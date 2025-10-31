@@ -1,9 +1,11 @@
+import warnings
 from orcapod.core.trackers import GraphTracker, Invocation
 from orcapod.pipeline.nodes import KernelNode, PodNode
 from orcapod.protocols.pipeline_protocols import Node
 from orcapod import contexts
 from orcapod.protocols import core_protocols as cp
 from orcapod.protocols import database_protocols as dbp
+from orcapod.databases import NoOpDatabase
 from typing import Any
 from collections.abc import Collection
 import os
@@ -73,7 +75,7 @@ class Pipeline(GraphTracker):
     def __init__(
         self,
         name: str | tuple[str, ...],
-        pipeline_database: dbp.ArrowDatabase,
+        pipeline_database: dbp.ArrowDatabase | None = None,
         results_database: dbp.ArrowDatabase | None = None,
         tracker_manager: cp.TrackerManager | None = None,
         data_context: str | contexts.DataContext | None = None,
@@ -84,14 +86,18 @@ class Pipeline(GraphTracker):
             name = (name,)
         self.name = name
         self.pipeline_store_path_prefix = self.name
+
+        if pipeline_database is None:
+            pipeline_database = NoOpDatabase()
+            warnings.warn(
+                "No database was specified. Pipeline results will not be saved"
+            )
+
         self.results_store_path_prefix = ()
         if results_database is None:
-            if pipeline_database is None:
-                raise ValueError(
-                    "Either pipeline_database or results_database must be provided"
-                )
             results_database = pipeline_database
             self.results_store_path_prefix = self.name + ("_results",)
+
         self.pipeline_database = pipeline_database
         self.results_database = results_database
         self.nodes: dict[str, Node] = {}
