@@ -58,6 +58,7 @@ class WrappedStream(StreamBase):
         include_content_hash: bool | str = False,
         sort_by_tags: bool = True,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> "pa.Table":
         """
         Returns the underlying table representation of the stream.
@@ -70,17 +71,23 @@ class WrappedStream(StreamBase):
             include_content_hash=include_content_hash,
             sort_by_tags=sort_by_tags,
             execution_engine=execution_engine,
+            execution_engine_opts=execution_engine_opts,
         )
+        # TODO handle default execution engine
 
     def iter_packets(
         self,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> Iterator[tuple[cp.Tag, cp.Packet]]:
         """
         Iterates over the packets in the stream.
         Each packet is represented as a tuple of (Tag, Packet).
         """
-        return self._stream.iter_packets(execution_engine=execution_engine)
+        return self._stream.iter_packets(
+            execution_engine=execution_engine,
+            execution_engine_opts=execution_engine_opts,
+        )
 
     def identity_structure(self) -> Any:
         return self._stream.identity_structure()

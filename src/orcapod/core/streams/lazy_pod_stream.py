@@ -49,7 +49,9 @@ class LazyPodResultStream(StreamBase):
         self._cached_content_hash_column: pa.Array | None = None
 
     def iter_packets(
-        self, execution_engine: cp.ExecutionEngine | None = None
+        self,
+        execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> Iterator[tuple[cp.Tag, cp.Packet]]:
         if self._prepared_stream_iterator is not None:
             for i, (tag, packet) in enumerate(self._prepared_stream_iterator):
@@ -61,8 +63,13 @@ class LazyPodResultStream(StreamBase):
                 else:
                     # Process packet
                     processed = self.pod.call(
-                        tag, packet, execution_engine=execution_engine
+                        tag,
+                        packet,
+                        execution_engine=execution_engine or self.execution_engine,
+                        execution_engine_opts=execution_engine_opts
+                        or self._execution_engine_opts,
                     )
+                    # TODO: verify the proper use of execution engine opts
                     if processed is not None:
                         # Update shared cache for future iterators (optimization)
                         self._cached_output_packets[i] = processed
@@ -83,6 +90,7 @@ class LazyPodResultStream(StreamBase):
         self,
         *args: Any,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         if self._prepared_stream_iterator is not None:
@@ -91,7 +99,11 @@ class LazyPodResultStream(StreamBase):
                 if i not in self._cached_output_packets:
                     # Process packet
                     pending_call_lut[i] = self.pod.async_call(
-                        tag, packet, execution_engine=execution_engine
+                        tag,
+                        packet,
+                        execution_engine=execution_engine or self.execution_engine,
+                        execution_engine_opts=execution_engine_opts
+                        or self._execution_engine_opts,
                     )
 
             indices = list(pending_call_lut.keys())
@@ -108,10 +120,14 @@ class LazyPodResultStream(StreamBase):
         self,
         *args: Any,
         execution_engine: cp.ExecutionEngine | None = None,
-        **kwargs: Any
+        execution_engine_opts: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> None:
         # Fallback to synchronous run
-        self.flow(execution_engine=execution_engine)
+        self.flow(
+            execution_engine=execution_engine or self.execution_engine,
+            execution_engine_opts=execution_engine_opts or self._execution_engine_opts,
+        )
 
     def keys(
         self, include_system_tags: bool = False
@@ -143,12 +159,17 @@ class LazyPodResultStream(StreamBase):
         include_content_hash: bool | str = False,
         sort_by_tags: bool = True,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> "pa.Table":
         if self._cached_output_table is None:
             all_tags = []
             all_packets = []
             tag_schema, packet_schema = None, None
-            for tag, packet in self.iter_packets(execution_engine=execution_engine):
+            for tag, packet in self.iter_packets(
+                execution_engine=execution_engine or self.execution_engine,
+                execution_engine_opts=execution_engine_opts
+                or self._execution_engine_opts,
+            ):
                 if tag_schema is None:
                     tag_schema = tag.arrow_schema(include_system_tags=True)
                 if packet_schema is None:
@@ -202,7 +223,10 @@ class LazyPodResultStream(StreamBase):
             if self._cached_content_hash_column is None:
                 content_hashes = []
                 # TODO: verify that order will be preserved
-                for tag, packet in self.iter_packets():
+                for tag, packet in self.iter_packets(
+                    execution_engine=execution_engine or self.execution_engine,
+                    execution_engine_opts=execution_engine_opts or self._execution_engine_opts,
+                ):
                     content_hashes.append(packet.content_hash().to_string())
                 self._cached_content_hash_column = pa.array(
                     content_hashes, type=pa.large_string()

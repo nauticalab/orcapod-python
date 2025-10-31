@@ -141,18 +141,25 @@ class KernelStream(StreamBase):
         self,
         *args: Any,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         self.refresh()
         assert self._cached_stream is not None, (
             "Stream has not been updated or is empty."
         )
-        self._cached_stream.run(*args, execution_engine=execution_engine, **kwargs)
+        self._cached_stream.run(
+            *args,
+            execution_engine=execution_engine,
+            execution_engine_opts=execution_engine_opts,
+            **kwargs,
+        )
 
     async def run_async(
         self,
         *args: Any,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         self.refresh()
@@ -160,7 +167,10 @@ class KernelStream(StreamBase):
             "Stream has not been updated or is empty."
         )
         await self._cached_stream.run_async(
-            *args, execution_engine=execution_engine, **kwargs
+            *args,
+            execution_engine=execution_engine,
+            execution_engine_opts=execution_engine_opts,
+            **kwargs,
         )
 
     def as_table(
@@ -171,6 +181,7 @@ class KernelStream(StreamBase):
         include_content_hash: bool | str = False,
         sort_by_tags: bool = True,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> "pa.Table":
         self.refresh()
         assert self._cached_stream is not None, (
@@ -183,17 +194,22 @@ class KernelStream(StreamBase):
             include_content_hash=include_content_hash,
             sort_by_tags=sort_by_tags,
             execution_engine=execution_engine,
+            execution_engine_opts=execution_engine_opts,
         )
 
     def iter_packets(
         self,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> Iterator[tuple[cp.Tag, cp.Packet]]:
         self.refresh()
         assert self._cached_stream is not None, (
             "Stream has not been updated or is empty."
         )
-        return self._cached_stream.iter_packets(execution_engine=execution_engine)
+        return self._cached_stream.iter_packets(
+            execution_engine=execution_engine,
+            execution_engine_opts=execution_engine_opts,
+        )
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(kernel={self.source}, upstreams={self.upstreams})"

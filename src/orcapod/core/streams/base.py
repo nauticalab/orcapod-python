@@ -173,6 +173,7 @@ class StatefulStreamBase(OperatorStreamBaseMixin, LabeledContentIdentifiableBase
     def __init__(
         self,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -181,6 +182,7 @@ class StatefulStreamBase(OperatorStreamBaseMixin, LabeledContentIdentifiableBase
         # note that this is not necessary for Stream protocol, but is provided
         # for convenience to resolve semantic types and other context-specific information
         self._execution_engine = execution_engine
+        self._execution_engine_opts = execution_engine_opts
 
     @property
     def substream_identities(self) -> tuple[str, ...]:
@@ -205,6 +207,8 @@ class StatefulStreamBase(OperatorStreamBaseMixin, LabeledContentIdentifiableBase
         This is typically used to track the execution context of the stream.
         """
         self._execution_engine = engine
+
+    # TODO: add getter/setter for execution engine opts
 
     def get_substream(self, substream_id: str) -> cp.Stream:
         """
@@ -321,6 +325,7 @@ class StatefulStreamBase(OperatorStreamBaseMixin, LabeledContentIdentifiableBase
     def iter_packets(
         self,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> Iterator[tuple[cp.Tag, cp.Packet]]: ...
 
     @abstractmethod
@@ -328,6 +333,7 @@ class StatefulStreamBase(OperatorStreamBaseMixin, LabeledContentIdentifiableBase
         self,
         *args: Any,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None: ...
 
@@ -336,6 +342,7 @@ class StatefulStreamBase(OperatorStreamBaseMixin, LabeledContentIdentifiableBase
         self,
         *args: Any,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None: ...
 
@@ -348,6 +355,7 @@ class StatefulStreamBase(OperatorStreamBaseMixin, LabeledContentIdentifiableBase
         include_content_hash: bool | str = False,
         sort_by_tags: bool = True,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> "pa.Table": ...
 
     def as_polars_df(
@@ -358,6 +366,7 @@ class StatefulStreamBase(OperatorStreamBaseMixin, LabeledContentIdentifiableBase
         include_content_hash: bool | str = False,
         sort_by_tags: bool = True,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> "pl.DataFrame":
         """
         Convert the entire stream to a Polars DataFrame.
@@ -370,6 +379,7 @@ class StatefulStreamBase(OperatorStreamBaseMixin, LabeledContentIdentifiableBase
                 include_content_hash=include_content_hash,
                 sort_by_tags=sort_by_tags,
                 execution_engine=execution_engine,
+                execution_engine_opts=execution_engine_opts,
             )
         )
 
@@ -381,6 +391,7 @@ class StatefulStreamBase(OperatorStreamBaseMixin, LabeledContentIdentifiableBase
         include_content_hash: bool | str = False,
         sort_by_tags: bool = True,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> "pl.DataFrame":
         """
         Convert the entire stream to a Polars DataFrame.
@@ -392,6 +403,7 @@ class StatefulStreamBase(OperatorStreamBaseMixin, LabeledContentIdentifiableBase
             include_content_hash=include_content_hash,
             sort_by_tags=sort_by_tags,
             execution_engine=execution_engine,
+            execution_engine_opts=execution_engine_opts,
         )
 
     def as_lazy_frame(
@@ -402,6 +414,7 @@ class StatefulStreamBase(OperatorStreamBaseMixin, LabeledContentIdentifiableBase
         include_content_hash: bool | str = False,
         sort_by_tags: bool = True,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> "pl.LazyFrame":
         """
         Convert the entire stream to a Polars LazyFrame.
@@ -413,6 +426,7 @@ class StatefulStreamBase(OperatorStreamBaseMixin, LabeledContentIdentifiableBase
             include_content_hash=include_content_hash,
             sort_by_tags=sort_by_tags,
             execution_engine=execution_engine,
+            execution_engine_opts=execution_engine_opts,
         )
         return df.lazy()
 
@@ -425,6 +439,7 @@ class StatefulStreamBase(OperatorStreamBaseMixin, LabeledContentIdentifiableBase
         sort_by_tags: bool = True,
         index_by_tags: bool = True,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> "pd.DataFrame":
         df = self.as_polars_df(
             include_data_context=include_data_context,
@@ -433,6 +448,7 @@ class StatefulStreamBase(OperatorStreamBaseMixin, LabeledContentIdentifiableBase
             include_content_hash=include_content_hash,
             sort_by_tags=sort_by_tags,
             execution_engine=execution_engine,
+            execution_engine_opts=execution_engine_opts,
         )
         tag_keys, _ = self.keys()
         pdf = df.to_pandas()
@@ -441,13 +457,21 @@ class StatefulStreamBase(OperatorStreamBaseMixin, LabeledContentIdentifiableBase
         return pdf
 
     def flow(
-        self, execution_engine: cp.ExecutionEngine | None = None
+        self,
+        execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> Collection[tuple[cp.Tag, cp.Packet]]:
         """
         Flow everything through the stream, returning the entire collection of
         (Tag, Packet) as a collection. This will tigger any upstream computation of the stream.
         """
-        return [e for e in self.iter_packets(execution_engine=execution_engine)]
+        return [
+            e
+            for e in self.iter_packets(
+                execution_engine=execution_engine,
+                execution_engine_opts=execution_engine_opts,
+            )
+        ]
 
     def _repr_html_(self) -> str:
         df = self.as_polars_df()
@@ -464,6 +488,7 @@ class StatefulStreamBase(OperatorStreamBaseMixin, LabeledContentIdentifiableBase
         include_content_hash: bool | str = False,
         sort_by_tags: bool = True,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> "StreamView":
         df = self.as_polars_df(
             include_data_context=include_data_context,
@@ -472,6 +497,7 @@ class StatefulStreamBase(OperatorStreamBaseMixin, LabeledContentIdentifiableBase
             include_content_hash=include_content_hash,
             sort_by_tags=sort_by_tags,
             execution_engine=execution_engine,
+            execution_engine_opts=execution_engine_opts,
         )
         tag_map = {t: f"*{t}" for t in self.tag_keys()}
         # TODO: construct repr html better

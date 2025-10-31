@@ -63,6 +63,7 @@ class CachedPodStream(StreamBase):
         self,
         *args: Any,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -127,7 +128,9 @@ class CachedPodStream(StreamBase):
                         tag,
                         packet,
                         skip_cache_lookup=True,
-                        execution_engine=execution_engine,
+                        execution_engine=execution_engine or self.execution_engine,
+                        execution_engine_opts=execution_engine_opts
+                        or self._execution_engine_opts,
                     )
                     pending_calls.append(pending)
             import asyncio
@@ -143,6 +146,7 @@ class CachedPodStream(StreamBase):
         self,
         *args: Any,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         cached_results = []
@@ -221,8 +225,11 @@ class CachedPodStream(StreamBase):
                         tag,
                         packet,
                         skip_cache_lookup=True,
-                        execution_engine=execution_engine,
+                        execution_engine=execution_engine or self.execution_engine,
+                        execution_engine_opts=execution_engine_opts
+                        or self._execution_engine_opts,
                     )
+                    # TODO: use getter for execution engine opts
                     hash_to_output_lut[packet_hash] = output_packet
                 cached_results.append((tag, output_packet))
 
@@ -230,7 +237,9 @@ class CachedPodStream(StreamBase):
         self._set_modified_time()
 
     def iter_packets(
-        self, execution_engine: cp.ExecutionEngine | None = None
+        self,
+        execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> Iterator[tuple[cp.Tag, cp.Packet]]:
         """
         Processes the input stream and prepares the output stream.
@@ -244,7 +253,9 @@ class CachedPodStream(StreamBase):
                 include_system_tags=True,
                 include_source=True,
                 include_content_hash=constants.INPUT_PACKET_HASH,
-                execution_engine=execution_engine,
+                execution_engine=execution_engine or self.execution_engine,
+                execution_engine_opts=execution_engine_opts
+                or self._execution_engine_opts,
             )
             existing_entries = self.pod.get_all_cached_outputs(
                 include_system_columns=True
@@ -331,7 +342,9 @@ class CachedPodStream(StreamBase):
                             tag,
                             packet,
                             skip_cache_lookup=True,
-                            execution_engine=execution_engine,
+                            execution_engine=execution_engine or self.execution_engine,
+                            execution_engine_opts=execution_engine_opts
+                            or self._execution_engine_opts,
                         )
                         hash_to_output_lut[packet_hash] = output_packet
                     cached_results.append((tag, output_packet))
@@ -375,12 +388,17 @@ class CachedPodStream(StreamBase):
         include_content_hash: bool | str = False,
         sort_by_tags: bool = True,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> "pa.Table":
         if self._cached_output_table is None:
             all_tags = []
             all_packets = []
             tag_schema, packet_schema = None, None
-            for tag, packet in self.iter_packets(execution_engine=execution_engine):
+            for tag, packet in self.iter_packets(
+                execution_engine=execution_engine or self.execution_engine,
+                execution_engine_opts=execution_engine_opts
+                or self._execution_engine_opts,
+            ):
                 if tag_schema is None:
                     tag_schema = tag.arrow_schema(include_system_tags=True)
                 if packet_schema is None:

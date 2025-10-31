@@ -207,6 +207,7 @@ class ActivatablePodBase(TrackedKernelBase):
         packet: cp.Packet,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> tuple[cp.Tag, cp.Packet | None]: ...
 
     @abstractmethod
@@ -216,6 +217,7 @@ class ActivatablePodBase(TrackedKernelBase):
         packet: cp.Packet,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> tuple[cp.Tag, cp.Packet | None]: ...
 
     def track_invocation(self, *streams: cp.Stream, label: str | None = None) -> None:
@@ -408,6 +410,7 @@ class FunctionPod(ActivatablePodBase):
         packet: cp.Packet,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> tuple[cp.Tag, DictPacket | None]:
         if not self.is_active():
             logger.info(
@@ -426,7 +429,11 @@ class FunctionPod(ActivatablePodBase):
         with self._tracker_manager.no_tracking():
             if execution_engine is not None:
                 # use the provided execution engine to run the function
-                values = execution_engine.submit_sync(self.function, **input_dict)
+                values = execution_engine.submit_sync(
+                    self.function,
+                    fn_kwargs=input_dict,
+                    engine_opts=execution_engine_opts,
+                )
             else:
                 values = self.function(**input_dict)
 
@@ -458,6 +465,7 @@ class FunctionPod(ActivatablePodBase):
         packet: cp.Packet,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> tuple[cp.Tag, cp.Packet | None]:
         """
         Asynchronous call to the function pod. This is a placeholder for future implementation.
@@ -481,7 +489,9 @@ class FunctionPod(ActivatablePodBase):
             input_dict = packet
         if execution_engine is not None:
             # use the provided execution engine to run the function
-            values = await execution_engine.submit_async(self.function, **input_dict)
+            values = await execution_engine.submit_async(
+                self.function, fn_kwargs=input_dict, engine_opts=execution_engine_opts
+            )
         else:
             values = self.function(**input_dict)
 
@@ -607,9 +617,14 @@ class WrappedPod(ActivatablePodBase):
         packet: cp.Packet,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> tuple[cp.Tag, cp.Packet | None]:
         return self.pod.call(
-            tag, packet, record_id=record_id, execution_engine=execution_engine
+            tag,
+            packet,
+            record_id=record_id,
+            execution_engine=execution_engine,
+            execution_engine_opts=execution_engine_opts,
         )
 
     async def async_call(
@@ -618,9 +633,14 @@ class WrappedPod(ActivatablePodBase):
         packet: cp.Packet,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> tuple[cp.Tag, cp.Packet | None]:
         return await self.pod.async_call(
-            tag, packet, record_id=record_id, execution_engine=execution_engine
+            tag,
+            packet,
+            record_id=record_id,
+            execution_engine=execution_engine,
+            execution_engine_opts=execution_engine_opts,
         )
 
     def kernel_identity_structure(
@@ -683,6 +703,7 @@ class CachedPod(WrappedPod):
         packet: cp.Packet,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
     ) -> tuple[cp.Tag, cp.Packet | None]:
@@ -700,7 +721,11 @@ class CachedPod(WrappedPod):
                 print(f"Cache hit for {packet}!")
         if output_packet is None:
             tag, output_packet = super().call(
-                tag, packet, record_id=record_id, execution_engine=execution_engine
+                tag,
+                packet,
+                record_id=record_id,
+                execution_engine=execution_engine,
+                execution_engine_opts=execution_engine_opts,
             )
             if (
                 output_packet is not None
@@ -717,6 +742,7 @@ class CachedPod(WrappedPod):
         packet: cp.Packet,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
     ) -> tuple[cp.Tag, cp.Packet | None]:
@@ -732,7 +758,11 @@ class CachedPod(WrappedPod):
             output_packet = self.get_cached_output_for_packet(packet)
         if output_packet is None:
             tag, output_packet = await super().async_call(
-                tag, packet, record_id=record_id, execution_engine=execution_engine
+                tag,
+                packet,
+                record_id=record_id,
+                execution_engine=execution_engine,
+                execution_engine_opts=execution_engine_opts,
             )
             if output_packet is not None and not skip_cache_insert:
                 self.record_packet(
@@ -740,6 +770,7 @@ class CachedPod(WrappedPod):
                     output_packet,
                     record_id=record_id,
                     execution_engine=execution_engine,
+                    execution_engine_opts=execution_engine_opts,
                 )
 
         return tag, output_packet
@@ -754,11 +785,14 @@ class CachedPod(WrappedPod):
         output_packet: cp.Packet,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
         skip_duplicates: bool = False,
     ) -> cp.Packet:
         """
         Record the output packet against the input packet in the result store.
         """
+
+        # TODO: consider incorporating execution_engine_opts into the record
         data_table = output_packet.as_table(include_context=True, include_source=True)
 
         for i, (k, v) in enumerate(self.tiered_pod_id.items()):

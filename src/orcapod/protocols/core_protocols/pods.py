@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from orcapod.protocols.core_protocols.base import ExecutionEngine
 from orcapod.protocols.core_protocols.datagrams import Packet, Tag
@@ -94,6 +94,7 @@ class Pod(Kernel, Protocol):
         packet: Packet,
         record_id: str | None = None,
         execution_engine: ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> tuple[Tag, Packet | None]: ...
 
     def call(
@@ -102,6 +103,7 @@ class Pod(Kernel, Protocol):
         packet: Packet,
         record_id: str | None = None,
         execution_engine: ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> tuple[Tag, Packet | None]:
         """
         Process a single packet with its associated tag.
@@ -143,6 +145,7 @@ class CachedPod(Pod, Protocol):
         packet: Packet,
         record_id: str | None = None,
         execution_engine: ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
     ) -> tuple[Tag, Packet | None]: ...
@@ -161,6 +164,7 @@ class CachedPod(Pod, Protocol):
         packet: Packet,
         record_id: str | None = None,
         execution_engine: ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
     ) -> tuple[Tag, Packet | None]:

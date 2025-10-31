@@ -1,7 +1,6 @@
 from abc import abstractmethod
-from orcapod.core.datagrams import ArrowTag
 from orcapod.core.kernels import KernelStream, WrappedKernel
-from orcapod.core.sources.base import SourceBase, InvocationBase
+from orcapod.core.sources.base import InvocationBase
 from orcapod.core.pods import CachedPod
 from orcapod.protocols import core_protocols as cp, database_protocols as dbp
 from orcapod.types import PythonSchema
@@ -302,6 +301,7 @@ class PodNode(NodeBase, CachedPod):
         packet: cp.Packet,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
     ) -> tuple[cp.Tag, cp.Packet | None]:
@@ -316,6 +316,7 @@ class PodNode(NodeBase, CachedPod):
             skip_cache_lookup=skip_cache_lookup,
             skip_cache_insert=skip_cache_insert,
             execution_engine=execution_engine,
+            execution_engine_opts=execution_engine_opts,
         )
 
         # if output_packet is not None:
@@ -339,6 +340,7 @@ class PodNode(NodeBase, CachedPod):
         packet: cp.Packet,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
     ) -> tuple[cp.Tag, cp.Packet | None]:
@@ -353,6 +355,7 @@ class PodNode(NodeBase, CachedPod):
             skip_cache_lookup=skip_cache_lookup,
             skip_cache_insert=skip_cache_insert,
             execution_engine=execution_engine,
+            execution_engine_opts=execution_engine_opts,
         )
 
         if output_packet is not None:

@@ -200,6 +200,7 @@ class TableStream(ImmutableStream):
         include_content_hash: bool | str = False,
         sort_by_tags: bool = True,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> "pa.Table":
         """
         Returns the underlying table representation of the stream.
@@ -250,7 +251,9 @@ class TableStream(ImmutableStream):
         self._cached_elements = None
 
     def iter_packets(
-        self, execution_engine: cp.ExecutionEngine | None = None
+        self,
+        execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> Iterator[tuple[cp.Tag, ArrowPacket]]:
         """
         Iterates over the packets in the stream.
@@ -298,6 +301,7 @@ class TableStream(ImmutableStream):
         self,
         *args: Any,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -311,6 +315,7 @@ class TableStream(ImmutableStream):
         self,
         *args: Any,
         execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         """

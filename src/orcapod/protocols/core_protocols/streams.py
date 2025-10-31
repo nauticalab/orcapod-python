@@ -233,7 +233,9 @@ class Stream(ContentIdentifiable, Labelable, Protocol):
         ...
 
     def iter_packets(
-        self, execution_engine: ExecutionEngine | None = None
+        self,
+        execution_engine: ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> Iterator[tuple[Tag, Packet]]:
         """
         Alias for __iter__ for explicit packet iteration.
@@ -256,7 +258,11 @@ class Stream(ContentIdentifiable, Labelable, Protocol):
         ...
 
     def run(
-        self, *args: Any, execution_engine: ExecutionEngine | None = None, **kwargs: Any
+        self,
+        *args: Any,
+        execution_engine: ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> None:
         """
         Execute the stream using the provided execution engine.
@@ -272,7 +278,11 @@ class Stream(ContentIdentifiable, Labelable, Protocol):
         ...
 
     async def run_async(
-        self, *args: Any, execution_engine: ExecutionEngine | None = None, **kwargs: Any
+        self,
+        *args: Any,
+        execution_engine: ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> None:
         """
         Asynchronously execute the stream using the provided execution engine.
@@ -295,6 +305,7 @@ class Stream(ContentIdentifiable, Labelable, Protocol):
         include_content_hash: bool | str = False,
         sort_by_tags: bool = True,
         execution_engine: ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> "pl.DataFrame":
         """
         Convert the entire stream to a Polars DataFrame.
@@ -309,6 +320,7 @@ class Stream(ContentIdentifiable, Labelable, Protocol):
         include_content_hash: bool | str = False,
         sort_by_tags: bool = True,
         execution_engine: ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> "pl.LazyFrame":
         """
         Load the entire stream to a Polars LazyFrame.
@@ -323,6 +335,7 @@ class Stream(ContentIdentifiable, Labelable, Protocol):
         include_content_hash: bool | str = False,
         sort_by_tags: bool = True,
         execution_engine: ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> "pl.DataFrame": ...
 
     def as_pandas_df(
@@ -334,6 +347,7 @@ class Stream(ContentIdentifiable, Labelable, Protocol):
         sort_by_tags: bool = True,
         index_by_tags: bool = True,
         execution_engine: ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> "pd.DataFrame": ...
 
     def as_table(
@@ -344,6 +358,7 @@ class Stream(ContentIdentifiable, Labelable, Protocol):
         include_content_hash: bool | str = False,
         sort_by_tags: bool = True,
         execution_engine: ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> "pa.Table":
         """
         Convert the entire stream to a PyArrow Table.
@@ -364,6 +379,7 @@ class Stream(ContentIdentifiable, Labelable, Protocol):
     def flow(
         self,
         execution_engine: ExecutionEngine | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> Collection[tuple[Tag, Packet]]:
         """
         Return the entire stream as a collection of (tag, packet) pairs.
