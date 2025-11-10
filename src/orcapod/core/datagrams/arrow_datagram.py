@@ -76,7 +76,7 @@ class ArrowDatagram(BaseDatagram):
             The input table is automatically split into data, meta, and context
             components based on column naming conventions.
         """
-        super().__init__()
+        super().__init__(**kwargs)
 
         # Validate table has exactly one row for datagram
         if len(table) != 1:

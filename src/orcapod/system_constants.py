@@ -4,7 +4,7 @@ DATAGRAM_PREFIX = "_"
 SOURCE_INFO_PREFIX = "source_"
 POD_ID_PREFIX = "pod_id_"
 DATA_CONTEXT_KEY = "context_key"
-INPUT_PACKET_HASH = "input_packet_hash"
+INPUT_PACKET_HASH_COL = "input_packet_hash"
 PACKET_RECORD_ID = "packet_id"
 SYSTEM_TAG_PREFIX = "tag"
 POD_VERSION = "pod_version"
@@ -48,8 +48,8 @@ class SystemConstant:
         return f"{self._global_prefix}{SYSTEM_COLUMN_PREFIX}{POD_ID_PREFIX}"
 
     @property
-    def INPUT_PACKET_HASH(self) -> str:
-        return f"{self._global_prefix}{SYSTEM_COLUMN_PREFIX}{INPUT_PACKET_HASH}"
+    def INPUT_PACKET_HASH_COL(self) -> str:
+        return f"{self._global_prefix}{SYSTEM_COLUMN_PREFIX}{INPUT_PACKET_HASH_COL}"
 
     @property
     def PACKET_RECORD_ID(self) -> str:

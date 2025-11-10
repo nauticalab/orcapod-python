@@ -806,7 +806,7 @@ class CachedPod(WrappedPod):
         # add the input packet hash as a column
         data_table = data_table.add_column(
             0,
-            constants.INPUT_PACKET_HASH,
+            constants.INPUT_PACKET_HASH_COL,
             pa.array([str(input_packet.content_hash())], type=pa.large_string()),
         )
         # add execution engine information
@@ -856,7 +856,9 @@ class CachedPod(WrappedPod):
 
         # get all records with matching the input packet hash
         # TODO: add match based on match_tier if specified
-        constraints = {constants.INPUT_PACKET_HASH: str(input_packet.content_hash())}
+        constraints = {
+            constants.INPUT_PACKET_HASH_COL: str(input_packet.content_hash())
+        }
         if self.match_tier is not None:
             constraints[f"{constants.POD_ID_PREFIX}{self.match_tier}"] = (
                 self.pod.tiered_pod_id[self.match_tier]
@@ -904,7 +906,7 @@ class CachedPod(WrappedPod):
             f"{constants.POD_ID_PREFIX}{k}" for k in self.tiered_pod_id.keys()
         ]
         result_table = result_table.drop_columns(pod_id_columns)
-        result_table = result_table.drop_columns(constants.INPUT_PACKET_HASH)
+        result_table = result_table.drop_columns(constants.INPUT_PACKET_HASH_COL)
 
         # note that data context will be loaded from the result store
         return ArrowPacket(
@@ -934,6 +936,6 @@ class CachedPod(WrappedPod):
                 f"{constants.POD_ID_PREFIX}{k}" for k in self.tiered_pod_id.keys()
             ]
             result_table = result_table.drop_columns(pod_id_columns)
-            result_table = result_table.drop_columns(constants.INPUT_PACKET_HASH)
+            result_table = result_table.drop_columns(constants.INPUT_PACKET_HASH_COL)
 
         return result_table

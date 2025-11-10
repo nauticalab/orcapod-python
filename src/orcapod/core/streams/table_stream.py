@@ -10,7 +10,7 @@ from orcapod.core.datagrams import (
     DictTag,
 )
 from orcapod.system_constants import constants
-from orcapod.protocols.core_protocols import Pod, Tag, Packet, Stream, ColumnConfig
+from orcapod.protocols.core_protocols import Pod, Tag, Stream, ColumnConfig
 
 from orcapod.types import PythonSchema
 from orcapod.utils import arrow_utils
@@ -19,12 +19,9 @@ from orcapod.core.streams.base import StreamBase
 
 if TYPE_CHECKING:
     import pyarrow as pa
-    import polars as pl
-    import pandas as pd
 else:
     pa = LazyModule("pyarrow")
-    pl = LazyModule("polars")
-    pd = LazyModule("pandas")
+
 
 logger = logging.getLogger(__name__)
 

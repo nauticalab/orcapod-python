@@ -1,11 +1,12 @@
 from typing import Any, Protocol, runtime_checkable
 
 from orcapod.protocols.core_protocols.datagrams import Packet
+from orcapod.protocols.core_protocols.labelable import Labelable
 from orcapod.types import PythonSchema
 
 
 @runtime_checkable
-class PacketFunction(Protocol):
+class PacketFunction(Labelable, Protocol):
     """
     Protocol for packet-processing function.
 

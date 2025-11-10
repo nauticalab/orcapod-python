@@ -11,6 +11,7 @@ from typing import (
 
 from orcapod.protocols.hashing_protocols import ContentIdentifiable
 from orcapod.types import DataType, DataValue, PythonSchema
+from uuid import UUID
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -176,6 +177,16 @@ class Datagram(ContentIdentifiable, Protocol):
         >>> filtered = datagram.select("user_id", "name")
         >>> table = datagram.as_table()
     """
+
+    @property
+    def uuid(self) -> UUID:
+        """
+        Return the UUID of this datagram.
+
+        Returns:
+            UUID: The unique identifier for this instance of datagram.
+        """
+        ...
 
     # 1. Core Properties (Identity & Structure)
     @property

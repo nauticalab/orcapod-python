@@ -20,6 +20,9 @@ import logging
 from abc import abstractmethod
 from collections.abc import Collection, Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Self, TypeAlias
+from uuid import UUID
+
+from uuid_utils import uuid7
 
 from orcapod.core.base import ContentIdentifiableBase
 from orcapod.protocols.core_protocols import ColumnConfig
@@ -117,6 +120,22 @@ class BaseDatagram(ContentIdentifiableBase):
     The base class only manages the data context key string - how that key
     is interpreted and used is left to concrete implementations.
     """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._uuid = None
+
+    @property
+    def uuid(self) -> UUID:
+        """
+        Return the UUID of this datagram.
+
+        Returns:
+            UUID: The unique identifier for this instance of datagram.
+        """
+        if self._uuid is None:
+            self._uuid = UUID(bytes=uuid7().bytes)
+        return self._uuid
 
     # TODO: revisit handling of identity structure for datagrams
     def identity_structure(self) -> Any:
@@ -271,4 +290,8 @@ class BaseDatagram(ContentIdentifiableBase):
         """Create a shallow copy of the datagram."""
         new_datagram = object.__new__(self.__class__)
         new_datagram._data_context = self._data_context
+        if include_cache:
+            # preserve uuid if cache is preserved
+            # TODO: revisit this logic
+            new_datagram._uuid = self._uuid
         return new_datagram
