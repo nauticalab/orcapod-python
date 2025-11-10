@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, Self
 
 from orcapod import contexts
 from orcapod.core.datagrams.base import BaseDatagram
-from orcapod.core.system_constants import constants
+from orcapod.system_constants import constants
 from orcapod.protocols.core_protocols import ColumnConfig
 from orcapod.protocols.hashing_protocols import ContentHash
 from orcapod.types import DataValue, PythonSchema

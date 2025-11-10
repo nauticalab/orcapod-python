@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import TableStream
-from orcapod.core.system_constants import constants
+from orcapod.system_constants import constants
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import ColumnConfig, Stream
 from orcapod.types import PythonSchema

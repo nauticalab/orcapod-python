@@ -9,7 +9,7 @@ from orcapod.core.datagrams import (
     ArrowTag,
     DictTag,
 )
-from orcapod.core.system_constants import constants
+from orcapod.system_constants import constants
 from orcapod.protocols.core_protocols import Pod, Tag, Packet, Stream, ColumnConfig
 
 from orcapod.types import PythonSchema

@@ -1,7 +1,7 @@
 # Collection of functions to work with Arrow table data that underlies streams and/or datagrams
 from orcapod.utils.lazy_module import LazyModule
 from typing import TYPE_CHECKING
-from orcapod.core.system_constants import constants
+from orcapod.system_constants import constants
 from collections.abc import Collection
 
 if TYPE_CHECKING:
