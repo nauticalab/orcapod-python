@@ -58,8 +58,10 @@ class PodNodeStream(StreamBase):
 
     async def run_async(
         self,
+       
         execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
-        | None = None,
+        | None = None,,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> None:
         """
         Runs the stream, processing the input stream and preparing the output stream.
@@ -123,7 +125,9 @@ class PodNodeStream(StreamBase):
                         tag,
                         packet,
                         skip_cache_lookup=True,
-                        execution_engine=execution_engine,
+                        execution_engine=execution_engine or self.execution_engine,
+                        execution_engine_opts=execution_engine_opts
+                        or self._execution_engine_opts,
                     )
                     pending_calls.append(pending)
             import asyncio
@@ -140,6 +144,7 @@ class PodNodeStream(StreamBase):
         *args: Any,
         execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
         | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         cached_results = []
@@ -154,7 +159,8 @@ class PodNodeStream(StreamBase):
             include_system_tags=True,
             include_source=True,
             include_content_hash=constants.INPUT_PACKET_HASH,
-            execution_engine=execution_engine,
+            execution_engine=execution_engine or self.execution_engine,
+            execution_engine_opts=execution_engine_opts or self._execution_engine_opts,
         )
         existing_entries = self.pod_node.get_all_cached_outputs(
             include_system_columns=True
@@ -234,7 +240,9 @@ class PodNodeStream(StreamBase):
                         packet,
                         record_id=packet_record_id,
                         skip_cache_lookup=True,
-                        execution_engine=execution_engine,
+                        execution_engine=execution_engine or self.execution_engine,
+                        execution_engine_opts=execution_engine_opts
+                        or self._execution_engine_opts,
                     )
                     packet_record_to_output_lut[packet_record_id] = output_packet
                     self.pod_node.add_pipeline_record(
@@ -259,8 +267,10 @@ class PodNodeStream(StreamBase):
 
     def iter_packets(
         self,
+       
         execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
-        | None = None,
+        | None = None,,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> Iterator[tuple[cp.Tag, cp.Packet]]:
         """
         Processes the input stream and prepares the output stream.
@@ -429,12 +439,17 @@ class PodNodeStream(StreamBase):
         sort_by_tags: bool = True,
         execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
         | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
     ) -> "pa.Table":
         if self._cached_output_table is None:
             all_tags = []
             all_packets = []
             tag_schema, packet_schema = None, None
-            for tag, packet in self.iter_packets(execution_engine=execution_engine):
+            for tag, packet in self.iter_packets(
+                execution_engine=execution_engine or self.execution_engine,
+                execution_engine_opts=execution_engine_opts
+                or self._execution_engine_opts,
+            ):
                 if tag_schema is None:
                     tag_schema = tag.arrow_schema(include_system_tags=True)
                 if packet_schema is None:
@@ -506,7 +521,11 @@ class PodNodeStream(StreamBase):
         if include_content_hash:
             if self._cached_content_hash_column is None:
                 content_hashes = []
-                for tag, packet in self.iter_packets(execution_engine=execution_engine):
+                for tag, packet in self.iter_packets(
+                    execution_engine=execution_engine or self.execution_engine,
+                    execution_engine_opts=execution_engine_opts
+                    or self._execution_engine_opts,
+                ):
                     content_hashes.append(packet.content_hash().to_string())
                 self._cached_content_hash_column = pa.array(
                     content_hashes, type=pa.large_string()

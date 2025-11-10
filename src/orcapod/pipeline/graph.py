@@ -181,6 +181,7 @@ class Pipeline(GraphTracker):
         self,
         execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
         | None = None,
+        execution_engine_opts: dict[str, Any] | None = None,
         run_async: bool | None = None,
     ) -> None:
         """Execute the pipeline by running all nodes in the graph.
@@ -205,9 +206,16 @@ class Pipeline(GraphTracker):
 
         for node in nx.topological_sort(self.graph):
             if run_async:
-                synchronous_run(node.run_async, execution_engine=execution_engine)
+                synchronous_run(
+                    node.run_async,
+                    execution_engine=execution_engine,
+                    execution_engine_opts=execution_engine_opts,
+                )
             else:
-                node.run(execution_engine=execution_engine)
+                node.run(
+                    execution_engine=execution_engine,
+                    execution_engine_opts=execution_engine_opts,
+                )
 
         self.flush()
 

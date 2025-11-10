@@ -29,42 +29,80 @@ class RayEngine:
     def __init__(self, ray_address: str | None = None, **ray_init_kwargs):
         """Initialize Ray with native async support."""
 
-        if not ray.is_initialized():
+        if not self.is_initialized():
             ray.init(address=ray_address, **ray_init_kwargs)
+            # track whether ray engine was initialized in this engine
             self._ray_initialized_here = True
+            logger.info("Native Ray async engine initialized")
         else:
             self._ray_initialized_here = False
+            logger.info("Working with an existing Ray async engine")
 
-        logger.info("Native Ray async engine initialized")
         logger.info(f"Cluster resources: {ray.cluster_resources()}")
+
+    def is_initialized(self) -> bool:
+        """Check if Ray is initialized."""
+        return ray.is_initialized()
 
     @property
     def name(self) -> str:
         return "ray"
 
-    def submit_sync(self, func: Callable[..., T], *args, **kwargs) -> T:
+    def submit_sync(
+        self,
+        func: Callable[..., T],
+        /,
+        *,
+        fn_args: tuple[Any, ...] = (),
+        fn_kwargs: dict[str, Any] | None = None,
+        **engine_opts: Any,
+    ) -> T:
         """
         Submit a function synchronously using Ray.
 
-        This is a blocking call that waits for the result.
+        Arguments destined for the function must be provided via
+        ``fn_args``/``fn_kwargs``. Engine-specific options (e.g., resources)
+        should be passed through ``engine_opts`` and are applied via
+        ``.options(**engine_opts)``.
         """
+        if fn_kwargs is None:
+            fn_kwargs = {}
+
         # Create remote function and submit
         remote_func = ray.remote(func)
-        object_ref = remote_func.remote(*args, **kwargs)
+        if engine_opts:
+            remote_func = remote_func.options(**engine_opts)  # type: ignore[arg-type]
+        object_ref = remote_func.remote(*fn_args, **fn_kwargs)
 
         # Wait for the result - this is blocking
         result = ray.get(object_ref)
         return result
 
-    async def submit_async(self, func: Callable[..., T], *args, **kwargs) -> T:
+    async def submit_async(
+        self,
+        func: Callable[..., T],
+        /,
+        *,
+        fn_args: tuple[Any, ...] = (),
+        fn_kwargs: dict[str, Any] | None = None,
+        **engine_opts: Any,
+    ) -> T:
         """
         Submit a function using Ray's native async support.
 
-        Uses ObjectRef.future() which Ray converts to asyncio.Future natively.
+        Arguments destined for the function must be provided via
+        ``fn_args``/``fn_kwargs``. Engine-specific options (e.g., resources)
+        should be passed through ``engine_opts`` and are applied via
+        ``.options(**engine_opts)``.
         """
+        if fn_kwargs is None:
+            fn_kwargs = {}
+
         # Create remote function and submit
         remote_func = ray.remote(func)
-        object_ref = remote_func.remote(*args, **kwargs)
+        if engine_opts:
+            remote_func = remote_func.options(**engine_opts)  # type: ignore[arg-type]
+        object_ref = remote_func.remote(*fn_args, **fn_kwargs)
 
         # Use Ray's native async support - this is the key insight!
         # ObjectRef.future() returns a concurrent.futures.Future that works with asyncio
