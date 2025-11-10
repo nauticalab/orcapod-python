@@ -10,27 +10,26 @@ from orcapod.core.datagrams import (
     DictTag,
 )
 from orcapod.core.system_constants import constants
-from orcapod.protocols import core_protocols as cp
+from orcapod.protocols.core_protocols import Pod, Tag, Packet, Stream, ColumnConfig
+
 from orcapod.types import PythonSchema
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
-from orcapod.core.streams.base import ImmutableStream
+from orcapod.core.streams.base import StreamBase
 
 if TYPE_CHECKING:
     import pyarrow as pa
-    import pyarrow.compute as pc
     import polars as pl
     import pandas as pd
 else:
     pa = LazyModule("pyarrow")
-    pc = LazyModule("pyarrow.compute")
     pl = LazyModule("polars")
     pd = LazyModule("pandas")
 
 logger = logging.getLogger(__name__)
 
 
-class TableStream(ImmutableStream):
+class TableStream(StreamBase):
     """
     An immutable stream based on a PyArrow Table.
     This stream is designed to be used with data that is already in a tabular format,
@@ -48,11 +47,14 @@ class TableStream(ImmutableStream):
         tag_columns: Collection[str] = (),
         system_tag_columns: Collection[str] = (),
         source_info: dict[str, str | None] | None = None,
-        source: cp.Kernel | None = None,
-        upstreams: tuple[cp.Stream, ...] = (),
+        source: Pod | None = None,
+        upstreams: tuple[Stream, ...] = (),
         **kwargs,
     ) -> None:
-        super().__init__(source=source, upstreams=upstreams, **kwargs)
+        super().__init__(**kwargs)
+
+        self._source = source
+        self._upstreams = upstreams
 
         data_table, data_context_table = arrow_utils.split_by_column_groups(
             table, [constants.CONTEXT_KEY]
@@ -143,47 +145,67 @@ class TableStream(ImmutableStream):
         #     )
         # )
 
-        self._cached_elements: list[tuple[cp.Tag, ArrowPacket]] | None = None
-        self._set_modified_time()  # set modified time to now
+        self._cached_elements: list[tuple[Tag, ArrowPacket]] | None = None
+        self._update_modified_time()  # set modified time to now
 
-    def data_content_identity_structure(self) -> Any:
+    def identity_structure(self) -> Any:
         """
         Returns a hash of the content of the stream.
         This is used to identify the content of the stream.
         """
-        table_hash = self.data_context.arrow_hasher.hash_table(
-            self.as_table(
-                include_data_context=True, include_source=True, include_system_tags=True
-            ),
-        )
-        return (
-            self.__class__.__name__,
-            table_hash,
-            self._tag_columns,
-        )
+        if self.source is None:
+            table_hash = self.data_context.arrow_hasher.hash_table(
+                self.as_table(
+                    all_info=True,
+                ),
+            )
+            return (
+                self.__class__.__name__,
+                table_hash,
+                self._tag_columns,
+            )
+        return super().identity_structure()
+
+    @property
+    def source(self) -> Pod | None:
+        return self._source
+
+    @property
+    def upstreams(self) -> tuple[Stream, ...]:
+        return self._upstreams
 
     def keys(
-        self, include_system_tags: bool = False
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """
         Returns the keys of the tag and packet columns in the stream.
         This is useful for accessing the columns in the stream.
         """
         tag_columns = self._tag_columns
-        if include_system_tags:
+        columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        # TODO: add standard parsing of columns
+        if columns_config.system_tags:
             tag_columns += self._system_tag_columns
         return tag_columns, self._packet_columns
 
-    def types(
-        self, include_system_tags: bool = False
+    def output_schema(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> tuple[PythonSchema, PythonSchema]:
         """
         Returns the types of the tag and packet columns in the stream.
         This is useful for accessing the types of the columns in the stream.
         """
+        # normalize column config
+        columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
         # TODO: consider using MappingProxyType to avoid copying the dicts
         converter = self.data_context.type_converter
-        if include_system_tags:
+        if columns_config.system_tags:
             tag_schema = self._all_tag_schema
         else:
             tag_schema = self._tag_schema
@@ -194,23 +216,21 @@ class TableStream(ImmutableStream):
 
     def as_table(
         self,
-        include_data_context: bool = False,
-        include_source: bool = False,
-        include_system_tags: bool = False,
-        include_content_hash: bool | str = False,
-        sort_by_tags: bool = True,
-        execution_engine: cp.ExecutionEngine | None = None,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> "pa.Table":
         """
         Returns the underlying table representation of the stream.
         This is useful for converting the stream to a table format.
         """
+        columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
         output_table = self._table
-        if include_content_hash:
+        if columns_config.content_hash:
             hash_column_name = (
                 "_content_hash"
-                if include_content_hash is True
-                else include_content_hash
+                if columns_config.content_hash is True
+                else columns_config.content_hash
             )
             content_hashes = [
                 str(packet.content_hash()) for _, packet in self.iter_packets()
@@ -218,22 +238,24 @@ class TableStream(ImmutableStream):
             output_table = output_table.append_column(
                 hash_column_name, pa.array(content_hashes, type=pa.large_string())
             )
-        if not include_system_tags:
+        if not columns_config.system_tags:
             # Check in original implementation
             output_table = output_table.drop_columns(list(self._system_tag_columns))
         table_stack = (output_table,)
-        if include_data_context:
+        if columns_config.context:
             table_stack += (self._data_context_table,)
-        if include_source:
+        if columns_config.source:
             table_stack += (self._source_info_table,)
 
         table = arrow_utils.hstack_tables(*table_stack)
 
-        if sort_by_tags:
+        if columns_config.sort_by_tags:
             # TODO: cleanup the sorting tag selection logic
             try:
                 target_tags = (
-                    self._all_tag_columns if include_system_tags else self._tag_columns
+                    self._all_tag_columns
+                    if columns_config.system_tags
+                    else self._tag_columns
                 )
                 return table.sort_by([(column, "ascending") for column in target_tags])
             except pa.ArrowTypeError:
@@ -249,9 +271,7 @@ class TableStream(ImmutableStream):
         """
         self._cached_elements = None
 
-    def iter_packets(
-        self, execution_engine: cp.ExecutionEngine | None = None
-    ) -> Iterator[tuple[cp.Tag, ArrowPacket]]:
+    def iter_packets(self) -> Iterator[tuple[Tag, ArrowPacket]]:
         """
         Iterates over the packets in the stream.
         Each packet is represented as a tuple of (Tag, Packet).
@@ -293,32 +313,6 @@ class TableStream(ImmutableStream):
             self._cached_elements = cached_elements
         else:
             yield from self._cached_elements
-
-    def run(
-        self,
-        *args: Any,
-        execution_engine: cp.ExecutionEngine | None = None,
-        **kwargs: Any,
-    ) -> None:
-        """
-        Runs the stream, which in this case is a no-op since the stream is immutable.
-        This is typically used to trigger any upstream computation of the stream.
-        """
-        # No-op for immutable streams
-        pass
-
-    async def run_async(
-        self,
-        *args: Any,
-        execution_engine: cp.ExecutionEngine | None = None,
-        **kwargs: Any,
-    ) -> None:
-        """
-        Runs the stream asynchronously, which in this case is a no-op since the stream is immutable.
-        This is typically used to trigger any upstream computation of the stream.
-        """
-        # No-op for immutable streams
-        pass
 
     def __repr__(self) -> str:
         return (

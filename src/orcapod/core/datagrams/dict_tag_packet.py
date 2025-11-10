@@ -1,14 +1,14 @@
 import logging
-from collections.abc import Collection, Mapping
-from typing import Self, TYPE_CHECKING
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, Self
 
-
-from orcapod.core.system_constants import constants
 from orcapod import contexts
 from orcapod.core.datagrams.dict_datagram import DictDatagram
-from orcapod.utils import arrow_utils
+from orcapod.core.system_constants import constants
+from orcapod.protocols.core_protocols import ColumnConfig
 from orcapod.semantic_types import infer_python_schema_from_pylist_data
 from orcapod.types import DataValue, PythonSchema, PythonSchemaLike
+from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -73,19 +73,15 @@ class DictTag(DictDatagram):
 
     def as_table(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_system_tags: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> "pa.Table":
         """Convert the packet to an Arrow table."""
-        table = super().as_table(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
-        )
+        table = super().as_table(columns=columns, all_info=all_info)
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
 
-        if include_all_info or include_system_tags:
+        if column_config.system_tags:
             # Only create and stack system tags table if there are actually system tags
             if self._system_tags:  # Check if system tags dict is not empty
                 if self._cached_system_tags_table is None:
@@ -100,10 +96,9 @@ class DictTag(DictDatagram):
 
     def as_dict(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_system_tags: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> dict[str, DataValue]:
         """
         Return dictionary representation.
@@ -114,55 +109,44 @@ class DictTag(DictDatagram):
         Returns:
             Dictionary representation of the packet
         """
-        dict_copy = super().as_dict(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
-        )
-        if include_all_info or include_system_tags:
+        dict_copy = super().as_dict(columns=columns, all_info=all_info)
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+
+        if column_config.system_tags:
             dict_copy.update(self._system_tags)
         return dict_copy
 
     def keys(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_system_tags: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> tuple[str, ...]:
         """Return keys of the Python schema."""
-        keys = super().keys(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
-        )
-        if include_all_info or include_system_tags:
+        keys = super().keys(columns=columns, all_info=all_info)
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.system_tags:
             keys += tuple(self._system_tags.keys())
         return keys
 
-    def types(
+    def schema(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_system_tags: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> PythonSchema:
         """Return copy of the Python schema."""
-        schema = super().types(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
-        )
-        if include_all_info or include_system_tags:
+        schema = super().schema(columns=columns, all_info=all_info)
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.system_tags:
             schema.update(self._system_tags_python_schema)
         return schema
 
     def arrow_schema(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_system_tags: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> "pa.Schema":
         """
         Return the PyArrow schema for this datagram.
@@ -174,12 +158,9 @@ class DictTag(DictDatagram):
         Returns:
             PyArrow schema representing the datagram's structure
         """
-        schema = super().arrow_schema(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
-        )
-        if include_all_info or include_system_tags:
+        schema = super().arrow_schema(columns=columns, all_info=all_info)
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.system_tags:
             if self._cached_system_tags_schema is None:
                 self._cached_system_tags_schema = (
                     self._data_context.type_converter.python_schema_to_arrow_schema(
@@ -193,9 +174,9 @@ class DictTag(DictDatagram):
 
     def as_datagram(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_system_tags: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> DictDatagram:
         """
         Convert the packet to a DictDatagram.
@@ -207,16 +188,8 @@ class DictTag(DictDatagram):
             DictDatagram representation of the packet
         """
 
-        data = self.as_dict(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_system_tags=include_system_tags,
-        )
-        python_schema = self.types(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_system_tags=include_system_tags,
-        )
+        data = self.as_dict(columns=columns, all_info=all_info)
+        python_schema = self.schema(columns=columns, all_info=all_info)
         return DictDatagram(
             data,
             python_schema=python_schema,
@@ -299,7 +272,7 @@ class DictPacket(DictDatagram):
     def _source_info_arrow_schema(self) -> "pa.Schema":
         if self._cached_source_info_schema is None:
             self._cached_source_info_schema = (
-                self._converter.python_schema_to_arrow_schema(
+                self.converter.python_schema_to_arrow_schema(
                     self._source_info_python_schema
                 )
             )
@@ -313,18 +286,14 @@ class DictPacket(DictDatagram):
 
     def as_table(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_source: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> "pa.Table":
         """Convert the packet to an Arrow table."""
-        table = super().as_table(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
-        )
-        if include_all_info or include_source:
+        table = super().as_table(columns=columns, all_info=all_info)
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.source:
             if self._cached_source_info_table is None:
                 source_info_data = {
                     f"{constants.SOURCE_PREFIX}{k}": v
@@ -349,10 +318,9 @@ class DictPacket(DictDatagram):
 
     def as_dict(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_source: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> dict[str, DataValue]:
         """
         Return dictionary representation.
@@ -363,47 +331,36 @@ class DictPacket(DictDatagram):
         Returns:
             Dictionary representation of the packet
         """
-        dict_copy = super().as_dict(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
-        )
-        if include_all_info or include_source:
+        dict_copy = super().as_dict(columns=columns, all_info=all_info)
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.source:
             for key, value in self.source_info().items():
                 dict_copy[f"{constants.SOURCE_PREFIX}{key}"] = value
         return dict_copy
 
     def keys(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_source: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> tuple[str, ...]:
         """Return keys of the Python schema."""
-        keys = super().keys(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
-        )
-        if include_all_info or include_source:
+        keys = super().keys(columns=columns, all_info=all_info)
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.source:
             keys += tuple(f"{constants.SOURCE_PREFIX}{key}" for key in super().keys())
         return keys
 
-    def types(
+    def schema(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_source: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> PythonSchema:
         """Return copy of the Python schema."""
-        schema = super().types(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
-        )
-        if include_all_info or include_source:
+        schema = super().schema(columns=columns, all_info=all_info)
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.source:
             for key in self.keys():
                 schema[f"{constants.SOURCE_PREFIX}{key}"] = str
         return schema
@@ -442,10 +399,9 @@ class DictPacket(DictDatagram):
 
     def arrow_schema(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_source: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> "pa.Schema":
         """
         Return the PyArrow schema for this datagram.
@@ -457,12 +413,9 @@ class DictPacket(DictDatagram):
         Returns:
             PyArrow schema representing the datagram's structure
         """
-        schema = super().arrow_schema(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
-        )
-        if include_all_info or include_source:
+        schema = super().arrow_schema(columns=columns, all_info=all_info)
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.source:
             return arrow_utils.join_arrow_schemas(
                 schema, self._source_info_arrow_schema
             )
@@ -470,9 +423,9 @@ class DictPacket(DictDatagram):
 
     def as_datagram(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_source: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> DictDatagram:
         """
         Convert the packet to a DictDatagram.
@@ -484,18 +437,10 @@ class DictPacket(DictDatagram):
             DictDatagram representation of the packet
         """
 
-        data = self.as_dict(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_source=include_source,
-        )
-        python_schema = self.types(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_source=include_source,
-        )
+        data = self.as_dict(columns=columns, all_info=all_info)
+        python_schema = self.schema(columns=columns, all_info=all_info)
         return DictDatagram(
-            data,
+            data=data,
             python_schema=python_schema,
             data_context=self._data_context,
         )

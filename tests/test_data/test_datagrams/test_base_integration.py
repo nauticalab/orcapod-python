@@ -24,7 +24,7 @@ from orcapod.core.datagrams.base import (
     ImmutableDict,
     contains_prefix_from,
 )
-from orcapod.core.system_constants import constants
+from orcapod.contexts.system_constants import constants
 
 
 class TestImmutableDict:

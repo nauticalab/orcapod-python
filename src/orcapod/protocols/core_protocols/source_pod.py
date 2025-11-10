@@ -1,11 +1,11 @@
 from typing import Protocol, runtime_checkable
 
-from orcapod.protocols.core_protocols.kernel import Kernel
+from orcapod.protocols.core_protocols.pod import Pod
 from orcapod.protocols.core_protocols.streams import Stream
 
 
 @runtime_checkable
-class Source(Kernel, Stream, Protocol):
+class SourcePod(Pod, Stream, Protocol):
     """
     Entry point for data into the computational graph.
 

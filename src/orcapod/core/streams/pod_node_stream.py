@@ -2,19 +2,20 @@ import logging
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
-from orcapod.core.system_constants import constants
-from orcapod.protocols import core_protocols as cp, pipeline_protocols as pp
+import orcapod.protocols.core_protocols.execution_engine
+from orcapod.contexts.system_constants import constants
+from orcapod.core.streams.base import StreamBase
+from orcapod.core.streams.table_stream import TableStream
+from orcapod.protocols import core_protocols as cp
+from orcapod.protocols import pipeline_protocols as pp
 from orcapod.types import PythonSchema
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
-from orcapod.core.streams.base import StreamBase
-from orcapod.core.streams.table_stream import TableStream
-
 
 if TYPE_CHECKING:
+    import polars as pl
     import pyarrow as pa
     import pyarrow.compute as pc
-    import polars as pl
 
 else:
     pa = LazyModule("pyarrow")
@@ -56,7 +57,9 @@ class PodNodeStream(StreamBase):
         return self.pod_node.mode
 
     async def run_async(
-        self, execution_engine: cp.ExecutionEngine | None = None
+        self,
+        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
+        | None = None,
     ) -> None:
         """
         Runs the stream, processing the input stream and preparing the output stream.
@@ -135,7 +138,8 @@ class PodNodeStream(StreamBase):
     def run(
         self,
         *args: Any,
-        execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
+        | None = None,
         **kwargs: Any,
     ) -> None:
         cached_results = []
@@ -254,7 +258,9 @@ class PodNodeStream(StreamBase):
         self._cached_content_hash_column = None
 
     def iter_packets(
-        self, execution_engine: cp.ExecutionEngine | None = None
+        self,
+        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
+        | None = None,
     ) -> Iterator[tuple[cp.Tag, cp.Packet]]:
         """
         Processes the input stream and prepares the output stream.
@@ -421,7 +427,8 @@ class PodNodeStream(StreamBase):
         include_system_tags: bool = False,
         include_content_hash: bool | str = False,
         sort_by_tags: bool = True,
-        execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
+        | None = None,
     ) -> "pa.Table":
         if self._cached_output_table is None:
             all_tags = []

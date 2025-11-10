@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 from orcapod.protocols import core_protocols as cp
 from orcapod.types import DataValue, PythonSchema, PythonSchemaLike
 from orcapod.utils.lazy_module import LazyModule
-from orcapod.core.system_constants import constants
+from orcapod.contexts.system_constants import constants
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
 
 if TYPE_CHECKING:

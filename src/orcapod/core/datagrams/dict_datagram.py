@@ -1,15 +1,16 @@
 import logging
 from collections.abc import Collection, Iterator, Mapping
-from typing import Self, cast, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Self, cast
 
-from orcapod.utils.lazy_module import LazyModule
-from orcapod.core.system_constants import constants
 from orcapod import contexts
 from orcapod.core.datagrams.base import BaseDatagram
+from orcapod.core.system_constants import constants
+from orcapod.protocols.core_protocols import ColumnConfig
+from orcapod.protocols.hashing_protocols import ContentHash
 from orcapod.semantic_types import infer_python_schema_from_pylist_data
 from orcapod.types import DataValue, PythonSchema, PythonSchemaLike
 from orcapod.utils import arrow_utils
-from orcapod.protocols.hashing_protocols import ContentHash
+from orcapod.utils.lazy_module import LazyModule
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,7 @@ class DictDatagram(BaseDatagram):
 
         # Initialize base class with data context
         final_context = data_context or cast(str, extracted_context)
-        super().__init__(final_context)
+        super().__init__(data_context=final_context)
 
         # Store data and meta components separately (immutable)
         self._data = dict(data_columns)
@@ -181,13 +182,14 @@ class DictDatagram(BaseDatagram):
     # 3. Structural Information
     def keys(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> tuple[str, ...]:
         """Return tuple of column names."""
-        include_meta_columns = include_all_info or include_meta_columns
-        include_context = include_all_info or include_context
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        include_meta_columns = column_config.meta
+        include_context = column_config.context
         # Start with data columns
         result_keys = list(self._data.keys())
 
@@ -210,11 +212,11 @@ class DictDatagram(BaseDatagram):
 
         return tuple(result_keys)
 
-    def types(
+    def schema(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> PythonSchema:
         """
         Return Python schema for the datagram.
@@ -229,8 +231,9 @@ class DictDatagram(BaseDatagram):
         Returns:
             Python schema
         """
-        include_meta_columns = include_all_info or include_meta_columns
-        include_context = include_all_info or include_context
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        include_meta_columns = column_config.meta
+        include_context = column_config.context
 
         # Start with data schema
         schema = dict(self._data_python_schema)
@@ -255,9 +258,9 @@ class DictDatagram(BaseDatagram):
 
     def arrow_schema(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> "pa.Schema":
         """
         Return the PyArrow schema for this datagram.
@@ -272,8 +275,9 @@ class DictDatagram(BaseDatagram):
         Returns:
             PyArrow schema representing the datagram's structure
         """
-        include_meta_columns = include_all_info or include_meta_columns
-        include_context = include_all_info or include_context
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        include_meta_columns = column_config.meta
+        include_context = column_config.context
 
         # Build data schema (cached)
         if self._cached_data_arrow_schema is None:
@@ -287,7 +291,7 @@ class DictDatagram(BaseDatagram):
 
         # Add context schema if requested
         if include_context:
-            context_schema = self._converter.python_schema_to_arrow_schema(
+            context_schema = self.converter.python_schema_to_arrow_schema(
                 {constants.CONTEXT_KEY: str}
             )
             all_schemas.append(context_schema)
@@ -323,16 +327,16 @@ class DictDatagram(BaseDatagram):
         """
         if self._cached_content_hash is None:
             self._cached_content_hash = self._data_context.arrow_hasher.hash_table(
-                self.as_table(include_meta_columns=False, include_context=False),
+                self.as_table(columns={"meta": False, "context": False}),
             )
         return self._cached_content_hash
 
     # 4. Format Conversions (Export)
     def as_dict(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> dict[str, DataValue]:
         """
         Return dictionary representation of the datagram.
@@ -347,8 +351,9 @@ class DictDatagram(BaseDatagram):
         Returns:
             Dictionary representation
         """
-        include_context = include_all_info or include_context
-        include_meta_columns = include_all_info or include_meta_columns
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        include_meta_columns = column_config.meta
+        include_context = column_config.context
 
         result_dict = dict(self._data)  # Start with user data
 
@@ -374,9 +379,9 @@ class DictDatagram(BaseDatagram):
 
     def as_arrow_compatible_dict(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> dict[str, DataValue]:
         """
         Return dictionary representation compatible with Arrow.
@@ -392,16 +397,8 @@ class DictDatagram(BaseDatagram):
             Dictionary representation compatible with Arrow
         """
         # FIXME: this is a super inefficient implementation!
-        python_dict = self.as_dict(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
-        )
-        python_schema = self.types(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
-        )
+        python_dict = self.as_dict(columns=columns, all_info=all_info)
+        python_schema = self.schema(columns=columns, all_info=all_info)
 
         return self._data_context.type_converter.python_dicts_to_struct_dicts(
             [python_dict], python_schema=python_schema
@@ -434,9 +431,9 @@ class DictDatagram(BaseDatagram):
 
     def as_table(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> "pa.Table":
         """
         Convert the datagram to an Arrow table.
@@ -451,8 +448,9 @@ class DictDatagram(BaseDatagram):
         Returns:
             Arrow table representation
         """
-        include_context = include_all_info or include_context
-        include_meta_columns = include_all_info or include_meta_columns
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        include_meta_columns = column_config.meta
+        include_context = column_config.context
 
         # Build data table (cached)
         if self._cached_data_table is None:
@@ -750,7 +748,7 @@ class DictDatagram(BaseDatagram):
         new_data.update(updates)
 
         # Create updated python schema - handle None values by defaulting to str
-        python_schema = self.types()
+        python_schema = self.schema()
         if column_types is not None:
             python_schema.update(column_types)
 

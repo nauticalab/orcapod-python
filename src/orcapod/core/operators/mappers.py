@@ -1,12 +1,13 @@
-from orcapod.protocols import core_protocols as cp
-from orcapod.core.streams import TableStream
-from orcapod.types import PythonSchema
-from typing import Any, TYPE_CHECKING
-from orcapod.utils.lazy_module import LazyModule
 from collections.abc import Mapping
-from orcapod.errors import InputValidationError
-from orcapod.core.system_constants import constants
+from typing import TYPE_CHECKING, Any
+
 from orcapod.core.operators.base import UnaryOperator
+from orcapod.core.streams import TableStream
+from orcapod.core.system_constants import constants
+from orcapod.errors import InputValidationError
+from orcapod.protocols.core_protocols import ColumnConfig, Stream
+from orcapod.types import PythonSchema
+from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -28,7 +29,7 @@ class MapPackets(UnaryOperator):
         self.drop_unmapped = drop_unmapped
         super().__init__(**kwargs)
 
-    def op_forward(self, stream: cp.Stream) -> cp.Stream:
+    def unary_execute(self, stream: Stream) -> Stream:
         tag_columns, packet_columns = stream.keys()
         unmapped_columns = set(packet_columns) - set(self.name_map.keys())
 
@@ -37,7 +38,7 @@ class MapPackets(UnaryOperator):
             return stream
 
         table = stream.as_table(
-            include_source=True, include_system_tags=True, sort_by_tags=False
+            columns={"source": True, "system_tags": True, "sort_by_tags": False}
         )
 
         name_map = {
@@ -68,11 +69,7 @@ class MapPackets(UnaryOperator):
             renamed_table, tag_columns=tag_columns, source=self, upstreams=(stream,)
         )
 
-    def op_validate_inputs(self, stream: cp.Stream) -> None:
-        """
-        This method should be implemented by subclasses to validate the inputs to the operator.
-        It takes two streams as input and raises an error if the inputs are not valid.
-        """
+    def validate_unary_input(self, stream: Stream) -> None:
         # verify that renamed value does NOT collide with other columns
         tag_columns, packet_columns = stream.keys()
         relevant_source = []
@@ -95,11 +92,15 @@ class MapPackets(UnaryOperator):
                 message += f"overlapping tag columns: {overlapping_tag_columns}."
             raise InputValidationError(message)
 
-    def op_output_types(
-        self, stream: cp.Stream, include_system_tags: bool = False
+    def unary_output_schema(
+        self,
+        stream: Stream,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> tuple[PythonSchema, PythonSchema]:
-        tag_typespec, packet_typespec = stream.types(
-            include_system_tags=include_system_tags
+        tag_typespec, packet_typespec = stream.output_schema(
+            columns=columns, all_info=all_info
         )
 
         # Create new packet typespec with renamed keys
@@ -111,12 +112,12 @@ class MapPackets(UnaryOperator):
 
         return tag_typespec, new_packet_typespec
 
-    def op_identity_structure(self, stream: cp.Stream | None = None) -> Any:
+    def identity_structure(self) -> Any:
         return (
             self.__class__.__name__,
             self.name_map,
             self.drop_unmapped,
-        ) + ((stream,) if stream is not None else ())
+        )
 
 
 class MapTags(UnaryOperator):
@@ -133,7 +134,7 @@ class MapTags(UnaryOperator):
         self.drop_unmapped = drop_unmapped
         super().__init__(**kwargs)
 
-    def op_forward(self, stream: cp.Stream) -> cp.Stream:
+    def unary_execute(self, stream: Stream) -> Stream:
         tag_columns, packet_columns = stream.keys()
         missing_tags = set(tag_columns) - set(self.name_map.keys())
 
@@ -141,7 +142,9 @@ class MapTags(UnaryOperator):
             # nothing to rename in the tags, return stream as is
             return stream
 
-        table = stream.as_table(include_source=True, include_system_tags=True)
+        table = stream.as_table(
+            columns={"source": True, "system_tags": True, "sort_by_tags": False}
+        )
 
         name_map = {
             tc: self.name_map.get(tc, tc)
@@ -162,7 +165,7 @@ class MapTags(UnaryOperator):
             renamed_table, tag_columns=new_tag_columns, source=self, upstreams=(stream,)
         )
 
-    def op_validate_inputs(self, stream: cp.Stream) -> None:
+    def validate_unary_input(self, stream: Stream) -> None:
         """
         This method should be implemented by subclasses to validate the inputs to the operator.
         It takes two streams as input and raises an error if the inputs are not valid.
@@ -187,11 +190,16 @@ class MapTags(UnaryOperator):
                 message += f"overlapping packet columns: {overlapping_packet_columns}."
             raise InputValidationError(message)
 
-    def op_output_types(
-        self, stream: cp.Stream, include_system_tags: bool = False
+    def unary_output_schema(
+        self,
+        stream: Stream,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+        include_system_tags: bool = False,
     ) -> tuple[PythonSchema, PythonSchema]:
-        tag_typespec, packet_typespec = stream.types(
-            include_system_tags=include_system_tags
+        tag_typespec, packet_typespec = stream.output_schema(
+            columns=columns, all_info=all_info
         )
 
         # Create new packet typespec with renamed keys
@@ -208,9 +216,9 @@ class MapTags(UnaryOperator):
 
         return new_tag_typespec, packet_typespec
 
-    def op_identity_structure(self, stream: cp.Stream | None = None) -> Any:
+    def identity_structure(self) -> Any:
         return (
             self.__class__.__name__,
             self.name_map,
             self.drop_unmapped,
-        ) + ((stream,) if stream is not None else ())
+        )

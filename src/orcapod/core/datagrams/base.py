@@ -19,13 +19,12 @@ and type conversions between semantic stores, Python stores, and Arrow tables.
 import logging
 from abc import abstractmethod
 from collections.abc import Collection, Iterator, Mapping
-from typing import Self, TypeAlias, TYPE_CHECKING
-from orcapod import contexts
-from orcapod.core.base import ContentIdentifiableBase
-from orcapod.protocols.hashing_protocols import ContentHash
+from typing import TYPE_CHECKING, Any, Self, TypeAlias
 
-from orcapod.utils.lazy_module import LazyModule
+from orcapod.core.base import ContentIdentifiableBase
+from orcapod.protocols.core_protocols import ColumnConfig
 from orcapod.types import DataValue, PythonSchema
+from orcapod.utils.lazy_module import LazyModule
 
 logger = logging.getLogger(__name__)
 
@@ -119,22 +118,19 @@ class BaseDatagram(ContentIdentifiableBase):
     is interpreted and used is left to concrete implementations.
     """
 
-    def __init__(self, data_context: contexts.DataContext | str | None = None) -> None:
-        """
-        Initialize base datagram with data context.
+    # TODO: revisit handling of identity structure for datagrams
+    def identity_structure(self) -> Any:
+        raise NotImplementedError()
 
-        Args:
-            data_context: Context for semantic interpretation. Can be a string key
-                or a DataContext object, or None for default.
-        """
-        self._data_context = contexts.resolve_context(data_context)
-        self._converter = self._data_context.type_converter
-
-    # 1. Core Properties (Identity & Structure)
     @property
-    def data_context_key(self) -> str:
-        """Return the data context key."""
-        return self._data_context.context_key
+    def converter(self):
+        """
+        Get the semantic type converter associated with this datagram's context.
+
+        Returns:
+            SemanticConverter: The type converter for this datagram's data context
+        """
+        return self.data_context.type_converter
 
     @property
     @abstractmethod
@@ -169,19 +165,19 @@ class BaseDatagram(ContentIdentifiableBase):
     @abstractmethod
     def keys(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> tuple[str, ...]:
         """Return tuple of column names."""
         ...
 
     @abstractmethod
-    def types(
+    def schema(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> PythonSchema:
         """Return type specification for the datagram."""
         ...
@@ -189,25 +185,20 @@ class BaseDatagram(ContentIdentifiableBase):
     @abstractmethod
     def arrow_schema(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> "pa.Schema":
         """Return the PyArrow schema for this datagram."""
-        ...
-
-    @abstractmethod
-    def content_hash(self) -> ContentHash:
-        """Calculate and return content hash of the datagram."""
         ...
 
     # 4. Format Conversions (Export)
     @abstractmethod
     def as_dict(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> dict[str, DataValue]:
         """Return dictionary representation of the datagram."""
         ...
@@ -215,9 +206,9 @@ class BaseDatagram(ContentIdentifiableBase):
     @abstractmethod
     def as_table(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> "pa.Table":
         """Convert the datagram to an Arrow table."""
         ...
@@ -272,7 +263,7 @@ class BaseDatagram(ContentIdentifiableBase):
     def with_context_key(self, new_context_key: str) -> Self:
         """Create new datagram with different data context."""
         new_datagram = self.copy(include_cache=False)
-        new_datagram._data_context = contexts.resolve_context(new_context_key)
+        new_datagram.data_context = new_context_key
         return new_datagram
 
     # 8. Utility Operations

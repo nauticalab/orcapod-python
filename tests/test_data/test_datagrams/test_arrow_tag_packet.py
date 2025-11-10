@@ -14,7 +14,7 @@ import pyarrow as pa
 from datetime import datetime, date
 
 from orcapod.core.datagrams import ArrowTag, ArrowPacket
-from orcapod.core.system_constants import constants
+from orcapod.contexts.system_constants import constants
 
 
 class TestArrowTagInitialization:

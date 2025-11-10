@@ -1,17 +1,18 @@
-from orcapod.protocols import core_protocols as cp
-from orcapod.core.streams import TableStream
-from orcapod.types import PythonSchema
-from orcapod.utils import types_utils
-from typing import Any, TYPE_CHECKING
-from orcapod.utils.lazy_module import LazyModule
 from collections.abc import Collection
-from orcapod.errors import InputValidationError
-from orcapod.core.operators.base import NonZeroInputOperator
+from typing import TYPE_CHECKING, Any
+
 from orcapod.core import arrow_data_utils
+from orcapod.core.operators.base import NonZeroInputOperator
+from orcapod.core.streams import TableStream
+from orcapod.errors import InputValidationError
+from orcapod.protocols.core_protocols import ArgumentGroup, ColumnConfig, Stream
+from orcapod.types import PythonSchema
+from orcapod.utils import schema_utils
+from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
-    import pyarrow as pa
     import polars as pl
+    import pyarrow as pa
 else:
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")
@@ -26,40 +27,48 @@ class Join(NonZeroInputOperator):
         """
         return (f"{self.__class__.__name__}",)
 
-    def op_validate_inputs(self, *streams: cp.Stream) -> None:
+    def validate_nonzero_inputs(self, *streams: Stream) -> None:
         try:
-            self.op_output_types(*streams)
+            self.output_schema(*streams)
         except Exception as e:
             # raise InputValidationError(f"Input streams are not compatible: {e}") from e
             raise e
 
-    def order_input_streams(self, *streams: cp.Stream) -> list[cp.Stream]:
+    def order_input_streams(self, *streams: Stream) -> list[Stream]:
         # order the streams based on their hashes to offer deterministic operation
         return sorted(streams, key=lambda s: s.content_hash().to_hex())
 
-    def op_output_types(
-        self, *streams: cp.Stream, include_system_tags: bool = False
+    def argument_symmetry(self, streams: Collection) -> ArgumentGroup:
+        return frozenset(streams)
+
+    def output_schema(
+        self,
+        *streams: Stream,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> tuple[PythonSchema, PythonSchema]:
         if len(streams) == 1:
             # If only one stream is provided, return its typespecs
-            return streams[0].types(include_system_tags=include_system_tags)
+            return streams[0].output_schema(columns=columns, all_info=all_info)
 
         # output type computation does NOT require consistent ordering of streams
 
         # TODO: consider performing the check always with system tags on
         stream = streams[0]
-        tag_typespec, packet_typespec = stream.types(
-            include_system_tags=include_system_tags
+        tag_typespec, packet_typespec = stream.output_schema(
+            columns=columns, all_info=all_info
         )
         for other_stream in streams[1:]:
-            other_tag_typespec, other_packet_typespec = other_stream.types(
-                include_system_tags=include_system_tags
+            other_tag_typespec, other_packet_typespec = other_stream.output_schema(
+                columns=columns, all_info=all_info
             )
-            tag_typespec = types_utils.union_typespecs(tag_typespec, other_tag_typespec)
-            intersection_packet_typespec = types_utils.intersection_typespecs(
+            tag_typespec = schema_utils.union_typespecs(
+                tag_typespec, other_tag_typespec
+            )
+            intersection_packet_typespec = schema_utils.intersection_typespecs(
                 packet_typespec, other_packet_typespec
             )
-            packet_typespec = types_utils.union_typespecs(
+            packet_typespec = schema_utils.union_typespecs(
                 packet_typespec, other_packet_typespec
             )
             if intersection_packet_typespec:
@@ -69,7 +78,7 @@ class Join(NonZeroInputOperator):
 
         return tag_typespec, packet_typespec
 
-    def op_forward(self, *streams: cp.Stream) -> cp.Stream:
+    def execute(self, *streams: Stream) -> Stream:
         """
         Joins two streams together based on their tags.
         The resulting stream will contain all the tags from both streams.
@@ -82,7 +91,7 @@ class Join(NonZeroInputOperator):
         stream = streams[0]
 
         tag_keys, _ = [set(k) for k in stream.keys()]
-        table = stream.as_table(include_source=True, include_system_tags=True)
+        table = stream.as_table(columns={"source": True, "system_tags": True})
         # trick to get cartesian product
         table = table.add_column(0, COMMON_JOIN_KEY, pa.array([0] * len(table)))
         table = arrow_data_utils.append_to_system_tags(
@@ -93,7 +102,7 @@ class Join(NonZeroInputOperator):
         for next_stream in streams[1:]:
             next_tag_keys, _ = next_stream.keys()
             next_table = next_stream.as_table(
-                include_source=True, include_system_tags=True
+                columns={"source": True, "system_tags": True}
             )
             next_table = arrow_data_utils.append_to_system_tags(
                 next_table,
@@ -130,12 +139,8 @@ class Join(NonZeroInputOperator):
             upstreams=streams,
         )
 
-    def op_identity_structure(
-        self, streams: Collection[cp.Stream] | None = None
-    ) -> Any:
-        return (
-            (self.__class__.__name__,) + (set(streams),) if streams is not None else ()
-        )
+    def identity_structure(self) -> Any:
+        return self.__class__.__name__
 
     def __repr__(self) -> str:
         return "Join()"

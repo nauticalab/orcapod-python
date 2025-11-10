@@ -16,7 +16,7 @@ import pytest
 import pyarrow as pa
 
 from orcapod.core.datagrams import DictDatagram
-from orcapod.core.system_constants import constants
+from orcapod.contexts.system_constants import constants
 
 
 class TestDictDatagramInitialization:

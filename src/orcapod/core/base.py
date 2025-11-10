@@ -1,28 +1,22 @@
 import logging
-from abc import ABC
+from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from typing import Any
 
-from orcapod import DEFAULT_CONFIG, contexts
-from orcapod.config import Config
+import orcapod.contexts as contexts
+from orcapod.config import DEFAULT_CONFIG, Config
 from orcapod.protocols import hashing_protocols as hp
 
 logger = logging.getLogger(__name__)
 
 
-class LablableBase:
+# Base classes for Orcapod core components, providing common functionality.
+
+
+class LabelableMixin:
     def __init__(self, label: str | None = None, **kwargs):
         self._label = label
         super().__init__(**kwargs)
-
-    @property
-    def has_assigned_label(self) -> bool:
-        """
-        Check if the label is explicitly set for this object.
-
-        Returns:
-            bool: True if the label is explicitly set, False otherwise.
-        """
-        return self._label is not None
 
     @property
     def label(self) -> str:
@@ -33,6 +27,16 @@ class LablableBase:
             str | None: The label of the object, or None if not set.
         """
         return self._label or self.computed_label() or self.__class__.__name__
+
+    @property
+    def has_assigned_label(self) -> bool:
+        """
+        Check if the label is explicitly set for this object.
+
+        Returns:
+            bool: True if the label is explicitly set, False otherwise.
+        """
+        return self._label is not None
 
     @label.setter
     def label(self, label: str | None) -> None:
@@ -52,7 +56,7 @@ class LablableBase:
         return None
 
 
-class ContextAwareConfigurableBase(ABC):
+class DataContextMixin:
     def __init__(
         self,
         data_context: str | contexts.DataContext | None = None,
@@ -73,13 +77,17 @@ class ContextAwareConfigurableBase(ABC):
     def data_context(self) -> contexts.DataContext:
         return self._data_context
 
+    @data_context.setter
+    def data_context(self, context: str | contexts.DataContext | None) -> None:
+        self._data_context = contexts.resolve_context(context)
+
     @property
     def data_context_key(self) -> str:
         """Return the data context key."""
         return self._data_context.context_key
 
 
-class ContentIdentifiableBase(ContextAwareConfigurableBase):
+class ContentIdentifiableBase(DataContextMixin, ABC):
     """
     Base class for content-identifiable objects.
     This class provides a way to define objects that can be uniquely identified
@@ -101,6 +109,7 @@ class ContentIdentifiableBase(ContextAwareConfigurableBase):
         self._cached_content_hash: hp.ContentHash | None = None
         self._cached_int_hash: int | None = None
 
+    @abstractmethod
     def identity_structure(self) -> Any:
         """
         Return a structure that represents the identity of this object.
@@ -112,7 +121,7 @@ class ContentIdentifiableBase(ContextAwareConfigurableBase):
         Returns:
             Any: A structure representing this object's content, or None to use default hash
         """
-        raise NotImplementedError("Subclasses must implement identity_structure")
+        ...
 
     def content_hash(self) -> hp.ContentHash:
         """
@@ -157,5 +166,67 @@ class ContentIdentifiableBase(ContextAwareConfigurableBase):
         return self.identity_structure() == other.identity_structure()
 
 
-class LabeledContentIdentifiableBase(ContentIdentifiableBase, LablableBase):
-    pass
+class TemporalMixin:
+    """
+    Mixin class that adds temporal functionality to an Orcapod entity.
+    It provides methods to track and manage the last modified timestamp of the entity.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._modified_time = self._update_modified_time()
+
+    @property
+    def last_modified(self) -> datetime | None:
+        """
+        When this object's content was last modified.
+
+        Returns:
+            datetime: Content last modified timestamp (timezone-aware)
+            None: Modification time unknown (assume always changed)
+        """
+        return self._modified_time
+
+    def _set_modified_time(self, modified_time: datetime | None) -> None:
+        """
+        Set the modified time for this object.
+
+        Args:
+            modified_time (datetime | None): The modified time to set. If None, clears the modified time.
+        """
+        self._modified_time = modified_time
+
+    def _update_modified_time(self) -> None:
+        """
+        Update the modified time to the current time.
+        """
+        self._modified_time = datetime.now(timezone.utc)
+
+    def updated_since(self, timestamp: datetime) -> bool:
+        """
+        Check if the object has been updated since the given timestamp.
+
+        Args:
+            timestamp (datetime): The timestamp to compare against.
+
+        Returns:
+            bool: True if the object has been updated since the given timestamp, False otherwise.
+        """
+        # if _modified_time is None, consider it always updated
+        if self._modified_time is None:
+            return True
+        return self._modified_time > timestamp
+
+
+class OrcapodBase(TemporalMixin, LabelableMixin, ContentIdentifiableBase):
+    """
+    Base class for all default OrcaPod entities, providing common functionality
+    including data context awareness, content-based identity, (semantic) labeling,
+    and modification timestamp.
+    """
+
+    def __repr__(self):
+        return self.__class__.__name__
+
+    def __str__(self):
+        return self.label

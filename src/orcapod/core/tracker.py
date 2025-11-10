@@ -1,11 +1,11 @@
-from orcapod.core.base import LabeledContentIdentifiableBase
-from orcapod.protocols import core_protocols as cp
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Generator
-from abc import ABC, abstractmethod
-from typing import Any, TYPE_CHECKING
 from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any
 
+from orcapod.core.base import OrcapodBase
+from orcapod.protocols import core_protocols as cp
 
 if TYPE_CHECKING:
     import networkx as nx
@@ -50,31 +50,11 @@ class BasicTrackerManager:
         # This is to ensure that we only return trackers that are currently active
         return [t for t in self._active_trackers if t.is_active()]
 
-    def record_kernel_invocation(
+    def record_pod_invocation(
         self,
-        kernel: cp.Kernel,
+        pod: cp.Pod,
         upstreams: tuple[cp.Stream, ...],
         label: str | None = None,
-    ) -> None:
-        """
-        Record the output stream of a kernel invocation in the tracker.
-        This is used to track the computational graph and the invocations of kernels.
-        """
-        for tracker in self.get_active_trackers():
-            tracker.record_kernel_invocation(kernel, upstreams, label=label)
-
-    def record_source_invocation(
-        self, source: cp.Source, label: str | None = None
-    ) -> None:
-        """
-        Record the output stream of a source invocation in the tracker.
-        This is used to track the computational graph and the invocations of sources.
-        """
-        for tracker in self.get_active_trackers():
-            tracker.record_source_invocation(source, label=label)
-
-    def record_pod_invocation(
-        self, pod: cp.Pod, upstreams: tuple[cp.Stream, ...], label: str | None = None
     ) -> None:
         """
         Record the output stream of a pod invocation in the tracker.
@@ -82,6 +62,31 @@ class BasicTrackerManager:
         """
         for tracker in self.get_active_trackers():
             tracker.record_pod_invocation(pod, upstreams, label=label)
+
+    def record_source_pod_invocation(
+        self, source_pod: cp.SourcePod, label: str | None = None
+    ) -> None:
+        """
+        Record the output stream of a source invocation in the tracker.
+        This is used to track the computational graph and the invocations of sources.
+        """
+        for tracker in self.get_active_trackers():
+            tracker.record_source_pod_invocation(source_pod, label=label)
+
+    def record_packet_function_invocation(
+        self,
+        packet_function: cp.PacketFunction,
+        input_stream: cp.Stream,
+        label: str | None = None,
+    ) -> None:
+        """
+        Record the output stream of a pod invocation in the tracker.
+        This is used to track the computational graph and the invocations of pods.
+        """
+        for tracker in self.get_active_trackers():
+            tracker.record_packet_function_invocation(
+                packet_function, input_stream, label=label
+            )
 
     @contextmanager
     def no_tracking(self) -> Generator[None, Any, None]:
@@ -111,14 +116,14 @@ class AutoRegisteringContextBasedTracker(ABC):
     @abstractmethod
     def record_kernel_invocation(
         self,
-        kernel: cp.Kernel,
+        kernel: cp.Pod,
         upstreams: tuple[cp.Stream, ...],
         label: str | None = None,
     ) -> None: ...
 
     @abstractmethod
     def record_source_invocation(
-        self, source: cp.Source, label: str | None = None
+        self, source: cp.SourcePod, label: str | None = None
     ) -> None: ...
 
     @abstractmethod
@@ -134,10 +139,10 @@ class AutoRegisteringContextBasedTracker(ABC):
         self.set_active(False)
 
 
-class Invocation(LabeledContentIdentifiableBase):
+class Invocation(OrcapodBase):
     def __init__(
         self,
-        kernel: cp.Kernel,
+        kernel: cp.Pod,
         upstreams: tuple[cp.Stream, ...] = (),
         label: str | None = None,
     ) -> None:
@@ -204,11 +209,11 @@ class GraphTracker(AutoRegisteringContextBasedTracker):
         # This is used to track the computational graph and the invocations of kernels
         self.kernel_invocations: set[Invocation] = set()
         self.invocation_to_pod_lut: dict[Invocation, cp.Pod] = {}
-        self.invocation_to_source_lut: dict[Invocation, cp.Source] = {}
+        self.invocation_to_source_lut: dict[Invocation, cp.SourcePod] = {}
 
     def _record_kernel_and_get_invocation(
         self,
-        kernel: cp.Kernel,
+        kernel: cp.Pod,
         upstreams: tuple[cp.Stream, ...],
         label: str | None = None,
     ) -> Invocation:
@@ -218,7 +223,7 @@ class GraphTracker(AutoRegisteringContextBasedTracker):
 
     def record_kernel_invocation(
         self,
-        kernel: cp.Kernel,
+        kernel: cp.Pod,
         upstreams: tuple[cp.Stream, ...],
         label: str | None = None,
     ) -> None:
@@ -229,7 +234,7 @@ class GraphTracker(AutoRegisteringContextBasedTracker):
         self._record_kernel_and_get_invocation(kernel, upstreams, label)
 
     def record_source_invocation(
-        self, source: cp.Source, label: str | None = None
+        self, source: cp.SourcePod, label: str | None = None
     ) -> None:
         """
         Record the output stream of a source invocation in the tracker.
@@ -246,7 +251,7 @@ class GraphTracker(AutoRegisteringContextBasedTracker):
         invocation = self._record_kernel_and_get_invocation(pod, upstreams, label)
         self.invocation_to_pod_lut[invocation] = pod
 
-    def reset(self) -> dict[cp.Kernel, list[cp.Stream]]:
+    def reset(self) -> dict[cp.Pod, list[cp.Stream]]:
         """
         Reset the tracker and return the recorded invocations.
         """

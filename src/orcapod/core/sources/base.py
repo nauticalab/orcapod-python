@@ -4,12 +4,13 @@ from collections.abc import Collection, Iterator
 from typing import TYPE_CHECKING, Any
 
 
-from orcapod.core.kernels import TrackedKernelBase
+from orcapod.core.executable_pod import TrackedKernelBase
 from orcapod.core.streams import (
     KernelStream,
     StatefulStreamBase,
 )
 from orcapod.protocols import core_protocols as cp
+import orcapod.protocols.core_protocols.execution_engine
 from orcapod.types import PythonSchema
 from orcapod.utils.lazy_module import LazyModule
 
@@ -118,7 +119,8 @@ class InvocationBase(TrackedKernelBase, StatefulStreamBase):
 
     def iter_packets(
         self,
-        execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
+        | None = None,
     ) -> Iterator[tuple[cp.Tag, cp.Packet]]:
         """Delegate to the cached KernelStream."""
         return self().iter_packets(execution_engine=execution_engine)
@@ -130,7 +132,8 @@ class InvocationBase(TrackedKernelBase, StatefulStreamBase):
         include_system_tags: bool = False,
         include_content_hash: bool | str = False,
         sort_by_tags: bool = True,
-        execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
+        | None = None,
     ) -> "pa.Table":
         """Delegate to the cached KernelStream."""
         return self().as_table(
@@ -143,7 +146,9 @@ class InvocationBase(TrackedKernelBase, StatefulStreamBase):
         )
 
     def flow(
-        self, execution_engine: cp.ExecutionEngine | None = None
+        self,
+        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
+        | None = None,
     ) -> Collection[tuple[cp.Tag, cp.Packet]]:
         """Delegate to the cached KernelStream."""
         return self().flow(execution_engine=execution_engine)
@@ -151,7 +156,8 @@ class InvocationBase(TrackedKernelBase, StatefulStreamBase):
     def run(
         self,
         *args: Any,
-        execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
+        | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -164,7 +170,8 @@ class InvocationBase(TrackedKernelBase, StatefulStreamBase):
     async def run_async(
         self,
         *args: Any,
-        execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
+        | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -338,7 +345,8 @@ class SourceBase(TrackedKernelBase, StatefulStreamBase):
 
     def iter_packets(
         self,
-        execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
+        | None = None,
     ) -> Iterator[tuple[cp.Tag, cp.Packet]]:
         """Delegate to the cached KernelStream."""
         return self().iter_packets(execution_engine=execution_engine)
@@ -350,7 +358,8 @@ class SourceBase(TrackedKernelBase, StatefulStreamBase):
         include_system_tags: bool = False,
         include_content_hash: bool | str = False,
         sort_by_tags: bool = True,
-        execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
+        | None = None,
     ) -> "pa.Table":
         """Delegate to the cached KernelStream."""
         return self().as_table(
@@ -363,7 +372,9 @@ class SourceBase(TrackedKernelBase, StatefulStreamBase):
         )
 
     def flow(
-        self, execution_engine: cp.ExecutionEngine | None = None
+        self,
+        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
+        | None = None,
     ) -> Collection[tuple[cp.Tag, cp.Packet]]:
         """Delegate to the cached KernelStream."""
         return self().flow(execution_engine=execution_engine)
@@ -371,7 +382,8 @@ class SourceBase(TrackedKernelBase, StatefulStreamBase):
     def run(
         self,
         *args: Any,
-        execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
+        | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -384,7 +396,8 @@ class SourceBase(TrackedKernelBase, StatefulStreamBase):
     async def run_async(
         self,
         *args: Any,
-        execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
+        | None = None,
         **kwargs: Any,
     ) -> None:
         """

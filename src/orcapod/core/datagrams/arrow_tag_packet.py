@@ -1,16 +1,14 @@
 import logging
-from collections.abc import Collection, Mapping
-from typing import Self, TYPE_CHECKING
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, Self
 
-
-from orcapod.core.system_constants import constants
 from orcapod import contexts
+from orcapod.core.datagrams.arrow_datagram import ArrowDatagram
+from orcapod.core.system_constants import constants
+from orcapod.protocols.core_protocols import ColumnConfig
 from orcapod.semantic_types import infer_python_schema_from_pylist_data
-
 from orcapod.types import DataValue, PythonSchema
 from orcapod.utils import arrow_utils
-
-from orcapod.core.datagrams.arrow_datagram import ArrowDatagram
 from orcapod.utils.lazy_module import LazyModule
 
 logger = logging.getLogger(__name__)
@@ -76,43 +74,40 @@ class ArrowTag(ArrowDatagram):
 
     def keys(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_system_tags: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> tuple[str, ...]:
         keys = super().keys(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
+            columns=columns,
+            all_info=all_info,
         )
-        if include_all_info or include_system_tags:
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.system_tags:
             keys += tuple(self._system_tags_dict.keys())
         return keys
 
-    def types(
+    def schema(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_system_tags: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> PythonSchema:
         """Return copy of the Python schema."""
-        schema = super().types(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
+        schema = super().schema(
+            columns=columns,
+            all_info=all_info,
         )
-        if include_all_info or include_system_tags:
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.system_tags:
             schema.update(self._system_tags_python_schema)
         return schema
 
     def arrow_schema(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_system_tags: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> "pa.Schema":
         """
         Return the PyArrow schema for this datagram.
@@ -125,11 +120,11 @@ class ArrowTag(ArrowDatagram):
             PyArrow schema representing the datagram's structure
         """
         schema = super().arrow_schema(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
+            columns=columns,
+            all_info=all_info,
         )
-        if include_all_info or include_system_tags:
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.system_tags:
             return arrow_utils.join_arrow_schemas(
                 schema, self._system_tags_table.schema
             )
@@ -137,10 +132,9 @@ class ArrowTag(ArrowDatagram):
 
     def as_dict(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_system_tags: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> dict[str, DataValue]:
         """
         Convert to dictionary representation.
@@ -152,47 +146,43 @@ class ArrowTag(ArrowDatagram):
             Dictionary representation of the packet
         """
         return_dict = super().as_dict(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
+            columns=columns,
+            all_info=all_info,
         )
-        if include_all_info or include_system_tags:
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.system_tags:
             return_dict.update(self._system_tags_dict)
         return return_dict
 
     def as_table(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_system_tags: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> "pa.Table":
         table = super().as_table(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
+            columns=columns,
+            all_info=all_info,
         )
-        if (
-            include_all_info or include_system_tags
-        ) and self._system_tags_table.num_columns > 0:
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.system_tags and self._system_tags_table.num_columns > 0:
             # add system_tags only if there are actual system tag columns
             table = arrow_utils.hstack_tables(table, self._system_tags_table)
         return table
 
     def as_datagram(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_system_tags: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> ArrowDatagram:
         table = self.as_table(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_system_tags=include_system_tags,
+            columns=columns,
+            all_info=all_info,
         )
         return ArrowDatagram(
             table,
-            data_context=self._data_context,
+            data_context=self.data_context,
         )
 
     def system_tags(self) -> dict[str, DataValue | None]:
@@ -287,44 +277,41 @@ class ArrowPacket(ArrowDatagram):
 
     def keys(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_source: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> tuple[str, ...]:
         keys = super().keys(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
+            columns=columns,
+            all_info=all_info,
         )
-        if include_all_info or include_source:
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.source:
             keys += tuple(f"{constants.SOURCE_PREFIX}{k}" for k in self.keys())
         return keys
 
-    def types(
+    def schema(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_source: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> PythonSchema:
         """Return copy of the Python schema."""
-        schema = super().types(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
+        schema = super().schema(
+            columns=columns,
+            all_info=all_info,
         )
-        if include_all_info or include_source:
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.source:
             for key in self.keys():
                 schema[f"{constants.SOURCE_PREFIX}{key}"] = str
         return schema
 
     def arrow_schema(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_source: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> "pa.Schema":
         """
         Return the PyArrow schema for this datagram.
@@ -336,12 +323,9 @@ class ArrowPacket(ArrowDatagram):
         Returns:
             PyArrow schema representing the datagram's structure
         """
-        schema = super().arrow_schema(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
-        )
-        if include_all_info or include_source:
+        schema = super().arrow_schema(columns=columns, all_info=all_info)
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.source:
             return arrow_utils.join_arrow_schemas(
                 schema, self._source_info_table.schema
             )
@@ -349,10 +333,9 @@ class ArrowPacket(ArrowDatagram):
 
     def as_dict(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_source: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> dict[str, DataValue]:
         """
         Convert to dictionary representation.
@@ -363,12 +346,9 @@ class ArrowPacket(ArrowDatagram):
         Returns:
             Dictionary representation of the packet
         """
-        return_dict = super().as_dict(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
-        )
-        if include_all_info or include_source:
+        return_dict = super().as_dict(columns=columns, all_info=all_info)
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.source:
             return_dict.update(
                 {
                     f"{constants.SOURCE_PREFIX}{k}": v
@@ -379,17 +359,13 @@ class ArrowPacket(ArrowDatagram):
 
     def as_table(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
-        include_source: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> "pa.Table":
-        table = super().as_table(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
-        )
-        if include_all_info or include_source:
+        table = super().as_table(columns=columns, all_info=all_info)
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        if column_config.source:
             # add source_info only if there are columns and the table has meaningful data
             if (
                 self._source_info_table.num_columns > 0
@@ -400,15 +376,11 @@ class ArrowPacket(ArrowDatagram):
 
     def as_datagram(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_source: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> ArrowDatagram:
-        table = self.as_table(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_source=include_source,
-        )
+        table = self.as_table(columns=columns, all_info=all_info)
         return ArrowDatagram(
             table,
             data_context=self._data_context,

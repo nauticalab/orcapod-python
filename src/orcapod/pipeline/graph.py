@@ -1,5 +1,6 @@
-from orcapod.core.trackers import GraphTracker, Invocation
+from orcapod.core.tracker import GraphTracker, Invocation
 from orcapod.pipeline.nodes import KernelNode, PodNode
+import orcapod.protocols.core_protocols.execution_engine
 from orcapod.protocols.pipeline_protocols import Node
 from orcapod import contexts
 from orcapod.protocols import core_protocols as cp
@@ -178,7 +179,8 @@ class Pipeline(GraphTracker):
 
     def run(
         self,
-        execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
+        | None = None,
         run_async: bool | None = None,
     ) -> None:
         """Execute the pipeline by running all nodes in the graph.

@@ -1,26 +1,27 @@
 # Library of functions for working with TypeSpecs and for extracting TypeSpecs from a function's signature
 
-from collections.abc import Callable, Collection, Sequence, Mapping
-from typing import get_origin, get_args, Any
-from orcapod.types import PythonSchema, PythonSchemaLike
 import inspect
 import logging
 import sys
+from collections.abc import Callable, Collection, Mapping, Sequence
+from typing import Any, get_args, get_origin
+
+from orcapod.types import PythonSchema, PythonSchemaLike
 
 logger = logging.getLogger(__name__)
 
 
-def verify_against_typespec(packet: dict, typespec: PythonSchema) -> bool:
+def verify_packet_schema(packet: dict, schema: PythonSchema) -> bool:
     """Verify that the dictionary's types match the expected types in the typespec."""
     from beartype.door import is_bearable
 
     # verify that packet contains no keys not in typespec
-    if set(packet.keys()) - set(typespec.keys()):
+    if set(packet.keys()) - set(schema.keys()):
         logger.warning(
-            f"Packet contains keys not in typespec: {set(packet.keys()) - set(typespec.keys())}. "
+            f"Packet contains keys not in typespec: {set(packet.keys()) - set(schema.keys())}. "
         )
         return False
-    for key, type_info in typespec.items():
+    for key, type_info in schema.items():
         if key not in packet:
             logger.warning(
                 f"Key '{key}' not found in packet. Assuming None but this behavior may change in the future"

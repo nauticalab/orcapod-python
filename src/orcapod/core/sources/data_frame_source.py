@@ -5,7 +5,7 @@ from orcapod.core.streams import TableStream
 from orcapod.protocols import core_protocols as cp
 from orcapod.types import PythonSchema
 from orcapod.utils.lazy_module import LazyModule
-from orcapod.core.system_constants import constants
+from orcapod.contexts.system_constants import constants
 from orcapod.core import polars_data_utils
 from orcapod.core.sources.source_registry import GLOBAL_SOURCE_REGISTRY, SourceRegistry
 import logging

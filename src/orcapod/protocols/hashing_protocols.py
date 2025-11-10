@@ -75,6 +75,21 @@ class ContentHash:
 
 
 @runtime_checkable
+class DataContextAware(Protocol):
+    """Protocol for objects aware of their data context."""
+
+    @property
+    def data_context_key(self) -> str:
+        """
+        Return the data context key associated with this object.
+
+        Returns:
+            str: The data context key
+        """
+        ...
+
+
+@runtime_checkable
 class ContentIdentifiable(Protocol):
     """Protocol for objects that can provide an identity structure."""
 
@@ -91,7 +106,7 @@ class ContentIdentifiable(Protocol):
 
     def content_hash(self) -> ContentHash:
         """
-        Compute a hash based on the content of this object.
+        Compute a hash based on the identity content of this object.
 
         Returns:
             bytes: A byte representation of the hash based on the content.

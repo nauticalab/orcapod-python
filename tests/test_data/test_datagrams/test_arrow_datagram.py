@@ -19,7 +19,7 @@ import pyarrow as pa
 from datetime import datetime, date
 
 from orcapod.core.datagrams import ArrowDatagram
-from orcapod.core.system_constants import constants
+from orcapod.contexts.system_constants import constants
 from orcapod.protocols.core_protocols import Datagram
 from orcapod.protocols.hashing_protocols import ContentHash
 

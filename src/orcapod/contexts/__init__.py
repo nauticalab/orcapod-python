@@ -25,10 +25,13 @@ Example usage:
     versions = get_available_contexts()
 """
 
-from .core import DataContext, ContextValidationError, ContextResolutionError
-from .registry import JSONDataContextRegistry
 from typing import Any
-from orcapod.protocols import hashing_protocols as hp, semantic_types_protocols as sp
+
+from orcapod.protocols import hashing_protocols as hp
+from orcapod.protocols import semantic_types_protocols as sp
+
+from .core import ContextResolutionError, ContextValidationError, DataContext
+from .registry import JSONDataContextRegistry
 
 # Global registry instance (lazily initialized)
 _registry: JSONDataContextRegistry | None = None

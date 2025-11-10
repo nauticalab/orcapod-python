@@ -1,13 +1,13 @@
 import logging
 from collections.abc import Collection, Iterator, Mapping
-from typing import Self, TYPE_CHECKING
-
+from typing import TYPE_CHECKING, Any, Self
 
 from orcapod import contexts
 from orcapod.core.datagrams.base import BaseDatagram
 from orcapod.core.system_constants import constants
-from orcapod.types import DataValue, PythonSchema
+from orcapod.protocols.core_protocols import ColumnConfig
 from orcapod.protocols.hashing_protocols import ContentHash
+from orcapod.types import DataValue, PythonSchema
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -57,6 +57,7 @@ class ArrowDatagram(BaseDatagram):
         table: "pa.Table",
         meta_info: Mapping[str, DataValue] | None = None,
         data_context: str | contexts.DataContext | None = None,
+        **kwargs,
     ) -> None:
         """
         Initialize ArrowDatagram from PyArrow Table.
@@ -75,6 +76,8 @@ class ArrowDatagram(BaseDatagram):
             The input table is automatically split into data, meta, and context
             components based on column naming conventions.
         """
+        super().__init__()
+
         # Validate table has exactly one row for datagram
         if len(table) != 1:
             raise ValueError(
@@ -97,7 +100,7 @@ class ArrowDatagram(BaseDatagram):
             data_context = context_table[constants.CONTEXT_KEY].to_pylist()[0]
 
         # Initialize base class with data context
-        super().__init__(data_context)
+        super().__init__(data_context=data_context, **kwargs)
 
         meta_columns = [
             col for col in table.column_names if col.startswith(constants.META_PREFIX)
@@ -185,14 +188,15 @@ class ArrowDatagram(BaseDatagram):
     # 3. Structural Information
     def keys(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> tuple[str, ...]:
         """Return tuple of column names."""
         # Start with data columns
-        include_meta_columns = include_all_info or include_meta_columns
-        include_context = include_all_info or include_context
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        include_meta_columns = column_config.meta
+        include_context = column_config.context
 
         result_keys = list(self._data_table.column_names)
 
@@ -215,11 +219,11 @@ class ArrowDatagram(BaseDatagram):
 
         return tuple(result_keys)
 
-    def types(
+    def schema(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> PythonSchema:
         """
         Return Python schema for the datagram.
@@ -234,8 +238,9 @@ class ArrowDatagram(BaseDatagram):
         Returns:
             Python schema
         """
-        include_meta_columns = include_all_info or include_meta_columns
-        include_context = include_all_info or include_context
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        include_meta_columns = column_config.meta
+        include_context = column_config.context
 
         # Get data schema (cached)
         if self._cached_python_schema is None:
@@ -274,9 +279,9 @@ class ArrowDatagram(BaseDatagram):
 
     def arrow_schema(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> "pa.Schema":
         """
         Return the PyArrow schema for this datagram.
@@ -292,8 +297,9 @@ class ArrowDatagram(BaseDatagram):
             PyArrow schema representing the datagram's structure
         """
         # order matters
-        include_meta_columns = include_all_info or include_meta_columns
-        include_context = include_all_info or include_context
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        include_meta_columns = column_config.meta
+        include_context = column_config.context
 
         all_schemas = [self._data_table.schema]
 
@@ -344,9 +350,9 @@ class ArrowDatagram(BaseDatagram):
     # 4. Format Conversions (Export)
     def as_dict(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> dict[str, DataValue]:
         """
         Return dictionary representation of the datagram.
@@ -361,8 +367,9 @@ class ArrowDatagram(BaseDatagram):
         Returns:
             Dictionary representation
         """
-        include_meta_columns = include_all_info or include_meta_columns
-        include_context = include_all_info or include_context
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        include_meta_columns = column_config.meta
+        include_context = column_config.context
 
         # Get data dict (cached)
         if self._cached_python_dict is None:
@@ -380,6 +387,7 @@ class ArrowDatagram(BaseDatagram):
 
         # Add meta data if requested
         if include_meta_columns and self._meta_table is not None:
+            meta_dict = None
             if include_meta_columns is True:
                 meta_dict = self._meta_table.to_pylist()[0]
             elif isinstance(include_meta_columns, Collection):
@@ -397,9 +405,9 @@ class ArrowDatagram(BaseDatagram):
 
     def as_table(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> "pa.Table":
         """
         Convert the datagram to an Arrow table.
@@ -414,8 +422,9 @@ class ArrowDatagram(BaseDatagram):
         Returns:
             Arrow table representation
         """
-        include_meta_columns = include_all_info or include_meta_columns
-        include_context = include_all_info or include_context
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        include_meta_columns = column_config.meta
+        include_context = column_config.context
 
         all_tables = [self._data_table]
 
@@ -455,9 +464,9 @@ class ArrowDatagram(BaseDatagram):
 
     def as_arrow_compatible_dict(
         self,
-        include_all_info: bool = False,
-        include_meta_columns: bool | Collection[str] = False,
-        include_context: bool = False,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> dict[str, DataValue]:
         """
         Return dictionary representation compatible with Arrow.
@@ -472,11 +481,7 @@ class ArrowDatagram(BaseDatagram):
         Returns:
             Dictionary representation compatible with Arrow
         """
-        return self.as_table(
-            include_all_info=include_all_info,
-            include_meta_columns=include_meta_columns,
-            include_context=include_context,
-        ).to_pylist()[0]
+        return self.as_table(columns=columns, all_info=all_info).to_pylist()[0]
 
     # 5. Meta Column Operations
     def get_meta_value(self, key: str, default: DataValue = None) -> DataValue:

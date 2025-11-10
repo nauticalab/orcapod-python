@@ -1,13 +1,14 @@
 from abc import abstractmethod
 from orcapod.core.datagrams import ArrowTag
-from orcapod.core.kernels import KernelStream, WrappedKernel
+from orcapod.core.pod import KernelStream, WrappedKernel
 from orcapod.core.sources.base import SourceBase, InvocationBase
-from orcapod.core.pods import CachedPod
+from orcapod.core.packet_function import CachedPod
 from orcapod.protocols import core_protocols as cp, database_protocols as dbp
+import orcapod.protocols.core_protocols.execution_engine
 from orcapod.types import PythonSchema
 from orcapod.utils.lazy_module import LazyModule
 from typing import TYPE_CHECKING, Any
-from orcapod.core.system_constants import constants
+from orcapod.contexts.system_constants import constants
 from orcapod.utils import arrow_utils
 from collections.abc import Collection
 from orcapod.core.streams import PodNodeStream
@@ -301,7 +302,8 @@ class PodNode(NodeBase, CachedPod):
         tag: cp.Tag,
         packet: cp.Packet,
         record_id: str | None = None,
-        execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
+        | None = None,
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
     ) -> tuple[cp.Tag, cp.Packet | None]:
@@ -338,7 +340,8 @@ class PodNode(NodeBase, CachedPod):
         tag: cp.Tag,
         packet: cp.Packet,
         record_id: str | None = None,
-        execution_engine: cp.ExecutionEngine | None = None,
+        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
+        | None = None,
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
     ) -> tuple[cp.Tag, cp.Packet | None]:
