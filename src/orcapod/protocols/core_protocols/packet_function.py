@@ -3,10 +3,11 @@ from typing import Any, Protocol, runtime_checkable
 from orcapod.protocols.core_protocols.datagrams import Packet
 from orcapod.protocols.core_protocols.labelable import Labelable
 from orcapod.types import PythonSchema
+from orcapod.protocols.hashing_protocols import ContentIdentifiable
 
 
 @runtime_checkable
-class PacketFunction(Labelable, Protocol):
+class PacketFunction(ContentIdentifiable, Labelable, Protocol):
     """
     Protocol for packet-processing function.
 

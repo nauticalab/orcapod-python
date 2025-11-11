@@ -40,6 +40,8 @@ class ArrowTag(ArrowDatagram):
         table: "pa.Table",
         system_tags: Mapping[str, DataValue] | None = None,
         data_context: str | contexts.DataContext | None = None,
+        record_id: str | None = None,
+        **kwargs,
     ) -> None:
         if len(table) != 1:
             raise ValueError(
@@ -49,6 +51,8 @@ class ArrowTag(ArrowDatagram):
         super().__init__(
             table=table,
             data_context=data_context,
+            record_id=record_id,
+            **kwargs,
         )
         extracted_system_tag_columns = [
             c
@@ -237,6 +241,8 @@ class ArrowPacket(ArrowDatagram):
         meta_info: Mapping[str, DataValue] | None = None,
         source_info: Mapping[str, str | None] | None = None,
         data_context: str | contexts.DataContext | None = None,
+        record_id: str | None = None,
+        **kwargs,
     ) -> None:
         if len(table) != 1:
             raise ValueError(
@@ -269,6 +275,8 @@ class ArrowPacket(ArrowDatagram):
             data_table,
             meta_info=meta_info,
             data_context=data_context,
+            record_id=record_id,
+            **kwargs,
         )
         self._source_info_table = prefixed_tables[constants.SOURCE_PREFIX]
 

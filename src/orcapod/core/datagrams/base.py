@@ -121,21 +121,18 @@ class BaseDatagram(ContentIdentifiableBase):
     is interpreted and used is left to concrete implementations.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, record_id: str | None = None, **kwargs):
         super().__init__(**kwargs)
-        self._uuid = None
+        self._record_id = record_id
 
     @property
-    def uuid(self) -> UUID:
+    def record_id(self) -> str:
         """
-        Return the UUID of this datagram.
-
-        Returns:
-            UUID: The unique identifier for this instance of datagram.
+        Returns record ID
         """
-        if self._uuid is None:
-            self._uuid = UUID(bytes=uuid7().bytes)
-        return self._uuid
+        if self._record_id is None:
+            self._record_id = str(uuid7())
+        return self._record_id
 
     # TODO: revisit handling of identity structure for datagrams
     def identity_structure(self) -> Any:
@@ -286,12 +283,13 @@ class BaseDatagram(ContentIdentifiableBase):
         return new_datagram
 
     # 8. Utility Operations
-    def copy(self, include_cache: bool = True) -> Self:
+    def copy(self, include_cache: bool = True, preserve_record_id: bool = True) -> Self:
         """Create a shallow copy of the datagram."""
         new_datagram = object.__new__(self.__class__)
         new_datagram._data_context = self._data_context
-        if include_cache:
-            # preserve uuid if cache is preserved
-            # TODO: revisit this logic
-            new_datagram._uuid = self._uuid
+
+        if preserve_record_id:
+            new_datagram._record_id = self._record_id
+        else:
+            new_datagram._record_id = None
         return new_datagram

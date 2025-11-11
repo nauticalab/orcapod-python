@@ -1,11 +1,12 @@
 import logging
 from collections.abc import Callable, Collection, Iterator
 from typing import TYPE_CHECKING, Any, Protocol, cast
-
+from orcapod.protocols.database_protocols import ArrowDatabase
+from orcapod.system_constants import constants
 from orcapod import contexts
 from orcapod.core.base import OrcapodBase
 from orcapod.core.operators import Join
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.packet_function import PythonPacketFunction, CachedPacketFunction
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
@@ -26,8 +27,10 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import pyarrow as pa
+    import polars as pl
 else:
     pa = LazyModule("pyarrow")
+    pl = LazyModule("polars")
 
 
 class FunctionPod(OrcapodBase):
@@ -39,13 +42,17 @@ class FunctionPod(OrcapodBase):
     ) -> None:
         super().__init__(**kwargs)
         self.tracker_manager = tracker_manager or DEFAULT_TRACKER_MANAGER
-        self.packet_function = packet_function
+        self._packet_function = packet_function
         self._output_schema_hash = self.data_context.object_hasher.hash_object(
             self.packet_function.output_packet_schema
         ).to_string()
 
+    @property
+    def packet_function(self) -> PacketFunction:
+        return self._packet_function
+
     def identity_structure(self) -> Any:
-        return self.packet_function
+        return self.packet_function.identity_structure()
 
     @property
     def uri(self) -> tuple[str, ...]:
@@ -89,6 +96,19 @@ class FunctionPod(OrcapodBase):
                 f"Incoming packet data type {incoming_packet_types} from {input_stream} is not compatible with expected input typespec {expected_packet_schema}"
             )
 
+    def process_packet(self, tag: Tag, packet: Packet) -> tuple[Tag, Packet | None]:
+        """
+        Process a single packet using the pod's packet function.
+
+        Args:
+            tag: The tag associated with the packet
+            packet: The input packet to process
+
+        Returns:
+            Packet | None: The processed output packet, or None if filtered out
+        """
+        return tag, self.packet_function.call(packet)
+
     def process(
         self, *streams: Stream, label: str | None = None
     ) -> "FunctionPodStream":
@@ -124,13 +144,15 @@ class FunctionPod(OrcapodBase):
         )
         return output_stream
 
-    def __call__(self, *streams: Stream, **kwargs) -> "FunctionPodStream":
+    def __call__(
+        self, *streams: Stream, label: str | None = None
+    ) -> "FunctionPodStream":
         """
         Convenience method to invoke the pod process on a collection of streams,
         """
         logger.debug(f"Invoking pod {self} on streams through __call__: {streams}")
         # perform input stream validation
-        return self.process(*streams, **kwargs)
+        return self.process(*streams, label=label)
 
     def argument_symmetry(self, streams: Collection[Stream]) -> ArgumentGroup:
         return self.multi_stream_handler().argument_symmetry(streams)
@@ -171,12 +193,6 @@ class FunctionPodStream(StreamBase):
         self._cached_output_packets: dict[int, tuple[Tag, Packet | None]] = {}
         self._cached_output_table: pa.Table | None = None
         self._cached_content_hash_column: pa.Array | None = None
-
-    def identity_structure(self):
-        return (
-            self._function_pod,
-            self._input_stream,
-        )
 
     @property
     def source(self) -> Pod:
@@ -223,7 +239,7 @@ class FunctionPodStream(StreamBase):
                         yield tag, packet
                 else:
                     # Process packet
-                    output_packet = self._function_pod.packet_function.call(packet)
+                    tag, output_packet = self._function_pod.process_packet(tag, packet)
                     self._cached_output_packets[i] = (tag, output_packet)
                     if output_packet is not None:
                         # Update shared cache for future iterators (optimization)
@@ -264,6 +280,8 @@ class FunctionPodStream(StreamBase):
             all_tags_as_tables: pa.Table = pa.Table.from_pylist(
                 all_tags, schema=tag_schema
             )
+            # drop context key column from tags table
+            all_tags_as_tables = all_tags_as_tables.drop([constants.CONTEXT_KEY])
             all_packets_as_tables: pa.Table = pa.Table.from_pylist(
                 struct_packets, schema=packet_schema
             )
@@ -275,58 +293,58 @@ class FunctionPodStream(StreamBase):
             "_cached_output_table should not be None here."
         )
 
-        return self._cached_output_table
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
 
-        # drop_columns = []
-        # if not include_system_tags:
-        #     # TODO: get system tags more effiicently
-        #     drop_columns.extend(
-        #         [
-        #             c
-        #             for c in self._cached_output_table.column_names
-        #             if c.startswith(constants.SYSTEM_TAG_PREFIX)
-        #         ]
-        #     )
-        # if not include_source:
-        #     drop_columns.extend(f"{constants.SOURCE_PREFIX}{c}" for c in self.keys()[1])
-        # if not include_data_context:
-        #     drop_columns.append(constants.CONTEXT_KEY)
+        drop_columns = []
+        if not column_config.system_tags:
+            # TODO: get system tags more effiicently
+            drop_columns.extend(
+                [
+                    c
+                    for c in self._cached_output_table.column_names
+                    if c.startswith(constants.SYSTEM_TAG_PREFIX)
+                ]
+            )
+        if not column_config.source:
+            drop_columns.extend(f"{constants.SOURCE_PREFIX}{c}" for c in self.keys()[1])
+        if not column_config.context:
+            drop_columns.append(constants.CONTEXT_KEY)
 
-        # output_table = self._cached_output_table.drop(drop_columns)
+        output_table = self._cached_output_table.drop(drop_columns)
 
-        # # lazily prepare content hash column if requested
-        # if include_content_hash:
-        #     if self._cached_content_hash_column is None:
-        #         content_hashes = []
-        #         # TODO: verify that order will be preserved
-        #         for tag, packet in self.iter_packets():
-        #             content_hashes.append(packet.content_hash().to_string())
-        #         self._cached_content_hash_column = pa.array(
-        #             content_hashes, type=pa.large_string()
-        #         )
-        #     assert self._cached_content_hash_column is not None, (
-        #         "_cached_content_hash_column should not be None here."
-        #     )
-        #     hash_column_name = (
-        #         "_content_hash"
-        #         if include_content_hash is True
-        #         else include_content_hash
-        #     )
-        #     output_table = output_table.append_column(
-        #         hash_column_name, self._cached_content_hash_column
-        #     )
+        # lazily prepare content hash column if requested
+        if column_config.content_hash:
+            if self._cached_content_hash_column is None:
+                content_hashes = []
+                # TODO: verify that order will be preserved
+                for tag, packet in self.iter_packets():
+                    content_hashes.append(packet.content_hash().to_string())
+                self._cached_content_hash_column = pa.array(
+                    content_hashes, type=pa.large_string()
+                )
+            assert self._cached_content_hash_column is not None, (
+                "_cached_content_hash_column should not be None here."
+            )
+            hash_column_name = (
+                "_content_hash"
+                if column_config.content_hash is True
+                else column_config.content_hash
+            )
+            output_table = output_table.append_column(
+                hash_column_name, self._cached_content_hash_column
+            )
 
-        # if sort_by_tags:
-        #     # TODO: reimplement using polars natively
-        #     output_table = (
-        #         pl.DataFrame(output_table)
-        #         .sort(by=self.keys()[0], descending=False)
-        #         .to_arrow()
-        #     )
-        #     # output_table = output_table.sort_by(
-        #     #     [(column, "ascending") for column in self.keys()[0]]
-        #     # )
-        # return output_table
+        if column_config.sort_by_tags:
+            # TODO: reimplement using polars natively
+            output_table = (
+                pl.DataFrame(output_table)
+                .sort(by=self.keys()[0], descending=False)
+                .to_arrow()
+            )
+            # output_table = output_table.sort_by(
+            #     [(column, "ascending") for column in self.keys()[0]]
+            # )
+        return output_table
 
 
 class CallableWithPod(Protocol):
@@ -343,6 +361,7 @@ def function_pod(
     function_name: str | None = None,
     version: str = "v0.0",
     label: str | None = None,
+    result_database: ArrowDatabase | None = None,
     **kwargs,
 ) -> Callable[..., CallableWithPod]:
     """
@@ -372,6 +391,13 @@ def function_pod(
             label=label,
             **kwargs,
         )
+
+        # if database is provided, wrap in CachedPacketFunction
+        if result_database is not None:
+            packet_function = CachedPacketFunction(
+                packet_function,
+                result_database=result_database,
+            )
 
         # Create a simple typed function pod
         pod = FunctionPod(
@@ -431,6 +457,186 @@ class WrappedFunctionPod(FunctionPod):
     # TODO: reconsider whether to return FunctionPodStream here in the signature
     def process(self, *streams: Stream, label: str | None = None) -> FunctionPodStream:
         return self._function_pod.process(*streams, label=label)
+
+
+class FunctionPodNode(FunctionPod):
+    """
+    A pod that caches the results of the wrapped pod.
+    This is useful for pods that are expensive to compute and can benefit from caching.
+    """
+
+    def __init__(
+        self,
+        packet_function: PacketFunction,
+        input_streams: Collection[Stream],
+        pipeline_database: ArrowDatabase,
+        result_database: ArrowDatabase | None = None,
+        pipeline_path_prefix: tuple[str, ...] = (),
+        **kwargs,
+    ):
+        result_path_prefix = ()
+        if result_database is None:
+            result_database = pipeline_database
+            # set result path to be within the pipeline path with "_result" appended
+            result_path_prefix = pipeline_path_prefix + ("_result",)
+
+        self._cached_packet_function = CachedPacketFunction(
+            packet_function,
+            result_database=result_database,
+            record_path_prefix=result_path_prefix,
+        )
+
+        super().__init__(self._cached_packet_function, **kwargs)
+
+        self._input_streams = input_streams
+
+        self._pipeline_database = pipeline_database
+        self._pipeline_path_prefix = pipeline_path_prefix
+
+        # take the pipeline node hash and schema hashes
+        self._pipeline_node_hash = self.content_hash().to_string()
+
+        # compute tag schema hash, inclusive of system tags
+        tag_schema, _ = self.output_schema(columns={"system_tags": True})
+        self._tag_schema_hash = self.data_context.object_hasher.hash_object(
+            tag_schema
+        ).to_string()
+
+    def node_identity_structure(self) -> Any:
+        return (self.packet_function, self.argument_symmetry(self._input_streams))
+
+    @property
+    def pipeline_path(self) -> tuple[str, ...]:
+        return self._pipeline_path_prefix + self.uri
+
+    @property
+    def uri(self) -> tuple[str, ...]:
+        # TODO: revisit organization of the URI components
+        return self._cached_packet_function.uri + (
+            f"node:{self._pipeline_node_hash}",
+            f"tag:{self._tag_schema_hash}",
+        )
+
+    def output_schema(
+        self,
+        *streams: Stream,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[PythonSchema, PythonSchema]:
+        return super().output_schema(
+            *self._input_streams, columns=columns, all_info=all_info
+        )
+
+    def process(
+        self, *streams: Stream, label: str | None = None
+    ) -> "FunctionPodStream":
+        if len(streams) > 0:
+            raise ValueError(
+                "FunctionPodNode.process does not accept external streams; input streams are fixed at initialization."
+            )
+        return super().process(*self._input_streams, label=label)
+
+    def process_packet(
+        self,
+        tag: Tag,
+        packet: Packet,
+        skip_cache_lookup: bool = False,
+        skip_cache_insert: bool = False,
+    ) -> tuple[Tag, Packet | None]:
+        """
+        Process a single packet using the pod's packet function.
+
+        Args:
+            tag: The tag associated with the packet
+            packet: The input packet to process
+
+        Returns:
+            Packet | None: The processed output packet, or None if filtered out
+        """
+        output_packet = self._cached_packet_function.call(
+            packet,
+            skip_cache_lookup=skip_cache_lookup,
+            skip_cache_insert=skip_cache_insert,
+        )
+
+        if output_packet is not None:
+            # check if the packet was computed or retrieved from cache
+            result_computed = bool(
+                output_packet.get_meta_value(
+                    self._cached_packet_function.RESULT_COMPUTED_FLAG, False
+                )
+            )
+            self.add_pipeline_record(
+                tag,
+                packet,
+                packet_record_id=output_packet.record_id,
+                computed=result_computed,
+            )
+
+        return tag, output_packet
+
+    def add_pipeline_record(
+        self,
+        tag: Tag,
+        input_packet: Packet,
+        packet_record_id: str,
+        computed: bool,
+        skip_cache_lookup: bool = False,
+    ) -> None:
+        # combine dp.Tag with packet content hash to compute entry hash
+        # TODO: add system tag columns
+        # TODO: consider using bytes instead of string representation
+        tag_with_hash = tag.as_table(columns={"system_tags": True}).append_column(
+            constants.INPUT_PACKET_HASH_COL,
+            pa.array([input_packet.content_hash().to_string()], type=pa.large_string()),
+        )
+
+        # unique entry ID is determined by the combination of tags, system_tags, and input_packet hash
+        entry_id = self.data_context.arrow_hasher.hash_table(tag_with_hash).to_string()
+
+        # check presence of an existing entry with the same entry_id
+        existing_record = None
+        if not skip_cache_lookup:
+            existing_record = self._pipeline_database.get_record_by_id(
+                self.pipeline_path,
+                entry_id,
+            )
+
+        if existing_record is not None:
+            # if the record already exists, then skip adding
+            return
+
+        # rename all keys to avoid potential collision with result columns
+        renamed_input_packet = input_packet.rename(
+            {k: f"_input_{k}" for k in input_packet.keys()}
+        )
+        input_packet_info = (
+            renamed_input_packet.as_table(columns={"source": True})
+            .append_column(
+                constants.PACKET_RECORD_ID,
+                pa.array([packet_record_id], type=pa.large_string()),
+            )
+            .append_column(
+                f"{constants.META_PREFIX}input_packet{constants.CONTEXT_KEY}",
+                pa.array([input_packet.data_context_key], type=pa.large_string()),
+            )
+            .append_column(
+                f"{constants.META_PREFIX}computed",
+                pa.array([computed], type=pa.bool_()),
+            )
+            .drop_columns(list(renamed_input_packet.keys()))
+        )
+
+        combined_record = arrow_utils.hstack_tables(
+            tag.as_table(columns={"system_tags": True}), input_packet_info
+        )
+
+        self._pipeline_database.add_record(
+            self.pipeline_path,
+            entry_id,
+            combined_record,
+            skip_duplicates=False,
+        )
 
 
 # class CachedFunctionPod(WrappedFunctionPod):
@@ -678,29 +884,3 @@ class WrappedFunctionPod(FunctionPod):
 #             result_table,
 #             meta_info={self.DATA_RETRIEVED_FLAG: str(datetime.now(timezone.utc))},
 #         )
-
-#     def get_all_cached_outputs(
-#         self, include_system_columns: bool = False
-#     ) -> "pa.Table | None":
-#         """
-#         Get all records from the result store for this pod.
-#         If include_system_columns is True, include system columns in the result.
-#         """
-#         record_id_column = (
-#             constants.PACKET_RECORD_ID if include_system_columns else None
-#         )
-#         result_table = self.result_database.get_all_records(
-#             self.record_path, record_id_column=record_id_column
-#         )
-#         if result_table is None or result_table.num_rows == 0:
-#             return None
-
-#         if not include_system_columns:
-#             # remove input packet hash and tiered pod ID columns
-#             pod_id_columns = [
-#                 f"{constants.POD_ID_PREFIX}{k}" for k in self.tiered_pod_id.keys()
-#             ]
-#             result_table = result_table.drop_columns(pod_id_columns)
-#             result_table = result_table.drop_columns(constants.INPUT_PACKET_HASH)
-
-#         return result_table

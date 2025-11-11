@@ -6,6 +6,8 @@ from abc import abstractmethod
 from collections.abc import Callable, Collection, Iterable, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
+from uuid_utils import uuid7
+
 from orcapod.core.base import OrcapodBase
 from orcapod.core.datagrams import DictPacket, ArrowPacket
 from orcapod.hashing.hash_utils import get_function_components, get_function_signature
@@ -85,10 +87,10 @@ class PacketFunctionBase(OrcapodBase):
         self._active = True
         self._version = version
 
-        match = re.match(r"\D.*(\d+)", version)
+        match = re.match(r"\D*(\d+)\.(.*)", version)
         if match:
             self._major_version = int(match.group(1))
-            self._minor_version = version[match.end(1) :]
+            self._minor_version = match.group(2)
         else:
             raise ValueError(
                 f"Version string {version} does not contain a valid version number"
@@ -98,15 +100,16 @@ class PacketFunctionBase(OrcapodBase):
     def uri(self) -> tuple[str, ...]:
         # TODO: make this more efficient
         return (
-            f"{self.packet_function_type_id}",
             f"{self.canonical_function_name}",
             self.data_context.object_hasher.hash_object(
                 self.output_packet_schema
             ).to_string(),
+            f"v{self.major_version}",
+            self.packet_function_type_id,
         )
 
     def identity_structure(self) -> Any:
-        return self.get_function_variation_data()
+        return self.uri
 
     @property
     def major_version(self) -> int:
@@ -315,7 +318,23 @@ class PythonPacketFunction(PacketFunctionBase):
                 f"Number of output keys {len(self._output_keys)}:{self._output_keys} does not match number of values returned by function {len(output_values)}"
             )
 
-        return DictPacket({k: v for k, v in zip(self._output_keys, output_values)})
+        def combine(*components: tuple[str, ...]) -> str:
+            inner_parsed = [":".join(component) for component in components]
+            return "::".join(inner_parsed)
+
+        output_data = {k: v for k, v in zip(self._output_keys, output_values)}
+
+        record_id = str(uuid7())
+
+        source_info = {k: combine(self.uri, (record_id,), (k,)) for k in output_data}
+
+        return DictPacket(
+            output_data,
+            source_info=source_info,
+            record_id=record_id,
+            python_schema=self.output_packet_schema,
+            data_context=self.data_context,
+        )
 
     async def async_call(self, packet: Packet) -> Packet | None:
         raise NotImplementedError("Async call not implemented for synchronous function")
@@ -376,7 +395,7 @@ class CachedPacketFunction(PacketFunctionWrapper):
     """
 
     # name of the column in the tag store that contains the packet hash
-    DATA_RETRIEVED_FLAG = f"{constants.META_PREFIX}data_retrieved"
+    RESULT_COMPUTED_FLAG = f"{constants.META_PREFIX}computed"
 
     def __init__(
         self,
@@ -386,8 +405,16 @@ class CachedPacketFunction(PacketFunctionWrapper):
         **kwargs,
     ) -> None:
         super().__init__(packet_function, **kwargs)
-        self._record_path_prefix = record_path_prefix
         self._result_database = result_database
+        self._record_path_prefix = record_path_prefix
+        self._auto_flush = True
+
+    def set_auto_flush(self, on: bool = True) -> None:
+        """
+        Set the auto-flush behavior of the result database.
+        If set to True, the result database will flush after each record is added.
+        """
+        self._auto_flush = on
 
     @property
     def record_path(self) -> tuple[str, ...]:
@@ -408,15 +435,66 @@ class CachedPacketFunction(PacketFunctionWrapper):
         output_packet = None
         if not skip_cache_lookup:
             print("Checking for cache...")
+            # lookup stored result for the input packet
             output_packet = self.get_cached_output_for_packet(packet)
             if output_packet is not None:
                 print(f"Cache hit for {packet}!")
         if output_packet is None:
             output_packet = self._packet_function.call(packet)
-            if output_packet is not None and not skip_cache_insert:
-                self.record_packet(packet, output_packet)
+            if output_packet is not None:
+                if not skip_cache_insert:
+                    self.record_packet(packet, output_packet)
+                # add meta column to indicate that this was computed
+                output_packet.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: True})
 
         return output_packet
+
+    def get_cached_output_for_packet(self, input_packet: Packet) -> Packet | None:
+        """
+        Retrieve the output packet from the result store based on the input packet.
+        If more than one output packet is found, conflict resolution strategy
+        will be applied.
+        If the output packet is not found, return None.
+        """
+
+        # get all records with matching the input packet hash
+        # TODO: add match based on match_tier if specified
+
+        # TODO: implement matching policy/strategy
+        constraints = {
+            constants.INPUT_PACKET_HASH_COL: input_packet.content_hash().to_string()
+        }
+
+        RECORD_ID_COLUMN = "_record_id"
+        result_table = self._result_database.get_records_with_column_value(
+            self.record_path,
+            constraints,
+            record_id_column=RECORD_ID_COLUMN,
+        )
+
+        if result_table is None or result_table.num_rows == 0:
+            return None
+
+        if result_table.num_rows > 1:
+            logger.info(
+                f"Performing conflict resolution for multiple records for {input_packet.content_hash().display_name()}"
+            )
+            result_table = result_table.sort_by(
+                constants.POD_TIMESTAMP, ascending=False
+            ).take([0])
+
+        # extract the record_id column
+        record_id = result_table.to_pylist()[0][RECORD_ID_COLUMN]
+        result_table = result_table.drop_columns(
+            [RECORD_ID_COLUMN, constants.INPUT_PACKET_HASH_COL]
+        )
+
+        # note that data context will be loaded from the result store
+        return ArrowPacket(
+            result_table,
+            record_id=record_id,
+            meta_info={self.RESULT_COMPUTED_FLAG: False},
+        )
 
     def record_packet(
         self,
@@ -431,13 +509,22 @@ class CachedPacketFunction(PacketFunctionWrapper):
         # TODO: consider incorporating execution_engine_opts into the record
         data_table = output_packet.as_table(columns={"source": True, "context": True})
 
-        # for i, (k, v) in enumerate(self.tiered_pod_id.items()):
-        #     # add the tiered pod ID to the data table
-        #     data_table = data_table.add_column(
-        #         i,
-        #         f"{constants.POD_ID_PREFIX}{k}",
-        #         pa.array([v], type=pa.large_string()),
-        #     )
+        i = -1
+        for i, (k, v) in enumerate(self.get_function_variation_data().items()):
+            # add the tiered pod ID to the data table
+            data_table = data_table.add_column(
+                i,
+                f"{constants.PF_VARIATION_PREFIX}{k}",
+                pa.array([v], type=pa.large_string()),
+            )
+
+        for j, (k, v) in enumerate(self.get_execution_data().items()):
+            # add the tiered pod ID to the data table
+            data_table = data_table.add_column(
+                i + j + 1,
+                f"{constants.PF_EXECUTION_PREFIX}{k}",
+                pa.array([v], type=pa.large_string()),
+            )
 
         # add the input packet hash as a column
         data_table = data_table.add_column(
@@ -445,12 +532,6 @@ class CachedPacketFunction(PacketFunctionWrapper):
             constants.INPUT_PACKET_HASH_COL,
             pa.array([input_packet.content_hash().to_string()], type=pa.large_string()),
         )
-        # # add execution engine information
-        # execution_engine_hash = execution_engine.name if execution_engine else "default"
-        # data_table = data_table.append_column(
-        #     constants.EXECUTION_ENGINE,
-        #     pa.array([execution_engine_hash], type=pa.large_string()),
-        # )
 
         # add computation timestamp
         timestamp = datetime.now(timezone.utc)
@@ -459,68 +540,18 @@ class CachedPacketFunction(PacketFunctionWrapper):
             pa.array([timestamp], type=pa.timestamp("us", tz="UTC")),
         )
 
-        # if record_id is None:
-        #     record_id = self.get_record_id(
-        #         input_packet, execution_engine_hash=execution_engine_hash
-        #     )
-
-        # self.result_database.add_record(
-        #     self.record_path,
-        #     record_id,
-        #     data_table,
-        #     skip_duplicates=skip_duplicates,
-        # )
-        # if result_flag is None:
-        #     # TODO: do more specific error handling
-        #     raise ValueError(
-        #         f"Failed to record packet {input_packet} in result store {self.result_store}"
-        #     )
-        # # TODO: make store return retrieved table
-        return output_packet
-
-    def get_cached_output_for_packet(self, input_packet: Packet) -> Packet | None:
-        """
-        Retrieve the output packet from the result store based on the input packet.
-        If more than one output packet is found, conflict resolution strategy
-        will be applied.
-        If the output packet is not found, return None.
-        """
-        # result_table = self.result_store.get_record_by_id(
-        #     self.record_path,
-        #     self.get_entry_hash(input_packet),
-        # )
-
-        # get all records with matching the input packet hash
-        # TODO: add match based on match_tier if specified
-
-        # TODO: implement matching policy/strategy
-        constraints = {
-            constants.INPUT_PACKET_HASH_COL: input_packet.content_hash().to_string()
-        }
-
-        result_table = self._result_database.get_records_with_column_value(
+        self._result_database.add_record(
             self.record_path,
-            constraints,
+            output_packet.record_id,
+            data_table,
+            skip_duplicates=skip_duplicates,
         )
-        if result_table is None or result_table.num_rows == 0:
-            return None
 
-        if result_table.num_rows > 1:
-            logger.info(
-                f"Performing conflict resolution for multiple records for {input_packet.content_hash().display_name()}"
-            )
-            result_table = result_table.sort_by(
-                constants.POD_TIMESTAMP, ascending=False
-            ).take([0])
+        if self._auto_flush:
+            self._result_database.flush()
 
-        # result_table = result_table.drop_columns(pod_id_columns)
-        result_table = result_table.drop_columns(constants.INPUT_PACKET_HASH_COL)
-
-        # note that data context will be loaded from the result store
-        return ArrowPacket(
-            result_table,
-            meta_info={self.DATA_RETRIEVED_FLAG: str(datetime.now(timezone.utc))},
-        )
+        # TODO: make store return retrieved table
+        return output_packet
 
     def get_all_cached_outputs(
         self, include_system_columns: bool = False

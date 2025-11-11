@@ -57,6 +57,7 @@ class ArrowDatagram(BaseDatagram):
         table: "pa.Table",
         meta_info: Mapping[str, DataValue] | None = None,
         data_context: str | contexts.DataContext | None = None,
+        record_id: str | None = None,
         **kwargs,
     ) -> None:
         """
@@ -76,7 +77,6 @@ class ArrowDatagram(BaseDatagram):
             The input table is automatically split into data, meta, and context
             components based on column naming conventions.
         """
-        super().__init__(**kwargs)
 
         # Validate table has exactly one row for datagram
         if len(table) != 1:
@@ -100,7 +100,7 @@ class ArrowDatagram(BaseDatagram):
             data_context = context_table[constants.CONTEXT_KEY].to_pylist()[0]
 
         # Initialize base class with data context
-        super().__init__(data_context=data_context, **kwargs)
+        super().__init__(data_context=data_context, record_id=record_id, **kwargs)
 
         meta_columns = [
             col for col in table.column_names if col.startswith(constants.META_PREFIX)

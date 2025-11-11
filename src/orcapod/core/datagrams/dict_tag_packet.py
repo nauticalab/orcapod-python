@@ -34,6 +34,8 @@ class DictTag(DictDatagram):
         meta_info: Mapping[str, DataValue] | None = None,
         python_schema: dict[str, type] | None = None,
         data_context: str | contexts.DataContext | None = None,
+        record_id: str | None = None,
+        **kwargs,
     ) -> None:
         """
         Initialize the tag with data.
@@ -56,6 +58,8 @@ class DictTag(DictDatagram):
             python_schema=python_schema,
             meta_info=meta_info,
             data_context=data_context,
+            record_id=record_id,
+            **kwargs,
         )
 
         self._system_tags = {**extracted_system_tags, **(system_tags or {})}
@@ -246,6 +250,8 @@ class DictPacket(DictDatagram):
         source_info: Mapping[str, str | None] | None = None,
         python_schema: PythonSchemaLike | None = None,
         data_context: str | contexts.DataContext | None = None,
+        record_id: str | None = None,
+        **kwargs,
     ) -> None:
         # normalize the data content and remove any source info keys
         data_only = {
@@ -262,6 +268,8 @@ class DictPacket(DictDatagram):
             python_schema=python_schema,
             meta_info=meta_info,
             data_context=data_context,
+            record_id=record_id,
+            **kwargs,
         )
 
         self._source_info = {**contained_source_info, **(source_info or {})}

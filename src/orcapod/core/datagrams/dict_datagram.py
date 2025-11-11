@@ -61,6 +61,8 @@ class DictDatagram(BaseDatagram):
         python_schema: PythonSchemaLike | None = None,
         meta_info: Mapping[str, DataValue] | None = None,
         data_context: str | contexts.DataContext | None = None,
+        record_id: str | None = None,
+        **kwargs,
     ) -> None:
         """
         Initialize DictDatagram from dictionary data.
@@ -97,7 +99,7 @@ class DictDatagram(BaseDatagram):
 
         # Initialize base class with data context
         final_context = data_context or cast(str, extracted_context)
-        super().__init__(data_context=final_context)
+        super().__init__(data_context=final_context, record_id=record_id, **kwargs)
 
         # Store data and meta components separately (immutable)
         self._data = dict(data_columns)
@@ -534,10 +536,15 @@ class DictDatagram(BaseDatagram):
         full_data = dict(self._data)  # User data
         full_data.update(new_meta_data)  # Meta data
 
-        return self.__class__(
+        new_datagram = self.__class__(
             data=full_data,
             data_context=self._data_context,
         )
+
+        # TODO: use copy instead
+        new_datagram._record_id = self._record_id
+
+        return new_datagram
 
     def drop_meta_columns(self, *keys: str, ignore_missing: bool = False) -> Self:
         """
@@ -764,7 +771,7 @@ class DictDatagram(BaseDatagram):
         return new_datagram
 
     # 8. Utility Operations
-    def copy(self, include_cache: bool = True) -> Self:
+    def copy(self, include_cache: bool = True, preserve_record_id:bool=True) -> Self:
         """
         Create a shallow copy of the datagram.
 
@@ -775,7 +782,7 @@ class DictDatagram(BaseDatagram):
         Returns:
             New DictDatagram instance with copied data and caches.
         """
-        new_datagram = super().copy()
+        new_datagram = super().copy(include_cache=include_cache, preserve_record_id=preserve_record_id)
         new_datagram._data = self._data.copy()
         new_datagram._meta_data = self._meta_data.copy()
         new_datagram._data_python_schema = self._data_python_schema.copy()

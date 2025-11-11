@@ -3,6 +3,8 @@ SYSTEM_COLUMN_PREFIX = "__"
 DATAGRAM_PREFIX = "_"
 SOURCE_INFO_PREFIX = "source_"
 POD_ID_PREFIX = "pod_id_"
+PF_VARIATION_PREFIX = "pf_var_"
+PF_EXECUTION_PREFIX = "pf_exec_"
 DATA_CONTEXT_KEY = "context_key"
 INPUT_PACKET_HASH_COL = "input_packet_hash"
 PACKET_RECORD_ID = "packet_id"
@@ -46,6 +48,14 @@ class SystemConstant:
     @property
     def POD_ID_PREFIX(self) -> str:
         return f"{self._global_prefix}{SYSTEM_COLUMN_PREFIX}{POD_ID_PREFIX}"
+
+    @property
+    def PF_VARIATION_PREFIX(self) -> str:
+        return f"{self._global_prefix}{SYSTEM_COLUMN_PREFIX}{PF_VARIATION_PREFIX}"
+
+    @property
+    def PF_EXECUTION_PREFIX(self) -> str:
+        return f"{self._global_prefix}{SYSTEM_COLUMN_PREFIX}{PF_EXECUTION_PREFIX}"
 
     @property
     def INPUT_PACKET_HASH_COL(self) -> str:
