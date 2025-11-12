@@ -254,7 +254,6 @@ def function_pod(
     """
 
     def decorator(func: Callable) -> CallableWithPod:
-        
         if func.__name__ == "<lambda>":
             raise ValueError("Lambda functions cannot be used with function_pod")
 
@@ -276,6 +275,7 @@ def function_pod(
         )
         setattr(wrapper, "pod", pod)
         return cast(CallableWithPod, wrapper)
+
     return decorator
 
 
@@ -496,9 +496,7 @@ class FunctionPod(ActivatablePodBase):
         if execution_engine is not None:
             # use the provided execution engine to run the function
             values = await execution_engine.submit_async(
-                self.function, 
-                fn_kwargs=input_dict, 
-                **(execution_engine_opts or {}) 
+                self.function, fn_kwargs=input_dict, **(execution_engine_opts or {})
             )
         else:
             values = self.function(**input_dict)

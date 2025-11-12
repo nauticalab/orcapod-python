@@ -45,8 +45,6 @@ def synchronous_run(async_func, *args, **kwargs):
         return asyncio.run(async_func(*args, **kwargs))
 
 
-
-
 class GraphNode:
     def __init__(self, label: str, id: int, kernel_type: str):
         self.label = label
@@ -230,7 +228,10 @@ class Pipeline(GraphTracker):
             may implement more efficient graph traversal algorithms.
         """
         import networkx as nx
-        if run_async is True and (execution_engine is None or not execution_engine.supports_async):
+
+        if run_async is True and (
+            execution_engine is None or not execution_engine.supports_async
+        ):
             raise ValueError(
                 "Cannot run asynchronously with an execution engine that does not support async."
             )

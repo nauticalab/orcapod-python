@@ -67,7 +67,8 @@ class PodNodeStream(StreamBase):
         This is typically called before iterating over the packets.
         """
         if self._cached_output_packets is None:
-            cached_results, missing = self._identify_existing_and_missing_entries(*args, 
+            cached_results, missing = self._identify_existing_and_missing_entries(
+                *args,
                 execution_engine=execution_engine,
                 execution_engine_opts=execution_engine_opts,
                 **kwargs,
@@ -90,6 +91,7 @@ class PodNodeStream(StreamBase):
                     pending_calls.append(pending)
 
             import asyncio
+
             completed_calls = await asyncio.gather(*pending_calls)
             for result in completed_calls:
                 cached_results.append(result)
@@ -99,12 +101,14 @@ class PodNodeStream(StreamBase):
             self._set_modified_time()
             self.pod_node.flush()
 
-    def _identify_existing_and_missing_entries(self,
-                                  *args: Any,
+    def _identify_existing_and_missing_entries(
+        self,
+        *args: Any,
         execution_engine: cp.ExecutionEngine | None = None,
         execution_engine_opts: dict[str, Any] | None = None,
-        **kwargs: Any) -> tuple[list[tuple[cp.Tag, cp.Packet|None]], pa.Table | None]:
-        cached_results: list[tuple[cp.Tag, cp.Packet|None]] = []
+        **kwargs: Any,
+    ) -> tuple[list[tuple[cp.Tag, cp.Packet | None]], pa.Table | None]:
+        cached_results: list[tuple[cp.Tag, cp.Packet | None]] = []
 
         # identify all entries in the input stream for which we still have not computed packets
         if len(args) > 0 or len(kwargs) > 0:
@@ -177,8 +181,6 @@ class PodNodeStream(StreamBase):
             for tag, packet in existing_stream.iter_packets():
                 cached_results.append((tag, packet))
 
-        
-
         return cached_results, missing
 
     def run(
@@ -230,7 +232,6 @@ class PodNodeStream(StreamBase):
                     )
                 cached_results.append((tag, output_packet))
 
-
         # reset the cache and set new results
         self.clear_cache()
         self._cached_output_packets = cached_results
@@ -276,7 +277,6 @@ class PodNodeStream(StreamBase):
             self._cached_output_packets = cached_results
             self._set_modified_time()
 
-        
     def keys(
         self, include_system_tags: bool = False
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:

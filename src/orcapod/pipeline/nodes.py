@@ -270,7 +270,7 @@ class PodNode(NodeBase, CachedPod):
     def execution_engine_opts(self) -> dict[str, Any]:
         return self._execution_engine_opts.copy()
 
-    @execution_engine_opts.setter   
+    @execution_engine_opts.setter
     def execution_engine_opts(self, opts: dict[str, Any]) -> None:
         self._execution_engine_opts = opts
 
@@ -322,7 +322,6 @@ class PodNode(NodeBase, CachedPod):
         if execution_engine_opts is not None:
             combined_execution_engine_opts.update(execution_engine_opts)
 
-
         tag, output_packet = super().call(
             tag,
             packet,
@@ -362,11 +361,9 @@ class PodNode(NodeBase, CachedPod):
         if record_id is None:
             record_id = self.get_record_id(packet, execution_engine_hash)
 
-        
         combined_execution_engine_opts = self.execution_engine_opts
         if execution_engine_opts is not None:
             combined_execution_engine_opts.update(execution_engine_opts)
-
 
         tag, output_packet = await super().async_call(
             tag,

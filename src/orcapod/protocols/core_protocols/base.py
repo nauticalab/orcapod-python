@@ -41,6 +41,7 @@ class ExecutionEngine(Protocol):
       "local", "threadpool", "processpool", or "ray" and is used for logging
       and diagnostics.
     """
+
     @property
     def supports_async(self) -> bool:
         """Indicate whether this engine supports async execution."""

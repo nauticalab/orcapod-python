@@ -477,7 +477,9 @@ class StatefulStreamBase(OperatorStreamBaseMixin, LabeledContentIdentifiableBase
     def _repr_html_(self) -> str:
         df = self.as_polars_df()
         # reorder columns
-        new_column_order = [c for c in df.columns if c in self.tag_keys()] + [c for c in df.columns if c not in self.tag_keys()]
+        new_column_order = [c for c in df.columns if c in self.tag_keys()] + [
+            c for c in df.columns if c not in self.tag_keys()
+        ]
         df = df[new_column_order]
         tag_map = {t: f"*{t}" for t in self.tag_keys()}
         # TODO: construct repr html better

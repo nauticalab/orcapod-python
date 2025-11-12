@@ -225,7 +225,8 @@ class LazyPodResultStream(StreamBase):
                 # TODO: verify that order will be preserved
                 for tag, packet in self.iter_packets(
                     execution_engine=execution_engine or self.execution_engine,
-                    execution_engine_opts=execution_engine_opts or self._execution_engine_opts,
+                    execution_engine_opts=execution_engine_opts
+                    or self._execution_engine_opts,
                 ):
                     content_hashes.append(packet.content_hash().to_string())
                 self._cached_content_hash_column = pa.array(
