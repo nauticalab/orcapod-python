@@ -54,6 +54,7 @@ dev = [
     "ipywidgets>=8.1.7",
     "jsonschema>=4.25.0",
     "minio>=7.2.16",
+    "pre-commit>=4.4.0",
     "pyarrow-stubs>=20.0.0.20250716",
     "pygraphviz>=1.14",
     "pyiceberg>=0.9.1",
