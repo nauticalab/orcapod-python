@@ -81,11 +81,10 @@ class FunctionPod(OrcapodBase):
         Raises:
             PodInputValidationError: If inputs are invalid
         """
-        if len(streams) != 1:
-            raise ValueError(
-                f"{self.__class__.__name__} expects exactly one input stream, got {len(streams)}"
-            )
-        input_stream = streams[0]
+        input_stream = self.handle_input_streams(*streams)
+        self._validate_input(input_stream)
+
+    def _validate_input(self, input_stream: Stream) -> None:
         _, incoming_packet_types = input_stream.output_schema()
         expected_packet_schema = self.packet_function.input_packet_schema
         if not schema_utils.check_typespec_compatibility(
@@ -109,6 +108,22 @@ class FunctionPod(OrcapodBase):
         """
         return tag, self.packet_function.call(packet)
 
+    def handle_input_streams(self, *streams: Stream) -> Stream:
+        """
+        Handle multiple input streams by joining them if necessary.
+
+        Args:
+            *streams: Input streams to handle
+        """
+        # handle multiple input streams
+        if len(streams) == 0:
+            raise ValueError("At least one input stream is required")
+        elif len(streams) > 1:
+            multi_stream_handler = self.multi_stream_handler()
+            joined_stream = multi_stream_handler.process(*streams)
+            return joined_stream
+        return streams[0]
+
     def process(
         self, *streams: Stream, label: str | None = None
     ) -> "FunctionPodStream":
@@ -124,17 +139,10 @@ class FunctionPod(OrcapodBase):
         """
         logger.debug(f"Invoking kernel {self} on streams: {streams}")
 
-        # handle multiple input streams
-        if len(streams) == 0:
-            raise ValueError("At least one input stream is required")
-        elif len(streams) > 1:
-            multi_stream_handler = self.multi_stream_handler()
-            joined_stream = multi_stream_handler.process(*streams)
-            streams = (joined_stream,)
-        input_stream = streams[0]
+        input_stream = self.handle_input_streams(*streams)
 
         # perform input stream validation
-        self.validate_inputs(*streams)
+        self._validate_input(input_stream)
         self.tracker_manager.record_packet_function_invocation(
             self.packet_function, input_stream, label=label
         )
@@ -459,7 +467,7 @@ class WrappedFunctionPod(FunctionPod):
         return self._function_pod.process(*streams, label=label)
 
 
-class FunctionPodNode(FunctionPod):
+class FunctionPodNode(OrcapodBase):
     """
     A pod that caches the results of the wrapped pod.
     This is useful for pods that are expensive to compute and can benefit from caching.
@@ -468,12 +476,16 @@ class FunctionPodNode(FunctionPod):
     def __init__(
         self,
         packet_function: PacketFunction,
-        input_streams: Collection[Stream],
+        input_stream: Stream,
         pipeline_database: ArrowDatabase,
         result_database: ArrowDatabase | None = None,
         pipeline_path_prefix: tuple[str, ...] = (),
+        tracker_manager: TrackerManager | None = None,
         **kwargs,
     ):
+        if tracker_manager is None:
+            tracker_manager = DEFAULT_TRACKER_MANAGER
+        self.tracker_manager = tracker_manager
         result_path_prefix = ()
         if result_database is None:
             result_database = pipeline_database
@@ -486,9 +498,10 @@ class FunctionPodNode(FunctionPod):
             record_path_prefix=result_path_prefix,
         )
 
-        super().__init__(self._cached_packet_function, **kwargs)
+        # initialize the base FunctionPod with the cached packet function
+        super().__init__(**kwargs)
 
-        self._input_streams = input_streams
+        self._input_stream = input_stream
 
         self._pipeline_database = pipeline_database
         self._pipeline_path_prefix = pipeline_path_prefix
@@ -496,14 +509,18 @@ class FunctionPodNode(FunctionPod):
         # take the pipeline node hash and schema hashes
         self._pipeline_node_hash = self.content_hash().to_string()
 
+        self._output_schema_hash = self.data_context.object_hasher.hash_object(
+            self._cached_packet_function.output_packet_schema
+        ).to_string()
+
         # compute tag schema hash, inclusive of system tags
         tag_schema, _ = self.output_schema(columns={"system_tags": True})
         self._tag_schema_hash = self.data_context.object_hasher.hash_object(
             tag_schema
         ).to_string()
 
-    def node_identity_structure(self) -> Any:
-        return (self.packet_function, self.argument_symmetry(self._input_streams))
+    def identity_structure(self) -> Any:
+        return (self._cached_packet_function, self._input_stream)
 
     @property
     def pipeline_path(self) -> tuple[str, ...]:
@@ -517,24 +534,11 @@ class FunctionPodNode(FunctionPod):
             f"tag:{self._tag_schema_hash}",
         )
 
-    def output_schema(
-        self,
-        *streams: Stream,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
-        return super().output_schema(
-            *self._input_streams, columns=columns, all_info=all_info
-        )
-
-    def process(
-        self, *streams: Stream, label: str | None = None
-    ) -> "FunctionPodStream":
+    def validate_inputs(self, *streams: Stream) -> None:
         if len(streams) > 0:
             raise ValueError(
-                "FunctionPodNode.process does not accept external streams; input streams are fixed at initialization."
+                "FunctionPodNode.validate_inputs does not accept external streams; input streams are fixed at initialization."
             )
-        return super().process(*self._input_streams, label=label)
 
     def process_packet(
         self,
@@ -574,6 +578,64 @@ class FunctionPodNode(FunctionPod):
             )
 
         return tag, output_packet
+
+    def process(
+        self, *streams: Stream, label: str | None = None
+    ) -> "FunctionPodNodeStream":
+        """
+        Invoke the packet processor on the input stream.
+        If multiple streams are passed in, all streams are joined before processing.
+
+        Args:
+            *streams: Input streams to process
+
+        Returns:
+            cp.Stream: The resulting output stream
+        """
+        logger.debug(f"Invoking kernel {self} on streams: {streams}")
+
+        # perform input stream validation
+        self.validate_inputs(self._input_stream)
+        self.tracker_manager.record_packet_function_invocation(
+            self._cached_packet_function, self._input_stream, label=label
+        )
+        output_stream = FunctionPodNodeStream(
+            fp_node=self,
+            input_stream=self._input_stream,
+        )
+        return output_stream
+
+    def __call__(
+        self, *streams: Stream, label: str | None = None
+    ) -> "FunctionPodNodeStream":
+        """
+        Convenience method to invoke the pod process on a collection of streams,
+        """
+        logger.debug(f"Invoking pod {self} on streams through __call__: {streams}")
+        # perform input stream validation
+        return self.process(*streams, label=label)
+
+    def argument_symmetry(self, streams: Collection[Stream]) -> ArgumentGroup:
+        if len(streams) > 0:
+            raise ValueError(
+                "FunctionPodNode.argument_symmetry does not accept external streams; input streams are fixed at initialization."
+            )
+        return ()
+
+    def output_schema(
+        self,
+        *streams: Stream,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[PythonSchema, PythonSchema]:
+        # TODO: decide on how to handle extra inputs if provided
+
+        tag_schema = self._input_stream.output_schema(
+            *streams, columns=columns, all_info=all_info
+        )[0]
+        # The output schema of the FunctionPod is determined by the packet function
+        # TODO: handle and extend to include additional columns
+        return tag_schema, self._cached_packet_function.output_packet_schema
 
     def add_pipeline_record(
         self,
@@ -637,6 +699,197 @@ class FunctionPodNode(FunctionPod):
             combined_record,
             skip_duplicates=False,
         )
+
+
+class FunctionPodNodeStream(StreamBase):
+    """
+    Recomputable stream wrapping a packet function.
+    """
+
+    def __init__(
+        self, fp_node: FunctionPodNode, input_stream: Stream, **kwargs
+    ) -> None:
+        super().__init__(**kwargs)
+        self._fp_node = fp_node
+        self._input_stream = input_stream
+
+        # capture the iterator over the input stream
+        self._cached_input_iterator = input_stream.iter_packets()
+        self._update_modified_time()  # update the modified time to AFTER we obtain the iterator
+        # note that the invocation of iter_packets on upstream likely triggeres the modified time
+        # to be updated on the usptream. Hence you want to set this stream's modified time after that.
+
+        # Packet-level caching (for the output packets)
+        self._cached_output_packets: dict[int, tuple[Tag, Packet | None]] = {}
+        self._cached_output_table: pa.Table | None = None
+        self._cached_content_hash_column: pa.Array | None = None
+
+    def refresh_cache(self) -> None:
+        upstream_last_modified = self._input_stream.last_modified
+        if (
+            upstream_last_modified is None
+            or self.last_modified is None
+            or upstream_last_modified > self.last_modified
+        ):
+            # input stream has been modified since last processing; refresh caches
+            # re-cache the iterator and clear out output packet cache
+            self._cached_input_iterator = self._input_stream.iter_packets()
+            self._cached_output_packets.clear()
+            self._cached_output_table = None
+            self._cached_content_hash_column = None
+            self._update_modified_time()
+
+    @property
+    def source(self) -> FunctionPodNode:
+        return self._fp_node
+
+    @property
+    def upstreams(self) -> tuple[Stream, ...]:
+        return (self._input_stream,)
+
+    def keys(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        tag_schema, packet_schema = self.output_schema(
+            columns=columns, all_info=all_info
+        )
+
+        return tuple(tag_schema.keys()), tuple(packet_schema.keys())
+
+    def output_schema(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[PythonSchema, PythonSchema]:
+        tag_schema = self._input_stream.output_schema(
+            columns=columns, all_info=all_info
+        )[0]
+        packet_schema = self._fp_node._cached_packet_function.output_packet_schema
+        return (tag_schema, packet_schema)
+
+    def __iter__(self) -> Iterator[tuple[Tag, Packet]]:
+        return self.iter_packets()
+
+    def iter_packets(self) -> Iterator[tuple[Tag, Packet]]:
+        if self._cached_input_iterator is not None:
+            for i, (tag, packet) in enumerate(self._cached_input_iterator):
+                if i in self._cached_output_packets:
+                    # Use cached result
+                    tag, packet = self._cached_output_packets[i]
+                    if packet is not None:
+                        yield tag, packet
+                else:
+                    # Process packet
+                    tag, output_packet = self._fp_node.process_packet(tag, packet)
+                    self._cached_output_packets[i] = (tag, output_packet)
+                    if output_packet is not None:
+                        # Update shared cache for future iterators (optimization)
+                        yield tag, output_packet
+
+            # Mark completion by releasing the iterator
+            self._cached_input_iterator = None
+        else:
+            # Yield from snapshot of complete cache
+            for i in range(len(self._cached_output_packets)):
+                tag, packet = self._cached_output_packets[i]
+                if packet is not None:
+                    yield tag, packet
+
+    def as_table(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> "pa.Table":
+        if self._cached_output_table is None:
+            all_tags = []
+            all_packets = []
+            tag_schema, packet_schema = None, None
+            for tag, packet in self.iter_packets():
+                if tag_schema is None:
+                    tag_schema = tag.arrow_schema(all_info=True)
+                if packet_schema is None:
+                    packet_schema = packet.arrow_schema(all_info=True)
+                # TODO: make use of arrow_compat dict
+                all_tags.append(tag.as_dict(all_info=True))
+                all_packets.append(packet.as_dict(all_info=True))
+
+            # TODO: re-verify the implemetation of this conversion
+            converter = self.data_context.type_converter
+
+            struct_packets = converter.python_dicts_to_struct_dicts(all_packets)
+            all_tags_as_tables: pa.Table = pa.Table.from_pylist(
+                all_tags, schema=tag_schema
+            )
+            # drop context key column from tags table
+            all_tags_as_tables = all_tags_as_tables.drop([constants.CONTEXT_KEY])
+            all_packets_as_tables: pa.Table = pa.Table.from_pylist(
+                struct_packets, schema=packet_schema
+            )
+
+            self._cached_output_table = arrow_utils.hstack_tables(
+                all_tags_as_tables, all_packets_as_tables
+            )
+        assert self._cached_output_table is not None, (
+            "_cached_output_table should not be None here."
+        )
+
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+
+        drop_columns = []
+        if not column_config.system_tags:
+            # TODO: get system tags more effiicently
+            drop_columns.extend(
+                [
+                    c
+                    for c in self._cached_output_table.column_names
+                    if c.startswith(constants.SYSTEM_TAG_PREFIX)
+                ]
+            )
+        if not column_config.source:
+            drop_columns.extend(f"{constants.SOURCE_PREFIX}{c}" for c in self.keys()[1])
+        if not column_config.context:
+            drop_columns.append(constants.CONTEXT_KEY)
+
+        output_table = self._cached_output_table.drop(drop_columns)
+
+        # lazily prepare content hash column if requested
+        if column_config.content_hash:
+            if self._cached_content_hash_column is None:
+                content_hashes = []
+                # TODO: verify that order will be preserved
+                for tag, packet in self.iter_packets():
+                    content_hashes.append(packet.content_hash().to_string())
+                self._cached_content_hash_column = pa.array(
+                    content_hashes, type=pa.large_string()
+                )
+            assert self._cached_content_hash_column is not None, (
+                "_cached_content_hash_column should not be None here."
+            )
+            hash_column_name = (
+                "_content_hash"
+                if column_config.content_hash is True
+                else column_config.content_hash
+            )
+            output_table = output_table.append_column(
+                hash_column_name, self._cached_content_hash_column
+            )
+
+        if column_config.sort_by_tags:
+            # TODO: reimplement using polars natively
+            output_table = (
+                pl.DataFrame(output_table)
+                .sort(by=self.keys()[0], descending=False)
+                .to_arrow()
+            )
+            # output_table = output_table.sort_by(
+            #     [(column, "ascending") for column in self.keys()[0]]
+            # )
+        return output_table
 
 
 # class CachedFunctionPod(WrappedFunctionPod):
