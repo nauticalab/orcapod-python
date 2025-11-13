@@ -57,6 +57,8 @@ dev = [
     "ipywidgets>=8.1.7",
     "jsonschema>=4.25.0",
     "minio>=7.2.16",
+    "pre-commit>=4.4.0",
+    "pre-commit-hooks>=6.0.0",
     "pyarrow-stubs>=20.0.0.20250716",
     "pyiceberg>=0.9.1",
     "pyright>=1.1.404",
@@ -64,7 +66,7 @@ dev = [
     "pytest-cov>=6.1.1",
     "ray[default]==2.48.0",
     "redis>=6.2.0",
-    "ruff>=0.11.11",
+    "ruff>=0.14.4",
     "sphinx>=8.2.3",
     "tqdm>=4.67.1",
 ]

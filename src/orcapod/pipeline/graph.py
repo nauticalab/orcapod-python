@@ -5,7 +5,7 @@ from orcapod.protocols.pipeline_protocols import Node
 from orcapod import contexts
 from orcapod.protocols import core_protocols as cp
 from orcapod.protocols import database_protocols as dbp
-from typing import Any
+from typing import Any, cast
 from collections.abc import Collection
 import os
 import tempfile
@@ -18,6 +18,8 @@ if TYPE_CHECKING:
     import networkx as nx
 else:
     nx = LazyModule("networkx")
+
+logger = logging.getLogger(__name__)
 
 
 def synchronous_run(async_func, *args, **kwargs):
@@ -42,9 +44,6 @@ def synchronous_run(async_func, *args, **kwargs):
     except RuntimeError:
         # No event loop running, safe to use asyncio.run()
         return asyncio.run(async_func(*args, **kwargs))
-
-
-logger = logging.getLogger(__name__)
 
 
 class GraphNode:
@@ -95,10 +94,38 @@ class Pipeline(GraphTracker):
             self.results_store_path_prefix = self.name + ("_results",)
         self.pipeline_database = pipeline_database
         self.results_database = results_database
-        self.nodes: dict[str, Node] = {}
+        self._nodes: dict[str, Node] = {}
         self.auto_compile = auto_compile
         self._dirty = False
         self._ordered_nodes = []  # Track order of invocations
+
+    @property
+    def nodes(self) -> dict[str, Node]:
+        return self._nodes.copy()
+
+    @property
+    def function_pods(self) -> dict[str, cp.Pod]:
+        return {
+            label: cast(cp.Pod, node)
+            for label, node in self._nodes.items()
+            if getattr(node, "kernel_type") == "function"
+        }
+
+    @property
+    def source_pods(self) -> dict[str, cp.Source]:
+        return {
+            label: node
+            for label, node in self._nodes.items()
+            if getattr(node, "kernel_type") == "source"
+        }
+
+    @property
+    def operator_pods(self) -> dict[str, cp.Kernel]:
+        return {
+            label: node
+            for label, node in self._nodes.items()
+            if getattr(node, "kernel_type") == "operator"
+        }
 
     def __exit__(self, exc_type=None, exc_value=None, traceback=None):
         """
@@ -157,13 +184,13 @@ class Pipeline(GraphTracker):
                 # If there are multiple nodes with the same label, we need to resolve the collision
                 logger.info(f"Collision detected for label '{label}': {nodes}")
                 for i, node in enumerate(nodes, start=1):
-                    self.nodes[f"{label}_{i}"] = node
+                    self._nodes[f"{label}_{i}"] = node
                     node.label = f"{label}_{i}"
             else:
-                self.nodes[label] = nodes[0]
+                self._nodes[label] = nodes[0]
                 nodes[0].label = label
 
-        self.label_lut = {v: k for k, v in self.nodes.items()}
+        self.label_lut = {v: k for k, v in self._nodes.items()}
 
         self.graph = node_graph
 
@@ -173,7 +200,7 @@ class Pipeline(GraphTracker):
     def set_mode(self, mode: str) -> None:
         if mode not in ("production", "development"):
             raise ValueError("Mode must be either 'production' or 'development'")
-        for node in self.nodes.values():
+        for node in self._nodes.values():
             if hasattr(node, "set_mode"):
                 node.set_mode(mode)
 
@@ -203,6 +230,19 @@ class Pipeline(GraphTracker):
             may implement more efficient graph traversal algorithms.
         """
         import networkx as nx
+
+        if run_async is True and (
+            execution_engine is None or not execution_engine.supports_async
+        ):
+            raise ValueError(
+                "Cannot run asynchronously with an execution engine that does not support async."
+            )
+
+        # if set to None, determine based on execution engine capabilities
+        if run_async is None:
+            run_async = execution_engine is not None and execution_engine.supports_async
+
+        logger.info(f"Running pipeline with run_async={run_async}")
 
         for node in nx.topological_sort(self.graph):
             if run_async:
@@ -259,27 +299,27 @@ class Pipeline(GraphTracker):
 
     def __getattr__(self, item: str) -> Any:
         """Allow direct access to pipeline attributes."""
-        if item in self.nodes:
-            return self.nodes[item]
+        if item in self._nodes:
+            return self._nodes[item]
         raise AttributeError(f"Pipeline has no attribute '{item}'")
 
     def __dir__(self) -> list[str]:
         """Return a list of attributes and methods of the pipeline."""
-        return list(super().__dir__()) + list(self.nodes.keys())
+        return list(super().__dir__()) + list(self._nodes.keys())
 
     def rename(self, old_name: str, new_name: str) -> None:
         """
         Rename a node in the pipeline.
         This will update the label and the internal mapping.
         """
-        if old_name not in self.nodes:
+        if old_name not in self._nodes:
             raise KeyError(f"Node '{old_name}' does not exist in the pipeline.")
-        if new_name in self.nodes:
+        if new_name in self._nodes:
             raise KeyError(f"Node '{new_name}' already exists in the pipeline.")
-        node = self.nodes[old_name]
-        del self.nodes[old_name]
+        node = self._nodes[old_name]
+        del self._nodes[old_name]
         node.label = new_name
-        self.nodes[new_name] = node
+        self._nodes[new_name] = node
         logger.info(f"Node '{old_name}' renamed to '{new_name}'")
 
 

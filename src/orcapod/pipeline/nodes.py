@@ -269,6 +269,15 @@ class PodNode(NodeBase, CachedPod):
             pipeline_path_prefix=pipeline_path_prefix,
             **kwargs,
         )
+        self._execution_engine_opts: dict[str, Any] = {}
+
+    @property
+    def execution_engine_opts(self) -> dict[str, Any]:
+        return self._execution_engine_opts.copy()
+
+    @execution_engine_opts.setter
+    def execution_engine_opts(self, opts: dict[str, Any]) -> None:
+        self._execution_engine_opts = opts
 
     def flush(self):
         self.pipeline_database.flush()
@@ -316,6 +325,10 @@ class PodNode(NodeBase, CachedPod):
         if record_id is None:
             record_id = self.get_record_id(packet, execution_engine_hash)
 
+        combined_execution_engine_opts = self.execution_engine_opts
+        if execution_engine_opts is not None:
+            combined_execution_engine_opts.update(execution_engine_opts)
+
         tag, output_packet = super().call(
             tag,
             packet,
@@ -323,7 +336,7 @@ class PodNode(NodeBase, CachedPod):
             skip_cache_lookup=skip_cache_lookup,
             skip_cache_insert=skip_cache_insert,
             execution_engine=execution_engine,
-            execution_engine_opts=execution_engine_opts,
+            execution_engine_opts=combined_execution_engine_opts,
         )
 
         # if output_packet is not None:
@@ -357,6 +370,10 @@ class PodNode(NodeBase, CachedPod):
         if record_id is None:
             record_id = self.get_record_id(packet, execution_engine_hash)
 
+        combined_execution_engine_opts = self.execution_engine_opts
+        if execution_engine_opts is not None:
+            combined_execution_engine_opts.update(execution_engine_opts)
+
         tag, output_packet = await super().async_call(
             tag,
             packet,
@@ -364,7 +381,7 @@ class PodNode(NodeBase, CachedPod):
             skip_cache_lookup=skip_cache_lookup,
             skip_cache_insert=skip_cache_insert,
             execution_engine=execution_engine,
-            execution_engine_opts=execution_engine_opts,
+            execution_engine_opts=combined_execution_engine_opts,
         )
 
         if output_packet is not None:

@@ -771,7 +771,7 @@ class DictDatagram(BaseDatagram):
         return new_datagram
 
     # 8. Utility Operations
-    def copy(self, include_cache: bool = True, preserve_record_id:bool=True) -> Self:
+    def copy(self, include_cache: bool = True, preserve_record_id: bool = True) -> Self:
         """
         Create a shallow copy of the datagram.
 
@@ -782,7 +782,9 @@ class DictDatagram(BaseDatagram):
         Returns:
             New DictDatagram instance with copied data and caches.
         """
-        new_datagram = super().copy(include_cache=include_cache, preserve_record_id=preserve_record_id)
+        new_datagram = super().copy(
+            include_cache=include_cache, preserve_record_id=preserve_record_id
+        )
         new_datagram._data = self._data.copy()
         new_datagram._meta_data = self._meta_data.copy()
         new_datagram._data_python_schema = self._data_python_schema.copy()

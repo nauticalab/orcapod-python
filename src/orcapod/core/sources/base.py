@@ -1,5 +1,4 @@
 from abc import abstractmethod
-from ast import Not
 from collections.abc import Collection, Iterator
 from typing import TYPE_CHECKING, Any
 
@@ -153,9 +152,7 @@ class InvocationBase(TrackedKernelBase, StatefulStreamBase):
 
     def flow(
         self,
-       
-        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
-        | None = None,,
+        execution_engine,
         execution_engine_opts: dict[str, Any] | None = None,
     ) -> Collection[tuple[cp.Tag, cp.Packet]]:
         """Delegate to the cached KernelStream."""
@@ -402,9 +399,7 @@ class SourceBase(TrackedKernelBase, StatefulStreamBase):
 
     def flow(
         self,
-       
-        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
-        | None = None,,
+        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine,
         execution_engine_opts: dict[str, Any] | None = None,
     ) -> Collection[tuple[cp.Tag, cp.Packet]]:
         """Delegate to the cached KernelStream."""

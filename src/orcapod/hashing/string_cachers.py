@@ -316,7 +316,7 @@ class SQLiteCacher(StringCacher):
                     )
                 """)
                 conn.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_last_accessed 
+                    CREATE INDEX IF NOT EXISTS idx_last_accessed
                     ON cache_entries(last_accessed)
                 """)
                 conn.commit()
@@ -330,7 +330,7 @@ class SQLiteCacher(StringCacher):
             try:
                 with sqlite3.connect(self.db_path) as conn:
                     cursor = conn.execute("""
-                        SELECT key, value FROM cache_entries 
+                        SELECT key, value FROM cache_entries
                         ORDER BY last_accessed DESC
                     """)
 

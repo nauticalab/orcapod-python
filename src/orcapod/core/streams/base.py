@@ -1,3 +1,4 @@
+from calendar import c
 import logging
 from abc import abstractmethod
 from collections.abc import Collection, Iterator, Mapping
@@ -287,7 +288,12 @@ class StreamBase(OrcapodBase):
 
     def _repr_html_(self) -> str:
         df = self.as_polars_df()
-        tag_map = {t: f"*{t}" for t in self.keys()[0]}
+        # reorder columns
+        new_column_order = [c for c in df.columns if c in self.tag_keys()] + [
+            c for c in df.columns if c not in self.tag_keys()
+        ]
+        df = df[new_column_order]
+        tag_map = {t: f"*{t}" for t in self.tag_keys()}
         # TODO: construct repr html better
         df = df.rename(tag_map)
         return f"{self.__class__.__name__}[{self.label}]\n" + df._repr_html_()

@@ -26,6 +26,11 @@ class RayEngine:
     3. No polling needed - Ray handles async integration
     """
 
+    @property
+    def supports_async(self) -> bool:
+        """Indicate that this engine supports async execution."""
+        return True
+
     def __init__(self, ray_address: str | None = None, **ray_init_kwargs):
         """Initialize Ray with native async support."""
 

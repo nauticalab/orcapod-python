@@ -10,6 +10,8 @@ from orcapod.core.datagrams import (
     ArrowPacket,
     DictPacket,
 )
+from functools import wraps
+
 from orcapod.utils.git_utils import get_git_info_for_python_object
 from orcapod.core.kernels import KernelStream, TrackedKernelBase
 from orcapod.core.operators import Join
@@ -255,6 +257,10 @@ def function_pod(
         if func.__name__ == "<lambda>":
             raise ValueError("Lambda functions cannot be used with function_pod")
 
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+
         # Store the original function in the module for pickling purposes
         # and make sure to change the name of the function
 
@@ -267,8 +273,8 @@ def function_pod(
             label=label,
             **kwargs,
         )
-        setattr(func, "pod", pod)
-        return cast(CallableWithPod, func)
+        setattr(wrapper, "pod", pod)
+        return cast(CallableWithPod, wrapper)
 
     return decorator
 
@@ -432,7 +438,7 @@ class FunctionPod(ActivatablePodBase):
                 values = execution_engine.submit_sync(
                     self.function,
                     fn_kwargs=input_dict,
-                    engine_opts=execution_engine_opts,
+                    **(execution_engine_opts or {}),
                 )
             else:
                 values = self.function(**input_dict)
@@ -490,7 +496,7 @@ class FunctionPod(ActivatablePodBase):
         if execution_engine is not None:
             # use the provided execution engine to run the function
             values = await execution_engine.submit_async(
-                self.function, fn_kwargs=input_dict, engine_opts=execution_engine_opts
+                self.function, fn_kwargs=input_dict, **(execution_engine_opts or {})
             )
         else:
             values = self.function(**input_dict)

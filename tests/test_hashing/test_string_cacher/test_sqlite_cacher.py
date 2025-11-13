@@ -47,7 +47,7 @@ def test_database_initialization():
         # Check that table exists with correct schema
         with sqlite3.connect(db_file) as conn:
             cursor = conn.execute("""
-                SELECT sql FROM sqlite_master 
+                SELECT sql FROM sqlite_master
                 WHERE type='table' AND name='cache_entries'
             """)
             schema = cursor.fetchone()[0]
@@ -58,7 +58,7 @@ def test_database_initialization():
 
             # Check that index exists
             cursor = conn.execute("""
-                SELECT name FROM sqlite_master 
+                SELECT name FROM sqlite_master
                 WHERE type='index' AND name='idx_last_accessed'
             """)
             assert cursor.fetchone() is not None
