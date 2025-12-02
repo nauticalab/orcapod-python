@@ -111,17 +111,23 @@ class PacketFunctionBase(OrcapodBase):
                 f"Version string {version} does not contain a valid version number"
             )
 
-        # compute and store hash for output_packet_schema
-        self._output_packet_schema_hash = self.data_context.object_hasher.hash_object(
-            self.output_packet_schema
-        ).to_string()
+        self._output_packet_schema_hash = None
+
+    @property
+    def output_packet_schema_hash(self) -> str | None:
+        if self._output_packet_schema_hash is None:
+            self._output_packet_schema_hash = (
+                self.data_context.object_hasher.hash_object(
+                    self.output_packet_schema
+                ).to_string()
+            )
+        return self._output_packet_schema_hash
 
     @property
     def uri(self) -> tuple[str, ...]:
-        # TODO: make this more efficient
         return (
             self.canonical_function_name,
-            self._output_packet_schema_hash,
+            self.output_packet_schema_hash,
             f"v{self.major_version}",
             self.packet_function_type_id,
         )

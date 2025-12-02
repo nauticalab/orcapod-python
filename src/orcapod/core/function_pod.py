@@ -22,6 +22,7 @@ from orcapod.protocols.core_protocols import (
 )
 from orcapod.protocols.database_protocols import ArrowDatabase
 from orcapod.system_constants import constants
+from orcapod.config import Config
 from orcapod.types import PythonSchema
 from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
@@ -41,9 +42,15 @@ class FunctionPod(OrcapodBase):
         self,
         packet_function: PacketFunction,
         tracker_manager: TrackerManager | None = None,
-        **kwargs,
+        label: str | None = None,
+        data_context: str | contexts.DataContext | None = None,
+        orcapod_config: Config | None = None,
     ) -> None:
-        super().__init__(**kwargs)
+        super().__init__(
+            label=label,
+            data_context=data_context,
+            orcapod_config=orcapod_config,
+        )
         self.tracker_manager = tracker_manager or DEFAULT_TRACKER_MANAGER
         self._packet_function = packet_function
         self._output_schema_hash = self.data_context.object_hasher.hash_object(
@@ -472,8 +479,8 @@ class WrappedFunctionPod(FunctionPod):
 
 class FunctionPodNode(OrcapodBase):
     """
-    A pod that caches the results of the wrapped pod.
-    This is useful for pods that are expensive to compute and can benefit from caching.
+    A pod that caches the results of the wrapped packet function.
+    This is useful for packet functions that are expensive to compute and can benefit from caching.
     """
 
     def __init__(
@@ -484,7 +491,9 @@ class FunctionPodNode(OrcapodBase):
         result_database: ArrowDatabase | None = None,
         pipeline_path_prefix: tuple[str, ...] = (),
         tracker_manager: TrackerManager | None = None,
-        **kwargs,
+        label: str | None = None,
+        data_context: str | contexts.DataContext | None = None,
+        orcapod_config: Config | None = None,
     ):
         if tracker_manager is None:
             tracker_manager = DEFAULT_TRACKER_MANAGER
@@ -502,7 +511,22 @@ class FunctionPodNode(OrcapodBase):
         )
 
         # initialize the base FunctionPod with the cached packet function
-        super().__init__(**kwargs)
+        super().__init__(
+            label=label,
+            data_context=data_context,
+            orcapod_config=orcapod_config,
+        )
+
+        # validate the input stream
+        _, incoming_packet_types = input_stream.output_schema()
+        expected_packet_schema = packet_function.input_packet_schema
+        if not schema_utils.check_typespec_compatibility(
+            incoming_packet_types, expected_packet_schema
+        ):
+            # TODO: use custom exception type for better error handling
+            raise ValueError(
+                f"Incoming packet data type {incoming_packet_types} from {input_stream} is not compatible with expected input typespec {expected_packet_schema}"
+            )
 
         self._input_stream = input_stream
 
@@ -523,6 +547,8 @@ class FunctionPodNode(OrcapodBase):
         ).to_string()
 
     def identity_structure(self) -> Any:
+        # Identity of function pod node is the identity of the
+        # (cached) packet function + input stream
         return (self._cached_packet_function, self._input_stream)
 
     @property
@@ -598,7 +624,9 @@ class FunctionPodNode(OrcapodBase):
         logger.debug(f"Invoking kernel {self} on streams: {streams}")
 
         # perform input stream validation
-        self.validate_inputs(self._input_stream)
+        self.validate_inputs(*streams)
+        # TODO: add logic to handle/modify input stream based on streams passed in
+        # Example includes appling semi_join on the input stream based on the streams passed in
         self.tracker_manager.record_packet_function_invocation(
             self._cached_packet_function, self._input_stream, label=label
         )
@@ -669,6 +697,9 @@ class FunctionPodNode(OrcapodBase):
 
         if existing_record is not None:
             # if the record already exists, then skip adding
+            logger.debug(
+                f"Record with entry_id {entry_id} already exists. Skipping addition."
+            )
             return
 
         # rename all keys to avoid potential collision with result columns
@@ -678,11 +709,11 @@ class FunctionPodNode(OrcapodBase):
         input_packet_info = (
             renamed_input_packet.as_table(columns={"source": True})
             .append_column(
-                constants.PACKET_RECORD_ID,
+                constants.PACKET_RECORD_ID,  # record ID for the packet function output packet
                 pa.array([packet_record_id], type=pa.large_string()),
             )
             .append_column(
-                f"{constants.META_PREFIX}input_packet{constants.CONTEXT_KEY}",
+                f"{constants.META_PREFIX}input_packet{constants.CONTEXT_KEY}",  # data context key for the input packet
                 pa.array([input_packet.data_context_key], type=pa.large_string()),
             )
             .append_column(
