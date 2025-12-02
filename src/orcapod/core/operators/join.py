@@ -1,13 +1,12 @@
 from collections.abc import Collection
 from typing import TYPE_CHECKING, Any
 
-from orcapod.core import arrow_data_utils
 from orcapod.core.operators.base import NonZeroInputOperator
 from orcapod.core.streams import TableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import ArgumentGroup, ColumnConfig, Stream
 from orcapod.types import PythonSchema
-from orcapod.utils import schema_utils
+from orcapod.utils import arrow_data_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:

@@ -111,14 +111,17 @@ class PacketFunctionBase(OrcapodBase):
                 f"Version string {version} does not contain a valid version number"
             )
 
+        # compute and store hash for output_packet_schema
+        self._output_packet_schema_hash = self.data_context.object_hasher.hash_object(
+            self.output_packet_schema
+        ).to_string()
+
     @property
     def uri(self) -> tuple[str, ...]:
         # TODO: make this more efficient
         return (
-            f"{self.canonical_function_name}",
-            self.data_context.object_hasher.hash_object(
-                self.output_packet_schema
-            ).to_string(),
+            self.canonical_function_name,
+            self._output_packet_schema_hash,
             f"v{self.major_version}",
             self.packet_function_type_id,
         )
@@ -450,11 +453,11 @@ class CachedPacketFunction(PacketFunctionWrapper):
         # execution_engine_hash = execution_engine.name if execution_engine else "default"
         output_packet = None
         if not skip_cache_lookup:
-            print("Checking for cache...")
+            logger.info("Checking for cache...")
             # lookup stored result for the input packet
             output_packet = self.get_cached_output_for_packet(packet)
             if output_packet is not None:
-                print(f"Cache hit for {packet}!")
+                logger.info(f"Cache hit for {packet}!")
         if output_packet is None:
             output_packet = self._packet_function.call(packet)
             if output_packet is not None:
@@ -525,22 +528,24 @@ class CachedPacketFunction(PacketFunctionWrapper):
         # TODO: consider incorporating execution_engine_opts into the record
         data_table = output_packet.as_table(columns={"source": True, "context": True})
 
-        i = -1
-        for i, (k, v) in enumerate(self.get_function_variation_data().items()):
+        i = 0
+        for k, v in self.get_function_variation_data().items():
             # add the tiered pod ID to the data table
             data_table = data_table.add_column(
                 i,
                 f"{constants.PF_VARIATION_PREFIX}{k}",
                 pa.array([v], type=pa.large_string()),
             )
+            i += 1
 
-        for j, (k, v) in enumerate(self.get_execution_data().items()):
+        for k, v in self.get_execution_data().items():
             # add the tiered pod ID to the data table
             data_table = data_table.add_column(
-                i + j + 1,
+                i,
                 f"{constants.PF_EXECUTION_PREFIX}{k}",
                 pa.array([v], type=pa.large_string()),
             )
+            i += 1
 
         # add the input packet hash as a column
         data_table = data_table.add_column(
@@ -558,7 +563,7 @@ class CachedPacketFunction(PacketFunctionWrapper):
 
         self._result_database.add_record(
             self.record_path,
-            output_packet.datagram_id,
+            output_packet.datagram_id,  # output packet datagram ID (uuid) is used as a unique identification
             data_table,
             skip_duplicates=skip_duplicates,
         )

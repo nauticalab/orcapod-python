@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, cast
 from deltalake import DeltaTable, write_deltalake
 from deltalake.exceptions import TableNotFoundError
 
-from orcapod.core import constants
+from orcapod.system_constants import constants
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -1002,6 +1002,7 @@ class BasicDeltaTableArrowStore:
                 "pending_records": pending_count,
             }
 
+        # FIXME: handle more specific exception only
         except Exception as e:
             logger.error(f"Error getting table info for {'/'.join(record_path)}: {e}")
             return None
