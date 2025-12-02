@@ -1,19 +1,17 @@
-from calendar import c
 import logging
 from abc import abstractmethod
 from collections.abc import Collection, Iterator, Mapping
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.base import OrcapodBase
-from orcapod.protocols.core_protocols import Pod, Stream, Tag, Packet, ColumnConfig
+from orcapod.protocols.core_protocols import ColumnConfig, Packet, Pod, Stream, Tag
 from orcapod.types import PythonSchema
 from orcapod.utils.lazy_module import LazyModule
 
-
 if TYPE_CHECKING:
-    import pyarrow as pa
-    import polars as pl
     import pandas as pd
+    import polars as pl
+    import pyarrow as pa
 else:
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")
@@ -289,11 +287,11 @@ class StreamBase(OrcapodBase):
     def _repr_html_(self) -> str:
         df = self.as_polars_df()
         # reorder columns
-        new_column_order = [c for c in df.columns if c in self.tag_keys()] + [
-            c for c in df.columns if c not in self.tag_keys()
+        new_column_order = [c for c in df.columns if c in self.keys()[0]] + [
+            c for c in df.columns if c not in self.keys()[0]
         ]
         df = df[new_column_order]
-        tag_map = {t: f"*{t}" for t in self.tag_keys()}
+        tag_map = {t: f"*{t}" for t in self.keys()[0]}
         # TODO: construct repr html better
         df = df.rename(tag_map)
         return f"{self.__class__.__name__}[{self.label}]\n" + df._repr_html_()

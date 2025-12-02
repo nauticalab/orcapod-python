@@ -78,7 +78,7 @@ class Join(NonZeroInputOperator):
 
         return tag_typespec, packet_typespec
 
-    def execute(self, *streams: Stream) -> Stream:
+    def static_process(self, *streams: Stream) -> Stream:
         """
         Joins two streams together based on their tags.
         The resulting stream will contain all the tags from both streams.

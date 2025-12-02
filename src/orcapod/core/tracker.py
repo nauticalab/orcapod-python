@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Generator
@@ -114,21 +116,24 @@ class AutoRegisteringContextBasedTracker(ABC):
         return self._active
 
     @abstractmethod
-    def record_kernel_invocation(
+    def record_pod_invocation(
         self,
-        kernel: cp.Pod,
+        pod: cp.Pod,
         upstreams: tuple[cp.Stream, ...],
         label: str | None = None,
     ) -> None: ...
 
     @abstractmethod
-    def record_source_invocation(
-        self, source: cp.SourcePod, label: str | None = None
+    def record_source_pod_invocation(
+        self, source_pod: cp.SourcePod, label: str | None = None
     ) -> None: ...
 
     @abstractmethod
-    def record_pod_invocation(
-        self, pod: cp.Pod, upstreams: tuple[cp.Stream, ...], label: str | None = None
+    def record_packet_function_invocation(
+        self,
+        packet_function: cp.PacketFunction,
+        input_stream: cp.Stream,
+        label: str | None = None,
     ) -> None: ...
 
     def __enter__(self):
@@ -184,7 +189,7 @@ class Invocation(OrcapodBase):
         # if no upstreams, then we want to identify the source directly
         if not self.upstreams:
             return self.kernel.identity_structure()
-        return self.kernel.identity_structure(self.upstreams)
+        return self.kernel.identity_structure()
 
     def __repr__(self) -> str:
         return f"Invocation(kernel={self.kernel}, upstreams={self.upstreams}, label={self.label})"

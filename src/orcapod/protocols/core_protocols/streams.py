@@ -2,9 +2,7 @@ from collections.abc import Collection, Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from orcapod.protocols.core_protocols.datagrams import ColumnConfig, Packet, Tag
-from orcapod.protocols.core_protocols.labelable import Labelable
-from orcapod.protocols.core_protocols.temporal import Temporal
-from orcapod.protocols.hashing_protocols import ContentIdentifiable
+from orcapod.protocols.core_protocols.orcapod_object import OrcapodObject
 from orcapod.types import PythonSchema
 
 if TYPE_CHECKING:
@@ -16,7 +14,7 @@ if TYPE_CHECKING:
 
 
 @runtime_checkable
-class Stream(ContentIdentifiable, Labelable, Temporal, Protocol):
+class Stream(OrcapodObject, Protocol):
     """
     Base protocol for all streams in Orcapod.
 

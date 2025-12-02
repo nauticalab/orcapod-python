@@ -4,9 +4,9 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import TableStream
-from orcapod.system_constants import constants
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import ColumnConfig, Stream
+from orcapod.system_constants import constants
 from orcapod.types import PythonSchema
 from orcapod.utils.lazy_module import LazyModule
 
@@ -30,7 +30,7 @@ class SelectTagColumns(UnaryOperator):
         self.strict = strict
         super().__init__(**kwargs)
 
-    def unary_execute(self, stream: Stream) -> Stream:
+    def unary_static_process(self, stream: Stream) -> Stream:
         tag_columns, packet_columns = stream.keys()
         tags_to_drop = [c for c in tag_columns if c not in self.columns]
         new_tag_columns = [c for c in tag_columns if c not in tags_to_drop]
@@ -104,7 +104,7 @@ class SelectPacketColumns(UnaryOperator):
         self.strict = strict
         super().__init__(**kwargs)
 
-    def unary_execute(self, stream: Stream) -> Stream:
+    def unary_static_process(self, stream: Stream) -> Stream:
         tag_columns, packet_columns = stream.keys()
         packet_columns_to_drop = [c for c in packet_columns if c not in self.columns]
         new_packet_columns = [
@@ -187,7 +187,7 @@ class DropTagColumns(UnaryOperator):
         self.strict = strict
         super().__init__(**kwargs)
 
-    def unary_execute(self, stream: Stream) -> Stream:
+    def unary_static_process(self, stream: Stream) -> Stream:
         tag_columns, packet_columns = stream.keys()
         columns_to_drop = self.columns
         if not self.strict:
@@ -263,7 +263,7 @@ class DropPacketColumns(UnaryOperator):
         self.strict = strict
         super().__init__(**kwargs)
 
-    def unary_execute(self, stream: Stream) -> Stream:
+    def unary_static_process(self, stream: Stream) -> Stream:
         tag_columns, packet_columns = stream.keys()
         columns_to_drop = list(self.columns)
         if not self.strict:

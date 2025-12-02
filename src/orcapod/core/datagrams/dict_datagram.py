@@ -4,10 +4,10 @@ from typing import TYPE_CHECKING, Any, Self, cast
 
 from orcapod import contexts
 from orcapod.core.datagrams.base import BaseDatagram
-from orcapod.system_constants import constants
 from orcapod.protocols.core_protocols import ColumnConfig
 from orcapod.protocols.hashing_protocols import ContentHash
 from orcapod.semantic_types import infer_python_schema_from_pylist_data
+from orcapod.system_constants import constants
 from orcapod.types import DataValue, PythonSchema, PythonSchemaLike
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
@@ -99,7 +99,7 @@ class DictDatagram(BaseDatagram):
 
         # Initialize base class with data context
         final_context = data_context or cast(str, extracted_context)
-        super().__init__(data_context=final_context, record_id=record_id, **kwargs)
+        super().__init__(data_context=final_context, datagram_id=record_id, **kwargs)
 
         # Store data and meta components separately (immutable)
         self._data = dict(data_columns)
@@ -542,7 +542,7 @@ class DictDatagram(BaseDatagram):
         )
 
         # TODO: use copy instead
-        new_datagram._record_id = self._record_id
+        new_datagram._datagram_id = self._datagram_id
 
         return new_datagram
 
@@ -771,7 +771,7 @@ class DictDatagram(BaseDatagram):
         return new_datagram
 
     # 8. Utility Operations
-    def copy(self, include_cache: bool = True, preserve_record_id: bool = True) -> Self:
+    def copy(self, include_cache: bool = True, preserve_id: bool = True) -> Self:
         """
         Create a shallow copy of the datagram.
 
@@ -783,7 +783,7 @@ class DictDatagram(BaseDatagram):
             New DictDatagram instance with copied data and caches.
         """
         new_datagram = super().copy(
-            include_cache=include_cache, preserve_record_id=preserve_record_id
+            include_cache=include_cache, preserve_id=preserve_id
         )
         new_datagram._data = self._data.copy()
         new_datagram._meta_data = self._meta_data.copy()

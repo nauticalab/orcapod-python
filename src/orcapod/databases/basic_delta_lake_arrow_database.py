@@ -1,8 +1,7 @@
 import logging
 from collections import defaultdict
-from collections.abc import Collection, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from deltalake import DeltaTable, write_deltalake
 from deltalake.exceptions import TableNotFoundError

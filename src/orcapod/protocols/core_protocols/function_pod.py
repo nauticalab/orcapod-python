@@ -9,8 +9,6 @@ from orcapod.protocols.core_protocols.pod import Pod
 class FunctionPod(Pod, Protocol):
     """
     Pod based on PacketFunction.
-
-
     """
 
     @property

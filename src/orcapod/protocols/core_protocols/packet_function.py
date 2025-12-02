@@ -2,8 +2,8 @@ from typing import Any, Protocol, runtime_checkable
 
 from orcapod.protocols.core_protocols.datagrams import Packet
 from orcapod.protocols.core_protocols.labelable import Labelable
-from orcapod.types import PythonSchema
 from orcapod.protocols.hashing_protocols import ContentIdentifiable
+from orcapod.types import PythonSchema
 
 
 @runtime_checkable

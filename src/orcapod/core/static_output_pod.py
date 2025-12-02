@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from abc import abstractmethod
 from collections.abc import Collection, Iterator
@@ -27,11 +29,14 @@ else:
     pa = LazyModule("pyarrow")
 
 
-class ExecutablePod(OrcapodBase):
+class StaticOutputPod(OrcapodBase):
     """
-    Abstract Base class for all pods that requires execution to generate
-    static output stream. The output stream will reexecute the pod as necessary
-    to keep the output stream current.
+    Abstract Base class for basic pods with core logic that yields static output stream.
+    The static output stream will be wrapped in DynamicPodStream which will re-execute
+    the pod as necessary to ensure that the output stream is up-to-date.
+
+    Furthermore, the invocation of the pod will be tracked by the tracker manager, registering
+    the pod as a general pod invocation.
     """
 
     def __init__(self, tracker_manager: TrackerManager | None = None, **kwargs) -> None:
@@ -42,7 +47,7 @@ class ExecutablePod(OrcapodBase):
     def uri(self) -> tuple[str, ...]:
         """
         Returns a unique resource identifier for the pod.
-        The pod URI must uniquely determine the necessary schema for the pod's information
+        The pod URI must uniquely determine the schema for the pod
         """
         return (
             f"{self.__class__.__name__}",
@@ -124,7 +129,7 @@ class ExecutablePod(OrcapodBase):
         ...
 
     @abstractmethod
-    def execute(self, *streams: Stream) -> Stream:
+    def static_process(self, *streams: Stream) -> Stream:
         """
         Executes the pod on the input streams, returning a new static output stream.
         The output of execute is expected to be a static stream and thus only represent
@@ -141,7 +146,7 @@ class ExecutablePod(OrcapodBase):
         """
         ...
 
-    def process(self, *streams: Stream, label: str | None = None) -> Stream:
+    def process(self, *streams: Stream, label: str | None = None) -> DynamicPodStream:
         """
         Invoke the pod on a collection of streams, returning a KernelStream
         that represents the computation.
@@ -157,13 +162,13 @@ class ExecutablePod(OrcapodBase):
         # perform input stream validation
         self.validate_inputs(*streams)
         self.tracker_manager.record_pod_invocation(self, upstreams=streams, label=label)
-        output_stream = ExecutablePodStream(
+        output_stream = DynamicPodStream(
             pod=self,
             upstreams=streams,
         )
         return output_stream
 
-    def __call__(self, *streams: Stream, **kwargs) -> Stream:
+    def __call__(self, *streams: Stream, **kwargs) -> DynamicPodStream:
         """
         Convenience method to invoke the pod process on a collection of streams,
         """
@@ -172,7 +177,7 @@ class ExecutablePod(OrcapodBase):
         return self.process(*streams, **kwargs)
 
 
-class ExecutablePodStream(StreamBase):
+class DynamicPodStream(StreamBase):
     """
     Recomputable stream wrapping a PodBase
 
@@ -184,7 +189,7 @@ class ExecutablePodStream(StreamBase):
 
     def __init__(
         self,
-        pod: ExecutablePod,
+        pod: StaticOutputPod,
         upstreams: tuple[
             Stream, ...
         ] = (),  # if provided, this will override the upstreams of the output_stream
@@ -276,7 +281,7 @@ class ExecutablePodStream(StreamBase):
 
         # recompute if cache is invalid
         if self._cached_time is None or self._cached_stream is None:
-            self._cached_stream = self._pod.execute(
+            self._cached_stream = self._pod.static_process(
                 *self.upstreams,
             )
             self._cached_time = datetime.now()

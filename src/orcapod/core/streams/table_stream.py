@@ -9,13 +9,12 @@ from orcapod.core.datagrams import (
     ArrowTag,
     DictTag,
 )
+from orcapod.core.streams.base import StreamBase
+from orcapod.protocols.core_protocols import ColumnConfig, Pod, Stream, Tag
 from orcapod.system_constants import constants
-from orcapod.protocols.core_protocols import Pod, Tag, Stream, ColumnConfig
-
 from orcapod.types import PythonSchema
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
-from orcapod.core.streams.base import StreamBase
 
 if TYPE_CHECKING:
     import pyarrow as pa

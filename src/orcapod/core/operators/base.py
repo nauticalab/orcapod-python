@@ -2,12 +2,12 @@ from abc import abstractmethod
 from collections.abc import Collection
 from typing import Any
 
-from orcapod.core.executable_pod import ExecutablePod
+from orcapod.core.static_output_pod import StaticOutputPod
 from orcapod.protocols.core_protocols import ArgumentGroup, ColumnConfig, Stream
 from orcapod.types import PythonSchema
 
 
-class Operator(ExecutablePod):
+class Operator(StaticOutputPod):
     """
     Base class for all operators.
     Operators are basic pods that can be used to perform operations on streams.
@@ -34,7 +34,7 @@ class UnaryOperator(Operator):
         ...
 
     @abstractmethod
-    def unary_execute(self, stream: Stream) -> Stream:
+    def unary_static_process(self, stream: Stream) -> Stream:
         """
         This method should be implemented by subclasses to define the specific behavior of the unary operator.
         It takes one stream as input and returns a new stream as output.
@@ -61,13 +61,13 @@ class UnaryOperator(Operator):
         stream = streams[0]
         return self.validate_unary_input(stream)
 
-    def execute(self, *streams: Stream) -> Stream:
+    def static_process(self, *streams: Stream) -> Stream:
         """
         Forward method for unary operators.
         It expects exactly one stream as input.
         """
         stream = streams[0]
-        return self.unary_execute(stream)
+        return self.unary_static_process(stream)
 
     def output_schema(
         self,
@@ -97,7 +97,9 @@ class BinaryOperator(Operator):
         ...
 
     @abstractmethod
-    def binary_execute(self, left_stream: Stream, right_stream: Stream) -> Stream:
+    def binary_static_process(
+        self, left_stream: Stream, right_stream: Stream
+    ) -> Stream:
         """
         Forward method for binary operators.
         It expects exactly two streams as input.

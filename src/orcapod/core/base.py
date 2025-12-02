@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -14,6 +16,11 @@ logger = logging.getLogger(__name__)
 
 
 class LabelableMixin:
+    """
+    Mixin class for objects that can have a label. Provides a mechanism to compute a label based on the object's content.
+    By default, explicitly set label will always take precedence over computed label and inferred label.
+    """
+
     def __init__(self, label: str | None = None, **kwargs):
         self._label = label
         super().__init__(**kwargs)
@@ -31,7 +38,7 @@ class LabelableMixin:
     @property
     def has_assigned_label(self) -> bool:
         """
-        Check if the label is explicitly set for this object.
+        Check if the label has been explicitly set for this object.
 
         Returns:
             bool: True if the label is explicitly set, False otherwise.
@@ -57,6 +64,11 @@ class LabelableMixin:
 
 
 class DataContextMixin:
+    """
+    Mixin to associate data context and an Orcapod config with an object. Deriving class allows data context and Orcapod config to be
+    explicitly specified and if not provided, use the default data context and Orcapod config.
+    """
+
     def __init__(
         self,
         data_context: str | contexts.DataContext | None = None,
@@ -64,10 +76,12 @@ class DataContextMixin:
         **kwargs,
     ):
         super().__init__(**kwargs)
-        if orcapod_config is None:
-            orcapod_config = DEFAULT_CONFIG
-        self._orcapod_config = orcapod_config
         self._data_context = contexts.resolve_context(data_context)
+        if orcapod_config is None:
+            orcapod_config = (
+                DEFAULT_CONFIG  # DEFAULT_CONFIG as defined in orcapod/config.py
+            )
+        self._orcapod_config = orcapod_config
 
     @property
     def orcapod_config(self) -> Config:
@@ -77,6 +91,7 @@ class DataContextMixin:
     def data_context(self) -> contexts.DataContext:
         return self._data_context
 
+    # TODO: re-evaluate whether changing data context should be allowed
     @data_context.setter
     def data_context(self, context: str | contexts.DataContext | None) -> None:
         self._data_context = contexts.resolve_context(context)
@@ -98,14 +113,18 @@ class ContentIdentifiableBase(DataContextMixin, ABC):
     Two content-identifiable objects are considered equal if their `identity_structure` returns the same value.
     """
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(
+        self,
+        data_context: str | contexts.DataContext | None = None,
+        orcapod_config: Config | None = None,
+    ) -> None:
         """
         Initialize the ContentHashable with an optional ObjectHasher.
 
         Args:
             identity_structure_hasher (ObjectHasher | None): An instance of ObjectHasher to use for hashing.
         """
-        super().__init__(**kwargs)
+        super().__init__(data_context=data_context, orcapod_config=orcapod_config)
         self._cached_content_hash: hp.ContentHash | None = None
         self._cached_int_hash: int | None = None
 
@@ -224,6 +243,17 @@ class OrcapodBase(TemporalMixin, LabelableMixin, ContentIdentifiableBase):
     including data context awareness, content-based identity, (semantic) labeling,
     and modification timestamp.
     """
+
+    def __init__(
+        self,
+        label: str | None = None,
+        data_context: str | contexts.DataContext | None = None,
+        orcapod_config: Config | None = None,
+    ):
+        # Init provided here for explicit listing of parmeters
+        super().__init__(
+            label=label, data_context=data_context, orcapod_config=orcapod_config
+        )
 
     def __repr__(self):
         return self.__class__.__name__

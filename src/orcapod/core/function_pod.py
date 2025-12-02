@@ -1,12 +1,13 @@
+from __future__ import annotations
+
 import logging
 from collections.abc import Callable, Collection, Iterator
 from typing import TYPE_CHECKING, Any, Protocol, cast
-from orcapod.protocols.database_protocols import ArrowDatabase
-from orcapod.system_constants import constants
+
 from orcapod import contexts
 from orcapod.core.base import OrcapodBase
 from orcapod.core.operators import Join
-from orcapod.core.packet_function import PythonPacketFunction, CachedPacketFunction
+from orcapod.core.packet_function import CachedPacketFunction, PythonPacketFunction
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
@@ -19,6 +20,8 @@ from orcapod.protocols.core_protocols import (
     Tag,
     TrackerManager,
 )
+from orcapod.protocols.database_protocols import ArrowDatabase
+from orcapod.system_constants import constants
 from orcapod.types import PythonSchema
 from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
@@ -26,8 +29,8 @@ from orcapod.utils.lazy_module import LazyModule
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    import pyarrow as pa
     import polars as pl
+    import pyarrow as pa
 else:
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")
@@ -573,7 +576,7 @@ class FunctionPodNode(OrcapodBase):
             self.add_pipeline_record(
                 tag,
                 packet,
-                packet_record_id=output_packet.record_id,
+                packet_record_id=output_packet.datagram_id,
                 computed=result_computed,
             )
 

@@ -35,7 +35,7 @@ class Batch(UnaryOperator):
         """
         return None
 
-    def unary_execute(self, stream: Stream) -> Stream:
+    def unary_static_process(self, stream: Stream) -> Stream:
         """
         This method should be implemented by subclasses to define the specific behavior of the binary operator.
         It takes two streams as input and returns a new stream as output.

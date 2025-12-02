@@ -1,7 +1,5 @@
-from .tracker import DEFAULT_TRACKER_MANAGER
-from ..system_constants import constants
+from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 
 __all__ = [
     "DEFAULT_TRACKER_MANAGER",
-    "constants",
 ]

@@ -4,9 +4,9 @@ from typing import TYPE_CHECKING, Any, TypeAlias
 
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import TableStream
-from orcapod.system_constants import constants
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import ColumnConfig, Stream
+from orcapod.system_constants import constants
 from orcapod.types import PythonSchema
 from orcapod.utils.lazy_module import LazyModule
 
@@ -42,7 +42,7 @@ class PolarsFilter(UnaryOperator):
         self.constraints = constraints if constraints is not None else {}
         super().__init__(**kwargs)
 
-    def unary_execute(self, stream: Stream) -> Stream:
+    def unary_static_process(self, stream: Stream) -> Stream:
         if len(self.predicates) == 0 and len(self.constraints) == 0:
             logger.info(
                 "No predicates or constraints specified. Returning stream unaltered."
@@ -102,7 +102,7 @@ class SelectPacketColumns(UnaryOperator):
         self.strict = strict
         super().__init__(**kwargs)
 
-    def unary_execute(self, stream: Stream) -> Stream:
+    def unary_static_process(self, stream: Stream) -> Stream:
         tag_columns, packet_columns = stream.keys()
         packet_columns_to_drop = [c for c in packet_columns if c not in self.columns]
         new_packet_columns = [

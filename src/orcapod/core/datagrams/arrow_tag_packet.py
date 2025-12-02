@@ -4,9 +4,9 @@ from typing import TYPE_CHECKING, Any, Self
 
 from orcapod import contexts
 from orcapod.core.datagrams.arrow_datagram import ArrowDatagram
-from orcapod.system_constants import constants
 from orcapod.protocols.core_protocols import ColumnConfig
 from orcapod.semantic_types import infer_python_schema_from_pylist_data
+from orcapod.system_constants import constants
 from orcapod.types import DataValue, PythonSchema
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
@@ -199,9 +199,9 @@ class ArrowTag(ArrowDatagram):
         return self._system_tags_dict.copy()
 
     # 8. Utility Operations
-    def copy(self, include_cache: bool = True) -> Self:
+    def copy(self, include_cache: bool = True, preserve_id: bool = True) -> Self:
         """Return a copy of the datagram."""
-        new_tag = super().copy(include_cache=include_cache)
+        new_tag = super().copy(include_cache=include_cache, preserve_id=preserve_id)
 
         new_tag._system_tags_dict = self._system_tags_dict.copy()
         new_tag._system_tags_python_schema = self._system_tags_python_schema.copy()
@@ -521,9 +521,9 @@ class ArrowPacket(ArrowDatagram):
         return new_packet
 
     # 8. Utility Operations
-    def copy(self, include_cache: bool = True) -> Self:
+    def copy(self, include_cache: bool = True, preserve_id: bool = True) -> Self:
         """Return a copy of the datagram."""
-        new_packet = super().copy(include_cache=include_cache)
+        new_packet = super().copy(include_cache=include_cache, preserve_id=preserve_id)
         new_packet._source_info_table = self._source_info_table
 
         if include_cache:

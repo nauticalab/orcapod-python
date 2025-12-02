@@ -1,12 +1,10 @@
 from collections.abc import Collection
 from typing import Any, Protocol, TypeAlias, runtime_checkable
 
+from orcapod.protocols.core_protocols.datagrams import ColumnConfig
+from orcapod.protocols.core_protocols.orcapod_object import OrcapodObject
 from orcapod.protocols.core_protocols.packet_function import PacketFunction
-from orcapod.protocols.core_protocols.datagrams import ColumnConfig, Tag, Packet
-from orcapod.protocols.core_protocols.labelable import Labelable
 from orcapod.protocols.core_protocols.streams import Stream
-from orcapod.protocols.core_protocols.temporal import Temporal
-from orcapod.protocols.hashing_protocols import ContentIdentifiable, DataContextAware
 from orcapod.types import PythonSchema
 
 # Core recursive types
@@ -17,7 +15,7 @@ OrderedGroup: TypeAlias = tuple[ArgumentGroup, ...]  # Order-dependent
 
 
 @runtime_checkable
-class Pod(DataContextAware, ContentIdentifiable, Labelable, Temporal, Protocol):
+class Pod(OrcapodObject, Protocol):
     """
     The fundamental unit of computation in Orcapod.
 

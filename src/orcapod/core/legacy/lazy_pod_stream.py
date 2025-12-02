@@ -3,18 +3,18 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from orcapod.system_constants import constants
+from orcapod.core.streams.base import StreamBase
 from orcapod.protocols import core_protocols as cp
+from orcapod.system_constants import constants
 from orcapod.types import PythonSchema
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
-from orcapod.core.streams.base import StreamBase
-
 
 if TYPE_CHECKING:
-    import pyarrow as pa
-    import polars as pl
     import asyncio
+
+    import polars as pl
+    import pyarrow as pa
 else:
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")

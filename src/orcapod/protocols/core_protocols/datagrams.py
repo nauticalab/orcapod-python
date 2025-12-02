@@ -9,7 +9,7 @@ from typing import (
     runtime_checkable,
 )
 
-from orcapod.protocols.hashing_protocols import ContentIdentifiable
+from orcapod.protocols.hashing_protocols import ContentIdentifiable, DataContextAware
 from orcapod.types import DataType, DataValue, PythonSchema
 
 if TYPE_CHECKING:
@@ -151,7 +151,7 @@ class ColumnConfig:
 
 
 @runtime_checkable
-class Datagram(ContentIdentifiable, Protocol):
+class Datagram(ContentIdentifiable, DataContextAware, Protocol):
     """
     Protocol for immutable datagram containers in Orcapod.
 
@@ -178,29 +178,12 @@ class Datagram(ContentIdentifiable, Protocol):
     """
 
     @property
-    def record_id(self) -> str:
+    def datagram_id(self) -> str:
         """
         Return the UUID of this datagram.
 
         Returns:
             UUID: The unique identifier for this instance of datagram.
-        """
-        ...
-
-    # 1. Core Properties (Identity & Structure)
-    @property
-    def data_context_key(self) -> str:
-        """
-        Return the data context key for this datagram.
-
-        This key identifies a collection of system components that collectively controls
-        how information is serialized, hashed and represented, including the semantic type registry,
-        arrow data hasher, and other contextual information. Same piece of information (that is two datagrams
-        with an identical *logical* content) may bear distinct internal representation if they are
-        represented under two distinct data context, as signified by distinct data context keys.
-
-        Returns:
-            str: Context key for proper datagram interpretation
         """
         ...
 

@@ -3,9 +3,9 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import TableStream
-from orcapod.system_constants import constants
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import ColumnConfig, Stream
+from orcapod.system_constants import constants
 from orcapod.types import PythonSchema
 from orcapod.utils.lazy_module import LazyModule
 
@@ -29,7 +29,7 @@ class MapPackets(UnaryOperator):
         self.drop_unmapped = drop_unmapped
         super().__init__(**kwargs)
 
-    def unary_execute(self, stream: Stream) -> Stream:
+    def unary_static_process(self, stream: Stream) -> Stream:
         tag_columns, packet_columns = stream.keys()
         unmapped_columns = set(packet_columns) - set(self.name_map.keys())
 

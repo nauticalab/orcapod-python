@@ -28,7 +28,9 @@ class SemiJoin(BinaryOperator):
     The output stream preserves the schema of the left stream exactly.
     """
 
-    def binary_execute(self, left_stream: Stream, right_stream: Stream) -> Stream:
+    def binary_static_process(
+        self, left_stream: Stream, right_stream: Stream
+    ) -> Stream:
         """
         Performs a semi-join between left and right streams.
         Returns entries from left stream that have matching entries in right stream.

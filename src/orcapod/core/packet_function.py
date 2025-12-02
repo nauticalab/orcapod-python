@@ -1,27 +1,46 @@
+from __future__ import annotations
+
 import hashlib
 import logging
 import re
 import sys
 from abc import abstractmethod
 from collections.abc import Callable, Collection, Iterable, Sequence
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal
 
 from uuid_utils import uuid7
 
+from orcapod.config import Config
+from orcapod.contexts import DataContext
 from orcapod.core.base import OrcapodBase
-from orcapod.core.datagrams import DictPacket, ArrowPacket
+from orcapod.core.datagrams import ArrowPacket, DictPacket
 from orcapod.hashing.hash_utils import get_function_components, get_function_signature
-from orcapod.protocols.core_protocols import Packet, PacketFunction, Tag, Stream
+from orcapod.protocols.core_protocols import Packet, PacketFunction
+from orcapod.protocols.database_protocols import ArrowDatabase
+from orcapod.system_constants import constants
 from orcapod.types import DataValue, PythonSchema, PythonSchemaLike
 from orcapod.utils import schema_utils
 from orcapod.utils.git_utils import get_git_info_for_python_object
 from orcapod.utils.lazy_module import LazyModule
-from orcapod.protocols.database_protocols import ArrowDatabase
-from orcapod.system_constants import constants
-from datetime import datetime, timezone
+
+if TYPE_CHECKING:
+    import pyarrow as pa
+    import pyarrow.compute as pc
+else:
+    pa = LazyModule("pyarrow")
+    pc = LazyModule("pyarrow.compute")
+
+logger = logging.getLogger(__name__)
+
+error_handling_options = Literal["raise", "ignore", "warn"]
 
 
-def process_function_output(self, values: Any) -> dict[str, DataValue]:
+def parse_function_outputs(self, values: Any) -> dict[str, DataValue]:
+    """
+    Process the output of a function and return a dictionary of DataValues, correctly parsing
+    the output based on expected number of values.
+    """
     output_values = []
     if len(self.output_keys) == 0:
         output_values = []
@@ -65,25 +84,21 @@ def combine_hashes(
     return combined_hash
 
 
-if TYPE_CHECKING:
-    import pyarrow as pa
-    import pyarrow.compute as pc
-else:
-    pa = LazyModule("pyarrow")
-    pc = LazyModule("pyarrow.compute")
-
-logger = logging.getLogger(__name__)
-
-error_handling_options = Literal["raise", "ignore", "warn"]
-
-
 class PacketFunctionBase(OrcapodBase):
     """
     Abstract base class for PacketFunction, defining the interface and common functionality.
     """
 
-    def __init__(self, version: str = "v0.0", **kwargs):
-        super().__init__(**kwargs)
+    def __init__(
+        self,
+        version: str = "v0.0",
+        label: str | None = None,
+        data_context: str | DataContext | None = None,
+        orcapod_config: Config | None = None,
+    ):
+        super().__init__(
+            label=label, data_context=data_context, orcapod_config=orcapod_config
+        )
         self._active = True
         self._version = version
 
@@ -123,7 +138,8 @@ class PacketFunctionBase(OrcapodBase):
     @abstractmethod
     def packet_function_type_id(self) -> str:
         """
-        Unique function type identifier
+        Unique function type identifier. This identifier is used for equivalence checks.
+        e.g. "python.function.v1"
         """
         ...
 
@@ -542,7 +558,7 @@ class CachedPacketFunction(PacketFunctionWrapper):
 
         self._result_database.add_record(
             self.record_path,
-            output_packet.record_id,
+            output_packet.datagram_id,
             data_table,
             skip_duplicates=skip_duplicates,
         )

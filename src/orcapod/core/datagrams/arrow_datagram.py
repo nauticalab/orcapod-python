@@ -4,9 +4,9 @@ from typing import TYPE_CHECKING, Any, Self
 
 from orcapod import contexts
 from orcapod.core.datagrams.base import BaseDatagram
-from orcapod.system_constants import constants
 from orcapod.protocols.core_protocols import ColumnConfig
 from orcapod.protocols.hashing_protocols import ContentHash
+from orcapod.system_constants import constants
 from orcapod.types import DataValue, PythonSchema
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
@@ -95,12 +95,13 @@ class ArrowDatagram(BaseDatagram):
         )
 
         # Extract context table from passed in table if present
+        # TODO: revisit the logic here
         if constants.CONTEXT_KEY in table.column_names and data_context is None:
             context_table = table.select([constants.CONTEXT_KEY])
             data_context = context_table[constants.CONTEXT_KEY].to_pylist()[0]
 
         # Initialize base class with data context
-        super().__init__(data_context=data_context, record_id=record_id, **kwargs)
+        super().__init__(data_context=data_context, datagram_id=record_id, **kwargs)
 
         meta_columns = [
             col for col in table.column_names if col.startswith(constants.META_PREFIX)
@@ -777,9 +778,11 @@ class ArrowDatagram(BaseDatagram):
         return new_datagram
 
     # 8. Utility Operations
-    def copy(self, include_cache: bool = True) -> Self:
+    def copy(self, include_cache: bool = True, preserve_id: bool = True) -> Self:
         """Return a copy of the datagram."""
-        new_datagram = super().copy()
+        new_datagram = super().copy(
+            include_cache=include_cache, preserve_id=preserve_id
+        )
 
         new_datagram._data_table = self._data_table
         new_datagram._meta_table = self._meta_table

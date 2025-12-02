@@ -20,7 +20,6 @@ import logging
 from abc import abstractmethod
 from collections.abc import Collection, Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Self, TypeAlias
-from uuid import UUID
 
 from uuid_utils import uuid7
 
@@ -121,18 +120,18 @@ class BaseDatagram(ContentIdentifiableBase):
     is interpreted and used is left to concrete implementations.
     """
 
-    def __init__(self, record_id: str | None = None, **kwargs):
+    def __init__(self, datagram_id: str | None = None, **kwargs):
         super().__init__(**kwargs)
-        self._record_id = record_id
+        self._datagram_id = datagram_id
 
     @property
-    def record_id(self) -> str:
+    def datagram_id(self) -> str:
         """
         Returns record ID
         """
-        if self._record_id is None:
-            self._record_id = str(uuid7())
-        return self._record_id
+        if self._datagram_id is None:
+            self._datagram_id = str(uuid7())
+        return self._datagram_id
 
     # TODO: revisit handling of identity structure for datagrams
     def identity_structure(self) -> Any:
@@ -283,13 +282,13 @@ class BaseDatagram(ContentIdentifiableBase):
         return new_datagram
 
     # 8. Utility Operations
-    def copy(self, include_cache: bool = True, preserve_record_id: bool = True) -> Self:
+    def copy(self, include_cache: bool = True, preserve_id: bool = True) -> Self:
         """Create a shallow copy of the datagram."""
         new_datagram = object.__new__(self.__class__)
         new_datagram._data_context = self._data_context
 
-        if preserve_record_id:
-            new_datagram._record_id = self._record_id
+        if preserve_id:
+            new_datagram._datagram_id = self._datagram_id
         else:
-            new_datagram._record_id = None
+            new_datagram._datagram_id = None
         return new_datagram

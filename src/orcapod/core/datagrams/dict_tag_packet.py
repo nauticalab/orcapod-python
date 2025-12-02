@@ -4,9 +4,9 @@ from typing import TYPE_CHECKING, Any, Self
 
 from orcapod import contexts
 from orcapod.core.datagrams.dict_datagram import DictDatagram
-from orcapod.system_constants import constants
 from orcapod.protocols.core_protocols import ColumnConfig
 from orcapod.semantic_types import infer_python_schema_from_pylist_data
+from orcapod.system_constants import constants
 from orcapod.types import DataValue, PythonSchema, PythonSchemaLike
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
@@ -209,17 +209,19 @@ class DictTag(DictDatagram):
         """
         return dict(self._system_tags)
 
-    def copy(self, include_cache: bool = True) -> Self:
+    def copy(self, include_cache: bool = True, preserve_id: bool = False) -> Self:
         """Return a shallow copy of the packet."""
         instance = super().copy(include_cache=include_cache)
         instance._system_tags = self._system_tags.copy()
         if include_cache:
             instance._cached_system_tags_table = self._cached_system_tags_table
             instance._cached_system_tags_schema = self._cached_system_tags_schema
-
         else:
             instance._cached_system_tags_table = None
             instance._cached_system_tags_schema = None
+
+        if preserve_id:
+            instance._datagram_id = self._datagram_id
 
         return instance
 
@@ -485,9 +487,9 @@ class DictPacket(DictDatagram):
 
         return new_packet
 
-    def copy(self, include_cache: bool = True) -> Self:
+    def copy(self, include_cache: bool = True, preserve_id: bool = True) -> Self:
         """Return a shallow copy of the packet."""
-        instance = super().copy(include_cache=include_cache)
+        instance = super().copy(include_cache=include_cache, preserve_id=preserve_id)
         instance._source_info = self._source_info.copy()
         if include_cache:
             instance._cached_source_info_table = self._cached_source_info_table
