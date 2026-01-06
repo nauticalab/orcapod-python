@@ -178,97 +178,92 @@ from upath import UPath
 
 class UPathStructConverter(SemanticStructConverterBase):
     """Converter for universal_pathlib.UPath objects to/from semantic structs."""
-
+    
     def __init__(self):
         super().__init__("upath")
         self._python_type = UPath
-
         # Define the Arrow struct type for upaths
         self._arrow_struct_type = pa.struct(
             [
-                pa.field("path", pa.large_string()),
+                pa.field("upath", pa.large_string()),
             ]
         )
-
+    
     @property
     def python_type(self) -> type:
         return self._python_type
-
+    
     @property
     def arrow_struct_type(self) -> pa.StructType:
         return self._arrow_struct_type
-
+    
     def python_to_struct_dict(self, value: UPath) -> dict[str, Any]:
         """Convert UPath to struct dictionary."""
         if not isinstance(value, UPath):
             raise TypeError(f"Expected UPath, got {type(value)}")
-
         return {
-            "path": str(value),
+            "upath": str(value),
         }
-
+    
     def struct_dict_to_python(self, struct_dict: dict[str, Any]) -> UPath:
         """Convert struct dictionary back to UPath."""
-        path_str = struct_dict.get("path")
+        path_str = struct_dict.get("upath")
         if path_str is None:
-            raise ValueError("Missing 'path' field in struct")
-
+            raise ValueError("Missing 'upath' field in struct")
         return UPath(path_str)
-
+    
     def can_handle_python_type(self, python_type: type) -> bool:
         """Check if this converter can handle the given Python type."""
         return issubclass(python_type, UPath)
-
+    
     def can_handle_struct_type(self, struct_type: pa.StructType) -> bool:
         """Check if this converter can handle the given struct type."""
         # Check if struct has the expected fields
         field_names = [field.name for field in struct_type]
-        expected_fields = {"path"}
-
+        expected_fields = {"upath"}
+        
         if set(field_names) != expected_fields:
             return False
-
+        
         # Check field types
         field_types = {field.name: field.type for field in struct_type}
-
-        return field_types["path"] == pa.large_string()
-
+        return field_types["upath"] == pa.large_string()
+    
     def is_semantic_struct(self, struct_dict: dict[str, Any]) -> bool:
         """Check if a struct dictionary represents this semantic type."""
-        return set(struct_dict.keys()) == {"path"} and isinstance(
-            struct_dict["path"], str
+        return set(struct_dict.keys()) == {"upath"} and isinstance(
+            struct_dict["upath"], str
         )
-
+    
     def hash_struct_dict(
         self, struct_dict: dict[str, Any], add_prefix: bool = False
     ) -> str:
         """
         Compute hash of the file content pointed to by the path.
-
+        
         Args:
-            struct_dict: Arrow struct dictionary with 'path' field
+            struct_dict: Arrow struct dictionary with 'upath' field
             add_prefix: If True, prefix with semantic type and algorithm info
-
+        
         Returns:
             Hash string of the file content, optionally prefixed
-
+        
         Raises:
             FileNotFoundError: If the file doesn't exist
             PermissionError: If the file can't be read
             OSError: For other file system errors
         """
-        path_str = struct_dict.get("path")
+        path_str = struct_dict.get("upath")
         if path_str is None:
-            raise ValueError("Missing 'path' field in struct")
-
+            raise ValueError("Missing 'upath' field in struct")
+        
         path = UPath(path_str)
-
+        
         try:
             # Read file content and compute hash
             content = path.read_bytes()
             hash_bytes = self._compute_content_hash(content)
             return self._format_hash_string(hash_bytes, add_prefix)
-
         except FileNotFoundError:
             raise FileNotFoundError(f"File not found: {path}")
         except PermissionError:
