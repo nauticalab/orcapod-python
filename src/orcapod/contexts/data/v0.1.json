@@ -9,6 +9,10 @@
                 "path": {
                     "_class": "orcapod.semantic_types.semantic_struct_converters.PathStructConverter",
                     "_config": {}
+                },
+                "upath": {
+                    "_class": "orcapod.semantic_types.semantic_struct_converters.UPathStructConverter",
+                    "_config": {}
                 }
             }
         }
