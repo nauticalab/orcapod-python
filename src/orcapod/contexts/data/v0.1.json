@@ -6,12 +6,12 @@
         "_class": "orcapod.semantic_types.semantic_registry.SemanticTypeRegistry",
         "_config": {
             "converters": {
-                "path": {
-                    "_class": "orcapod.semantic_types.semantic_struct_converters.PathStructConverter",
-                    "_config": {}
-                },
                 "upath": {
                     "_class": "orcapod.semantic_types.semantic_struct_converters.UPathStructConverter",
+                    "_config": {}
+                },
+                "path": {
+                    "_class": "orcapod.semantic_types.semantic_struct_converters.PathStructConverter",
                     "_config": {}
                 }
             }
