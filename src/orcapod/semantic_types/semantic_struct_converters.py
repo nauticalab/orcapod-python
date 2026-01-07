@@ -5,8 +5,10 @@ This replaces the metadata-based approach with explicit struct fields,
 making semantic types visible in schemas and preserved through operations.
 """
 
+from abc import ABC
 from typing import Any, TYPE_CHECKING
 from pathlib import Path
+from upath import UPath
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -68,102 +70,80 @@ class SemanticStructConverterBase:
 
         return hashlib.sha256(content).digest()
 
-
-# Path-specific implementation
-class PathStructConverter(SemanticStructConverterBase):
-    """Converter for pathlib.Path objects to/from semantic structs."""
-
-    def __init__(self):
-        super().__init__("path")
-        self._python_type = Path
-
-        # Define the Arrow struct type for paths
-        self._arrow_struct_type = pa.struct(
-            [
-                pa.field("path", pa.large_string()),
-            ]
-        )
-
+class FilePathStructConverterBase(SemanticStructConverterBase, ABC):
+    """Base converter for file path types Path and UPath, since they have similar APIs."""
+    
+    def __init__(self, name: str, path_type: type):
+        super().__init__(name)
+        self._python_type = path_type
+        self._field_name = name
+        self._arrow_struct_type = pa.struct([
+            pa.field(name, pa.large_string()),
+        ])
+    
     @property
     def python_type(self) -> type:
         return self._python_type
-
+    
     @property
-    def arrow_struct_type(self) -> pa.StructType:
+    def arrow_struct_type(self) -> "pa.StructType":
         return self._arrow_struct_type
-
-    def python_to_struct_dict(self, value: Path) -> dict[str, Any]:
-        """Convert Path to struct dictionary."""
-        if not isinstance(value, Path):
-            raise TypeError(f"Expected Path, got {type(value)}")
-
-        return {
-            "path": str(value),
-        }
-
-    def struct_dict_to_python(self, struct_dict: dict[str, Any]) -> Path:
-        """Convert struct dictionary back to Path."""
-        path_str = struct_dict.get("path")
+    
+    def python_to_struct_dict(self, value: Any) -> dict[str, Any]:
+        """Convert path object to struct dictionary."""
+        if not isinstance(value, self._python_type):
+            raise TypeError(f"Expected {self._python_type.__name__}, got {type(value)}")
+        return {self._field_name: str(value)}
+    
+    def struct_dict_to_python(self, struct_dict: dict[str, Any]) -> Any:
+        """Convert struct dictionary back to path object."""
+        path_str = struct_dict.get(self._field_name)
         if path_str is None:
-            raise ValueError("Missing 'path' field in struct")
-
-        return Path(path_str)
-
+            raise ValueError(f"Missing '{self._field_name}' field in struct")
+        return self._python_type(path_str)
+    
     def can_handle_python_type(self, python_type: type) -> bool:
         """Check if this converter can handle the given Python type."""
-        return issubclass(python_type, Path)
-
-    def can_handle_struct_type(self, struct_type: pa.StructType) -> bool:
+        return issubclass(python_type, self._python_type)
+    
+    def can_handle_struct_type(self, struct_type: "pa.StructType") -> bool:
         """Check if this converter can handle the given struct type."""
-        # Check if struct has the expected fields
         field_names = [field.name for field in struct_type]
-        expected_fields = {"path"}
-
-        if set(field_names) != expected_fields:
+        if set(field_names) != {self._field_name}:
             return False
-
-        # Check field types
         field_types = {field.name: field.type for field in struct_type}
-
-        return field_types["path"] == pa.large_string()
-
+        return field_types[self._field_name] == pa.large_string()
+    
     def is_semantic_struct(self, struct_dict: dict[str, Any]) -> bool:
         """Check if a struct dictionary represents this semantic type."""
-        return set(struct_dict.keys()) == {"path"} and isinstance(
-            struct_dict["path"], str
+        return (
+            set(struct_dict.keys()) == {self._field_name} 
+            and isinstance(struct_dict[self._field_name], str)
         )
-
+    
     def hash_struct_dict(
         self, struct_dict: dict[str, Any], add_prefix: bool = False
     ) -> str:
         """
         Compute hash of the file content pointed to by the path.
-
+        
         Args:
-            struct_dict: Arrow struct dictionary with 'path' field
+            struct_dict: Arrow struct dictionary with path field
             add_prefix: If True, prefix with semantic type and algorithm info
-
+        
         Returns:
             Hash string of the file content, optionally prefixed
-
-        Raises:
-            FileNotFoundError: If the file doesn't exist
-            PermissionError: If the file can't be read
-            OSError: For other file system errors
         """
-        path_str = struct_dict.get("path")
+        path_str = struct_dict.get(self._field_name)
         if path_str is None:
-            raise ValueError("Missing 'path' field in struct")
-
-        path = Path(path_str)
-
+            raise ValueError(f"Missing '{self._field_name}' field in struct")
+        
+        path = self._python_type(path_str)
+        
         try:
-            # TODO: replace with FileHasher implementation
-            # Read file content and compute hash
             content = path.read_bytes()
             hash_bytes = self._compute_content_hash(content)
             return self._format_hash_string(hash_bytes, add_prefix)
-
         except FileNotFoundError:
             raise FileNotFoundError(f"File not found: {path}")
         except PermissionError:
@@ -174,101 +154,15 @@ class PathStructConverter(SemanticStructConverterBase):
             raise OSError(f"Error reading file {path}: {e}")
 
 
-from upath import UPath
+class PathStructConverter(FilePathStructConverterBase):
+    """Converter for pathlib.Path objects to/from semantic structs."""
+    
+    def __init__(self):
+        super().__init__("path", Path)
 
-class UPathStructConverter(SemanticStructConverterBase):
+
+class UPathStructConverter(FilePathStructConverterBase):
     """Converter for universal_pathlib.UPath objects to/from semantic structs."""
     
     def __init__(self):
-        super().__init__("upath")
-        self._python_type = UPath
-        # Define the Arrow struct type for upaths
-        self._arrow_struct_type = pa.struct(
-            [
-                pa.field("upath", pa.large_string()),
-            ]
-        )
-    
-    @property
-    def python_type(self) -> type:
-        return self._python_type
-    
-    @property
-    def arrow_struct_type(self) -> pa.StructType:
-        return self._arrow_struct_type
-    
-    def python_to_struct_dict(self, value: UPath) -> dict[str, Any]:
-        """Convert UPath to struct dictionary."""
-        if not isinstance(value, UPath):
-            raise TypeError(f"Expected UPath, got {type(value)}")
-        return {
-            "upath": str(value),
-        }
-    
-    def struct_dict_to_python(self, struct_dict: dict[str, Any]) -> UPath:
-        """Convert struct dictionary back to UPath."""
-        path_str = struct_dict.get("upath")
-        if path_str is None:
-            raise ValueError("Missing 'upath' field in struct")
-        return UPath(path_str)
-    
-    def can_handle_python_type(self, python_type: type) -> bool:
-        """Check if this converter can handle the given Python type."""
-        return issubclass(python_type, UPath)
-    
-    def can_handle_struct_type(self, struct_type: pa.StructType) -> bool:
-        """Check if this converter can handle the given struct type."""
-        # Check if struct has the expected fields
-        field_names = [field.name for field in struct_type]
-        expected_fields = {"upath"}
-        
-        if set(field_names) != expected_fields:
-            return False
-        
-        # Check field types
-        field_types = {field.name: field.type for field in struct_type}
-        return field_types["upath"] == pa.large_string()
-    
-    def is_semantic_struct(self, struct_dict: dict[str, Any]) -> bool:
-        """Check if a struct dictionary represents this semantic type."""
-        return set(struct_dict.keys()) == {"upath"} and isinstance(
-            struct_dict["upath"], str
-        )
-    
-    def hash_struct_dict(
-        self, struct_dict: dict[str, Any], add_prefix: bool = False
-    ) -> str:
-        """
-        Compute hash of the file content pointed to by the path.
-        
-        Args:
-            struct_dict: Arrow struct dictionary with 'upath' field
-            add_prefix: If True, prefix with semantic type and algorithm info
-        
-        Returns:
-            Hash string of the file content, optionally prefixed
-        
-        Raises:
-            FileNotFoundError: If the file doesn't exist
-            PermissionError: If the file can't be read
-            OSError: For other file system errors
-        """
-        path_str = struct_dict.get("upath")
-        if path_str is None:
-            raise ValueError("Missing 'upath' field in struct")
-        
-        path = UPath(path_str)
-        
-        try:
-            # Read file content and compute hash
-            content = path.read_bytes()
-            hash_bytes = self._compute_content_hash(content)
-            return self._format_hash_string(hash_bytes, add_prefix)
-        except FileNotFoundError:
-            raise FileNotFoundError(f"File not found: {path}")
-        except PermissionError:
-            raise PermissionError(f"Permission denied reading file: {path}")
-        except IsADirectoryError:
-            raise ValueError(f"Path is a directory, not a file: {path}")
-        except OSError as e:
-            raise OSError(f"Error reading file {path}: {e}")
+        super().__init__("upath", UPath)
