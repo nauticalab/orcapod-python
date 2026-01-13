@@ -662,6 +662,19 @@ class UniversalTypeConverter:
                     f"f{i}": converters[i](item) for i, item in enumerate(value)
                 }
 
+        # Handle Optional[T] unions; complex unions (e.g., A | B) are not currently supported
+        elif origin is typing.Union or origin is types.UnionType:
+            non_none_types = [t for t in args if t is not type(None)]
+            if len(non_none_types) == 1:
+                # Optional[T] - use converter for T, pass through None
+                inner_converter = self.get_python_to_arrow_converter(non_none_types[0])
+                return lambda value: inner_converter(value) if value is not None else None
+            else:
+                raise ValueError(
+                    f"Complex unions with multiple non-None types are not supported: {python_type}. "
+                    f"Only Optional[T] (i.e., T | None) is allowed."
+                )
+
         else:
             # Default passthrough
             return lambda value: value
