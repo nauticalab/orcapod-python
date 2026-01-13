@@ -30,6 +30,38 @@ def test_python_type_to_arrow_type_custom():
     assert field.name == "path"
     assert field.type == pa.large_string()
 
+def test_python_type_to_arrow_type_upath():
+    from upath import UPath
+    arrow_type = universal_converter.python_type_to_arrow_type(UPath)
+    # Should be a StructType with field 'upath' of type large_string
+    assert isinstance(arrow_type, pa.StructType)
+    assert len(arrow_type) == 1
+    field = arrow_type[0]
+    assert field.name == "upath"
+    assert field.type == pa.large_string()
+
+def test_optional_upath_converter():
+    """Test that Optional[UPath] correctly converts UPath values."""
+    from upath import UPath
+    
+    to_arrow, to_python = universal_converter.get_conversion_functions(UPath | None)
+    
+    # Test with UPath value
+    path = UPath("/tmp/test.txt")
+    result = to_arrow(path)
+    assert result == {"upath": "/tmp/test.txt"}
+    
+    # Test with None
+    assert to_arrow(None) is None
+
+
+def test_complex_union_raises_error():
+    """Test that complex unions (multiple non-None types) raise ValueError."""
+    from upath import UPath
+    from pathlib import Path
+    
+    with pytest.raises(ValueError, match="Complex unions"):
+        universal_converter.get_conversion_functions(UPath | Path)
 
 def test_python_type_to_arrow_type_context():
     ctx = get_default_context()

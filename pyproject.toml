@@ -19,6 +19,7 @@ dependencies = [
     "deltalake>=1.0.2",
     "graphviz>=0.21",
     "gitpython>=3.1.45",
+    "universal-pathlib>=0.3.8",
 ]
 readme = "README.md"
 requires-python = ">=3.11.0"
