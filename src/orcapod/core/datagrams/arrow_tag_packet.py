@@ -7,7 +7,7 @@ from orcapod.core.datagrams.arrow_datagram import ArrowDatagram
 from orcapod.protocols.core_protocols import ColumnConfig
 from orcapod.semantic_types import infer_python_schema_from_pylist_data
 from orcapod.system_constants import constants
-from orcapod.types import DataValue, PythonSchema
+from orcapod.types import DataValue, Schema
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -96,7 +96,7 @@ class ArrowTag(ArrowDatagram):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> PythonSchema:
+    ) -> Schema:
         """Return copy of the Python schema."""
         schema = super().schema(
             columns=columns,
@@ -281,7 +281,7 @@ class ArrowPacket(ArrowDatagram):
         self._source_info_table = prefixed_tables[constants.SOURCE_PREFIX]
 
         self._cached_source_info: dict[str, str | None] | None = None
-        self._cached_python_schema: PythonSchema | None = None
+        self._cached_python_schema: Schema | None = None
 
     def keys(
         self,
@@ -303,7 +303,7 @@ class ArrowPacket(ArrowDatagram):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> PythonSchema:
+    ) -> Schema:
         """Return copy of the Python schema."""
         schema = super().schema(
             columns=columns,

@@ -8,7 +8,7 @@ from orcapod.protocols.core_protocols import ColumnConfig
 from orcapod.protocols.hashing_protocols import ContentHash
 from orcapod.semantic_types import infer_python_schema_from_pylist_data
 from orcapod.system_constants import constants
-from orcapod.types import DataValue, PythonSchema, PythonSchemaLike
+from orcapod.types import DataValue, Schema, PythonSchemaLike
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -219,7 +219,7 @@ class DictDatagram(BaseDatagram):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> PythonSchema:
+    ) -> Schema:
         """
         Return Python schema for the datagram.
 

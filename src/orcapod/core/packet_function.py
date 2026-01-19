@@ -19,7 +19,7 @@ from orcapod.hashing.hash_utils import get_function_components, get_function_sig
 from orcapod.protocols.core_protocols import Packet, PacketFunction
 from orcapod.protocols.database_protocols import ArrowDatabase
 from orcapod.system_constants import constants
-from orcapod.types import DataValue, PythonSchema, PythonSchemaLike
+from orcapod.types import DataValue, Schema, PythonSchemaLike
 from orcapod.utils import schema_utils
 from orcapod.utils.git_utils import get_git_info_for_python_object
 from orcapod.utils.lazy_module import LazyModule
@@ -162,7 +162,7 @@ class PacketFunctionBase(OrcapodBase):
 
     @property
     @abstractmethod
-    def input_packet_schema(self) -> PythonSchema:
+    def input_packet_schema(self) -> Schema:
         """
         Return the input typespec for the pod. This is used to validate the input streams.
         """
@@ -170,7 +170,7 @@ class PacketFunctionBase(OrcapodBase):
 
     @property
     @abstractmethod
-    def output_packet_schema(self) -> PythonSchema:
+    def output_packet_schema(self) -> Schema:
         """
         Return the output typespec for the pod. This is used to validate the output streams.
         """
@@ -296,14 +296,14 @@ class PythonPacketFunction(PacketFunctionBase):
         return {"python_version": python_version_str, "execution_context": "local"}
 
     @property
-    def input_packet_schema(self) -> PythonSchema:
+    def input_packet_schema(self) -> Schema:
         """
         Return the input typespec for the pod. This is used to validate the input streams.
         """
         return self._input_schema
 
     @property
-    def output_packet_schema(self) -> PythonSchema:
+    def output_packet_schema(self) -> Schema:
         """
         Return the output typespec for the pod. This is used to validate the output streams.
         """
@@ -394,11 +394,11 @@ class PacketFunctionWrapper(PacketFunctionBase):
         return self._packet_function.canonical_function_name
 
     @property
-    def input_packet_schema(self) -> PythonSchema:
+    def input_packet_schema(self) -> Schema:
         return self._packet_function.input_packet_schema
 
     @property
-    def output_packet_schema(self) -> PythonSchema:
+    def output_packet_schema(self) -> Schema:
         return self._packet_function.output_packet_schema
 
     def get_function_variation_data(self) -> dict[str, Any]:

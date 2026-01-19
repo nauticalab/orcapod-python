@@ -18,7 +18,7 @@ from orcapod.protocols.core_protocols import (
     Tag,
     TrackerManager,
 )
-from orcapod.types import PythonSchema
+from orcapod.types import Schema
 from orcapod.utils.lazy_module import LazyModule
 
 logger = logging.getLogger(__name__)
@@ -102,7 +102,7 @@ class StaticOutputPod(OrcapodBase):
         *streams: Stream,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         """
         Determine output types without triggering computation.
 
@@ -240,7 +240,7 @@ class DynamicPodStream(StreamBase):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         """
         Returns the schemas of the tag and packet columns in the stream.
         """

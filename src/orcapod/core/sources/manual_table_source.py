@@ -9,7 +9,7 @@ from orcapod.core.sources.source_registry import SourceRegistry
 from orcapod.core.streams import TableStream
 from orcapod.errors import DuplicateTagError
 from orcapod.protocols import core_protocols as cp
-from orcapod.types import PythonSchema, PythonSchemaLike
+from orcapod.types import Schema, PythonSchemaLike
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -140,11 +140,11 @@ class ManualDeltaTableSource(SourceBase):
 
     def source_output_types(
         self, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         """Return tag and packet types based on schema and tag columns."""
         # TODO: auto add system entry tag
-        tag_types: PythonSchema = {}
-        packet_types: PythonSchema = {}
+        tag_types: Schema = {}
+        packet_types: Schema = {}
         for field, field_type in self.python_schema.items():
             if field in self.tag_columns:
                 tag_types[field] = field_type

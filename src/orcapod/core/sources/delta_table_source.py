@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod.core.streams import TableStream
 from orcapod.protocols import core_protocols as cp
-from orcapod.types import PathLike, PythonSchema
+from orcapod.types import PathLike, Schema
 from orcapod.utils.lazy_module import LazyModule
 from pathlib import Path
 
@@ -95,7 +95,7 @@ class DeltaTableSource(SourceBase):
 
     def source_output_types(
         self, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         """Return tag and packet types based on Delta table schema."""
         # Create a sample stream to get types
         return self.forward().types(include_system_tags=include_system_tags)

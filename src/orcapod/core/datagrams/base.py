@@ -25,7 +25,7 @@ from uuid_utils import uuid7
 
 from orcapod.core.base import ContentIdentifiableBase
 from orcapod.protocols.core_protocols import ColumnConfig
-from orcapod.types import DataValue, PythonSchema
+from orcapod.types import DataValue, Schema
 from orcapod.utils.lazy_module import LazyModule
 
 logger = logging.getLogger(__name__)
@@ -193,7 +193,7 @@ class BaseDatagram(ContentIdentifiableBase):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> PythonSchema:
+    ) -> Schema:
         """Return type specification for the datagram."""
         ...
 

@@ -5,7 +5,7 @@ from orcapod.core.operators.base import NonZeroInputOperator
 from orcapod.core.streams import TableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import ArgumentGroup, ColumnConfig, Stream
-from orcapod.types import PythonSchema
+from orcapod.types import Schema
 from orcapod.utils import arrow_data_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -45,7 +45,7 @@ class Join(NonZeroInputOperator):
         *streams: Stream,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         if len(streams) == 1:
             # If only one stream is provided, return its typespecs
             return streams[0].output_schema(columns=columns, all_info=all_info)

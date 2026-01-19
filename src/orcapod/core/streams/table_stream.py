@@ -12,7 +12,7 @@ from orcapod.core.datagrams import (
 from orcapod.core.streams.base import StreamBase
 from orcapod.protocols.core_protocols import ColumnConfig, Pod, Stream, Tag
 from orcapod.system_constants import constants
-from orcapod.types import PythonSchema
+from orcapod.types import Schema
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -192,7 +192,7 @@ class TableStream(StreamBase):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         """
         Returns the types of the tag and packet columns in the stream.
         This is useful for accessing the types of the columns in the stream.

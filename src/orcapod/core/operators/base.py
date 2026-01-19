@@ -4,7 +4,7 @@ from typing import Any
 
 from orcapod.core.static_output_pod import StaticOutputPod
 from orcapod.protocols.core_protocols import ArgumentGroup, ColumnConfig, Stream
-from orcapod.types import PythonSchema
+from orcapod.types import Schema
 
 
 class Operator(StaticOutputPod):
@@ -48,7 +48,7 @@ class UnaryOperator(Operator):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         """
         This method should be implemented by subclasses to return the typespecs of the input and output streams.
         It takes two streams as input and returns a tuple of typespecs.
@@ -74,7 +74,7 @@ class UnaryOperator(Operator):
         *streams: Stream,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         stream = streams[0]
         return self.unary_output_schema(stream, columns=columns, all_info=all_info)
 
@@ -114,7 +114,7 @@ class BinaryOperator(Operator):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]: ...
+    ) -> tuple[Schema, Schema]: ...
 
     @abstractmethod
     def is_commutative(self) -> bool:
@@ -128,7 +128,7 @@ class BinaryOperator(Operator):
         *streams: Stream,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         left_stream, right_stream = streams
         return self.binary_output_schema(
             left_stream, right_stream, columns=columns, all_info=all_info

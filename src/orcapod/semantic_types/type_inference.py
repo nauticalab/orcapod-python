@@ -1,5 +1,5 @@
 from types import UnionType
-from typing import Any, Union, get_origin, get_args
+from typing import Any, Union
 from collections.abc import Collection, Mapping
 
 from orcapod.types import PythonSchema

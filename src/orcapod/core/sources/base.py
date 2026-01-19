@@ -10,7 +10,7 @@ from orcapod.core.streams import (
 )
 from orcapod.protocols import core_protocols as cp
 import orcapod.protocols.core_protocols.execution_engine
-from orcapod.types import PythonSchema
+from orcapod.types import Schema
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -92,9 +92,7 @@ class InvocationBase(TrackedKernelBase, StatefulStreamBase):
         """Delegate to the cached KernelStream."""
         return self().keys(include_system_tags=include_system_tags)
 
-    def types(
-        self, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
+    def types(self, include_system_tags: bool = False) -> tuple[Schema, Schema]:
         """Delegate to the cached KernelStream."""
         return self().types(include_system_tags=include_system_tags)
 
@@ -268,7 +266,7 @@ class SourceBase(TrackedKernelBase, StatefulStreamBase):
 
     def kernel_output_types(
         self, *streams: cp.Stream, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         return self.source_output_types(include_system_tags=include_system_tags)
 
     @abstractmethod
@@ -339,9 +337,7 @@ class SourceBase(TrackedKernelBase, StatefulStreamBase):
         """Delegate to the cached KernelStream."""
         return self().keys(include_system_tags=include_system_tags)
 
-    def types(
-        self, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
+    def types(self, include_system_tags: bool = False) -> tuple[Schema, Schema]:
         """Delegate to the cached KernelStream."""
         return self().types(include_system_tags=include_system_tags)
 
@@ -484,7 +480,7 @@ class StreamSource(SourceBase):
 
     def source_output_types(
         self, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         """
         Returns the types of the tag and packet columns in the stream.
         This is useful for accessing the types of the columns in the stream.

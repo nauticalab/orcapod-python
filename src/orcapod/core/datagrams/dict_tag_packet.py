@@ -7,7 +7,7 @@ from orcapod.core.datagrams.dict_datagram import DictDatagram
 from orcapod.protocols.core_protocols import ColumnConfig
 from orcapod.semantic_types import infer_python_schema_from_pylist_data
 from orcapod.system_constants import constants
-from orcapod.types import DataValue, PythonSchema, PythonSchemaLike
+from orcapod.types import DataValue, Schema, PythonSchemaLike
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -63,8 +63,8 @@ class DictTag(DictDatagram):
         )
 
         self._system_tags = {**extracted_system_tags, **(system_tags or {})}
-        self._system_tags_python_schema: PythonSchema = (
-            infer_python_schema_from_pylist_data([self._system_tags])
+        self._system_tags_python_schema: Schema = infer_python_schema_from_pylist_data(
+            [self._system_tags]
         )
         self._cached_system_tags_table: pa.Table | None = None
         self._cached_system_tags_schema: pa.Schema | None = None
@@ -138,7 +138,7 @@ class DictTag(DictDatagram):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> PythonSchema:
+    ) -> Schema:
         """Return copy of the Python schema."""
         schema = super().schema(columns=columns, all_info=all_info)
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
@@ -366,7 +366,7 @@ class DictPacket(DictDatagram):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> PythonSchema:
+    ) -> Schema:
         """Return copy of the Python schema."""
         schema = super().schema(columns=columns, all_info=all_info)
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)

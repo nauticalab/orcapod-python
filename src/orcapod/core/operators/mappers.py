@@ -6,7 +6,7 @@ from orcapod.core.streams import TableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import ColumnConfig, Stream
 from orcapod.system_constants import constants
-from orcapod.types import PythonSchema
+from orcapod.types import Schema
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -98,7 +98,7 @@ class MapPackets(UnaryOperator):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         tag_typespec, packet_typespec = stream.output_schema(
             columns=columns, all_info=all_info
         )
@@ -197,7 +197,7 @@ class MapTags(UnaryOperator):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
         include_system_tags: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         tag_typespec, packet_typespec = stream.output_schema(
             columns=columns, all_info=all_info
         )

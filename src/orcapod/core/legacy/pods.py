@@ -21,7 +21,7 @@ from orcapod.hashing.hash_utils import get_function_components, get_function_sig
 from orcapod.protocols import core_protocols as cp
 from orcapod.protocols import hashing_protocols as hp
 from orcapod.protocols.database_protocols import ArrowDatabase
-from orcapod.types import DataValue, PythonSchema, PythonSchemaLike
+from orcapod.types import DataValue, Schema, PythonSchemaLike
 from orcapod.utils import types_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -68,14 +68,14 @@ class ActivatablePodBase(TrackedKernelBase):
     """
 
     @abstractmethod
-    def input_packet_types(self) -> PythonSchema:
+    def input_packet_types(self) -> Schema:
         """
         Return the input typespec for the pod. This is used to validate the input streams.
         """
         ...
 
     @abstractmethod
-    def output_packet_types(self) -> PythonSchema:
+    def output_packet_types(self) -> Schema:
         """
         Return the output typespec for the pod. This is used to validate the output streams.
         """
@@ -130,7 +130,7 @@ class ActivatablePodBase(TrackedKernelBase):
 
     def kernel_output_types(
         self, *streams: cp.Stream, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         """
         Return the input and output typespecs for the pod.
         This is used to validate the input and output streams.
@@ -384,14 +384,14 @@ class FunctionPod(ActivatablePodBase):
             prefix_hasher_id=True,
         )
 
-    def input_packet_types(self) -> PythonSchema:
+    def input_packet_types(self) -> Schema:
         """
         Return the input typespec for the function pod.
         This is used to validate the input streams.
         """
         return self._input_packet_schema.copy()
 
-    def output_packet_types(self) -> PythonSchema:
+    def output_packet_types(self) -> Schema:
         """
         Return the output typespec for the function pod.
         This is used to validate the output streams.
@@ -600,14 +600,14 @@ class WrappedPod(ActivatablePodBase):
     def computed_label(self) -> str | None:
         return self.pod.label
 
-    def input_packet_types(self) -> PythonSchema:
+    def input_packet_types(self) -> Schema:
         """
         Return the input typespec for the stored pod.
         This is used to validate the input streams.
         """
         return self.pod.input_packet_types()
 
-    def output_packet_types(self) -> PythonSchema:
+    def output_packet_types(self) -> Schema:
         """
         Return the output typespec for the stored pod.
         This is used to validate the output streams.

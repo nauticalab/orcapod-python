@@ -1,7 +1,7 @@
 from orcapod.protocols.hashing_protocols import FunctionInfoExtractor
 from collections.abc import Callable
 from typing import Any, Literal
-from orcapod.types import PythonSchema
+from orcapod.types import Schema
 import inspect
 
 
@@ -14,8 +14,8 @@ class FunctionNameExtractor:
         self,
         func: Callable[..., Any],
         function_name: str | None = None,
-        input_typespec: PythonSchema | None = None,
-        output_typespec: PythonSchema | None = None,
+        input_typespec: Schema | None = None,
+        output_typespec: Schema | None = None,
     ) -> dict[str, Any]:
         if not callable(func):
             raise TypeError("Provided object is not callable")
@@ -38,8 +38,8 @@ class FunctionSignatureExtractor:
         self,
         func: Callable[..., Any],
         function_name: str | None = None,
-        input_typespec: PythonSchema | None = None,
-        output_typespec: PythonSchema | None = None,
+        input_typespec: Schema | None = None,
+        output_typespec: Schema | None = None,
     ) -> dict[str, Any]:
         if not callable(func):
             raise TypeError("Provided object is not callable")

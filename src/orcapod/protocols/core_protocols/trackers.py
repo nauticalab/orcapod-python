@@ -51,7 +51,7 @@ class Tracker(Protocol):
         ...
 
     def record_pod_invocation(
-        self, pod: Pod, upstreams: tuple[Stream, ...], label: str | None = None
+        self, pod: Pod, upstreams: tuple[Stream, ...] = (), label: str | None = None
     ) -> None:
         """
         Record a pod invocation in the computational graph.
@@ -59,32 +59,13 @@ class Tracker(Protocol):
         This method is called whenever a pod is invoked. The tracker
         should record:
         - The pod and its properties
-        - The input streams that were used as input
+        - The input streams that were used as input. If no streams are provided, the pod is considered a source pod.
         - Timing and performance information
         - Any relevant metadata
 
         Args:
             pod: The pod that was invoked
             upstreams: The input streams used for this invocation
-        """
-        ...
-
-    def record_source_pod_invocation(
-        self, source_pod: SourcePod, label: str | None = None
-    ) -> None:
-        """
-        Record a source pod invocation in the computational graph.
-
-        This method should be called to track a source pod invocation.
-        The tracker should record:
-        - The pod and its properties
-        - The input streams that were used as input
-        - Timing and performance information
-        - Any relevant metadata
-
-        Args:
-            source_pod: The source pod that was invoked
-            label: An optional label for the invocation
         """
         ...
 
@@ -170,7 +151,7 @@ class TrackerManager(Protocol):
         ...
 
     def record_pod_invocation(
-        self, pod: Pod, upstreams: tuple[Stream, ...], label: str | None = None
+        self, pod: Pod, upstreams: tuple[Stream, ...] = (), label: str | None = None
     ) -> None:
         """
         Record a stream in all active trackers.
@@ -181,23 +162,6 @@ class TrackerManager(Protocol):
 
         Args:
             stream: The stream to record in all active trackers
-        """
-        ...
-
-    def record_source_pod_invocation(
-        self, source_pod: SourcePod, label: str | None = None
-    ) -> None:
-        """
-        Record a source invocation in the computational graph.
-
-        This method is called whenever a source is invoked. The tracker
-        should record:
-        - The source and its properties
-        - Timing and performance information
-        - Any relevant metadata
-
-        Args:
-            source: The source that was invoked
         """
         ...
 

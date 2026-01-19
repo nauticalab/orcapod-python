@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.streams.base import StreamBase
 from orcapod.protocols import core_protocols as cp
 from orcapod.system_constants import constants
-from orcapod.types import PythonSchema
+from orcapod.types import Schema
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -141,9 +141,7 @@ class LazyPodResultStream(StreamBase):
         packet_keys = tuple(self.pod.output_packet_types().keys())
         return tag_keys, packet_keys
 
-    def types(
-        self, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
+    def types(self, include_system_tags: bool = False) -> tuple[Schema, Schema]:
         tag_typespec, _ = self.prepared_stream.types(
             include_system_tags=include_system_tags
         )

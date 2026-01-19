@@ -7,7 +7,7 @@ from orcapod.core.datagrams.base import BaseDatagram
 from orcapod.protocols.core_protocols import ColumnConfig
 from orcapod.protocols.hashing_protocols import ContentHash
 from orcapod.system_constants import constants
-from orcapod.types import DataValue, PythonSchema
+from orcapod.types import DataValue, Schema
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -151,9 +151,9 @@ class ArrowDatagram(BaseDatagram):
         )
 
         # Initialize caches
-        self._cached_python_schema: PythonSchema | None = None
+        self._cached_python_schema: Schema | None = None
         self._cached_python_dict: dict[str, DataValue] | None = None
-        self._cached_meta_python_schema: PythonSchema | None = None
+        self._cached_meta_python_schema: Schema | None = None
         self._cached_content_hash: ContentHash | None = None
 
     # 1. Core Properties (Identity & Structure)
@@ -225,7 +225,7 @@ class ArrowDatagram(BaseDatagram):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> PythonSchema:
+    ) -> Schema:
         """
         Return Python schema for the datagram.
 

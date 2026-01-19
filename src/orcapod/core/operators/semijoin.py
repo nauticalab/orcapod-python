@@ -4,7 +4,7 @@ from orcapod.core.operators.base import BinaryOperator
 from orcapod.core.streams import TableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import ColumnConfig, Stream
-from orcapod.types import PythonSchema
+from orcapod.types import Schema
 from orcapod.utils import schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -83,7 +83,7 @@ class SemiJoin(BinaryOperator):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         """
         Returns the output types for the semi-join operation.
         The output preserves the exact schema of the left stream.

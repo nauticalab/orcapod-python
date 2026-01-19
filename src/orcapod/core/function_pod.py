@@ -23,7 +23,7 @@ from orcapod.protocols.core_protocols import (
 from orcapod.protocols.database_protocols import ArrowDatabase
 from orcapod.system_constants import constants
 from orcapod.config import Config
-from orcapod.types import PythonSchema
+from orcapod.types import Schema
 from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -67,6 +67,7 @@ class FunctionPod(OrcapodBase):
     @property
     def uri(self) -> tuple[str, ...]:
         return (
+            self.packet_function.canonical_function_name,
             self.packet_function.packet_function_type_id,
             f"v{self.packet_function.major_version}",
             self._output_schema_hash,
@@ -180,7 +181,7 @@ class FunctionPod(OrcapodBase):
         *streams: Stream,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         tag_schema = self.multi_stream_handler().output_schema(
             *streams, columns=columns, all_info=all_info
         )[0]
@@ -237,7 +238,7 @@ class FunctionPodStream(StreamBase):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         tag_schema = self._input_stream.output_schema(
             columns=columns, all_info=all_info
         )[0]
@@ -467,7 +468,7 @@ class WrappedFunctionPod(FunctionPod):
         *streams: Stream,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         return self._function_pod.output_schema(
             *streams, columns=columns, all_info=all_info
         )
@@ -549,7 +550,7 @@ class FunctionPodNode(OrcapodBase):
     def identity_structure(self) -> Any:
         # Identity of function pod node is the identity of the
         # (cached) packet function + input stream
-        return (self._cached_packet_function, self._input_stream)
+        return (self._cached_packet_function, (self._input_stream,))
 
     @property
     def pipeline_path(self) -> tuple[str, ...]:
@@ -658,7 +659,7 @@ class FunctionPodNode(OrcapodBase):
         *streams: Stream,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         # TODO: decide on how to handle extra inputs if provided
 
         tag_schema = self._input_stream.output_schema(
@@ -798,7 +799,7 @@ class FunctionPodNodeStream(StreamBase):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         tag_schema = self._input_stream.output_schema(
             columns=columns, all_info=all_info
         )[0]

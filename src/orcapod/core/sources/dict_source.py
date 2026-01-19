@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Any
 
 
 from orcapod.protocols import core_protocols as cp
-from orcapod.types import DataValue, PythonSchema, PythonSchemaLike
+from orcapod.types import DataValue, Schema, PythonSchemaLike
 from orcapod.utils.lazy_module import LazyModule
 from orcapod.contexts.system_constants import constants
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
@@ -105,7 +105,7 @@ class DictSource(SourceBase):
 
     def source_output_types(
         self, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         """Return tag and packet types based on provided typespecs."""
         # TODO: add system tag
         return self._table_source.source_output_types(

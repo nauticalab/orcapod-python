@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod.core.streams import TableStream
 from orcapod.protocols import core_protocols as cp
-from orcapod.types import PythonSchema
+from orcapod.types import Schema
 from orcapod.utils.lazy_module import LazyModule
 from orcapod.contexts.system_constants import constants
 from orcapod.core import polars_data_utils
@@ -148,6 +148,6 @@ class DataFrameSource(SourceBase):
 
     def source_output_types(
         self, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         """Return tag and packet types based on provided typespecs."""
         return self._table_stream.types(include_system_tags=include_system_tags)

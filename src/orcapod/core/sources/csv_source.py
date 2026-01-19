@@ -5,7 +5,7 @@ from orcapod.core.streams import (
     TableStream,
 )
 from orcapod.protocols import core_protocols as cp
-from orcapod.types import PythonSchema
+from orcapod.types import Schema
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -59,7 +59,7 @@ class CSVSource(SourceBase):
 
     def source_output_types(
         self, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         """Infer types from the file (could be cached)."""
         # For demonstration - in practice you might cache this
         sample_stream = self.forward()

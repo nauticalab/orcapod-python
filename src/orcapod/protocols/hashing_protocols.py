@@ -17,12 +17,12 @@ class ContentHash:
     digest: bytes
 
     # TODO: make the default char count configurable
-    def to_hex(self, char_count: int | None = 20) -> str:
+    def to_hex(self, char_count: int | None = None) -> str:
         """Convert digest to hex string, optionally truncated."""
         hex_str = self.digest.hex()
         return hex_str[:char_count] if char_count else hex_str
 
-    def to_int(self, hexdigits: int = 20) -> int:
+    def to_int(self, hexdigits: int | None = None) -> int:
         """
         Convert digest to integer representation.
 
@@ -32,8 +32,7 @@ class ContentHash:
         Returns:
             Integer representation of the hash
         """
-        hex_str = self.to_hex()[:hexdigits]
-        return int(hex_str, 16)
+        return int(self.to_hex(hexdigits), 16)
 
     def to_uuid(self, namespace: uuid.UUID = uuid.NAMESPACE_OID) -> uuid.UUID:
         """
@@ -54,11 +53,13 @@ class ContentHash:
 
         return base64.b64encode(self.digest).decode("ascii")
 
-    def to_string(self, prefix_method: bool = True) -> str:
+    def to_string(
+        self, prefix_method: bool = True, hexdigits: int | None = None
+    ) -> str:
         """Convert digest to a string representation."""
         if prefix_method:
-            return f"{self.method}:{self.to_hex()}"
-        return self.to_hex()
+            return f"{self.method}:{self.to_hex(hexdigits)}"
+        return self.to_hex(hexdigits)
 
     def __str__(self) -> str:
         return self.to_string()

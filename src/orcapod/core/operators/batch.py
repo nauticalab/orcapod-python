@@ -12,7 +12,7 @@ else:
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")
 
-from orcapod.types import PythonSchema
+from orcapod.types import Schema
 
 
 class Batch(UnaryOperator):
@@ -73,7 +73,7 @@ class Batch(UnaryOperator):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         """
         This method should be implemented by subclasses to return the typespecs of the input and output streams.
         It takes two streams as input and returns a tuple of typespecs.
@@ -85,7 +85,7 @@ class Batch(UnaryOperator):
         batched_packet_types = {k: list[v] for k, v in packet_types.items()}
 
         # TODO: check if this is really necessary
-        return PythonSchema(batched_tag_types), PythonSchema(batched_packet_types)
+        return Schema(batched_tag_types), Schema(batched_packet_types)
 
     def identity_structure(self) -> Any:
         return (self.__class__.__name__, self.batch_size, self.drop_partial_batch)

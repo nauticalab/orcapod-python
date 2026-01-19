@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod.core.base import OrcapodBase
 from orcapod.protocols.core_protocols import ColumnConfig, Packet, Pod, Stream, Tag
-from orcapod.types import PythonSchema
+from orcapod.types import Schema
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -43,10 +43,11 @@ class StreamBase(OrcapodBase):
         # Identity of a PodStream is determined by the pod and its upstreams
         if self.source is None:
             raise ValueError("Stream has no source pod for identity structure.")
-        return (
-            self.source,
-            self.source.argument_symmetry(self.upstreams),
-        )
+
+        structure = (self.source,)
+        if len(self.upstreams) > 0:
+            structure += (self.source.argument_symmetry(self.upstreams),)
+        return structure
 
     def join(self, other_stream: Stream, label: str | None = None) -> Stream:
         """
@@ -193,7 +194,7 @@ class StreamBase(OrcapodBase):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]: ...
+    ) -> tuple[Schema, Schema]: ...
 
     def __iter__(
         self,

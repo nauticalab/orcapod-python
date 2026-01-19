@@ -14,7 +14,7 @@ from orcapod.core.streams import (
 )
 from orcapod.errors import DuplicateTagError
 from orcapod.protocols import core_protocols as cp
-from orcapod.types import DataValue, PythonSchema
+from orcapod.types import DataValue, Schema
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 from orcapod.contexts.system_constants import constants
