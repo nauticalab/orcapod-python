@@ -6,7 +6,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
-from orcapod.core.base import OrcapodBase
+from orcapod.core.base import TraceableBase
 from orcapod.protocols import core_protocols as cp
 
 if TYPE_CHECKING:
@@ -144,7 +144,7 @@ class AutoRegisteringContextBasedTracker(ABC):
         self.set_active(False)
 
 
-class Invocation(OrcapodBase):
+class Invocation(TraceableBase):
     def __init__(
         self,
         kernel: cp.Pod,

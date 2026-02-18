@@ -5,8 +5,9 @@ from abc import abstractmethod
 from collections.abc import Collection, Iterator
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
-
-from orcapod.core.base import OrcapodBase
+from orcapod.core.config import OrcapodConfig
+from orcapod.core.data_context import DataContext
+from orcapod.core.base import TraceableBase
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
@@ -29,7 +30,7 @@ else:
     pa = LazyModule("pyarrow")
 
 
-class StaticOutputPod(OrcapodBase):
+class StaticOutputPod(TraceableBase):
     """
     Abstract Base class for basic pods with core logic that yields static output stream.
     The static output stream will be wrapped in DynamicPodStream which will re-execute
@@ -120,7 +121,7 @@ class StaticOutputPod(OrcapodBase):
             *streams: Input streams to analyze
 
         Returns:
-            tuple[TypeSpec, TypeSpec]: (tag_types, packet_types) for output
+            tuple[Schema, Schema]: (tag_types, packet_types) for output
 
         Raises:
             ValidationError: If input types are incompatible
@@ -190,15 +191,17 @@ class DynamicPodStream(StreamBase):
     def __init__(
         self,
         pod: StaticOutputPod,
-        upstreams: tuple[
-            Stream, ...
-        ] = (),  # if provided, this will override the upstreams of the output_stream
-        **kwargs,
+        upstreams: tuple[Stream, ...] = (),
+        label: str | None = None,
+        data_context: DataContext | None = None,
+        orcapod_config: OrcapodConfig | None = None,
     ) -> None:
         self._pod = pod
         self._upstreams = upstreams
 
-        super().__init__(**kwargs)
+        super().__init__(
+            label=label, data_context=data_context, orcapod_config=orcapod_config
+        )
         self._set_modified_time(None)
         self._cached_time: datetime | None = None
         self._cached_stream: Stream | None = None

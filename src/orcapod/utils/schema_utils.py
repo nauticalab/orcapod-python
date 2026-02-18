@@ -53,7 +53,7 @@ def check_typespec_compatibility(
     return True
 
 
-def extract_function_typespecs(
+def extract_function_schemas(
     func: Callable,
     output_keys: Collection[str],
     input_typespec: PythonSchemaLike | None = None,

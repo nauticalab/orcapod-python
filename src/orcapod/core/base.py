@@ -237,9 +237,9 @@ class TemporalMixin:
         return self._modified_time > timestamp
 
 
-class OrcapodBase(TemporalMixin, LabelableMixin, ContentIdentifiableBase):
+class TraceableBase(TemporalMixin, LabelableMixin, ContentIdentifiableBase):
     """
-    Base class for all default OrcaPod entities, providing common functionality
+    Base class for all default traceable entities, providing common functionality
     including data context awareness, content-based identity, (semantic) labeling,
     and modification timestamp.
     """

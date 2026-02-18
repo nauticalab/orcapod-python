@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import logging
 from abc import abstractmethod
 from collections.abc import Collection, Iterator, Mapping
 from typing import TYPE_CHECKING, Any
 
-from orcapod.core.base import OrcapodBase
+from orcapod.core.base import TraceableBase
 from orcapod.protocols.core_protocols import ColumnConfig, Packet, Pod, Stream, Tag
 from orcapod.types import Schema
 from orcapod.utils.lazy_module import LazyModule
@@ -24,7 +26,7 @@ else:
 logger = logging.getLogger(__name__)
 
 
-class StreamBase(OrcapodBase):
+class StreamBase(TraceableBase):
     @property
     @abstractmethod
     def source(self) -> Pod | None: ...

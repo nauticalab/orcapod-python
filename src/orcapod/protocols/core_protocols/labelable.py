@@ -7,8 +7,8 @@ class Labelable(Protocol):
     Protocol for objects that can have a human-readable label.
 
     Labels provide meaningful names for objects in the computational graph,
-    making debugging, visualization, and monitoring much easier. They serve
-    as human-friendly identifiers that complement the technical identifiers
+    aiding in debugging, visualization, and monitoring. They serve as
+    human-friendly identifiers that complement the technical identifiers
     used internally.
 
     Labels are optional but highly recommended for:

@@ -17,15 +17,3 @@ class FunctionPod(Pod, Protocol):
         The PacketFunction that defines the computation for this FunctionPod.
         """
         ...
-
-    def process_packet(self, packet: Packet) -> Packet | None:
-        """
-        Process a single packet using the pod's PacketFunction.
-
-        Args:
-            packet (Packet): The input packet to process.
-
-        Returns:
-            Packet | None: The processed packet, or None if filtered out.
-        """
-        ...

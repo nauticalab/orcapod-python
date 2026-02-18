@@ -13,7 +13,7 @@ from uuid_utils import uuid7
 
 from orcapod.config import Config
 from orcapod.contexts import DataContext
-from orcapod.core.base import OrcapodBase
+from orcapod.core.base import TraceableBase
 from orcapod.core.datagrams import ArrowPacket, DictPacket
 from orcapod.hashing.hash_utils import get_function_components, get_function_signature
 from orcapod.protocols.core_protocols import Packet, PacketFunction
@@ -84,7 +84,7 @@ def combine_hashes(
     return combined_hash
 
 
-class PacketFunctionBase(OrcapodBase):
+class PacketFunctionBase(TraceableBase):
     """
     Abstract base class for PacketFunction, defining the interface and common functionality.
     """
@@ -241,7 +241,7 @@ class PythonPacketFunction(PacketFunctionBase):
         super().__init__(label=label or self._function_name, version=version, **kwargs)
 
         # extract input and output schema from the function signature
-        input_schema, output_schema = schema_utils.extract_function_typespecs(
+        input_schema, output_schema = schema_utils.extract_function_schemas(
             self._function,
             self._output_keys,
             input_typespec=input_schema,

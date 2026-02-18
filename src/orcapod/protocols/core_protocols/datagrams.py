@@ -117,6 +117,7 @@ class ColumnConfig:
         """Convenience: include only data columns (default)"""
         return cls()
 
+    # TODO: consider renaming this to something more intuitive
     @classmethod
     def handle_config(
         cls, config: Self | dict[str, Any] | None, all_info: bool = False
@@ -441,7 +442,7 @@ class Datagram(ContentIdentifiable, DataContextAware, Protocol):
         all_info: bool = False,
     ) -> dict[str, Any]:
         """
-        Return dictionary with values optimized for Arrow table conversion.
+        Return a dictionary with values optimized for Arrow table conversion.
 
         This method returns a dictionary where values are in a form that can be
         efficiently converted to Arrow format using pa.Table.from_pylist().
@@ -463,7 +464,7 @@ class Datagram(ContentIdentifiable, DataContextAware, Protocol):
             include_context: Whether to include context key
 
         Returns:
-            Dictionary with values optimized for Arrow conversion
+            A dictionary with values optimized for Arrow table conversion.
 
         Example:
             # Efficient batch conversion pattern
@@ -500,7 +501,7 @@ class Datagram(ContentIdentifiable, DataContextAware, Protocol):
 
     def with_meta_columns(self, **updates: DataValue) -> Self:
         """
-        Create new datagram with updated meta columns.
+        Create a new datagram with updated meta columns.
 
         Adds or updates operational metadata while preserving all data columns.
         Keys are automatically prefixed with {orcapod.META_PREFIX} ('__') if needed.
@@ -509,7 +510,7 @@ class Datagram(ContentIdentifiable, DataContextAware, Protocol):
             **updates: Meta column updates as keyword arguments.
 
         Returns:
-            New datagram instance with updated meta columns.
+            A new datagram instance with updated meta columns.
 
         Example:
             >>> tracked = datagram.with_meta_columns(
@@ -521,7 +522,7 @@ class Datagram(ContentIdentifiable, DataContextAware, Protocol):
 
     def drop_meta_columns(self, *keys: str, ignore_missing: bool = False) -> Self:
         """
-        Create new datagram with specified meta columns removed.
+        Create a new datagram with specified meta columns removed.
 
         Args:
             *keys: Meta column keys to remove (prefixes optional).
@@ -529,10 +530,10 @@ class Datagram(ContentIdentifiable, DataContextAware, Protocol):
 
 
         Returns:
-            New datagram instance without specified meta columns.
+            A new datagram instance without specified meta columns.
 
         Raises:
-            KeryError: If any specified meta column to drop doesn't exist and ignore_missing=False.
+            KeyError: If any specified meta column to drop doesn't exist and ignore_missing=False.
 
         Example:
             >>> cleaned = datagram.drop_meta_columns("old_source", "temp_debug")
@@ -542,7 +543,7 @@ class Datagram(ContentIdentifiable, DataContextAware, Protocol):
     # 6. Data Column Operations
     def select(self, *column_names: str) -> Self:
         """
-        Create new datagram with only specified data columns.
+        Create a new datagram with only specified data columns.
 
         Args:
             *column_names: Data column names to keep.
@@ -562,7 +563,7 @@ class Datagram(ContentIdentifiable, DataContextAware, Protocol):
 
     def drop(self, *column_names: str, ignore_missing: bool = False) -> Self:
         """
-        Create new datagram with specified data columns removed. Note that this does not
+        Create a new datagram with specified data columns removed. Note that this does not
         remove meta columns or context column. Refer to `drop_meta_columns()` for dropping
         specific meta columns. Context key column can never be dropped but a modified copy
         can be created with a different context key using `with_data_context()`.
@@ -587,7 +588,7 @@ class Datagram(ContentIdentifiable, DataContextAware, Protocol):
         column_mapping: Mapping[str, str],
     ) -> Self:
         """
-        Create new datagram with data columns renamed.
+        Create a new datagram with data columns renamed.
 
         Args:
             column_mapping: Mapping from old names to new names.
@@ -605,7 +606,7 @@ class Datagram(ContentIdentifiable, DataContextAware, Protocol):
 
     def update(self, **updates: DataValue) -> Self:
         """
-        Create new datagram with existing column values updated.
+        Create a new datagram with existing column values updated.
 
         Updates values in existing data columns. Will error if any specified
         column doesn't exist - use with_columns() to add new columns.
@@ -633,7 +634,7 @@ class Datagram(ContentIdentifiable, DataContextAware, Protocol):
         **updates: DataValue,
     ) -> Self:
         """
-        Create new datagram with additional data columns.
+        Create a new datagram with additional data columns.
 
         Adds new data columns to the datagram. Will error if any specified
         column already exists - use update() to modify existing columns.
@@ -720,7 +721,7 @@ class Datagram(ContentIdentifiable, DataContextAware, Protocol):
         Shows the datagram type and comprehensive information for debugging.
 
         Returns:
-            Detailed representation with type and metadata information.
+            A detailed representation with type and metadata information.
         """
         ...
 
@@ -759,7 +760,7 @@ class Tag(Datagram, Protocol):
         - Processing pipeline information
 
         Returns:
-            dict[str, str | None]: Source information for each data column as key-value pairs.
+            A dictionary with source information for each data column as key-value pairs.
         """
         ...
 
@@ -803,7 +804,7 @@ class Packet(Datagram, Protocol):
         **source_info: str | None,
     ) -> Self:
         """
-        Create new packet with updated source information.
+        Create a new packet with updated source information.
 
         Adds or updates source metadata for the packet. This is useful for
         tracking data provenance and lineage through the computational graph.
@@ -812,7 +813,7 @@ class Packet(Datagram, Protocol):
             **source_info: Source metadata as keyword arguments.
 
         Returns:
-            New packet instance with updated source information.
+            A new packet instance with updated source information.
 
         Example:
             >>> updated_packet = packet.with_source_info(

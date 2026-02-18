@@ -5,7 +5,7 @@ from collections.abc import Callable, Collection, Iterator
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from orcapod import contexts
-from orcapod.core.base import OrcapodBase
+from orcapod.core.base import TraceableBase
 from orcapod.core.operators import Join
 from orcapod.core.packet_function import CachedPacketFunction, PythonPacketFunction
 from orcapod.core.streams.base import StreamBase
@@ -37,7 +37,7 @@ else:
     pl = LazyModule("polars")
 
 
-class FunctionPod(OrcapodBase):
+class FunctionPod(TraceableBase):
     def __init__(
         self,
         packet_function: PacketFunction,
@@ -478,7 +478,7 @@ class WrappedFunctionPod(FunctionPod):
         return self._function_pod.process(*streams, label=label)
 
 
-class FunctionPodNode(OrcapodBase):
+class FunctionPodNode(TraceableBase):
     """
     A pod that caches the results of the wrapped packet function.
     This is useful for packet functions that are expensive to compute and can benefit from caching.

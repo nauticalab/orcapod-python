@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 from collections.abc import Collection
 from typing import Any, Protocol, TypeAlias, runtime_checkable
 
 from orcapod.protocols.core_protocols.datagrams import ColumnConfig
-from orcapod.protocols.core_protocols.orcapod_object import OrcapodObject
+from orcapod.protocols.core_protocols.orcapod_object import Traceable
 from orcapod.protocols.core_protocols.packet_function import PacketFunction
 from orcapod.protocols.core_protocols.streams import Stream
 from orcapod.types import PythonSchema
@@ -15,7 +17,7 @@ OrderedGroup: TypeAlias = tuple[ArgumentGroup, ...]  # Order-dependent
 
 
 @runtime_checkable
-class Pod(OrcapodObject, Protocol):
+class Pod(Traceable, Protocol):
     """
     The fundamental unit of computation in Orcapod.
 
@@ -43,8 +45,7 @@ class Pod(OrcapodObject, Protocol):
         Unique identifier for the pod
 
         The URI is used for caching/storage and tracking purposes.
-        As the name indicates, this is how data originating from the kernel will be referred to.
-
+        As the name indicates, this is how data originating from the pod will be referred to.
 
         Returns:
             tuple[str, ...]: URI for this pod
@@ -142,36 +143,5 @@ class Pod(OrcapodObject, Protocol):
 
         Returns:
             Stream: Result of the computation (may be static or live)
-        """
-        ...
-
-
-@runtime_checkable
-class FunctionPod(Pod, Protocol):
-    """
-    A Pod that represents a pure function from input streams to an output stream.
-
-    FunctionPods have no side effects and always produce the same output
-    for the same inputs. They are suitable for:
-    - Stateless transformations
-    - Mathematical operations
-    - Data format conversions
-
-    Because they are pure functions, FunctionPods can be:
-    - Cached based on input content hashes
-    - Parallelized across multiple inputs
-    - Reasoned about more easily in complex graphs
-    """
-
-    @property
-    def packet_function(self) -> PacketFunction:
-        """
-        Retrieve the core packet processing function.
-
-        This function defines the per-packet computational logic of the FunctionPod.
-        It is invoked for each packet in the input streams to produce output packets.
-
-        Returns:
-            PodFunction: The packet processing function
         """
         ...
