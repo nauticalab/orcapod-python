@@ -1,10 +1,12 @@
-from typing import cast
-import pytest
-import pyarrow as pa
-import numpy as np
 from pathlib import Path
-from orcapod.semantic_types import universal_converter
+from typing import cast
+
+import numpy as np
+import pyarrow as pa
+import pytest
+
 from orcapod.contexts import get_default_context
+from orcapod.semantic_types import universal_converter
 
 
 def test_python_type_to_arrow_type_basic():

@@ -44,7 +44,8 @@ class StreamBase(TraceableBase):
     def identity_structure(self) -> Any:
         # Identity of a PodStream is determined by the pod and its upstreams
         if self.source is None:
-            raise ValueError("Stream has no source pod for identity structure.")
+            # TODO: consider what ought to be the identity structure for non-sourced stream
+            return (None,)
 
         structure = (self.source,)
         if len(self.upstreams) > 0:

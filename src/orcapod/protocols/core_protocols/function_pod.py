@@ -1,6 +1,5 @@
 from typing import Protocol, runtime_checkable
 
-from orcapod.protocols.core_protocols.datagrams import Packet
 from orcapod.protocols.core_protocols.packet_function import PacketFunction
 from orcapod.protocols.core_protocols.pod import Pod
 

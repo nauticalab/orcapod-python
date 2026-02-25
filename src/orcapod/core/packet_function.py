@@ -19,7 +19,7 @@ from orcapod.hashing.hash_utils import get_function_components, get_function_sig
 from orcapod.protocols.core_protocols import Packet, PacketFunction
 from orcapod.protocols.database_protocols import ArrowDatabase
 from orcapod.system_constants import constants
-from orcapod.types import DataValue, Schema, PythonSchemaLike
+from orcapod.types import DataValue, Schema, SchemaLike
 from orcapod.utils import schema_utils
 from orcapod.utils.git_utils import get_git_info_for_python_object
 from orcapod.utils.lazy_module import LazyModule
@@ -114,7 +114,7 @@ class PacketFunctionBase(TraceableBase):
         self._output_packet_schema_hash = None
 
     @property
-    def output_packet_schema_hash(self) -> str | None:
+    def output_packet_schema_hash(self) -> str:
         if self._output_packet_schema_hash is None:
             self._output_packet_schema_hash = (
                 self.data_context.object_hasher.hash_object(
@@ -215,8 +215,8 @@ class PythonPacketFunction(PacketFunctionBase):
         output_keys: str | Collection[str] | None = None,
         function_name: str | None = None,
         version: str = "v0.0",
-        input_schema: PythonSchemaLike | None = None,
-        output_schema: PythonSchemaLike | Sequence[type] | None = None,
+        input_schema: SchemaLike | None = None,
+        output_schema: SchemaLike | Sequence[type] | None = None,
         label: str | None = None,
         **kwargs,
     ) -> None:

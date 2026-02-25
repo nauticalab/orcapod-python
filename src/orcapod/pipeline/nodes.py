@@ -8,7 +8,7 @@ from orcapod.core.sources.base import InvocationBase
 from orcapod.core.pods import CachedPod
 from orcapod.protocols import core_protocols as cp, database_protocols as dbp
 import orcapod.protocols.core_protocols.execution_engine
-from orcapod.types import PythonSchema
+from orcapod.types import Schema
 from orcapod.utils.lazy_module import LazyModule
 from typing import TYPE_CHECKING, Any
 from orcapod.contexts.system_constants import constants
@@ -107,7 +107,7 @@ class NodeBase(
 
     def kernel_output_types(
         self, *streams: cp.Stream, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         """
         Return the output types of the node.
         This is used to determine the types of the output streams.

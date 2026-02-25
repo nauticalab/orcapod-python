@@ -7,7 +7,7 @@ from typing import Any
 
 import orcapod.contexts as contexts
 from orcapod.config import DEFAULT_CONFIG, Config
-from orcapod.protocols import hashing_protocols as hp
+from orcapod.types import ContentHash
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ class ContentIdentifiableBase(DataContextMixin, ABC):
             identity_structure_hasher (ObjectHasher | None): An instance of ObjectHasher to use for hashing.
         """
         super().__init__(data_context=data_context, orcapod_config=orcapod_config)
-        self._cached_content_hash: hp.ContentHash | None = None
+        self._cached_content_hash: ContentHash | None = None
         self._cached_int_hash: int | None = None
 
     @abstractmethod
@@ -142,7 +142,7 @@ class ContentIdentifiableBase(DataContextMixin, ABC):
         """
         ...
 
-    def content_hash(self) -> hp.ContentHash:
+    def content_hash(self) -> ContentHash:
         """
         Compute a hash based on the content of this object.
 

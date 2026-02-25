@@ -1,14 +1,14 @@
+from collections.abc import Collection, Mapping
 from types import UnionType
 from typing import Any, Union
-from collections.abc import Collection, Mapping
 
-from orcapod.types import PythonSchema
+from orcapod.types import DataType, Schema
 
 
 def infer_python_schema_from_pylist_data(
     data: Collection[Mapping[str, Any]],
     default_type: type = str,
-) -> PythonSchema:
+) -> Schema:
     """
     Infer schema from sample data (best effort).
 
@@ -23,9 +23,9 @@ def infer_python_schema_from_pylist_data(
     For production use, explicit schemas are recommended.
     """
     if not data:
-        return {}
+        return Schema.empty()
 
-    schema: PythonSchema = {}
+    schema_data: dict[str, DataType] = {}
 
     # Get all possible field names
     all_fields = []
@@ -48,28 +48,28 @@ def infer_python_schema_from_pylist_data(
 
         if not non_none_values:
             # Handle case where all values are None
-            schema[field_name] = default_type | None
+            schema_data[field_name] = default_type | None
             continue
 
         # Infer type from non-None values
         inferred_type = _infer_type_from_values(non_none_values)
 
         if inferred_type is None:
-            schema[field_name] = default_type | None
+            schema_data[field_name] = default_type | None
         elif has_none:
             # Wrap with Optional if None values present
             # TODO: consider the case of Any
-            schema[field_name] = inferred_type | None
+            schema_data[field_name] = inferred_type | None
         else:
-            schema[field_name] = inferred_type
+            schema_data[field_name] = inferred_type
 
-    return schema
+    return Schema(schema_data)
 
 
 def infer_python_schema_from_pydict_data(
     data: dict[str, list[Any]],
     default_type: type = str,
-) -> PythonSchema:
+) -> Schema:
     """
     Infer schema from columnar sample data (best effort).
 
@@ -84,15 +84,17 @@ def infer_python_schema_from_pydict_data(
     For production use, explicit schemas are recommended.
     """
     if not data:
-        return {}
+        return Schema()
 
-    schema: PythonSchema = {}
+    schema_data = {}
 
     # Infer type for each field
     for field_name, field_values in data.items():
         if not field_values:
             # Handle case where field has empty list
-            schema[field_name] = default_type | None
+            values = dict(schema_data)
+            values[field_name] = default_type | None
+            schema_data[field_name] = default_type | None
             continue
 
         # Separate None and non-None values
@@ -101,26 +103,26 @@ def infer_python_schema_from_pydict_data(
 
         if not non_none_values:
             # Handle case where all values are None
-            schema[field_name] = default_type | None
+            schema_data[field_name] = default_type | None
             continue
 
         # Infer type from non-None values
         inferred_type = _infer_type_from_values(non_none_values)
 
         if inferred_type is None:
-            schema[field_name] = default_type | None
+            schema_data[field_name] = default_type | None
         elif has_none:
             # Wrap with Optional if None values present
             # TODO: consider the case of Any
-            schema[field_name] = inferred_type | None
+            schema_data[field_name] = inferred_type | None
         else:
-            schema[field_name] = inferred_type
+            schema_data[field_name] = inferred_type
 
-    return schema
+    return Schema(schema_data)
 
 
 # TODO: reconsider this type hint -- use of Any effectively renders this type hint useless
-def _infer_type_from_values(values: list) -> type | UnionType | Any | None:
+def _infer_type_from_values(values: list) -> DataType | None:
     """Infer type from a list of non-None values."""
     if not values:
         return None
@@ -301,7 +303,7 @@ def test_schema_inference():
 
     print("Inferred Schema:")
     for field, field_type in sorted(schema.items()):
-        print(f"  {field}: {field_type}")
+        print(f"  {field}: {getattr(field_type, '__name__', field_type)}")
 
     return schema
 

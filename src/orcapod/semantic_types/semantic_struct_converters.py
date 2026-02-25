@@ -5,8 +5,10 @@ This replaces the metadata-based approach with explicit struct fields,
 making semantic types visible in schemas and preserved through operations.
 """
 
-from typing import Any, TYPE_CHECKING
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from orcapod.types import ContentHash
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -54,7 +56,7 @@ class SemanticStructConverterBase:
         else:
             return hash_hex
 
-    def _compute_content_hash(self, content: bytes) -> bytes:
+    def _compute_content_hash(self, content: bytes) -> ContentHash:
         """
         Compute SHA-256 hash of content bytes.
 
@@ -66,12 +68,13 @@ class SemanticStructConverterBase:
         """
         import hashlib
 
-        return hashlib.sha256(content).digest()
+        digest = hashlib.sha256(content).digest()
+        return ContentHash(method=f"{self.semantic_type_name}:sha256", digest=digest)
 
 
 # Path-specific implementation
 class PathStructConverter(SemanticStructConverterBase):
-    """Converter for pathlib.Path objects to/from semantic structs."""
+    """Converter for pathlib.Path objects to/from semantic structs of form { path: "/value/of/path"}"""
 
     def __init__(self):
         super().__init__("path")
@@ -116,26 +119,25 @@ class PathStructConverter(SemanticStructConverterBase):
     def can_handle_struct_type(self, struct_type: pa.StructType) -> bool:
         """Check if this converter can handle the given struct type."""
         # Check if struct has the expected fields
-        field_names = [field.name for field in struct_type]
-        expected_fields = {"path"}
+        for field in self._arrow_struct_type:
+            if (
+                field.name not in struct_type.names
+                or struct_type[field.name].type != field.type
+            ):
+                return False
 
-        if set(field_names) != expected_fields:
-            return False
-
-        # Check field types
-        field_types = {field.name: field.type for field in struct_type}
-
-        return field_types["path"] == pa.large_string()
+        return True
 
     def is_semantic_struct(self, struct_dict: dict[str, Any]) -> bool:
         """Check if a struct dictionary represents this semantic type."""
+        # TODO: infer this check based on identified struct type as definedin the __init__
         return set(struct_dict.keys()) == {"path"} and isinstance(
             struct_dict["path"], str
         )
 
     def hash_struct_dict(
         self, struct_dict: dict[str, Any], add_prefix: bool = False
-    ) -> str:
+    ) -> ContentHash:
         """
         Compute hash of the file content pointed to by the path.
 
@@ -144,7 +146,7 @@ class PathStructConverter(SemanticStructConverterBase):
             add_prefix: If True, prefix with semantic type and algorithm info
 
         Returns:
-            Hash string of the file content, optionally prefixed
+            ContentHash of the file content
 
         Raises:
             FileNotFoundError: If the file doesn't exist
@@ -161,8 +163,7 @@ class PathStructConverter(SemanticStructConverterBase):
             # TODO: replace with FileHasher implementation
             # Read file content and compute hash
             content = path.read_bytes()
-            hash_bytes = self._compute_content_hash(content)
-            return self._format_hash_string(hash_bytes, add_prefix)
+            return self._compute_content_hash(content)
 
         except FileNotFoundError:
             raise FileNotFoundError(f"File not found: {path}")

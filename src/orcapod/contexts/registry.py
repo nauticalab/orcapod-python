@@ -10,9 +10,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from orcapod.contexts.core import (
+    ContextResolutionError,
+    ContextValidationError,
+    DataContext,
+)
 from orcapod.utils.object_spec import parse_objectspec
-
-from .core import ContextResolutionError, ContextValidationError, DataContext
 
 logger = logging.getLogger(__name__)
 

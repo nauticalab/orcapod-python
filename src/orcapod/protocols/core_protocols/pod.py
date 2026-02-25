@@ -4,10 +4,9 @@ from collections.abc import Collection
 from typing import Any, Protocol, TypeAlias, runtime_checkable
 
 from orcapod.protocols.core_protocols.datagrams import ColumnConfig
-from orcapod.protocols.core_protocols.orcapod_object import Traceable
-from orcapod.protocols.core_protocols.packet_function import PacketFunction
 from orcapod.protocols.core_protocols.streams import Stream
-from orcapod.types import PythonSchema
+from orcapod.protocols.core_protocols.traceable import Traceable
+from orcapod.types import Schema
 
 # Core recursive types
 ArgumentGroup: TypeAlias = "SymmetricGroup | OrderedGroup | Stream"
@@ -97,7 +96,7 @@ class Pod(Traceable, Protocol):
         *streams: Stream,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         """
         Determine output schemas without triggering computation.
 

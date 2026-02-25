@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
 from typing import (
@@ -5,54 +7,14 @@ from typing import (
     Any,
     Protocol,
     Self,
-    TypeAlias,
     runtime_checkable,
 )
 
 from orcapod.protocols.hashing_protocols import ContentIdentifiable, DataContextAware
-from orcapod.types import DataType, DataValue, PythonSchema
+from orcapod.types import DataValue, Schema
 
 if TYPE_CHECKING:
     import pyarrow as pa
-
-
-class Schema(Mapping[str, DataType]):
-    """
-    Abstract base class for schema representations in Orcapod.
-
-    Provides methods to access schema information in various formats,
-    including Python type specifications and PyArrow schemas.
-    """
-
-    @classmethod
-    def from_arrow_schema(cls, arrow_schema: "pa.Schema") -> Self:
-        """
-        Create Schema instance from PyArrow schema.
-
-        Args:
-            arrow_schema: PyArrow Schema to convert.
-        """
-        ...
-
-    def to_arrow_schema(self) -> "pa.Schema":
-        """
-        Return PyArrow schema representation.
-
-        The schema provides structured field and type information for efficient
-        serialization and deserialization with PyArrow.
-
-        Returns:
-            PyArrow Schema describing the structure.
-
-        Example:
-            >>> schema = schema.arrow_schema()
-            >>> schema.names
-            ['user_id', 'name']
-        """
-        ...
-
-
-SchemaLike: TypeAlias = Mapping[str, DataType]
 
 
 @dataclass(frozen=True)
@@ -313,7 +275,7 @@ class Datagram(ContentIdentifiable, DataContextAware, Protocol):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> PythonSchema:
+    ) -> Schema:
         """
         Return type specification mapping field names to Python types.
 
@@ -341,7 +303,7 @@ class Datagram(ContentIdentifiable, DataContextAware, Protocol):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> "pa.Schema":
+    ) -> pa.Schema:
         """
         Return PyArrow schema representation.
 
@@ -662,7 +624,7 @@ class Datagram(ContentIdentifiable, DataContextAware, Protocol):
     # 7. Context Operations
     def with_context_key(self, new_context_key: str) -> Self:
         """
-        Create new datagram with different context key.
+        Create new datagram with a different context key.
 
         Changes the semantic interpretation context while preserving all data.
         The context key affects how columns are processed and converted.

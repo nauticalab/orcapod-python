@@ -1,11 +1,12 @@
-from typing import Any, TYPE_CHECKING
 from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
+
 from orcapod.protocols.semantic_types_protocols import SemanticStructConverter
-from orcapod.utils.lazy_module import LazyModule
+from orcapod.semantic_types import pydata_utils
 
 # from orcapod.semantic_types.type_inference import infer_python_schema_from_pylist_data
-from orcapod.types import DataType, PythonSchema
-from orcapod.semantic_types import pydata_utils
+from orcapod.types import DataType, Schema
+from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -23,14 +24,14 @@ class SemanticTypeRegistry:
     """
 
     @staticmethod
-    def infer_python_schema_from_pylist(data: list[dict[str, Any]]) -> PythonSchema:
+    def infer_python_schema_from_pylist(data: list[dict[str, Any]]) -> Schema:
         """
         Infer Python schema from a list of dictionaries (pylist)
         """
         return pydata_utils.infer_python_schema_from_pylist_data(data)
 
     @staticmethod
-    def infer_python_schema_from_pydict(data: dict[str, list[Any]]) -> PythonSchema:
+    def infer_python_schema_from_pydict(data: dict[str, list[Any]]) -> Schema:
         # TODO: consider which data type is more efficient and use that pylist or pydict
         return pydata_utils.infer_python_schema_from_pylist_data(
             pydata_utils.pydict_to_pylist(data)

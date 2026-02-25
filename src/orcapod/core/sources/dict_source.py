@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Any
 
 
 from orcapod.protocols import core_protocols as cp
-from orcapod.types import DataValue, Schema, PythonSchemaLike
+from orcapod.types import DataValue, Schema, SchemaLike
 from orcapod.utils.lazy_module import LazyModule
 from orcapod.contexts.system_constants import constants
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
@@ -66,7 +66,7 @@ class DictSource(SourceBase):
         tag_columns: Collection[str] = (),
         system_tag_columns: Collection[str] = (),
         source_name: str | None = None,
-        data_schema: PythonSchemaLike | None = None,
+        data_schema: SchemaLike | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)

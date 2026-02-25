@@ -1,7 +1,7 @@
 # Protocols for pipeline and nodes
-from typing import Protocol, runtime_checkable, TYPE_CHECKING
-from orcapod.protocols import core_protocols as cp
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from orcapod.protocols import core_protocols as cp
 
 if TYPE_CHECKING:
     import pyarrow as pa

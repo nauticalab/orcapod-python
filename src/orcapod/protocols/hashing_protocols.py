@@ -1,78 +1,12 @@
 """Hash strategy protocols for dependency injection."""
 
-import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from orcapod.types import PathLike, PythonSchema
+from orcapod.types import ContentHash, PathLike, Schema
 
 if TYPE_CHECKING:
     import pyarrow as pa
-
-
-@dataclass(frozen=True, slots=True)
-class ContentHash:
-    method: str
-    digest: bytes
-
-    # TODO: make the default char count configurable
-    def to_hex(self, char_count: int | None = None) -> str:
-        """Convert digest to hex string, optionally truncated."""
-        hex_str = self.digest.hex()
-        return hex_str[:char_count] if char_count else hex_str
-
-    def to_int(self, hexdigits: int | None = None) -> int:
-        """
-        Convert digest to integer representation.
-
-        Args:
-            hexdigits: Number of hex digits to use (truncates if needed)
-
-        Returns:
-            Integer representation of the hash
-        """
-        return int(self.to_hex(hexdigits), 16)
-
-    def to_uuid(self, namespace: uuid.UUID = uuid.NAMESPACE_OID) -> uuid.UUID:
-        """
-        Convert digest to UUID format.
-
-        Args:
-            namespace: UUID namespace for uuid5 generation
-
-        Returns:
-            UUID derived from this hash
-        """
-        # Using uuid5 with the hex string ensures deterministic UUIDs
-        return uuid.uuid5(namespace, self.to_hex())
-
-    def to_base64(self) -> str:
-        """Convert digest to base64 string."""
-        import base64
-
-        return base64.b64encode(self.digest).decode("ascii")
-
-    def to_string(
-        self, prefix_method: bool = True, hexdigits: int | None = None
-    ) -> str:
-        """Convert digest to a string representation."""
-        if prefix_method:
-            return f"{self.method}:{self.to_hex(hexdigits)}"
-        return self.to_hex(hexdigits)
-
-    def __str__(self) -> str:
-        return self.to_string()
-
-    @classmethod
-    def from_string(cls, hash_string: str) -> "ContentHash":
-        """Parse 'method:hex_digest' format."""
-        method, hex_digest = hash_string.split(":", 1)
-        return cls(method, bytes.fromhex(hex_digest))
-
-    def display_name(self, length: int = 8) -> str:
-        """Return human-friendly display like 'arrow_v2.1:1a2b3c4d'."""
-        return f"{self.method}:{self.to_hex(length)}"
 
 
 @runtime_checkable
@@ -197,8 +131,8 @@ class FunctionInfoExtractor(Protocol):
         self,
         func: Callable[..., Any],
         function_name: str | None = None,
-        input_typespec: PythonSchema | None = None,
-        output_typespec: PythonSchema | None = None,
+        input_typespec: Schema | None = None,
+        output_typespec: Schema | None = None,
         exclude_function_signature: bool = False,
         exclude_function_body: bool = False,
     ) -> dict[str, Any]: ...

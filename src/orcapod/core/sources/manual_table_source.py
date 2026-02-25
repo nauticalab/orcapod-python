@@ -9,7 +9,7 @@ from orcapod.core.sources.source_registry import SourceRegistry
 from orcapod.core.streams import TableStream
 from orcapod.errors import DuplicateTagError
 from orcapod.protocols import core_protocols as cp
-from orcapod.types import Schema, PythonSchemaLike
+from orcapod.types import Schema, SchemaLike
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -37,7 +37,7 @@ class ManualDeltaTableSource(SourceBase):
     def __init__(
         self,
         table_path: str | Path,
-        python_schema: PythonSchemaLike | None = None,
+        python_schema: SchemaLike | None = None,
         tag_columns: Collection[str] | None = None,
         source_name: str | None = None,
         source_registry: SourceRegistry | None = None,

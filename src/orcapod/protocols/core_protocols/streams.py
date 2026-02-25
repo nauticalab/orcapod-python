@@ -2,8 +2,8 @@ from collections.abc import Collection, Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from orcapod.protocols.core_protocols.datagrams import ColumnConfig, Packet, Tag
-from orcapod.protocols.core_protocols.orcapod_object import Traceable
-from orcapod.types import PythonSchema
+from orcapod.protocols.core_protocols.traceable import Traceable
+from orcapod.types import Schema
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -92,7 +92,7 @@ class Stream(Traceable, Protocol):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
+    ) -> tuple[Schema, Schema]:
         """
         Type specifications for the stream content.
 
@@ -103,7 +103,7 @@ class Stream(Traceable, Protocol):
         - Compatibility checking between kernels
 
         Returns:
-            tuple[PythonSchema, PythonSchema]: (tag_types, packet_types)
+            tuple[Schema, Schema]: (tag_types, packet_types)
         """
         ...
 

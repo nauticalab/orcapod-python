@@ -7,9 +7,10 @@ class Temporal(Protocol):
     """
     Protocol for objects that track temporal state.
 
-    Objects implementing Temporal can report when their content
-    was last modified, enabling cache invalidation, incremental
-    processing, and dependency tracking.
+    Objects implementing Temporal carries a computed property to
+    report when their content was last modified, enabling time-sensitive
+    actions such as cache invalidation, incremental processing, and
+    dependency staleness tracking.
     """
 
     @property

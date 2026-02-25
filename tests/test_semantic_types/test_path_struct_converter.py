@@ -1,7 +1,9 @@
-from typing import cast
-import pytest
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
+
+import pytest
+
 from orcapod.semantic_types.semantic_struct_converters import PathStructConverter
 
 

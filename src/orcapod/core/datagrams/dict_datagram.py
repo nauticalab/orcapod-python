@@ -8,7 +8,7 @@ from orcapod.protocols.core_protocols import ColumnConfig
 from orcapod.protocols.hashing_protocols import ContentHash
 from orcapod.semantic_types import infer_python_schema_from_pylist_data
 from orcapod.system_constants import constants
-from orcapod.types import DataValue, Schema, PythonSchemaLike
+from orcapod.types import DataValue, Schema, SchemaLike
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -58,7 +58,7 @@ class DictDatagram(BaseDatagram):
     def __init__(
         self,
         data: Mapping[str, DataValue],
-        python_schema: PythonSchemaLike | None = None,
+        python_schema: SchemaLike | None = None,
         meta_info: Mapping[str, DataValue] | None = None,
         data_context: str | contexts.DataContext | None = None,
         record_id: str | None = None,

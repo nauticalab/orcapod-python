@@ -9,21 +9,19 @@ This provides a comprehensive, self-contained system that:
 5. Integrates seamlessly with semantic type registries
 """
 
-import types
-from typing import TypedDict, Any
-import typing
-from collections.abc import Callable, Mapping
 import hashlib
 import logging
+import types
+import typing
+from collections.abc import Callable, Mapping
+
+# Handle generic types
+from typing import TYPE_CHECKING, Any, TypedDict, get_args, get_origin
+
 from orcapod.contexts import DataContext, resolve_context
 from orcapod.semantic_types.semantic_registry import SemanticTypeRegistry
 from orcapod.semantic_types.type_inference import infer_python_schema_from_pylist_data
-
-# Handle generic types
-from typing import get_origin, get_args
-
-from typing import TYPE_CHECKING
-from orcapod.types import DataType, PythonSchemaLike
+from orcapod.types import DataType, SchemaLike
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -135,13 +133,12 @@ class UniversalTypeConverter:
 
         return arrow_type
 
-    def python_schema_to_arrow_schema(
-        self, python_schema: PythonSchemaLike
-    ) -> pa.Schema:
+    def python_schema_to_arrow_schema(self, python_schema: SchemaLike) -> pa.Schema:
         """
-        Convert a Python schema (dict of field names to types) to an Arrow schema.
+        Convert a Python schema (dict of field names to data types) to an Arrow schema.
 
-        This uses the main conversion logic and caches results for performance.
+        This uses the main conversion logic, using caches for known type conversion for
+        an improved performance.
         """
         fields = []
         for field_name, python_type in python_schema.items():
@@ -171,7 +168,8 @@ class UniversalTypeConverter:
         """
         Convert an Arrow schema to a Python schema (dict of field names to types).
 
-        This uses the main conversion logic and caches results for performance.
+        This uses the main conversion logic, using caches for known type conversion for
+        an improved performance.
         """
         python_schema = {}
         for field in arrow_schema:
@@ -183,16 +181,17 @@ class UniversalTypeConverter:
     def python_dicts_to_struct_dicts(
         self,
         python_dicts: list[dict[str, Any]],
-        python_schema: PythonSchemaLike | None = None,
+        python_schema: SchemaLike | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Convert a list of Python dictionaries to an Arrow table.
+        Convert a list of Python dictionaries to Arrow compatible list of structural dicts.
 
         This uses the main conversion logic and caches results for performance.
         """
         if python_schema is None:
             python_schema = infer_python_schema_from_pylist_data(python_dicts)
 
+        # prepare a LUT of converters from Python to Arrow-compatible data type
         converters = {
             field_name: self.get_python_to_arrow_converter(python_type)
             for field_name, python_type in python_schema.items()
@@ -216,7 +215,7 @@ class UniversalTypeConverter:
         arrow_schema: pa.Schema,
     ) -> list[dict[str, Any]]:
         """
-        Convert a list of Arrow structs to Python dictionaries.
+        Convert a list of Arrow-compatible structural dictionaries to Python dictionaries.
 
         This uses the main conversion logic and caches results for performance.
         """
@@ -241,7 +240,7 @@ class UniversalTypeConverter:
     def python_dicts_to_arrow_table(
         self,
         python_dicts: list[dict[str, Any]],
-        python_schema: PythonSchemaLike | None = None,
+        python_schema: SchemaLike | None = None,
         arrow_schema: "pa.Schema | None" = None,
     ) -> pa.Table:
         """
@@ -565,7 +564,7 @@ class UniversalTypeConverter:
 
         return typeddict_class
 
-    # TODO: consider setting type of field_specs to PythonSchema
+    # TODO: consider setting type of field_specs to Schema
     def _generate_unique_type_name(self, field_specs: Mapping[str, DataType]) -> str:
         """Generate a unique name for TypedDict based on field specifications."""
 
