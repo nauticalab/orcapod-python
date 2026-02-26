@@ -82,10 +82,10 @@ def get_versioned_semantic_hasher(
     SemanticHasher
         A fully configured SemanticHasher instance.
     """
-    from orcapod.hashing.semantic_hasher import BaseSemanticHasher
+    from orcapod.hashing.semantic_hashing.semantic_hasher import BaseSemanticHasher
 
     if type_handler_registry is None:
-        from orcapod.hashing.type_handler_registry import (
+        from orcapod.hashing.semantic_hashing.type_handler_registry import (
             get_default_type_handler_registry,
         )
 

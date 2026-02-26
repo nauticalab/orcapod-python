@@ -43,16 +43,16 @@ class FunctionPod(TraceableBase):
         tracker_manager: TrackerManager | None = None,
         label: str | None = None,
         data_context: str | contexts.DataContext | None = None,
-        orcapod_config: Config | None = None,
+        config: Config | None = None,
     ) -> None:
         super().__init__(
             label=label,
             data_context=data_context,
-            orcapod_config=orcapod_config,
+            config=config,
         )
         self.tracker_manager = tracker_manager or DEFAULT_TRACKER_MANAGER
         self._packet_function = packet_function
-        self._output_schema_hash = self.data_context.object_hasher.hash_object(
+        self._output_schema_hash = self.data_context.semantic_hasher.hash_object(
             self.packet_function.output_packet_schema
         ).to_string()
 
@@ -493,7 +493,7 @@ class FunctionPodNode(TraceableBase):
         tracker_manager: TrackerManager | None = None,
         label: str | None = None,
         data_context: str | contexts.DataContext | None = None,
-        orcapod_config: Config | None = None,
+        config: Config | None = None,
     ):
         if tracker_manager is None:
             tracker_manager = DEFAULT_TRACKER_MANAGER
@@ -514,7 +514,7 @@ class FunctionPodNode(TraceableBase):
         super().__init__(
             label=label,
             data_context=data_context,
-            orcapod_config=orcapod_config,
+            config=config,
         )
 
         # validate the input stream
@@ -536,13 +536,13 @@ class FunctionPodNode(TraceableBase):
         # take the pipeline node hash and schema hashes
         self._pipeline_node_hash = self.content_hash().to_string()
 
-        self._output_schema_hash = self.data_context.object_hasher.hash_object(
+        self._output_schema_hash = self.data_context.semantic_hasher.hash_object(
             self._cached_packet_function.output_packet_schema
         ).to_string()
 
         # compute tag schema hash, inclusive of system tags
         tag_schema, _ = self.output_schema(columns={"system_tags": True})
-        self._tag_schema_hash = self.data_context.object_hasher.hash_object(
+        self._tag_schema_hash = self.data_context.semantic_hasher.hash_object(
             tag_schema
         ).to_string()
 

@@ -22,7 +22,7 @@ To add a handler for a third-party type, create a class that implements the
 TypeHandler protocol (a single ``handle(obj, hasher)`` method) and register
 it:
 
-    from orcapod.hashing.type_handler_registry import get_default_type_handler_registry
+    from orcapod.hashing.semantic_hashing.type_handler_registry import get_default_type_handler_registry
     get_default_type_handler_registry().register(MyType, MyTypeHandler())
 """
 
@@ -36,7 +36,9 @@ from uuid import UUID
 from orcapod.types import ContentHash
 
 if TYPE_CHECKING:
-    from orcapod.hashing.type_handler_registry import TypeHandlerRegistry
+    from orcapod.hashing.semantic_hashing.type_handler_registry import (
+        TypeHandlerRegistry,
+    )
     from orcapod.protocols.hashing_protocols import SemanticHasher
 
 logger = logging.getLogger(__name__)
@@ -213,12 +215,14 @@ def register_builtin_handlers(
     """
     # Resolve defaults for auxiliary objects ----------------------------
     if file_hasher is None:
-        from orcapod.hashing.file_hashers import BasicFileHasher
+        from orcapod.hashing.file_hashers import BasicFileHasher  # stays in hashing/
 
         file_hasher = BasicFileHasher(algorithm="sha256")
 
     if function_info_extractor is None:
-        from orcapod.hashing.function_info_extractors import FunctionSignatureExtractor
+        from orcapod.hashing.semantic_hashing.function_info_extractors import (
+            FunctionSignatureExtractor,
+        )
 
         function_info_extractor = FunctionSignatureExtractor(
             include_module=True,

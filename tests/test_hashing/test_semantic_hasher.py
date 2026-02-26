@@ -26,18 +26,16 @@ from uuid import UUID
 
 import pytest
 
-from orcapod.hashing.builtin_handlers import (
-    BytesHandler,
-    FunctionHandler,
-    PathContentHandler,
-    TypeObjectHandler,
-    UUIDHandler,
-    register_builtin_handlers,
-)
-from orcapod.hashing.content_identifiable_mixin import ContentIdentifiableMixin
 from orcapod.hashing.defaults import get_default_semantic_hasher
-from orcapod.hashing.semantic_hasher import BaseSemanticHasher, _is_namedtuple
-from orcapod.hashing.type_handler_registry import (
+from orcapod.hashing.semantic_hashing.builtin_handlers import register_builtin_handlers
+from orcapod.hashing.semantic_hashing.content_identifiable_mixin import (
+    ContentIdentifiableMixin,
+)
+from orcapod.hashing.semantic_hashing.semantic_hasher import (
+    BaseSemanticHasher,
+    _is_namedtuple,
+)
+from orcapod.hashing.semantic_hashing.type_handler_registry import (
     TypeHandlerRegistry,
     get_default_type_handler_registry,
 )
@@ -1024,11 +1022,12 @@ class TestJsonNormalizationConsistency:
     # ------------------------------------------------------------------
 
     def _dict_tree(self, items: dict) -> dict:
-        """Produce the tagged dict form: {"__type__": "dict", "items": {sorted}}."""
-        return {"__type__": "dict", "items": dict(sorted(items.items()))}
+        """Produce the native sorted JSON object form (no __type__ wrapper)."""
+        return dict(sorted(items.items()))
 
-    def _list_tree(self, items: list) -> dict:
-        return {"__type__": "list", "items": items}
+    def _list_tree(self, items: list) -> list:
+        """Produce the native JSON array form (no __type__ wrapper)."""
+        return list(items)
 
     def _set_tree(self, items: list) -> dict:
         """Produce the tagged set form: {"__type__": "set", "items": [sorted by str]}."""
@@ -1049,13 +1048,13 @@ class TestJsonNormalizationConsistency:
     # ------------------------------------------------------------------
 
     def test_flat_dict(self, h):
-        """A plain dict with string values."""
+        """A plain dict is serialised as a native sorted JSON object (no __type__ wrapper)."""
         structure = {"beta": 2, "alpha": 1}
         expected_tree = self._dict_tree({"beta": 2, "alpha": 1})
         assert h.hash_object(structure) == _sha256_json(expected_tree, self.HASHER_ID)
 
     def test_list_of_primitives(self, h):
-        """A plain list of integers."""
+        """A plain list is serialised as a native JSON array (no __type__ wrapper)."""
         structure = [10, 20, 30]
         expected_tree = self._list_tree([10, 20, 30])
         assert h.hash_object(structure) == _sha256_json(expected_tree, self.HASHER_ID)
@@ -1080,22 +1079,22 @@ class TestJsonNormalizationConsistency:
         assert h.hash_object(structure) == _sha256_json(expected_tree, self.HASHER_ID)
 
     def test_nested_dict_with_list(self, h):
-        """A dict whose value is a list."""
+        """A dict whose value is a list -- both use their native JSON forms."""
         structure = {"nums": [1, 2, 3], "label": "test"}
-        expected_items = {
-            "nums": self._list_tree([1, 2, 3]),
-            "label": "test",
-        }
-        expected_tree = self._dict_tree(expected_items)
+        # list expands to a plain array; dict expands to a plain sorted object
+        expected_tree = self._dict_tree(
+            {"nums": self._list_tree([1, 2, 3]), "label": "test"}
+        )
         assert h.hash_object(structure) == _sha256_json(expected_tree, self.HASHER_ID)
 
     def test_dict_with_unsorted_keys_normalises(self, h):
         """Insertion order must not affect the hash -- keys are always sorted."""
         # These two Python dicts are semantically identical; both should produce
-        # the same normalized JSON and therefore the same hash.
+        # the same normalized JSON (a plain sorted object) and therefore the same hash.
         structure_forward = {"z": 26, "a": 1, "m": 13}
         structure_backward = {"m": 13, "z": 26, "a": 1}
 
+        # _dict_tree already sorts keys, so this is the canonical native-JSON form
         expected_tree = self._dict_tree({"z": 26, "a": 1, "m": 13})
         canonical_hash = _sha256_json(expected_tree, self.HASHER_ID)
 
@@ -1111,8 +1110,9 @@ class TestJsonNormalizationConsistency:
     def test_deeply_nested_structure(self, h):
         """A multi-level nested structure to confirm the tree is built correctly."""
         structure = {"outer": {"inner": [True, None, 42]}, "flag": False}
-        inner_list = self._list_tree([True, None, 42])
-        inner_dict = self._dict_tree({"inner": inner_list})
+        # All levels use native JSON forms (plain arrays and plain sorted objects)
+        inner_list = self._list_tree([True, None, 42])  # plain array
+        inner_dict = self._dict_tree({"inner": inner_list})  # plain sorted object
         expected_tree = self._dict_tree({"outer": inner_dict, "flag": False})
         assert h.hash_object(structure) == _sha256_json(expected_tree, self.HASHER_ID)
 
@@ -1157,7 +1157,6 @@ class TestProcessIdentityStructure:
     def test_default_mode_uses_object_content_hash(self):
         """With process_identity_structure=False (default), hash_object returns
         exactly what obj.content_hash() returns -- using the object's own hasher."""
-        obj_hasher = make_hasher(strict=True)
         calling_hasher = make_hasher(strict=True)
         # Give the object a *different* hasher (different hasher_id)
         obj_hasher_id_hasher = BaseSemanticHasher(hasher_id="obj_hasher_v1")

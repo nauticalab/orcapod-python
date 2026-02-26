@@ -7,8 +7,8 @@ import pyarrow as pa
 
 from orcapod.hashing import arrow_serialization
 from orcapod.hashing.visitors import SemanticHashingVisitor
-from orcapod.protocols.hashing_protocols import ContentHash
 from orcapod.semantic_types import SemanticTypeRegistry
+from orcapod.types import ContentHash
 from orcapod.utils import arrow_utils
 
 SERIALIZATION_METHOD_LUT: dict[str, Callable[[pa.Table], bytes]] = {

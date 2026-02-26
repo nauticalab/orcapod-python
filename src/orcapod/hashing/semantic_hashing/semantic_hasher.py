@@ -20,7 +20,7 @@ recursive with ``_expand_structure``:
 ``_expand_structure(obj)``
   Structural expansion only -- called exclusively for container types
   (list, tuple, dict, set, frozenset, namedtuple).  Returns a
-  JSON-serialisable tagged tree where:
+  JSON-serialisable value where:
 
   - Primitive elements  → passed through as-is (become leaves in the tree)
   - Nested structures   → recurse via ``_expand_structure``
@@ -33,18 +33,25 @@ embedded inside [X, C] contributes only its hash token to the parent --
 it is NOT the same as [[A, B], C].  The parent's structure is opaque to
 the expansion that produced X's hash.
 
-Container type tagging
-----------------------
-Lists, tuples, dicts, sets, and namedtuples are represented as tagged
-JSON objects so that structurally similar but type-distinct containers
-produce different hashes:
+Container type serialisation
+----------------------------
+Native JSON container types (list and dict) are kept in their natural JSON
+form.  Python-only container types that have no unambiguous JSON equivalent
+are wrapped in a ``{"__type__": ..., ...}`` tagged object so that
+structurally similar but type-distinct containers produce different hashes:
 
-  list       → {"__type__": "list",      "items": [...]}
+  list       → [...]                                        # native JSON array
+  dict       → {...}                                        # native JSON object; keys sorted
   tuple      → {"__type__": "tuple",     "items": [...]}
-  set        → {"__type__": "set",       "items": [...]}   # sorted by hash str
-  dict       → {"__type__": "dict",      "items": {...}}   # sorted by key str
+  set        → {"__type__": "set",       "items": [...]}   # items sorted by str()
+  frozenset  → {"__type__": "set",       "items": [...]}   # same tag as set
   namedtuple → {"__type__": "namedtuple","name": "T",
                 "fields": {...}}                            # sorted by field name
+
+This means a ``list`` and a ``tuple`` with the same elements will hash
+differently (the tuple carries a type tag), while a plain ``list`` and a
+plain JSON array embedded anywhere in a structure are indistinguishable --
+which is exactly the desired semantics for interoperability.
 
 Circular-reference detection
 -----------------------------
@@ -62,7 +69,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from orcapod.hashing.type_handler_registry import TypeHandlerRegistry
+from orcapod.hashing.semantic_hashing.type_handler_registry import TypeHandlerRegistry
 from orcapod.protocols import hashing_protocols as hp
 from orcapod.types import ContentHash
 
@@ -101,7 +108,7 @@ class BaseSemanticHasher:
         if type_handler_registry is None:
             from orcapod.hashing.defaults import get_default_type_handler_registry
 
-            self._registry = get_default_type_handler_registry()
+            self._registry = get_default_type_handler_registry()  # stays in hashing/
         else:
             self._registry = type_handler_registry
 
@@ -237,10 +244,7 @@ class BaseSemanticHasher:
             return self._expand_mapping(obj, _visited)
 
         if isinstance(obj, list):
-            return {
-                "__type__": "list",
-                "items": [self._expand_element(item, _visited) for item in obj],
-            }
+            return [self._expand_element(item, _visited) for item in obj]
 
         if isinstance(obj, tuple):
             return {
@@ -280,14 +284,13 @@ class BaseSemanticHasher:
         obj: Mapping,
         _visited: frozenset[int],
     ) -> dict:
-        """Expand a dict/Mapping into a tagged, sorted JSON object."""
+        """Expand a dict/Mapping into a sorted native JSON object."""
         items: dict[str, Any] = {}
         for k, v in obj.items():
             str_key = str(self._expand_element(k, _visited))
             items[str_key] = self._expand_element(v, _visited)
         # Sort for determinism regardless of insertion order.
-        sorted_items = dict(sorted(items.items()))
-        return {"__type__": "dict", "items": sorted_items}
+        return dict(sorted(items.items()))
 
     def _expand_namedtuple(
         self,

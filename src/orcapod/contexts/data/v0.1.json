@@ -34,7 +34,7 @@
         }
     },
     "object_hasher": {
-        "_class": "orcapod.hashing.semantic_hasher.BaseSemanticHasher",
+        "_class": "orcapod.hashing.semantic_hashing.semantic_hasher.BaseSemanticHasher",
         "_config": {
             "hasher_id": "semantic_v0.1",
             "type_handler_registry": {
@@ -43,7 +43,7 @@
         }
     },
     "type_handler_registry": {
-        "_class": "orcapod.hashing.type_handler_registry.BuiltinTypeHandlerRegistry",
+        "_class": "orcapod.hashing.semantic_hashing.type_handler_registry.BuiltinTypeHandlerRegistry",
         "_config": {}
     },
     "metadata": {

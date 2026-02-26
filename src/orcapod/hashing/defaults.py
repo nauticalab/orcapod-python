@@ -10,7 +10,7 @@
 # from its JSON spec.  Constructing them here would bypass versioning and
 # produce hashers that are decoupled from the active data context.
 
-from orcapod.hashing.type_handler_registry import TypeHandlerRegistry
+from orcapod.hashing.semantic_hashing.type_handler_registry import TypeHandlerRegistry
 from orcapod.protocols import hashing_protocols as hp
 
 

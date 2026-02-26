@@ -65,7 +65,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from orcapod.hashing.semantic_hasher import BaseSemanticHasher
+from orcapod.hashing.semantic_hashing.semantic_hasher import BaseSemanticHasher
 from orcapod.types import ContentHash
 
 logger = logging.getLogger(__name__)

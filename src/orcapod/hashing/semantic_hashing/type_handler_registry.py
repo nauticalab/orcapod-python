@@ -13,7 +13,7 @@ registry = TypeHandlerRegistry()
 registry.register(Path, PathContentHandler())
 
 # Or use the global default registry:
-from orcapod.hashing.type_handler_registry import get_default_type_handler_registry
+from orcapod.hashing.semantic_hashing.type_handler_registry import get_default_type_handler_registry
 get_default_type_handler_registry().register(MyType, MyTypeHandler())
 
 # Look up a handler (returns None if not found):
@@ -217,7 +217,9 @@ def get_default_type_handler_registry() -> "TypeHandlerRegistry":
     active DataContext.  Importing this function from
     ``orcapod.hashing.defaults`` or ``orcapod.hashing`` is equivalent.
     """
-    from orcapod.hashing.defaults import get_default_type_handler_registry as _get
+    from orcapod.hashing.defaults import (
+        get_default_type_handler_registry as _get,
+    )  # stays in hashing/
 
     return _get()
 
@@ -234,6 +236,8 @@ class BuiltinTypeHandlerRegistry(TypeHandlerRegistry):
 
     def __init__(self) -> None:
         super().__init__()
-        from orcapod.hashing.builtin_handlers import register_builtin_handlers
+        from orcapod.hashing.semantic_hashing.builtin_handlers import (
+            register_builtin_handlers,
+        )
 
         register_builtin_handlers(self)

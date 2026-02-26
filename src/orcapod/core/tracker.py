@@ -55,7 +55,7 @@ class BasicTrackerManager:
     def record_pod_invocation(
         self,
         pod: cp.Pod,
-        upstreams: tuple[cp.Stream, ...],
+        upstreams: tuple[cp.Stream, ...] = (),
         label: str | None = None,
     ) -> None:
         """

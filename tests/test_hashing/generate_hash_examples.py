@@ -1,14 +1,17 @@
 # This script is used to generate hash examples for testing purposes.
 # The resulting hashes are saved in `hash_samples` folder, and are used
 # throughout the tests to ensure consistent hashing behavior across different runs
-# and revision of the codebase.
+# and revisions of the codebase.
+#
+# Uses the new BaseSemanticHasher API (get_default_semantic_hasher) rather than
+# the legacy hash_to_hex / hash_to_int / hash_to_uuid functions.
 
 import json
 from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
 
-from orcapod.hashing import hash_to_hex, hash_to_int, hash_to_uuid
+from orcapod.hashing import get_default_semantic_hasher
 
 # Create the hash_samples directory if it doesn't exist
 SAMPLES_DIR = Path(__file__).parent / "hash_samples"
@@ -24,7 +27,8 @@ output_file = DATA_STRUCTURES_DIR / f"hash_examples_{timestamp}.json"
 
 
 def generate_hash_examples():
-    """Generate hash examples for various data structures."""
+    """Generate hash examples for various data structures using BaseSemanticHasher."""
+    hasher = get_default_semantic_hasher()
     examples = []
 
     # Basic data types
@@ -64,10 +68,14 @@ def generate_hash_examples():
         set(),
         {1, 2, 3},
         {"a", "b", "c"},
+        frozenset(),
+        frozenset([1, 2, 3]),
+        (),
+        (1, 2, 3),
         {},
         {"a": 1},
         {"a": 1, "b": 2},
-        {"b": 1, "a": 2},  # Same keys as above but different order
+        {"b": 1, "a": 2},  # Same keys as above but different insertion order
         {"nested": {"a": 1, "b": 2}},
     ]
 
@@ -98,26 +106,30 @@ def generate_hash_examples():
     # Generate hashes for each example
     for value in all_examples:
         try:
-            hex_hash = hash_to_hex(value)
-            int_hash = hash_to_int(value)
-            uuid_hash = str(
-                hash_to_uuid(value)
-            )  # Convert UUID to string for JSON serialization
+            content_hash = hasher.hash_object(value)
+            hash_string = content_hash.to_string()
 
-            # Create a serializable representation of the value
+            # Produce a JSON-serialisable representation of the value so the
+            # sample file is human-readable and round-trippable by the test.
             if isinstance(value, (bytes, bytearray)):
                 serialized_value = f"bytes:{value.hex()}"
-            elif isinstance(value, set):
-                serialized_value = f"set:{list(value)}"
+            elif isinstance(value, (set, frozenset)):
+                type_tag = "frozenset" if isinstance(value, frozenset) else "set"
+                serialized_value = {
+                    "__type__": type_tag,
+                    "items": sorted(value, key=str),
+                }
+            elif isinstance(value, tuple):
+                serialized_value = {"__type__": "tuple", "items": list(value)}
+            elif isinstance(value, OrderedDict):
+                serialized_value = {"__type__": "OrderedDict", "items": dict(value)}
             else:
                 serialized_value = value
 
             examples.append(
                 {
                     "value": serialized_value,
-                    "hex_hash": hex_hash,
-                    "int_hash": int_hash,
-                    "uuid_hash": uuid_hash,
+                    "hash": hash_string,
                 }
             )
         except Exception as e:

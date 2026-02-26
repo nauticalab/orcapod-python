@@ -34,16 +34,6 @@ Utility:
 # New API -- SemanticHasher, registry, mixin
 # ---------------------------------------------------------------------------
 
-from orcapod.hashing.builtin_handlers import (
-    BytesHandler,
-    FunctionHandler,
-    PathContentHandler,
-    TypeObjectHandler,
-    UUIDHandler,
-    register_builtin_handlers,
-)
-from orcapod.hashing.content_identifiable_mixin import ContentIdentifiableMixin
-
 # ---------------------------------------------------------------------------
 # Default hasher factories
 # ---------------------------------------------------------------------------
@@ -59,6 +49,17 @@ from orcapod.hashing.defaults import (
 # ---------------------------------------------------------------------------
 from orcapod.hashing.file_hashers import BasicFileHasher, CachedFileHasher
 from orcapod.hashing.hash_utils import hash_file
+from orcapod.hashing.semantic_hashing.builtin_handlers import (
+    BytesHandler,
+    FunctionHandler,
+    PathContentHandler,
+    TypeObjectHandler,
+    UUIDHandler,
+    register_builtin_handlers,
+)
+from orcapod.hashing.semantic_hashing.content_identifiable_mixin import (
+    ContentIdentifiableMixin,
+)
 
 # ---------------------------------------------------------------------------
 # Legacy API (deprecated -- kept for backward compatibility)
@@ -87,8 +88,8 @@ except ImportError:
     hash_to_hex = None  # type: ignore[assignment]
     hash_to_int = None  # type: ignore[assignment]
     hash_to_uuid = None  # type: ignore[assignment]
-from orcapod.hashing.semantic_hasher import BaseSemanticHasher
-from orcapod.hashing.type_handler_registry import (
+from orcapod.hashing.semantic_hashing.semantic_hasher import BaseSemanticHasher
+from orcapod.hashing.semantic_hashing.type_handler_registry import (
     BuiltinTypeHandlerRegistry,
     TypeHandlerRegistry,
 )

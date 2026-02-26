@@ -1,0 +1,385 @@
+[
+  {
+    "value": null,
+    "hash": "semantic_v0.1:74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  {
+    "value": true,
+    "hash": "semantic_v0.1:b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+  },
+  {
+    "value": false,
+    "hash": "semantic_v0.1:fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+  },
+  {
+    "value": 0,
+    "hash": "semantic_v0.1:5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+  },
+  {
+    "value": 1,
+    "hash": "semantic_v0.1:6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+  },
+  {
+    "value": -1,
+    "hash": "semantic_v0.1:1bad6b8cf97131fceab8543e81f7757195fbb1d36b376ee994ad1cf17699c464"
+  },
+  {
+    "value": 42,
+    "hash": "semantic_v0.1:73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049"
+  },
+  {
+    "value": 3.14159,
+    "hash": "semantic_v0.1:c0740dd25c9de39b9c8d5ab452e8b69bcc0bf86f2a60ed7e527e79d0a3035852"
+  },
+  {
+    "value": -2.71828,
+    "hash": "semantic_v0.1:43dc3d0d4b9e9bb2a2dfcf9696b0d49fe1f4fa10ac48586ef40e0b037f9ebcfe"
+  },
+  {
+    "value": 0.0,
+    "hash": "semantic_v0.1:8aed642bf5118b9d3c859bd4be35ecac75b6e873cce34e7b6f554b06f75550d7"
+  },
+  {
+    "value": "",
+    "hash": "semantic_v0.1:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+  },
+  {
+    "value": "hello",
+    "hash": "semantic_v0.1:5aa762ae383fbb727af3c7a36d4940a5b8c40a989452d2304fc958ff3f354e7a"
+  },
+  {
+    "value": "Hello, World!",
+    "hash": "semantic_v0.1:cc82ebbcf8b60a5821d1c51c72cd79380ecea47de343ccb3b158938a2b3bf764"
+  },
+  {
+    "value": "Special chars: !@#$%^&*()",
+    "hash": "semantic_v0.1:bbfa5afce2bf76f5520f0acafbb986c6da70dc507717450af24f91e8d01832c9"
+  },
+  {
+    "value": "Unicode: 你好, Привет, こんにちは",
+    "hash": "semantic_v0.1:2dd7db78b058c582953d493cc25b725d3cd7671c246c30440cebb5effc7c9e91"
+  },
+  {
+    "value": "bytes:",
+    "hash": "semantic_v0.1:12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+  },
+  {
+    "value": "bytes:68656c6c6f",
+    "hash": "semantic_v0.1:7375513f6d0b5271db377b03ad832f51966a263f2ceb70a747b17c076b273ede"
+  },
+  {
+    "value": "bytes:00010203",
+    "hash": "semantic_v0.1:cedf4873ac6b0aba6a4b8dc6574c5564ee4b971a0be7fd8ad76582d1377e9995"
+  },
+  {
+    "value": "bytes:68656c6c6f20776f726c64",
+    "hash": "semantic_v0.1:95b243c4c8b3e696c28c0ffc82ff70b87f505f487f57ed5e7595a70b21a6a6ff"
+  },
+  {
+    "value": "bytes:414243",
+    "hash": "semantic_v0.1:9117877bc5c6f08d682a7d9bb4e67b984d316921faf09bf224a5c9bedb3ebb20"
+  },
+  {
+    "value": [],
+    "hash": "semantic_v0.1:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "value": [
+      1,
+      2,
+      3
+    ],
+    "hash": "semantic_v0.1:a615eeaee21de5179de080de8c3052c8da901138406ba71c38c032845f7d54f4"
+  },
+  {
+    "value": [
+      "a",
+      "b",
+      "c"
+    ],
+    "hash": "semantic_v0.1:fa1844c2988ad15ab7b49e0ece09684500fad94df916859fb9a43ff85f5bb477"
+  },
+  {
+    "value": [
+      1,
+      "a",
+      true
+    ],
+    "hash": "semantic_v0.1:8554b19db94b8f9b64793d82a73098ea8af738886c738a2183682ca0ce08489a"
+  },
+  {
+    "value": {
+      "__type__": "set",
+      "items": []
+    },
+    "hash": "semantic_v0.1:469289aca5c121cc9cec7cbde2df99827e5f310b646d4b7367760ea5f3a72bc7"
+  },
+  {
+    "value": {
+      "__type__": "set",
+      "items": [
+        1,
+        2,
+        3
+      ]
+    },
+    "hash": "semantic_v0.1:d1ff6a34712272cbf01d0bc874fb41db6df312102bd073c95529df6e9ae738bf"
+  },
+  {
+    "value": {
+      "__type__": "set",
+      "items": [
+        "a",
+        "b",
+        "c"
+      ]
+    },
+    "hash": "semantic_v0.1:dc64a5a5142e9849961bf58ac4900f662d8d1fcf81261063f46ac5c475c0f4e7"
+  },
+  {
+    "value": {
+      "__type__": "frozenset",
+      "items": []
+    },
+    "hash": "semantic_v0.1:469289aca5c121cc9cec7cbde2df99827e5f310b646d4b7367760ea5f3a72bc7"
+  },
+  {
+    "value": {
+      "__type__": "frozenset",
+      "items": [
+        1,
+        2,
+        3
+      ]
+    },
+    "hash": "semantic_v0.1:d1ff6a34712272cbf01d0bc874fb41db6df312102bd073c95529df6e9ae738bf"
+  },
+  {
+    "value": {
+      "__type__": "tuple",
+      "items": []
+    },
+    "hash": "semantic_v0.1:095502da3bf5c96b476e96c1304bbf052aec9482f7c46ed649e74d9d9bc172a7"
+  },
+  {
+    "value": {
+      "__type__": "tuple",
+      "items": [
+        1,
+        2,
+        3
+      ]
+    },
+    "hash": "semantic_v0.1:41ad6c92bc0c7ab5a7b680740391d08333bddaa7caffe3a54e7136a898835cbf"
+  },
+  {
+    "value": {},
+    "hash": "semantic_v0.1:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+  },
+  {
+    "value": {
+      "a": 1
+    },
+    "hash": "semantic_v0.1:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862"
+  },
+  {
+    "value": {
+      "a": 1,
+      "b": 2
+    },
+    "hash": "semantic_v0.1:43258cff783fe7036d8a43033f830adfc60ec037382473548ac742b888292777"
+  },
+  {
+    "value": {
+      "b": 1,
+      "a": 2
+    },
+    "hash": "semantic_v0.1:d3626ac30a87e6f7a6428233b3c68299976865fa5508e4267c5415c76af7a772"
+  },
+  {
+    "value": {
+      "nested": {
+        "a": 1,
+        "b": 2
+      }
+    },
+    "hash": "semantic_v0.1:635b42bee92bc9e78396200dd770fffce472fc9b768d9ea1b73118367efaf084"
+  },
+  {
+    "value": [
+      1,
+      [
+        2,
+        [
+          3,
+          [
+            4,
+            [
+              5
+            ]
+          ]
+        ]
+      ]
+    ],
+    "hash": "semantic_v0.1:fdc65463c02cb1c8788344fba97041b67fce86c4726d4e10fe135af24b9c6801"
+  },
+  {
+    "value": {
+      "a": {
+        "b": {
+          "c": {
+            "d": {
+              "e": 42
+            }
+          }
+        }
+      }
+    },
+    "hash": "semantic_v0.1:c6d14482c460f03004d38484d71298a40eb8ec52e264851222c8bda2f4982541"
+  },
+  {
+    "value": {
+      "a": [
+        1,
+        2,
+        {
+          "b": [
+            3,
+            4,
+            {
+              "c": 5
+            }
+          ]
+        }
+      ]
+    },
+    "hash": "semantic_v0.1:2252fc2a778c83e9c9308bd3ff747afd8125a902ff23282f4324d48424987c5d"
+  },
+  {
+    "value": [
+      {
+        "a": 1
+      },
+      {
+        "b": 2
+      },
+      {
+        "c": [
+          3,
+          4,
+          5
+        ]
+      }
+    ],
+    "hash": "semantic_v0.1:d72ea3c2223310171bdcb8e1787ef9f67f0e0c9a96616ad1686ad98b9d1c5e9d"
+  },
+  {
+    "value": {
+      "keys": [
+        "a",
+        "b",
+        "c"
+      ],
+      "values": [
+        1,
+        2,
+        3
+      ]
+    },
+    "hash": "semantic_v0.1:af63a0d00f3d3b744714e12bc4b6003b2395e296fe23c7a02c3352794f156cdb"
+  },
+  {
+    "value": [
+      {
+        "a": 1,
+        "b": [
+          2,
+          3
+        ]
+      },
+      {
+        "c": 4,
+        "d": [
+          5,
+          6
+        ]
+      }
+    ],
+    "hash": "semantic_v0.1:d88e8543683b6b82bd7ce2225762d5a908c9229d122f8a52ca5c64169aec9a9b"
+  },
+  {
+    "value": {
+      "users": [
+        {
+          "name": "Alice",
+          "age": 30
+        },
+        {
+          "name": "Bob",
+          "age": 25
+        }
+      ]
+    },
+    "hash": "semantic_v0.1:32c13fff89d73e616960914df441b14c74671ec89d9589c2bcdba76f436b8126"
+  },
+  {
+    "value": {
+      "data": {
+        "points": [
+          [
+            1,
+            2
+          ],
+          [
+            3,
+            4
+          ],
+          [
+            5,
+            6
+          ]
+        ],
+        "labels": [
+          "A",
+          "B",
+          "C"
+        ]
+      }
+    },
+    "hash": "semantic_v0.1:a553155144ad09460431dbbaacf7fe9a2910dd03ef969af8a9a529aae1c62c4f"
+  },
+  {
+    "value": {
+      "__type__": "OrderedDict",
+      "items": {
+        "a": 1,
+        "b": 2,
+        "c": 3
+      }
+    },
+    "hash": "semantic_v0.1:e6a3385fb77c287a712e7f406a451727f0625041823ecf23bea7ef39b2e39805"
+  },
+  {
+    "value": [
+      [
+        1,
+        2
+      ],
+      [
+        3,
+        4
+      ],
+      {
+        "a": [
+          5,
+          6
+        ],
+        "b": [
+          7,
+          8
+        ]
+      }
+    ],
+    "hash": "semantic_v0.1:aa4dc10726bca2bd65f5c953962b432c3aee33b37fe3fbc05b1514307d440a92"
+  }
+]
