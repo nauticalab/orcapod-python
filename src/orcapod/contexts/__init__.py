@@ -168,14 +168,14 @@ def get_default_context() -> DataContext:
     return resolve_context()
 
 
-def get_default_object_hasher() -> hp.ObjectHasher:
+def get_default_object_hasher() -> hp.SemanticHasher:
     """
     Get the default object hasher.
 
     Returns:
-        ObjectHasher instance for the default context
+        SemanticHasher instance for the default context
     """
-    return get_default_context().object_hasher
+    return get_default_context().semantic_hasher
 
 
 def get_default_arrow_hasher() -> hp.ArrowHasher:

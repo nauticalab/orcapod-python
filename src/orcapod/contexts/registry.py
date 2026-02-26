@@ -146,6 +146,7 @@ class JSONDataContextRegistry:
             "type_converter",
             "arrow_hasher",
             "object_hasher",
+            "type_handler_registry",
         ]
         missing_fields = [field for field in required_fields if field not in spec]
         if missing_fields:
@@ -269,7 +270,7 @@ class JSONDataContextRegistry:
             description = spec.get("description", "")
             ref_lut = {}
 
-            logger.debug(f"Creating type converter for {version}")
+            logger.debug(f"Creating semantic registry for {version}")
             ref_lut["semantic_registry"] = parse_objectspec(
                 spec["semantic_registry"],
                 ref_lut=ref_lut,
@@ -285,6 +286,11 @@ class JSONDataContextRegistry:
                 spec["arrow_hasher"], ref_lut=ref_lut
             )
 
+            logger.debug(f"Creating type handler registry for {version}")
+            ref_lut["type_handler_registry"] = parse_objectspec(
+                spec["type_handler_registry"], ref_lut=ref_lut
+            )
+
             logger.debug(f"Creating object hasher for {version}")
             ref_lut["object_hasher"] = parse_objectspec(
                 spec["object_hasher"], ref_lut=ref_lut
@@ -296,7 +302,8 @@ class JSONDataContextRegistry:
                 description=description,
                 type_converter=ref_lut["type_converter"],
                 arrow_hasher=ref_lut["arrow_hasher"],
-                object_hasher=ref_lut["object_hasher"],
+                semantic_hasher=ref_lut["object_hasher"],
+                type_handler_registry=ref_lut["type_handler_registry"],
             )
 
         except Exception as e:

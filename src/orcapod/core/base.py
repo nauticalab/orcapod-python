@@ -151,9 +151,11 @@ class ContentIdentifiableBase(DataContextMixin, ABC):
                    If no identity structure is provided, return None.
         """
         if self._cached_content_hash is None:
+            # hash of content identifiable should be identical to
+            # the hash of its identity_structure
             structure = self.identity_structure()
             # processed_structure = process_structure(structure)
-            self._cached_content_hash = self.data_context.object_hasher.hash_object(
+            self._cached_content_hash = self.data_context.semantic_hasher.hash_object(
                 structure
             )
         return self._cached_content_hash

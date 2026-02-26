@@ -26,76 +26,128 @@ class DataContextAware(Protocol):
 
 @runtime_checkable
 class ContentIdentifiable(Protocol):
-    """Protocol for objects that can provide an identity structure."""
+    """
+    Protocol for objects that can express their semantic identity as a plain
+    Python structure.
+
+    This is the only method a class needs to implement to participate in the
+    content-based hashing system. The returned structure is recursively
+    resolved by the SemanticHasher -- any nested ContentIdentifiable objects
+    within the structure will themselves be expanded and hashed, producing a
+    Merkle-tree-like composition of hashes.
+
+    The method should return a deterministic structure whose value depends
+    only on the semantic content of the object -- not on memory addresses,
+    object IDs, or other incidental runtime state.
+    """
 
     def identity_structure(self) -> Any:
         """
-        Return a structure that represents the identity of this object.
+        Return a structure that represents the semantic identity of this object.
+
+        The returned value may be any Python object:
+          - Primitives (str, int, float, bool, None) are used as-is.
+          - Collections (list, dict, set, tuple) are recursively traversed.
+          - Nested ContentIdentifiable objects are recursively resolved by
+            the SemanticHasher: their identity structure is hashed to a
+            ContentHash hex token, which is then embedded in place of the
+            object in the parent structure.
+          - Any type that has a registered TypeHandler in the
+            SemanticHasher's registry is handled by that handler.
 
         Returns:
-            Any: A structure representing this object's content.
+            Any: A structure representing this object's semantic content.
                  Should be deterministic and include all identity-relevant data.
-                 Return None to indicate no custom identity is available.
         """
         ...
 
     def content_hash(self) -> ContentHash:
         """
-        Compute a hash based on the identity content of this object.
-
-        Returns:
-            bytes: A byte representation of the hash based on the content.
-                   If no identity structure is provided, return None.
+        Returns the content hash. Note that the context and algorithm used for computing
+        the hash is dependent on the object implementing this. If you'd prefer to use
+        your own algorithm, hash the identity_structure instead.
         """
         ...
 
-    def __eq__(self, other: object) -> bool:
+
+class TypeHandler(Protocol):
+    """
+    Protocol for type-specific serialization handlers used by SemanticHasher.
+
+    A TypeHandler converts a specific Python type into a value that
+    ``hash_object`` can process.  Handlers are registered with a
+    TypeHandlerRegistry and looked up via MRO-aware resolution.
+
+    The returned value is passed directly back to ``hash_object``, so it may
+    be anything that ``hash_object`` understands:
+
+      - A primitive (None, bool, int, float, str) -- hashed directly.
+      - A structure (list, tuple, dict, set, frozenset) -- expanded and hashed.
+      - A ContentHash -- treated as a terminal; returned as-is without
+        re-hashing.  Use this when the handler has already computed the
+        definitive hash of the object (e.g. hashing a file's content).
+      - A ContentIdentifiable -- its identity_structure() will be called.
+      - Another registered type -- dispatched through the registry.
+    """
+
+    def handle(self, obj: Any, hasher: "SemanticHasher") -> Any:
         """
-        Equality check that compares the identity structures of two objects.
+        Convert *obj* into a value that ``hash_object`` can process.
 
         Args:
-            other (object): The object to compare with.
+            obj:    The object to handle.
+            hasher: The SemanticHasher, available if the handler needs to
+                    hash sub-objects explicitly via ``hasher.hash_object()``.
 
         Returns:
-            bool: True if the identity structures are equal, False otherwise.
-        """
-        ...
-
-    def __hash__(self) -> int:
-        """
-        Hash implementation that uses the identity structure if provided,
-        otherwise falls back to the default hash.
-
-        Returns:
-            int: A hash value based on either content or identity.
+            Any value accepted by ``hash_object``: a primitive, structure,
+            ContentHash, ContentIdentifiable, or another registered type.
         """
         ...
 
 
-class ObjectHasher(Protocol):
-    """Protocol for general object hashing."""
+class SemanticHasher(Protocol):
+    """
+    Protocol for the semantic content-based hasher.
 
-    # TODO: consider more explicitly stating types of objects accepted
+    ``hash_object(obj)`` is the single recursive entry point.  It produces a
+    ContentHash for any Python object using the following dispatch:
+
+      - ContentHash        → terminal; returned as-is
+      - Primitive          → JSON-serialised and hashed directly
+      - Structure          → structurally expanded (type-tagged), then hashed
+      - Handler match      → handler.handle() returns a new value; recurse
+      - ContentIdentifiable→ identity_structure() returns a value; recurse
+      - Unknown            → TypeError (strict) or best-effort string (lenient)
+
+    Containers are type-tagged before hashing so that list, tuple, dict, set,
+    and namedtuple produce distinct hashes even when their elements are equal.
+
+    Unknown types raise TypeError by default (strict mode).  Set
+    strict=False on construction to fall back to a best-effort string
+    representation with a warning instead.
+    """
+
     def hash_object(self, obj: Any) -> ContentHash:
         """
-        Hash an object to a byte representation. Object hasher must be
-        able to handle ContentIdentifiable objects to hash them based on their
-        identity structure. If compressed=True, the content identifiable object
-        is immediately replaced with its compressed string identity and used in the
-        computation of containing identity structure.
+        Hash *obj* based on its semantic content.
 
         Args:
-            obj (Any): The object to hash.
+            obj: The object to hash.
 
         Returns:
-            bytes: The byte representation of the hash.
+            ContentHash: Stable, content-based hash of the object.
         """
         ...
 
     @property
     def hasher_id(self) -> str:
         """
-        Returns a unique identifier/name assigned to the hasher
+        Returns a unique identifier/name for this hasher instance.
+
+        The hasher_id is embedded in every ContentHash produced by this
+        hasher, allowing hashes from different versions or configurations
+        to be distinguished.
         """
         ...
 

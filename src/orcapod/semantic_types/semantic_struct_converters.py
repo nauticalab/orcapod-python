@@ -130,46 +130,7 @@ class PathStructConverter(SemanticStructConverterBase):
 
     def is_semantic_struct(self, struct_dict: dict[str, Any]) -> bool:
         """Check if a struct dictionary represents this semantic type."""
-        # TODO: infer this check based on identified struct type as definedin the __init__
+        # TODO: infer this check based on identified struct type as defined in the __init__
         return set(struct_dict.keys()) == {"path"} and isinstance(
             struct_dict["path"], str
         )
-
-    def hash_struct_dict(
-        self, struct_dict: dict[str, Any], add_prefix: bool = False
-    ) -> ContentHash:
-        """
-        Compute hash of the file content pointed to by the path.
-
-        Args:
-            struct_dict: Arrow struct dictionary with 'path' field
-            add_prefix: If True, prefix with semantic type and algorithm info
-
-        Returns:
-            ContentHash of the file content
-
-        Raises:
-            FileNotFoundError: If the file doesn't exist
-            PermissionError: If the file can't be read
-            OSError: For other file system errors
-        """
-        path_str = struct_dict.get("path")
-        if path_str is None:
-            raise ValueError("Missing 'path' field in struct")
-
-        path = Path(path_str)
-
-        try:
-            # TODO: replace with FileHasher implementation
-            # Read file content and compute hash
-            content = path.read_bytes()
-            return self._compute_content_hash(content)
-
-        except FileNotFoundError:
-            raise FileNotFoundError(f"File not found: {path}")
-        except PermissionError:
-            raise PermissionError(f"Permission denied reading file: {path}")
-        except IsADirectoryError:
-            raise ValueError(f"Path is a directory, not a file: {path}")
-        except OSError as e:
-            raise OSError(f"Error reading file {path}: {e}")

@@ -34,17 +34,17 @@
         }
     },
     "object_hasher": {
-        "_class": "orcapod.hashing.object_hashers.BasicObjectHasher",
+        "_class": "orcapod.hashing.semantic_hasher.BaseSemanticHasher",
         "_config": {
             "hasher_id": "object_v0.1",
-            "function_info_extractor": {
-                "_class": "orcapod.hashing.function_info_extractors.FunctionSignatureExtractor",
-                "_config": {
-                    "include_module": true,
-                    "include_defaults": true
-                }
+            "type_handler_registry": {
+                "_ref": "type_handler_registry"
             }
         }
+    },
+    "type_handler_registry": {
+        "_class": "orcapod.hashing.type_handler_registry.BuiltinTypeHandlerRegistry",
+        "_config": {}
     },
     "metadata": {
         "created_date": "2025-08-01",

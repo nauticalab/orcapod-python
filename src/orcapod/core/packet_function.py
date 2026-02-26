@@ -132,7 +132,7 @@ class PacketFunctionBase(TraceableBase):
         """
         if self._output_packet_schema_hash is None:
             self._output_packet_schema_hash = (
-                self.data_context.object_hasher.hash_object(
+                self.data_context.semantic_hasher.hash_object(
                     self.output_packet_schema
                 ).to_string()
             )
@@ -274,14 +274,14 @@ class PythonPacketFunction(PacketFunctionBase):
                 git_hash += "-dirty"
         self._git_hash = git_hash
 
-        object_hasher = self.data_context.object_hasher
-        self._function_signature_hash = object_hasher.hash_object(
+        semantic_hasher = self.data_context.semantic_hasher
+        self._function_signature_hash = semantic_hasher.hash_object(
             get_function_signature(function)
         ).to_string()
-        self._function_content_hash = object_hasher.hash_object(
+        self._function_content_hash = semantic_hasher.hash_object(
             get_function_components(self._function)
         ).to_string()
-        self._output_schema_hash = object_hasher.hash_object(
+        self._output_schema_hash = semantic_hasher.hash_object(
             self.output_packet_schema
         ).to_string()
 
