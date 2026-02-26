@@ -7,7 +7,7 @@ from orcapod.protocols.core_protocols import ArgumentGroup, Stream
 from orcapod.types import ColumnConfig, Schema
 
 
-class Operator(StaticOutputPod):
+class OperatorPod(StaticOutputPod):
     """
     Base class for all operators.
     Operators are basic pods that can be used to perform operations on streams.
@@ -20,7 +20,7 @@ class Operator(StaticOutputPod):
         return self.__class__.__name__
 
 
-class UnaryOperator(Operator):
+class UnaryOperator(OperatorPod):
     """
     Base class for all unary operators.
     """
@@ -83,7 +83,7 @@ class UnaryOperator(Operator):
         return (tuple(streams)[0],)
 
 
-class BinaryOperator(Operator):
+class BinaryOperator(OperatorPod):
     """
     Base class for all operators.
     """
@@ -149,7 +149,7 @@ class BinaryOperator(Operator):
             return tuple(streams)
 
 
-class NonZeroInputOperator(Operator):
+class NonZeroInputOperator(OperatorPod):
     """
     Operators that work with at least one input stream.
     This is useful for operators that can take a variable number of (but at least one ) input streams,

@@ -6,9 +6,9 @@ from collections.abc import Collection, Iterator
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 
+from orcapod.config import Config
+from orcapod.contexts import DataContext
 from orcapod.core.base import TraceableBase
-from orcapod.core.config import OrcapodConfig
-from orcapod.core.data_context import DataContext
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
@@ -32,7 +32,7 @@ else:
 
 class StaticOutputPod(TraceableBase):
     """
-    Abstract Base class for basic pods with core logic that yields static output stream.
+    Abstract Base class for pods with core logic that yields static output stream.
     The static output stream will be wrapped in DynamicPodStream which will re-execute
     the pod as necessary to ensure that the output stream is up-to-date.
 
@@ -194,14 +194,12 @@ class DynamicPodStream(StreamBase):
         upstreams: tuple[Stream, ...] = (),
         label: str | None = None,
         data_context: DataContext | None = None,
-        orcapod_config: OrcapodConfig | None = None,
+        config: Config | None = None,
     ) -> None:
         self._pod = pod
         self._upstreams = upstreams
 
-        super().__init__(
-            label=label, data_context=data_context, orcapod_config=orcapod_config
-        )
+        super().__init__(label=label, data_context=data_context, config=config)
         self._set_modified_time(None)
         self._cached_time: datetime | None = None
         self._cached_stream: Stream | None = None

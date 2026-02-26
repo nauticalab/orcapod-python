@@ -39,7 +39,14 @@ error_handling_options = Literal["raise", "ignore", "warn"]
 def parse_function_outputs(self, values: Any) -> dict[str, DataValue]:
     """
     Process the output of a function and return a dictionary of DataValues, correctly parsing
-    the output based on expected number of values.
+    the output based on the expected number of output keys.
+
+    Examples:
+        - If ``output_keys = []``, the function returns no values and an empty dict is returned.
+        - If ``output_keys = ["result"]``, a single value is expected and mapped directly:
+          ``{"result": value}``
+        - If ``output_keys = ["a", "b"]``, the function should return an iterable of two values,
+          e.g. ``(1, 2)`` → ``{"a": 1, "b": 2}``
     """
     output_values = []
     if len(self.output_keys) == 0:
@@ -66,7 +73,7 @@ def combine_hashes(
     *hashes: str,
     order: bool = False,
     prefix_hasher_id: bool = False,
-    hex_char_count: int | None = 20,
+    hex_char_count: int | None = None,
 ) -> str:
     """Combine hashes into a single hash string."""
 
@@ -94,14 +101,14 @@ class PacketFunctionBase(TraceableBase):
         version: str = "v0.0",
         label: str | None = None,
         data_context: str | DataContext | None = None,
-        orcapod_config: Config | None = None,
+        config: Config | None = None,
     ):
-        super().__init__(
-            label=label, data_context=data_context, orcapod_config=orcapod_config
-        )
+        super().__init__(label=label, data_context=data_context, config=config)
         self._active = True
         self._version = version
 
+        # Parse version string to extract major and minor versions
+        # 0.5.2 -> 0 and 5.2, 1.3rc -> 1 and 3rc
         match = re.match(r"\D*(\d+)\.(.*)", version)
         if match:
             self._major_version = int(match.group(1))
@@ -115,6 +122,14 @@ class PacketFunctionBase(TraceableBase):
 
     @property
     def output_packet_schema_hash(self) -> str:
+        """
+        Return the hash of the output packet schema as a string.
+
+        The hash is computed lazily on first access and cached for subsequent calls.
+
+        Returns:
+            str: The hash string of the output packet schema.
+        """
         if self._output_packet_schema_hash is None:
             self._output_packet_schema_hash = (
                 self.data_context.object_hasher.hash_object(
@@ -178,12 +193,12 @@ class PacketFunctionBase(TraceableBase):
 
     @abstractmethod
     def get_function_variation_data(self) -> dict[str, Any]:
-        """Raw data defining function variation - system computes hash"""
+        """Raw data defining function variation"""
         ...
 
     @abstractmethod
     def get_execution_data(self) -> dict[str, Any]:
-        """Raw data defining execution context - system computes hash"""
+        """Raw data defining execution context"""
         ...
 
     @abstractmethod
@@ -241,7 +256,7 @@ class PythonPacketFunction(PacketFunctionBase):
         super().__init__(label=label or self._function_name, version=version, **kwargs)
 
         # extract input and output schema from the function signature
-        input_schema, output_schema = schema_utils.extract_function_schemas(
+        self._input_schema, self._output_schema = schema_utils.extract_function_schemas(
             self._function,
             self._output_keys,
             input_typespec=input_schema,
@@ -258,9 +273,6 @@ class PythonPacketFunction(PacketFunctionBase):
             if env_info.get("git_repo_status") == "dirty":
                 git_hash += "-dirty"
         self._git_hash = git_hash
-
-        self._input_schema = input_schema
-        self._output_schema = output_schema
 
         object_hasher = self.data_context.object_hasher
         self._function_signature_hash = object_hasher.hash_object(

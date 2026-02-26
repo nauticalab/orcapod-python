@@ -248,12 +248,10 @@ class TraceableBase(TemporalMixin, LabelableMixin, ContentIdentifiableBase):
         self,
         label: str | None = None,
         data_context: str | contexts.DataContext | None = None,
-        orcapod_config: Config | None = None,
+        config: Config | None = None,
     ):
         # Init provided here for explicit listing of parmeters
-        super().__init__(
-            label=label, data_context=data_context, orcapod_config=orcapod_config
-        )
+        super().__init__(label=label, data_context=data_context, config=config)
 
     def __repr__(self):
         return self.__class__.__name__

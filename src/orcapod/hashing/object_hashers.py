@@ -9,13 +9,14 @@ from typing import Any
 from uuid import UUID
 
 from orcapod.protocols import hashing_protocols as hp
+from orcapod.types import ContentHash
 
 logger = logging.getLogger(__name__)
 
 
 class ObjectHasherBase(ABC):
     @abstractmethod
-    def hash_object(self, obj: object) -> hp.ContentHash: ...
+    def hash_object(self, obj: object) -> ContentHash: ...
 
     @property
     @abstractmethod
@@ -113,7 +114,7 @@ class BasicObjectHasher(ObjectHasherBase):
             return "CircularRef"  # Don't include the actual id in hash output
 
         # TODO: revisit the hashing of the ContentHash
-        if isinstance(obj, hp.ContentHash):
+        if isinstance(obj, ContentHash):
             return (obj.method, obj.digest.hex())
 
         # For objects that could contain circular references, add to visited
