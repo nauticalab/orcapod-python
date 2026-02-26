@@ -36,7 +36,7 @@
     "object_hasher": {
         "_class": "orcapod.hashing.semantic_hasher.BaseSemanticHasher",
         "_config": {
-            "hasher_id": "object_v0.1",
+            "hasher_id": "semantic_v0.1",
             "type_handler_registry": {
                 "_ref": "type_handler_registry"
             }
