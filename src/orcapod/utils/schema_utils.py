@@ -4,7 +4,7 @@ import inspect
 import logging
 import sys
 from collections.abc import Callable, Collection, Mapping, Sequence
-from typing import Any, get_args, get_origin
+from typing import Any, get_args, get_origin, get_type_hints
 
 from orcapod.types import Schema, SchemaLike
 
@@ -149,22 +149,32 @@ def extract_function_schemas(
                 )
             verified_output_types = {k: v for k, v in zip(output_keys, output_typespec)}
 
+    # Use get_type_hints to resolve annotations that may be stored as strings
+    # (e.g. when the defining module uses `from __future__ import annotations`).
+    # Fall back to an empty dict if hints cannot be resolved (e.g. for built-ins).
+    try:
+        resolved_hints = get_type_hints(func)
+    except Exception:
+        resolved_hints = {}
+
     signature = inspect.signature(func)
 
     param_info: Schema = {}
     for name, param in signature.parameters.items():
         if input_typespec and name in input_typespec:
             param_info[name] = input_typespec[name]
+        elif name in resolved_hints:
+            param_info[name] = resolved_hints[name]
+        elif param.annotation is not inspect.Parameter.empty:
+            # annotation is already a live type (no __future__ postponement)
+            param_info[name] = param.annotation
         else:
-            # check if the parameter has annotation
-            if param.annotation is not inspect.Signature.empty:
-                param_info[name] = param.annotation
-            else:
-                raise ValueError(
-                    f"Parameter '{name}' has no type annotation and is not specified in input_types."
-                )
+            raise ValueError(
+                f"Parameter '{name}' has no type annotation and is not specified in input_types."
+            )
 
-    return_annot = signature.return_annotation
+    # get_type_hints stores the return annotation under the key 'return'
+    return_annot = resolved_hints.get("return", signature.return_annotation)
     inferred_output_types: Schema = {}
     if return_annot is not inspect.Signature.empty and return_annot is not None:
         output_item_types = []
@@ -175,9 +185,12 @@ def extract_function_schemas(
         elif len(output_keys) == 1:
             # if only one return key, the entire annotation is inferred as the return type
             output_item_types = [return_annot]
-        elif (get_origin(return_annot) or return_annot) in (tuple, list, Sequence):
+        elif get_origin(return_annot) in (tuple, list) or (
+            isinstance(get_origin(return_annot), type)
+            and issubclass(get_origin(return_annot), Sequence)
+        ):
             if get_origin(return_annot) is None:
-                # right type was specified but did not specified the type of items
+                # right type was specified but did not specify the type of items
                 raise ValueError(
                     f"Function return type annotation {return_annot} is a Sequence type but does not specify item types."
                 )

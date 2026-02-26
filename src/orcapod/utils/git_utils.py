@@ -32,10 +32,9 @@ def get_git_info(path):
         commit_hash = repo.head.commit.hexsha
         short_hash = repo.head.commit.hexsha[:7]
 
-        # Check if repository is dirty
+        # Check if repository is dirty (staged or unstaged changes only;
+        # untracked_files=False avoids a slow git ls-files subprocess call)
         is_dirty = repo.is_dirty(untracked_files=False)
-        # Check if there are untracked files
-        has_untracked_files = len(repo.untracked_files) > 0
 
         # Get current branch name
         try:
@@ -44,22 +43,12 @@ def get_git_info(path):
             # Handle detached HEAD state
             branch_name = "HEAD (detached)"
 
-        # Get more detailed dirty status
-        dirty_details = {
-            "staged": len(repo.index.diff("HEAD")) > 0,
-            "unstaged": len(repo.index.diff(None)) > 0,
-            "untracked": len(repo.untracked_files) > 0,
-        }
-
         return {
             "is_repo": True,
             "commit_hash": commit_hash,
             "short_hash": short_hash,
             "is_dirty": is_dirty,
-            "has_untracked_files": has_untracked_files,
             "branch": branch_name,
-            "dirty_details": dirty_details,
-            "untracked_files": repo.untracked_files,
             "repo_root": repo.working_dir,
         }
 

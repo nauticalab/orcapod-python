@@ -8,16 +8,10 @@ like semantic hashing, validation, data cleaning, etc.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, TYPE_CHECKING
-from orcapod.utils.lazy_module import LazyModule
+from typing import TYPE_CHECKING, Any
+
 from orcapod.semantic_types.semantic_registry import SemanticTypeRegistry
-
-
-if TYPE_CHECKING:
-    import pyarrow as pa
-else:
-    pa = LazyModule("pyarrow")
-
+from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -143,36 +137,6 @@ class ArrowTypeDataVisitor(ABC):
             return pa.list_(new_element_type), processed_elements
 
 
-class PassThroughVisitor(ArrowTypeDataVisitor):
-    """
-    A visitor that passes through data unchanged.
-
-    Useful as a base class or for testing the visitor pattern.
-    """
-
-    def visit_struct(
-        self, struct_type: "pa.StructType", data: dict | None
-    ) -> tuple["pa.DataType", Any]:
-        return self._visit_struct_fields(struct_type, data)
-
-    def visit_list(
-        self, list_type: "pa.ListType", data: list | None
-    ) -> tuple["pa.DataType", Any]:
-        return self._visit_list_elements(list_type, data)
-
-    def visit_map(
-        self, map_type: "pa.MapType", data: dict | None
-    ) -> tuple["pa.DataType", Any]:
-        # For simplicity, treat maps like structs for now
-        # TODO: Implement proper map handling if needed
-        return map_type, data
-
-    def visit_primitive(
-        self, primitive_type: "pa.DataType", data: Any
-    ) -> tuple["pa.DataType", Any]:
-        return primitive_type, data
-
-
 class SemanticHashingError(Exception):
     """Exception raised when semantic hashing fails"""
 
@@ -284,86 +248,6 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
 
         for field in struct_type:
             # Add field name to path for error context
-            self._current_field_path.append(field.name)
-            try:
-                field_data = data.get(field.name)
-                new_field_type, new_field_data = self.visit(field.type, field_data)
-
-                new_fields.append(pa.field(field.name, new_field_type))
-                new_data[field.name] = new_field_data
-            finally:
-                self._current_field_path.pop()
-
-        return pa.struct(new_fields), new_data
-
-
-class ValidationVisitor(ArrowTypeDataVisitor):
-    """
-    Example visitor for data validation.
-
-    This demonstrates how the visitor pattern can be extended for other use cases.
-    """
-
-    def __init__(self):
-        self.errors: list[str] = []
-        self._current_field_path: list[str] = []
-
-    def visit_struct(
-        self, struct_type: "pa.StructType", data: dict | None
-    ) -> tuple["pa.DataType", Any]:
-        if data is None:
-            return struct_type, None
-
-        # Check for missing required fields
-        field_names = {field.name for field in struct_type}
-        data_keys = set(data.keys())
-        missing_fields = field_names - data_keys
-
-        if missing_fields:
-            field_path = (
-                ".".join(self._current_field_path)
-                if self._current_field_path
-                else "<root>"
-            )
-            self.errors.append(
-                f"Missing required fields {missing_fields} at '{field_path}'"
-            )
-
-        return self._visit_struct_fields(struct_type, data)
-
-    def visit_list(
-        self, list_type: "pa.ListType", data: list | None
-    ) -> tuple["pa.DataType", Any]:
-        if data is None:
-            return list_type, None
-
-        self._current_field_path.append("[*]")
-        try:
-            return self._visit_list_elements(list_type, data)
-        finally:
-            self._current_field_path.pop()
-
-    def visit_map(
-        self, map_type: "pa.MapType", data: dict | None
-    ) -> tuple["pa.DataType", Any]:
-        return map_type, data
-
-    def visit_primitive(
-        self, primitive_type: "pa.DataType", data: Any
-    ) -> tuple["pa.DataType", Any]:
-        return primitive_type, data
-
-    def _visit_struct_fields(
-        self, struct_type: "pa.StructType", data: dict | None
-    ) -> tuple["pa.StructType", dict]:
-        """Override to add field path tracking"""
-        if data is None:
-            return struct_type, None
-
-        new_fields = []
-        new_data = {}
-
-        for field in struct_type:
             self._current_field_path.append(field.name)
             try:
                 field_data = data.get(field.name)

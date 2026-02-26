@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 import sys
@@ -15,7 +14,10 @@ from orcapod.config import Config
 from orcapod.contexts import DataContext
 from orcapod.core.base import TraceableBase
 from orcapod.core.datagrams import ArrowPacket, DictPacket
-from orcapod.hashing.hash_utils import get_function_components, get_function_signature
+from orcapod.hashing.hash_utils import (
+    get_function_components,
+    get_function_signature,
+)
 from orcapod.protocols.core_protocols import Packet, PacketFunction
 from orcapod.protocols.database_protocols import ArrowDatabase
 from orcapod.system_constants import constants
@@ -68,29 +70,6 @@ def parse_function_outputs(self, values: Any) -> dict[str, DataValue]:
     return {k: v for k, v in zip(self.output_keys, output_values)}
 
 
-# TODO: extract default char count as config
-def combine_hashes(
-    *hashes: str,
-    order: bool = False,
-    prefix_hasher_id: bool = False,
-    hex_char_count: int | None = None,
-) -> str:
-    """Combine hashes into a single hash string."""
-
-    # Sort for deterministic order regardless of input order
-    if order:
-        prepared_hashes = sorted(hashes)
-    else:
-        prepared_hashes = list(hashes)
-    combined = "".join(prepared_hashes)
-    combined_hash = hashlib.sha256(combined.encode()).hexdigest()
-    if hex_char_count is not None:
-        combined_hash = combined_hash[:hex_char_count]
-    if prefix_hasher_id:
-        return "sha256@" + combined_hash
-    return combined_hash
-
-
 class PacketFunctionBase(TraceableBase):
     """
     Abstract base class for PacketFunction, defining the interface and common functionality.
@@ -119,6 +98,12 @@ class PacketFunctionBase(TraceableBase):
             )
 
         self._output_packet_schema_hash = None
+
+    def computed_label(self) -> str | None:
+        """
+        If no explicit label is provided, use the canonical function name as the label.
+        """
+        return self.canonical_function_name
 
     @property
     def output_packet_schema_hash(self) -> str:
@@ -253,7 +238,7 @@ class PythonPacketFunction(PacketFunctionBase):
         assert function_name is not None
         self._function_name = function_name
 
-        super().__init__(label=label or self._function_name, version=version, **kwargs)
+        super().__init__(label=label, version=version, **kwargs)
 
         # extract input and output schema from the function signature
         self._input_schema, self._output_schema = schema_utils.extract_function_schemas(
@@ -431,7 +416,7 @@ class CachedPacketFunction(PacketFunctionWrapper):
     Wrapper around a PacketFunction that caches results for identical input packets.
     """
 
-    # name of the column in the tag store that contains the packet hash
+    # cloumn name containing indication of whether the result was computed
     RESULT_COMPUTED_FLAG = f"{constants.META_PREFIX}computed"
 
     def __init__(

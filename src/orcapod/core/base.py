@@ -72,16 +72,14 @@ class DataContextMixin:
     def __init__(
         self,
         data_context: str | contexts.DataContext | None = None,
-        orcapod_config: Config | None = None,
+        config: Config | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self._data_context = contexts.resolve_context(data_context)
-        if orcapod_config is None:
-            orcapod_config = (
-                DEFAULT_CONFIG  # DEFAULT_CONFIG as defined in orcapod/config.py
-            )
-        self._orcapod_config = orcapod_config
+        if config is None:
+            config = DEFAULT_CONFIG  # DEFAULT_CONFIG as defined in orcapod/config.py
+        self._orcapod_config = config
 
     @property
     def orcapod_config(self) -> Config:
@@ -116,7 +114,7 @@ class ContentIdentifiableBase(DataContextMixin, ABC):
     def __init__(
         self,
         data_context: str | contexts.DataContext | None = None,
-        orcapod_config: Config | None = None,
+        config: Config | None = None,
     ) -> None:
         """
         Initialize the ContentHashable with an optional ObjectHasher.
@@ -124,7 +122,7 @@ class ContentIdentifiableBase(DataContextMixin, ABC):
         Args:
             identity_structure_hasher (ObjectHasher | None): An instance of ObjectHasher to use for hashing.
         """
-        super().__init__(data_context=data_context, orcapod_config=orcapod_config)
+        super().__init__(data_context=data_context, config=config)
         self._cached_content_hash: ContentHash | None = None
         self._cached_int_hash: int | None = None
 

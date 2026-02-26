@@ -33,7 +33,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from orcapod.types import ContentHash
+from orcapod.protocols.hashing_protocols import FileContentHasher
+from orcapod.types import ContentHash, PathLike
 
 if TYPE_CHECKING:
     from orcapod.hashing.semantic_hashing.type_handler_registry import (
@@ -68,11 +69,11 @@ class PathContentHandler:
                      method (satisfies the FileContentHasher protocol).
     """
 
-    def __init__(self, file_hasher: Any) -> None:
+    def __init__(self, file_hasher: FileContentHasher) -> None:
         self.file_hasher = file_hasher
 
-    def handle(self, obj: Any, hasher: "SemanticHasher") -> Any:
-        path: Path = obj if isinstance(obj, Path) else Path(obj)
+    def handle(self, obj: PathLike, hasher: "SemanticHasher") -> Any:
+        path: Path = Path(obj)
 
         if not path.exists():
             raise FileNotFoundError(
@@ -89,16 +90,7 @@ class PathContentHandler:
             )
 
         logger.debug("PathContentHandler: hashing file content at %s", path)
-        result = self.file_hasher.hash_file(path)
-        # hash_file returns a ContentHash. SemanticHasher treats ContentHash
-        # as a terminal -- so returning it directly means no re-hashing occurs.
-        if isinstance(result, ContentHash):
-            return result
-        # Legacy file hashers may return raw bytes; wrap in a ContentHash.
-        if isinstance(result, (bytes, bytearray)):
-            return ContentHash("file-sha256", bytes(result))
-        # Fallback: wrap unknown return types as a string-method ContentHash.
-        return ContentHash("file-unknown", str(result).encode())
+        return self.file_hasher.hash_file(path)
 
 
 class UUIDHandler:

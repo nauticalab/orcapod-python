@@ -1,53 +1,32 @@
-import hashlib
 import logging
 from abc import abstractmethod
 from collections.abc import Callable, Collection, Iterable, Sequence
 from datetime import datetime, timezone
+from functools import wraps
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
+
+from orcapod.core.kernels import KernelStream, TrackedKernelBase
 
 from orcapod import contexts
 from orcapod.core.datagrams import (
     ArrowPacket,
     DictPacket,
 )
-from functools import wraps
-
-from orcapod.utils.git_utils import get_git_info_for_python_object
-from orcapod.core.kernels import KernelStream, TrackedKernelBase
 from orcapod.core.operators import Join
 from orcapod.core.streams import CachedPodStream, LazyPodResultStream
-from orcapod.system_constants import constants
-from orcapod.hashing.hash_utils import get_function_components, get_function_signature
+from orcapod.hashing.hash_utils import (
+    combine_hashes,
+    get_function_components,
+    get_function_signature,
+)
 from orcapod.protocols import core_protocols as cp
 from orcapod.protocols import hashing_protocols as hp
 from orcapod.protocols.database_protocols import ArrowDatabase
+from orcapod.system_constants import constants
 from orcapod.types import DataValue, Schema, SchemaLike
 from orcapod.utils import types_utils
+from orcapod.utils.git_utils import get_git_info_for_python_object
 from orcapod.utils.lazy_module import LazyModule
-
-
-# TODO: extract default char count as config
-def combine_hashes(
-    *hashes: str,
-    order: bool = False,
-    prefix_hasher_id: bool = False,
-    hex_char_count: int | None = 20,
-) -> str:
-    """Combine hashes into a single hash string."""
-
-    # Sort for deterministic order regardless of input order
-    if order:
-        prepared_hashes = sorted(hashes)
-    else:
-        prepared_hashes = list(hashes)
-    combined = "".join(prepared_hashes)
-    combined_hash = hashlib.sha256(combined.encode()).hexdigest()
-    if hex_char_count is not None:
-        combined_hash = combined_hash[:hex_char_count]
-    if prefix_hasher_id:
-        return "sha256@" + combined_hash
-    return combined_hash
-
 
 if TYPE_CHECKING:
     import pyarrow as pa
