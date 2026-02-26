@@ -59,7 +59,7 @@ def test_compute_content_hash():
     result = converter._compute_content_hash(data)
     import hashlib
 
-    assert result == hashlib.sha256(data).digest()
+    assert result.digest == hashlib.sha256(data).digest()
 
 
 # --- PathStructConverter tests ---
