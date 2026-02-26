@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.operators.base import NonZeroInputOperator
 from orcapod.core.streams import TableStream
 from orcapod.errors import InputValidationError
-from orcapod.protocols.core_protocols import ArgumentGroup, ColumnConfig, Stream
-from orcapod.types import Schema
+from orcapod.protocols.core_protocols import ArgumentGroup, Stream
+from orcapod.types import ColumnConfig, Schema
 from orcapod.utils import arrow_data_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 

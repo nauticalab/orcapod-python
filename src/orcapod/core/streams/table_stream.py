@@ -10,9 +10,9 @@ from orcapod.core.datagrams import (
     DictTag,
 )
 from orcapod.core.streams.base import StreamBase
-from orcapod.protocols.core_protocols import ColumnConfig, Pod, Stream, Tag
+from orcapod.protocols.core_protocols import Pod, Stream, Tag
 from orcapod.system_constants import constants
-from orcapod.types import Schema
+from orcapod.types import ColumnConfig, Schema
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 

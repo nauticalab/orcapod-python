@@ -5,21 +5,21 @@ from abc import abstractmethod
 from collections.abc import Collection, Iterator
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
+
+from orcapod.core.base import TraceableBase
 from orcapod.core.config import OrcapodConfig
 from orcapod.core.data_context import DataContext
-from orcapod.core.base import TraceableBase
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
     ArgumentGroup,
-    ColumnConfig,
     Packet,
     Pod,
     Stream,
     Tag,
     TrackerManager,
 )
-from orcapod.types import Schema
+from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.lazy_module import LazyModule
 
 logger = logging.getLogger(__name__)

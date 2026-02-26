@@ -6,8 +6,8 @@ from collections.abc import Collection, Iterator, Mapping
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.base import TraceableBase
-from orcapod.protocols.core_protocols import ColumnConfig, Packet, Pod, Stream, Tag
-from orcapod.types import Schema
+from orcapod.protocols.core_protocols import Packet, Pod, Stream, Tag
+from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:

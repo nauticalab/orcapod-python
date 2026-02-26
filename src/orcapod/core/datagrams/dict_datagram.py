@@ -4,11 +4,10 @@ from typing import TYPE_CHECKING, Any, Self, cast
 
 from orcapod import contexts
 from orcapod.core.datagrams.base import BaseDatagram
-from orcapod.protocols.core_protocols import ColumnConfig
 from orcapod.protocols.hashing_protocols import ContentHash
 from orcapod.semantic_types import infer_python_schema_from_pylist_data
 from orcapod.system_constants import constants
-from orcapod.types import DataValue, Schema, SchemaLike
+from orcapod.types import ColumnConfig, DataValue, Schema, SchemaLike
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 

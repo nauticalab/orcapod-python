@@ -3,8 +3,8 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.operators.base import BinaryOperator
 from orcapod.core.streams import TableStream
 from orcapod.errors import InputValidationError
-from orcapod.protocols.core_protocols import ColumnConfig, Stream
-from orcapod.types import Schema
+from orcapod.protocols.core_protocols import Stream
+from orcapod.types import ColumnConfig, Schema
 from orcapod.utils import schema_utils
 from orcapod.utils.lazy_module import LazyModule
 

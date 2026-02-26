@@ -1,3 +1,14 @@
+"""Core type definitions for OrcaPod.
+
+Defines the fundamental data types, type aliases, and data structures used
+throughout the OrcaPod framework, including:
+
+    - Type aliases for data values, schemas, paths, and tags.
+    - ``Schema`` -- an immutable, hashable mapping of field names to Python types.
+    - ``ContentHash`` -- a content-addressable hash pairing a method name with
+      a raw digest, with convenience conversions to hex, int, UUID, and base64.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -6,13 +17,13 @@ import uuid
 from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
 from types import UnionType
-from typing import TypeAlias, Union
+from typing import Any, Self, TypeAlias, Union
 
 import pyarrow as pa
 
 logger = logging.getLogger(__name__)
 
-# Mapping from Python types to Arrow types
+# Mapping from Python types to Arrow types.
 _PYTHON_TO_ARROW: dict[type, pa.DataType] = {
     int: pa.int64(),
     float: pa.float64(),
@@ -21,45 +32,66 @@ _PYTHON_TO_ARROW: dict[type, pa.DataType] = {
     bytes: pa.binary(),
 }
 
-# Reverse mapping
+# Reverse mapping from Arrow types back to Python types.
 _ARROW_TO_PYTHON: dict[pa.DataType, type] = {v: k for k, v in _PYTHON_TO_ARROW.items()}
 
 # TODO: revisit and consider a way to incorporate older Union type
 DataType: TypeAlias = type | UnionType  # | type[Union]
+"""A Python type or union of types used to describe the data type of a single
+field within a ``Schema``."""
 
+# TODO: accomodate other Path-like objects
+PathLike: TypeAlias = str | os.PathLike
+"""Convenience alias for any filesystem-path-like object (``str`` or
+``os.PathLike``)."""
 
-# Convenience alias for anything pathlike
-PathLike = str | os.PathLike
-
-# an (optional) string or a collection of (optional) string values
-# Note that TagValue can be nested, allowing for an arbitrary depth of nested lists
+# TODO: accomodate other common data types such as datetime
 TagValue: TypeAlias = int | str | None | Collection["TagValue"]
+"""A tag metadata value: an int, string, ``None``, or an arbitrarily nested
+collection thereof. Tags are used to label and organise packets and
+datagrams."""
 
-# a pathset is a path or an arbitrary depth of nested list of paths
 PathSet: TypeAlias = PathLike | Collection[PathLike | None]
+"""A single path or an arbitrarily nested collection of paths (with optional
+``None`` entries). Used when operations need to address multiple files at
+once, e.g. batch hashing."""
 
-# Simple data types that we support (with clear Polars correspondence)
 SupportedNativePythonData: TypeAlias = str | int | float | bool | bytes
+"""The simple Python scalar types that have a direct Arrow / Polars
+correspondence."""
 
 ExtendedSupportedPythonData: TypeAlias = SupportedNativePythonData | PathSet
+"""Native scalar types extended with filesystem paths."""
 
-# Extended data values that can be stored in packets
-# Either the original PathSet or one of our supported simple data types
 DataValue: TypeAlias = ExtendedSupportedPythonData | Collection["DataValue"] | None
+"""The universe of values that can appear in a packet column -- scalars,
+paths, arbitrarily nested collections, or ``None``."""
 
 PacketLike: TypeAlias = Mapping[str, DataValue]
-
+"""A dict-like structure mapping field names to ``DataValue`` entries. Serves
+as a lightweight, protocol-free representation of a packet."""
 
 SchemaLike: TypeAlias = Mapping[str, DataType]
+"""A dict-like structure mapping field names to ``DataType`` entries.
+Accepted wherever a ``Schema`` is expected so callers can pass plain dicts."""
 
 
 class Schema(Mapping[str, DataType]):
-    """
-    Immutable schema representing a mapping of field names to Python types.
+    """Immutable schema representing a mapping of field names to Python types.
 
     Serves as the canonical internal schema representation in OrcaPod,
     with interop to/from Arrow schemas. Hashable and suitable for use
     in content-addressable contexts.
+
+    Args:
+        fields: An optional mapping of field names to their data types.
+        **kwargs: Additional field name / type pairs. These are merged with
+            ``fields``; keyword arguments take precedence on conflict.
+
+    Example::
+
+        schema = Schema({"x": int, "y": float})
+        schema = Schema(x=int, y=float)
     """
 
     def __init__(
@@ -94,87 +126,256 @@ class Schema(Mapping[str, DataType]):
             f"Equality check is not implemented for object of type {type(other)}"
         )
 
-    def __hash__(self) -> int:
-        # sort all fields based on their key entries
-        # TODO: consider nested structured type
-        return hash(tuple(sorted(self._data.items(), key=lambda kv: kv[0])))
-
     # ==================== Schema operations ====================
 
     def merge(self, other: Mapping[str, type]) -> Schema:
-        """Return a new Schema merging self with other. Raises on conflicts."""
+        """Return a new Schema that is the union of ``self`` and ``other``.
+
+        Args:
+            other: A mapping of field names to types to merge in.
+
+        Returns:
+            A new ``Schema`` containing all fields from both schemas.
+
+        Raises:
+            ValueError: If any shared field has a different type in ``other``.
+        """
         conflicts = {k for k in other if k in self._data and self._data[k] != other[k]}
         if conflicts:
             raise ValueError(f"Schema merge conflict on fields: {conflicts}")
         return Schema({**self._data, **other})
 
     def with_values(self, other: dict[str, type] | None, **kwargs: type) -> Schema:
-        """Return a new Schema, setting specified keys to the type. If the key already
-        exists in the schema, the new value will override the old value."""
+        """Return a new Schema with the specified fields added or overridden.
+
+        Unlike ``merge``, this method silently overrides existing fields when
+        a key already exists.
+
+        Args:
+            other: An optional mapping of field names to types.
+            **kwargs: Additional field name / type pairs.
+
+        Returns:
+            A new ``Schema`` with the updated fields.
+        """
         if other is None:
             other = {}
         return Schema({**self._data, **other, **kwargs})
 
     def select(self, *fields: str) -> Schema:
-        """Return a new Schema with only the specified fields."""
+        """Return a new Schema containing only the specified fields.
+
+        Args:
+            *fields: Names of the fields to keep.
+
+        Returns:
+            A new ``Schema`` with only the requested fields.
+
+        Raises:
+            KeyError: If any of the requested fields are not present.
+        """
         missing = set(fields) - self._data.keys()
         if missing:
             raise KeyError(f"Fields not in schema: {missing}")
         return Schema({k: self._data[k] for k in fields})
 
     def drop(self, *fields: str) -> Schema:
-        """Return a new Schema without the specified fields."""
+        """Return a new Schema with the specified fields removed.
+
+        Args:
+            *fields: Names of the fields to drop. Fields not present in the
+                schema are silently ignored.
+
+        Returns:
+            A new ``Schema`` without the dropped fields.
+        """
         return Schema({k: v for k, v in self._data.items() if k not in fields})
 
     def is_compatible_with(self, other: Schema) -> bool:
-        """True if other contains at least all fields in self with matching types."""
+        """Check whether ``other`` is a superset of this schema.
+
+        Args:
+            other: The schema to compare against.
+
+        Returns:
+            ``True`` if ``other`` contains every field in ``self`` with a
+            matching type.
+        """
         return all(other.get(k) == v for k, v in self._data.items())
 
     # ==================== Convenience constructors ====================
 
     @classmethod
     def empty(cls) -> Schema:
+        """Create an empty schema with no fields.
+
+        Returns:
+            A new ``Schema`` containing zero fields.
+        """
         return cls({})
 
 
 @dataclass(frozen=True, slots=True)
+class ColumnConfig:
+    """
+    Configuration for column inclusion in Datagram/Packet/Tag operations.
+
+    Controls which column types to include when converting to tables, dicts,
+    or querying keys/types.
+
+    Attributes:
+        meta: Include meta columns (with '__' prefix).
+              - False: exclude all meta columns (default)
+              - True: include all meta columns
+              - Collection[str]: include specific meta columns by name
+                (prefix '__' is added automatically if not present)
+        context: Include context column
+        source: Include source info columns (Packet only, ignored for others)
+        system_tags: Include system tag columns (Tag only, ignored for others)
+        all_info: Include all available columns (overrides other settings)
+
+    Examples:
+        >>> # Data columns only (default)
+        >>> ColumnConfig()
+
+        >>> # Everything
+        >>> ColumnConfig(all_info=True)
+        >>> # Or use convenience method:
+        >>> ColumnConfig.all()
+
+        >>> # Specific combinations
+        >>> ColumnConfig(meta=True, context=True)
+        >>> ColumnConfig(meta=["pipeline", "processed"], source=True)
+
+        >>> # As dict (alternative syntax)
+        >>> {"meta": True, "source": True}
+    """
+
+    meta: bool | Collection[str] = False
+    context: bool = False
+    source: bool = False  # Only relevant for Packet
+    system_tags: bool = False  # Only relevant for Tag
+    content_hash: bool | str = False  # Only relevant for Packet
+    sort_by_tags: bool = False  # Only relevant for Tag
+    all_info: bool = False
+
+    @classmethod
+    def all(cls) -> Self:
+        """Convenience: include all available columns"""
+        return cls(
+            meta=True,
+            context=True,
+            source=True,
+            system_tags=True,
+            content_hash=True,
+            sort_by_tags=True,
+            all_info=True,
+        )
+
+    @classmethod
+    def data_only(cls) -> Self:
+        """Convenience: include only data columns (default)"""
+        return cls()
+
+    # TODO: consider renaming this to something more intuitive
+    @classmethod
+    def handle_config(
+        cls, config: Self | dict[str, Any] | None, all_info: bool = False
+    ) -> Self:
+        """
+        Normalize column configuration input.
+
+        Args:
+            config: ColumnConfig instance or dict to normalize.
+            all_info: If True, override config to include all columns.
+
+        Returns:
+            Normalized ColumnConfig instance.
+        """
+        if all_info:
+            return cls.all()
+        # TODO: properly handle non-boolean values when using all_info
+
+        if config is None:
+            column_config = cls()
+        elif isinstance(config, dict):
+            column_config = cls(**config)
+        elif isinstance(config, cls):
+            column_config = config
+        else:
+            raise TypeError(
+                f"Invalid column config type: {type(config)}. "
+                "Expected ColumnConfig instance or dict."
+            )
+
+        return column_config
+
+
+@dataclass(frozen=True, slots=True)
 class ContentHash:
+    """Content-addressable hash pairing a hashing method with a raw digest.
+
+    ``ContentHash`` is the standard way to represent hashes throughout OrcaPod.
+    It is immutable (frozen dataclass) and provides convenience methods to
+    convert the digest into hex strings, integers, UUIDs, base64, and
+    human-friendly display names.
+
+    Attributes:
+        method: Identifier for the hashing algorithm / strategy used
+            (e.g. ``"arrow_v2.1"``).
+        digest: The raw hash bytes.
+    """
+
     method: str
     digest: bytes
 
     # TODO: make the default char count configurable
     def to_hex(self, char_count: int | None = None) -> str:
-        """Convert digest to hex string, optionally truncated."""
+        """Convert the digest to a hexadecimal string.
+
+        Args:
+            char_count: If given, truncate the hex string to this many
+                characters.
+
+        Returns:
+            The full (or truncated) hex representation of the digest.
+        """
         hex_str = self.digest.hex()
         return hex_str[:char_count] if char_count else hex_str
 
     def to_int(self, hexdigits: int | None = None) -> int:
-        """
-        Convert digest to integer representation.
+        """Convert the digest to an integer.
 
         Args:
-            hexdigits: Number of hex digits to use (truncates if needed)
+            hexdigits: Number of hex digits to use. If provided, the hex
+                string is truncated before conversion.
 
         Returns:
-            Integer representation of the hash
+            Integer representation of the (optionally truncated) digest.
         """
         return int(self.to_hex(hexdigits), 16)
 
     def to_uuid(self, namespace: uuid.UUID = uuid.NAMESPACE_OID) -> uuid.UUID:
-        """
-        Convert digest to UUID format.
+        """Derive a deterministic UUID from the digest.
+
+        Uses ``uuid5`` with the full hex string to ensure deterministic output.
 
         Args:
-            namespace: UUID namespace for uuid5 generation
+            namespace: UUID namespace for ``uuid5`` generation. Defaults to
+                ``uuid.NAMESPACE_OID``.
 
         Returns:
-            UUID derived from this hash
+            A UUID derived from this hash.
         """
         # Using uuid5 with the hex string ensures deterministic UUIDs
         return uuid.uuid5(namespace, self.to_hex())
 
     def to_base64(self) -> str:
-        """Convert digest to base64 string."""
+        """Convert the digest to a base64-encoded ASCII string.
+
+        Returns:
+            Base64 representation of the digest.
+        """
         import base64
 
         return base64.b64encode(self.digest).decode("ascii")
@@ -182,7 +383,16 @@ class ContentHash:
     def to_string(
         self, prefix_method: bool = True, hexdigits: int | None = None
     ) -> str:
-        """Convert digest to a string representation."""
+        """Convert the digest to a human-readable string.
+
+        Args:
+            prefix_method: If ``True`` (the default), prepend the method name
+                followed by a colon (e.g. ``"sha256:abcd1234"``).
+            hexdigits: Optional number of hex digits to include.
+
+        Returns:
+            String representation of the hash.
+        """
         if prefix_method:
             return f"{self.method}:{self.to_hex(hexdigits)}"
         return self.to_hex(hexdigits)
@@ -192,10 +402,25 @@ class ContentHash:
 
     @classmethod
     def from_string(cls, hash_string: str) -> "ContentHash":
-        """Parse 'method:hex_digest' format."""
+        """Parse a ``"method:hex_digest"`` string into a ``ContentHash``.
+
+        Args:
+            hash_string: A string in the format ``"method:hex_digest"``.
+
+        Returns:
+            A new ``ContentHash`` instance.
+        """
         method, hex_digest = hash_string.split(":", 1)
         return cls(method, bytes.fromhex(hex_digest))
 
     def display_name(self, length: int = 8) -> str:
-        """Return human-friendly display like 'arrow_v2.1:1a2b3c4d'."""
+        """Return a short, human-friendly label for this hash.
+
+        Args:
+            length: Number of hex characters to include after the method
+                prefix. Defaults to 8.
+
+        Returns:
+            A string like ``"arrow_v2.1:1a2b3c4d"``.
+        """
         return f"{self.method}:{self.to_hex(length)}"

@@ -2,7 +2,8 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import TableStream
-from orcapod.protocols.core_protocols import ColumnConfig, Stream
+from orcapod.protocols.core_protocols import Stream
+from orcapod.types import ColumnConfig
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:

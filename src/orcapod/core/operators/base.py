@@ -3,8 +3,8 @@ from collections.abc import Collection
 from typing import Any
 
 from orcapod.core.static_output_pod import StaticOutputPod
-from orcapod.protocols.core_protocols import ArgumentGroup, ColumnConfig, Stream
-from orcapod.types import Schema
+from orcapod.protocols.core_protocols import ArgumentGroup, Stream
+from orcapod.types import ColumnConfig, Schema
 
 
 class Operator(StaticOutputPod):

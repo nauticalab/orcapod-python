@@ -24,8 +24,7 @@ from typing import TYPE_CHECKING, Any, Self, TypeAlias
 from uuid_utils import uuid7
 
 from orcapod.core.base import ContentIdentifiableBase
-from orcapod.protocols.core_protocols import ColumnConfig
-from orcapod.types import DataValue, Schema
+from orcapod.types import ColumnConfig, DataValue, Schema
 from orcapod.utils.lazy_module import LazyModule
 
 logger = logging.getLogger(__name__)

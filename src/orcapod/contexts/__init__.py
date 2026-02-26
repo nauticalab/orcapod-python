@@ -1,5 +1,5 @@
 """
-OrcaPod Data Context System
+Orcapod Data Context System
 
 This package manages versioned data contexts that define how data
 should be interpreted and processed throughout the OrcaPod system.
@@ -7,7 +7,7 @@ should be interpreted and processed throughout the OrcaPod system.
 A DataContext contains:
 - Semantic type registry for handling structured data types
 - Arrow hasher for hashing Arrow tables
-- Object hasher for general object hashing
+- Object hasher for general Python object hashing
 - Versioning information for reproducibility
 
 Example usage:

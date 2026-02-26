@@ -5,6 +5,7 @@ from collections.abc import Callable, Collection, Iterator
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from orcapod import contexts
+from orcapod.config import Config
 from orcapod.core.base import TraceableBase
 from orcapod.core.operators import Join
 from orcapod.core.packet_function import CachedPacketFunction, PythonPacketFunction
@@ -12,7 +13,6 @@ from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
     ArgumentGroup,
-    ColumnConfig,
     Packet,
     PacketFunction,
     Pod,
@@ -22,8 +22,7 @@ from orcapod.protocols.core_protocols import (
 )
 from orcapod.protocols.database_protocols import ArrowDatabase
 from orcapod.system_constants import constants
-from orcapod.config import Config
-from orcapod.types import Schema
+from orcapod.types import ColumnConfig, Schema
 from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 

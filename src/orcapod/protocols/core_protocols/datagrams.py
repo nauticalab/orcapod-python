@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Collection, Iterator, Mapping
-from dataclasses import dataclass
+from collections.abc import Iterator, Mapping
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -11,106 +10,10 @@ from typing import (
 )
 
 from orcapod.protocols.hashing_protocols import ContentIdentifiable, DataContextAware
-from orcapod.types import DataValue, Schema
+from orcapod.types import ColumnConfig, DataValue, Schema
 
 if TYPE_CHECKING:
     import pyarrow as pa
-
-
-@dataclass(frozen=True)
-class ColumnConfig:
-    """
-    Configuration for column inclusion in Datagram/Packet/Tag operations.
-
-    Controls which column types to include when converting to tables, dicts,
-    or querying keys/types.
-
-    Attributes:
-        meta: Include meta columns (with '__' prefix).
-              - False: exclude all meta columns (default)
-              - True: include all meta columns
-              - Collection[str]: include specific meta columns by name
-                (prefix '__' is added automatically if not present)
-        context: Include context column
-        source: Include source info columns (Packet only, ignored for others)
-        system_tags: Include system tag columns (Tag only, ignored for others)
-        all_info: Include all available columns (overrides other settings)
-
-    Examples:
-        >>> # Data columns only (default)
-        >>> ColumnConfig()
-
-        >>> # Everything
-        >>> ColumnConfig(all_info=True)
-        >>> # Or use convenience method:
-        >>> ColumnConfig.all()
-
-        >>> # Specific combinations
-        >>> ColumnConfig(meta=True, context=True)
-        >>> ColumnConfig(meta=["pipeline", "processed"], source=True)
-
-        >>> # As dict (alternative syntax)
-        >>> {"meta": True, "source": True}
-    """
-
-    meta: bool | Collection[str] = False
-    context: bool = False
-    source: bool = False  # Only relevant for Packet
-    system_tags: bool = False  # Only relevant for Tag
-    content_hash: bool | str = False  # Only relevant for Packet
-    sort_by_tags: bool = False  # Only relevant for Tag
-    all_info: bool = False
-
-    @classmethod
-    def all(cls) -> Self:
-        """Convenience: include all available columns"""
-        return cls(
-            meta=True,
-            context=True,
-            source=True,
-            system_tags=True,
-            content_hash=True,
-            sort_by_tags=True,
-            all_info=True,
-        )
-
-    @classmethod
-    def data_only(cls) -> Self:
-        """Convenience: include only data columns (default)"""
-        return cls()
-
-    # TODO: consider renaming this to something more intuitive
-    @classmethod
-    def handle_config(
-        cls, config: Self | dict[str, Any] | None, all_info: bool = False
-    ) -> Self:
-        """
-        Normalize column configuration input.
-
-        Args:
-            config: ColumnConfig instance or dict to normalize.
-            all_info: If True, override config to include all columns.
-
-        Returns:
-            Normalized ColumnConfig instance.
-        """
-        if all_info:
-            return cls.all()
-        # TODO: properly handle non-boolean values when using all_info
-
-        if config is None:
-            column_config = cls()
-        elif isinstance(config, dict):
-            column_config = cls(**config)
-        elif isinstance(config, Self):
-            column_config = config
-        else:
-            raise TypeError(
-                f"Invalid column config type: {type(config)}. "
-                "Expected ColumnConfig instance or dict."
-            )
-
-        return column_config
 
 
 @runtime_checkable

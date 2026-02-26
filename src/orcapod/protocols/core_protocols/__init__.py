@@ -1,4 +1,6 @@
-from .datagrams import ColumnConfig, Datagram, Packet, Tag
+from orcapod.types import ColumnConfig
+
+from .datagrams import Datagram, Packet, Tag
 from .operator_pod import OperatorPod
 from .packet_function import PacketFunction
 from .pod import ArgumentGroup, Pod

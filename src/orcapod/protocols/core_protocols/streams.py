@@ -1,9 +1,9 @@
 from collections.abc import Collection, Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from orcapod.protocols.core_protocols.datagrams import ColumnConfig, Packet, Tag
+from orcapod.protocols.core_protocols.datagrams import Packet, Tag
 from orcapod.protocols.core_protocols.traceable import Traceable
-from orcapod.types import Schema
+from orcapod.types import ColumnConfig, Schema
 
 if TYPE_CHECKING:
     import pandas as pd

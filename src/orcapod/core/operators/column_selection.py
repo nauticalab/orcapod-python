@@ -5,9 +5,9 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import TableStream
 from orcapod.errors import InputValidationError
-from orcapod.protocols.core_protocols import ColumnConfig, Stream
+from orcapod.protocols.core_protocols import Stream
 from orcapod.system_constants import constants
-from orcapod.types import Schema
+from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
