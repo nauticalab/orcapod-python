@@ -1,9 +1,11 @@
 from .delta_lake_databases import DeltaTableDatabase
 from .in_memory_databases import InMemoryArrowDatabase
+from .noop_database import NoOpArrowDatabase
 
 __all__ = [
     "DeltaTableDatabase",
     "InMemoryArrowDatabase",
+    "NoOpArrowDatabase",
 ]
 
 # Future ArrowDatabase backends to implement:
