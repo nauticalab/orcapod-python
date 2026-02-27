@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 import re
 import sys
@@ -221,6 +222,25 @@ class PythonPacketFunction(PacketFunctionBase):
         **kwargs,
     ) -> None:
         self._function = function
+
+        # Reject functions with variadic parameters -- PythonPacketFunction maps
+        # packet keys to named parameters, so the full parameter set must be fixed.
+        _sig = inspect.signature(function)
+        _variadic = [
+            name
+            for name, param in _sig.parameters.items()
+            if param.kind
+            in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            )
+        ]
+        if _variadic:
+            raise ValueError(
+                f"PythonPacketFunction does not support functions with variadic "
+                f"parameters (*args / **kwargs). "
+                f"Offending parameters: {_variadic!r}."
+            )
 
         if output_keys is None:
             output_keys = []

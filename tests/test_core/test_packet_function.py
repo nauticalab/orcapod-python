@@ -223,6 +223,36 @@ class TestPythonPacketFunctionConstruction:
         pf = PythonPacketFunction(multi, output_keys=["sum", "product"])
         assert list(pf._output_keys) == ["sum", "product"]
 
+    def test_var_positional_args_raises(self):
+        def func_with_args(*args: int) -> int:
+            return sum(args)
+
+        with pytest.raises(ValueError, match=r"\*args"):
+            PythonPacketFunction(func_with_args, output_keys="result")
+
+    def test_var_keyword_args_raises(self):
+        def func_with_kwargs(**kwargs: int) -> int:
+            return sum(kwargs.values())
+
+        with pytest.raises(ValueError, match=r"\*\*kwargs"):
+            PythonPacketFunction(func_with_kwargs, output_keys="result")
+
+    def test_mixed_variadic_raises(self):
+        def func_mixed(x: int, *args: int, **kwargs: int) -> int:
+            return x
+
+        with pytest.raises(ValueError):
+            PythonPacketFunction(func_mixed, output_keys="result")
+
+    def test_fixed_params_with_defaults_accepted(self):
+        def func_with_default(x: int, y: int = 10) -> int:
+            return x + y
+
+        # Should not raise -- default values are fine, only variadic are rejected
+        pf = PythonPacketFunction(func_with_default, output_keys="result")
+        assert "x" in pf.input_packet_schema
+        assert "y" in pf.input_packet_schema
+
 
 # ---------------------------------------------------------------------------
 # 5. get_function_variation_data
