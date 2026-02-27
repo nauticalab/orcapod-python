@@ -492,6 +492,7 @@ class WrappedFunctionPod(TrackedPacketFunctionPod):
         if data_context is None:
             data_context = function_pod.data_context_key
         super().__init__(
+            packet_function=function_pod.packet_function,
             data_context=data_context,
             **kwargs,
         )

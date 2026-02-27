@@ -123,7 +123,10 @@ class InMemoryArrowDatabase:
         committed = self._tables.get(record_key)
         if committed is None or committed.num_rows == 0:
             return set()
-        return set(committed[self.RECORD_ID_COLUMN].to_pylist())
+        existing_ids = committed[self.RECORD_ID_COLUMN].to_pylist()
+        existing_ids = [str(id) for id in existing_ids if id is not None]
+        # TODO: evaluate the efficiency of this implementation
+        return set(existing_ids)
 
     def _filter_existing_records(
         self, record_key: str, table: "pa.Table"
