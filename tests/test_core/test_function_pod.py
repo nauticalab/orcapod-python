@@ -25,7 +25,6 @@ from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.streams import TableStream
 from orcapod.protocols.core_protocols import FunctionPod, Stream
 
-
 # ---------------------------------------------------------------------------
 # Helper functions and fixtures
 # ---------------------------------------------------------------------------

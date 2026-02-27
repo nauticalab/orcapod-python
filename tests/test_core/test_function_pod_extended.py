@@ -20,7 +20,6 @@ from orcapod.core.datagrams import DictPacket, DictTag
 from orcapod.core.function_pod import (
     FunctionPodNode,
     FunctionPodNodeStream,
-    FunctionPodStream,
     SimpleFunctionPod,
     WrappedFunctionPod,
     function_pod,
@@ -28,8 +27,7 @@ from orcapod.core.function_pod import (
 from orcapod.core.packet_function import CachedPacketFunction, PythonPacketFunction
 from orcapod.core.streams import TableStream
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.protocols.core_protocols import FunctionPod, Stream
-
+from orcapod.protocols.core_protocols import Stream
 
 # ---------------------------------------------------------------------------
 # Helper functions and fixtures
@@ -237,7 +235,9 @@ class TestFunctionPodStreamSortByTags:
         )
         stream = double_pod.process(TableStream(table, tag_columns=["id"]))
         result = stream.as_table(columns={"sort_by_tags": True})
-        ids = result.column("id").to_pylist()
+        raw = result.column("id").to_pylist()
+        assert all(v is not None for v in raw)
+        ids: list[int] = raw  # type: ignore[assignment]
         assert ids == sorted(ids)
 
     def test_default_table_may_be_unsorted(self, double_pod):
@@ -253,7 +253,9 @@ class TestFunctionPodStreamSortByTags:
         stream = double_pod.process(TableStream(table, tag_columns=["id"]))
         result = stream.as_table()
         # Without sort, order should match input (reversed)
-        ids = result.column("id").to_pylist()
+        raw = result.column("id").to_pylist()
+        assert all(v is not None for v in raw)
+        ids: list[int] = raw  # type: ignore[assignment]
         assert ids == reversed_ids
 
 
@@ -642,7 +644,9 @@ class TestFunctionPodNodeStream:
         )
         node_stream = node.process()
         result = node_stream.as_table(columns={"sort_by_tags": True})
-        ids = result.column("id").to_pylist()
+        raw = result.column("id").to_pylist()
+        assert all(isinstance(v, int) for v in raw)
+        ids: list[int] = raw  # type: ignore[assignment]
         assert ids == sorted(ids)
 
 

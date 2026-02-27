@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -36,7 +35,6 @@ from orcapod.core.packet_function import (
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.protocols.core_protocols import PacketFunction
 from orcapod.system_constants import constants
-
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures

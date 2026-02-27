@@ -5,7 +5,7 @@ import logging
 import re
 import sys
 from abc import abstractmethod
-from collections.abc import Callable, Collection, Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -225,7 +225,7 @@ class PythonPacketFunction(PacketFunctionBase):
     def __init__(
         self,
         function: Callable[..., Any],
-        output_keys: str | Collection[str] | None = None,
+        output_keys: str | Sequence[str] | None = None,
         function_name: str | None = None,
         version: str = "v0.0",
         input_schema: SchemaLike | None = None,

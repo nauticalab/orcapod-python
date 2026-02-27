@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
 from types import UnionType
-from typing import Any, Self, TypeAlias, Union
+from typing import Any, Self, TypeAlias
 
 import pyarrow as pa
 

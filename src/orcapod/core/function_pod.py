@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from abc import abstractmethod
-from collections.abc import Callable, Collection, Iterator
+from collections.abc import Callable, Collection, Iterator, Sequence
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from orcapod import contexts
@@ -421,9 +421,15 @@ class CallableWithPod(Protocol):
         """
         ...
 
+    def __call__(self, *args, **kwargs):
+        """
+        Calls the function pod with the given arguments.
+        """
+        ...
+
 
 def function_pod(
-    output_keys: str | Collection[str] | None = None,
+    output_keys: str | Sequence[str] | None = None,
     function_name: str | None = None,
     version: str = "v0.0",
     label: str | None = None,
