@@ -11,6 +11,7 @@ from orcapod.core.base import TraceableBase
 from orcapod.core.operators import Join
 from orcapod.core.packet_function import CachedPacketFunction, PythonPacketFunction
 from orcapod.core.streams.base import StreamBase
+from orcapod.core.streams.table_stream import TableStream
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
     ArgumentGroup,
@@ -792,6 +793,64 @@ class FunctionPodNode(TraceableBase):
             skip_duplicates=False,
         )
 
+    def get_all_records(
+        self,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> "pa.Table | None":
+        """
+        Return all computed results joined with their pipeline tag records.
+
+        Fetches result packets from the result database (keyed by PACKET_RECORD_ID)
+        and pipeline records from the pipeline database, then inner-joins them on
+        PACKET_RECORD_ID to reconstruct tag + output-packet rows.
+
+        The ``columns`` / ``all_info`` arguments follow the same ``ColumnConfig``
+        convention used throughout the codebase:
+
+        - ``meta``        — include ``__``-prefixed system columns (PACKET_RECORD_ID,
+                            INPUT_PACKET_HASH, __computed, …)
+        - ``source``      — include ``_source_*`` input-packet provenance columns
+        - ``system_tags`` — include ``_tag::*`` system tag columns
+        - ``all_info``    — shorthand for all of the above
+        """
+        results = self._cached_packet_function._result_database.get_all_records(
+            self._cached_packet_function.record_path,
+            record_id_column=constants.PACKET_RECORD_ID,
+        )
+        taginfo = self._pipeline_database.get_all_records(self.pipeline_path)
+
+        if results is None or taginfo is None:
+            return None
+
+        joined = (
+            pl.DataFrame(taginfo)
+            .join(pl.DataFrame(results), on=constants.PACKET_RECORD_ID, how="inner")
+            .to_arrow()
+        )
+
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+
+        drop_columns = []
+        if not column_config.meta and not column_config.all_info:
+            drop_columns.extend(
+                c for c in joined.column_names if c.startswith(constants.META_PREFIX)
+            )
+        if not column_config.source and not column_config.all_info:
+            drop_columns.extend(
+                c for c in joined.column_names if c.startswith(constants.SOURCE_PREFIX)
+            )
+        if not column_config.system_tags and not column_config.all_info:
+            drop_columns.extend(
+                c
+                for c in joined.column_names
+                if c.startswith(constants.SYSTEM_TAG_PREFIX)
+            )
+        if drop_columns:
+            joined = joined.drop([c for c in drop_columns if c in joined.column_names])
+
+        return joined if joined.num_rows > 0 else None
+
 
 class FunctionPodNodeStream(StreamBase):
     """
@@ -868,21 +927,33 @@ class FunctionPodNodeStream(StreamBase):
 
     def iter_packets(self) -> Iterator[tuple[Tag, Packet]]:
         if self._cached_input_iterator is not None:
-            for i, (tag, packet) in enumerate(self._cached_input_iterator):
-                if i in self._cached_output_packets:
-                    # Use cached result
-                    tag, packet = self._cached_output_packets[i]
-                    if packet is not None:
-                        yield tag, packet
-                else:
-                    # Process packet
-                    tag, output_packet = self._fp_node.process_packet(tag, packet)
-                    self._cached_output_packets[i] = (tag, output_packet)
-                    if output_packet is not None:
-                        # Update shared cache for future iterators (optimization)
-                        yield tag, output_packet
+            # --- Phase 1: yield already-computed results from the databases ---
+            existing = self._fp_node.get_all_records(columns={"meta": True})
+            computed_hashes: set[str] = set()
+            if existing is not None and existing.num_rows > 0:
+                tag_keys = self._fp_node._input_stream.keys()[0]
+                # Strip the meta column before handing to TableStream so it only
+                # sees tag + output-packet columns.
+                hash_col = constants.INPUT_PACKET_HASH_COL
+                hash_values = existing.column(hash_col).to_pylist()
+                computed_hashes = set(hash_values)
+                data_table = existing.drop([hash_col])
+                existing_stream = TableStream(data_table, tag_columns=tag_keys)
+                for i, (tag, packet) in enumerate(existing_stream.iter_packets()):
+                    self._cached_output_packets[i] = (tag, packet)
+                    yield tag, packet
 
-            # Mark completion by releasing the iterator
+            # --- Phase 2: process only missing input packets ---
+            offset = len(self._cached_output_packets)
+            for j, (tag, packet) in enumerate(self._cached_input_iterator):
+                input_hash = packet.content_hash().to_string()
+                if input_hash in computed_hashes:
+                    continue
+                tag, output_packet = self._fp_node.process_packet(tag, packet)
+                self._cached_output_packets[offset + j] = (tag, output_packet)
+                if output_packet is not None:
+                    yield tag, output_packet
+
             self._cached_input_iterator = None
         else:
             # Yield from snapshot of complete cache

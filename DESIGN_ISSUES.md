@@ -148,6 +148,22 @@ grouping. It should be co-located with `function_pod` or moved to the protocols 
 
 ---
 
+### F10 — `FunctionPodNodeStream.iter_packets` recomputes every packet on every call
+**Status:** resolved
+**Severity:** high
+`iter_packets` always iterates the full input stream and calls `process_packet` for every packet,
+even when results are already stored in the result/pipeline databases.  This defeats the purpose
+of the two-database design (result DB + pipeline DB) used to cache computed outputs.
+
+**Fix:** Refactored `iter_packets` to first call `FunctionPodNode.get_all_records(columns={"meta": True})`
+to load already-computed (tag, output-packet) pairs from the databases (mirroring the legacy
+`PodNodeStream` design), yield those via `TableStream`, then collect the set of already-processed
+`INPUT_PACKET_HASH` values and only call `process_packet` for input packets not yet in the DB.
+Also added `FunctionPodNode.get_all_records(columns, all_info)` using `ColumnConfig` to control
+which column groups (meta, source, system_tags) are returned.
+
+---
+
 ### F9 — `as_table()` crashes with `KeyError` on empty stream
 **Status:** resolved
 **Severity:** high
