@@ -65,16 +65,6 @@ class BasicTrackerManager:
         for tracker in self.get_active_trackers():
             tracker.record_pod_invocation(pod, upstreams, label=label)
 
-    def record_source_pod_invocation(
-        self, source_pod: cp.SourcePod, label: str | None = None
-    ) -> None:
-        """
-        Record the output stream of a source invocation in the tracker.
-        This is used to track the computational graph and the invocations of sources.
-        """
-        for tracker in self.get_active_trackers():
-            tracker.record_source_pod_invocation(source_pod, label=label)
-
     def record_packet_function_invocation(
         self,
         packet_function: cp.PacketFunction,
@@ -119,13 +109,8 @@ class AutoRegisteringContextBasedTracker(ABC):
     def record_pod_invocation(
         self,
         pod: cp.Pod,
-        upstreams: tuple[cp.Stream, ...],
+        upstreams: tuple[cp.Stream, ...] = (),
         label: str | None = None,
-    ) -> None: ...
-
-    @abstractmethod
-    def record_source_pod_invocation(
-        self, source_pod: cp.SourcePod, label: str | None = None
     ) -> None: ...
 
     @abstractmethod
@@ -248,7 +233,10 @@ class GraphTracker(AutoRegisteringContextBasedTracker):
         self.invocation_to_source_lut[invocation] = source
 
     def record_pod_invocation(
-        self, pod: cp.Pod, upstreams: tuple[cp.Stream, ...], label: str | None = None
+        self,
+        pod: cp.Pod,
+        upstreams: tuple[cp.Stream, ...] = (),
+        label: str | None = None,
     ) -> None:
         """
         Record the output stream of a pod invocation in the tracker.

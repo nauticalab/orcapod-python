@@ -29,65 +29,7 @@ from orcapod.core.streams import TableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.protocols.core_protocols import Stream
 
-# ---------------------------------------------------------------------------
-# Helper functions and fixtures
-# ---------------------------------------------------------------------------
-
-
-def double(x: int) -> int:
-    return x * 2
-
-
-def add(x: int, y: int) -> int:
-    return x + y
-
-
-def to_upper(name: str) -> str:
-    return name.upper()
-
-
-@pytest.fixture
-def double_pf() -> PythonPacketFunction:
-    return PythonPacketFunction(double, output_keys="result")
-
-
-@pytest.fixture
-def add_pf() -> PythonPacketFunction:
-    return PythonPacketFunction(add, output_keys="result")
-
-
-@pytest.fixture
-def double_pod(double_pf) -> SimpleFunctionPod:
-    return SimpleFunctionPod(packet_function=double_pf)
-
-
-@pytest.fixture
-def add_pod(add_pf) -> SimpleFunctionPod:
-    return SimpleFunctionPod(packet_function=add_pf)
-
-
-def make_int_stream(n: int = 3) -> TableStream:
-    """TableStream with tag=id (int), packet=x (int)."""
-    table = pa.table(
-        {
-            "id": pa.array(list(range(n)), type=pa.int64()),
-            "x": pa.array(list(range(n)), type=pa.int64()),
-        }
-    )
-    return TableStream(table, tag_columns=["id"])
-
-
-def make_two_col_stream(n: int = 3) -> TableStream:
-    """TableStream with tag=id, packet={x, y} for add_pf."""
-    table = pa.table(
-        {
-            "id": pa.array(list(range(n)), type=pa.int64()),
-            "x": pa.array(list(range(n)), type=pa.int64()),
-            "y": pa.array([i * 10 for i in range(n)], type=pa.int64()),
-        }
-    )
-    return TableStream(table, tag_columns=["id"])
-
+from ..conftest import add, double, make_int_stream, make_two_col_stream
 
 # ---------------------------------------------------------------------------
 # 1. TrackedPacketFunctionPod — handle_input_streams with 0 streams
@@ -126,6 +68,8 @@ class TestTrackedPacketFunctionPodHandleInputStreams:
         result = add_pod.handle_input_streams(stream_x, stream_y)
         # result should be a joined stream
         assert isinstance(result, Stream)
+        # TODO: add more thorough check to ensure that the result is actually join of the two streams
+        assert len([p for p in result.iter_packets()]) == 2
 
 
 # ---------------------------------------------------------------------------

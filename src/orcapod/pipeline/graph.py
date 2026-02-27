@@ -1,17 +1,17 @@
-from orcapod.core.tracker import GraphTracker, Invocation
-from orcapod.pipeline.nodes import KernelNode, PodNode
-import orcapod.protocols.core_protocols.execution_engine
-from orcapod.protocols.pipeline_protocols import Node
-from orcapod import contexts
-from orcapod.protocols import core_protocols as cp
-from orcapod.protocols import database_protocols as dbp
-from typing import Any, cast
-from collections.abc import Collection
+import asyncio
+import logging
 import os
 import tempfile
-import logging
-import asyncio
-from typing import TYPE_CHECKING
+from collections.abc import Collection
+from typing import TYPE_CHECKING, Any, cast
+
+import orcapod.protocols.core_protocols.execution_engine
+from orcapod import contexts
+from orcapod.core.tracker import GraphTracker, Invocation
+from orcapod.pipeline.nodes import KernelNode, PodNode
+from orcapod.protocols import core_protocols as cp
+from orcapod.protocols import database_protocols as dbp
+from orcapod.protocols.pipeline_protocols import Node
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -151,10 +151,21 @@ class Pipeline(GraphTracker):
     def record_pod_invocation(
         self,
         pod: cp.Pod,
-        upstreams: tuple[cp.Stream, ...],
+        upstreams: tuple[cp.Stream, ...] = (),
         label: str | None = None,
     ) -> None:
         super().record_pod_invocation(pod, upstreams, label)
+        self._dirty = True
+
+    def record_packet_function_invocation(
+        self,
+        packet_function: cp.PacketFunction,
+        input_stream: cp.Stream,
+        label: str | None = None,
+    ) -> None:
+        super().record_packet_function_invocation(
+            packet_function, input_stream=input_stream, label=label
+        )
         self._dirty = True
 
     def compile(self) -> None:
@@ -589,8 +600,8 @@ class GraphRenderer:
             dot.render(name, format=format_type, cleanup=True)
             print(f"Graph saved to {output_path}")
 
-        import matplotlib.pyplot as plt
         import matplotlib.image as mpimg
+        import matplotlib.pyplot as plt
 
         if show:
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
