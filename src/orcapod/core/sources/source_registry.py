@@ -1,232 +1,151 @@
+from __future__ import annotations
+
 import logging
 from collections.abc import Iterator
-from orcapod.protocols.core_protocols import Source
+from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    from orcapod.core.sources.base import RootSource
 
 logger = logging.getLogger(__name__)
 
 
-class SourceCollisionError(Exception):
-    """Raised when attempting to register a source ID that already exists."""
-
-    pass
-
-
-class SourceNotFoundError(Exception):
-    """Raised when attempting to access a source that doesn't exist."""
-
-    pass
-
-
 class SourceRegistry:
     """
-    Registry for managing data sources.
+    Registry mapping canonical source IDs to live ``RootSource`` objects.
 
-    Provides collision detection, source lookup, and management of source lifecycles.
+    A source ID is a stable, human-readable name (e.g. ``"delta_table:sales"``)
+    that is independent of physical location.  The registry lets downstream
+    code resolve a ``source_id`` token embedded in a provenance string back to
+    the concrete source object that produced it, enabling ``resolve_field``
+    calls without requiring a direct reference to the source object.
+
+    Registration behaviour
+    ----------------------
+    - Registering the **same object** under the same ID is idempotent.
+    - Registering a **different object** under an already-taken ID logs a
+      warning and skips (rather than raising), so that sources constructed in
+      different contexts don't crash each other via the global singleton.
+    - Use ``replace`` when you explicitly want to overwrite an entry.
+
+    The module-level ``GLOBAL_SOURCE_REGISTRY`` is the default registry used
+    when no explicit registry is provided.
     """
 
-    def __init__(self):
-        self._sources: dict[str, Source] = {}
+    def __init__(self) -> None:
+        self._sources: dict[str, "RootSource"] = {}
 
-    def register(self, source_id: str, source: Source) -> None:
+    # ------------------------------------------------------------------
+    # Registration
+    # ------------------------------------------------------------------
+
+    def register(self, source_id: str, source: "RootSource") -> None:
         """
-        Register a source with the given ID.
+        Register *source* under *source_id*.
 
-        Args:
-            source_id: Unique identifier for the source
-            source: Source instance to register
-
-        Raises:
-            SourceCollisionError: If source_id already exists
-            ValueError: If source_id or source is invalid
+        If *source_id* is already taken by the same object, the call is a
+        no-op.  If it is taken by a *different* object, a warning is emitted
+        and the existing entry is left unchanged.
         """
         if not source_id:
-            raise ValueError("Source ID cannot be empty")
-
-        if not isinstance(source_id, str):
-            raise ValueError(f"Source ID must be a string, got {type(source_id)}")
-
+            raise ValueError("source_id cannot be empty")
         if source is None:
-            raise ValueError("Source cannot be None")
+            raise ValueError("source cannot be None")
 
-        if source_id in self._sources:
-            existing_source = self._sources[source_id]
-            if existing_source == source:
-                # Idempotent - same source already registered
+        existing = self._sources.get(source_id)
+        if existing is not None:
+            if existing is source:
                 logger.debug(
-                    f"Source ID '{source_id}' already registered with the same source instance."
+                    "Source '%s' already registered with the same object — skipping.",
+                    source_id,
                 )
                 return
-            raise SourceCollisionError(
-                f"Source ID '{source_id}' already registered with {type(existing_source).__name__}. "
-                f"Cannot register {type(source).__name__}. "
-                f"Choose a different source_id or unregister the existing source first."
+            logger.warning(
+                "Source ID '%s' is already registered with a different %s object; "
+                "keeping the existing registration.  Use replace() to overwrite.",
+                source_id,
+                type(existing).__name__,
             )
+            return
 
         self._sources[source_id] = source
-        logger.info(f"Registered source: '{source_id}' -> {type(source).__name__}")
+        logger.debug("Registered source '%s' -> %s", source_id, type(source).__name__)
 
-    def get(self, source_id: str) -> Source:
+    def replace(self, source_id: str, source: "RootSource") -> "RootSource | None":
         """
-        Get a source by ID.
-
-        Args:
-            source_id: Source identifier
-
-        Returns:
-            Source instance
-
-        Raises:
-            SourceNotFoundError: If source doesn't exist
+        Register *source* under *source_id*, unconditionally replacing any
+        existing entry.  Returns the previous source if one existed.
         """
-        if source_id not in self._sources:
-            available_ids = list(self._sources.keys())
-            raise SourceNotFoundError(
-                f"Source '{source_id}' not found. Available sources: {available_ids}"
+        if not source_id:
+            raise ValueError("source_id cannot be empty")
+        old = self._sources.get(source_id)
+        self._sources[source_id] = source
+        if old is not None and old is not source:
+            logger.info(
+                "Replaced source '%s': %s -> %s",
+                source_id,
+                type(old).__name__,
+                type(source).__name__,
             )
+        return old
 
-        return self._sources[source_id]
-
-    def get_optional(self, source_id: str) -> Source | None:
-        """
-        Get a source by ID, returning None if not found.
-
-        Args:
-            source_id: Source identifier
-
-        Returns:
-            Source instance or None if not found
-        """
-        return self._sources.get(source_id)
-
-    def unregister(self, source_id: str) -> Source:
-        """
-        Unregister a source by ID.
-
-        Args:
-            source_id: Source identifier
-
-        Returns:
-            The unregistered source instance
-
-        Raises:
-            SourceNotFoundError: If source doesn't exist
-        """
+    def unregister(self, source_id: str) -> "RootSource":
+        """Remove and return the source registered under *source_id*."""
         if source_id not in self._sources:
-            raise SourceNotFoundError(f"Source '{source_id}' not found")
-
+            raise KeyError(f"No source registered under '{source_id}'")
         source = self._sources.pop(source_id)
-        logger.info(f"Unregistered source: '{source_id}'")
+        logger.debug("Unregistered source '%s'", source_id)
         return source
 
-    # TODO: consider just using __contains__
-    def contains(self, source_id: str) -> bool:
-        """Check if a source ID is registered."""
-        return source_id in self._sources
+    # ------------------------------------------------------------------
+    # Lookup
+    # ------------------------------------------------------------------
 
-    def list_sources(self) -> list[str]:
-        """Get list of all registered source IDs."""
-        return list(self._sources.keys())
+    def get(self, source_id: str) -> "RootSource":
+        """Return the source for *source_id*, raising ``KeyError`` if absent."""
+        if source_id not in self._sources:
+            raise KeyError(
+                f"No source registered under '{source_id}'. "
+                f"Available: {list(self._sources)}"
+            )
+        return self._sources[source_id]
 
-    # TODO: consider removing this
-    def list_sources_by_type(self, source_type: type) -> list[str]:
-        """
-        Get list of source IDs filtered by source type.
+    def get_optional(self, source_id: str) -> "RootSource | None":
+        """Return the source for *source_id*, or ``None`` if not registered."""
+        return self._sources.get(source_id)
 
-        Args:
-            source_type: Class type to filter by
+    # ------------------------------------------------------------------
+    # Introspection
+    # ------------------------------------------------------------------
 
-        Returns:
-            List of source IDs that match the type
-        """
-        return [
-            source_id
-            for source_id, source in self._sources.items()
-            if isinstance(source, source_type)
-        ]
+    def list_ids(self) -> list[str]:
+        return list(self._sources)
 
     def clear(self) -> None:
-        """Remove all registered sources."""
         count = len(self._sources)
         self._sources.clear()
-        logger.info(f"Cleared {count} sources from registry")
+        logger.debug("Cleared %d source(s) from registry", count)
 
-    def replace(self, source_id: str, source: Source) -> Source | None:
-        """
-        Replace an existing source or register a new one.
+    # ------------------------------------------------------------------
+    # Dunder helpers
+    # ------------------------------------------------------------------
 
-        Args:
-            source_id: Source identifier
-            source: New source instance
-
-        Returns:
-            Previous source if it existed, None otherwise
-        """
-        old_source = self._sources.get(source_id)
-        self._sources[source_id] = source
-
-        if old_source:
-            logger.info(f"Replaced source: '{source_id}' -> {type(source).__name__}")
-        else:
-            logger.info(
-                f"Registered new source: '{source_id}' -> {type(source).__name__}"
-            )
-
-        return old_source
-
-    def get_source_info(self, source_id: str) -> dict:
-        """
-        Get information about a registered source.
-
-        Args:
-            source_id: Source identifier
-
-        Returns:
-            Dictionary with source information
-
-        Raises:
-            SourceNotFoundError: If source doesn't exist
-        """
-        source = self.get(source_id)  # This handles the not found case
-
-        info = {
-            "source_id": source_id,
-            "type": type(source).__name__,
-            "reference": source.reference if hasattr(source, "reference") else None,
-        }
-        info["identity"] = source.identity_structure()
-
-        return info
-
-    def __len__(self) -> int:
-        """Return number of registered sources."""
-        return len(self._sources)
-
-    def __contains__(self, source_id: str) -> bool:
-        """Support 'in' operator for checking source existence."""
+    def __contains__(self, source_id: Any) -> bool:
         return source_id in self._sources
 
+    def __len__(self) -> int:
+        return len(self._sources)
+
     def __iter__(self) -> Iterator[str]:
-        """Iterate over source IDs."""
         return iter(self._sources)
 
-    def items(self) -> Iterator[tuple[str, Source]]:
-        """Iterate over (source_id, source) pairs."""
+    def items(self) -> Iterator[tuple[str, "RootSource"]]:
         yield from self._sources.items()
 
     def __repr__(self) -> str:
-        return f"SourceRegistry({len(self._sources)} sources)"
-
-    def __str__(self) -> str:
-        if not self._sources:
-            return "SourceRegistry(empty)"
-
-        source_summary = []
-        for source_id, source in self._sources.items():
-            source_summary.append(f"  {source_id}: {type(source).__name__}")
-
-        return "SourceRegistry:\n" + "\n".join(source_summary)
+        return f"SourceRegistry({len(self._sources)} source(s): {list(self._sources)})"
 
 
-# Global source registry instance
-GLOBAL_SOURCE_REGISTRY = SourceRegistry()
+# Module-level global singleton — used as the default when no explicit
+# registry is passed to DataContextMixin or RootSource.
+GLOBAL_SOURCE_REGISTRY: SourceRegistry = SourceRegistry()

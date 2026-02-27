@@ -64,10 +64,12 @@ class TestStreamProtocolConformance:
         assert isinstance(packet_keys, tuple)
 
     def test_stream_has_output_schema_method(self):
+        from orcapod.types import Schema
+
         stream = make_table_stream()
         tag_schema, packet_schema = stream.output_schema()
-        assert isinstance(tag_schema, dict)
-        assert isinstance(packet_schema, dict)
+        assert isinstance(tag_schema, Schema)
+        assert isinstance(packet_schema, Schema)
 
     def test_stream_has_iter_packets_method(self):
         stream = make_table_stream()

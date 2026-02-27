@@ -1,187 +1,133 @@
-from collections.abc import Callable, Collection, Iterator
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from __future__ import annotations
 
-from deltalake import DeltaTable, write_deltalake
-from pyarrow.lib import Table
+from collections.abc import Callable, Collection
+from typing import Any, Literal
 
-from orcapod.core.datagrams import DictTag
-from orcapod.core.executable_pod import TrackedKernelBase
-from orcapod.core.streams import (
-    TableStream,
-    KernelStream,
-    StatefulStreamBase,
-)
-from orcapod.errors import DuplicateTagError
-from orcapod.protocols import core_protocols as cp
-from orcapod.types import DataValue, Schema
-from orcapod.utils import arrow_utils
-from orcapod.utils.lazy_module import LazyModule
-from orcapod.contexts.system_constants import constants
-from orcapod.semantic_types import infer_python_schema_from_pylist_data
-
-if TYPE_CHECKING:
-    import pandas as pd
-    import polars as pl
-    import pyarrow as pa
-else:
-    pl = LazyModule("polars")
-    pd = LazyModule("pandas")
-    pa = LazyModule("pyarrow")
-
-from orcapod.core.sources.base import SourceBase
+from orcapod.core.sources.arrow_table_source import ArrowTableSource
+from orcapod.core.sources.base import RootSource
+from orcapod.core.streams.table_stream import TableStream
+from orcapod.protocols.core_protocols import Stream, Tag
+from orcapod.types import ColumnConfig, Schema
 
 
-class ListSource(SourceBase):
+class ListSource(RootSource):
     """
-    A stream source that sources data from a list of elements.
-    For each element in the list, yields a tuple containing:
-    - A tag generated either by the provided tag_function or defaulting to the element index
-    - A packet containing the element under the provided name key
+    A source backed by a Python list.
+
+    Each element in the list becomes one (tag, packet) pair.  The element is
+    stored as the packet under ``name``; the tag is either the element's index
+    (default) or the dict returned by ``tag_function(element, index)``.
+
+    The list is converted to an Arrow table at construction time so the same
+    ``TableStream`` is returned from every ``process()`` call.  Source-info
+    provenance and schema-hash system tags are added via ``ArrowTableSource``.
+
     Parameters
     ----------
-    name : str
-        The key name under which each list element will be stored in the packet
-    data : list[Any]
-        The list of elements to source data from
-    tag_function : Callable[[Any, int], Tag] | None, default=None
-        Optional function to generate a tag from a list element and its index.
-        The function receives the element and the index as arguments.
-        If None, uses the element index in a dict with key 'element_index'
-    tag_function_hash_mode : Literal["content", "signature", "name"], default="name"
-        How to hash the tag function for identity purposes
-    expected_tag_keys : Collection[str] | None, default=None
-        Expected tag keys for the stream
-    label : str | None, default=None
-        Optional label for the source
-    Examples
-    --------
-    >>> # Simple list of file names
-    >>> file_list = ['/path/to/file1.txt', '/path/to/file2.txt', '/path/to/file3.txt']
-    >>> source = ListSource('file_path', file_list)
-    >>>
-    >>> # Custom tag function using filename stems
-    >>> from pathlib import Path
-    >>> source = ListSource(
-    ...     'file_path',
-    ...     file_list,
-    ...     tag_function=lambda elem, idx: {'file_name': Path(elem).stem}
-    ... )
-    >>>
-    >>> # List of sample IDs
-    >>> samples = ['sample_001', 'sample_002', 'sample_003']
-    >>> source = ListSource(
-    ...     'sample_id',
-    ...     samples,
-    ...     tag_function=lambda elem, idx: {'sample': elem}
-    ... )
+    name:
+        Packet column name under which each list element is stored.
+    data:
+        The list of elements.
+    tag_function:
+        Optional callable ``(element, index) -> dict[str, Any]`` producing the
+        tag fields for each element.  Defaults to ``{"element_index": index}``.
+    tag_function_hash_mode:
+        How to identify the tag function for content-hash purposes.
+    expected_tag_keys:
+        Explicit tag key names (used when ``tag_function`` is provided and the
+        keys are known statically).
     """
 
     @staticmethod
-    def default_tag_function(element: Any, idx: int) -> cp.Tag:
-        return DictTag({"element_index": idx})
+    def _default_tag(element: Any, idx: int) -> dict[str, Any]:
+        return {"element_index": idx}
 
     def __init__(
         self,
         name: str,
         data: list[Any],
-        tag_function: Callable[[Any, int], cp.Tag] | None = None,
-        label: str | None = None,
-        tag_function_hash_mode: Literal["content", "signature", "name"] = "name",
+        tag_function: Callable[[Any, int], dict[str, Any] | Tag] | None = None,
         expected_tag_keys: Collection[str] | None = None,
-        **kwargs,
+        tag_function_hash_mode: Literal["content", "signature", "name"] = "name",
+        **kwargs: Any,
     ) -> None:
-        super().__init__(label=label, **kwargs)
+        super().__init__(**kwargs)
+
         self.name = name
-        self.elements = list(data)  # Create a copy to avoid external modifications
+        self._elements = list(data)
+        self._tag_function_hash_mode = tag_function_hash_mode
 
         if tag_function is None:
-            tag_function = self.__class__.default_tag_function
-            # If using default tag function and no explicit expected_tag_keys, set to default
+            tag_function = self.__class__._default_tag
             if expected_tag_keys is None:
                 expected_tag_keys = ["element_index"]
 
-        self.expected_tag_keys = expected_tag_keys
-        self.tag_function = tag_function
-        self.tag_function_hash_mode = tag_function_hash_mode
-
-    def forward(self, *streams: SyncStream) -> SyncStream:
-        if len(streams) != 0:
-            raise ValueError(
-                "ListSource does not support forwarding streams. "
-                "It generates its own stream from the list elements."
-            )
-
-        def generator() -> Iterator[tuple[Tag, Packet]]:
-            for idx, element in enumerate(self.elements):
-                tag = self.tag_function(element, idx)
-                packet = {self.name: element}
-                yield tag, packet
-
-        return SyncStreamFromGenerator(generator)
-
-    def __repr__(self) -> str:
-        return f"ListSource({self.name}, {len(self.elements)} elements)"
-
-    def identity_structure(self, *streams: SyncStream) -> Any:
-        hash_function_kwargs = {}
-        if self.tag_function_hash_mode == "content":
-            # if using content hash, exclude few
-            hash_function_kwargs = {
-                "include_name": False,
-                "include_module": False,
-                "include_declaration": False,
-            }
-
-        tag_function_hash = hash_function(
-            self.tag_function,
-            function_hash_mode=self.tag_function_hash_mode,
-            hash_kwargs=hash_function_kwargs,
+        self._tag_function = tag_function
+        self._expected_tag_keys = (
+            tuple(expected_tag_keys) if expected_tag_keys is not None else None
         )
 
-        # Convert list to hashable representation
-        # Handle potentially unhashable elements by converting to string
-        try:
-            elements_hashable = tuple(self.elements)
-        except TypeError:
-            # If elements are not hashable, convert to string representation
-            elements_hashable = tuple(str(elem) for elem in self.elements)
+        # Hash the tag function for identity purposes.
+        self._tag_function_hash = self._hash_tag_function()
 
+        # Build rows: each row is tag_fields merged with {name: element}.
+        rows = []
+        for idx, element in enumerate(self._elements):
+            tag_fields = tag_function(element, idx)
+            if hasattr(tag_fields, "as_dict"):
+                tag_fields = tag_fields.as_dict()  # Tag protocol → plain dict
+            row = dict(tag_fields)
+            row[name] = element
+            rows.append(row)
+
+        tag_columns = (
+            list(self._expected_tag_keys)
+            if self._expected_tag_keys is not None
+            else [k for k in (rows[0].keys() if rows else []) if k != name]
+        )
+
+        self._arrow_source = ArrowTableSource(
+            table=self.data_context.type_converter.python_dicts_to_arrow_table(rows),
+            tag_columns=tag_columns,
+            data_context=self.data_context,
+            config=self.orcapod_config,
+        )
+
+    def _hash_tag_function(self) -> str:
+        """Produce a stable hash string for the tag function."""
+        if self._tag_function_hash_mode == "name":
+            fn = self._tag_function
+            return f"{fn.__module__}.{fn.__qualname__}"
+        elif self._tag_function_hash_mode == "signature":
+            import inspect
+
+            return str(inspect.signature(self._tag_function))
+        else:  # "content"
+            import inspect
+
+            src = inspect.getsource(self._tag_function)
+            return self.data_context.semantic_hasher.hash_object(src).to_hex()
+
+    def identity_structure(self) -> Any:
+        try:
+            elements_repr: Any = tuple(self._elements)
+        except TypeError:
+            elements_repr = tuple(str(e) for e in self._elements)
         return (
             self.__class__.__name__,
             self.name,
-            elements_hashable,
-            tag_function_hash,
-        ) + tuple(streams)
+            elements_repr,
+            self._tag_function_hash,
+        )
 
-    def keys(
-        self, *streams: SyncStream, trigger_run: bool = False
-    ) -> tuple[Collection[str] | None, Collection[str] | None]:
-        """
-        Returns the keys of the stream. The keys are the names of the packets
-        in the stream. The keys are used to identify the packets in the stream.
-        If expected_keys are provided, they will be used instead of the default keys.
-        """
-        if len(streams) != 0:
-            raise ValueError(
-                "ListSource does not support forwarding streams. "
-                "It generates its own stream from the list elements."
-            )
+    def output_schema(
+        self,
+        *streams: Stream,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]:
+        return self._arrow_source.output_schema(columns=columns, all_info=all_info)
 
-        if self.expected_tag_keys is not None:
-            return tuple(self.expected_tag_keys), (self.name,)
-        return super().keys(trigger_run=trigger_run)
-
-    def claims_unique_tags(
-        self, *streams: "SyncStream", trigger_run: bool = True
-    ) -> bool | None:
-        if len(streams) != 0:
-            raise ValueError(
-                "ListSource does not support forwarding streams. "
-                "It generates its own stream from the list elements."
-            )
-        # Claim uniqueness only if the default tag function is used
-        if self.tag_function == self.__class__.default_tag_function:
-            return True
-        # Otherwise, delegate to the base class
-        return super().claims_unique_tags(trigger_run=trigger_run)
+    def process(self, *streams: Stream, label: str | None = None) -> TableStream:
+        self.validate_inputs(*streams)
+        return self._arrow_source.process()

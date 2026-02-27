@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, get_args, get_origin
 from orcapod.contexts import DataContext, resolve_context
 from orcapod.semantic_types.semantic_registry import SemanticTypeRegistry
 from orcapod.semantic_types.type_inference import infer_python_schema_from_pylist_data
-from orcapod.types import DataType, SchemaLike
+from orcapod.types import DataType, Schema, SchemaLike
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -164,19 +164,18 @@ class UniversalTypeConverter:
 
         return python_type
 
-    def arrow_schema_to_python_schema(self, arrow_schema: pa.Schema) -> dict[str, type]:
+    def arrow_schema_to_python_schema(self, arrow_schema: pa.Schema) -> Schema:
         """
-        Convert an Arrow schema to a Python schema (dict of field names to types).
+        Convert an Arrow schema to a Python Schema (mapping of field names to types).
 
         This uses the main conversion logic, using caches for known type conversion for
         an improved performance.
         """
-        python_schema = {}
+        fields = {}
         for field in arrow_schema:
-            python_type = self.arrow_type_to_python_type(field.type)
-            python_schema[field.name] = python_type
+            fields[field.name] = self.arrow_type_to_python_type(field.type)
 
-        return python_schema
+        return Schema(fields)
 
     def python_dicts_to_struct_dicts(
         self,

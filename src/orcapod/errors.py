@@ -9,3 +9,19 @@ class DuplicateTagError(ValueError):
     """Raised when duplicate tag values are found and skip_duplicates=False"""
 
     pass
+
+
+class FieldNotResolvableError(LookupError):
+    """
+    Raised when a source cannot resolve a field value for a given record ID.
+
+    This may happen because:
+    - The source is transient or randomly generated (no stable backing data)
+    - The record ID is not found in the source
+    - The field name does not exist in the source schema
+    - The source type does not support field resolution
+
+    The exception message should describe which condition applies.
+    """
+
+    pass

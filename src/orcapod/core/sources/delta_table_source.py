@@ -1,18 +1,15 @@
+from __future__ import annotations
+
 from collections.abc import Collection
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-
-from orcapod.core.streams import TableStream
-from orcapod.protocols import core_protocols as cp
-from orcapod.types import PathLike, Schema
+from orcapod.core.sources.arrow_table_source import ArrowTableSource
+from orcapod.core.sources.base import RootSource
+from orcapod.core.streams.table_stream import TableStream
+from orcapod.protocols.core_protocols import Stream
+from orcapod.types import ColumnConfig, PathLike, Schema
 from orcapod.utils.lazy_module import LazyModule
-from pathlib import Path
-
-
-from orcapod.core.sources.base import SourceBase
-from orcapod.core.sources.source_registry import GLOBAL_SOURCE_REGISTRY, SourceRegistry
-from deltalake import DeltaTable
-from deltalake.exceptions import TableNotFoundError
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -20,181 +17,88 @@ else:
     pa = LazyModule("pyarrow")
 
 
-class DeltaTableSource(SourceBase):
-    """Source that generates streams from a Delta table."""
+class DeltaTableSource(RootSource):
+    """
+    A source backed by a Delta Lake table.
+
+    The table is read once at construction time using ``deltalake``'s
+    PyArrow integration.  The resulting Arrow table is handed off to
+    ``ArrowTableSource`` which adds source-info provenance and schema-hash
+    system tags.
+
+    Parameters
+    ----------
+    delta_table_path:
+        Filesystem path to the Delta table directory.
+    tag_columns:
+        Column names whose values form the tag for each row.
+    system_tag_columns:
+        Additional system-level tag columns.
+    source_name:
+        Human-readable name for provenance strings.  Defaults to the
+        final component of ``delta_table_path``.
+    record_id_column:
+        Column whose values serve as stable record identifiers in provenance
+        strings and ``resolve_field`` lookups.  When ``None`` (default) the
+        positional row index is used instead.  For Delta tables a dedicated
+        primary-key column is strongly recommended for stable lineage.
+    source_id:
+        Canonical registry name for this source (passed to ``RootSource``).
+    auto_register:
+        Whether to auto-register with the source registry on construction.
+    """
 
     def __init__(
         self,
         delta_table_path: PathLike,
         tag_columns: Collection[str] = (),
+        system_tag_columns: Collection[str] = (),
         source_name: str | None = None,
-        source_registry: SourceRegistry | None = None,
-        auto_register: bool = True,
-        **kwargs,
-    ):
-        """
-        Initialize DeltaTableSource with a Delta table.
-
-        Args:
-            delta_table_path: Path to the Delta table
-            source_name: Name for this source (auto-generated if None)
-            tag_columns: Column names to use as tags vs packet data
-            source_registry: Registry to register with (uses global if None)
-            auto_register: Whether to auto-register this source
-        """
+        record_id_column: str | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
 
-        # Normalize path
-        self._delta_table_path = Path(delta_table_path).resolve()
+        from deltalake import DeltaTable
+        from deltalake.exceptions import TableNotFoundError
 
-        # Try to open the Delta table
+        resolved = Path(delta_table_path).resolve()
+        self._delta_table_path = resolved
+
         try:
-            self._delta_table = DeltaTable(str(self._delta_table_path))
+            delta_table = DeltaTable(str(resolved))
         except TableNotFoundError:
-            raise ValueError(f"Delta table not found at {self._delta_table_path}")
+            raise ValueError(f"Delta table not found at {resolved}")
 
-        # Generate source name if not provided
         if source_name is None:
-            source_name = self._delta_table_path.name
+            source_name = resolved.name
 
-        self._source_name = source_name
-        self._tag_columns = tuple(tag_columns)
-        self._cached_table_stream: TableStream | None = None
+        table: pa.Table = delta_table.to_pyarrow_dataset(as_large_types=True).to_table()
 
-        # Auto-register with global registry
-        if auto_register:
-            registry = source_registry or GLOBAL_SOURCE_REGISTRY
-            registry.register(self.source_id, self)
-
-    @property
-    def reference(self) -> tuple[str, ...]:
-        """Reference tuple for this source."""
-        return ("delta_table", self._source_name)
-
-    def source_identity_structure(self) -> Any:
-        """
-        Identity structure for this source - includes path and modification info.
-        This changes when the underlying Delta table changes.
-        """
-        # Get Delta table version for change detection
-        table_version = self._delta_table.version()
-
-        return {
-            "class": self.__class__.__name__,
-            "path": str(self._delta_table_path),
-            "version": table_version,
-            "tag_columns": self._tag_columns,
-        }
-
-    def validate_inputs(self, *streams: cp.Stream) -> None:
-        """Delta table sources don't take input streams."""
-        if len(streams) > 0:
-            raise ValueError(
-                f"DeltaTableSource doesn't accept input streams, got {len(streams)}"
-            )
-
-    def source_output_types(
-        self, include_system_tags: bool = False
-    ) -> tuple[Schema, Schema]:
-        """Return tag and packet types based on Delta table schema."""
-        # Create a sample stream to get types
-        return self.forward().types(include_system_tags=include_system_tags)
-
-    def forward(self, *streams: cp.Stream) -> cp.Stream:
-        """
-        Generate stream from Delta table data.
-
-        Returns:
-            TableStream containing all data from the Delta table
-        """
-        if self._cached_table_stream is None:
-            # Refresh table to get latest data
-            self._refresh_table()
-
-            # Load table data
-            table_data = self._delta_table.to_pyarrow_dataset(
-                as_large_types=True
-            ).to_table()
-
-            self._cached_table_stream = TableStream(
-                table=table_data,
-                tag_columns=self._tag_columns,
-                source=self,
-            )
-        return self._cached_table_stream
-
-    def _refresh_table(self) -> None:
-        """Refresh the Delta table to get latest version."""
-        try:
-            # Create fresh Delta table instance to get latest data
-            self._delta_table = DeltaTable(str(self._delta_table_path))
-        except Exception as e:
-            # If refresh fails, log but continue with existing table
-            import logging
-
-            logger = logging.getLogger(__name__)
-            logger.warning(
-                f"Failed to refresh Delta table {self._delta_table_path}: {e}"
-            )
-
-    def get_table_info(self) -> dict[str, Any]:
-        """Get metadata about the Delta table."""
-        self._refresh_table()
-
-        schema = self._delta_table.schema()
-        history = self._delta_table.history()
-
-        return {
-            "path": str(self._delta_table_path),
-            "version": self._delta_table.version(),
-            "schema": schema,
-            "num_files": len(self._delta_table.files()),
-            "tag_columns": self._tag_columns,
-            "latest_commit": history[0] if history else None,
-        }
-
-    def resolve_field(self, collection_id: str, record_id: str, field_name: str) -> Any:
-        """
-        Resolve a specific field value from source field reference.
-
-        For Delta table sources:
-        - collection_id: Not used (single table)
-        - record_id: Row identifier (implementation dependent)
-        - field_name: Column name
-        """
-        # This is a basic implementation - you might want to add more sophisticated
-        # record identification based on your needs
-
-        # For now, assume record_id is a row index
-        try:
-            row_index = int(record_id)
-            table_data = self._delta_table.to_pyarrow_dataset(
-                as_large_types=True
-            ).to_table()
-
-            if row_index >= table_data.num_rows:
-                raise ValueError(
-                    f"Record ID {record_id} out of range (table has {table_data.num_rows} rows)"
-                )
-
-            if field_name not in table_data.column_names:
-                raise ValueError(
-                    f"Field '{field_name}' not found in table columns: {table_data.column_names}"
-                )
-
-            return table_data[field_name][row_index].as_py()
-
-        except ValueError as e:
-            if "invalid literal for int()" in str(e):
-                raise ValueError(
-                    f"Record ID must be numeric for DeltaTableSource, got: {record_id}"
-                )
-            raise
-
-    def __repr__(self) -> str:
-        return (
-            f"DeltaTableSource(path={self._delta_table_path}, name={self._source_name})"
+        self._arrow_source = ArrowTableSource(
+            table=table,
+            tag_columns=tag_columns,
+            system_tag_columns=system_tag_columns,
+            source_name=source_name,
+            record_id_column=record_id_column,
+            data_context=self.data_context,
+            config=self.orcapod_config,
         )
 
-    def __str__(self) -> str:
-        return f"DeltaTableSource:{self._source_name}"
+    def resolve_field(self, record_id: str, field_name: str) -> Any:
+        return self._arrow_source.resolve_field(record_id, field_name)
+
+    def identity_structure(self) -> Any:
+        return self._arrow_source.identity_structure()
+
+    def output_schema(
+        self,
+        *streams: Stream,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]:
+        return self._arrow_source.output_schema(columns=columns, all_info=all_info)
+
+    def process(self, *streams: Stream, label: str | None = None) -> TableStream:
+        self.validate_inputs(*streams)
+        return self._arrow_source.process()
