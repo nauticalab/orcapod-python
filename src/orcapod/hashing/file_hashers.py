@@ -3,7 +3,7 @@ from orcapod.protocols.hashing_protocols import (
     FileContentHasher,
     StringCacher,
 )
-from orcapod.types import PathLike
+from orcapod.types import ContentHash, PathLike
 
 
 class BasicFileHasher:
@@ -17,7 +17,7 @@ class BasicFileHasher:
         self.algorithm = algorithm
         self.buffer_size = buffer_size
 
-    def hash_file(self, file_path: PathLike) -> bytes:
+    def hash_file(self, file_path: PathLike) -> ContentHash:
         return hash_file(
             file_path, algorithm=self.algorithm, buffer_size=self.buffer_size
         )
@@ -34,7 +34,7 @@ class CachedFileHasher:
         self.file_hasher = file_hasher
         self.string_cacher = string_cacher
 
-    def hash_file(self, file_path: PathLike) -> bytes:
+    def hash_file(self, file_path: PathLike) -> ContentHash:
         cache_key = f"file:{file_path}"
         cached_value = self.string_cacher.get_cached(cache_key)
         if cached_value is not None:

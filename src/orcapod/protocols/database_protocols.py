@@ -1,10 +1,11 @@
-from typing import Any, Protocol, TYPE_CHECKING
+from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
 from collections.abc import Collection, Mapping
 
 if TYPE_CHECKING:
     import pyarrow as pa
 
 
+@runtime_checkable
 class ArrowDatabase(Protocol):
     def add_record(
         self,

@@ -415,7 +415,7 @@ class FunctionPodStream(StreamBase):
 
 class CallableWithPod(Protocol):
     @property
-    def pod(self) -> FunctionPod:
+    def pod(self) -> TrackedPacketFunctionPod:
         """
         Returns associated function pod
         """

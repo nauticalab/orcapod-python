@@ -315,6 +315,8 @@ class DeltaTableDatabase:
         Raises:
             ValueError: If any record IDs already exist and skip_duplicates=False
         """
+        self._validate_record_path(record_path)
+
         if records.num_rows == 0:
             return
 

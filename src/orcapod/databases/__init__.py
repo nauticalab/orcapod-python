@@ -1,16 +1,20 @@
-# from .legacy.types import DataStore, ArrowDataStore
-# from .legacy.legacy_arrow_data_stores import MockArrowDataStore, SimpleParquetDataStore
-# from .legacy.dict_data_stores import DirDataStore, NoOpDataStore
-# from .legacy.safe_dir_data_store import SafeDirDataStore
-
-# __all__ = [
-#     "DataStore",
-#     "ArrowDataStore",
-#     "DirDataStore",
-#     "SafeDirDataStore",
-#     "NoOpDataStore",
-#     "MockArrowDataStore",
-#     "SimpleParquetDataStore",
-# ]
-
 from .delta_lake_databases import DeltaTableDatabase
+
+__all__ = [
+    "DeltaTableDatabase",
+]
+
+# Future ArrowDatabase backends to implement:
+#
+#   ParquetArrowDatabase    -- stores each record_path as a partitioned Parquet
+#                              directory; simpler, no Delta Lake dependency,
+#                              suitable for write-once / read-heavy workloads.
+#
+#   InMemoryArrowDatabase   -- dict-backed, no filesystem I/O; intended for
+#                              unit tests and ephemeral in-process use.
+#
+#   IcebergArrowDatabase    -- Apache Iceberg backend for cloud-native /
+#                              object-store deployments.
+#
+# All backends must satisfy the ArrowDatabase protocol defined in
+# orcapod.protocols.database_protocols.
