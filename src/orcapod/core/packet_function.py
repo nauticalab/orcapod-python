@@ -522,7 +522,7 @@ class CachedPacketFunction(PacketFunctionWrapper):
                 f"Performing conflict resolution for multiple records for {input_packet.content_hash().display_name()}"
             )
             result_table = result_table.sort_by(
-                constants.POD_TIMESTAMP, ascending=False
+                [(constants.POD_TIMESTAMP, "descending")]
             ).take([0])
 
         # extract the record_id column

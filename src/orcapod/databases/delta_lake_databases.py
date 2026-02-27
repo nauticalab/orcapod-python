@@ -79,11 +79,25 @@ class DeltaTableDatabase:
         """Generate cache key for source storage."""
         return "/".join(record_path)
 
+    @staticmethod
+    def _sanitize_path_component(component: str) -> str:
+        """Sanitize a path component for the current OS.
+
+        On Windows, colons are not allowed in filenames (reserved for drive
+        letters). Replace them with '!' so that URIs containing ':' can still
+        be stored safely on all platforms.
+        """
+        import sys
+
+        if sys.platform == "win32":
+            return component.replace(":", "!")
+        return component
+
     def _get_table_path(self, record_path: tuple[str, ...]) -> Path:
         """Get the filesystem path for a given source path."""
         path = self.base_path
         for subpath in record_path:
-            path = path / subpath
+            path = path / self._sanitize_path_component(subpath)
         return path
 
     def _validate_record_path(self, record_path: tuple[str, ...]) -> None:
@@ -112,8 +126,10 @@ class DeltaTableDatabase:
                     f"Source path component {i} is invalid: {repr(component)}"
                 )
 
-            # Check for filesystem-unsafe characters
-            unsafe_chars = ["/", "\\", ":", "*", "?", '"', "<", ">", "|", "\0"]
+            # Check for filesystem-unsafe characters.
+            # ':' is handled by _sanitize_path_component (replaced on Windows),
+            # so it is intentionally absent from this list.
+            unsafe_chars = ["/", "\\", "*", "?", '"', "<", ">", "|", "\0"]
             if any(char in component for char in unsafe_chars):
                 raise ValueError(
                     f"Source path {record_path} component {component} contains invalid characters: {repr(component)}"

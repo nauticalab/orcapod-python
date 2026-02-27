@@ -1,5 +1,22 @@
 # Claude Code instructions for orcapod-python
 
+## Running commands
+
+Always run Python commands via `uv run`, e.g.:
+
+```
+uv run pytest tests/
+uv run python -c "..."
+```
+
+Never use `python`, `pytest`, or `python3` directly.
+
+## Updating agent instructions
+
+When adding or changing any instruction, update BOTH:
+- `CLAUDE.md` (for Claude Code)
+- `.zed/rules` (for Zed AI)
+
 ## Git commits
 
 Always use [Conventional Commits](https://www.conventionalcommits.org/) style:
