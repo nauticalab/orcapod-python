@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import sys
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -24,13 +23,6 @@ from orcapod.protocols.core_protocols import PacketFunction
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_stub(output_keys: list[str]) -> Any:
-    """Minimal stub that satisfies the `self` interface expected by parse_function_outputs."""
-    stub = MagicMock()
-    stub.output_keys = output_keys
-    return stub
 
 
 def add(x: int, y: int) -> int:
@@ -70,32 +62,26 @@ def add_packet() -> DictPacket:
 
 class TestParseFunctionOutputs:
     def test_no_output_keys_returns_empty_dict(self):
-        stub = _make_stub([])
-        assert parse_function_outputs(stub, 42) == {}
+        assert parse_function_outputs([], 42) == {}
 
     def test_single_key_wraps_value(self):
-        stub = _make_stub(["result"])
-        assert parse_function_outputs(stub, 99) == {"result": 99}
+        assert parse_function_outputs(["result"], 99) == {"result": 99}
 
     def test_single_key_wraps_iterable_as_single_value(self):
         # A list should be stored as-is, not unpacked, when there's one key
-        stub = _make_stub(["items"])
-        result = parse_function_outputs(stub, [1, 2, 3])
+        result = parse_function_outputs(["items"], [1, 2, 3])
         assert result == {"items": [1, 2, 3]}
 
     def test_multiple_keys_unpacks_iterable(self):
-        stub = _make_stub(["a", "b"])
-        assert parse_function_outputs(stub, (10, 20)) == {"a": 10, "b": 20}
+        assert parse_function_outputs(["a", "b"], (10, 20)) == {"a": 10, "b": 20}
 
     def test_multiple_keys_non_iterable_raises(self):
-        stub = _make_stub(["a", "b"])
         with pytest.raises(ValueError):
-            parse_function_outputs(stub, 42)
+            parse_function_outputs(["a", "b"], 42)
 
     def test_mismatched_count_raises(self):
-        stub = _make_stub(["a", "b", "c"])
         with pytest.raises(ValueError):
-            parse_function_outputs(stub, (1, 2))  # only 2 values for 3 keys
+            parse_function_outputs(["a", "b", "c"], (1, 2))  # only 2 values for 3 keys
 
 
 # ---------------------------------------------------------------------------

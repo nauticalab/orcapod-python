@@ -39,36 +39,48 @@ logger = logging.getLogger(__name__)
 error_handling_options = Literal["raise", "ignore", "warn"]
 
 
-def parse_function_outputs(self, values: Any) -> dict[str, DataValue]:
+def parse_function_outputs(
+    output_keys: Sequence[str], values: Any
+) -> dict[str, DataValue]:
     """
-    Process the output of a function and return a dictionary of DataValues, correctly parsing
-    the output based on the expected number of output keys.
+    Map raw function return values to a keyed output dict.
 
-    Examples:
-        - If ``output_keys = []``, the function returns no values and an empty dict is returned.
-        - If ``output_keys = ["result"]``, a single value is expected and mapped directly:
-          ``{"result": value}``
-        - If ``output_keys = ["a", "b"]``, the function should return an iterable of two values,
-          e.g. ``(1, 2)`` → ``{"a": 1, "b": 2}``
+    Rules:
+        - ``output_keys = []``: return value is ignored; empty dict returned.
+        - ``output_keys = ["result"]``: any value (including iterables) is stored as-is
+          under the single key.
+        - ``output_keys = ["a", "b", ...]``: ``values`` must be iterable and its length
+          must match the number of keys.
+
+    Args:
+        output_keys: Ordered list of output key names.
+        values: Raw return value from the function.
+
+    Returns:
+        Dict mapping each output key to its corresponding value.
+
+    Raises:
+        ValueError: If ``values`` is not iterable when multiple keys are given, or if
+            the number of values does not match the number of keys.
     """
-    output_values = []
-    if len(self.output_keys) == 0:
-        output_values = []
-    elif len(self.output_keys) == 1:
-        output_values = [values]  # type: ignore
+    if len(output_keys) == 0:
+        output_values: list[Any] = []
+    elif len(output_keys) == 1:
+        output_values = [values]
     elif isinstance(values, Iterable):
-        output_values = list(values)  # type: ignore
-    elif len(self.output_keys) > 1:
+        output_values = list(values)
+    else:
         raise ValueError(
-            "Values returned by function must be a pathlike or a sequence of pathlikes"
+            "Values returned by function must be sequence-like if multiple output keys are specified"
         )
 
-    if len(output_values) != len(self.output_keys):
+    if len(output_values) != len(output_keys):
         raise ValueError(
-            f"Number of output keys {len(self.output_keys)}:{self.output_keys} does not match number of values returned by function {len(output_values)}"
+            f"Number of output keys {len(output_keys)}:{output_keys} does not match "
+            f"number of values returned by function {len(output_values)}"
         )
 
-    return {k: v for k, v in zip(self.output_keys, output_values)}
+    return dict(zip(output_keys, output_values))
 
 
 class PacketFunctionBase(TraceableBase):
@@ -342,29 +354,11 @@ class PythonPacketFunction(PacketFunctionBase):
         if not self._active:
             return None
         values = self._function(**packet.as_dict())
-        output_values = []
-
-        if len(self._output_keys) == 0:
-            output_values = []
-        elif len(self._output_keys) == 1:
-            output_values = [values]  # type: ignore
-        elif isinstance(values, Iterable):
-            output_values = list(values)  # type: ignore
-        elif len(self._output_keys) > 1:
-            raise ValueError(
-                "Values returned by function must be sequence-like if multiple output keys are specified"
-            )
-
-        if len(output_values) != len(self._output_keys):
-            raise ValueError(
-                f"Number of output keys {len(self._output_keys)}:{self._output_keys} does not match number of values returned by function {len(output_values)}"
-            )
+        output_data = parse_function_outputs(self._output_keys, values)
 
         def combine(*components: tuple[str, ...]) -> str:
             inner_parsed = [":".join(component) for component in components]
             return "::".join(inner_parsed)
-
-        output_data = {k: v for k, v in zip(self._output_keys, output_values)}
 
         record_id = str(uuid7())
 
