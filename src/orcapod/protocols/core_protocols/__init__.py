@@ -1,6 +1,7 @@
 from orcapod.types import ColumnConfig
 
 from .datagrams import Datagram, Packet, Tag
+from .function_pod import FunctionPod
 from .operator_pod import OperatorPod
 from .packet_function import PacketFunction
 from .pod import ArgumentGroup, Pod
@@ -17,6 +18,7 @@ __all__ = [
     "Pod",
     "ArgumentGroup",
     "SourcePod",
+    "FunctionPod",
     "OperatorPod",
     "PacketFunction",
     "Tracker",

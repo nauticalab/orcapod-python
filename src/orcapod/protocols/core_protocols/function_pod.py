@@ -1,5 +1,6 @@
 from typing import Protocol, runtime_checkable
 
+from orcapod.protocols.core_protocols.datagrams import Packet, Tag
 from orcapod.protocols.core_protocols.packet_function import PacketFunction
 from orcapod.protocols.core_protocols.pod import Pod
 
@@ -16,3 +17,5 @@ class FunctionPod(Pod, Protocol):
         The PacketFunction that defines the computation for this FunctionPod.
         """
         ...
+
+    def process_packet(self, tag: Tag, packet: Packet) -> tuple[Tag, Packet | None]: ...

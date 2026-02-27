@@ -95,11 +95,15 @@ class Schema(Mapping[str, DataType]):
     """
 
     def __init__(
-        self, fields: Mapping[str, DataType] | None = None, **kwargs: type
+        self,
+        fields: Mapping[str, DataType] | None = None,
+        optional_fields: Collection[str] | None = None,
+        **kwargs: type,
     ) -> None:
         combined = dict(fields or {})
         combined.update(kwargs)
         self._data: dict[str, DataType] = combined
+        self._optional: frozenset[str] = frozenset(optional_fields or ())
 
     # ==================== Mapping interface ====================
 
@@ -119,12 +123,28 @@ class Schema(Mapping[str, DataType]):
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, Schema):
-            return self._data == other._data
+            return self._data == other._data and self._optional == other._optional
         if isinstance(other, Mapping):
             return self._data == dict(other)
         raise NotImplementedError(
             f"Equality check is not implemented for object of type {type(other)}"
         )
+
+    # ==================== Optionality ====================
+
+    @property
+    def optional_fields(self) -> frozenset[str]:
+        """Field names that are optional (have a default value in the source function)."""
+        return self._optional
+
+    @property
+    def required_fields(self) -> frozenset[str]:
+        """Field names that must be present in an incoming packet."""
+        return frozenset(self._data.keys()) - self._optional
+
+    def is_required(self, field: str) -> bool:
+        """Return True if *field* must be present (has no default)."""
+        return field not in self._optional
 
     # ==================== Schema operations ====================
 
@@ -143,7 +163,10 @@ class Schema(Mapping[str, DataType]):
         conflicts = {k for k in other if k in self._data and self._data[k] != other[k]}
         if conflicts:
             raise ValueError(f"Schema merge conflict on fields: {conflicts}")
-        return Schema({**self._data, **other})
+        other_optional = other._optional if isinstance(other, Schema) else frozenset()
+        return Schema(
+            {**self._data, **other}, optional_fields=self._optional | other_optional
+        )
 
     def with_values(self, other: dict[str, type] | None, **kwargs: type) -> Schema:
         """Return a new Schema with the specified fields added or overridden.
@@ -177,7 +200,10 @@ class Schema(Mapping[str, DataType]):
         missing = set(fields) - self._data.keys()
         if missing:
             raise KeyError(f"Fields not in schema: {missing}")
-        return Schema({k: self._data[k] for k in fields})
+        kept = frozenset(fields)
+        return Schema(
+            {k: self._data[k] for k in fields}, optional_fields=self._optional & kept
+        )
 
     def drop(self, *fields: str) -> Schema:
         """Return a new Schema with the specified fields removed.
@@ -189,7 +215,11 @@ class Schema(Mapping[str, DataType]):
         Returns:
             A new ``Schema`` without the dropped fields.
         """
-        return Schema({k: v for k, v in self._data.items() if k not in fields})
+        dropped = frozenset(fields)
+        return Schema(
+            {k: v for k, v in self._data.items() if k not in fields},
+            optional_fields=self._optional - dropped,
+        )
 
     def is_compatible_with(self, other: Schema) -> bool:
         """Check whether ``other`` is a superset of this schema.

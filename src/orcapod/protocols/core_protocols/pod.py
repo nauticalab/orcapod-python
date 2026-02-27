@@ -121,7 +121,7 @@ class Pod(Traceable, Protocol):
         """
         ...
 
-    def process(self, *streams: Stream) -> Stream:
+    def process(self, *streams: Stream, label: str | None = None) -> Stream:
         """
         Executes the computation on zero or more input streams.
         This method contains the core computation logic and should be

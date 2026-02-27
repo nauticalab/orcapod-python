@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from orcapod.protocols.hashing_protocols import FileContentHasher
-from orcapod.types import ContentHash, PathLike
+from orcapod.types import PathLike, Schema
 
 if TYPE_CHECKING:
     from orcapod.hashing.semantic_hashing.type_handler_registry import (
@@ -169,6 +169,28 @@ class TypeObjectHandler:
         return f"type:{module}.{qualname}"
 
 
+class SchemaHandler:
+    """
+    Handler for :class:`~orcapod.types.Schema` objects.
+
+    Produces a stable dict containing both the field-type mapping and the
+    sorted list of optional field names, so that two schemas differing only
+    in which fields are optional produce different hashes.
+    """
+
+    def handle(self, obj: Any, hasher: "SemanticHasher") -> Any:
+        if not isinstance(obj, Schema):
+            raise TypeError(f"SchemaHandler: expected a Schema, got {type(obj)!r}")
+        # schema handler is not implemented yet
+        raise NotImplementedError()
+        # visited: frozenset[int] = frozenset()
+
+        # return {
+        #     "fields": {k: hasher._expand_element(v, visited) for k, v in obj.items()},
+        #     "optional_fields": sorted(obj.optional_fields),
+        # }
+
+
 # ---------------------------------------------------------------------------
 # Registration helper
 # ---------------------------------------------------------------------------
@@ -248,6 +270,10 @@ def register_builtin_handlers(
 
     # type objects (classes used as values, e.g. passed in a dict)
     registry.register(type, TypeObjectHandler())
+
+    # Schema objects -- must come after type handler so Schema is matched
+    # specifically rather than falling through to the Mapping expansion path
+    registry.register(Schema, SchemaHandler())
 
     logger.debug(
         "register_builtin_handlers: registered %d built-in handlers",

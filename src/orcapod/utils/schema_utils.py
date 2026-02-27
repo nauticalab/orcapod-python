@@ -50,6 +50,13 @@ def check_typespec_compatibility(
                 f"Type mismatch for key '{key}': expected {receiving_types[key]}, got {type_info}."
             )
             return False
+
+    # Every receiving key must be present in incoming OR be optional (has a default)
+    for key in receiving_types:
+        if key not in incoming_types and key not in receiving_types.optional_fields:
+            logger.warning(f"Required key '{key}' missing from incoming types.")
+            return False
+
     return True
 
 
@@ -160,6 +167,7 @@ def extract_function_schemas(
     signature = inspect.signature(func)
 
     param_info: Schema = {}
+    optional_params: set[str] = set()
     for name, param in signature.parameters.items():
         if input_typespec and name in input_typespec:
             param_info[name] = input_typespec[name]
@@ -172,6 +180,8 @@ def extract_function_schemas(
             raise ValueError(
                 f"Parameter '{name}' has no type annotation and is not specified in input_types."
             )
+        if param.default is not inspect.Parameter.empty:
+            optional_params.add(name)
 
     # get_type_hints stores the return annotation under the key 'return'
     return_annot = resolved_hints.get("return", signature.return_annotation)
@@ -225,7 +235,9 @@ def extract_function_schemas(
             raise ValueError(
                 f"Type for return item '{key}' is not specified in output_types and has no type annotation in function signature."
             )
-    return param_info, inferred_output_types
+    return Schema(param_info, optional_fields=optional_params), Schema(
+        inferred_output_types
+    )
 
 
 def get_typespec_from_dict(

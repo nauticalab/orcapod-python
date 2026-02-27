@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from abc import abstractmethod
 from collections.abc import Callable, Collection, Iterator
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
@@ -13,6 +14,7 @@ from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
     ArgumentGroup,
+    FunctionPod,
     Packet,
     PacketFunction,
     Pod,
@@ -36,7 +38,12 @@ else:
     pl = LazyModule("polars")
 
 
-class FunctionPod(TraceableBase):
+class TrackedPacketFunctionPod(TraceableBase):
+    """
+    A think wrapper around a packet function, creating a pod that applies the
+    packet function on each and every input packet.
+    """
+
     def __init__(
         self,
         packet_function: PacketFunction,
@@ -52,9 +59,7 @@ class FunctionPod(TraceableBase):
         )
         self.tracker_manager = tracker_manager or DEFAULT_TRACKER_MANAGER
         self._packet_function = packet_function
-        self._output_schema_hash = self.data_context.semantic_hasher.hash_object(
-            self.packet_function.output_packet_schema
-        ).to_string()
+        self._output_schema_hash = None
 
     @property
     def packet_function(self) -> PacketFunction:
@@ -65,11 +70,16 @@ class FunctionPod(TraceableBase):
 
     @property
     def uri(self) -> tuple[str, ...]:
+        if self._output_schema_hash is None:
+            self._output_schema_hash = self.data_context.semantic_hasher.hash_object(
+                # hash the vanilla output schema with no extra columns
+                self.packet_function.output_packet_schema
+            ).to_string()
         return (
             self.packet_function.canonical_function_name,
-            self.packet_function.packet_function_type_id,
-            f"v{self.packet_function.major_version}",
             self._output_schema_hash,
+            f"v{self.packet_function.major_version}",
+            self.packet_function.packet_function_type_id,
         )
 
     def multi_stream_handler(self) -> Pod:
@@ -92,17 +102,17 @@ class FunctionPod(TraceableBase):
             PodInputValidationError: If inputs are invalid
         """
         input_stream = self.handle_input_streams(*streams)
-        self._validate_input(input_stream)
+        _, incoming_packet_schema = input_stream.output_schema()
+        self._validate_input_schema(incoming_packet_schema)
 
-    def _validate_input(self, input_stream: Stream) -> None:
-        _, incoming_packet_types = input_stream.output_schema()
+    def _validate_input_schema(self, input_schema: Schema) -> None:
         expected_packet_schema = self.packet_function.input_packet_schema
         if not schema_utils.check_typespec_compatibility(
-            incoming_packet_types, expected_packet_schema
+            input_schema, expected_packet_schema
         ):
             # TODO: use custom exception type for better error handling
             raise ValueError(
-                f"Incoming packet data type {incoming_packet_types} from {input_stream} is not compatible with expected input typespec {expected_packet_schema}"
+                f"Incoming packet data type {input_schema} is not compatible with expected input typespec {expected_packet_schema}"
             )
 
     def process_packet(self, tag: Tag, packet: Packet) -> tuple[Tag, Packet | None]:
@@ -129,14 +139,14 @@ class FunctionPod(TraceableBase):
         if len(streams) == 0:
             raise ValueError("At least one input stream is required")
         elif len(streams) > 1:
+            # TODO: simplify the multi-stream handling logic
             multi_stream_handler = self.multi_stream_handler()
             joined_stream = multi_stream_handler.process(*streams)
             return joined_stream
         return streams[0]
 
-    def process(
-        self, *streams: Stream, label: str | None = None
-    ) -> "FunctionPodStream":
+    @abstractmethod
+    def process(self, *streams: Stream, label: str | None = None) -> Stream:
         """
         Invoke the packet processor on the input stream.
         If multiple streams are passed in, all streams are joined before processing.
@@ -145,26 +155,26 @@ class FunctionPod(TraceableBase):
             *streams: Input streams to process
 
         Returns:
-            cp.Stream: The resulting output stream
+            Stream: The resulting output stream
         """
+        ...
         logger.debug(f"Invoking kernel {self} on streams: {streams}")
 
         input_stream = self.handle_input_streams(*streams)
 
-        # perform input stream validation
-        self._validate_input(input_stream)
+        # perform input stream schema validation
+        self._validate_input_schema(input_stream.output_schema()[1])
         self.tracker_manager.record_packet_function_invocation(
             self.packet_function, input_stream, label=label
         )
         output_stream = FunctionPodStream(
             function_pod=self,
             input_stream=input_stream,
+            label=label,
         )
         return output_stream
 
-    def __call__(
-        self, *streams: Stream, label: str | None = None
-    ) -> "FunctionPodStream":
+    def __call__(self, *streams: Stream, label: str | None = None) -> Stream:
         """
         Convenience method to invoke the pod process on a collection of streams,
         """
@@ -181,12 +191,52 @@ class FunctionPod(TraceableBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        tag_schema = self.multi_stream_handler().output_schema(
+        tag_schema, incoming_packet_schema = self.multi_stream_handler().output_schema(
             *streams, columns=columns, all_info=all_info
-        )[0]
+        )
+        # validate that incoming_packet_schema is valid
+        self._validate_input_schema(incoming_packet_schema)
         # The output schema of the FunctionPod is determined by the packet function
         # TODO: handle and extend to include additional columns
+        # Namely, the source columns
         return tag_schema, self.packet_function.output_packet_schema
+
+
+class SimpleFunctionPod(TrackedPacketFunctionPod):
+    def process(self, *streams: Stream, label: str | None = None) -> FunctionPodStream:
+        """
+        Invoke the packet processor on the input stream.
+        If multiple streams are passed in, all streams are joined before processing.
+
+        Args:
+            *streams: Input streams to process
+
+        Returns:
+            cp.Stream: The resulting output stream
+        """
+        logger.debug(f"Invoking kernel {self} on streams: {streams}")
+
+        input_stream = self.handle_input_streams(*streams)
+
+        # perform input stream schema validation
+        self._validate_input_schema(input_stream.output_schema()[1])
+        self.tracker_manager.record_packet_function_invocation(
+            self.packet_function, input_stream, label=label
+        )
+        output_stream = FunctionPodStream(
+            function_pod=self,
+            input_stream=input_stream,
+            label=label,
+        )
+        return output_stream
+
+    def __call__(self, *streams: Stream, label: str | None = None) -> FunctionPodStream:
+        """
+        Convenience method to invoke the pod process on a collection of streams,
+        """
+        logger.debug(f"Invoking pod {self} on streams through __call__: {streams}")
+        # perform input stream validation
+        return self.process(*streams, label=label)
 
 
 class FunctionPodStream(StreamBase):
@@ -238,11 +288,9 @@ class FunctionPodStream(StreamBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        tag_schema = self._input_stream.output_schema(
-            columns=columns, all_info=all_info
-        )[0]
-        packet_schema = self._function_pod.packet_function.output_packet_schema
-        return (tag_schema, packet_schema)
+        return self._function_pod.output_schema(
+            self._input_stream, columns=columns, all_info=all_info
+        )
 
     def __iter__(self) -> Iterator[tuple[Tag, Packet]]:
         return self.iter_packets()
@@ -418,7 +466,7 @@ def function_pod(
             )
 
         # Create a simple typed function pod
-        pod = FunctionPod(
+        pod = SimpleFunctionPod(
             packet_function=packet_function,
         )
         setattr(func, "pod", pod)
@@ -427,7 +475,7 @@ def function_pod(
     return decorator
 
 
-class WrappedFunctionPod(FunctionPod):
+class WrappedFunctionPod(TrackedPacketFunctionPod):
     """
     A wrapper for a function pod, allowing for additional functionality or modifications without changing the original pod.
     This class is meant to serve as a base class for other pods that need to wrap existing pods.
@@ -473,7 +521,7 @@ class WrappedFunctionPod(FunctionPod):
         )
 
     # TODO: reconsider whether to return FunctionPodStream here in the signature
-    def process(self, *streams: Stream, label: str | None = None) -> FunctionPodStream:
+    def process(self, *streams: Stream, label: str | None = None) -> Stream:
         return self._function_pod.process(*streams, label=label)
 
 

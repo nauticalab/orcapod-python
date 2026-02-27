@@ -3,7 +3,7 @@ from typing import Any, Protocol, runtime_checkable
 from orcapod.protocols.core_protocols.datagrams import Packet
 from orcapod.protocols.core_protocols.labelable import Labelable
 from orcapod.protocols.hashing_protocols import ContentIdentifiable
-from orcapod.types import Schema
+from orcapod.types import ColumnConfig, Schema
 
 
 @runtime_checkable
