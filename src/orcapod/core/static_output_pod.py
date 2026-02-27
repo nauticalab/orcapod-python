@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from abc import abstractmethod
 from collections.abc import Collection, Iterator
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, cast
 
 from orcapod.config import Config
@@ -285,7 +285,7 @@ class DynamicPodStream(StreamBase):
             self._cached_stream = self._pod.static_process(
                 *self.upstreams,
             )
-            self._cached_time = datetime.now()
+            self._cached_time = datetime.now(timezone.utc)
 
     def as_table(
         self,

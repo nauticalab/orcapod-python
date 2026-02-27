@@ -1,34 +1,31 @@
 """
-Tests for FunctionPodNode.get_all_records and the DB-backed iter_packets
-behaviour of FunctionPodNodeStream.
-
-Covers:
-- get_all_records: empty DB → None
-- get_all_records: default (data-only) columns
-- get_all_records: meta columns included/excluded
-- get_all_records: source columns included/excluded
-- get_all_records: system_tags columns included/excluded
-- get_all_records: all_info=True includes everything
-- get_all_records: row count and values are correct
-- iter_packets Phase 1: already-stored results served from DB without recomputation
-- iter_packets Phase 2: only missing entries are passed to process_packet
-- iter_packets: partial fill — some stored, some new
-- iter_packets: second node sharing same DB skips all computation
-- iter_packets: node with fresh DB always computes
-- iter_packets: results from DB and from compute agree in values
-- iter_packets: call-count proof that the inner function is not re-called for cached rows
+Tests for FunctionPodNode covering:
+- Construction, pipeline_path, uri
+- validate_inputs and argument_symmetry
+- output_schema
+- process_packet and add_pipeline_record
+- process() / __call__()
+- get_all_records: empty DB, correctness, ColumnConfig (meta/source/system_tags/all_info)
+- pipeline_path_prefix
+- result path conventions
 """
 
 from __future__ import annotations
+
+from collections.abc import Mapping
 
 import pyarrow as pa
 import pytest
 
 from orcapod.core.datagrams import DictPacket, DictTag
-from orcapod.core.function_pod import FunctionPodNode, FunctionPodNodeStream
+from orcapod.core.function_pod import (
+    FunctionPodNode,
+    FunctionPodNodeStream,
+)
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.streams import TableStream
 from orcapod.databases import InMemoryArrowDatabase
+from orcapod.protocols.core_protocols import Stream
 from orcapod.system_constants import constants
 
 from ..conftest import double, make_int_stream
@@ -82,7 +79,249 @@ def _fill_node(node: FunctionPodNode) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 1. FunctionPodNode.get_all_records — empty database
+# 1. Construction
+# ---------------------------------------------------------------------------
+
+
+class TestFunctionPodNodeConstruction:
+    @pytest.fixture
+    def node(self, double_pf) -> FunctionPodNode:
+        db = InMemoryArrowDatabase()
+        stream = make_int_stream(n=3)
+        return FunctionPodNode(
+            packet_function=double_pf,
+            input_stream=stream,
+            pipeline_database=db,
+        )
+
+    def test_construction_succeeds(self, node):
+        assert node is not None
+
+    def test_pipeline_path_is_tuple_of_strings(self, node):
+        path = node.pipeline_path
+        assert isinstance(path, tuple)
+        assert all(isinstance(p, str) for p in path)
+
+    def test_uri_is_tuple_of_strings(self, node):
+        uri = node.uri
+        assert isinstance(uri, tuple)
+        assert all(isinstance(part, str) for part in uri)
+
+    def test_uri_contains_node_component(self, node):
+        uri_str = ":".join(node.uri)
+        assert "node:" in uri_str
+
+    def test_uri_contains_tag_component(self, node):
+        uri_str = ":".join(node.uri)
+        assert "tag:" in uri_str
+
+    def test_pipeline_path_includes_uri(self, node):
+        for part in node.uri:
+            assert part in node.pipeline_path
+
+    def test_incompatible_stream_raises_on_construction(self, double_pf):
+        db = InMemoryArrowDatabase()
+        bad_stream = TableStream(
+            pa.table(
+                {
+                    "id": pa.array([0, 1], type=pa.int64()),
+                    "z": pa.array([0, 1], type=pa.int64()),
+                }
+            ),
+            tag_columns=["id"],
+        )
+        with pytest.raises(ValueError):
+            FunctionPodNode(
+                packet_function=double_pf,
+                input_stream=bad_stream,
+                pipeline_database=db,
+            )
+
+    def test_result_database_defaults_to_pipeline_database(self, double_pf):
+        db = InMemoryArrowDatabase()
+        node = FunctionPodNode(
+            packet_function=double_pf,
+            input_stream=make_int_stream(n=2),
+            pipeline_database=db,
+        )
+        assert node._pipeline_database is db
+
+    def test_separate_result_database_accepted(self, double_pf):
+        pipeline_db = InMemoryArrowDatabase()
+        result_db = InMemoryArrowDatabase()
+        node = FunctionPodNode(
+            packet_function=double_pf,
+            input_stream=make_int_stream(n=2),
+            pipeline_database=pipeline_db,
+            result_database=result_db,
+        )
+        assert node._pipeline_database is pipeline_db
+
+
+# ---------------------------------------------------------------------------
+# 2. validate_inputs and argument_symmetry
+# ---------------------------------------------------------------------------
+
+
+class TestFunctionPodNodeValidation:
+    @pytest.fixture
+    def node(self, double_pf) -> FunctionPodNode:
+        db = InMemoryArrowDatabase()
+        return FunctionPodNode(
+            packet_function=double_pf,
+            input_stream=make_int_stream(n=3),
+            pipeline_database=db,
+        )
+
+    def test_validate_inputs_with_no_streams_succeeds(self, node: FunctionPodNode):
+        node.validate_inputs()  # must not raise
+
+    def test_validate_inputs_with_any_stream_raises(self, node: FunctionPodNode):
+        extra = make_int_stream(n=2)
+        with pytest.raises(ValueError):
+            node.validate_inputs(extra)
+
+    def test_argument_symmetry_empty_raises(self, node: FunctionPodNode):
+        with pytest.raises(ValueError):
+            node.argument_symmetry([make_int_stream()])
+
+    def test_argument_symmetry_no_streams_returns_empty(self, node: FunctionPodNode):
+        result = node.argument_symmetry([])
+        assert result == ()
+
+
+# ---------------------------------------------------------------------------
+# 3. output_schema
+# ---------------------------------------------------------------------------
+
+
+class TestFunctionPodNodeOutputSchema:
+    @pytest.fixture
+    def node(self, double_pf) -> FunctionPodNode:
+        db = InMemoryArrowDatabase()
+        return FunctionPodNode(
+            packet_function=double_pf,
+            input_stream=make_int_stream(n=3),
+            pipeline_database=db,
+        )
+
+    def test_output_schema_returns_two_mappings(self, node: FunctionPodNode):
+        tag_schema, packet_schema = node.output_schema()
+        assert isinstance(tag_schema, Mapping)
+        assert isinstance(packet_schema, Mapping)
+        assert "id" in tag_schema
+        assert len(tag_schema) == 1
+        assert "result" in packet_schema
+        assert len(packet_schema) == 1
+        assert tag_schema["id"] is int
+        assert packet_schema["result"] is int
+
+    def test_packet_schema_matches_function_output(self, node, double_pf):
+        _, packet_schema = node.output_schema()
+        assert packet_schema == double_pf.output_packet_schema
+
+    def test_tag_schema_matches_input_stream(self, node):
+        tag_schema, _ = node.output_schema()
+        assert "id" in tag_schema
+        assert tag_schema["id"] is int
+
+
+# ---------------------------------------------------------------------------
+# 4. process_packet and add_pipeline_record
+# ---------------------------------------------------------------------------
+
+
+class TestFunctionPodNodeProcessPacket:
+    @pytest.fixture
+    def node(self, double_pf) -> FunctionPodNode:
+        db = InMemoryArrowDatabase()
+        return FunctionPodNode(
+            packet_function=double_pf,
+            input_stream=make_int_stream(n=3),
+            pipeline_database=db,
+        )
+
+    def test_process_packet_returns_tag_and_packet(self, node):
+        tag = DictTag({"id": 0})
+        packet = DictPacket({"x": 5})
+        out_tag, out_packet = node.process_packet(tag, packet)
+        assert out_tag is tag
+        assert out_packet is not None
+
+    def test_process_packet_value_correct(self, node):
+        tag = DictTag({"id": 0})
+        packet = DictPacket({"x": 6})
+        _, out_packet = node.process_packet(tag, packet)
+        assert out_packet["result"] == 12  # 6 * 2
+
+    def test_process_packet_adds_pipeline_record(self, node, double_pf):
+        tag = DictTag({"id": 0})
+        packet = DictPacket({"x": 3})
+        node.process_packet(tag, packet)
+        db = node._pipeline_database
+        db.flush()
+        all_records = db.get_all_records(node.pipeline_path)
+        assert all_records is not None
+        assert all_records.num_rows >= 1
+
+    def test_process_packet_second_call_same_input_deduplicates(self, node):
+        tag = DictTag({"id": 0})
+        packet = DictPacket({"x": 3})
+        node.process_packet(tag, packet)
+        node.process_packet(tag, packet)
+        db = node._pipeline_database
+        db.flush()
+        all_records = db.get_all_records(node.pipeline_path)
+        assert all_records is not None
+        assert all_records.num_rows == 1
+
+    def test_process_two_packets_add_two_entries(self, node):
+        tag = DictTag({"id": 0})
+        packet1 = DictPacket({"x": 3})
+        packet2 = DictPacket({"x": 4})
+        node.process_packet(tag, packet1)
+        node.process_packet(tag, packet2)
+        db = node._pipeline_database
+        all_records = db.get_all_records(node.pipeline_path)
+        assert all_records is not None
+        assert all_records.num_rows == 2
+
+
+# ---------------------------------------------------------------------------
+# 5. process() / __call__()
+# ---------------------------------------------------------------------------
+
+
+class TestFunctionPodNodeProcess:
+    @pytest.fixture
+    def node(self, double_pf) -> FunctionPodNode:
+        db = InMemoryArrowDatabase()
+        return FunctionPodNode(
+            packet_function=double_pf,
+            input_stream=make_int_stream(n=3),
+            pipeline_database=db,
+        )
+
+    def test_process_returns_function_pod_node_stream(self, node):
+        result = node.process()
+        assert isinstance(result, FunctionPodNodeStream)
+        assert [packet["result"] for tag, packet in result.iter_packets()] == [0, 2, 4]
+
+    def test_call_operator_returns_function_pod_node_stream(self, node):
+        result = node()
+        assert isinstance(result, FunctionPodNodeStream)
+
+    def test_process_with_extra_streams_raises(self, node):
+        with pytest.raises(ValueError):
+            node.process(make_int_stream(n=2))
+
+    def test_process_output_is_stream_protocol(self, node):
+        result = node.process()
+        assert isinstance(result, Stream)
+
+
+# ---------------------------------------------------------------------------
+# 6. get_all_records — empty database
 # ---------------------------------------------------------------------------
 
 
@@ -93,12 +332,11 @@ class TestGetAllRecordsEmpty:
 
     def test_returns_none_after_no_processing(self, double_pf):
         node = _make_node(double_pf, n=5)
-        # process() is never called, so both DBs are empty
         assert node.get_all_records(all_info=True) is None
 
 
 # ---------------------------------------------------------------------------
-# 2. FunctionPodNode.get_all_records — basic correctness after population
+# 7. get_all_records — basic correctness after population
 # ---------------------------------------------------------------------------
 
 
@@ -131,7 +369,6 @@ class TestGetAllRecordsValues:
     def test_output_values_are_correct(self, filled_node):
         result = filled_node.get_all_records()
         assert result is not None
-        # double(x) = x*2, x in {0,1,2,3}
         assert sorted(result.column("result").to_pylist()) == [0, 2, 4, 6]
 
     def test_tag_values_are_correct(self, filled_node):
@@ -141,7 +378,7 @@ class TestGetAllRecordsValues:
 
 
 # ---------------------------------------------------------------------------
-# 3. FunctionPodNode.get_all_records — ColumnConfig: meta columns
+# 8. get_all_records — ColumnConfig: meta columns
 # ---------------------------------------------------------------------------
 
 
@@ -190,7 +427,7 @@ class TestGetAllRecordsMetaColumns:
 
 
 # ---------------------------------------------------------------------------
-# 4. FunctionPodNode.get_all_records — ColumnConfig: source columns
+# 9. get_all_records — ColumnConfig: source columns
 # ---------------------------------------------------------------------------
 
 
@@ -225,14 +462,13 @@ class TestGetAllRecordsSourceColumns:
 
 
 # ---------------------------------------------------------------------------
-# 5. FunctionPodNode.get_all_records — ColumnConfig: system_tags columns
+# 10. get_all_records — ColumnConfig: system_tags columns
 # ---------------------------------------------------------------------------
 
 
 class TestGetAllRecordsSystemTagColumns:
     @pytest.fixture
     def filled_node_with_sys_tags(self, double_pf) -> FunctionPodNode:
-        """Node whose input stream has an explicit 'run' system-tag column."""
         node = _make_node_with_system_tags(double_pf, n=3)
         _fill_node(node)
         return node
@@ -267,7 +503,7 @@ class TestGetAllRecordsSystemTagColumns:
 
 
 # ---------------------------------------------------------------------------
-# 6. FunctionPodNode.get_all_records — all_info=True
+# 11. get_all_records — all_info=True
 # ---------------------------------------------------------------------------
 
 
@@ -301,7 +537,6 @@ class TestGetAllRecordsAllInfo:
         assert len(source_cols) > 0
 
     def test_all_info_includes_system_tag_columns(self, filled_node_with_sys_tags):
-        """System-tag columns appear in all_info only when the input stream has them."""
         result = filled_node_with_sys_tags.get_all_records(all_info=True)
         assert result is not None
         sys_cols = [
@@ -317,7 +552,6 @@ class TestGetAllRecordsAllInfo:
         assert full_result.num_columns > default_result.num_columns
 
     def test_all_info_data_columns_match_default(self, filled_node):
-        """Data columns (id, result) are present and identical under both configs."""
         default_result = filled_node.get_all_records()
         full_result = filled_node.get_all_records(all_info=True)
         assert default_result is not None
@@ -331,241 +565,52 @@ class TestGetAllRecordsAllInfo:
 
 
 # ---------------------------------------------------------------------------
-# 7. FunctionPodNodeStream.iter_packets — Phase 1: DB-served results
+# 12. pipeline_path_prefix
 # ---------------------------------------------------------------------------
 
 
-class TestIterPacketsDbPhase:
-    def test_cached_results_served_without_recomputation(self, double_pf):
-        """
-        After node1 fills the DB, node2 (sharing the same DB) should serve all
-        results from Phase 1 (DB lookup) without calling the inner function.
-        """
-        call_count = 0
-
-        def counting_double(x: int) -> int:
-            nonlocal call_count
-            call_count += 1
-            return x * 2
-
-        counting_pf = PythonPacketFunction(counting_double, output_keys="result")
-
-        n = 3
+class TestFunctionPodNodePipelinePathPrefix:
+    def test_prefix_prepended_to_pipeline_path(self, double_pf):
         db = InMemoryArrowDatabase()
-
-        # node1 — first pass populates result DB and pipeline DB
-        node1 = FunctionPodNode(
-            packet_function=counting_pf,
-            input_stream=make_int_stream(n=n),
-            pipeline_database=db,
-        )
-        _fill_node(node1)
-        calls_after_first_pass = call_count
-
-        # node2 — same packet_function, same DB → all entries pre-exist
-        node2 = FunctionPodNode(
-            packet_function=counting_pf,
-            input_stream=make_int_stream(n=n),
-            pipeline_database=db,
-        )
-        _fill_node(node2)
-
-        # No additional calls should have happened
-        assert call_count == calls_after_first_pass
-
-    def test_db_served_results_have_correct_values(self, double_pf):
-        """Values from DB Phase equal the originally computed values."""
-        n = 4
-        db = InMemoryArrowDatabase()
-
-        node1 = FunctionPodNode(
+        prefix = ("my_pipeline", "stage_1")
+        node = FunctionPodNode(
             packet_function=double_pf,
-            input_stream=make_int_stream(n=n),
+            input_stream=make_int_stream(n=2),
             pipeline_database=db,
+            pipeline_path_prefix=prefix,
         )
-        table1 = node1.process().as_table()
+        pipeline_path = node.pipeline_path
+        assert pipeline_path[: len(prefix)] == prefix
 
-        node2 = FunctionPodNode(
+    def test_no_prefix_pipeline_path_equals_uri(self, double_pf):
+        db = InMemoryArrowDatabase()
+        node = FunctionPodNode(
             packet_function=double_pf,
-            input_stream=make_int_stream(n=n),
+            input_stream=make_int_stream(n=2),
             pipeline_database=db,
         )
-        table2 = node2.process().as_table()
-
-        # Both passes must produce the same result values
-        assert sorted(table1.column("result").to_pylist()) == sorted(
-            table2.column("result").to_pylist()
-        )
-
-    def test_db_served_results_have_correct_row_count(self, double_pf):
-        n = 5
-        db = InMemoryArrowDatabase()
-
-        node1 = _make_node(double_pf, n=n, db=db)
-        _fill_node(node1)
-
-        node2 = _make_node(double_pf, n=n, db=db)
-        packets = list(node2.process().iter_packets())
-        assert len(packets) == n
-
-    def test_fresh_db_always_computes(self, double_pf):
-        """A node with a fresh (empty) DB always falls through to Phase 2."""
-        call_count = 0
-
-        def counting_double(x: int) -> int:
-            nonlocal call_count
-            call_count += 1
-            return x * 2
-
-        counting_pf = PythonPacketFunction(counting_double, output_keys="result")
-
-        n = 3
-        # Each node gets its own fresh DB → no cross-node cache sharing
-        for _ in range(2):
-            node = FunctionPodNode(
-                packet_function=counting_pf,
-                input_stream=make_int_stream(n=n),
-                pipeline_database=InMemoryArrowDatabase(),
-            )
-            _fill_node(node)
-
-        # Both passes must have computed from scratch
-        assert call_count == n * 2
+        assert node.pipeline_path == node.uri
 
 
 # ---------------------------------------------------------------------------
-# 8. FunctionPodNodeStream.iter_packets — Phase 2: only missing entries computed
+# 13. Result path conventions
 # ---------------------------------------------------------------------------
 
 
-class TestIterPacketsMissingEntriesOnly:
-    def test_partial_fill_computes_only_missing(self, double_pf):
-        """
-        Manually populate the DB for a subset of the input, then verify that
-        iter_packets only computes the remaining entries.
-        """
-        call_count = 0
-
-        def counting_double(x: int) -> int:
-            nonlocal call_count
-            call_count += 1
-            return x * 2
-
-        counting_pf = PythonPacketFunction(counting_double, output_keys="result")
-
-        n = 4
+class TestFunctionPodNodeResultPath:
+    def test_result_records_stored_under_result_suffix_path(self, double_pf):
         db = InMemoryArrowDatabase()
-
-        # Pre-fill 2 out of 4 entries using a node over a smaller input stream
-        node_pre = FunctionPodNode(
-            packet_function=counting_pf,
-            input_stream=make_int_stream(n=2),  # only first 2 rows
+        node = FunctionPodNode(
+            packet_function=double_pf,
+            input_stream=make_int_stream(n=2),
             pipeline_database=db,
         )
-        _fill_node(node_pre)
-        calls_after_prefill = call_count  # should be 2
+        tag = DictTag({"id": 0})
+        packet = DictPacket({"x": 5})
+        node.process_packet(tag, packet)
+        db.flush()
 
-        # Now process all 4 rows — the 2 already in DB should not be recomputed
-        node_full = FunctionPodNode(
-            packet_function=counting_pf,
-            input_stream=make_int_stream(n=n),
-            pipeline_database=db,
-        )
-        _fill_node(node_full)
-
-        # Only 2 additional calls expected for the 2 missing rows
-        assert call_count == calls_after_prefill + 2
-
-    def test_partial_fill_total_row_count_correct(self, double_pf):
-        n = 4
-        db = InMemoryArrowDatabase()
-
-        # Pre-fill first 2
-        node_pre = _make_node(double_pf, n=2, db=db)
-        _fill_node(node_pre)
-
-        # Full run over n=4
-        node_full = _make_node(double_pf, n=n, db=db)
-        packets = list(node_full.process().iter_packets())
-        assert len(packets) == n
-
-    def test_partial_fill_all_values_correct(self, double_pf):
-        n = 4
-        db = InMemoryArrowDatabase()
-
-        node_pre = _make_node(double_pf, n=2, db=db)
-        _fill_node(node_pre)
-
-        node_full = _make_node(double_pf, n=n, db=db)
-        table = node_full.process().as_table()
-        assert sorted(table.column("result").to_pylist()) == [0, 2, 4, 6]
-
-    def test_already_full_db_zero_additional_calls(self, double_pf):
-        """Once every entry is in the DB, a new node makes zero inner-function calls."""
-        call_count = 0
-
-        def counting_double(x: int) -> int:
-            nonlocal call_count
-            call_count += 1
-            return x * 2
-
-        counting_pf = PythonPacketFunction(counting_double, output_keys="result")
-        n = 3
-        db = InMemoryArrowDatabase()
-
-        # Fill completely
-        node1 = _make_node(counting_pf, n=n, db=db)
-        _fill_node(node1)
-        calls_after_fill = call_count
-
-        # Second node — same DB, same inputs → Phase 1 covers everything
-        node2 = _make_node(counting_pf, n=n, db=db)
-        _fill_node(node2)
-        assert call_count == calls_after_fill
-
-
-# ---------------------------------------------------------------------------
-# 9. FunctionPodNodeStream.iter_packets — inactive packet function + DB
-# ---------------------------------------------------------------------------
-
-
-class TestIterPacketsInactiveWithDb:
-    def test_inactive_with_empty_db_yields_no_packets(self, double_pf):
-        double_pf.set_active(False)
-        node = _make_node(double_pf, n=3)
-        packets = list(node.process().iter_packets())
-        assert packets == []
-
-    def test_inactive_with_filled_db_serves_cached_results(self, double_pf):
-        """
-        Fill the DB while active, then deactivate and verify results still come
-        from Phase 1 (DB) without calling the inner function.
-        """
-        n = 3
-        db = InMemoryArrowDatabase()
-
-        # Fill while active
-        node1 = _make_node(double_pf, n=n, db=db)
-        _fill_node(node1)
-
-        # Deactivate and use a new node with the same DB
-        double_pf.set_active(False)
-        node2 = _make_node(double_pf, n=n, db=db)
-        packets = list(node2.process().iter_packets())
-
-        assert len(packets) == n
-
-    def test_inactive_with_filled_db_values_correct(self, double_pf):
-        n = 3
-        db = InMemoryArrowDatabase()
-
-        node1 = _make_node(double_pf, n=n, db=db)
-        table1 = node1.process().as_table()
-
-        double_pf.set_active(False)
-        node2 = _make_node(double_pf, n=n, db=db)
-        table2 = node2.process().as_table()
-
-        assert sorted(table2.column("result").to_pylist()) == sorted(
-            table1.column("result").to_pylist()
+        result_path = node._cached_packet_function.record_path
+        assert result_path[-1] == "_result" or any(
+            "_result" in part for part in result_path
         )

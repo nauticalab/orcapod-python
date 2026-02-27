@@ -193,7 +193,7 @@ class TemporalMixin:
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._modified_time = self._update_modified_time()
+        self._update_modified_time()
 
     @property
     def last_modified(self) -> datetime | None:

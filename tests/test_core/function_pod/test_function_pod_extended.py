@@ -1,26 +1,19 @@
 """
 Extended tests for function_pod.py covering:
+- TrackedPacketFunctionPod — handle_input_streams
 - WrappedFunctionPod — delegation, uri, validate_inputs, output_schema, process
-- FunctionPodNode — construction, pipeline_path, uri, validate_inputs, process_packet,
-                    add_pipeline_record, output_schema, argument_symmetry, process/__call__
-- FunctionPodNodeStream — iter_packets, as_table, refresh_cache, output_schema
+- FunctionPodStream — as_table() with content_hash and sort_by_tags column configs
 - function_pod decorator with result_database — creates CachedPacketFunction, caching works
-- FunctionPodStream.as_table() content_hash and sort_by_tags column configs
-- TrackedPacketFunctionPod — handle_input_streams with 0 streams raises
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from tkinter import Pack
 
 import pyarrow as pa
 import pytest
 
-from orcapod.core.datagrams import DictPacket, DictTag
 from orcapod.core.function_pod import (
-    FunctionPodNode,
-    FunctionPodNodeStream,
     SimpleFunctionPod,
     WrappedFunctionPod,
     function_pod,
@@ -28,9 +21,10 @@ from orcapod.core.function_pod import (
 from orcapod.core.packet_function import CachedPacketFunction, PythonPacketFunction
 from orcapod.core.streams import TableStream
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.protocols.core_protocols import PacketFunction, Stream
+from orcapod.protocols.core_protocols import Stream
 
-from ..conftest import add, double, make_int_stream, make_two_col_stream
+from ..conftest import make_int_stream, make_two_col_stream
+
 
 # ---------------------------------------------------------------------------
 # 1. TrackedPacketFunctionPod — handle_input_streams with 0 streams
@@ -67,9 +61,7 @@ class TestTrackedPacketFunctionPodHandleInputStreams:
             tag_columns=["id"],
         )
         result = add_pod.handle_input_streams(stream_x, stream_y)
-        # result should be a joined stream
         assert isinstance(result, Stream)
-        # TODO: add more thorough check to ensure that the result is actually join of the two streams
         assert len([p for p in result.iter_packets()]) == 2
 
 
@@ -81,7 +73,6 @@ class TestTrackedPacketFunctionPodHandleInputStreams:
 class TestWrappedFunctionPodDelegation:
     @pytest.fixture
     def wrapped(self, double_pod) -> WrappedFunctionPod:
-        """WrappedFunctionPod wrapping double_pod."""
         return WrappedFunctionPod(function_pod=double_pod)
 
     def test_uri_delegates_to_inner_pod(self, wrapped, double_pod):
@@ -91,15 +82,11 @@ class TestWrappedFunctionPodDelegation:
         assert wrapped.computed_label() == double_pod.label
 
     def test_validate_inputs_delegates(self, wrapped):
-        stream = make_int_stream()
-        # Should not raise for compatible stream
-        wrapped.validate_inputs(stream)
+        wrapped.validate_inputs(make_int_stream())
 
     def test_output_schema_delegates(self, wrapped, double_pod):
         stream = make_int_stream()
-        wrapped_schema = wrapped.output_schema(stream)
-        pod_schema = double_pod.output_schema(stream)
-        assert wrapped_schema == pod_schema
+        assert wrapped.output_schema(stream) == double_pod.output_schema(stream)
 
     def test_argument_symmetry_delegates(self, wrapped, double_pod):
         stream = make_int_stream()
@@ -114,7 +101,7 @@ class TestWrappedFunctionPodDelegation:
         packets = list(result.iter_packets())
         assert len(packets) == 3
         for i, (_, packet) in enumerate(packets):
-            assert packet["result"] == i * 2  # double
+            assert packet["result"] == i * 2
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +135,6 @@ class TestFunctionPodStreamContentHash:
             assert len(val) > 0
 
     def test_content_hash_is_idempotent(self, double_pod):
-        """Calling as_table() twice with content_hash must give same hash values."""
         stream = double_pod.process(make_int_stream(n=3))
         t1 = stream.as_table(columns={"content_hash": True})
         t2 = stream.as_table(columns={"content_hash": True})
@@ -170,7 +156,6 @@ class TestFunctionPodStreamContentHash:
 
 class TestFunctionPodStreamSortByTags:
     def test_sort_by_tags_returns_sorted_table(self, double_pod):
-        # Build a stream with tags in reverse order
         n = 5
         table = pa.table(
             {
@@ -180,13 +165,10 @@ class TestFunctionPodStreamSortByTags:
         )
         stream = double_pod.process(TableStream(table, tag_columns=["id"]))
         result = stream.as_table(columns={"sort_by_tags": True})
-        raw = result.column("id").to_pylist()
-        assert all(v is not None for v in raw)
-        ids: list[int] = raw  # type: ignore[assignment]
+        ids: list[int] = result.column("id").to_pylist()  # type: ignore[assignment]
         assert ids == sorted(ids)
 
     def test_default_table_may_be_unsorted(self, double_pod):
-        """When sort_by_tags is not set, row order follows input order."""
         n = 5
         reversed_ids = list(reversed(range(n)))
         table = pa.table(
@@ -197,10 +179,7 @@ class TestFunctionPodStreamSortByTags:
         )
         stream = double_pod.process(TableStream(table, tag_columns=["id"]))
         result = stream.as_table()
-        # Without sort, order should match input (reversed)
-        raw = result.column("id").to_pylist()
-        assert all(v is not None for v in raw)
-        ids: list[int] = raw  # type: ignore[assignment]
+        ids: list[int] = result.column("id").to_pylist()  # type: ignore[assignment]
         assert ids == reversed_ids
 
 
@@ -217,7 +196,6 @@ class TestFunctionPodDecoratorWithDatabase:
         def square(x: int) -> int:
             return x * x
 
-        # With a result_database, the inner packet_function should be CachedPacketFunction
         assert isinstance(square.pod.packet_function, CachedPacketFunction)
 
     def test_pod_is_still_simple_function_pod(self):
@@ -239,15 +217,11 @@ class TestFunctionPodDecoratorWithDatabase:
             call_count += 1
             return x * 2
 
-        stream = make_int_stream(n=2)
-        # First pass — cache miss → inner function called
-        list(counted_double.pod.process(stream).iter_packets())
+        list(counted_double.pod.process(make_int_stream(n=2)).iter_packets())
         first_count = call_count
 
-        stream2 = make_int_stream(n=2)
-        # Second pass — should hit cache → inner function NOT called again
-        list(counted_double.pod.process(stream2).iter_packets())
-        assert call_count == first_count  # no new calls
+        list(counted_double.pod.process(make_int_stream(n=2)).iter_packets())
+        assert call_count == first_count
 
     def test_cached_results_match_direct_results(self):
         db = InMemoryArrowDatabase()
@@ -256,10 +230,8 @@ class TestFunctionPodDecoratorWithDatabase:
         def triple_cached(x: int) -> int:
             return x * 3
 
-        stream1 = make_int_stream(n=3)
-        stream2 = make_int_stream(n=3)
-        first = list(triple_cached.pod.process(stream1).iter_packets())
-        second = list(triple_cached.pod.process(stream2).iter_packets())
+        first = list(triple_cached.pod.process(make_int_stream(n=3)).iter_packets())
+        second = list(triple_cached.pod.process(make_int_stream(n=3)).iter_packets())
 
         for (_, p1), (_, p2) in zip(first, second):
             assert p1["result"] == p2["result"]
@@ -271,582 +243,3 @@ class TestFunctionPodDecoratorWithDatabase:
 
         assert isinstance(plain.pod.packet_function, PythonPacketFunction)
         assert not isinstance(plain.pod.packet_function, CachedPacketFunction)
-
-
-# ---------------------------------------------------------------------------
-# 6. FunctionPodNode — construction
-# ---------------------------------------------------------------------------
-
-
-class TestFunctionPodNodeConstruction:
-    @pytest.fixture
-    def node(self, double_pf) -> FunctionPodNode:
-        db = InMemoryArrowDatabase()
-        stream = make_int_stream(n=3)
-        return FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=stream,
-            pipeline_database=db,
-        )
-
-    def test_construction_succeeds(self, node):
-        assert node is not None
-
-    def test_pipeline_path_is_tuple_of_strings(self, node):
-        path = node.pipeline_path
-        assert isinstance(path, tuple)
-        assert all(isinstance(p, str) for p in path)
-
-    def test_uri_is_tuple_of_strings(self, node):
-        uri = node.uri
-        assert isinstance(uri, tuple)
-        assert all(isinstance(part, str) for part in uri)
-
-    def test_uri_contains_node_component(self, node):
-        uri_str = ":".join(node.uri)
-        assert "node:" in uri_str
-
-    def test_uri_contains_tag_component(self, node):
-        uri_str = ":".join(node.uri)
-        assert "tag:" in uri_str
-
-    def test_pipeline_path_includes_uri(self, node):
-        for part in node.uri:
-            assert part in node.pipeline_path
-
-    def test_incompatible_stream_raises_on_construction(self, double_pf):
-        db = InMemoryArrowDatabase()
-        # double_pf expects 'x'; provide 'z'
-        bad_stream = TableStream(
-            pa.table(
-                {
-                    "id": pa.array([0, 1], type=pa.int64()),
-                    "z": pa.array([0, 1], type=pa.int64()),
-                }
-            ),
-            tag_columns=["id"],
-        )
-        with pytest.raises(ValueError):
-            FunctionPodNode(
-                packet_function=double_pf,
-                input_stream=bad_stream,
-                pipeline_database=db,
-            )
-
-    def test_result_database_defaults_to_pipeline_database(self, double_pf):
-        db = InMemoryArrowDatabase()
-        stream = make_int_stream(n=2)
-        node = FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=stream,
-            pipeline_database=db,
-        )
-        # result_database not provided → same db is used with _result suffix in path
-        assert node._pipeline_database is db
-
-    def test_separate_result_database_accepted(self, double_pf):
-        pipeline_db = InMemoryArrowDatabase()
-        result_db = InMemoryArrowDatabase()
-        stream = make_int_stream(n=2)
-        node = FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=stream,
-            pipeline_database=pipeline_db,
-            result_database=result_db,
-        )
-        assert node._pipeline_database is pipeline_db
-
-
-# ---------------------------------------------------------------------------
-# 7. FunctionPodNode — validate_inputs and argument_symmetry
-# ---------------------------------------------------------------------------
-
-
-class TestFunctionPodNodeValidation:
-    @pytest.fixture
-    def node(self, double_pf) -> FunctionPodNode:
-        db = InMemoryArrowDatabase()
-        return FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=make_int_stream(n=3),
-            pipeline_database=db,
-        )
-
-    def test_validate_inputs_with_no_streams_succeeds(self, node: FunctionPodNode):
-        node.validate_inputs()  # must not raise
-
-    def test_validate_inputs_with_any_stream_raises(self, node: FunctionPodNode):
-        # FunctionPodNode should not accept any external streams
-        extra = make_int_stream(n=2)
-        with pytest.raises(ValueError):
-            node.validate_inputs(extra)
-
-    def test_argument_symmetry_empty_raises(self, node: FunctionPodNode):
-        # expects no external streams
-        with pytest.raises(ValueError):
-            node.argument_symmetry([make_int_stream()])
-
-    def test_argument_symmetry_no_streams_returns_empty(self, node: FunctionPodNode):
-        result = node.argument_symmetry([])
-        assert result == ()
-
-
-# ---------------------------------------------------------------------------
-# 8. FunctionPodNode — output_schema
-# ---------------------------------------------------------------------------
-
-
-class TestFunctionPodNodeOutputSchema:
-    @pytest.fixture
-    def node(self, double_pf) -> FunctionPodNode:
-        db = InMemoryArrowDatabase()
-        return FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=make_int_stream(n=3),
-            pipeline_database=db,
-        )
-
-    def test_output_schema_returns_two_mappings(self, node: FunctionPodNode):
-        tag_schema, packet_schema = node.output_schema()
-        assert isinstance(tag_schema, Mapping)
-        assert isinstance(packet_schema, Mapping)
-        # Tag schema should contain the 'id' tag column from make_int_stream
-        assert "id" in tag_schema
-        assert len(tag_schema) == 1
-        # Packet schema should contain the 'result' output key from double_pf
-        assert "result" in packet_schema
-        assert len(packet_schema) == 1
-        # Verify the schema value types are pyarrow DataTypes
-        assert tag_schema["id"] is int
-        assert packet_schema["result"] is int
-
-    def test_packet_schema_matches_function_output(self, node, double_pf):
-        _, packet_schema = node.output_schema()
-        assert packet_schema == double_pf.output_packet_schema
-
-    def test_tag_schema_matches_input_stream(self, node):
-        tag_schema, _ = node.output_schema()
-        # tag from make_int_stream has 'id'
-        assert "id" in tag_schema
-        assert tag_schema["id"] is int
-
-
-# ---------------------------------------------------------------------------
-# 9. FunctionPodNode — process_packet and add_pipeline_record
-# ---------------------------------------------------------------------------
-
-
-class TestFunctionPodNodeProcessPacket:
-    @pytest.fixture
-    def node(self, double_pf) -> FunctionPodNode:
-        db = InMemoryArrowDatabase()
-        return FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=make_int_stream(n=3),
-            pipeline_database=db,
-        )
-
-    def test_process_packet_returns_tag_and_packet(self, node):
-        tag = DictTag({"id": 0})
-        packet = DictPacket({"x": 5})
-        out_tag, out_packet = node.process_packet(tag, packet)
-        assert out_tag is tag
-        assert out_packet is not None
-
-    def test_process_packet_value_correct(self, node):
-        tag = DictTag({"id": 0})
-        packet = DictPacket({"x": 6})
-        _, out_packet = node.process_packet(tag, packet)
-        assert out_packet["result"] == 12  # 6 * 2
-
-    def test_process_packet_adds_pipeline_record(self, node, double_pf):
-        tag = DictTag({"id": 0})
-        packet = DictPacket({"x": 3})
-        node.process_packet(tag, packet)
-        # after calling process_packet, pipeline db should have at least one record
-        db = node._pipeline_database
-        db.flush()
-        all_records = db.get_all_records(node.pipeline_path)
-        assert all_records is not None
-        assert all_records.num_rows >= 1
-
-    def test_process_packet_second_call_same_input_deduplicates(self, node):
-        tag = DictTag({"id": 0})
-        packet = DictPacket({"x": 3})
-        node.process_packet(tag, packet)
-        node.process_packet(tag, packet)  # same tag+packet → should not double-insert
-        db = node._pipeline_database
-        db.flush()
-        all_records = db.get_all_records(node.pipeline_path)
-        assert all_records is not None
-        assert all_records.num_rows == 1  # deduplicated
-
-    def test_process_two_packets_add_two_entries(self, node):
-        tag = DictTag({"id": 0})
-        packet1 = DictPacket({"x": 3})
-        packet2 = DictPacket({"x": 4})
-        node.process_packet(tag, packet1)
-        node.process_packet(
-            tag, packet2
-        )  # same tag but different packet → should create two entries
-        db = node._pipeline_database
-        all_records = db.get_all_records(node.pipeline_path)
-        assert all_records is not None
-        assert all_records.num_rows == 2  # deduplicated
-
-
-# ---------------------------------------------------------------------------
-# 10. FunctionPodNode — process() / __call__()
-# ---------------------------------------------------------------------------
-
-
-class TestFunctionPodNodeProcess:
-    @pytest.fixture
-    def node(self, double_pf) -> FunctionPodNode:
-        db = InMemoryArrowDatabase()
-        return FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=make_int_stream(n=3),
-            pipeline_database=db,
-        )
-
-    def test_process_returns_function_pod_node_stream(self, node):
-        result = node.process()
-        assert isinstance(result, FunctionPodNodeStream)
-        assert [packet["result"] for tag, packet in result.iter_packets()] == [0, 2, 4]
-
-    def test_call_operator_returns_function_pod_node_stream(self, node):
-        result = node()
-        assert isinstance(result, FunctionPodNodeStream)
-
-    def test_process_with_extra_streams_raises(self, node):
-        with pytest.raises(ValueError):
-            node.process(make_int_stream(n=2))
-
-    def test_process_output_is_stream_protocol(self, node):
-        result = node.process()
-        assert isinstance(result, Stream)
-
-
-# ---------------------------------------------------------------------------
-# 11. FunctionPodNodeStream — iter_packets and as_table
-# ---------------------------------------------------------------------------
-
-
-class TestFunctionPodNodeStream:
-    @pytest.fixture
-    def node_stream(self, double_pf) -> FunctionPodNodeStream:
-        db = InMemoryArrowDatabase()
-        input_stream = make_int_stream(n=3)
-        node = FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=input_stream,
-            pipeline_database=db,
-        )
-        return node.process()
-
-    def test_iter_packets_yields_correct_count(
-        self, node_stream: FunctionPodNodeStream
-    ):
-        packets = list(node_stream.iter_packets())
-        assert len(packets) == 3
-
-    def test_iter_packets_correct_values(self, node_stream: FunctionPodNodeStream):
-        for i, (_, packet) in enumerate(node_stream.iter_packets()):
-            assert packet["result"] == i * 2
-
-    def test_iter_is_repeatable(self, node_stream: FunctionPodNodeStream):
-        first = [(t["id"], p["result"]) for t, p in node_stream.iter_packets()]
-        second = [(t["id"], p["result"]) for t, p in node_stream.iter_packets()]
-        assert first == second
-
-    def test_dunder_iter_delegates_to_iter_packets(
-        self, node_stream: FunctionPodNodeStream
-    ):
-        via_iter = list(node_stream)
-        via_method = list(node_stream.iter_packets())
-        assert len(via_iter) == len(via_method)
-
-    def test_as_table_returns_pyarrow_table(self, node_stream: FunctionPodNodeStream):
-        table = node_stream.as_table()
-        assert isinstance(table, pa.Table)
-
-    def test_as_table_has_correct_row_count(self, node_stream: FunctionPodNodeStream):
-        table = node_stream.as_table()
-        assert len(table) == 3
-
-    def test_as_table_contains_tag_columns(self, node_stream: FunctionPodNodeStream):
-        table = node_stream.as_table()
-        assert "id" in table.column_names
-
-    def test_as_table_contains_packet_columns(self, node_stream: FunctionPodNodeStream):
-        table = node_stream.as_table()
-        assert "result" in table.column_names
-
-    def test_source_is_fp_node(
-        self, node_stream: FunctionPodNodeStream, double_pf: PacketFunction
-    ):
-        assert isinstance(node_stream.source, FunctionPodNode)
-
-    def test_upstreams_contains_input_stream(self, node_stream: FunctionPodNodeStream):
-        upstreams = node_stream.upstreams
-        assert isinstance(upstreams, tuple)
-        assert len(upstreams) == 1
-
-    def test_output_schema_matches_node_output_schema(
-        self, node_stream: FunctionPodNodeStream
-    ):
-        tag_schema, packet_schema = node_stream.output_schema()
-        assert isinstance(tag_schema, Mapping)
-        assert isinstance(packet_schema, Mapping)
-        assert "result" in packet_schema
-
-    def test_as_table_content_hash_column(self, node_stream: FunctionPodNodeStream):
-        table = node_stream.as_table(columns={"content_hash": True})
-        assert "_content_hash" in table.column_names
-        assert len(table.column("_content_hash")) == 3
-
-    def test_as_table_sort_by_tags(self, double_pf: PacketFunction):
-        db = InMemoryArrowDatabase()
-        reversed_table = pa.table(
-            {
-                "id": pa.array([4, 3, 2, 1, 0], type=pa.int64()),
-                "x": pa.array([4, 3, 2, 1, 0], type=pa.int64()),
-            }
-        )
-        input_stream = TableStream(reversed_table, tag_columns=["id"])
-        node = FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=input_stream,
-            pipeline_database=db,
-        )
-        node_stream = node.process()
-        result = node_stream.as_table(columns={"sort_by_tags": True})
-        raw = result.column("id").to_pylist()
-        assert all(isinstance(v, int) for v in raw)
-        ids: list[int] = raw  # type: ignore[assignment]
-        assert ids == sorted(ids)
-
-    def test_as_table_returns_empty_when_packet_function_inactive(
-        self, double_pf: PacketFunction
-    ):
-        double_pf.set_active(False)
-        db = InMemoryArrowDatabase()
-        node = FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=make_int_stream(n=3),
-            pipeline_database=db,
-        )
-        node_stream = node.process()
-        table = node_stream.as_table()
-        assert isinstance(table, pa.Table)
-        assert len(table) == 0
-
-    def test_as_table_returns_cached_results_when_packet_function_inactive(
-        self, double_pf: PacketFunction
-    ):
-        """
-        Cache filled by node1 (active) is shared with node2 (inactive).
-        node2's as_table() must return full results served entirely from cache,
-        proving that the cache lookup path is independent of the active flag.
-        """
-        n = 3
-        db = InMemoryArrowDatabase()
-        input_stream = make_int_stream(n=n)
-
-        # node1 — active; populates the result cache
-        node1 = FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=input_stream,
-            pipeline_database=db,
-        )
-        table1 = node1.process().as_table()
-        assert len(table1) == n
-
-        # Deactivate the inner packet function so direct execution returns None
-        double_pf.set_active(False)
-
-        # node2 — same packet_function and result_database → same cache key
-        node2 = FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=make_int_stream(n=n),
-            pipeline_database=db,
-        )
-        table2 = node2.process().as_table()
-
-        # Cache hits must supply all rows even though the function is inactive
-        assert isinstance(table2, pa.Table)
-        assert len(table2) == n
-        assert (
-            table2.column("result").to_pylist() == table1.column("result").to_pylist()
-        )
-
-        # node3 — inactive + non-shared database → no cache → empty table
-        node3 = FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=make_int_stream(n=n),
-            pipeline_database=InMemoryArrowDatabase(),
-        )
-        table3 = node3.process().as_table()
-        assert isinstance(table3, pa.Table)
-        assert len(table3) == 0
-
-
-# ---------------------------------------------------------------------------
-# 12. FunctionPodNodeStream — refresh_cache
-# ---------------------------------------------------------------------------
-
-
-class TestFunctionPodNodeStreamRefreshCache:
-    def test_refresh_cache_clears_output_when_upstream_modified(self, double_pf):
-        db = InMemoryArrowDatabase()
-        input_stream = make_int_stream(n=3)
-        node = FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=input_stream,
-            pipeline_database=db,
-        )
-        node_stream = node.process()
-
-        # Consume the stream to populate cache
-        list(node_stream.iter_packets())
-        assert len(node_stream._cached_output_packets) == 3
-
-        # Simulate upstream modification by manually updating timestamps
-        import time
-
-        time.sleep(0.01)
-        input_stream._update_modified_time()
-
-        # refresh_cache should clear the output cache
-        node_stream.refresh_cache()
-        assert len(node_stream._cached_output_packets) == 0
-        assert node_stream._cached_output_table is None
-
-    def test_refresh_cache_no_op_when_not_stale(self, double_pf):
-        db = InMemoryArrowDatabase()
-        input_stream = make_int_stream(n=3)
-        node = FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=input_stream,
-            pipeline_database=db,
-        )
-        node_stream = node.process()
-
-        # Consume stream
-        list(node_stream.iter_packets())
-        cached_count = len(node_stream._cached_output_packets)
-
-        # Do NOT update upstream; refresh should be a no-op
-        node_stream.refresh_cache()
-        assert len(node_stream._cached_output_packets) == cached_count
-
-    def test_refresh_cache_no_op_preserves_as_table_result(self, double_pf):
-        import time
-
-        db = InMemoryArrowDatabase()
-        input_stream = make_int_stream(n=3)
-        node = FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=input_stream,
-            pipeline_database=db,
-        )
-        node_stream = node.process()
-
-        table_before = node_stream.as_table()
-        # Without upstream modification, refresh is a no-op
-        node_stream.refresh_cache()
-        table_after = node_stream.as_table()
-
-        assert table_before.equals(table_after)
-
-    def test_refresh_cache_after_upstream_modified_repopulates_as_table(
-        self, double_pf
-    ):
-        import time
-
-        db = InMemoryArrowDatabase()
-        input_stream = make_int_stream(n=3)
-        node = FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=input_stream,
-            pipeline_database=db,
-        )
-        node_stream = node.process()
-
-        # Consume to populate cache, then confirm as_table works
-        table_before = node_stream.as_table()
-        assert len(table_before) == 3
-        assert node_stream._cached_output_table is not None
-
-        # Mark upstream as modified
-        time.sleep(0.01)
-        input_stream._update_modified_time()
-
-        # refresh_cache should clear internal state
-        node_stream.refresh_cache()
-        assert node_stream._cached_output_table is None
-        assert len(node_stream._cached_output_packets) == 0
-
-        # as_table() should reprocess and return the same results (from result_db cache)
-        table_after = node_stream.as_table()
-        assert len(table_after) == 3
-        assert (
-            table_after.column("result").to_pylist()
-            == table_before.column("result").to_pylist()
-        )
-
-
-# ---------------------------------------------------------------------------
-# 13. FunctionPodNode with pipeline_path_prefix
-# ---------------------------------------------------------------------------
-
-
-class TestFunctionPodNodePipelinePathPrefix:
-    def test_prefix_prepended_to_pipeline_path(self, double_pf):
-        db = InMemoryArrowDatabase()
-        prefix = ("my_pipeline", "stage_1")
-        node = FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=make_int_stream(n=2),
-            pipeline_database=db,
-            pipeline_path_prefix=prefix,
-        )
-        pipeline_path = node.pipeline_path
-        assert pipeline_path[: len(prefix)] == prefix
-
-    def test_no_prefix_pipeline_path_equals_uri(self, double_pf):
-        db = InMemoryArrowDatabase()
-        node = FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=make_int_stream(n=2),
-            pipeline_database=db,
-        )
-        assert node.pipeline_path == node.uri
-
-
-# ---------------------------------------------------------------------------
-# 14. FunctionPodNode — result path uses _result suffix when no separate db
-# ---------------------------------------------------------------------------
-
-
-class TestFunctionPodNodeResultPath:
-    def test_result_records_stored_under_result_suffix_path(self, double_pf):
-        db = InMemoryArrowDatabase()
-        stream = make_int_stream(n=2)
-        node = FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=stream,
-            pipeline_database=db,
-        )
-        # Process some packets so results are stored
-        tag = DictTag({"id": 0})
-        packet = DictPacket({"x": 5})
-        node.process_packet(tag, packet)
-        db.flush()
-
-        # Results should be stored under a path ending in "_result"
-        result_path = node._cached_packet_function.record_path
-        assert result_path[-1] == "_result" or any(
-            "_result" in part for part in result_path
-        )

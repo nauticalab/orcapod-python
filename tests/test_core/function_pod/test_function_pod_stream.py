@@ -156,3 +156,98 @@ class TestFunctionPodStreamAsTable:
         assert len(result.as_table(all_info=True).column_names) >= len(
             result.as_table().column_names
         )
+
+
+# ---------------------------------------------------------------------------
+# 5. Staleness and cache busting
+# ---------------------------------------------------------------------------
+
+
+class TestFunctionPodStreamStaleness:
+    def test_is_stale_false_immediately_after_process(self, double_pod):
+        """A freshly created stream is not stale."""
+        stream = double_pod.process(make_int_stream(n=3))
+        assert not stream.is_stale
+
+    def test_is_stale_true_after_upstream_modified(self, double_pod):
+        """Updating the upstream stream's modified time makes the stream stale."""
+        import time
+
+        input_stream = make_int_stream(n=3)
+        stream = double_pod.process(input_stream)
+        list(stream.iter_packets())  # populate cache
+
+        time.sleep(0.01)
+        input_stream._update_modified_time()
+
+        assert stream.is_stale
+
+    def test_is_stale_true_after_source_pod_updated(self, double_pod):
+        """Updating the source pod's modified time makes the stream stale."""
+        import time
+
+        stream = double_pod.process(make_int_stream(n=3))
+        list(stream.iter_packets())  # populate cache
+
+        time.sleep(0.01)
+        double_pod._update_modified_time()  # simulate pod being modified
+
+        assert stream.is_stale
+
+    def test_iter_packets_auto_clears_when_upstream_updated(self, double_pod):
+        """iter_packets re-populates automatically when the upstream stream is modified."""
+        import time
+
+        input_stream = make_int_stream(n=3)
+        stream = double_pod.process(input_stream)
+        first = list(stream.iter_packets())
+
+        time.sleep(0.01)
+        input_stream._update_modified_time()
+        assert stream.is_stale
+
+        second = list(stream.iter_packets())
+        assert len(second) == len(first)
+        assert [p["result"] for _, p in second] == [p["result"] for _, p in first]
+
+    def test_iter_packets_auto_clears_when_source_pod_updated(self, double_pod):
+        """iter_packets re-populates automatically when the source pod is modified."""
+        import time
+
+        stream = double_pod.process(make_int_stream(n=3))
+        first = list(stream.iter_packets())
+        assert len(stream._cached_output_packets) == 3
+
+        time.sleep(0.01)
+        double_pod._update_modified_time()
+        assert stream.is_stale
+
+        second = list(stream.iter_packets())
+        assert len(second) == len(first)
+        assert [p["result"] for _, p in second] == [p["result"] for _, p in first]
+
+    def test_as_table_auto_clears_when_source_pod_updated(self, double_pod):
+        """as_table re-populates automatically when the source pod is modified."""
+        import time
+
+        stream = double_pod.process(make_int_stream(n=3))
+        table_before = stream.as_table()
+        assert len(table_before) == 3
+
+        time.sleep(0.01)
+        double_pod._update_modified_time()
+
+        table_after = stream.as_table()
+        assert len(table_after) == 3
+        assert sorted(table_after.column("result").to_pylist()) == sorted(
+            table_before.column("result").to_pylist()
+        )
+
+    def test_no_auto_clear_when_not_stale(self, double_pod):
+        """When neither upstream nor pod has changed, iter_packets preserves the cache."""
+        stream = double_pod.process(make_int_stream(n=3))
+        list(stream.iter_packets())
+        cached_count = len(stream._cached_output_packets)
+
+        list(stream.iter_packets())
+        assert len(stream._cached_output_packets) == cached_count

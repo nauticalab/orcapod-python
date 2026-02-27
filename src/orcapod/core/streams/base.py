@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from abc import abstractmethod
 from collections.abc import Collection, Iterator, Mapping
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.base import TraceableBase
@@ -34,6 +35,30 @@ class StreamBase(TraceableBase):
     @property
     @abstractmethod
     def upstreams(self) -> tuple[Stream, ...]: ...
+
+    @property
+    def is_stale(self) -> bool:
+        """
+        True if any upstream stream or the source pod has a ``last_modified``
+        timestamp strictly newer than this stream's own ``last_modified``,
+        indicating that any in-memory cached content should be discarded and
+        repopulated.
+
+        Semantics:
+        - A ``None`` timestamp on *this* stream means "content not yet
+          established" → always stale.
+        - A ``None`` timestamp on an upstream or source means "modification
+          time unknown" → conservatively treat as stale.
+        - Immutable streams with no upstreams and no source (e.g.
+          ``TableStream``) always return ``False``.
+        """
+        own_time: datetime | None = self.last_modified
+        if own_time is None:
+            return True
+        candidates: list[datetime | None] = [s.last_modified for s in self.upstreams]
+        if self.source is not None:
+            candidates.append(self.source.last_modified)
+        return any(t is None or t > own_time for t in candidates)
 
     def computed_label(self) -> str | None:
         if self.source is not None:

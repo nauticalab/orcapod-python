@@ -293,10 +293,25 @@ class FunctionPodStream(StreamBase):
             self._input_stream, columns=columns, all_info=all_info
         )
 
+    def clear_cache(self) -> None:
+        """
+        Discard all in-memory cached state and re-acquire the input iterator.
+        Call this when you know the stream content is stale; prefer letting
+        ``iter_packets`` / ``as_table`` detect staleness automatically via
+        ``is_stale`` instead of calling this directly.
+        """
+        self._cached_input_iterator = self._input_stream.iter_packets()
+        self._cached_output_packets.clear()
+        self._cached_output_table = None
+        self._cached_content_hash_column = None
+        self._update_modified_time()
+
     def __iter__(self) -> Iterator[tuple[Tag, Packet]]:
         return self.iter_packets()
 
     def iter_packets(self) -> Iterator[tuple[Tag, Packet]]:
+        if self.is_stale:
+            self.clear_cache()
         if self._cached_input_iterator is not None:
             for i, (tag, packet) in enumerate(self._cached_input_iterator):
                 if i in self._cached_output_packets:
@@ -875,20 +890,18 @@ class FunctionPodNodeStream(StreamBase):
         self._cached_output_table: pa.Table | None = None
         self._cached_content_hash_column: pa.Array | None = None
 
-    def refresh_cache(self) -> None:
-        upstream_last_modified = self._input_stream.last_modified
-        if (
-            upstream_last_modified is None
-            or self.last_modified is None
-            or upstream_last_modified > self.last_modified
-        ):
-            # input stream has been modified since last processing; refresh caches
-            # re-cache the iterator and clear out output packet cache
-            self._cached_input_iterator = self._input_stream.iter_packets()
-            self._cached_output_packets.clear()
-            self._cached_output_table = None
-            self._cached_content_hash_column = None
-            self._update_modified_time()
+    def clear_cache(self) -> None:
+        """
+        Discard all in-memory cached state and re-acquire the input iterator.
+        Call this when you know the stream content is stale; prefer letting
+        ``iter_packets`` / ``as_table`` detect staleness automatically via
+        ``is_stale`` instead of calling this directly.
+        """
+        self._cached_input_iterator = self._input_stream.iter_packets()
+        self._cached_output_packets.clear()
+        self._cached_output_table = None
+        self._cached_content_hash_column = None
+        self._update_modified_time()
 
     @property
     def source(self) -> FunctionPodNode:
@@ -926,6 +939,8 @@ class FunctionPodNodeStream(StreamBase):
         return self.iter_packets()
 
     def iter_packets(self) -> Iterator[tuple[Tag, Packet]]:
+        if self.is_stale:
+            self.clear_cache()
         if self._cached_input_iterator is not None:
             # --- Phase 1: yield already-computed results from the databases ---
             existing = self._fp_node.get_all_records(columns={"meta": True})
