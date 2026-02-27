@@ -346,8 +346,9 @@ class FunctionPodStream(StreamBase):
             all_tags_as_tables: pa.Table = pa.Table.from_pylist(
                 all_tags, schema=tag_schema
             )
-            # drop context key column from tags table
-            all_tags_as_tables = all_tags_as_tables.drop([constants.CONTEXT_KEY])
+            # drop context key column from tags table (guard: column absent on empty stream)
+            if constants.CONTEXT_KEY in all_tags_as_tables.column_names:
+                all_tags_as_tables = all_tags_as_tables.drop([constants.CONTEXT_KEY])
             all_packets_as_tables: pa.Table = pa.Table.from_pylist(
                 struct_packets, schema=packet_schema
             )
@@ -376,7 +377,9 @@ class FunctionPodStream(StreamBase):
         if not column_config.context:
             drop_columns.append(constants.CONTEXT_KEY)
 
-        output_table = self._cached_output_table.drop(drop_columns)
+        output_table = self._cached_output_table.drop(
+            [c for c in drop_columns if c in self._cached_output_table.column_names]
+        )
 
         # lazily prepare content hash column if requested
         if column_config.content_hash:
@@ -914,8 +917,9 @@ class FunctionPodNodeStream(StreamBase):
             all_tags_as_tables: pa.Table = pa.Table.from_pylist(
                 all_tags, schema=tag_schema
             )
-            # drop context key column from tags table
-            all_tags_as_tables = all_tags_as_tables.drop([constants.CONTEXT_KEY])
+            # drop context key column from tags table (guard: column absent on empty stream)
+            if constants.CONTEXT_KEY in all_tags_as_tables.column_names:
+                all_tags_as_tables = all_tags_as_tables.drop([constants.CONTEXT_KEY])
             all_packets_as_tables: pa.Table = pa.Table.from_pylist(
                 struct_packets, schema=packet_schema
             )
@@ -944,7 +948,9 @@ class FunctionPodNodeStream(StreamBase):
         if not column_config.context:
             drop_columns.append(constants.CONTEXT_KEY)
 
-        output_table = self._cached_output_table.drop(drop_columns)
+        output_table = self._cached_output_table.drop(
+            [c for c in drop_columns if c in self._cached_output_table.column_names]
+        )
 
         # lazily prepare content hash column if requested
         if column_config.content_hash:
