@@ -1,8 +1,8 @@
 from collections.abc import Collection, Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from orcapod.protocols.core_protocols.datagrams import Packet, Tag
-from orcapod.protocols.core_protocols.traceable import Traceable
+from orcapod.protocols.core_protocols.datagrams import PacketProtocol, TagProtocol
+from orcapod.protocols.core_protocols.traceable import TraceableProtocol
 from orcapod.types import ColumnConfig, Schema
 
 if TYPE_CHECKING:
@@ -10,15 +10,15 @@ if TYPE_CHECKING:
     import polars as pl
     import pyarrow as pa
 
-    from orcapod.protocols.core_protocols.pod import Pod
+    from orcapod.protocols.core_protocols.pod import PodProtocol
 
 
 @runtime_checkable
-class Stream(Traceable, Protocol):
+class StreamProtocol(TraceableProtocol, Protocol):
     """
     Base protocol for all streams in Orcapod.
 
-    Streams represent sequences of (Tag, Packet) pairs flowing through the
+    Streams represent sequences of (TagProtocol, PacketProtocol) pairs flowing through the
     computational graph. They are the fundamental data structure connecting
     kernels and carrying both data and metadata.
 
@@ -37,7 +37,7 @@ class Stream(Traceable, Protocol):
     # TODO: add substream system
 
     @property
-    def source(self) -> "Pod | None":
+    def source(self) -> "PodProtocol | None":
         """
         The pod that produced this stream, if any.
 
@@ -46,13 +46,13 @@ class Stream(Traceable, Protocol):
         have no source pod.
 
         Returns:
-            Pod: The source pod that created this stream
+            PodProtocol: The source pod that created this stream
             None: This is a root stream with no source pod
         """
         ...
 
     @property
-    def upstreams(self) -> tuple["Stream", ...]:
+    def upstreams(self) -> tuple["StreamProtocol", ...]:
         """
         Input streams used to produce this stream.
 
@@ -62,7 +62,7 @@ class Stream(Traceable, Protocol):
         upstreams to be meaningfully inspected.
 
         Returns:
-            tuple[Stream, ...]: Upstream dependency streams (empty for sources)
+            tuple[StreamProtocol, ...]: Upstream dependency streams (empty for sources)
         """
         ...
 
@@ -107,7 +107,7 @@ class Stream(Traceable, Protocol):
         """
         ...
 
-    def iter_packets(self) -> Iterator[tuple[Tag, Packet]]:
+    def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
         """
         Generates explicit iterator over (tag, packet) pairs in the stream.
 
@@ -115,7 +115,7 @@ class Stream(Traceable, Protocol):
         return an identical iterator.
 
         Yields:
-            tuple[Tag, Packet]: Sequential (tag, packet) pairs
+            tuple[TagProtocol, PacketProtocol]: Sequential (tag, packet) pairs
         """
         ...
 
@@ -142,7 +142,7 @@ class Stream(Traceable, Protocol):
         ...
 
 
-class StreamWithOperations(Stream, Protocol):
+class StreamWithOperationsProtocol(StreamProtocol, Protocol):
     def as_df(
         self,
         *,
@@ -189,7 +189,7 @@ class StreamWithOperations(Stream, Protocol):
 
     def flow(
         self,
-    ) -> Collection[tuple[Tag, Packet]]:
+    ) -> Collection[tuple[TagProtocol, PacketProtocol]]:
         """
         Return the entire stream as a collection of (tag, packet) pairs.
 
@@ -203,7 +203,9 @@ class StreamWithOperations(Stream, Protocol):
         """
         ...
 
-    def join(self, other_stream: "Stream", label: str | None = None) -> "Stream":
+    def join(
+        self, other_stream: "StreamProtocol", label: str | None = None
+    ) -> "StreamProtocol":
         """
         Join this stream with another stream.
 
@@ -219,7 +221,9 @@ class StreamWithOperations(Stream, Protocol):
         """
         ...
 
-    def semi_join(self, other_stream: "Stream", label: str | None = None) -> "Stream":
+    def semi_join(
+        self, other_stream: "StreamProtocol", label: str | None = None
+    ) -> "StreamProtocol":
         """
         Perform a semi-join with another stream.
 
@@ -240,7 +244,7 @@ class StreamWithOperations(Stream, Protocol):
         name_map: Mapping[str, str],
         drop_unmapped: bool = True,
         label: str | None = None,
-    ) -> "Stream":
+    ) -> "StreamProtocol":
         """
         Map tag names in this stream to new names based on the provided mapping.
         """
@@ -251,7 +255,7 @@ class StreamWithOperations(Stream, Protocol):
         name_map: Mapping[str, str],
         drop_unmapped: bool = True,
         label: str | None = None,
-    ) -> "Stream":
+    ) -> "StreamProtocol":
         """
         Map packet names in this stream to new names based on the provided mapping.
         """
@@ -263,14 +267,14 @@ class StreamWithOperations(Stream, Protocol):
         constraint_map: Mapping[str, Any] | None = None,
         label: str | None = None,
         **constraints: Any,
-    ) -> "Stream": ...
+    ) -> "StreamProtocol": ...
 
     def select_tag_columns(
         self,
         tag_columns: str | Collection[str],
         strict: bool = True,
         label: str | None = None,
-    ) -> "Stream":
+    ) -> "StreamProtocol":
         """
         Select the specified tag columns from the stream. A ValueError is raised
         if one or more specified tag columns do not exist in the stream unless strict = False.
@@ -282,7 +286,7 @@ class StreamWithOperations(Stream, Protocol):
         packet_columns: str | Collection[str],
         strict: bool = True,
         label: str | None = None,
-    ) -> "Stream":
+    ) -> "StreamProtocol":
         """
         Select the specified tag columns from the stream. A ValueError is raised
         if one or more specified tag columns do not exist in the stream unless strict = False.
@@ -294,7 +298,7 @@ class StreamWithOperations(Stream, Protocol):
         tag_columns: str | Collection[str],
         strict: bool = True,
         label: str | None = None,
-    ) -> "Stream":
+    ) -> "StreamProtocol":
         """
         Drop the specified tag columns from the stream. A ValueError is raised
         if one or more specified tag columns do not exist in the stream unless strict = False.
@@ -307,7 +311,7 @@ class StreamWithOperations(Stream, Protocol):
         packet_columns: str | Collection[str],
         strict: bool = True,
         label: str | None = None,
-    ) -> "Stream":
+    ) -> "StreamProtocol":
         """
         Drop the specified packet columns from the stream. A ValueError is raised
         if one or more specified packet columns do not exist in the stream unless strict = False.
@@ -319,7 +323,7 @@ class StreamWithOperations(Stream, Protocol):
         batch_size: int = 0,
         drop_partial_batch: bool = False,
         label: str | None = None,
-    ) -> "Stream":
+    ) -> "StreamProtocol":
         """
         Batch the stream into groups of the specified size.
 

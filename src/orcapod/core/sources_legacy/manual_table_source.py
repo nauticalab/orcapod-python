@@ -115,7 +115,7 @@ class ManualDeltaTableSource(SourceBase):
             return self._delta_table.version()
         return None
 
-    def forward(self, *streams: cp.Stream) -> cp.Stream:
+    def forward(self, *streams: cp.StreamProtocol) -> cp.StreamProtocol:
         """Load current delta table data as a stream."""
         if len(streams) > 0:
             raise ValueError("ManualDeltaTableSource takes no input streams")

@@ -13,7 +13,7 @@ else:
 
 class NoOpArrowDatabase:
     """
-    An ArrowDatabase implementation that performs no real storage.
+    An ArrowDatabaseProtocol implementation that performs no real storage.
 
     All write operations are silently discarded. All read operations return
     None (empty / not found). Useful as a placeholder where a database

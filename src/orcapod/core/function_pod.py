@@ -15,15 +15,15 @@ from orcapod.core.streams.table_stream import TableStream
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
     ArgumentGroup,
-    FunctionPod,
-    Packet,
-    PacketFunction,
-    Pod,
-    Stream,
-    Tag,
-    TrackerManager,
+    FunctionPodProtocol,
+    PacketProtocol,
+    PacketFunctionProtocol,
+    PodProtocol,
+    StreamProtocol,
+    TagProtocol,
+    TrackerManagerProtocol,
 )
-from orcapod.protocols.database_protocols import ArrowDatabase
+from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils import arrow_utils, schema_utils
@@ -39,7 +39,7 @@ else:
     pl = LazyModule("polars")
 
 
-class TrackedPacketFunctionPod(TraceableBase):
+class _FunctionPodBase(TraceableBase):
     """
     A think wrapper around a packet function, creating a pod that applies the
     packet function on each and every input packet.
@@ -47,8 +47,8 @@ class TrackedPacketFunctionPod(TraceableBase):
 
     def __init__(
         self,
-        packet_function: PacketFunction,
-        tracker_manager: TrackerManager | None = None,
+        packet_function: PacketFunctionProtocol,
+        tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
         data_context: str | contexts.DataContext | None = None,
         config: Config | None = None,
@@ -63,7 +63,7 @@ class TrackedPacketFunctionPod(TraceableBase):
         self._output_schema_hash = None
 
     @property
-    def packet_function(self) -> PacketFunction:
+    def packet_function(self) -> PacketFunctionProtocol:
         return self._packet_function
 
     def identity_structure(self) -> Any:
@@ -83,16 +83,16 @@ class TrackedPacketFunctionPod(TraceableBase):
             self.packet_function.packet_function_type_id,
         )
 
-    def multi_stream_handler(self) -> Pod:
+    def multi_stream_handler(self) -> PodProtocol:
         return Join()
 
-    def validate_inputs(self, *streams: Stream) -> None:
+    def validate_inputs(self, *streams: StreamProtocol) -> None:
         """
         Validate input streams, raising exceptions if invalid.
 
         Should check:
         - Number of input streams
-        - Stream types and schemas
+        - StreamProtocol types and schemas
         - Kernel-specific requirements
         - Business logic constraints
 
@@ -116,7 +116,9 @@ class TrackedPacketFunctionPod(TraceableBase):
                 f"Incoming packet data type {input_schema} is not compatible with expected input typespec {expected_packet_schema}"
             )
 
-    def process_packet(self, tag: Tag, packet: Packet) -> tuple[Tag, Packet | None]:
+    def process_packet(
+        self, tag: TagProtocol, packet: PacketProtocol
+    ) -> tuple[TagProtocol, PacketProtocol | None]:
         """
         Process a single packet using the pod's packet function.
 
@@ -125,11 +127,11 @@ class TrackedPacketFunctionPod(TraceableBase):
             packet: The input packet to process
 
         Returns:
-            Packet | None: The processed output packet, or None if filtered out
+            PacketProtocol | None: The processed output packet, or None if filtered out
         """
         return tag, self.packet_function.call(packet)
 
-    def handle_input_streams(self, *streams: Stream) -> Stream:
+    def handle_input_streams(self, *streams: StreamProtocol) -> StreamProtocol:
         """
         Handle multiple input streams by joining them if necessary.
 
@@ -147,7 +149,9 @@ class TrackedPacketFunctionPod(TraceableBase):
         return streams[0]
 
     @abstractmethod
-    def process(self, *streams: Stream, label: str | None = None) -> Stream:
+    def process(
+        self, *streams: StreamProtocol, label: str | None = None
+    ) -> StreamProtocol:
         """
         Invoke the packet processor on the input stream.
         If multiple streams are passed in, all streams are joined before processing.
@@ -156,7 +160,7 @@ class TrackedPacketFunctionPod(TraceableBase):
             *streams: Input streams to process
 
         Returns:
-            Stream: The resulting output stream
+            StreamProtocol: The resulting output stream
         """
         ...
         logger.debug(f"Invoking kernel {self} on streams: {streams}")
@@ -175,7 +179,9 @@ class TrackedPacketFunctionPod(TraceableBase):
         )
         return output_stream
 
-    def __call__(self, *streams: Stream, label: str | None = None) -> Stream:
+    def __call__(
+        self, *streams: StreamProtocol, label: str | None = None
+    ) -> StreamProtocol:
         """
         Convenience method to invoke the pod process on a collection of streams,
         """
@@ -183,12 +189,12 @@ class TrackedPacketFunctionPod(TraceableBase):
         # perform input stream validation
         return self.process(*streams, label=label)
 
-    def argument_symmetry(self, streams: Collection[Stream]) -> ArgumentGroup:
+    def argument_symmetry(self, streams: Collection[StreamProtocol]) -> ArgumentGroup:
         return self.multi_stream_handler().argument_symmetry(streams)
 
     def output_schema(
         self,
-        *streams: Stream,
+        *streams: StreamProtocol,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
@@ -197,14 +203,16 @@ class TrackedPacketFunctionPod(TraceableBase):
         )
         # validate that incoming_packet_schema is valid
         self._validate_input_schema(incoming_packet_schema)
-        # The output schema of the FunctionPod is determined by the packet function
+        # The output schema of the FunctionPodProtocol is determined by the packet function
         # TODO: handle and extend to include additional columns
         # Namely, the source columns
         return tag_schema, self.packet_function.output_packet_schema
 
 
-class SimpleFunctionPod(TrackedPacketFunctionPod):
-    def process(self, *streams: Stream, label: str | None = None) -> FunctionPodStream:
+class FunctionPod(_FunctionPodBase):
+    def process(
+        self, *streams: StreamProtocol, label: str | None = None
+    ) -> FunctionPodStream:
         """
         Invoke the packet processor on the input stream.
         If multiple streams are passed in, all streams are joined before processing.
@@ -213,7 +221,7 @@ class SimpleFunctionPod(TrackedPacketFunctionPod):
             *streams: Input streams to process
 
         Returns:
-            cp.Stream: The resulting output stream
+            cp.StreamProtocol: The resulting output stream
         """
         logger.debug(f"Invoking kernel {self} on streams: {streams}")
 
@@ -231,7 +239,9 @@ class SimpleFunctionPod(TrackedPacketFunctionPod):
         )
         return output_stream
 
-    def __call__(self, *streams: Stream, label: str | None = None) -> FunctionPodStream:
+    def __call__(
+        self, *streams: StreamProtocol, label: str | None = None
+    ) -> FunctionPodStream:
         """
         Convenience method to invoke the pod process on a collection of streams,
         """
@@ -246,7 +256,7 @@ class FunctionPodStream(StreamBase):
     """
 
     def __init__(
-        self, function_pod: FunctionPod, input_stream: Stream, **kwargs
+        self, function_pod: FunctionPodProtocol, input_stream: StreamProtocol, **kwargs
     ) -> None:
         self._function_pod = function_pod
         self._input_stream = input_stream
@@ -258,17 +268,19 @@ class FunctionPodStream(StreamBase):
         # note that the invocation of iter_packets on upstream likely triggeres the modified time
         # to be updated on the usptream. Hence you want to set this stream's modified time after that.
 
-        # Packet-level caching (for the output packets)
-        self._cached_output_packets: dict[int, tuple[Tag, Packet | None]] = {}
+        # PacketProtocol-level caching (for the output packets)
+        self._cached_output_packets: dict[
+            int, tuple[TagProtocol, PacketProtocol | None]
+        ] = {}
         self._cached_output_table: pa.Table | None = None
         self._cached_content_hash_column: pa.Array | None = None
 
     @property
-    def source(self) -> Pod:
+    def source(self) -> PodProtocol:
         return self._function_pod
 
     @property
-    def upstreams(self) -> tuple[Stream, ...]:
+    def upstreams(self) -> tuple[StreamProtocol, ...]:
         return (self._input_stream,)
 
     def keys(
@@ -306,10 +318,10 @@ class FunctionPodStream(StreamBase):
         self._cached_content_hash_column = None
         self._update_modified_time()
 
-    def __iter__(self) -> Iterator[tuple[Tag, Packet]]:
+    def __iter__(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
         return self.iter_packets()
 
-    def iter_packets(self) -> Iterator[tuple[Tag, Packet]]:
+    def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
         if self.is_stale:
             self.clear_cache()
         if self._cached_input_iterator is not None:
@@ -434,7 +446,7 @@ class FunctionPodStream(StreamBase):
 
 class CallableWithPod(Protocol):
     @property
-    def pod(self) -> TrackedPacketFunctionPod:
+    def pod(self) -> _FunctionPodBase:
         """
         Returns associated function pod
         """
@@ -452,19 +464,19 @@ def function_pod(
     function_name: str | None = None,
     version: str = "v0.0",
     label: str | None = None,
-    result_database: ArrowDatabase | None = None,
+    result_database: ArrowDatabaseProtocol | None = None,
     **kwargs,
 ) -> Callable[..., CallableWithPod]:
     """
-    Decorator that attaches FunctionPod as pod attribute.
+    Decorator that attaches FunctionPodProtocol as pod attribute.
 
     Args:
         output_keys: Keys for the function output(s)
         function_name: Name of the function pod; if None, defaults to the function name
-        **kwargs: Additional keyword arguments to pass to the FunctionPod constructor. Please refer to the FunctionPod documentation for details.
+        **kwargs: Additional keyword arguments to pass to the FunctionPodProtocol constructor. Please refer to the FunctionPodProtocol documentation for details.
 
     Returns:
-        CallableWithPod: Decorated function with `pod` attribute holding the FunctionPod instance
+        CallableWithPod: Decorated function with `pod` attribute holding the FunctionPodProtocol instance
     """
 
     def decorator(func: Callable) -> CallableWithPod:
@@ -491,7 +503,7 @@ def function_pod(
             )
 
         # Create a simple typed function pod
-        pod = SimpleFunctionPod(
+        pod = FunctionPod(
             packet_function=packet_function,
         )
         setattr(func, "pod", pod)
@@ -500,7 +512,7 @@ def function_pod(
     return decorator
 
 
-class WrappedFunctionPod(TrackedPacketFunctionPod):
+class WrappedFunctionPod(_FunctionPodBase):
     """
     A wrapper for a function pod, allowing for additional functionality or modifications without changing the original pod.
     This class is meant to serve as a base class for other pods that need to wrap existing pods.
@@ -509,7 +521,7 @@ class WrappedFunctionPod(TrackedPacketFunctionPod):
 
     def __init__(
         self,
-        function_pod: FunctionPod,
+        function_pod: FunctionPodProtocol,
         data_context: str | contexts.DataContext | None = None,
         **kwargs,
     ) -> None:
@@ -530,15 +542,15 @@ class WrappedFunctionPod(TrackedPacketFunctionPod):
     def uri(self) -> tuple[str, ...]:
         return self._function_pod.uri
 
-    def validate_inputs(self, *streams: Stream) -> None:
+    def validate_inputs(self, *streams: StreamProtocol) -> None:
         self._function_pod.validate_inputs(*streams)
 
-    def argument_symmetry(self, streams: Collection[Stream]) -> ArgumentGroup:
+    def argument_symmetry(self, streams: Collection[StreamProtocol]) -> ArgumentGroup:
         return self._function_pod.argument_symmetry(streams)
 
     def output_schema(
         self,
-        *streams: Stream,
+        *streams: StreamProtocol,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
@@ -547,7 +559,9 @@ class WrappedFunctionPod(TrackedPacketFunctionPod):
         )
 
     # TODO: reconsider whether to return FunctionPodStream here in the signature
-    def process(self, *streams: Stream, label: str | None = None) -> Stream:
+    def process(
+        self, *streams: StreamProtocol, label: str | None = None
+    ) -> StreamProtocol:
         return self._function_pod.process(*streams, label=label)
 
 
@@ -559,12 +573,12 @@ class FunctionPodNode(TraceableBase):
 
     def __init__(
         self,
-        packet_function: PacketFunction,
-        input_stream: Stream,
-        pipeline_database: ArrowDatabase,
-        result_database: ArrowDatabase | None = None,
+        packet_function: PacketFunctionProtocol,
+        input_stream: StreamProtocol,
+        pipeline_database: ArrowDatabaseProtocol,
+        result_database: ArrowDatabaseProtocol | None = None,
         pipeline_path_prefix: tuple[str, ...] = (),
-        tracker_manager: TrackerManager | None = None,
+        tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
         data_context: str | contexts.DataContext | None = None,
         config: Config | None = None,
@@ -584,7 +598,7 @@ class FunctionPodNode(TraceableBase):
             record_path_prefix=result_path_prefix,
         )
 
-        # initialize the base FunctionPod with the cached packet function
+        # initialize the base FunctionPodProtocol with the cached packet function
         super().__init__(
             label=label,
             data_context=data_context,
@@ -637,7 +651,7 @@ class FunctionPodNode(TraceableBase):
             f"tag:{self._tag_schema_hash}",
         )
 
-    def validate_inputs(self, *streams: Stream) -> None:
+    def validate_inputs(self, *streams: StreamProtocol) -> None:
         if len(streams) > 0:
             raise ValueError(
                 "FunctionPodNode.validate_inputs does not accept external streams; input streams are fixed at initialization."
@@ -645,11 +659,11 @@ class FunctionPodNode(TraceableBase):
 
     def process_packet(
         self,
-        tag: Tag,
-        packet: Packet,
+        tag: TagProtocol,
+        packet: PacketProtocol,
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
-    ) -> tuple[Tag, Packet | None]:
+    ) -> tuple[TagProtocol, PacketProtocol | None]:
         """
         Process a single packet using the pod's packet function.
 
@@ -658,7 +672,7 @@ class FunctionPodNode(TraceableBase):
             packet: The input packet to process
 
         Returns:
-            Packet | None: The processed output packet, or None if filtered out
+            PacketProtocol | None: The processed output packet, or None if filtered out
         """
         output_packet = self._cached_packet_function.call(
             packet,
@@ -683,7 +697,7 @@ class FunctionPodNode(TraceableBase):
         return tag, output_packet
 
     def process(
-        self, *streams: Stream, label: str | None = None
+        self, *streams: StreamProtocol, label: str | None = None
     ) -> "FunctionPodNodeStream":
         """
         Invoke the packet processor on the input stream.
@@ -693,7 +707,7 @@ class FunctionPodNode(TraceableBase):
             *streams: Input streams to process
 
         Returns:
-            cp.Stream: The resulting output stream
+            cp.StreamProtocol: The resulting output stream
         """
         logger.debug(f"Invoking kernel {self} on streams: {streams}")
 
@@ -711,7 +725,7 @@ class FunctionPodNode(TraceableBase):
         return output_stream
 
     def __call__(
-        self, *streams: Stream, label: str | None = None
+        self, *streams: StreamProtocol, label: str | None = None
     ) -> "FunctionPodNodeStream":
         """
         Convenience method to invoke the pod process on a collection of streams,
@@ -720,7 +734,7 @@ class FunctionPodNode(TraceableBase):
         # perform input stream validation
         return self.process(*streams, label=label)
 
-    def argument_symmetry(self, streams: Collection[Stream]) -> ArgumentGroup:
+    def argument_symmetry(self, streams: Collection[StreamProtocol]) -> ArgumentGroup:
         if len(streams) > 0:
             raise ValueError(
                 "FunctionPodNode.argument_symmetry does not accept external streams; input streams are fixed at initialization."
@@ -729,7 +743,7 @@ class FunctionPodNode(TraceableBase):
 
     def output_schema(
         self,
-        *streams: Stream,
+        *streams: StreamProtocol,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
@@ -738,19 +752,19 @@ class FunctionPodNode(TraceableBase):
         tag_schema = self._input_stream.output_schema(
             *streams, columns=columns, all_info=all_info
         )[0]
-        # The output schema of the FunctionPod is determined by the packet function
+        # The output schema of the FunctionPodProtocol is determined by the packet function
         # TODO: handle and extend to include additional columns
         return tag_schema, self._cached_packet_function.output_packet_schema
 
     def add_pipeline_record(
         self,
-        tag: Tag,
-        input_packet: Packet,
+        tag: TagProtocol,
+        input_packet: PacketProtocol,
         packet_record_id: str,
         computed: bool,
         skip_cache_lookup: bool = False,
     ) -> None:
-        # combine dp.Tag with packet content hash to compute entry hash
+        # combine dp.TagProtocol with packet content hash to compute entry hash
         # TODO: add system tag columns
         # TODO: consider using bytes instead of string representation
         tag_with_hash = tag.as_table(columns={"system_tags": True}).append_column(
@@ -873,7 +887,7 @@ class FunctionPodNodeStream(StreamBase):
     """
 
     def __init__(
-        self, fp_node: FunctionPodNode, input_stream: Stream, **kwargs
+        self, fp_node: FunctionPodNode, input_stream: StreamProtocol, **kwargs
     ) -> None:
         super().__init__(**kwargs)
         self._fp_node = fp_node
@@ -885,8 +899,10 @@ class FunctionPodNodeStream(StreamBase):
         # note that the invocation of iter_packets on upstream likely triggeres the modified time
         # to be updated on the usptream. Hence you want to set this stream's modified time after that.
 
-        # Packet-level caching (for the output packets)
-        self._cached_output_packets: dict[int, tuple[Tag, Packet | None]] = {}
+        # PacketProtocol-level caching (for the output packets)
+        self._cached_output_packets: dict[
+            int, tuple[TagProtocol, PacketProtocol | None]
+        ] = {}
         self._cached_output_table: pa.Table | None = None
         self._cached_content_hash_column: pa.Array | None = None
 
@@ -908,7 +924,7 @@ class FunctionPodNodeStream(StreamBase):
         return self._fp_node
 
     @property
-    def upstreams(self) -> tuple[Stream, ...]:
+    def upstreams(self) -> tuple[StreamProtocol, ...]:
         return (self._input_stream,)
 
     def keys(
@@ -935,10 +951,10 @@ class FunctionPodNodeStream(StreamBase):
         packet_schema = self._fp_node._cached_packet_function.output_packet_schema
         return (tag_schema, packet_schema)
 
-    def __iter__(self) -> Iterator[tuple[Tag, Packet]]:
+    def __iter__(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
         return self.iter_packets()
 
-    def iter_packets(self) -> Iterator[tuple[Tag, Packet]]:
+    def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
         if self.is_stale:
             self.clear_cache()
         if self._cached_input_iterator is not None:
@@ -950,7 +966,7 @@ class FunctionPodNodeStream(StreamBase):
                 # Strip the meta column before handing to TableStream so it only
                 # sees tag + output-packet columns.
                 hash_col = constants.INPUT_PACKET_HASH_COL
-                hash_values = existing.column(hash_col).to_pylist()
+                hash_values = cast(list[str], existing.column(hash_col).to_pylist())
                 computed_hashes = set(hash_values)
                 data_table = existing.drop([hash_col])
                 existing_stream = TableStream(data_table, tag_columns=tag_keys)
@@ -1084,8 +1100,8 @@ class FunctionPodNodeStream(StreamBase):
 
 #     def __init__(
 #         self,
-#         pod: cp.Pod,
-#         result_database: ArrowDatabase,
+#         pod: cp.PodProtocol,
+#         result_database: ArrowDatabaseProtocol,
 #         record_path_prefix: tuple[str, ...] = (),
 #         match_tier: str | None = None,
 #         retrieval_mode: Literal["latest", "most_specific"] = "latest",
@@ -1117,14 +1133,14 @@ class FunctionPodNodeStream(StreamBase):
 
 #     def call(
 #         self,
-#         tag: cp.Tag,
-#         packet: cp.Packet,
+#         tag: cp.TagProtocol,
+#         packet: cp.PacketProtocol,
 #         record_id: str | None = None,
 #         execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
 #         | None = None,
 #         skip_cache_lookup: bool = False,
 #         skip_cache_insert: bool = False,
-#     ) -> tuple[cp.Tag, cp.Packet | None]:
+#     ) -> tuple[cp.TagProtocol, cp.PacketProtocol | None]:
 #         # TODO: consider logic for overwriting existing records
 #         execution_engine_hash = execution_engine.name if execution_engine else "default"
 #         if record_id is None:
@@ -1152,14 +1168,14 @@ class FunctionPodNodeStream(StreamBase):
 
 #     async def async_call(
 #         self,
-#         tag: cp.Tag,
-#         packet: cp.Packet,
+#         tag: cp.TagProtocol,
+#         packet: cp.PacketProtocol,
 #         record_id: str | None = None,
 #         execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
 #         | None = None,
 #         skip_cache_lookup: bool = False,
 #         skip_cache_insert: bool = False,
-#     ) -> tuple[cp.Tag, cp.Packet | None]:
+#     ) -> tuple[cp.TagProtocol, cp.PacketProtocol | None]:
 #         # TODO: consider logic for overwriting existing records
 #         execution_engine_hash = execution_engine.name if execution_engine else "default"
 
@@ -1184,19 +1200,19 @@ class FunctionPodNodeStream(StreamBase):
 
 #         return tag, output_packet
 
-#     def forward(self, *streams: cp.Stream) -> cp.Stream:
+#     def forward(self, *streams: cp.StreamProtocol) -> cp.StreamProtocol:
 #         assert len(streams) == 1, "PodBase.forward expects exactly one input stream"
 #         return CachedPodStream(pod=self, input_stream=streams[0])
 
 #     def record_packet(
 #         self,
-#         input_packet: cp.Packet,
-#         output_packet: cp.Packet,
+#         input_packet: cp.PacketProtocol,
+#         output_packet: cp.PacketProtocol,
 #         record_id: str | None = None,
 #         execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
 #         | None = None,
 #         skip_duplicates: bool = False,
-#     ) -> cp.Packet:
+#     ) -> cp.PacketProtocol:
 #         """
 #         Record the output packet against the input packet in the result store.
 #         """
@@ -1249,7 +1265,7 @@ class FunctionPodNodeStream(StreamBase):
 #         # # TODO: make store return retrieved table
 #         return output_packet
 
-#     def get_cached_output_for_packet(self, input_packet: cp.Packet) -> cp.Packet | None:
+#     def get_cached_output_for_packet(self, input_packet: cp.PacketProtocol) -> cp.PacketProtocol | None:
 #         """
 #         Retrieve the output packet from the result store based on the input packet.
 #         If more than one output packet is found, conflict resolution strategy

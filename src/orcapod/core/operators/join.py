@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.operators.base import NonZeroInputOperator
 from orcapod.core.streams import TableStream
 from orcapod.errors import InputValidationError
-from orcapod.protocols.core_protocols import ArgumentGroup, Stream
+from orcapod.protocols.core_protocols import ArgumentGroup, StreamProtocol
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils import arrow_data_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
@@ -26,14 +26,14 @@ class Join(NonZeroInputOperator):
         """
         return (f"{self.__class__.__name__}",)
 
-    def validate_nonzero_inputs(self, *streams: Stream) -> None:
+    def validate_nonzero_inputs(self, *streams: StreamProtocol) -> None:
         try:
             self.output_schema(*streams)
         except Exception as e:
             # raise InputValidationError(f"Input streams are not compatible: {e}") from e
             raise e
 
-    def order_input_streams(self, *streams: Stream) -> list[Stream]:
+    def order_input_streams(self, *streams: StreamProtocol) -> list[StreamProtocol]:
         # order the streams based on their hashes to offer deterministic operation
         return sorted(streams, key=lambda s: s.content_hash().to_hex())
 
@@ -42,7 +42,7 @@ class Join(NonZeroInputOperator):
 
     def output_schema(
         self,
-        *streams: Stream,
+        *streams: StreamProtocol,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
@@ -77,7 +77,7 @@ class Join(NonZeroInputOperator):
 
         return tag_typespec, packet_typespec
 
-    def static_process(self, *streams: Stream) -> Stream:
+    def static_process(self, *streams: StreamProtocol) -> StreamProtocol:
         """
         Joins two streams together based on their tags.
         The resulting stream will contain all the tags from both streams.

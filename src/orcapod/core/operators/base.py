@@ -3,11 +3,11 @@ from collections.abc import Collection
 from typing import Any
 
 from orcapod.core.static_output_pod import StaticOutputPod
-from orcapod.protocols.core_protocols import ArgumentGroup, Stream
+from orcapod.protocols.core_protocols import ArgumentGroup, StreamProtocol
 from orcapod.types import ColumnConfig, Schema
 
 
-class OperatorPod(StaticOutputPod):
+class OperatorPodProtocol(StaticOutputPod):
     """
     Base class for all operators.
     Operators are basic pods that can be used to perform operations on streams.
@@ -20,13 +20,13 @@ class OperatorPod(StaticOutputPod):
         return self.__class__.__name__
 
 
-class UnaryOperator(OperatorPod):
+class UnaryOperator(OperatorPodProtocol):
     """
     Base class for all unary operators.
     """
 
     @abstractmethod
-    def validate_unary_input(self, stream: Stream) -> None:
+    def validate_unary_input(self, stream: StreamProtocol) -> None:
         """
         This method should be implemented by subclasses to validate the inputs to the operator.
         It takes two streams as input and raises an error if the inputs are not valid.
@@ -34,7 +34,7 @@ class UnaryOperator(OperatorPod):
         ...
 
     @abstractmethod
-    def unary_static_process(self, stream: Stream) -> Stream:
+    def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         """
         This method should be implemented by subclasses to define the specific behavior of the unary operator.
         It takes one stream as input and returns a new stream as output.
@@ -44,7 +44,7 @@ class UnaryOperator(OperatorPod):
     @abstractmethod
     def unary_output_schema(
         self,
-        stream: Stream,
+        stream: StreamProtocol,
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
@@ -55,13 +55,13 @@ class UnaryOperator(OperatorPod):
         """
         ...
 
-    def validate_inputs(self, *streams: Stream) -> None:
+    def validate_inputs(self, *streams: StreamProtocol) -> None:
         if len(streams) != 1:
             raise ValueError("UnaryOperator requires exactly one input stream.")
         stream = streams[0]
         return self.validate_unary_input(stream)
 
-    def static_process(self, *streams: Stream) -> Stream:
+    def static_process(self, *streams: StreamProtocol) -> StreamProtocol:
         """
         Forward method for unary operators.
         It expects exactly one stream as input.
@@ -71,25 +71,27 @@ class UnaryOperator(OperatorPod):
 
     def output_schema(
         self,
-        *streams: Stream,
+        *streams: StreamProtocol,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
         stream = streams[0]
         return self.unary_output_schema(stream, columns=columns, all_info=all_info)
 
-    def argument_symmetry(self, streams: Collection[Stream]) -> ArgumentGroup:
+    def argument_symmetry(self, streams: Collection[StreamProtocol]) -> ArgumentGroup:
         # return single stream as a tuple
         return (tuple(streams)[0],)
 
 
-class BinaryOperator(OperatorPod):
+class BinaryOperator(OperatorPodProtocol):
     """
     Base class for all operators.
     """
 
     @abstractmethod
-    def validate_binary_inputs(self, left_stream: Stream, right_stream: Stream) -> None:
+    def validate_binary_inputs(
+        self, left_stream: StreamProtocol, right_stream: StreamProtocol
+    ) -> None:
         """
         Check that the inputs to the binary operator are valid.
         This method is called before the forward method to ensure that the inputs are valid.
@@ -98,8 +100,8 @@ class BinaryOperator(OperatorPod):
 
     @abstractmethod
     def binary_static_process(
-        self, left_stream: Stream, right_stream: Stream
-    ) -> Stream:
+        self, left_stream: StreamProtocol, right_stream: StreamProtocol
+    ) -> StreamProtocol:
         """
         Forward method for binary operators.
         It expects exactly two streams as input.
@@ -109,8 +111,8 @@ class BinaryOperator(OperatorPod):
     @abstractmethod
     def binary_output_schema(
         self,
-        left_stream: Stream,
-        right_stream: Stream,
+        left_stream: StreamProtocol,
+        right_stream: StreamProtocol,
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
@@ -125,7 +127,7 @@ class BinaryOperator(OperatorPod):
 
     def output_schema(
         self,
-        *streams: Stream,
+        *streams: StreamProtocol,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
@@ -134,13 +136,13 @@ class BinaryOperator(OperatorPod):
             left_stream, right_stream, columns=columns, all_info=all_info
         )
 
-    def validate_inputs(self, *streams: Stream) -> None:
+    def validate_inputs(self, *streams: StreamProtocol) -> None:
         if len(streams) != 2:
             raise ValueError("BinaryOperator requires exactly two input streams.")
         left_stream, right_stream = streams
         self.validate_binary_inputs(left_stream, right_stream)
 
-    def argument_symmetry(self, streams: Collection[Stream]) -> ArgumentGroup:
+    def argument_symmetry(self, streams: Collection[StreamProtocol]) -> ArgumentGroup:
         if self.is_commutative():
             # return as symmetric group
             return frozenset(streams)
@@ -149,7 +151,7 @@ class BinaryOperator(OperatorPod):
             return tuple(streams)
 
 
-class NonZeroInputOperator(OperatorPod):
+class NonZeroInputOperator(OperatorPodProtocol):
     """
     Operators that work with at least one input stream.
     This is useful for operators that can take a variable number of (but at least one ) input streams,
@@ -159,7 +161,7 @@ class NonZeroInputOperator(OperatorPod):
     @abstractmethod
     def validate_nonzero_inputs(
         self,
-        *streams: Stream,
+        *streams: StreamProtocol,
     ) -> None:
         """
         Check that the inputs to the variable inputs operator are valid.
@@ -167,7 +169,7 @@ class NonZeroInputOperator(OperatorPod):
         """
         ...
 
-    def validate_inputs(self, *streams: Stream) -> None:
+    def validate_inputs(self, *streams: StreamProtocol) -> None:
         if len(streams) == 0:
             raise ValueError(
                 f"Operator {self.__class__.__name__} requires at least one input stream."

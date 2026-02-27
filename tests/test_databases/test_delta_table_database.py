@@ -1,5 +1,5 @@
 """
-Tests for DeltaTableDatabase against the ArrowDatabase protocol.
+Tests for DeltaTableDatabase against the ArrowDatabaseProtocol protocol.
 
 Covers:
 - Protocol conformance (isinstance check)
@@ -21,7 +21,7 @@ import pyarrow as pa
 import pytest
 
 from orcapod.databases import DeltaTableDatabase
-from orcapod.protocols.database_protocols import ArrowDatabase
+from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +46,7 @@ def make_table(**columns: list) -> pa.Table:
 
 class TestProtocolConformance:
     def test_satisfies_arrow_database_protocol(self, db):
-        assert isinstance(db, ArrowDatabase)
+        assert isinstance(db, ArrowDatabaseProtocol)
 
     def test_has_add_record(self, db):
         assert callable(db.add_record)

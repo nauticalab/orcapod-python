@@ -97,7 +97,7 @@ def deserialize_value(serialized_value):
 def test_hash_consistency():
     """
     For every entry in the latest sample file, re-hash the value with the
-    current default SemanticHasher and assert it matches the recorded hash.
+    current default SemanticHasherProtocol and assert it matches the recorded hash.
     """
     hasher = get_default_semantic_hasher()
     samples = load_hash_samples()

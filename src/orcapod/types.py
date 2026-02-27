@@ -248,7 +248,7 @@ class Schema(Mapping[str, DataType]):
 @dataclass(frozen=True, slots=True)
 class ColumnConfig:
     """
-    Configuration for column inclusion in Datagram/Packet/Tag operations.
+    Configuration for column inclusion in DatagramProtocol/PacketProtocol/TagProtocol operations.
 
     Controls which column types to include when converting to tables, dicts,
     or querying keys/types.
@@ -260,8 +260,8 @@ class ColumnConfig:
               - Collection[str]: include specific meta columns by name
                 (prefix '__' is added automatically if not present)
         context: Include context column
-        source: Include source info columns (Packet only, ignored for others)
-        system_tags: Include system tag columns (Tag only, ignored for others)
+        source: Include source info columns (PacketProtocol only, ignored for others)
+        system_tags: Include system tag columns (TagProtocol only, ignored for others)
         all_info: Include all available columns (overrides other settings)
 
     Examples:
@@ -283,10 +283,10 @@ class ColumnConfig:
 
     meta: bool | Collection[str] = False
     context: bool = False
-    source: bool = False  # Only relevant for Packet
-    system_tags: bool = False  # Only relevant for Tag
-    content_hash: bool | str = False  # Only relevant for Packet
-    sort_by_tags: bool = False  # Only relevant for Tag
+    source: bool = False  # Only relevant for PacketProtocol
+    system_tags: bool = False  # Only relevant for TagProtocol
+    content_hash: bool | str = False  # Only relevant for PacketProtocol
+    sort_by_tags: bool = False  # Only relevant for TagProtocol
     all_info: bool = False
 
     @classmethod

@@ -13,11 +13,11 @@ from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
     ArgumentGroup,
-    Packet,
-    Pod,
-    Stream,
-    Tag,
-    TrackerManager,
+    PacketProtocol,
+    PodProtocol,
+    StreamProtocol,
+    TagProtocol,
+    TrackerManagerProtocol,
 )
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.lazy_module import LazyModule
@@ -40,7 +40,9 @@ class StaticOutputPod(TraceableBase):
     the pod as a general pod invocation.
     """
 
-    def __init__(self, tracker_manager: TrackerManager | None = None, **kwargs) -> None:
+    def __init__(
+        self, tracker_manager: TrackerManagerProtocol | None = None, **kwargs
+    ) -> None:
         self.tracker_manager = tracker_manager or DEFAULT_TRACKER_MANAGER
         super().__init__(**kwargs)
 
@@ -56,13 +58,13 @@ class StaticOutputPod(TraceableBase):
         )
 
     @abstractmethod
-    def validate_inputs(self, *streams: Stream) -> None:
+    def validate_inputs(self, *streams: StreamProtocol) -> None:
         """
         Validate input streams, raising exceptions if invalid.
 
         Should check:
         - Number of input streams
-        - Stream types and schemas
+        - StreamProtocol types and schemas
         - Kernel-specific requirements
         - Business logic constraints
 
@@ -75,7 +77,7 @@ class StaticOutputPod(TraceableBase):
         ...
 
     @abstractmethod
-    def argument_symmetry(self, streams: Collection[Stream]) -> ArgumentGroup:
+    def argument_symmetry(self, streams: Collection[StreamProtocol]) -> ArgumentGroup:
         """
         Describe symmetry/ordering constraints on input arguments.
 
@@ -100,7 +102,7 @@ class StaticOutputPod(TraceableBase):
     @abstractmethod
     def output_schema(
         self,
-        *streams: Stream,
+        *streams: StreamProtocol,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
@@ -130,24 +132,26 @@ class StaticOutputPod(TraceableBase):
         ...
 
     @abstractmethod
-    def static_process(self, *streams: Stream) -> Stream:
+    def static_process(self, *streams: StreamProtocol) -> StreamProtocol:
         """
         Executes the pod on the input streams, returning a new static output stream.
         The output of execute is expected to be a static stream and thus only represent
         instantaneous computation of the pod on the input streams.
 
-        Concrete subclass implementing a Pod should override this method to provide
+        Concrete subclass implementing a PodProtocol should override this method to provide
         the pod's unique processing logic.
 
         Args:
             *streams: Input streams to process
 
         Returns:
-            cp.Stream: The resulting output stream
+            cp.StreamProtocol: The resulting output stream
         """
         ...
 
-    def process(self, *streams: Stream, label: str | None = None) -> DynamicPodStream:
+    def process(
+        self, *streams: StreamProtocol, label: str | None = None
+    ) -> DynamicPodStream:
         """
         Invoke the pod on a collection of streams, returning a KernelStream
         that represents the computation.
@@ -156,7 +160,7 @@ class StaticOutputPod(TraceableBase):
             *streams: Input streams to process
 
         Returns:
-            cp.Stream: The resulting output stream
+            cp.StreamProtocol: The resulting output stream
         """
         logger.debug(f"Invoking kernel {self} on streams: {streams}")
 
@@ -169,7 +173,7 @@ class StaticOutputPod(TraceableBase):
         )
         return output_stream
 
-    def __call__(self, *streams: Stream, **kwargs) -> DynamicPodStream:
+    def __call__(self, *streams: StreamProtocol, **kwargs) -> DynamicPodStream:
         """
         Convenience method to invoke the pod process on a collection of streams,
         """
@@ -184,14 +188,14 @@ class DynamicPodStream(StreamBase):
 
     This stream is used to represent the output of a PodBase invocation.
 
-    For a more general recomputable stream for Pod (orcapod.protocols.Pod), use
+    For a more general recomputable stream for PodProtocol (orcapod.protocols.PodProtocol), use
     PodStream.
     """
 
     def __init__(
         self,
         pod: StaticOutputPod,
-        upstreams: tuple[Stream, ...] = (),
+        upstreams: tuple[StreamProtocol, ...] = (),
         label: str | None = None,
         data_context: DataContext | None = None,
         config: Config | None = None,
@@ -202,14 +206,14 @@ class DynamicPodStream(StreamBase):
         super().__init__(label=label, data_context=data_context, config=config)
         self._set_modified_time(None)
         self._cached_time: datetime | None = None
-        self._cached_stream: Stream | None = None
+        self._cached_stream: StreamProtocol | None = None
 
     @property
-    def source(self) -> Pod:
+    def source(self) -> PodProtocol:
         return self._pod
 
     @property
-    def upstreams(self) -> tuple[Stream, ...]:
+    def upstreams(self) -> tuple[StreamProtocol, ...]:
         return self._upstreams
 
     def clear_cache(self) -> None:
@@ -295,16 +299,16 @@ class DynamicPodStream(StreamBase):
     ) -> "pa.Table":
         self.run()
         assert self._cached_stream is not None, (
-            "Stream has not been updated or is empty."
+            "StreamProtocol has not been updated or is empty."
         )
         return self._cached_stream.as_table(columns=columns, all_info=all_info)
 
     def iter_packets(
         self,
-    ) -> Iterator[tuple[Tag, Packet]]:
+    ) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
         self.run()
         assert self._cached_stream is not None, (
-            "Stream has not been updated or is empty."
+            "StreamProtocol has not been updated or is empty."
         )
         return self._cached_stream.iter_packets()
 

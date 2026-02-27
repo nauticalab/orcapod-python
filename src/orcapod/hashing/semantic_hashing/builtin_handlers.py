@@ -1,13 +1,13 @@
 """
-Built-in TypeHandler implementations for the SemanticHasher system.
+Built-in TypeHandlerProtocol implementations for the SemanticHasherProtocol system.
 
-This module provides handlers for all Python types that the SemanticHasher
+This module provides handlers for all Python types that the SemanticHasherProtocol
 knows how to process out of the box:
 
   - PathContentHandler    -- pathlib.Path: returns ContentHash of file content
   - UUIDHandler           -- uuid.UUID: canonical string representation
   - BytesHandler          -- bytes / bytearray: hex string representation
-  - FunctionHandler       -- callable with __code__: via FunctionInfoExtractor
+  - FunctionHandler       -- callable with __code__: via FunctionInfoExtractorProtocol
   - TypeObjectHandler     -- type objects (classes): stable "type:<name>" string
 
 Note: ContentHash requires no handler -- it is recognised as a terminal by
@@ -19,7 +19,7 @@ called automatically when the global default registry is first accessed.
 Extending the system
 --------------------
 To add a handler for a third-party type, create a class that implements the
-TypeHandler protocol (a single ``handle(obj, hasher)`` method) and register
+TypeHandlerProtocol protocol (a single ``handle(obj, hasher)`` method) and register
 it:
 
     from orcapod.hashing.semantic_hashing.type_handler_registry import get_default_type_handler_registry
@@ -33,14 +33,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from orcapod.protocols.hashing_protocols import FileContentHasher
+from orcapod.protocols.hashing_protocols import FileContentHasherProtocol
 from orcapod.types import PathLike, Schema
 
 if TYPE_CHECKING:
     from orcapod.hashing.semantic_hashing.type_handler_registry import (
         TypeHandlerRegistry,
     )
-    from orcapod.protocols.hashing_protocols import SemanticHasher
+    from orcapod.protocols.hashing_protocols import SemanticHasherProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class PathContentHandler:
     Handler for pathlib.Path objects.
 
     Hashes the *content* of the file at the given path using the injected
-    FileContentHasher, producing a stable content-addressed identifier.
+    FileContentHasherProtocol, producing a stable content-addressed identifier.
     The resulting bytes are stored as a hex string embedded in the resolved
     structure.
 
@@ -66,13 +66,13 @@ class PathContentHandler:
 
     Args:
         file_hasher: Any object with a ``hash_file(path) -> ContentHash``
-                     method (satisfies the FileContentHasher protocol).
+                     method (satisfies the FileContentHasherProtocol protocol).
     """
 
-    def __init__(self, file_hasher: FileContentHasher) -> None:
+    def __init__(self, file_hasher: FileContentHasherProtocol) -> None:
         self.file_hasher = file_hasher
 
-    def handle(self, obj: PathLike, hasher: "SemanticHasher") -> Any:
+    def handle(self, obj: PathLike, hasher: "SemanticHasherProtocol") -> Any:
         path: Path = Path(obj)
 
         if not path.exists():
@@ -102,7 +102,7 @@ class UUIDHandler:
     human-readable, and unambiguous.
     """
 
-    def handle(self, obj: Any, hasher: "SemanticHasher") -> Any:
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         return str(obj)
 
 
@@ -115,7 +115,7 @@ class BytesHandler:
     exact byte sequence in the hash input.
     """
 
-    def handle(self, obj: Any, hasher: "SemanticHasher") -> Any:
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         if isinstance(obj, (bytes, bytearray)):
             return obj.hex()
         raise TypeError(f"BytesHandler: expected bytes or bytearray, got {type(obj)!r}")
@@ -125,7 +125,7 @@ class FunctionHandler:
     """
     Handler for Python functions / callables that carry a ``__code__`` attribute.
 
-    Delegates to a FunctionInfoExtractor to produce a stable, serialisable
+    Delegates to a FunctionInfoExtractorProtocol to produce a stable, serialisable
     dict representation of the function.  The extractor is responsible for
     deciding which parts of the function (name, signature, source body, etc.)
     are included.
@@ -133,13 +133,13 @@ class FunctionHandler:
     Args:
         function_info_extractor: Any object with an
             ``extract_function_info(func) -> dict`` method (satisfies the
-            FunctionInfoExtractor protocol).
+            FunctionInfoExtractorProtocol protocol).
     """
 
     def __init__(self, function_info_extractor: Any) -> None:
         self.function_info_extractor = function_info_extractor
 
-    def handle(self, obj: Any, hasher: "SemanticHasher") -> Any:
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         if not (callable(obj) and hasattr(obj, "__code__")):
             raise TypeError(
                 f"FunctionHandler: expected a callable with __code__, got {type(obj)!r}"
@@ -159,7 +159,7 @@ class TypeObjectHandler:
     result is human-readable.
     """
 
-    def handle(self, obj: Any, hasher: "SemanticHasher") -> Any:
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         if not isinstance(obj, type):
             raise TypeError(
                 f"TypeObjectHandler: expected a type/class, got {type(obj)!r}"
@@ -178,7 +178,7 @@ class SchemaHandler:
     in which fields are optional produce different hashes.
     """
 
-    def handle(self, obj: Any, hasher: "SemanticHasher") -> Any:
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         if not isinstance(obj, Schema):
             raise TypeError(f"SchemaHandler: expected a Schema, got {type(obj)!r}")
         # schema handler is not implemented yet
@@ -208,8 +208,8 @@ def register_builtin_handlers(
     first accessed via ``get_default_type_handler_registry()``.  It can also
     be called manually to populate a custom registry.
 
-    Path and function handling require auxiliary objects (a FileContentHasher
-    and a FunctionInfoExtractor respectively).  When these are not supplied,
+    Path and function handling require auxiliary objects (a FileContentHasherProtocol
+    and a FunctionInfoExtractorProtocol respectively).  When these are not supplied,
     sensible defaults are constructed:
 
       - ``BasicFileHasher`` (SHA-256, 64 KiB buffer) for Path handling.
@@ -219,11 +219,11 @@ def register_builtin_handlers(
         registry:
             The TypeHandlerRegistry to populate.
         file_hasher:
-            Optional object satisfying FileContentHasher (i.e. has a
+            Optional object satisfying FileContentHasherProtocol (i.e. has a
             ``hash_file(path) -> ContentHash`` method).  Defaults to a
             ``BasicFileHasher`` configured with SHA-256.
         function_info_extractor:
-            Optional object satisfying FunctionInfoExtractor (i.e. has an
+            Optional object satisfying FunctionInfoExtractorProtocol (i.e. has an
             ``extract_function_info(func) -> dict`` method).  Defaults to
             ``FunctionSignatureExtractor``.
     """
@@ -256,7 +256,7 @@ def register_builtin_handlers(
     # uuid.UUID
     registry.register(UUID, UUIDHandler())
 
-    # Note: ContentHash needs no handler -- SemanticHasher treats it as
+    # Note: ContentHash needs no handler -- SemanticHasherProtocol treats it as
     # a terminal in hash_object() and returns it as-is.
 
     # Functions -- register types.FunctionType so MRO lookup works for

@@ -10,7 +10,7 @@ Key classes:
 - DictDatagram: Immutable dict-based data structure
 - PythonDictPacket: Python dict-based packet with source info
 - ArrowPacket: Arrow table-based packet implementation
-- PythonDictTag/ArrowTag: Tag implementations for data identification
+- PythonDictTag/ArrowTag: TagProtocol implementations for data identification
 
 The module also provides utilities for schema validation, table operations,
 and type conversions between semantic stores, Python stores, and Arrow tables.
@@ -35,11 +35,11 @@ else:
     pa = LazyModule("pyarrow")
 
 # A conveniece packet-like type that defines a value that can be
-# converted to a packet. It's broader than Packet and a simple mapping
+# converted to a packet. It's broader than PacketProtocol and a simple mapping
 # from string keys to DataValue (e.g., int, float, str) can be regarded
 # as PacketLike, allowing for more flexible interfaces.
-# Anything that requires Packet-like data but without the strict features
-# of a Packet should accept PacketLike.
+# Anything that requires PacketProtocol-like data but without the strict features
+# of a PacketProtocol should accept PacketLike.
 # One should be careful when using PacketLike as a return type as it does not
 # enforce the typespec or source_info, which are important for packet integrity.
 PacketLike: TypeAlias = Mapping[str, DataValue]

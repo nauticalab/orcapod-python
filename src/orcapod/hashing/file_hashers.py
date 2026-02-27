@@ -1,7 +1,7 @@
 from orcapod.hashing.hash_utils import hash_file
 from orcapod.protocols.hashing_protocols import (
-    FileContentHasher,
-    StringCacher,
+    FileContentHasherProtocol,
+    StringCacherProtocol,
 )
 from orcapod.types import ContentHash, PathLike
 
@@ -28,8 +28,8 @@ class CachedFileHasher:
 
     def __init__(
         self,
-        file_hasher: FileContentHasher,
-        string_cacher: StringCacher,
+        file_hasher: FileContentHasherProtocol,
+        string_cacher: StringCacherProtocol,
     ):
         self.file_hasher = file_hasher
         self.string_cacher = string_cacher

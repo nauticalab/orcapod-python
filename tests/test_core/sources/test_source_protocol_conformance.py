@@ -2,12 +2,12 @@
 Protocol conformance and comprehensive functionality tests for all source implementations.
 
 Every concrete source (ArrowTableSource, DictSource, ListSource, DataFrameSource)
-must satisfy both the Pod protocol and the Stream protocol — i.e. SourcePod.
+must satisfy both the PodProtocol protocol and the StreamProtocol protocol — i.e. SourcePodProtocol.
 
 Tests are structured in three layers:
-1. Protocol conformance  — isinstance checks against Pod, Stream, SourcePod
-2. Pod-side behaviour    — uri, validate_inputs, argument_symmetry, output_schema, process
-3. Stream-side behaviour — source, upstreams, keys, output_schema, iter_packets, as_table
+1. Protocol conformance  — isinstance checks against PodProtocol, StreamProtocol, SourcePodProtocol
+2. PodProtocol-side behaviour    — uri, validate_inputs, argument_symmetry, output_schema, process
+3. StreamProtocol-side behaviour — source, upstreams, keys, output_schema, iter_packets, as_table
 """
 
 from __future__ import annotations
@@ -23,8 +23,8 @@ from orcapod.core.sources import (
     ListSource,
     RootSource,
 )
-from orcapod.protocols.core_protocols import Pod, Stream
-from orcapod.protocols.core_protocols.source_pod import SourcePod
+from orcapod.protocols.core_protocols import PodProtocol, StreamProtocol
+from orcapod.protocols.core_protocols.source_pod import SourcePodProtocol
 from orcapod.types import Schema
 
 
@@ -92,23 +92,27 @@ ALL_SOURCE_FIXTURES = ["arrow_src", "dict_src", "list_src", "df_src"]
 
 
 class TestProtocolConformance:
-    """Every source must satisfy Pod, Stream, and SourcePod at runtime."""
+    """Every source must satisfy PodProtocol, StreamProtocol, and SourcePodProtocol at runtime."""
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_is_pod(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
-        assert isinstance(src, Pod), f"{type(src).__name__} does not satisfy Pod"
+        assert isinstance(src, PodProtocol), (
+            f"{type(src).__name__} does not satisfy PodProtocol"
+        )
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_is_stream(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
-        assert isinstance(src, Stream), f"{type(src).__name__} does not satisfy Stream"
+        assert isinstance(src, StreamProtocol), (
+            f"{type(src).__name__} does not satisfy StreamProtocol"
+        )
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_is_source_pod(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
-        assert isinstance(src, SourcePod), (
-            f"{type(src).__name__} does not satisfy SourcePod"
+        assert isinstance(src, SourcePodProtocol), (
+            f"{type(src).__name__} does not satisfy SourcePodProtocol"
         )
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
@@ -118,7 +122,7 @@ class TestProtocolConformance:
 
 
 # ---------------------------------------------------------------------------
-# 2. Pod-side behaviour
+# 2. PodProtocol-side behaviour
 # ---------------------------------------------------------------------------
 
 
@@ -186,7 +190,7 @@ class TestPodOutputSchema:
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_called_with_streams_still_works(self, src_fixture, request):
-        """Pod protocol passes *streams; sources should ignore them gracefully."""
+        """PodProtocol protocol passes *streams; sources should ignore them gracefully."""
         src = request.getfixturevalue(src_fixture)
         # output_schema is called with no positional streams — same as stream protocol
         tag_schema, packet_schema = src.output_schema()
@@ -222,7 +226,7 @@ class TestPodProcess:
     def test_returns_stream(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
         result = src.process()
-        assert isinstance(result, Stream)
+        assert isinstance(result, StreamProtocol)
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_called_with_streams_raises(self, src_fixture, request):
@@ -241,7 +245,7 @@ class TestPodProcess:
 
 
 # ---------------------------------------------------------------------------
-# 3. Stream-side behaviour (via RootSource delegation)
+# 3. StreamProtocol-side behaviour (via RootSource delegation)
 # ---------------------------------------------------------------------------
 
 
@@ -288,7 +292,7 @@ class TestStreamKeys:
 
 
 class TestStreamOutputSchema:
-    """Stream-protocol output_schema (no positional args)."""
+    """StreamProtocol-protocol output_schema (no positional args)."""
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_returns_two_schemas(self, src_fixture, request):

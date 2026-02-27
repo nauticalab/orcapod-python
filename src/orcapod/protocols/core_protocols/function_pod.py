@@ -1,21 +1,23 @@
 from typing import Protocol, runtime_checkable
 
-from orcapod.protocols.core_protocols.datagrams import Packet, Tag
-from orcapod.protocols.core_protocols.packet_function import PacketFunction
-from orcapod.protocols.core_protocols.pod import Pod
+from orcapod.protocols.core_protocols.datagrams import PacketProtocol, TagProtocol
+from orcapod.protocols.core_protocols.packet_function import PacketFunctionProtocol
+from orcapod.protocols.core_protocols.pod import PodProtocol
 
 
 @runtime_checkable
-class FunctionPod(Pod, Protocol):
+class FunctionPodProtocol(PodProtocol, Protocol):
     """
-    Pod based on PacketFunction.
+    PodProtocol based on PacketFunctionProtocol.
     """
 
     @property
-    def packet_function(self) -> PacketFunction:
+    def packet_function(self) -> PacketFunctionProtocol:
         """
-        The PacketFunction that defines the computation for this FunctionPod.
+        The PacketFunctionProtocol that defines the computation for this FunctionPodProtocol.
         """
         ...
 
-    def process_packet(self, tag: Tag, packet: Packet) -> tuple[Tag, Packet | None]: ...
+    def process_packet(
+        self, tag: TagProtocol, packet: PacketProtocol
+    ) -> tuple[TagProtocol, PacketProtocol | None]: ...

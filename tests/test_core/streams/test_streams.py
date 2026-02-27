@@ -1,7 +1,7 @@
 """
 Tests for core stream implementations.
 
-Verifies that StreamBase and TableStream correctly implement the Stream protocol,
+Verifies that StreamBase and TableStream correctly implement the StreamProtocol protocol,
 and tests the core behaviour of TableStream.
 """
 
@@ -9,7 +9,7 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.streams import TableStream
-from orcapod.protocols.core_protocols.streams import Stream
+from orcapod.protocols.core_protocols.streams import StreamProtocol
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -37,14 +37,14 @@ def make_table_stream(
 
 
 class TestStreamProtocolConformance:
-    """Verify that StreamBase (via TableStream) satisfies the Stream protocol."""
+    """Verify that StreamBase (via TableStream) satisfies the StreamProtocol protocol."""
 
     def test_stream_base_is_subclass_of_stream_protocol(self):
-        """StreamBase must be a structural subtype of Stream (runtime check)."""
+        """StreamBase must be a structural subtype of StreamProtocol (runtime check)."""
         # isinstance on a Protocol checks structural conformance at method-name level
         stream = make_table_stream()
-        assert isinstance(stream, Stream), (
-            "TableStream instance does not satisfy the Stream protocol"
+        assert isinstance(stream, StreamProtocol), (
+            "TableStream instance does not satisfy the StreamProtocol protocol"
         )
 
     def test_stream_has_source_property(self):
@@ -76,7 +76,7 @@ class TestStreamProtocolConformance:
         it = stream.iter_packets()
         # must be iterable
         pair = next(it)
-        assert len(pair) == 2  # (Tag, Packet)
+        assert len(pair) == 2  # (TagProtocol, PacketProtocol)
 
     def test_stream_has_as_table_method(self):
         stream = make_table_stream()
@@ -178,12 +178,15 @@ class TestTableStreamIterPackets:
         assert len(pairs) == n
 
     def test_each_pair_has_tag_and_packet(self):
-        from orcapod.protocols.core_protocols.datagrams import Packet, Tag
+        from orcapod.protocols.core_protocols.datagrams import (
+            PacketProtocol,
+            TagProtocol,
+        )
 
         stream = make_table_stream()
         for tag, packet in stream.iter_packets():
-            assert isinstance(tag, Tag)
-            assert isinstance(packet, Packet)
+            assert isinstance(tag, TagProtocol)
+            assert isinstance(packet, PacketProtocol)
 
     def test_tag_contains_tag_column(self):
         stream = make_table_stream(tag_columns=["id"])

@@ -9,7 +9,10 @@ from typing import (
     runtime_checkable,
 )
 
-from orcapod.protocols.hashing_protocols import ContentIdentifiable, DataContextAware
+from orcapod.protocols.hashing_protocols import (
+    ContentIdentifiableProtocol,
+    DataContextAwareProtocol,
+)
 from orcapod.types import ColumnConfig, DataValue, Schema
 
 if TYPE_CHECKING:
@@ -17,7 +20,7 @@ if TYPE_CHECKING:
 
 
 @runtime_checkable
-class Datagram(ContentIdentifiable, DataContextAware, Protocol):
+class DatagramProtocol(ContentIdentifiableProtocol, DataContextAwareProtocol, Protocol):
     """
     Protocol for immutable datagram containers in Orcapod.
 
@@ -30,9 +33,9 @@ class Datagram(ContentIdentifiable, DataContextAware, Protocol):
     - **Meta columns**: Internal system metadata with {constants.META_PREFIX} (typically '__') prefixes (e.g. __processed_at, etc.)
     - **Context column**: Data context information ({constants.CONTEXT_KEY})
 
-    Derivative of datagram (such as Packet or Tag) will also include some specific columns pertinent to the function of the specialized datagram:
-    - **Source info columns**: Data provenance with {constants.SOURCE_PREFIX} ('_source_') prefixes (_source_user_id, etc.) used in Packet
-    - **System tags**: Internal tags for system use, typically prefixed with {constants.SYSTEM_TAG_PREFIX} ('_system_') (_system_created_at, etc.) used in Tag
+    Derivative of datagram (such as PacketProtocol or TagProtocol) will also include some specific columns pertinent to the function of the specialized datagram:
+    - **Source info columns**: Data provenance with {constants.SOURCE_PREFIX} ('_source_') prefixes (_source_user_id, etc.) used in PacketProtocol
+    - **System tags**: Internal tags for system use, typically prefixed with {constants.SYSTEM_TAG_PREFIX} ('_system_') (_system_created_at, etc.) used in TagProtocol
 
     All operations are by design immutable - methods return new datagram instances rather than modifying existing ones.
 
@@ -592,7 +595,7 @@ class Datagram(ContentIdentifiable, DataContextAware, Protocol):
 
 
 @runtime_checkable
-class Tag(Datagram, Protocol):
+class TagProtocol(DatagramProtocol, Protocol):
     """
     Metadata associated with each data item in a stream.
 
@@ -601,7 +604,7 @@ class Tag(Datagram, Protocol):
     helps with:
     - Data lineage tracking
     - Grouping and aggregation operations
-    - Temporal information (timestamps)
+    - TemporalProtocol information (timestamps)
     - Source identification
     - Processing context
 
@@ -631,7 +634,7 @@ class Tag(Datagram, Protocol):
 
 
 @runtime_checkable
-class Packet(Datagram, Protocol):
+class PacketProtocol(DatagramProtocol, Protocol):
     """
     The actual data payload in a stream.
 
@@ -639,12 +642,12 @@ class Packet(Datagram, Protocol):
     graph. Unlike Tags (which are metadata), Packets contain the actual
     information that computations operate on.
 
-    Packets extend Datagram with additional capabilities for:
+    Packets extend DatagramProtocol with additional capabilities for:
     - Source tracking and lineage
     - Content-based hashing for caching
     - Metadata inclusion for debugging
 
-    The distinction between Tag and Packet is crucial for understanding
+    The distinction between TagProtocol and PacketProtocol is crucial for understanding
     data flow: Tags provide context, Packets provide content.
     """
 

@@ -1,4 +1,4 @@
-from orcapod.protocols.hashing_protocols import FunctionInfoExtractor
+from orcapod.protocols.hashing_protocols import FunctionInfoExtractorProtocol
 from collections.abc import Callable
 from typing import Any, Literal
 from orcapod.types import Schema
@@ -80,7 +80,7 @@ class FunctionInfoExtractorFactory:
     @staticmethod
     def create_function_info_extractor(
         strategy: Literal["name", "signature"] = "signature",
-    ) -> FunctionInfoExtractor:
+    ) -> FunctionInfoExtractorProtocol:
         """Create a basic composite extractor."""
         if strategy == "name":
             return FunctionNameExtractor()

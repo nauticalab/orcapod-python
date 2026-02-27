@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import TableStream
-from orcapod.protocols.core_protocols import Stream
+from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.types import ColumnConfig
 from orcapod.utils.lazy_module import LazyModule
 
@@ -30,13 +30,13 @@ class Batch(UnaryOperator):
         self.batch_size = batch_size
         self.drop_partial_batch = drop_partial_batch
 
-    def validate_unary_input(self, stream: Stream) -> None:
+    def validate_unary_input(self, stream: StreamProtocol) -> None:
         """
         Batch works on any input stream, so no validation is needed.
         """
         return None
 
-    def unary_static_process(self, stream: Stream) -> Stream:
+    def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         """
         This method should be implemented by subclasses to define the specific behavior of the binary operator.
         It takes two streams as input and returns a new stream as output.
@@ -70,7 +70,7 @@ class Batch(UnaryOperator):
 
     def unary_output_schema(
         self,
-        stream: Stream,
+        stream: StreamProtocol,
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,

@@ -2,7 +2,7 @@ from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
-class Labelable(Protocol):
+class LabelableProtocol(Protocol):
     """
     Protocol for objects that can have a human-readable label.
 

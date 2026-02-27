@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING, Any, cast
 import orcapod.protocols.core_protocols.execution_engine
 from orcapod import contexts
 from orcapod.core.tracker import GraphTracker, Invocation
-from orcapod.pipeline.nodes import KernelNode, PodNode
+from orcapod.pipeline.nodes import KernelNode, PodNodeProtocol
 from orcapod.protocols import core_protocols as cp
 from orcapod.protocols import database_protocols as dbp
-from orcapod.protocols.pipeline_protocols import Node
+from orcapod.protocols.pipeline_protocols import NodeProtocol
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -73,9 +73,9 @@ class Pipeline(GraphTracker):
     def __init__(
         self,
         name: str | tuple[str, ...],
-        pipeline_database: dbp.ArrowDatabase,
-        results_database: dbp.ArrowDatabase | None = None,
-        tracker_manager: cp.TrackerManager | None = None,
+        pipeline_database: dbp.ArrowDatabaseProtocol,
+        results_database: dbp.ArrowDatabaseProtocol | None = None,
+        tracker_manager: cp.TrackerManagerProtocol | None = None,
         data_context: str | contexts.DataContext | None = None,
         auto_compile: bool = True,
     ):
@@ -94,19 +94,19 @@ class Pipeline(GraphTracker):
             self.results_store_path_prefix = self.name + ("_results",)
         self.pipeline_database = pipeline_database
         self.results_database = results_database
-        self._nodes: dict[str, Node] = {}
+        self._nodes: dict[str, NodeProtocol] = {}
         self.auto_compile = auto_compile
         self._dirty = False
         self._ordered_nodes = []  # Track order of invocations
 
     @property
-    def nodes(self) -> dict[str, Node]:
+    def nodes(self) -> dict[str, NodeProtocol]:
         return self._nodes.copy()
 
     @property
-    def function_pods(self) -> dict[str, cp.Pod]:
+    def function_pods(self) -> dict[str, cp.PodProtocol]:
         return {
-            label: cast(cp.Pod, node)
+            label: cast(cp.PodProtocol, node)
             for label, node in self._nodes.items()
             if getattr(node, "kernel_type") == "function"
         }
@@ -142,7 +142,7 @@ class Pipeline(GraphTracker):
     def record_kernel_invocation(
         self,
         kernel: cp.Kernel,
-        upstreams: tuple[cp.Stream, ...],
+        upstreams: tuple[cp.StreamProtocol, ...],
         label: str | None = None,
     ) -> None:
         super().record_kernel_invocation(kernel, upstreams, label)
@@ -150,8 +150,8 @@ class Pipeline(GraphTracker):
 
     def record_pod_invocation(
         self,
-        pod: cp.Pod,
-        upstreams: tuple[cp.Stream, ...] = (),
+        pod: cp.PodProtocol,
+        upstreams: tuple[cp.StreamProtocol, ...] = (),
         label: str | None = None,
     ) -> None:
         super().record_pod_invocation(pod, upstreams, label)
@@ -159,8 +159,8 @@ class Pipeline(GraphTracker):
 
     def record_packet_function_invocation(
         self,
-        packet_function: cp.PacketFunction,
-        input_stream: cp.Stream,
+        packet_function: cp.PacketFunctionProtocol,
+        input_stream: cp.StreamProtocol,
         label: str | None = None,
     ) -> None:
         super().record_packet_function_invocation(
@@ -273,11 +273,11 @@ class Pipeline(GraphTracker):
     def wrap_invocation(
         self,
         invocation: Invocation,
-        new_input_streams: Collection[cp.Stream],
-    ) -> Node:
+        new_input_streams: Collection[cp.StreamProtocol],
+    ) -> NodeProtocol:
         if invocation in self.invocation_to_pod_lut:
             pod = self.invocation_to_pod_lut[invocation]
-            node = PodNode(
+            node = PodNodeProtocol(
                 pod=pod,
                 input_streams=new_input_streams,
                 result_database=self.results_database,
@@ -324,14 +324,14 @@ class Pipeline(GraphTracker):
         This will update the label and the internal mapping.
         """
         if old_name not in self._nodes:
-            raise KeyError(f"Node '{old_name}' does not exist in the pipeline.")
+            raise KeyError(f"NodeProtocol '{old_name}' does not exist in the pipeline.")
         if new_name in self._nodes:
-            raise KeyError(f"Node '{new_name}' already exists in the pipeline.")
+            raise KeyError(f"NodeProtocol '{new_name}' already exists in the pipeline.")
         node = self._nodes[old_name]
         del self._nodes[old_name]
         node.label = new_name
         self._nodes[new_name] = node
-        logger.info(f"Node '{old_name}' renamed to '{new_name}'")
+        logger.info(f"NodeProtocol '{old_name}' renamed to '{new_name}'")
 
 
 class GraphRenderer:
@@ -354,8 +354,8 @@ class GraphRenderer:
         "dpi": 150,
         # HTML Label defaults
         "main_font_size": 14,  # Main label font size
-        "type_font_size": 11,  # Pod type font size (small)
-        "type_style": "normal",  # Pod type text style
+        "type_font_size": 11,  # PodProtocol type font size (small)
+        "type_style": "normal",  # PodProtocol type text style
     }
 
     DEFAULT_STYLE_RULES = {

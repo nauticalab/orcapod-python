@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import TableStream
 from orcapod.errors import InputValidationError
-from orcapod.protocols.core_protocols import Stream
+from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.lazy_module import LazyModule
@@ -29,7 +29,7 @@ class MapPackets(UnaryOperator):
         self.drop_unmapped = drop_unmapped
         super().__init__(**kwargs)
 
-    def unary_static_process(self, stream: Stream) -> Stream:
+    def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         tag_columns, packet_columns = stream.keys()
         unmapped_columns = set(packet_columns) - set(self.name_map.keys())
 
@@ -69,7 +69,7 @@ class MapPackets(UnaryOperator):
             renamed_table, tag_columns=tag_columns, source=self, upstreams=(stream,)
         )
 
-    def validate_unary_input(self, stream: Stream) -> None:
+    def validate_unary_input(self, stream: StreamProtocol) -> None:
         # verify that renamed value does NOT collide with other columns
         tag_columns, packet_columns = stream.keys()
         relevant_source = []
@@ -94,7 +94,7 @@ class MapPackets(UnaryOperator):
 
     def unary_output_schema(
         self,
-        stream: Stream,
+        stream: StreamProtocol,
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
@@ -134,7 +134,7 @@ class MapTags(UnaryOperator):
         self.drop_unmapped = drop_unmapped
         super().__init__(**kwargs)
 
-    def unary_execute(self, stream: Stream) -> Stream:
+    def unary_execute(self, stream: StreamProtocol) -> StreamProtocol:
         tag_columns, packet_columns = stream.keys()
         missing_tags = set(tag_columns) - set(self.name_map.keys())
 
@@ -165,7 +165,7 @@ class MapTags(UnaryOperator):
             renamed_table, tag_columns=new_tag_columns, source=self, upstreams=(stream,)
         )
 
-    def validate_unary_input(self, stream: Stream) -> None:
+    def validate_unary_input(self, stream: StreamProtocol) -> None:
         """
         This method should be implemented by subclasses to validate the inputs to the operator.
         It takes two streams as input and raises an error if the inputs are not valid.
@@ -192,7 +192,7 @@ class MapTags(UnaryOperator):
 
     def unary_output_schema(
         self,
-        stream: Stream,
+        stream: StreamProtocol,
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,

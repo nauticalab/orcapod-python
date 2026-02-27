@@ -7,7 +7,7 @@ if TYPE_CHECKING:
     import pyarrow as pa
 
 
-class TypeConverter(Protocol):
+class TypeConverterProtocol(Protocol):
     def python_type_to_arrow_type(self, python_type: type) -> "pa.DataType": ...
 
     def python_schema_to_arrow_schema(
@@ -51,7 +51,7 @@ class TypeConverter(Protocol):
 
 
 # Core protocols
-class SemanticStructConverter(Protocol):
+class SemanticStructConverterProtocol(Protocol):
     """Protocol for converting between Python objects and semantic structs."""
 
     @property

@@ -6,7 +6,7 @@ from typing import Any, Literal
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
 from orcapod.core.sources.base import RootSource
 from orcapod.core.streams.table_stream import TableStream
-from orcapod.protocols.core_protocols import Stream, Tag
+from orcapod.protocols.core_protocols import StreamProtocol, TagProtocol
 from orcapod.types import ColumnConfig, Schema
 
 
@@ -25,7 +25,7 @@ class ListSource(RootSource):
     Parameters
     ----------
     name:
-        Packet column name under which each list element is stored.
+        PacketProtocol column name under which each list element is stored.
     data:
         The list of elements.
     tag_function:
@@ -46,7 +46,7 @@ class ListSource(RootSource):
         self,
         name: str,
         data: list[Any],
-        tag_function: Callable[[Any, int], dict[str, Any] | Tag] | None = None,
+        tag_function: Callable[[Any, int], dict[str, Any] | TagProtocol] | None = None,
         expected_tag_keys: Collection[str] | None = None,
         tag_function_hash_mode: Literal["content", "signature", "name"] = "name",
         **kwargs: Any,
@@ -75,7 +75,7 @@ class ListSource(RootSource):
         for idx, element in enumerate(self._elements):
             tag_fields = tag_function(element, idx)
             if hasattr(tag_fields, "as_dict"):
-                tag_fields = tag_fields.as_dict()  # Tag protocol → plain dict
+                tag_fields = tag_fields.as_dict()  # TagProtocol protocol → plain dict
             row = dict(tag_fields)
             row[name] = element
             rows.append(row)
@@ -122,12 +122,14 @@ class ListSource(RootSource):
 
     def output_schema(
         self,
-        *streams: Stream,
+        *streams: StreamProtocol,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
         return self._arrow_source.output_schema(columns=columns, all_info=all_info)
 
-    def process(self, *streams: Stream, label: str | None = None) -> TableStream:
+    def process(
+        self, *streams: StreamProtocol, label: str | None = None
+    ) -> TableStream:
         self.validate_inputs(*streams)
         return self._arrow_source.process()

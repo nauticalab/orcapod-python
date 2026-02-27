@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, TypeAlias
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import TableStream
 from orcapod.errors import InputValidationError
-from orcapod.protocols.core_protocols import Stream
+from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.lazy_module import LazyModule
@@ -42,7 +42,7 @@ class PolarsFilter(UnaryOperator):
         self.constraints = constraints if constraints is not None else {}
         super().__init__(**kwargs)
 
-    def unary_static_process(self, stream: Stream) -> Stream:
+    def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         if len(self.predicates) == 0 and len(self.constraints) == 0:
             logger.info(
                 "No predicates or constraints specified. Returning stream unaltered."
@@ -63,7 +63,7 @@ class PolarsFilter(UnaryOperator):
             upstreams=(stream,),
         )
 
-    def validate_unary_input(self, stream: Stream) -> None:
+    def validate_unary_input(self, stream: StreamProtocol) -> None:
         """
         This method should be implemented by subclasses to validate the inputs to the operator.
         It takes two streams as input and raises an error if the inputs are not valid.
@@ -73,7 +73,7 @@ class PolarsFilter(UnaryOperator):
 
     def unary_output_schema(
         self,
-        stream: Stream,
+        stream: StreamProtocol,
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
@@ -102,7 +102,7 @@ class SelectPacketColumns(UnaryOperator):
         self.strict = strict
         super().__init__(**kwargs)
 
-    def unary_static_process(self, stream: Stream) -> Stream:
+    def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         tag_columns, packet_columns = stream.keys()
         packet_columns_to_drop = [c for c in packet_columns if c not in self.columns]
         new_packet_columns = [
@@ -131,7 +131,7 @@ class SelectPacketColumns(UnaryOperator):
             upstreams=(stream,),
         )
 
-    def validate_unary_input(self, stream: Stream) -> None:
+    def validate_unary_input(self, stream: StreamProtocol) -> None:
         """
         This method should be implemented by subclasses to validate the inputs to the operator.
         It takes two streams as input and raises an error if the inputs are not valid.
@@ -147,7 +147,7 @@ class SelectPacketColumns(UnaryOperator):
 
     def unary_output_schema(
         self,
-        stream: Stream,
+        stream: StreamProtocol,
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,

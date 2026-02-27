@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.sources.base import RootSource
 from orcapod.core.streams.table_stream import TableStream
 from orcapod.errors import FieldNotResolvableError
-from orcapod.protocols.core_protocols import Stream
+from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils import arrow_data_utils
@@ -218,12 +218,14 @@ class ArrowTableSource(RootSource):
 
     def output_schema(
         self,
-        *streams: Stream,
+        *streams: StreamProtocol,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
         return self._stream.output_schema(columns=columns, all_info=all_info)
 
-    def process(self, *streams: Stream, label: str | None = None) -> TableStream:
+    def process(
+        self, *streams: StreamProtocol, label: str | None = None
+    ) -> TableStream:
         self.validate_inputs(*streams)
         return self._stream

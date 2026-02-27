@@ -2,9 +2,9 @@
 Tests for the function_pod decorator.
 
 Covers:
-- Pod attachment and protocol conformance
+- PodProtocol attachment and protocol conformance
 - Original callable preserved
-- Pod properties (name, version, output keys, URI)
+- PodProtocol properties (name, version, output keys, URI)
 - Lambda rejection
 - End-to-end processing via pod.process() and pod()
 """
@@ -14,8 +14,8 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from orcapod.core.function_pod import FunctionPodStream, SimpleFunctionPod, function_pod
-from orcapod.protocols.core_protocols import FunctionPod, Stream
+from orcapod.core.function_pod import FunctionPodStream, FunctionPod, function_pod
+from orcapod.protocols.core_protocols import FunctionPodProtocol, StreamProtocol
 
 from ..conftest import make_int_stream
 from orcapod.core.streams import TableStream
@@ -38,7 +38,7 @@ def renamed(x: int) -> int:
 
 
 # ---------------------------------------------------------------------------
-# 1. Pod attachment
+# 1. PodProtocol attachment
 # ---------------------------------------------------------------------------
 
 
@@ -47,10 +47,10 @@ class TestFunctionPodDecoratorAttachment:
         assert hasattr(triple, "pod")
 
     def test_pod_attribute_is_simple_function_pod(self):
-        assert isinstance(triple.pod, SimpleFunctionPod)
+        assert isinstance(triple.pod, FunctionPod)
 
     def test_pod_satisfies_function_pod_protocol(self):
-        assert isinstance(triple.pod, FunctionPod)
+        assert isinstance(triple.pod, FunctionPodProtocol)
 
     def test_decorated_function_is_still_callable(self):
         assert callable(triple)
@@ -60,7 +60,7 @@ class TestFunctionPodDecoratorAttachment:
 
 
 # ---------------------------------------------------------------------------
-# 2. Pod properties
+# 2. PodProtocol properties
 # ---------------------------------------------------------------------------
 
 
@@ -107,7 +107,7 @@ class TestFunctionPodDecoratorEndToEnd:
         assert isinstance(triple.pod.process(make_int_stream(n=3)), FunctionPodStream)
 
     def test_pod_process_output_satisfies_stream_protocol(self):
-        assert isinstance(triple.pod.process(make_int_stream(n=3)), Stream)
+        assert isinstance(triple.pod.process(make_int_stream(n=3)), StreamProtocol)
 
     def test_pod_process_correct_values(self):
         for i, (_, packet) in enumerate(

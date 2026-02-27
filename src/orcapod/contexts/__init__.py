@@ -168,27 +168,27 @@ def get_default_context() -> DataContext:
     return resolve_context()
 
 
-def get_default_object_hasher() -> hp.SemanticHasher:
+def get_default_object_hasher() -> hp.SemanticHasherProtocol:
     """
     Get the default object hasher.
 
     Returns:
-        SemanticHasher instance for the default context
+        SemanticHasherProtocol instance for the default context
     """
     return get_default_context().semantic_hasher
 
 
-def get_default_arrow_hasher() -> hp.ArrowHasher:
+def get_default_arrow_hasher() -> hp.ArrowHasherProtocol:
     """
     Get the default arrow hasher.
 
     Returns:
-        ArrowHasher instance for the default context
+        ArrowHasherProtocol instance for the default context
     """
     return get_default_context().arrow_hasher
 
 
-def get_default_type_converter() -> "sp.TypeConverter":
+def get_default_type_converter() -> "sp.TypeConverterProtocol":
     """
     Get the default type converter.
 

@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 
 @runtime_checkable
-class DataContextAware(Protocol):
+class DataContextAwareProtocol(Protocol):
     """Protocol for objects aware of their data context."""
 
     @property
@@ -25,14 +25,14 @@ class DataContextAware(Protocol):
 
 
 @runtime_checkable
-class ContentIdentifiable(Protocol):
+class ContentIdentifiableProtocol(Protocol):
     """
     Protocol for objects that can express their semantic identity as a plain
     Python structure.
 
     This is the only method a class needs to implement to participate in the
     content-based hashing system. The returned structure is recursively
-    resolved by the SemanticHasher -- any nested ContentIdentifiable objects
+    resolved by the SemanticHasherProtocol -- any nested ContentIdentifiableProtocol objects
     within the structure will themselves be expanded and hashed, producing a
     Merkle-tree-like composition of hashes.
 
@@ -48,12 +48,12 @@ class ContentIdentifiable(Protocol):
         The returned value may be any Python object:
           - Primitives (str, int, float, bool, None) are used as-is.
           - Collections (list, dict, set, tuple) are recursively traversed.
-          - Nested ContentIdentifiable objects are recursively resolved by
-            the SemanticHasher: their identity structure is hashed to a
+          - Nested ContentIdentifiableProtocol objects are recursively resolved by
+            the SemanticHasherProtocol: their identity structure is hashed to a
             ContentHash hex token, which is then embedded in place of the
             object in the parent structure.
-          - Any type that has a registered TypeHandler in the
-            SemanticHasher's registry is handled by that handler.
+          - Any type that has a registered TypeHandlerProtocol in the
+            SemanticHasherProtocol's registry is handled by that handler.
 
         Returns:
             Any: A structure representing this object's semantic content.
@@ -70,11 +70,11 @@ class ContentIdentifiable(Protocol):
         ...
 
 
-class TypeHandler(Protocol):
+class TypeHandlerProtocol(Protocol):
     """
-    Protocol for type-specific serialization handlers used by SemanticHasher.
+    Protocol for type-specific serialization handlers used by SemanticHasherProtocol.
 
-    A TypeHandler converts a specific Python type into a value that
+    A TypeHandlerProtocol converts a specific Python type into a value that
     ``hash_object`` can process.  Handlers are registered with a
     TypeHandlerRegistry and looked up via MRO-aware resolution.
 
@@ -86,27 +86,27 @@ class TypeHandler(Protocol):
       - A ContentHash -- treated as a terminal; returned as-is without
         re-hashing.  Use this when the handler has already computed the
         definitive hash of the object (e.g. hashing a file's content).
-      - A ContentIdentifiable -- its identity_structure() will be called.
+      - A ContentIdentifiableProtocol -- its identity_structure() will be called.
       - Another registered type -- dispatched through the registry.
     """
 
-    def handle(self, obj: Any, hasher: "SemanticHasher") -> Any:
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         """
         Convert *obj* into a value that ``hash_object`` can process.
 
         Args:
             obj:    The object to handle.
-            hasher: The SemanticHasher, available if the handler needs to
+            hasher: The SemanticHasherProtocol, available if the handler needs to
                     hash sub-objects explicitly via ``hasher.hash_object()``.
 
         Returns:
             Any value accepted by ``hash_object``: a primitive, structure,
-            ContentHash, ContentIdentifiable, or another registered type.
+            ContentHash, ContentIdentifiableProtocol, or another registered type.
         """
         ...
 
 
-class SemanticHasher(Protocol):
+class SemanticHasherProtocol(Protocol):
     """
     Protocol for the semantic content-based hasher.
 
@@ -117,7 +117,7 @@ class SemanticHasher(Protocol):
       - Primitive          → JSON-serialised and hashed directly
       - Structure          → structurally expanded (type-tagged), then hashed
       - Handler match      → handler.handle() returns a new value; recurse
-      - ContentIdentifiable→ identity_structure() returns a value; recurse
+      - ContentIdentifiableProtocol→ identity_structure() returns a value; recurse
       - Unknown            → TypeError (strict) or best-effort string (lenient)
 
     Containers are type-tagged before hashing so that list, tuple, dict, set,
@@ -152,13 +152,13 @@ class SemanticHasher(Protocol):
         ...
 
 
-class FileContentHasher(Protocol):
+class FileContentHasherProtocol(Protocol):
     """Protocol for file-related hashing."""
 
     def hash_file(self, file_path: PathLike) -> ContentHash: ...
 
 
-class ArrowHasher(Protocol):
+class ArrowHasherProtocol(Protocol):
     """Protocol for hashing arrow packets."""
 
     def get_hasher_id(self) -> str: ...
@@ -168,7 +168,7 @@ class ArrowHasher(Protocol):
     ) -> ContentHash: ...
 
 
-class StringCacher(Protocol):
+class StringCacherProtocol(Protocol):
     """Protocol for caching string key value pairs."""
 
     def get_cached(self, cache_key: str) -> str | None: ...
@@ -176,7 +176,7 @@ class StringCacher(Protocol):
     def clear_cache(self) -> None: ...
 
 
-class FunctionInfoExtractor(Protocol):
+class FunctionInfoExtractorProtocol(Protocol):
     """Protocol for extracting function information."""
 
     def extract_function_info(
@@ -190,7 +190,7 @@ class FunctionInfoExtractor(Protocol):
     ) -> dict[str, Any]: ...
 
 
-class SemanticTypeHasher(Protocol):
+class SemanticTypeHasherProtocol(Protocol):
     """Abstract base class for semantic type-specific hashers."""
 
     @property
@@ -205,6 +205,6 @@ class SemanticTypeHasher(Protocol):
         """Hash a column with this semantic type and return the hash bytes an an array"""
         ...
 
-    def set_cacher(self, cacher: StringCacher) -> None:
+    def set_cacher(self, cacher: StringCacherProtocol) -> None:
         """Add a string cacher for caching hash values."""
         ...

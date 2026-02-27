@@ -170,7 +170,7 @@ class ContentIdentifiableMixin:
         """
         Compare this object to *other* based on content hash equality.
 
-        Two ContentIdentifiable objects are considered equal if and only if
+        Two ContentIdentifiableProtocol objects are considered equal if and only if
         their content hashes are identical.  Objects of a different type that
         do not inherit ContentIdentifiableMixin are never equal to a mixin
         instance (returns NotImplemented to allow the other object to decide).

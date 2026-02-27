@@ -86,7 +86,7 @@ class DeltaTableSource(SourceBase):
             "tag_columns": self._tag_columns,
         }
 
-    def validate_inputs(self, *streams: cp.Stream) -> None:
+    def validate_inputs(self, *streams: cp.StreamProtocol) -> None:
         """Delta table sources don't take input streams."""
         if len(streams) > 0:
             raise ValueError(
@@ -100,7 +100,7 @@ class DeltaTableSource(SourceBase):
         # Create a sample stream to get types
         return self.forward().types(include_system_tags=include_system_tags)
 
-    def forward(self, *streams: cp.Stream) -> cp.Stream:
+    def forward(self, *streams: cp.StreamProtocol) -> cp.StreamProtocol:
         """
         Generate stream from Delta table data.
 

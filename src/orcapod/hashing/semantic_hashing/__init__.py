@@ -4,15 +4,15 @@ orcapod.hashing.semantic_hashing
 Sub-package containing all components of the semantic hashing system:
 
   BaseSemanticHasher          -- content-based recursive object hasher
-  TypeHandlerRegistry         -- MRO-aware registry mapping types → TypeHandler
+  TypeHandlerRegistry         -- MRO-aware registry mapping types → TypeHandlerProtocol
   BuiltinTypeHandlerRegistry  -- pre-populated registry with built-in handlers
   ContentIdentifiableMixin    -- convenience mixin for content-identifiable objects
 
-Built-in TypeHandler implementations:
+Built-in TypeHandlerProtocol implementations:
   PathContentHandler          -- pathlib.Path  → file-content hash
   UUIDHandler                 -- uuid.UUID     → canonical string
   BytesHandler                -- bytes/bytearray → hex string
-  FunctionHandler             -- callable      → via FunctionInfoExtractor
+  FunctionHandler             -- callable      → via FunctionInfoExtractorProtocol
   TypeObjectHandler           -- type objects  → "type:<module>.<qualname>"
   register_builtin_handlers   -- populate a registry with all of the above
 

@@ -1,5 +1,5 @@
 """
-Tests for InMemoryArrowDatabase against the ArrowDatabase protocol.
+Tests for InMemoryArrowDatabase against the ArrowDatabaseProtocol protocol.
 
 Mirrors test_delta_table_database.py — same behavioural assertions, no filesystem.
 """
@@ -10,7 +10,7 @@ import pyarrow as pa
 import pytest
 
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.protocols.database_protocols import ArrowDatabase
+from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ def make_table(**columns: list) -> pa.Table:
 
 class TestProtocolConformance:
     def test_satisfies_arrow_database_protocol(self, db):
-        assert isinstance(db, ArrowDatabase)
+        assert isinstance(db, ArrowDatabaseProtocol)
 
     def test_has_add_record(self, db):
         assert callable(db.add_record)

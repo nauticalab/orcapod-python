@@ -1,8 +1,11 @@
 # Collection of functions to work with Arrow table data that underlies streams and/or datagrams
-from orcapod.utils.lazy_module import LazyModule
-from typing import TYPE_CHECKING
-from orcapod.system_constants import constants
+from __future__ import annotations
+
 from collections.abc import Collection
+from typing import TYPE_CHECKING
+
+from orcapod.system_constants import constants
+from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -11,10 +14,10 @@ else:
 
 
 def drop_columns_with_prefix(
-    table: "pa.Table",
+    table: pa.Table,
     prefix: str | tuple[str, ...],
     exclude_columns: Collection[str] = (),
-) -> "pa.Table":
+) -> pa.Table:
     """Drop columns with a specific prefix from an Arrow table."""
     columns_to_drop = [
         col
@@ -25,16 +28,16 @@ def drop_columns_with_prefix(
 
 
 def drop_system_columns(
-    table: "pa.Table",
+    table: pa.Table,
     system_column_prefix: tuple[str, ...] = (
         constants.META_PREFIX,
         constants.DATAGRAM_PREFIX,
     ),
-) -> "pa.Table":
+) -> pa.Table:
     return drop_columns_with_prefix(table, system_column_prefix)
 
 
-def get_system_columns(table: "pa.Table") -> "pa.Table":
+def get_system_columns(table: pa.Table) -> pa.Table:
     """Get system columns from an Arrow table."""
     return table.select(
         [
@@ -46,10 +49,10 @@ def get_system_columns(table: "pa.Table") -> "pa.Table":
 
 
 def add_system_tag_column(
-    table: "pa.Table",
+    table: pa.Table,
     system_tag_column_name: str,
     system_tag_values: str | Collection[str],
-) -> "pa.Table":
+) -> pa.Table:
     """Add a system tags column to an Arrow table."""
     if not table.column_names:
         raise ValueError("Table is empty")
@@ -69,7 +72,7 @@ def add_system_tag_column(
     return table.append_column(system_tag_column_name, tags_column)
 
 
-def append_to_system_tags(table: "pa.Table", value: str) -> "pa.Table":
+def append_to_system_tags(table: pa.Table, value: str) -> pa.Table:
     """Append a value to the system tags column in an Arrow table."""
     if not table.column_names:
         raise ValueError("Table is empty")
@@ -82,14 +85,14 @@ def append_to_system_tags(table: "pa.Table", value: str) -> "pa.Table":
 
 
 def add_source_info(
-    table: "pa.Table",
+    table: pa.Table,
     source_info: str | Collection[str] | None,
     exclude_prefixes: Collection[str] = (
         constants.META_PREFIX,
         constants.DATAGRAM_PREFIX,
     ),
     exclude_columns: Collection[str] = (),
-) -> "pa.Table":
+) -> pa.Table:
     """Add source information to an Arrow table."""
     # Create a new column with the source information
     if source_info is None or isinstance(source_info, str):

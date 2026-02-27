@@ -39,7 +39,7 @@ class CSVSource(SourceBase):
     def source_identity_structure(self) -> Any:
         return (self.__class__.__name__, self.source_id, tuple(self.tag_columns))
 
-    def forward(self, *streams: cp.Stream) -> cp.Stream:
+    def forward(self, *streams: cp.StreamProtocol) -> cp.StreamProtocol:
         """
         Load data from file and return a static stream.
 

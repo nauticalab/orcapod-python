@@ -26,16 +26,16 @@ def get_default_type_handler_registry() -> TypeHandlerRegistry:
     return get_default_context().type_handler_registry
 
 
-def get_default_semantic_hasher() -> hp.SemanticHasher:
+def get_default_semantic_hasher() -> hp.SemanticHasherProtocol:
     """
-    Return the SemanticHasher from the default data context.
+    Return the SemanticHasherProtocol from the default data context.
 
     The hasher is owned by the active DataContext and is therefore consistent
     with all other versioned components (arrow hasher, type converter, etc.)
     that belong to the same context.
 
     Returns:
-        SemanticHasher: The object hasher from the default data context.
+        SemanticHasherProtocol: The object hasher from the default data context.
     """
     # Late import to avoid circular dependencies: contexts imports from
     # protocols and hashing, so we must not import contexts at module level
@@ -45,29 +45,29 @@ def get_default_semantic_hasher() -> hp.SemanticHasher:
     return get_default_context().semantic_hasher
 
 
-def get_default_object_hasher() -> hp.SemanticHasher:
+def get_default_object_hasher() -> hp.SemanticHasherProtocol:
     """
-    Return the SemanticHasher from the default data context.
+    Return the SemanticHasherProtocol from the default data context.
 
     Alias for ``get_default_semantic_hasher()``, kept so that existing
     call-sites that reference ``get_default_object_hasher`` continue to
     work without modification.
 
     Returns:
-        SemanticHasher: The object hasher from the default data context.
+        SemanticHasherProtocol: The object hasher from the default data context.
     """
     return get_default_semantic_hasher()
 
 
 def get_default_arrow_hasher(
-    cache_file_hash: bool | hp.StringCacher = True,
-) -> hp.ArrowHasher:
+    cache_file_hash: bool | hp.StringCacherProtocol = True,
+) -> hp.ArrowHasherProtocol:
     """
-    Return the ArrowHasher from the default data context.
+    Return the ArrowHasherProtocol from the default data context.
 
-    If ``cache_file_hash`` is True an in-memory StringCacher is attached to
+    If ``cache_file_hash`` is True an in-memory StringCacherProtocol is attached to
     the hasher so that repeated hashes of the same file path are served from
-    cache.  Pass a ``StringCacher`` instance to use a custom caching backend
+    cache.  Pass a ``StringCacherProtocol`` instance to use a custom caching backend
     (e.g. SQLite-backed).
 
     Note: caching is applied on top of the context's arrow hasher each time
@@ -76,11 +76,11 @@ def get_default_arrow_hasher(
 
     Args:
         cache_file_hash: True to use an ephemeral in-memory cache, a
-            StringCacher instance to use a custom cache, or False/None to
+            StringCacherProtocol instance to use a custom cache, or False/None to
             disable caching.
 
     Returns:
-        ArrowHasher: The arrow hasher from the default data context,
+        ArrowHasherProtocol: The arrow hasher from the default data context,
             optionally with file-hash caching attached.
     """
     from typing import Any
@@ -93,12 +93,12 @@ def get_default_arrow_hasher(
         from orcapod.hashing.string_cachers import InMemoryCacher
 
         if cache_file_hash is True:
-            string_cacher: hp.StringCacher = InMemoryCacher(max_size=None)
+            string_cacher: hp.StringCacherProtocol = InMemoryCacher(max_size=None)
         else:
             string_cacher = cache_file_hash
 
         # set_cacher is present on SemanticArrowHasher but not on the
-        # ArrowHasher protocol, so we call it via Any to avoid a type error.
+        # ArrowHasherProtocol protocol, so we call it via Any to avoid a type error.
         arrow_hasher.set_cacher("path", string_cacher)
 
     return arrow_hasher

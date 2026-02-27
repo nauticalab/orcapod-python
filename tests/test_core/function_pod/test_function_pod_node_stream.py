@@ -20,10 +20,10 @@ import pytest
 from collections.abc import Mapping
 
 from orcapod.core.function_pod import FunctionPodNode, FunctionPodNodeStream
-from orcapod.core.packet_function import PacketFunction, PythonPacketFunction
+from orcapod.core.packet_function import PacketFunctionProtocol, PythonPacketFunction
 from orcapod.core.streams import TableStream
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.protocols.core_protocols import Stream
+from orcapod.protocols.core_protocols import StreamProtocol
 
 from ..conftest import make_int_stream
 

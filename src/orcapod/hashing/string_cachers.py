@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from orcapod.protocols.hashing_protocols import StringCacher
+from orcapod.protocols.hashing_protocols import StringCacherProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -14,14 +14,14 @@ if TYPE_CHECKING:
     import redis
 
 
-class TransferCacher(StringCacher):
+class TransferCacher(StringCacherProtocol):
     """
     Takes two string cachers as source and destination. Everytime a cached value is retrieved from source,
     the value is also set in the destination cacher.
     This is useful for transferring cached values between different caching mechanisms.
     """
 
-    def __init__(self, source: StringCacher, destination: StringCacher):
+    def __init__(self, source: StringCacherProtocol, destination: StringCacherProtocol):
         """
         Initialize the TransferCacher.
 
@@ -68,7 +68,7 @@ class TransferCacher(StringCacher):
         self.destination.clear_cache()
 
 
-class InMemoryCacher(StringCacher):
+class InMemoryCacher(StringCacherProtocol):
     """Thread-safe in-memory LRU cache."""
 
     def __init__(self, max_size: int | None = 1000):
@@ -108,7 +108,7 @@ class InMemoryCacher(StringCacher):
             self._access_order.clear()
 
 
-class FileCacher(StringCacher):
+class FileCacher(StringCacherProtocol):
     """File-based cacher with eventual consistency between memory and disk."""
 
     def __init__(
@@ -270,7 +270,7 @@ class FileCacher(StringCacher):
             self._sync_to_file()
 
 
-class SQLiteCacher(StringCacher):
+class SQLiteCacher(StringCacherProtocol):
     """SQLite-based cacher with in-memory LRU and database persistence."""
 
     def __init__(
@@ -579,7 +579,7 @@ class SQLiteCacher(StringCacher):
             pass  # Avoid exceptions in destructor
 
 
-class RedisCacher(StringCacher):
+class RedisCacher(StringCacherProtocol):
     """Redis-based cacher with graceful failure handling."""
 
     def __init__(

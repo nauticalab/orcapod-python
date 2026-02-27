@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod.core.base import TraceableBase
 from orcapod.errors import FieldNotResolvableError
-from orcapod.protocols.core_protocols import Stream
+from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.types import ColumnConfig, Schema
 
 if TYPE_CHECKING:
@@ -17,17 +17,17 @@ class RootSource(TraceableBase):
     """
     Abstract base class for all sources in Orcapod.
 
-    A RootSource is a Pod that takes no input streams — it is the root of a
+    A RootSource is a PodProtocol that takes no input streams — it is the root of a
     computational graph, producing data from an external source (file, database,
     in-memory data, etc.).
 
-    It simultaneously satisfies both the Pod protocol and the Stream protocol:
+    It simultaneously satisfies both the PodProtocol protocol and the StreamProtocol protocol:
 
-    - As a Pod:  ``process()`` is called with no input streams and returns a
-      Stream.  ``validate_inputs`` rejects any provided streams.
+    - As a PodProtocol:  ``process()`` is called with no input streams and returns a
+      StreamProtocol.  ``validate_inputs`` rejects any provided streams.
       ``argument_symmetry`` always returns an empty ordered group.
 
-    - As a Stream: all stream methods (``keys``, ``output_schema``,
+    - As a StreamProtocol: all stream methods (``keys``, ``output_schema``,
       ``iter_packets``, ``as_table``) delegate straight through to
       ``self.process()``.  ``source`` returns ``self``; ``upstreams`` is always
       empty.  No caching is performed at this level — caching is the
@@ -51,7 +51,7 @@ class RootSource(TraceableBase):
     that back addressable data should override it.
 
     Concrete subclasses must implement:
-    - ``process(*streams, label=None) -> Stream``
+    - ``process(*streams, label=None) -> StreamProtocol``
     - ``output_schema(*streams, columns=..., all_info=...) -> tuple[Schema, Schema]``
     - ``identity_structure() -> Any``  (required by TraceableBase)
     """
@@ -112,14 +112,14 @@ class RootSource(TraceableBase):
         )
 
     # -------------------------------------------------------------------------
-    # Pod protocol
+    # PodProtocol protocol
     # -------------------------------------------------------------------------
 
     @property
     def uri(self) -> tuple[str, ...]:
         return (self.__class__.__name__, self.content_hash().to_hex())
 
-    def validate_inputs(self, *streams: Stream) -> None:
+    def validate_inputs(self, *streams: StreamProtocol) -> None:
         """Sources accept no input streams."""
         if streams:
             raise ValueError(
@@ -127,7 +127,7 @@ class RootSource(TraceableBase):
                 f"but {len(streams)} stream(s) were provided."
             )
 
-    def argument_symmetry(self, streams: Collection[Stream]) -> tuple[()]:
+    def argument_symmetry(self, streams: Collection[StreamProtocol]) -> tuple[()]:
         """Sources have no input arguments."""
         if streams:
             raise ValueError(
@@ -138,24 +138,26 @@ class RootSource(TraceableBase):
     @abstractmethod
     def output_schema(
         self,
-        *streams: Stream,
+        *streams: StreamProtocol,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
         """
         Return the (tag_schema, packet_schema) for this source.
 
-        Compatible with both the Pod protocol (which passes ``*streams``) and
-        the Stream protocol (which passes no positional arguments).  Concrete
+        Compatible with both the PodProtocol protocol (which passes ``*streams``) and
+        the StreamProtocol protocol (which passes no positional arguments).  Concrete
         implementations should ignore ``streams`` — it will always be empty for
         a source.
         """
         ...
 
     @abstractmethod
-    def process(self, *streams: Stream, label: str | None = None) -> Stream:
+    def process(
+        self, *streams: StreamProtocol, label: str | None = None
+    ) -> StreamProtocol:
         """
-        Return a Stream representing the current state of this source.
+        Return a StreamProtocol representing the current state of this source.
 
         Concrete subclasses choose their own execution and caching model.
         This method is called with no input streams.
@@ -163,7 +165,7 @@ class RootSource(TraceableBase):
         ...
 
     # -------------------------------------------------------------------------
-    # Stream protocol — pure delegation to self.process()
+    # StreamProtocol protocol — pure delegation to self.process()
     # -------------------------------------------------------------------------
 
     @property
@@ -172,7 +174,7 @@ class RootSource(TraceableBase):
         return self
 
     @property
-    def upstreams(self) -> tuple[Stream, ...]:
+    def upstreams(self) -> tuple[StreamProtocol, ...]:
         """Sources have no upstream dependencies."""
         return ()
 

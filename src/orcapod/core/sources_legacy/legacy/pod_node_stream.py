@@ -35,7 +35,7 @@
 #     """
 
 #     # TODO: define interface for storage or pod storage
-#     def __init__(self, pod_node: pp.PodNode, input_stream: cp.Stream, **kwargs):
+#     def __init__(self, pod_node: pp.PodNodeProtocol, input_stream: cp.StreamProtocol, **kwargs):
 #         super().__init__(source=pod_node, upstreams=(input_stream,), **kwargs)
 #         self.pod_node = pod_node
 #         self.input_stream = input_stream
@@ -44,8 +44,8 @@
 #         self._prepared_stream_iterator = input_stream.iter_packets()
 #         self._set_modified_time()  # set modified time to when we obtain the iterator
 
-#         # Packet-level caching (from your PodStream)
-#         self._cached_output_packets: list[tuple[cp.Tag, cp.Packet | None]] | None = None
+#         # PacketProtocol-level caching (from your PodStream)
+#         self._cached_output_packets: list[tuple[cp.TagProtocol, cp.PacketProtocol | None]] | None = None
 #         self._cached_output_table: pa.Table | None = None
 #         self._cached_content_hash_column: pa.Array | None = None
 
@@ -108,8 +108,8 @@
 #         | None = None,
 #         execution_engine_opts: dict[str, Any] | None = None,
 #         **kwargs: Any,
-#     ) -> tuple[list[tuple[cp.Tag, cp.Packet | None]], pa.Table | None]:
-#         cached_results: list[tuple[cp.Tag, cp.Packet | None]] = []
+#     ) -> tuple[list[tuple[cp.TagProtocol, cp.PacketProtocol | None]], pa.Table | None]:
+#         cached_results: list[tuple[cp.TagProtocol, cp.PacketProtocol | None]] = []
 
 #         # identify all entries in the input stream for which we still have not computed packets
 #         if len(args) > 0 or len(kwargs) > 0:
@@ -200,7 +200,7 @@
 #         )
 
 #         if missing is not None and missing.num_rows > 0:
-#             packet_record_to_output_lut: dict[str, cp.Packet | None] = {}
+#             packet_record_to_output_lut: dict[str, cp.PacketProtocol | None] = {}
 #             execution_engine_hash = (
 #                 execution_engine.name if execution_engine is not None else "default"
 #             )
@@ -250,7 +250,7 @@
 #         self,
 #         execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine,
 #         execution_engine_opts: dict[str, Any] | None = None,
-#     ) -> Iterator[tuple[cp.Tag, cp.Packet]]:
+#     ) -> Iterator[tuple[cp.TagProtocol, cp.PacketProtocol]]:
 #         """
 #         Processes the input stream and prepares the output stream.
 #         This is typically called before iterating over the packets.

@@ -30,7 +30,7 @@ class InvocationBase(TrackedKernelBase, StatefulStreamBase):
 
     @abstractmethod
     def kernel_identity_structure(
-        self, streams: Collection[cp.Stream] | None = None
+        self, streams: Collection[cp.StreamProtocol] | None = None
     ) -> Any: ...
 
     # Redefine the reference to ensure subclass would provide a concrete implementation
@@ -44,7 +44,7 @@ class InvocationBase(TrackedKernelBase, StatefulStreamBase):
 
     # The following are inherited from TrackedKernelBase as abstract methods.
     # @abstractmethod
-    # def forward(self, *streams: dp.Stream) -> dp.Stream:
+    # def forward(self, *streams: dp.StreamProtocol) -> dp.StreamProtocol:
     #     """
     #     Pure computation: return a static snapshot of the data.
 
@@ -55,17 +55,17 @@ class InvocationBase(TrackedKernelBase, StatefulStreamBase):
     #     ...
 
     # @abstractmethod
-    # def kernel_output_types(self, *streams: dp.Stream) -> tuple[TypeSpec, TypeSpec]:
+    # def kernel_output_types(self, *streams: dp.StreamProtocol) -> tuple[TypeSpec, TypeSpec]:
     #     """Return the tag and packet types this source produces."""
     #     ...
 
     # @abstractmethod
     # def kernel_identity_structure(
-    #     self, streams: Collection[dp.Stream] | None = None
+    #     self, streams: Collection[dp.StreamProtocol] | None = None
     # ) -> dp.Any: ...
 
     def prepare_output_stream(
-        self, *streams: cp.Stream, label: str | None = None
+        self, *streams: cp.StreamProtocol, label: str | None = None
     ) -> KernelStream:
         if self._cached_kernel_stream is None:
             self._cached_kernel_stream = super().prepare_output_stream(
@@ -73,10 +73,12 @@ class InvocationBase(TrackedKernelBase, StatefulStreamBase):
             )
         return self._cached_kernel_stream
 
-    def track_invocation(self, *streams: cp.Stream, label: str | None = None) -> None:
+    def track_invocation(
+        self, *streams: cp.StreamProtocol, label: str | None = None
+    ) -> None:
         raise NotImplementedError("Behavior for track invocation is not determined")
 
-    # ==================== Stream Protocol (Delegation) ====================
+    # ==================== StreamProtocol Protocol (Delegation) ====================
 
     @property
     def source(self) -> cp.Kernel | None:
@@ -84,7 +86,7 @@ class InvocationBase(TrackedKernelBase, StatefulStreamBase):
         return self
 
     # @property
-    # def upstreams(self) -> tuple[cp.Stream, ...]: ...
+    # def upstreams(self) -> tuple[cp.StreamProtocol, ...]: ...
 
     def keys(
         self, include_system_tags: bool = False
@@ -106,7 +108,7 @@ class InvocationBase(TrackedKernelBase, StatefulStreamBase):
         """Delegate to the cached KernelStream."""
         return self().is_current
 
-    def __iter__(self) -> Iterator[tuple[cp.Tag, cp.Packet]]:
+    def __iter__(self) -> Iterator[tuple[cp.TagProtocol, cp.PacketProtocol]]:
         """
         Iterate over the cached KernelStream.
 
@@ -119,7 +121,7 @@ class InvocationBase(TrackedKernelBase, StatefulStreamBase):
         execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
         | None = None,
         execution_engine_opts: dict[str, Any] | None = None,
-    ) -> Iterator[tuple[cp.Tag, cp.Packet]]:
+    ) -> Iterator[tuple[cp.TagProtocol, cp.PacketProtocol]]:
         """Delegate to the cached KernelStream."""
         return self().iter_packets(
             execution_engine=execution_engine,
@@ -152,7 +154,7 @@ class InvocationBase(TrackedKernelBase, StatefulStreamBase):
         self,
         execution_engine,
         execution_engine_opts: dict[str, Any] | None = None,
-    ) -> Collection[tuple[cp.Tag, cp.Packet]]:
+    ) -> Collection[tuple[cp.TagProtocol, cp.PacketProtocol]]:
         """Delegate to the cached KernelStream."""
         return self().flow(
             execution_engine=execution_engine,
@@ -242,7 +244,7 @@ class SourceBase(TrackedKernelBase, StatefulStreamBase):
         return self._schema_hash
 
     def kernel_identity_structure(
-        self, streams: Collection[cp.Stream] | None = None
+        self, streams: Collection[cp.StreamProtocol] | None = None
     ) -> Any:
         if streams is not None:
             # when checked for invocation id, act as a source
@@ -265,7 +267,7 @@ class SourceBase(TrackedKernelBase, StatefulStreamBase):
         ...
 
     def kernel_output_types(
-        self, *streams: cp.Stream, include_system_tags: bool = False
+        self, *streams: cp.StreamProtocol, include_system_tags: bool = False
     ) -> tuple[Schema, Schema]:
         return self.source_output_types(include_system_tags=include_system_tags)
 
@@ -279,7 +281,7 @@ class SourceBase(TrackedKernelBase, StatefulStreamBase):
 
     # The following are inherited from TrackedKernelBase as abstract methods.
     # @abstractmethod
-    # def forward(self, *streams: dp.Stream) -> dp.Stream:
+    # def forward(self, *streams: dp.StreamProtocol) -> dp.StreamProtocol:
     #     """
     #     Pure computation: return a static snapshot of the data.
 
@@ -290,16 +292,16 @@ class SourceBase(TrackedKernelBase, StatefulStreamBase):
     #     ...
 
     # @abstractmethod
-    # def kernel_output_types(self, *streams: dp.Stream) -> tuple[TypeSpec, TypeSpec]:
+    # def kernel_output_types(self, *streams: dp.StreamProtocol) -> tuple[TypeSpec, TypeSpec]:
     #     """Return the tag and packet types this source produces."""
     #     ...
 
     # @abstractmethod
     # def kernel_identity_structure(
-    #     self, streams: Collection[dp.Stream] | None = None
+    #     self, streams: Collection[dp.StreamProtocol] | None = None
     # ) -> dp.Any: ...
 
-    def validate_inputs(self, *streams: cp.Stream) -> None:
+    def validate_inputs(self, *streams: cp.StreamProtocol) -> None:
         """Sources take no input streams."""
         if len(streams) > 0:
             raise ValueError(
@@ -307,7 +309,7 @@ class SourceBase(TrackedKernelBase, StatefulStreamBase):
             )
 
     def prepare_output_stream(
-        self, *streams: cp.Stream, label: str | None = None
+        self, *streams: cp.StreamProtocol, label: str | None = None
     ) -> KernelStream:
         if self._cached_kernel_stream is None:
             self._cached_kernel_stream = super().prepare_output_stream(
@@ -315,11 +317,13 @@ class SourceBase(TrackedKernelBase, StatefulStreamBase):
             )
         return self._cached_kernel_stream
 
-    def track_invocation(self, *streams: cp.Stream, label: str | None = None) -> None:
+    def track_invocation(
+        self, *streams: cp.StreamProtocol, label: str | None = None
+    ) -> None:
         if not self._skip_tracking and self._tracker_manager is not None:
             self._tracker_manager.record_source_invocation(self, label=label)
 
-    # ==================== Stream Protocol (Delegation) ====================
+    # ==================== StreamProtocol Protocol (Delegation) ====================
 
     @property
     def source(self) -> cp.Kernel | None:
@@ -327,7 +331,7 @@ class SourceBase(TrackedKernelBase, StatefulStreamBase):
         return self
 
     @property
-    def upstreams(self) -> tuple[cp.Stream, ...]:
+    def upstreams(self) -> tuple[cp.StreamProtocol, ...]:
         """Sources have no upstream dependencies."""
         return ()
 
@@ -351,7 +355,7 @@ class SourceBase(TrackedKernelBase, StatefulStreamBase):
         """Delegate to the cached KernelStream."""
         return self().is_current
 
-    def __iter__(self) -> Iterator[tuple[cp.Tag, cp.Packet]]:
+    def __iter__(self) -> Iterator[tuple[cp.TagProtocol, cp.PacketProtocol]]:
         """
         Iterate over the cached KernelStream.
 
@@ -364,7 +368,7 @@ class SourceBase(TrackedKernelBase, StatefulStreamBase):
         execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
         | None = None,
         execution_engine_opts: dict[str, Any] | None = None,
-    ) -> Iterator[tuple[cp.Tag, cp.Packet]]:
+    ) -> Iterator[tuple[cp.TagProtocol, cp.PacketProtocol]]:
         """Delegate to the cached KernelStream."""
         return self().iter_packets(
             execution_engine=execution_engine,
@@ -397,7 +401,7 @@ class SourceBase(TrackedKernelBase, StatefulStreamBase):
         self,
         execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine,
         execution_engine_opts: dict[str, Any] | None = None,
-    ) -> Collection[tuple[cp.Tag, cp.Packet]]:
+    ) -> Collection[tuple[cp.TagProtocol, cp.PacketProtocol]]:
         """Delegate to the cached KernelStream."""
         return self().flow(
             execution_engine=execution_engine,
@@ -469,7 +473,9 @@ class SourceBase(TrackedKernelBase, StatefulStreamBase):
 
 
 class StreamSource(SourceBase):
-    def __init__(self, stream: cp.Stream, label: str | None = None, **kwargs) -> None:
+    def __init__(
+        self, stream: cp.StreamProtocol, label: str | None = None, **kwargs
+    ) -> None:
         """
         A placeholder source based on stream
         This is used to represent a kernel that has no computation.
@@ -491,7 +497,7 @@ class StreamSource(SourceBase):
     def reference(self) -> tuple[str, ...]:
         return ("stream", self.stream.content_hash().to_string())
 
-    def forward(self, *args: Any, **kwargs: Any) -> cp.Stream:
+    def forward(self, *args: Any, **kwargs: Any) -> cp.StreamProtocol:
         """
         Forward the stream through the stub kernel.
         This is a no-op and simply returns the stream.

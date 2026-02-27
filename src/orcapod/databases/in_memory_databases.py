@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 class InMemoryArrowDatabase:
     """
-    A pure in-memory implementation of the ArrowDatabase protocol.
+    A pure in-memory implementation of the ArrowDatabaseProtocol protocol.
 
     Records are stored in PyArrow tables held in process memory.
     Data is lost when the process exits — intended for tests and ephemeral use.

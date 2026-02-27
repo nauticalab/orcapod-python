@@ -44,7 +44,7 @@ class ListSource(SourceBase):
         The key name under which each list element will be stored in the packet
     data : list[Any]
         The list of elements to source data from
-    tag_function : Callable[[Any, int], Tag] | None, default=None
+    tag_function : Callable[[Any, int], TagProtocol] | None, default=None
         Optional function to generate a tag from a list element and its index.
         The function receives the element and the index as arguments.
         If None, uses the element index in a dict with key 'element_index'
@@ -78,14 +78,14 @@ class ListSource(SourceBase):
     """
 
     @staticmethod
-    def default_tag_function(element: Any, idx: int) -> cp.Tag:
+    def default_tag_function(element: Any, idx: int) -> cp.TagProtocol:
         return DictTag({"element_index": idx})
 
     def __init__(
         self,
         name: str,
         data: list[Any],
-        tag_function: Callable[[Any, int], cp.Tag] | None = None,
+        tag_function: Callable[[Any, int], cp.TagProtocol] | None = None,
         label: str | None = None,
         tag_function_hash_mode: Literal["content", "signature", "name"] = "name",
         expected_tag_keys: Collection[str] | None = None,
@@ -112,7 +112,7 @@ class ListSource(SourceBase):
                 "It generates its own stream from the list elements."
             )
 
-        def generator() -> Iterator[tuple[Tag, Packet]]:
+        def generator() -> Iterator[tuple[TagProtocol, PacketProtocol]]:
             for idx, element in enumerate(self.elements):
                 tag = self.tag_function(element, idx)
                 packet = {self.name: element}

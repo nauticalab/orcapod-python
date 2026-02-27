@@ -25,7 +25,7 @@ from orcapod.core.function_pod import (
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.streams import TableStream
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.protocols.core_protocols import Stream
+from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.system_constants import constants
 
 from ..conftest import double, make_int_stream
@@ -317,7 +317,7 @@ class TestFunctionPodNodeProcess:
 
     def test_process_output_is_stream_protocol(self, node):
         result = node.process()
-        assert isinstance(result, Stream)
+        assert isinstance(result, StreamProtocol)
 
 
 # ---------------------------------------------------------------------------

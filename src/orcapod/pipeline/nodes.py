@@ -35,8 +35,8 @@ class NodeBase(
 
     def __init__(
         self,
-        input_streams: Collection[cp.Stream],
-        pipeline_database: dbp.ArrowDatabase,
+        input_streams: Collection[cp.StreamProtocol],
+        pipeline_database: dbp.ArrowDatabaseProtocol,
         pipeline_path_prefix: tuple[str, ...] = (),
         kernel_type: str = "operator",
         **kwargs,
@@ -68,11 +68,13 @@ class NodeBase(
         return self.content_hash().to_string()
 
     @property
-    def upstreams(self) -> tuple[cp.Stream, ...]:
+    def upstreams(self) -> tuple[cp.StreamProtocol, ...]:
         return self._input_streams
 
-    def track_invocation(self, *streams: cp.Stream, label: str | None = None) -> None:
-        # Node invocation should not be tracked
+    def track_invocation(
+        self, *streams: cp.StreamProtocol, label: str | None = None
+    ) -> None:
+        # NodeProtocol invocation should not be tracked
         return None
 
     @property
@@ -94,19 +96,21 @@ class NodeBase(
         """
         ...
 
-    def validate_inputs(self, *streams: cp.Stream) -> None:
+    def validate_inputs(self, *streams: cp.StreamProtocol) -> None:
         return
 
-    # def forward(self, *streams: cp.Stream) -> cp.Stream:
+    # def forward(self, *streams: cp.StreamProtocol) -> cp.StreamProtocol:
     #     # TODO: re-evaluate the use here -- consider semi joining with input streams
     #     # super().validate_inputs(*self.input_streams)
     #     return super().forward(*self.upstreams)  # type: ignore[return-value]
 
-    def pre_kernel_processing(self, *streams: cp.Stream) -> tuple[cp.Stream, ...]:
+    def pre_kernel_processing(
+        self, *streams: cp.StreamProtocol
+    ) -> tuple[cp.StreamProtocol, ...]:
         return self.upstreams
 
     def kernel_output_types(
-        self, *streams: cp.Stream, include_system_tags: bool = False
+        self, *streams: cp.StreamProtocol, include_system_tags: bool = False
     ) -> tuple[Schema, Schema]:
         """
         Return the output types of the node.
@@ -117,7 +121,7 @@ class NodeBase(
         )
 
     def kernel_identity_structure(
-        self, streams: Collection[cp.Stream] | None = None
+        self, streams: Collection[cp.StreamProtocol] | None = None
     ) -> Any:
         # construct identity structure from the node's information and the
         return self.contained_kernel.identity_structure(self.upstreams)
@@ -146,8 +150,8 @@ class KernelNode(NodeBase, WrappedKernel):
     def __init__(
         self,
         kernel: cp.Kernel,
-        input_streams: Collection[cp.Stream],
-        pipeline_database: dbp.ArrowDatabase,
+        input_streams: Collection[cp.StreamProtocol],
+        pipeline_database: dbp.ArrowDatabaseProtocol,
         pipeline_path_prefix: tuple[str, ...] = (),
         **kwargs,
     ) -> None:
@@ -170,14 +174,14 @@ class KernelNode(NodeBase, WrappedKernel):
     def __str__(self):
         return f"KernelNode:{self.kernel!s}"
 
-    def forward(self, *streams: cp.Stream) -> cp.Stream:
+    def forward(self, *streams: cp.StreamProtocol) -> cp.StreamProtocol:
         output_stream = super().forward(*streams)
 
         if not self.skip_recording:
             self.record_pipeline_output(output_stream)
         return output_stream
 
-    def record_pipeline_output(self, output_stream: cp.Stream) -> None:
+    def record_pipeline_output(self, output_stream: cp.StreamProtocol) -> None:
         key_column_name = self.HASH_COLUMN_NAME
         # FIXME: compute record id based on each record in its entirety
         output_table = output_stream.as_table(
@@ -249,13 +253,13 @@ class KernelNode(NodeBase, WrappedKernel):
         return results
 
 
-class PodNode(NodeBase, CachedPod):
+class PodNodeProtocol(NodeBase, CachedPod):
     def __init__(
         self,
-        pod: cp.Pod,
-        input_streams: Collection[cp.Stream],
-        pipeline_database: dbp.ArrowDatabase,
-        result_database: dbp.ArrowDatabase | None = None,
+        pod: cp.PodProtocol,
+        input_streams: Collection[cp.StreamProtocol],
+        pipeline_database: dbp.ArrowDatabaseProtocol,
+        result_database: dbp.ArrowDatabaseProtocol | None = None,
         record_path_prefix: tuple[str, ...] = (),
         pipeline_path_prefix: tuple[str, ...] = (),
         **kwargs,
@@ -304,15 +308,15 @@ class PodNode(NodeBase, CachedPod):
         )
 
     def __repr__(self):
-        return f"PodNode(pod={self.pod!r})"
+        return f"PodNodeProtocol(pod={self.pod!r})"
 
     def __str__(self):
-        return f"PodNode:{self.pod!s}"
+        return f"PodNodeProtocol:{self.pod!s}"
 
     def call(
         self,
-        tag: cp.Tag,
-        packet: cp.Packet,
+        tag: cp.TagProtocol,
+        packet: cp.PacketProtocol,
         record_id: str | None = None,
         execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
         | None = None,
@@ -320,7 +324,7 @@ class PodNode(NodeBase, CachedPod):
         execution_engine_opts: dict[str, Any] | None = None,
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
-    ) -> tuple[cp.Tag, cp.Packet | None]:
+    ) -> tuple[cp.TagProtocol, cp.PacketProtocol | None]:
         execution_engine_hash = execution_engine.name if execution_engine else "default"
         if record_id is None:
             record_id = self.get_record_id(packet, execution_engine_hash)
@@ -356,8 +360,8 @@ class PodNode(NodeBase, CachedPod):
 
     async def async_call(
         self,
-        tag: cp.Tag,
-        packet: cp.Packet,
+        tag: cp.TagProtocol,
+        packet: cp.PacketProtocol,
         record_id: str | None = None,
         execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
         | None = None,
@@ -365,7 +369,7 @@ class PodNode(NodeBase, CachedPod):
         execution_engine_opts: dict[str, Any] | None = None,
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
-    ) -> tuple[cp.Tag, cp.Packet | None]:
+    ) -> tuple[cp.TagProtocol, cp.PacketProtocol | None]:
         execution_engine_hash = execution_engine.name if execution_engine else "default"
         if record_id is None:
             record_id = self.get_record_id(packet, execution_engine_hash)
@@ -401,13 +405,13 @@ class PodNode(NodeBase, CachedPod):
 
     def add_pipeline_record(
         self,
-        tag: cp.Tag,
-        input_packet: cp.Packet,
+        tag: cp.TagProtocol,
+        input_packet: cp.PacketProtocol,
         packet_record_id: str,
         retrieved: bool | None = None,
         skip_cache_lookup: bool = False,
     ) -> None:
-        # combine dp.Tag with packet content hash to compute entry hash
+        # combine dp.TagProtocol with packet content hash to compute entry hash
         # TODO: add system tag columns
         # TODO: consider using bytes instead of string representation
         tag_with_hash = tag.as_table(include_system_tags=True).append_column(
@@ -462,7 +466,7 @@ class PodNode(NodeBase, CachedPod):
             skip_duplicates=False,
         )
 
-    def forward(self, *streams: cp.Stream) -> cp.Stream:
+    def forward(self, *streams: cp.StreamProtocol) -> cp.StreamProtocol:
         # TODO: re-evaluate the use here -- consider semi joining with input streams
         # super().validate_inputs(*self.input_streams)
         return PodNodeStream(self, *self.upstreams)  # type: ignore[return-value]

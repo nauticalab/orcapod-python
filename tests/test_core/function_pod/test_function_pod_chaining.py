@@ -5,7 +5,7 @@ Covers:
 - Two-pod linear chain: output stream of pod1 feeds into pod2
 - Three-pod linear chain with value verification at each stage
 - Chaining via the decorator (@function_pod) interface
-- Tag preservation across chained pods
+- TagProtocol preservation across chained pods
 - Row count preservation across chained pods
 - as_table() results after chaining
 - Chain where an intermediate pod is inactive (packets filtered out)
@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import pytest
 
-from orcapod.core.function_pod import FunctionPodStream, SimpleFunctionPod, function_pod
+from orcapod.core.function_pod import FunctionPodStream, FunctionPod, function_pod
 from orcapod.core.packet_function import PythonPacketFunction
-from orcapod.protocols.core_protocols import Stream
+from orcapod.protocols.core_protocols import StreamProtocol
 
 from ..conftest import double, make_int_stream
 
@@ -47,13 +47,13 @@ def square(result: int) -> int:
 class TestTwoPodChain:
     @pytest.fixture
     def double_pod(self):
-        return SimpleFunctionPod(
+        return FunctionPod(
             packet_function=PythonPacketFunction(double, output_keys="result")
         )
 
     @pytest.fixture
     def add_one_pod(self):
-        return SimpleFunctionPod(
+        return FunctionPod(
             packet_function=PythonPacketFunction(add_one, output_keys="result")
         )
 
@@ -65,7 +65,7 @@ class TestTwoPodChain:
     def test_chain_satisfies_stream_protocol(self, double_pod, add_one_pod):
         stream1 = double_pod.process(make_int_stream(n=3))
         stream2 = add_one_pod.process(stream1)
-        assert isinstance(stream2, Stream)
+        assert isinstance(stream2, StreamProtocol)
 
     def test_chain_row_count_preserved(self, double_pod, add_one_pod):
         n = 5
@@ -115,19 +115,19 @@ class TestTwoPodChain:
 class TestThreePodChain:
     @pytest.fixture
     def double_pod(self):
-        return SimpleFunctionPod(
+        return FunctionPod(
             packet_function=PythonPacketFunction(double, output_keys="result")
         )
 
     @pytest.fixture
     def add_one_pod(self):
-        return SimpleFunctionPod(
+        return FunctionPod(
             packet_function=PythonPacketFunction(add_one, output_keys="result")
         )
 
     @pytest.fixture
     def square_pod(self):
-        return SimpleFunctionPod(
+        return FunctionPod(
             packet_function=PythonPacketFunction(square, output_keys="result")
         )
 
@@ -272,22 +272,22 @@ class TestChainWithInactivePod:
 
     def test_inactive_first_pod_yields_no_packets(self, double_pf, add_one_pf):
         double_pf.set_active(False)
-        pod1 = SimpleFunctionPod(packet_function=double_pf)
-        pod2 = SimpleFunctionPod(packet_function=add_one_pf)
+        pod1 = FunctionPod(packet_function=double_pf)
+        pod2 = FunctionPod(packet_function=add_one_pf)
         stream = pod2.process(pod1.process(make_int_stream(n=3)))
         assert list(stream.iter_packets()) == []
 
     def test_inactive_second_pod_yields_no_packets(self, double_pf, add_one_pf):
         add_one_pf.set_active(False)
-        pod1 = SimpleFunctionPod(packet_function=double_pf)
-        pod2 = SimpleFunctionPod(packet_function=add_one_pf)
+        pod1 = FunctionPod(packet_function=double_pf)
+        pod2 = FunctionPod(packet_function=add_one_pf)
         stream = pod2.process(pod1.process(make_int_stream(n=3)))
         assert list(stream.iter_packets()) == []
 
     def test_reactivating_pod_restores_output(self, double_pf, add_one_pf):
         double_pf.set_active(False)
-        pod1 = SimpleFunctionPod(packet_function=double_pf)
-        pod2 = SimpleFunctionPod(packet_function=add_one_pf)
+        pod1 = FunctionPod(packet_function=double_pf)
+        pod2 = FunctionPod(packet_function=add_one_pf)
 
         stream_inactive = pod2.process(pod1.process(make_int_stream(n=3)))
         assert list(stream_inactive.iter_packets()) == []

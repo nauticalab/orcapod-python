@@ -1,7 +1,7 @@
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from orcapod.protocols.semantic_types_protocols import SemanticStructConverter
+from orcapod.protocols.semantic_types_protocols import SemanticStructConverterProtocol
 from orcapod.semantic_types import pydata_utils
 
 # from orcapod.semantic_types.type_inference import infer_python_schema_from_pylist_data
@@ -37,14 +37,18 @@ class SemanticTypeRegistry:
             pydata_utils.pydict_to_pylist(data)
         )
 
-    def __init__(self, converters: Mapping[str, SemanticStructConverter] | None = None):
+    def __init__(
+        self, converters: Mapping[str, SemanticStructConverterProtocol] | None = None
+    ):
         # Bidirectional mappings between Python types and struct signatures
         self._python_to_struct: dict[DataType, "pa.StructType"] = {}
         self._struct_to_python: dict["pa.StructType", DataType] = {}
-        self._struct_to_converter: dict["pa.StructType", SemanticStructConverter] = {}
+        self._struct_to_converter: dict[
+            "pa.StructType", SemanticStructConverterProtocol
+        ] = {}
 
         # Name mapping for convenience
-        self._name_to_converter: dict[str, SemanticStructConverter] = {}
+        self._name_to_converter: dict[str, SemanticStructConverterProtocol] = {}
         self._struct_to_name: dict["pa.StructType", str] = {}
 
         # If initialized with a list of converters, register them
@@ -53,7 +57,7 @@ class SemanticTypeRegistry:
                 self.register_converter(semantic_type_name, converter)
 
     def register_converter(
-        self, semantic_type_name: str, converter: SemanticStructConverter
+        self, semantic_type_name: str, converter: SemanticStructConverterProtocol
     ) -> None:
         """
         Register a semantic type converter.
@@ -103,7 +107,7 @@ class SemanticTypeRegistry:
 
     def get_converter_for_python_type(
         self, python_type: DataType
-    ) -> SemanticStructConverter | None:
+    ) -> SemanticStructConverterProtocol | None:
         """Get converter registered to the Python type."""
         # Direct lookup first
         struct_signature = self._python_to_struct.get(python_type)
@@ -127,13 +131,13 @@ class SemanticTypeRegistry:
 
     def get_converter_for_semantic_type(
         self, semantic_type_name: str
-    ) -> SemanticStructConverter | None:
+    ) -> SemanticStructConverterProtocol | None:
         """Get converter registered to the semantic type name."""
         return self._name_to_converter.get(semantic_type_name)
 
     def get_converter_for_struct_signature(
         self, struct_signature: "pa.StructType"
-    ) -> SemanticStructConverter | None:
+    ) -> SemanticStructConverterProtocol | None:
         """
         Get converter registered to the Arrow struct signature.
         """

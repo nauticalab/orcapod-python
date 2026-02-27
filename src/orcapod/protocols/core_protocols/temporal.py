@@ -3,11 +3,11 @@ from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
-class Temporal(Protocol):
+class TemporalProtocol(Protocol):
     """
     Protocol for objects that track temporal state.
 
-    Objects implementing Temporal carries a computed property to
+    Objects implementing TemporalProtocol carries a computed property to
     report when their content was last modified, enabling time-sensitive
     actions such as cache invalidation, incremental processing, and
     dependency staleness tracking.

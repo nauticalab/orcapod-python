@@ -1,7 +1,7 @@
 # from .config import DEFAULT_CONFIG, Config
 # from .core import DEFAULT_TRACKER_MANAGER
 # from .core.packet_function import PythonPacketFunction
-# from .core.function_pod import FunctionPod
+from .core.function_pod import FunctionPod
 # from .core import streams
 # from .core import operators
 # from .core import sources

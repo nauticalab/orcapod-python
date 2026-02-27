@@ -5,7 +5,7 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from orcapod.core.function_pod import SimpleFunctionPod
+from orcapod.core.function_pod import FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.streams import TableStream
 
@@ -66,10 +66,10 @@ def add_pf() -> PythonPacketFunction:
 
 
 @pytest.fixture
-def double_pod(double_pf) -> SimpleFunctionPod:
-    return SimpleFunctionPod(packet_function=double_pf)
+def double_pod(double_pf) -> FunctionPod:
+    return FunctionPod(packet_function=double_pf)
 
 
 @pytest.fixture
-def add_pod(add_pf) -> SimpleFunctionPod:
-    return SimpleFunctionPod(packet_function=add_pf)
+def add_pod(add_pf) -> FunctionPod:
+    return FunctionPod(packet_function=add_pf)

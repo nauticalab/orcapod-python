@@ -6,7 +6,7 @@ if TYPE_CHECKING:
 
 
 @runtime_checkable
-class ArrowDatabase(Protocol):
+class ArrowDatabaseProtocol(Protocol):
     def add_record(
         self,
         record_path: tuple[str, ...],
@@ -62,7 +62,7 @@ class ArrowDatabase(Protocol):
         ...
 
 
-class MetadataCapable(Protocol):
+class MetadataCapableProtocol(Protocol):
     def set_metadata(
         self,
         record_path: tuple[str, ...],
@@ -83,7 +83,9 @@ class MetadataCapable(Protocol):
     ) -> Collection[str]: ...
 
 
-class ArrowDatabaseWithMetadata(ArrowDatabase, MetadataCapable, Protocol):
-    """A protocol that combines ArrowDatabase with metadata capabilities."""
+class ArrowDatabaseWithMetadataProtocol(
+    ArrowDatabaseProtocol, MetadataCapableProtocol, Protocol
+):
+    """A protocol that combines ArrowDatabaseProtocol with metadata capabilities."""
 
     pass

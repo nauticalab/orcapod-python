@@ -33,7 +33,7 @@ from orcapod.core.packet_function import (
     PythonPacketFunction,
 )
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.protocols.core_protocols import PacketFunction
+from orcapod.protocols.core_protocols import PacketFunctionProtocol
 from orcapod.system_constants import constants
 
 # ---------------------------------------------------------------------------
@@ -410,7 +410,7 @@ class TestPacketFunctionWrapperDelegation:
         assert wrapper.computed_label() == inner_pf.label
 
     def test_satisfies_packet_function_protocol(self, wrapper):
-        assert isinstance(wrapper, PacketFunction)
+        assert isinstance(wrapper, PacketFunctionProtocol)
 
 
 # ---------------------------------------------------------------------------

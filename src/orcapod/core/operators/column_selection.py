@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import TableStream
 from orcapod.errors import InputValidationError
-from orcapod.protocols.core_protocols import Stream
+from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.lazy_module import LazyModule
@@ -30,7 +30,7 @@ class SelectTagColumns(UnaryOperator):
         self.strict = strict
         super().__init__(**kwargs)
 
-    def unary_static_process(self, stream: Stream) -> Stream:
+    def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         tag_columns, packet_columns = stream.keys()
         tags_to_drop = [c for c in tag_columns if c not in self.columns]
         new_tag_columns = [c for c in tag_columns if c not in tags_to_drop]
@@ -52,7 +52,7 @@ class SelectTagColumns(UnaryOperator):
             upstreams=(stream,),
         )
 
-    def validate_unary_input(self, stream: Stream) -> None:
+    def validate_unary_input(self, stream: StreamProtocol) -> None:
         """
         This method should be implemented by subclasses to validate the inputs to the operator.
         It takes two streams as input and raises an error if the inputs are not valid.
@@ -68,7 +68,7 @@ class SelectTagColumns(UnaryOperator):
 
     def unary_output_schema(
         self,
-        stream: Stream,
+        stream: StreamProtocol,
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
@@ -84,7 +84,7 @@ class SelectTagColumns(UnaryOperator):
 
         return new_tag_schema, packet_schema
 
-    def op_identity_structure(self, stream: Stream | None = None) -> Any:
+    def op_identity_structure(self, stream: StreamProtocol | None = None) -> Any:
         return (
             self.__class__.__name__,
             self.columns,
@@ -104,7 +104,7 @@ class SelectPacketColumns(UnaryOperator):
         self.strict = strict
         super().__init__(**kwargs)
 
-    def unary_static_process(self, stream: Stream) -> Stream:
+    def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         tag_columns, packet_columns = stream.keys()
         packet_columns_to_drop = [c for c in packet_columns if c not in self.columns]
         new_packet_columns = [
@@ -133,7 +133,7 @@ class SelectPacketColumns(UnaryOperator):
             upstreams=(stream,),
         )
 
-    def validate_unary_input(self, stream: Stream) -> None:
+    def validate_unary_input(self, stream: StreamProtocol) -> None:
         """
         This method should be implemented by subclasses to validate the inputs to the operator.
         It takes two streams as input and raises an error if the inputs are not valid.
@@ -149,7 +149,7 @@ class SelectPacketColumns(UnaryOperator):
 
     def unary_output_schema(
         self,
-        stream: Stream,
+        stream: StreamProtocol,
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
@@ -187,7 +187,7 @@ class DropTagColumns(UnaryOperator):
         self.strict = strict
         super().__init__(**kwargs)
 
-    def unary_static_process(self, stream: Stream) -> Stream:
+    def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         tag_columns, packet_columns = stream.keys()
         columns_to_drop = self.columns
         if not self.strict:
@@ -212,7 +212,7 @@ class DropTagColumns(UnaryOperator):
             upstreams=(stream,),
         )
 
-    def validate_unary_input(self, stream: Stream) -> None:
+    def validate_unary_input(self, stream: StreamProtocol) -> None:
         """
         This method should be implemented by subclasses to validate the inputs to the operator.
         It takes two streams as input and raises an error if the inputs are not valid.
@@ -228,7 +228,7 @@ class DropTagColumns(UnaryOperator):
 
     def unary_output_schema(
         self,
-        stream: Stream,
+        stream: StreamProtocol,
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
@@ -263,7 +263,7 @@ class DropPacketColumns(UnaryOperator):
         self.strict = strict
         super().__init__(**kwargs)
 
-    def unary_static_process(self, stream: Stream) -> Stream:
+    def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         tag_columns, packet_columns = stream.keys()
         columns_to_drop = list(self.columns)
         if not self.strict:
@@ -292,7 +292,7 @@ class DropPacketColumns(UnaryOperator):
             upstreams=(stream,),
         )
 
-    def validate_unary_input(self, stream: Stream) -> None:
+    def validate_unary_input(self, stream: StreamProtocol) -> None:
         """
         This method should be implemented by subclasses to validate the inputs to the operator.
         It takes two streams as input and raises an error if the inputs are not valid.
@@ -307,7 +307,7 @@ class DropPacketColumns(UnaryOperator):
 
     def unary_output_schema(
         self,
-        stream: Stream,
+        stream: StreamProtocol,
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
@@ -344,7 +344,7 @@ class MapTags(UnaryOperator):
         self.drop_unmapped = drop_unmapped
         super().__init__(**kwargs)
 
-    def unary_execute(self, stream: Stream) -> Stream:
+    def unary_execute(self, stream: StreamProtocol) -> StreamProtocol:
         tag_columns, packet_columns = stream.keys()
         missing_tags = set(tag_columns) - set(self.name_map.keys())
 
@@ -371,7 +371,7 @@ class MapTags(UnaryOperator):
             renamed_table, tag_columns=new_tag_columns, source=self, upstreams=(stream,)
         )
 
-    def validate_unary_input(self, stream: Stream) -> None:
+    def validate_unary_input(self, stream: StreamProtocol) -> None:
         """
         This method should be implemented by subclasses to validate the inputs to the operator.
         It takes two streams as input and raises an error if the inputs are not valid.
@@ -398,7 +398,7 @@ class MapTags(UnaryOperator):
 
     def unary_output_schema(
         self,
-        stream: Stream,
+        stream: StreamProtocol,
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,

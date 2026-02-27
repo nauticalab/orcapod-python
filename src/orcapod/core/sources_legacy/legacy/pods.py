@@ -21,7 +21,7 @@ from orcapod.hashing.hash_utils import (
 )
 from orcapod.protocols import core_protocols as cp
 from orcapod.protocols import hashing_protocols as hp
-from orcapod.protocols.database_protocols import ArrowDatabase
+from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.system_constants import constants
 from orcapod.types import DataValue, Schema, SchemaLike
 from orcapod.utils import types_utils
@@ -42,7 +42,7 @@ error_handling_options = Literal["raise", "ignore", "warn"]
 
 class ActivatablePodBase(TrackedKernelBase):
     """
-    FunctionPod is a specialized kernel that encapsulates a function to be executed on data streams.
+    FunctionPodProtocol is a specialized kernel that encapsulates a function to be executed on data streams.
     It allows for the execution of a function with a specific label and can be tracked by the system.
     """
 
@@ -65,7 +65,9 @@ class ActivatablePodBase(TrackedKernelBase):
         return self._version
 
     @abstractmethod
-    def get_record_id(self, packet: cp.Packet, execution_engine_hash: str) -> str:
+    def get_record_id(
+        self, packet: cp.PacketProtocol, execution_engine_hash: str
+    ) -> str:
         """
         Return the record ID for the input packet. This is used to identify the pod in the system.
         """
@@ -108,7 +110,7 @@ class ActivatablePodBase(TrackedKernelBase):
         return self._major_version
 
     def kernel_output_types(
-        self, *streams: cp.Stream, include_system_tags: bool = False
+        self, *streams: cp.StreamProtocol, include_system_tags: bool = False
     ) -> tuple[Schema, Schema]:
         """
         Return the input and output typespecs for the pod.
@@ -130,7 +132,7 @@ class ActivatablePodBase(TrackedKernelBase):
         self._active = active
 
     @staticmethod
-    def _join_streams(*streams: cp.Stream) -> cp.Stream:
+    def _join_streams(*streams: cp.StreamProtocol) -> cp.StreamProtocol:
         if not streams:
             raise ValueError("No streams provided for joining")
         # Join the streams using a suitable join strategy
@@ -142,7 +144,9 @@ class ActivatablePodBase(TrackedKernelBase):
             joined_stream = Join()(joined_stream, next_stream)
         return joined_stream
 
-    def pre_kernel_processing(self, *streams: cp.Stream) -> tuple[cp.Stream, ...]:
+    def pre_kernel_processing(
+        self, *streams: cp.StreamProtocol
+    ) -> tuple[cp.StreamProtocol, ...]:
         """
         Prepare the incoming streams for execution in the pod. At least one stream must be present.
         If more than one stream is present, the join of the provided streams will be returned.
@@ -155,7 +159,7 @@ class ActivatablePodBase(TrackedKernelBase):
         output_stream = self._join_streams(*streams)
         return (output_stream,)
 
-    def validate_inputs(self, *streams: cp.Stream) -> None:
+    def validate_inputs(self, *streams: cp.StreamProtocol) -> None:
         if len(streams) != 1:
             raise ValueError(
                 f"{self.__class__.__name__} expects exactly one input stream, got {len(streams)}"
@@ -173,35 +177,37 @@ class ActivatablePodBase(TrackedKernelBase):
             )
 
     def prepare_output_stream(
-        self, *streams: cp.Stream, label: str | None = None
+        self, *streams: cp.StreamProtocol, label: str | None = None
     ) -> KernelStream:
         return KernelStream(source=self, upstreams=streams, label=label)
 
-    def forward(self, *streams: cp.Stream) -> cp.Stream:
+    def forward(self, *streams: cp.StreamProtocol) -> cp.StreamProtocol:
         assert len(streams) == 1, "PodBase.forward expects exactly one input stream"
         return LazyPodResultStream(pod=self, prepared_stream=streams[0])
 
     @abstractmethod
     def call(
         self,
-        tag: cp.Tag,
-        packet: cp.Packet,
+        tag: cp.TagProtocol,
+        packet: cp.PacketProtocol,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
         execution_engine_opts: dict[str, Any] | None = None,
-    ) -> tuple[cp.Tag, cp.Packet | None]: ...
+    ) -> tuple[cp.TagProtocol, cp.PacketProtocol | None]: ...
 
     @abstractmethod
     async def async_call(
         self,
-        tag: cp.Tag,
-        packet: cp.Packet,
+        tag: cp.TagProtocol,
+        packet: cp.PacketProtocol,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
         execution_engine_opts: dict[str, Any] | None = None,
-    ) -> tuple[cp.Tag, cp.Packet | None]: ...
+    ) -> tuple[cp.TagProtocol, cp.PacketProtocol | None]: ...
 
-    def track_invocation(self, *streams: cp.Stream, label: str | None = None) -> None:
+    def track_invocation(
+        self, *streams: cp.StreamProtocol, label: str | None = None
+    ) -> None:
         if not self._skip_tracking and self._tracker_manager is not None:
             self._tracker_manager.record_pod_invocation(self, streams, label=label)
 
@@ -210,7 +216,7 @@ class CallableWithPod(Protocol):
     def __call__(self, *args, **kwargs) -> Any: ...
 
     @property
-    def pod(self) -> "FunctionPod": ...
+    def pod(self) -> "FunctionPodProtocol": ...
 
 
 def function_pod(
@@ -221,15 +227,15 @@ def function_pod(
     **kwargs,
 ) -> Callable[..., CallableWithPod]:
     """
-    Decorator that attaches FunctionPod as pod attribute.
+    Decorator that attaches FunctionPodProtocol as pod attribute.
 
     Args:
         output_keys: Keys for the function output(s)
         function_name: Name of the function pod; if None, defaults to the function name
-        **kwargs: Additional keyword arguments to pass to the FunctionPod constructor. Please refer to the FunctionPod documentation for details.
+        **kwargs: Additional keyword arguments to pass to the FunctionPodProtocol constructor. Please refer to the FunctionPodProtocol documentation for details.
 
     Returns:
-        CallableWithPod: Decorated function with `pod` attribute holding the FunctionPod instance
+        CallableWithPod: Decorated function with `pod` attribute holding the FunctionPodProtocol instance
     """
 
     def decorator(func: Callable) -> CallableWithPod:
@@ -244,7 +250,7 @@ def function_pod(
         # and make sure to change the name of the function
 
         # Create a simple typed function pod
-        pod = FunctionPod(
+        pod = FunctionPodProtocol(
             function=func,
             output_keys=output_keys,
             function_name=function_name or func.__name__,
@@ -258,7 +264,7 @@ def function_pod(
     return decorator
 
 
-class FunctionPod(ActivatablePodBase):
+class FunctionPodProtocol(ActivatablePodBase):
     def __init__(
         self,
         function: cp.PodFunction,
@@ -268,7 +274,7 @@ class FunctionPod(ActivatablePodBase):
         input_python_schema: SchemaLike | None = None,
         output_python_schema: SchemaLike | Sequence[type] | None = None,
         label: str | None = None,
-        function_info_extractor: hp.FunctionInfoExtractor | None = None,
+        function_info_extractor: hp.FunctionInfoExtractorProtocol | None = None,
         **kwargs,
     ) -> None:
         self.function = function
@@ -353,7 +359,7 @@ class FunctionPod(ActivatablePodBase):
 
     def get_record_id(
         self,
-        packet: cp.Packet,
+        packet: cp.PacketProtocol,
         execution_engine_hash: str,
     ) -> str:
         return combine_hashes(
@@ -378,7 +384,7 @@ class FunctionPod(ActivatablePodBase):
         return self._output_packet_schema.copy()
 
     def __repr__(self) -> str:
-        return f"FunctionPod:{self.function_name}"
+        return f"FunctionPodProtocol:{self.function_name}"
 
     def __str__(self) -> str:
         include_module = self.function.__module__ != "__main__"
@@ -387,19 +393,19 @@ class FunctionPod(ActivatablePodBase):
             name_override=self.function_name,
             include_module=include_module,
         )
-        return f"FunctionPod:{func_sig}"
+        return f"FunctionPodProtocol:{func_sig}"
 
     def call(
         self,
-        tag: cp.Tag,
-        packet: cp.Packet,
+        tag: cp.TagProtocol,
+        packet: cp.PacketProtocol,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
         execution_engine_opts: dict[str, Any] | None = None,
-    ) -> tuple[cp.Tag, DictPacket | None]:
+    ) -> tuple[cp.TagProtocol, DictPacket | None]:
         if not self.is_active():
             logger.info(
-                f"Pod is not active: skipping computation on input packet {packet}"
+                f"PodProtocol is not active: skipping computation on input packet {packet}"
             )
             return tag, None
 
@@ -446,19 +452,19 @@ class FunctionPod(ActivatablePodBase):
 
     async def async_call(
         self,
-        tag: cp.Tag,
-        packet: cp.Packet,
+        tag: cp.TagProtocol,
+        packet: cp.PacketProtocol,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
         execution_engine_opts: dict[str, Any] | None = None,
-    ) -> tuple[cp.Tag, cp.Packet | None]:
+    ) -> tuple[cp.TagProtocol, cp.PacketProtocol | None]:
         """
         Asynchronous call to the function pod. This is a placeholder for future implementation.
         Currently, it behaves like the synchronous call.
         """
         if not self.is_active():
             logger.info(
-                f"Pod is not active: skipping computation on input packet {packet}"
+                f"PodProtocol is not active: skipping computation on input packet {packet}"
             )
             return tag, None
 
@@ -523,7 +529,7 @@ class FunctionPod(ActivatablePodBase):
         return {k: v for k, v in zip(self.output_keys, output_values)}
 
     def kernel_identity_structure(
-        self, streams: Collection[cp.Stream] | None = None
+        self, streams: Collection[cp.StreamProtocol] | None = None
     ) -> Any:
         id_struct = (self.__class__.__name__,) + self.reference
         # if streams are provided, perform pre-processing step, validate, and add the
@@ -543,7 +549,7 @@ class WrappedPod(ActivatablePodBase):
 
     def __init__(
         self,
-        pod: cp.Pod,
+        pod: cp.PodProtocol,
         label: str | None = None,
         data_context: str | contexts.DataContext | None = None,
         **kwargs,
@@ -566,7 +572,9 @@ class WrappedPod(ActivatablePodBase):
         """
         return self.pod.reference
 
-    def get_record_id(self, packet: cp.Packet, execution_engine_hash: str) -> str:
+    def get_record_id(
+        self, packet: cp.PacketProtocol, execution_engine_hash: str
+    ) -> str:
         return self.pod.get_record_id(packet, execution_engine_hash)
 
     @property
@@ -593,17 +601,17 @@ class WrappedPod(ActivatablePodBase):
         """
         return self.pod.output_packet_types()
 
-    def validate_inputs(self, *streams: cp.Stream) -> None:
+    def validate_inputs(self, *streams: cp.StreamProtocol) -> None:
         self.pod.validate_inputs(*streams)
 
     def call(
         self,
-        tag: cp.Tag,
-        packet: cp.Packet,
+        tag: cp.TagProtocol,
+        packet: cp.PacketProtocol,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
         execution_engine_opts: dict[str, Any] | None = None,
-    ) -> tuple[cp.Tag, cp.Packet | None]:
+    ) -> tuple[cp.TagProtocol, cp.PacketProtocol | None]:
         return self.pod.call(
             tag,
             packet,
@@ -614,12 +622,12 @@ class WrappedPod(ActivatablePodBase):
 
     async def async_call(
         self,
-        tag: cp.Tag,
-        packet: cp.Packet,
+        tag: cp.TagProtocol,
+        packet: cp.PacketProtocol,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
         execution_engine_opts: dict[str, Any] | None = None,
-    ) -> tuple[cp.Tag, cp.Packet | None]:
+    ) -> tuple[cp.TagProtocol, cp.PacketProtocol | None]:
         return await self.pod.async_call(
             tag,
             packet,
@@ -629,7 +637,7 @@ class WrappedPod(ActivatablePodBase):
         )
 
     def kernel_identity_structure(
-        self, streams: Collection[cp.Stream] | None = None
+        self, streams: Collection[cp.StreamProtocol] | None = None
     ) -> Any:
         return self.pod.identity_structure(streams)
 
@@ -651,8 +659,8 @@ class CachedPod(WrappedPod):
 
     def __init__(
         self,
-        pod: cp.Pod,
-        result_database: ArrowDatabase,
+        pod: cp.PodProtocol,
+        result_database: ArrowDatabaseProtocol,
         record_path_prefix: tuple[str, ...] = (),
         match_tier: str | None = None,
         retrieval_mode: Literal["latest", "most_specific"] = "latest",
@@ -684,14 +692,14 @@ class CachedPod(WrappedPod):
 
     def call(
         self,
-        tag: cp.Tag,
-        packet: cp.Packet,
+        tag: cp.TagProtocol,
+        packet: cp.PacketProtocol,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
         execution_engine_opts: dict[str, Any] | None = None,
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
-    ) -> tuple[cp.Tag, cp.Packet | None]:
+    ) -> tuple[cp.TagProtocol, cp.PacketProtocol | None]:
         # TODO: consider logic for overwriting existing records
         execution_engine_hash = execution_engine.name if execution_engine else "default"
         if record_id is None:
@@ -723,14 +731,14 @@ class CachedPod(WrappedPod):
 
     async def async_call(
         self,
-        tag: cp.Tag,
-        packet: cp.Packet,
+        tag: cp.TagProtocol,
+        packet: cp.PacketProtocol,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
         execution_engine_opts: dict[str, Any] | None = None,
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
-    ) -> tuple[cp.Tag, cp.Packet | None]:
+    ) -> tuple[cp.TagProtocol, cp.PacketProtocol | None]:
         # TODO: consider logic for overwriting existing records
         execution_engine_hash = execution_engine.name if execution_engine else "default"
 
@@ -760,19 +768,19 @@ class CachedPod(WrappedPod):
 
         return tag, output_packet
 
-    def forward(self, *streams: cp.Stream) -> cp.Stream:
+    def forward(self, *streams: cp.StreamProtocol) -> cp.StreamProtocol:
         assert len(streams) == 1, "PodBase.forward expects exactly one input stream"
         return CachedPodStream(pod=self, input_stream=streams[0])
 
     def record_packet(
         self,
-        input_packet: cp.Packet,
-        output_packet: cp.Packet,
+        input_packet: cp.PacketProtocol,
+        output_packet: cp.PacketProtocol,
         record_id: str | None = None,
         execution_engine: cp.ExecutionEngine | None = None,
         execution_engine_opts: dict[str, Any] | None = None,
         skip_duplicates: bool = False,
-    ) -> cp.Packet:
+    ) -> cp.PacketProtocol:
         """
         Record the output packet against the input packet in the result store.
         """
@@ -827,7 +835,9 @@ class CachedPod(WrappedPod):
         # # TODO: make store return retrieved table
         return output_packet
 
-    def get_cached_output_for_packet(self, input_packet: cp.Packet) -> cp.Packet | None:
+    def get_cached_output_for_packet(
+        self, input_packet: cp.PacketProtocol
+    ) -> cp.PacketProtocol | None:
         """
         Retrieve the output packet from the result store based on the input packet.
         If more than one output packet is found, conflict resolution strategy

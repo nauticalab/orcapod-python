@@ -30,10 +30,12 @@ logger = logging.getLogger(__name__)
 class LazyPodResultStream(StreamBase):
     """
     A fixed stream that lazily processes packets from a prepared input stream.
-    This is what Pod.process() returns - it's static/fixed but efficient.
+    This is what PodProtocol.process() returns - it's static/fixed but efficient.
     """
 
-    def __init__(self, pod: cp.Pod, prepared_stream: cp.Stream, **kwargs):
+    def __init__(
+        self, pod: cp.PodProtocol, prepared_stream: cp.StreamProtocol, **kwargs
+    ):
         super().__init__(source=pod, upstreams=(prepared_stream,), **kwargs)
         self.pod = pod
         self.prepared_stream = prepared_stream
@@ -43,8 +45,10 @@ class LazyPodResultStream(StreamBase):
         # note that the invocation of iter_packets on upstream likely triggeres the modified time
         # to be updated on the usptream. Hence you want to set this stream's modified time after that.
 
-        # Packet-level caching (from your PodStream)
-        self._cached_output_packets: dict[int, tuple[cp.Tag, cp.Packet | None]] = {}
+        # PacketProtocol-level caching (from your PodStream)
+        self._cached_output_packets: dict[
+            int, tuple[cp.TagProtocol, cp.PacketProtocol | None]
+        ] = {}
         self._cached_output_table: pa.Table | None = None
         self._cached_content_hash_column: pa.Array | None = None
 
@@ -52,7 +56,7 @@ class LazyPodResultStream(StreamBase):
         self,
         execution_engine: cp.ExecutionEngine | None = None,
         execution_engine_opts: dict[str, Any] | None = None,
-    ) -> Iterator[tuple[cp.Tag, cp.Packet]]:
+    ) -> Iterator[tuple[cp.TagProtocol, cp.PacketProtocol]]:
         if self._prepared_stream_iterator is not None:
             for i, (tag, packet) in enumerate(self._prepared_stream_iterator):
                 if i in self._cached_output_packets:

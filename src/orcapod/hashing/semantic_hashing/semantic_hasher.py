@@ -14,7 +14,7 @@ recursive with ``_expand_structure``:
   - Structure          → delegate to ``_expand_structure``, then
                          JSON-serialise the resulting tagged tree + SHA-256
   - Handler match      → call handler.handle(obj), recurse via hash_object
-  - ContentIdentifiable→ call identity_structure(), recurse via hash_object
+  - ContentIdentifiableProtocol→ call identity_structure(), recurse via hash_object
   - Fallback           → strict error or best-effort string, then hash
 
 ``_expand_structure(obj)``
@@ -28,7 +28,7 @@ recursive with ``_expand_structure``:
                           ContentHash.to_string() as a string leaf
 
 The boundary between the two functions encodes a key semantic distinction:
-a ContentIdentifiable object X whose identity_structure returns [A, B]
+a ContentIdentifiableProtocol object X whose identity_structure returns [A, B]
 embedded inside [X, C] contributes only its hash token to the parent --
 it is NOT the same as [[A, B], C].  The parent's structure is opaque to
 the expansion that produced X's hash.
@@ -89,7 +89,7 @@ class BaseSemanticHasher:
         A short string identifying this hasher version/configuration.
         Embedded in every ContentHash produced.
     type_handler_registry:
-        TypeHandlerRegistry for MRO-aware lookup of TypeHandler instances.
+        TypeHandlerRegistry for MRO-aware lookup of TypeHandlerProtocol instances.
         If None, the default registry from the active DataContext is used.
     strict:
         When True (default) raises TypeError for unhandled types.
@@ -137,13 +137,13 @@ class BaseSemanticHasher:
         - Primitive          → JSON-serialised and hashed directly
         - Structure          → structurally expanded then hashed
         - Handler match      → handler produces a value, recurse
-        - ContentIdentifiable→ identity_structure() produces a value, recurse
+        - ContentIdentifiableProtocol→ identity_structure() produces a value, recurse
         - Unknown type       → TypeError in strict mode; best-effort otherwise
 
         Args:
             obj: The object to hash.
-            process_identity_structure: If False(default), when hashing ContentIdentifiable object, its content_hash method is invoked.
-                                        If True, ContentIdentifiable is hashed by hashing the identity_structure
+            process_identity_structure: If False(default), when hashing ContentIdentifiableProtocol object, its content_hash method is invoked.
+                                        If True, ContentIdentifiableProtocol is hashed by hashing the identity_structure
 
         Returns:
             ContentHash: Stable, content-based hash of the object.
@@ -171,17 +171,17 @@ class BaseSemanticHasher:
             )
             return self.hash_object(handler.handle(obj, self))
 
-        # ContentIdentifiable: expand via identity_structure(); recurse.
-        if isinstance(obj, hp.ContentIdentifiable):
+        # ContentIdentifiableProtocol: expand via identity_structure(); recurse.
+        if isinstance(obj, hp.ContentIdentifiableProtocol):
             if process_identity_structure:
                 logger.debug(
-                    "hash_object: hashing identity structure of ContentIdentifiable %s",
+                    "hash_object: hashing identity structure of ContentIdentifiableProtocol %s",
                     type(obj).__name__,
                 )
                 return self.hash_object(obj.identity_structure())
             else:
                 logger.debug(
-                    "hash_object: using ContentIdentifiable %s's content_hash",
+                    "hash_object: using ContentIdentifiableProtocol %s's content_hash",
                     type(obj).__name__,
                 )
                 return obj.content_hash()
@@ -344,7 +344,7 @@ class BaseSemanticHasher:
 
     def _handle_unknown(self, obj: Any) -> str:
         """
-        Produce a best-effort string for an unregistered, non-ContentIdentifiable
+        Produce a best-effort string for an unregistered, non-ContentIdentifiableProtocol
         type.  Raises TypeError in strict mode.
         """
         class_name = type(obj).__name__
@@ -353,14 +353,14 @@ class BaseSemanticHasher:
 
         if self._strict:
             raise TypeError(
-                f"BaseSemanticHasher (strict): no TypeHandler registered for type "
-                f"'{qualified}' and it does not implement ContentIdentifiable. "
-                "Register a TypeHandler via the TypeHandlerRegistry or implement "
+                f"BaseSemanticHasher (strict): no TypeHandlerProtocol registered for type "
+                f"'{qualified}' and it does not implement ContentIdentifiableProtocol. "
+                "Register a TypeHandlerProtocol via the TypeHandlerRegistry or implement "
                 "identity_structure() on the class."
             )
 
         logger.warning(
-            "SemanticHasher (non-strict): no handler for type '%s'. "
+            "SemanticHasherProtocol (non-strict): no handler for type '%s'. "
             "Falling back to best-effort string representation.",
             qualified,
         )

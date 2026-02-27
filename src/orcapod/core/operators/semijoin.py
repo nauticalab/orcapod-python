@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.operators.base import BinaryOperator
 from orcapod.core.streams import TableStream
 from orcapod.errors import InputValidationError
-from orcapod.protocols.core_protocols import Stream
+from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils import schema_utils
 from orcapod.utils.lazy_module import LazyModule
@@ -29,8 +29,8 @@ class SemiJoin(BinaryOperator):
     """
 
     def binary_static_process(
-        self, left_stream: Stream, right_stream: Stream
-    ) -> Stream:
+        self, left_stream: StreamProtocol, right_stream: StreamProtocol
+    ) -> StreamProtocol:
         """
         Performs a semi-join between left and right streams.
         Returns entries from left stream that have matching entries in right stream.
@@ -78,8 +78,8 @@ class SemiJoin(BinaryOperator):
 
     def binary_output_schema(
         self,
-        left_stream: Stream,
-        right_stream: Stream,
+        left_stream: StreamProtocol,
+        right_stream: StreamProtocol,
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
@@ -91,7 +91,9 @@ class SemiJoin(BinaryOperator):
         # Semi-join preserves the left stream's schema exactly
         return left_stream.output_schema(columns=columns, all_info=all_info)
 
-    def validate_binary_inputs(self, left_stream: Stream, right_stream: Stream) -> None:
+    def validate_binary_inputs(
+        self, left_stream: StreamProtocol, right_stream: StreamProtocol
+    ) -> None:
         """
         Validates that the input streams are compatible for semi-join.
         Checks that overlapping columns have compatible types.

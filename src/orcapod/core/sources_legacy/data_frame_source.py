@@ -138,7 +138,7 @@ class DataFrameSource(SourceBase):
     ) -> "pa.Table | None":
         return self().as_table(include_source=include_system_columns)
 
-    def forward(self, *streams: cp.Stream) -> cp.Stream:
+    def forward(self, *streams: cp.StreamProtocol) -> cp.StreamProtocol:
         """
         Load data from file and return a static stream.
 

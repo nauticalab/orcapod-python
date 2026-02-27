@@ -31,11 +31,11 @@ logger = logging.getLogger(__name__)
 class CachedPodStream(StreamBase):
     """
     A fixed stream that lazily processes packets from a prepared input stream.
-    This is what Pod.process() returns - it's static/fixed but efficient.
+    This is what PodProtocol.process() returns - it's static/fixed but efficient.
     """
 
     # TODO: define interface for storage or pod storage
-    def __init__(self, pod: cp.CachedPod, input_stream: cp.Stream, **kwargs):
+    def __init__(self, pod: cp.CachedPod, input_stream: cp.StreamProtocol, **kwargs):
         super().__init__(source=pod, upstreams=(input_stream,), **kwargs)
         self.pod = pod
         self.input_stream = input_stream
@@ -44,8 +44,10 @@ class CachedPodStream(StreamBase):
 
         self._prepared_stream_iterator = input_stream.iter_packets()
 
-        # Packet-level caching (from your PodStream)
-        self._cached_output_packets: list[tuple[cp.Tag, cp.Packet | None]] | None = None
+        # PacketProtocol-level caching (from your PodStream)
+        self._cached_output_packets: (
+            list[tuple[cp.TagProtocol, cp.PacketProtocol | None]] | None
+        ) = None
         self._cached_output_table: pa.Table | None = None
         self._cached_content_hash_column: pa.Array | None = None
 
@@ -56,7 +58,7 @@ class CachedPodStream(StreamBase):
     def mode(self) -> str:
         return self.pod.mode
 
-    def test(self) -> cp.Stream:
+    def test(self) -> cp.StreamProtocol:
         return self
 
     async def run_async(
@@ -214,7 +216,7 @@ class CachedPodStream(StreamBase):
                 cached_results.append((tag, packet))
 
         if missing is not None and missing.num_rows > 0:
-            hash_to_output_lut: dict[str, cp.Packet | None] = {}
+            hash_to_output_lut: dict[str, cp.PacketProtocol | None] = {}
             for tag, packet in TableStream(missing, tag_columns=tag_keys):
                 # Since these packets are known to be missing, skip the cache lookup
                 packet_hash = packet.content_hash().to_string()
@@ -240,7 +242,7 @@ class CachedPodStream(StreamBase):
         self,
         execution_engine: cp.ExecutionEngine | None = None,
         execution_engine_opts: dict[str, Any] | None = None,
-    ) -> Iterator[tuple[cp.Tag, cp.Packet]]:
+    ) -> Iterator[tuple[cp.TagProtocol, cp.PacketProtocol]]:
         """
         Processes the input stream and prepares the output stream.
         This is typically called before iterating over the packets.
@@ -331,7 +333,7 @@ class CachedPodStream(StreamBase):
                     yield tag, packet
 
             if missing is not None and missing.num_rows > 0:
-                hash_to_output_lut: dict[str, cp.Packet | None] = {}
+                hash_to_output_lut: dict[str, cp.PacketProtocol | None] = {}
                 for tag, packet in TableStream(missing, tag_columns=tag_keys):
                     # Since these packets are known to be missing, skip the cache lookup
                     packet_hash = packet.content_hash().to_string()

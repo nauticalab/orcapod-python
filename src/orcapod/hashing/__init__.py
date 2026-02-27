@@ -5,9 +5,9 @@ Public API
 ----------
 New (preferred) names:
   BaseSemanticHasher           -- content-based recursive object hasher (concrete)
-  SemanticHasher               -- protocol for semantic hashers
-  TypeHandlerRegistry          -- registry mapping types to TypeHandler instances
-  get_default_semantic_hasher  -- global default SemanticHasher factory
+  SemanticHasherProtocol               -- protocol for semantic hashers
+  TypeHandlerRegistry          -- registry mapping types to TypeHandlerProtocol instances
+  get_default_semantic_hasher  -- global default SemanticHasherProtocol factory
   get_default_type_handler_registry -- global default TypeHandlerRegistry factory
   ContentIdentifiableMixin     -- convenience mixin for content-identifiable objects
 
@@ -24,14 +24,14 @@ Legacy names (kept for backward compatibility):
   HashableMixin             -- legacy mixin from legacy_core (deprecated)
 
 Utility:
-  FileContentHasher
-  StringCacher
-  FunctionInfoExtractor
-  ArrowHasher
+  FileContentHasherProtocol
+  StringCacherProtocol
+  FunctionInfoExtractorProtocol
+  ArrowHasherProtocol
 """
 
 # ---------------------------------------------------------------------------
-# New API -- SemanticHasher, registry, mixin
+# New API -- SemanticHasherProtocol, registry, mixin
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
@@ -98,14 +98,14 @@ from orcapod.hashing.semantic_hashing.type_handler_registry import (
 # Protocols (re-exported for convenience)
 # ---------------------------------------------------------------------------
 from orcapod.protocols.hashing_protocols import (
-    ArrowHasher,
-    ContentIdentifiable,
-    FileContentHasher,
-    FunctionInfoExtractor,
-    SemanticHasher,
-    SemanticTypeHasher,
-    StringCacher,
-    TypeHandler,
+    ArrowHasherProtocol,
+    ContentIdentifiableProtocol,
+    FileContentHasherProtocol,
+    FunctionInfoExtractorProtocol,
+    SemanticHasherProtocol,
+    SemanticTypeHasherProtocol,
+    StringCacherProtocol,
+    TypeHandlerProtocol,
 )
 
 # ---------------------------------------------------------------------------
@@ -128,14 +128,14 @@ __all__ = [
     "TypeObjectHandler",
     "register_builtin_handlers",
     # ---- Protocols ----
-    "SemanticHasher",
-    "ContentIdentifiable",
-    "TypeHandler",
-    "FileContentHasher",
-    "ArrowHasher",
-    "StringCacher",
-    "FunctionInfoExtractor",
-    "SemanticTypeHasher",
+    "SemanticHasherProtocol",
+    "ContentIdentifiableProtocol",
+    "TypeHandlerProtocol",
+    "FileContentHasherProtocol",
+    "ArrowHasherProtocol",
+    "StringCacherProtocol",
+    "FunctionInfoExtractorProtocol",
+    "SemanticTypeHasherProtocol",
     # ---- File hashing ----
     "BasicFileHasher",
     "CachedFileHasher",

@@ -4,7 +4,7 @@ Comprehensive test suite for the BaseSemanticHasher system.
 Covers:
   - BaseSemanticHasher: primitives, container type-tagging, determinism,
     circular references, strict vs non-strict mode
-  - ContentIdentifiable protocol: independent hashing, composability
+  - ContentIdentifiableProtocol protocol: independent hashing, composability
   - TypeHandlerRegistry: registration, MRO-aware lookup, unregister
   - Built-in handlers: bytes, UUID, Path, functions, type objects
   - ContentHash as terminal: returned as-is without re-hashing
@@ -83,7 +83,7 @@ class SimpleRecord(ContentIdentifiableMixin):
 
 
 class NestedRecord(ContentIdentifiableMixin):
-    """A content-identifiable record that embeds another ContentIdentifiable."""
+    """A content-identifiable record that embeds another ContentIdentifiableProtocol."""
 
     def __init__(
         self, label: str, inner: SimpleRecord, *, semantic_hasher=None
@@ -289,7 +289,7 @@ class TestCircularReferences:
 
 
 class Unhandled:
-    """An unregistered, non-ContentIdentifiable class."""
+    """An unregistered, non-ContentIdentifiableProtocol class."""
 
     def __init__(self, x: int) -> None:
         self.x = x
@@ -297,7 +297,7 @@ class Unhandled:
 
 class TestStrictMode:
     def test_strict_raises_on_unknown_type(self, hasher):
-        with pytest.raises(TypeError, match="no TypeHandler registered"):
+        with pytest.raises(TypeError, match="no TypeHandlerProtocol registered"):
             hasher.hash_object(Unhandled(1))
 
     def test_non_strict_returns_content_hash(self, lenient_hasher):
@@ -521,7 +521,7 @@ class TestTypeObjectHandler:
 
 
 # ---------------------------------------------------------------------------
-# 12. ContentIdentifiable: independent hashing and composability
+# 12. ContentIdentifiableProtocol: independent hashing and composability
 # ---------------------------------------------------------------------------
 
 
@@ -594,7 +594,7 @@ class TestContentIdentifiable:
         would be hashed independently), the two paths are equivalent.
         """
         rec = SimpleRecord("hello", 42, semantic_hasher=hasher)
-        # hash_object via ContentIdentifiable path
+        # hash_object via ContentIdentifiableProtocol path
         h_via_obj = hasher.hash_object(rec)
         # hash_object directly on the same primitive structure
         h_via_struct = hasher.hash_object(rec.identity_structure())
@@ -1140,7 +1140,7 @@ class TestJsonNormalizationConsistency:
 
 class TestProcessIdentityStructure:
     """
-    Verify the two modes of hash_object when applied to ContentIdentifiable objects:
+    Verify the two modes of hash_object when applied to ContentIdentifiableProtocol objects:
 
       process_identity_structure=False (default):
         hash_object defers to obj.content_hash(), which uses the object's own
@@ -1151,7 +1151,7 @@ class TestProcessIdentityStructure:
         hash_object calls obj.identity_structure() and hashes the result
         using the *calling* hasher, ignoring the object's local hasher.
 
-    For non-ContentIdentifiable objects the flag has no observable effect.
+    For non-ContentIdentifiableProtocol objects the flag has no observable effect.
     """
 
     def test_default_mode_uses_object_content_hash(self):
@@ -1233,7 +1233,7 @@ class TestProcessIdentityStructure:
         assert result is first_call
 
     # ------------------------------------------------------------------
-    # Non-ContentIdentifiable objects: flag has no effect
+    # Non-ContentIdentifiableProtocol objects: flag has no effect
     # ------------------------------------------------------------------
 
     def test_flag_has_no_effect_on_primitives(self):
@@ -1267,7 +1267,7 @@ class TestProcessIdentityStructure:
 
     def test_flag_has_no_effect_on_handler_dispatched_types(self):
         """process_identity_structure has no effect on types handled by a registered
-        TypeHandler (e.g. bytes, UUID)."""
+        TypeHandlerProtocol (e.g. bytes, UUID)."""
         h = make_hasher(strict=True)
         u = UUID("550e8400-e29b-41d4-a716-446655440000")
         assert h.hash_object(u, process_identity_structure=False) == h.hash_object(
@@ -1278,7 +1278,7 @@ class TestProcessIdentityStructure:
         ) == h.hash_object(b"data", process_identity_structure=True)
 
     def test_nested_content_identifiable_in_structure_respects_defer_mode(self):
-        """When a ContentIdentifiable is embedded inside a structure, the calling
+        """When a ContentIdentifiableProtocol is embedded inside a structure, the calling
         hasher expands the structure and encounters the CI object via _expand_element,
         which always calls hash_object(obj) to get a token.  In that context
         the default (defer) mode is used -- the embedded object contributes its

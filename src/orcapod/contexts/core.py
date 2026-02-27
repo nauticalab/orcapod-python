@@ -8,8 +8,11 @@ the context management system.
 from dataclasses import dataclass
 
 from orcapod.hashing.semantic_hashing.type_handler_registry import TypeHandlerRegistry
-from orcapod.protocols.hashing_protocols import ArrowHasher, SemanticHasher
-from orcapod.protocols.semantic_types_protocols import TypeConverter
+from orcapod.protocols.hashing_protocols import (
+    ArrowHasherProtocol,
+    SemanticHasherProtocol,
+)
+from orcapod.protocols.semantic_types_protocols import TypeConverterProtocol
 
 
 @dataclass
@@ -28,15 +31,15 @@ class DataContext:
         semantic_type_registry: Registry of semantic type converters
         arrow_hasher: Arrow table hasher for this context
         object_hasher: General object hasher for this context
-        type_handler_registry: Registry of TypeHandler instances for SemanticHasher
+        type_handler_registry: Registry of TypeHandlerProtocol instances for SemanticHasherProtocol
     """
 
     context_key: str
     version: str
     description: str
-    type_converter: TypeConverter
-    arrow_hasher: ArrowHasher
-    semantic_hasher: SemanticHasher  # this is the currently the JSON hasher
+    type_converter: TypeConverterProtocol
+    arrow_hasher: ArrowHasherProtocol
+    semantic_hasher: SemanticHasherProtocol  # this is the currently the JSON hasher
     type_handler_registry: TypeHandlerRegistry
 
 

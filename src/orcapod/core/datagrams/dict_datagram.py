@@ -35,7 +35,7 @@ class DictDatagram(BaseDatagram):
     - Meta dict: Internal system metadata with {orcapod.META_PREFIX} ('__') prefixes
     - Context: Data context information with {orcapod.CONTEXT_KEY}
 
-    Future Packet subclass will also handle:
+    Future PacketProtocol subclass will also handle:
     - Source info: Data provenance with {orcapod.SOURCE_PREFIX} ('_source_') prefixes
 
     When exposing to external tools, semantic types are encoded as

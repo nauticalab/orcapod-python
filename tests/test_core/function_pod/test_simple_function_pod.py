@@ -1,8 +1,8 @@
 """
-Tests for SimpleFunctionPod.
+Tests for FunctionPod.
 
 Covers:
-- FunctionPod protocol conformance
+- FunctionPodProtocol protocol conformance
 - Construction and properties
 - process() and __call__()
 - Input packet schema validation
@@ -18,10 +18,10 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.datagrams import DictPacket, DictTag
-from orcapod.core.function_pod import FunctionPodStream, SimpleFunctionPod
+from orcapod.core.function_pod import FunctionPodStream, FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.streams import TableStream
-from orcapod.protocols.core_protocols import FunctionPod
+from orcapod.protocols.core_protocols import FunctionPodProtocol
 
 from ..conftest import add, double, make_int_stream, to_upper
 
@@ -33,8 +33,8 @@ from ..conftest import add, double, make_int_stream, to_upper
 
 class TestSimpleFunctionPodProtocolConformance:
     def test_satisfies_function_pod_protocol(self, double_pod):
-        assert isinstance(double_pod, FunctionPod), (
-            "SimpleFunctionPod does not satisfy the FunctionPod protocol"
+        assert isinstance(double_pod, FunctionPodProtocol), (
+            "FunctionPod does not satisfy the FunctionPodProtocol protocol"
         )
 
     def test_has_packet_function_property(self, double_pod, double_pf):
@@ -113,7 +113,7 @@ class TestSimpleFunctionPodProcess:
         assert input_stream in double_pod.process(input_stream).upstreams
 
     def test_schema_mismatch_raises(self):
-        pod = SimpleFunctionPod(
+        pod = FunctionPod(
             packet_function=PythonPacketFunction(to_upper, output_keys="result")
         )
         with pytest.raises(ValueError):
@@ -180,7 +180,7 @@ class TestSimpleFunctionPodInputSchemaValidation:
         def add_with_default(x: int, y: int = 10) -> int:
             return x + y
 
-        pod = SimpleFunctionPod(
+        pod = FunctionPod(
             packet_function=PythonPacketFunction(add_with_default, output_keys="result")
         )
         stream = TableStream(
@@ -198,7 +198,7 @@ class TestSimpleFunctionPodInputSchemaValidation:
         def add_with_default(x: int, y: int = 10) -> int:
             return x + y
 
-        pod = SimpleFunctionPod(
+        pod = FunctionPod(
             packet_function=PythonPacketFunction(add_with_default, output_keys="result")
         )
         stream = TableStream(

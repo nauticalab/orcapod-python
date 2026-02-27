@@ -5,7 +5,7 @@ Covers:
 - parse_function_outputs helper
 - PacketFunctionBase (version parsing, URI, schema hash, identity) via PythonPacketFunction
 - PythonPacketFunction construction, properties, call behaviour, error paths
-- PacketFunction protocol conformance
+- PacketFunctionProtocol protocol conformance
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import pytest
 
 from orcapod.core.datagrams import DictPacket
 from orcapod.core.packet_function import PythonPacketFunction, parse_function_outputs
-from orcapod.protocols.core_protocols import PacketFunction
+from orcapod.protocols.core_protocols import PacketFunctionProtocol
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -425,12 +425,12 @@ class TestAsyncCall:
 
 
 # ---------------------------------------------------------------------------
-# 11. PacketFunction protocol conformance
+# 11. PacketFunctionProtocol protocol conformance
 # ---------------------------------------------------------------------------
 
 
 class TestPacketFunctionProtocolConformance:
     def test_python_packet_function_satisfies_protocol(self, add_pf):
-        assert isinstance(add_pf, PacketFunction), (
-            "PythonPacketFunction does not satisfy the PacketFunction protocol"
+        assert isinstance(add_pf, PacketFunctionProtocol), (
+            "PythonPacketFunction does not satisfy the PacketFunctionProtocol protocol"
         )

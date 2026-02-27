@@ -138,7 +138,7 @@ def create_sample_packets():
         )
         print(f"Created simple packet with one key, Hash: {packet_hash}")
 
-    # Sample 2: Packet with multiple keys, each pointing to a single file
+    # Sample 2: PacketProtocol with multiple keys, each pointing to a single file
     if len(text_files) >= 2 and binary_files:
         packet = {
             "text": text_files[0],
@@ -160,7 +160,7 @@ def create_sample_packets():
         )
         print(f"Created packet with multiple keys, Hash: {packet_hash}")
 
-    # Sample 3: Packet with keys pointing to collections of files
+    # Sample 3: PacketProtocol with keys pointing to collections of files
     if len(text_files) >= 3 and len(binary_files) >= 2:
         packet = {"texts": text_files[:3], "binaries": binary_files[:2]}
         packet_hash = hash_packet(packet)
@@ -244,7 +244,7 @@ def main():
         json.dump(packet_lut, f, indent=2)
 
     print(f"\nGenerated {len(packets_info)} sample packets")
-    print(f"Packet hash lookup table saved to {PACKET_LUT_PATH}")
+    print(f"PacketProtocol hash lookup table saved to {PACKET_LUT_PATH}")
 
 
 if __name__ == "__main__":

@@ -3,19 +3,19 @@ from __future__ import annotations
 from collections.abc import Collection
 from typing import Any, Protocol, TypeAlias, runtime_checkable
 
-from orcapod.protocols.core_protocols.streams import Stream
-from orcapod.protocols.core_protocols.traceable import Traceable
+from orcapod.protocols.core_protocols.streams import StreamProtocol
+from orcapod.protocols.core_protocols.traceable import TraceableProtocol
 from orcapod.types import ColumnConfig, Schema
 
 # Core recursive types
-ArgumentGroup: TypeAlias = "SymmetricGroup | OrderedGroup | Stream"
+ArgumentGroup: TypeAlias = "SymmetricGroup | OrderedGroup | StreamProtocol"
 
 SymmetricGroup: TypeAlias = frozenset[ArgumentGroup]  # Order-independent
 OrderedGroup: TypeAlias = tuple[ArgumentGroup, ...]  # Order-dependent
 
 
 @runtime_checkable
-class Pod(Traceable, Protocol):
+class PodProtocol(TraceableProtocol, Protocol):
     """
     The fundamental unit of computation in Orcapod.
 
@@ -31,7 +31,7 @@ class Pod(Traceable, Protocol):
 
     Execution modes:
     - __call__(): Full-featured execution with tracking, returns LiveStream
-    - forward(): Pure computation without side effects, returns Stream
+    - forward(): Pure computation without side effects, returns StreamProtocol
 
     The distinction between these modes enables both production use (with
     full tracking) and testing/debugging (without side effects).
@@ -50,13 +50,13 @@ class Pod(Traceable, Protocol):
         """
         ...
 
-    def validate_inputs(self, *streams: Stream) -> None:
+    def validate_inputs(self, *streams: StreamProtocol) -> None:
         """
         Validate input streams, raising exceptions if invalid.
 
         Should check:
         - Number of input streams
-        - Stream types and schemas
+        - StreamProtocol types and schemas
         - Kernel-specific requirements
         - Business logic constraints
 
@@ -68,7 +68,7 @@ class Pod(Traceable, Protocol):
         """
         ...
 
-    def argument_symmetry(self, streams: Collection[Stream]) -> ArgumentGroup:
+    def argument_symmetry(self, streams: Collection[StreamProtocol]) -> ArgumentGroup:
         """
         Describe symmetry/ordering constraints on input arguments.
 
@@ -92,7 +92,7 @@ class Pod(Traceable, Protocol):
 
     def output_schema(
         self,
-        *streams: Stream,
+        *streams: StreamProtocol,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
@@ -121,7 +121,9 @@ class Pod(Traceable, Protocol):
         """
         ...
 
-    def process(self, *streams: Stream, label: str | None = None) -> Stream:
+    def process(
+        self, *streams: StreamProtocol, label: str | None = None
+    ) -> StreamProtocol:
         """
         Executes the computation on zero or more input streams.
         This method contains the core computation logic and should be
@@ -140,6 +142,6 @@ class Pod(Traceable, Protocol):
             *streams: Input streams to process
 
         Returns:
-            Stream: Result of the computation (may be static or live)
+            StreamProtocol: Result of the computation (may be static or live)
         """
         ...

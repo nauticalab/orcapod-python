@@ -10,7 +10,7 @@ bumps happen in exactly one place.
 Functions
 ---------
 get_versioned_semantic_hasher()
-    Return the current-version SemanticHasher (the new content-based
+    Return the current-version SemanticHasherProtocol (the new content-based
     recursive hasher that replaces BasicObjectHasher).
 
 get_versioned_object_hasher()
@@ -47,7 +47,7 @@ _CURRENT_ARROW_HASHER_ID = "arrow_v0.1"
 
 
 # ---------------------------------------------------------------------------
-# SemanticHasher factory
+# SemanticHasherProtocol factory
 # ---------------------------------------------------------------------------
 
 
@@ -55,9 +55,9 @@ def get_versioned_semantic_hasher(
     hasher_id: str = _CURRENT_SEMANTIC_HASHER_ID,
     strict: bool = True,
     type_handler_registry: "hp.TypeHandlerRegistry | None" = None,  # type: ignore[name-defined]
-) -> hp.SemanticHasher:
+) -> hp.SemanticHasherProtocol:
     """
-    Return a SemanticHasher configured for the current version.
+    Return a SemanticHasherProtocol configured for the current version.
 
     The returned hasher uses the global default TypeHandlerRegistry (which
     is pre-populated with all built-in handlers) unless an explicit registry
@@ -79,8 +79,8 @@ def get_versioned_semantic_hasher(
 
     Returns
     -------
-    SemanticHasher
-        A fully configured SemanticHasher instance.
+    SemanticHasherProtocol
+        A fully configured SemanticHasherProtocol instance.
     """
     from orcapod.hashing.semantic_hashing.semantic_hasher import BaseSemanticHasher
 
@@ -108,7 +108,7 @@ def get_versioned_object_hasher(
     hasher_id: str = _CURRENT_SEMANTIC_HASHER_ID,
     strict: bool = True,
     type_handler_registry: "hp.TypeHandlerRegistry | None" = None,  # type: ignore[name-defined]
-) -> hp.SemanticHasher:
+) -> hp.SemanticHasherProtocol:
     """
     Return the current-version object hasher.
 
@@ -119,7 +119,7 @@ def get_versioned_object_hasher(
         the ``DataContext.object_hasher`` field continue to work without any
         changes.
       * Call-sites that were already using ``get_versioned_object_hasher()``
-        transparently receive the new SemanticHasher implementation.
+        transparently receive the new SemanticHasherProtocol implementation.
 
     All parameters are forwarded verbatim to ``get_versioned_semantic_hasher()``.
     """
@@ -137,7 +137,7 @@ def get_versioned_object_hasher(
 
 def get_versioned_semantic_arrow_hasher(
     hasher_id: str = _CURRENT_ARROW_HASHER_ID,
-) -> hp.ArrowHasher:
+) -> hp.ArrowHasherProtocol:
     """
     Return a SemanticArrowHasher configured for the current version.
 
@@ -151,7 +151,7 @@ def get_versioned_semantic_arrow_hasher(
 
     Returns
     -------
-    ArrowHasher
+    ArrowHasherProtocol
         A fully configured SemanticArrowHasher instance.
     """
     from orcapod.hashing.arrow_hashers import SemanticArrowHasher
@@ -160,7 +160,7 @@ def get_versioned_semantic_arrow_hasher(
 
     # Build a default semantic registry populated with the standard converters.
     # We use Any-typed locals here to side-step type-checker false positives
-    # that arise from the protocol definition of SemanticStructConverter having
+    # that arise from the protocol definition of SemanticStructConverterProtocol having
     # a slightly different hash_struct_dict signature than the concrete class.
     registry: Any = SemanticTypeRegistry()
     path_converter: Any = PathStructConverter()

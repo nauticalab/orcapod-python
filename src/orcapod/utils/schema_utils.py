@@ -18,7 +18,7 @@ def verify_packet_schema(packet: dict, schema: Schema) -> bool:
     # verify that packet contains no keys not in typespec
     if set(packet.keys()) - set(schema.keys()):
         logger.warning(
-            f"Packet contains keys not in typespec: {set(packet.keys()) - set(schema.keys())}. "
+            f"PacketProtocol contains keys not in typespec: {set(packet.keys()) - set(schema.keys())}. "
         )
         return False
     for key, type_info in schema.items():

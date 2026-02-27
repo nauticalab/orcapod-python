@@ -10,7 +10,7 @@ from orcapod.core.datagrams import (
     DictTag,
 )
 from orcapod.core.streams.base import StreamBase
-from orcapod.protocols.core_protocols import Pod, Stream, Tag
+from orcapod.protocols.core_protocols import PodProtocol, StreamProtocol, TagProtocol
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils import arrow_utils
@@ -43,8 +43,8 @@ class TableStream(StreamBase):
         tag_columns: Collection[str] = (),
         system_tag_columns: Collection[str] = (),
         source_info: dict[str, str | None] | None = None,
-        source: Pod | None = None,
-        upstreams: tuple[Stream, ...] = (),
+        source: PodProtocol | None = None,
+        upstreams: tuple[StreamProtocol, ...] = (),
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -141,7 +141,7 @@ class TableStream(StreamBase):
         #     )
         # )
 
-        self._cached_elements: list[tuple[Tag, ArrowPacket]] | None = None
+        self._cached_elements: list[tuple[TagProtocol, ArrowPacket]] | None = None
         self._update_modified_time()  # set modified time to now
 
     def identity_structure(self) -> Any:
@@ -163,11 +163,11 @@ class TableStream(StreamBase):
         return super().identity_structure()
 
     @property
-    def source(self) -> Pod | None:
+    def source(self) -> PodProtocol | None:
         return self._source
 
     @property
-    def upstreams(self) -> tuple[Stream, ...]:
+    def upstreams(self) -> tuple[StreamProtocol, ...]:
         return self._upstreams
 
     def keys(
@@ -267,10 +267,10 @@ class TableStream(StreamBase):
         """
         self._cached_elements = None
 
-    def iter_packets(self) -> Iterator[tuple[Tag, ArrowPacket]]:
+    def iter_packets(self) -> Iterator[tuple[TagProtocol, ArrowPacket]]:
         """
         Iterates over the packets in the stream.
-        Each packet is represented as a tuple of (Tag, Packet).
+        Each packet is represented as a tuple of (TagProtocol, PacketProtocol).
         """
         # TODO: make it work with table batch stream
         if self._cached_elements is None:

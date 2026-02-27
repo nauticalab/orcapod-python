@@ -1,6 +1,6 @@
 """
 Extended tests for function_pod.py covering:
-- TrackedPacketFunctionPod — handle_input_streams
+- _FunctionPodBase — handle_input_streams
 - WrappedFunctionPod — delegation, uri, validate_inputs, output_schema, process
 - FunctionPodStream — as_table() with content_hash and sort_by_tags column configs
 - function_pod decorator with result_database — creates CachedPacketFunction, caching works
@@ -14,20 +14,20 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.function_pod import (
-    SimpleFunctionPod,
+    FunctionPod,
     WrappedFunctionPod,
     function_pod,
 )
 from orcapod.core.packet_function import CachedPacketFunction, PythonPacketFunction
 from orcapod.core.streams import TableStream
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.protocols.core_protocols import Stream
+from orcapod.protocols.core_protocols import StreamProtocol
 
 from ..conftest import make_int_stream, make_two_col_stream
 
 
 # ---------------------------------------------------------------------------
-# 1. TrackedPacketFunctionPod — handle_input_streams with 0 streams
+# 1. _FunctionPodBase — handle_input_streams with 0 streams
 # ---------------------------------------------------------------------------
 
 
@@ -61,7 +61,7 @@ class TestTrackedPacketFunctionPodHandleInputStreams:
             tag_columns=["id"],
         )
         result = add_pod.handle_input_streams(stream_x, stream_y)
-        assert isinstance(result, Stream)
+        assert isinstance(result, StreamProtocol)
         assert len([p for p in result.iter_packets()]) == 2
 
 
@@ -97,7 +97,7 @@ class TestWrappedFunctionPodDelegation:
     def test_process_delegates_to_inner_pod(self, wrapped):
         stream = make_int_stream(n=3)
         result = wrapped.process(stream)
-        assert isinstance(result, Stream)
+        assert isinstance(result, StreamProtocol)
         packets = list(result.iter_packets())
         assert len(packets) == 3
         for i, (_, packet) in enumerate(packets):
@@ -205,7 +205,7 @@ class TestFunctionPodDecoratorWithDatabase:
         def cube(x: int) -> int:
             return x * x * x
 
-        assert isinstance(cube.pod, SimpleFunctionPod)
+        assert isinstance(cube.pod, FunctionPod)
 
     def test_cache_miss_then_hit(self):
         db = InMemoryArrowDatabase()

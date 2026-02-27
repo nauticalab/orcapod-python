@@ -8,7 +8,7 @@ __all__ = [
     "NoOpArrowDatabase",
 ]
 
-# Future ArrowDatabase backends to implement:
+# Future ArrowDatabaseProtocol backends to implement:
 #
 #   ParquetArrowDatabase    -- stores each record_path as a partitioned Parquet
 #                              directory; simpler, no Delta Lake dependency,
@@ -17,5 +17,5 @@ __all__ = [
 #   IcebergArrowDatabase    -- Apache Iceberg backend for cloud-native /
 #                              object-store deployments.
 #
-# All backends must satisfy the ArrowDatabase protocol defined in
+# All backends must satisfy the ArrowDatabaseProtocol protocol defined in
 # orcapod.protocols.database_protocols.

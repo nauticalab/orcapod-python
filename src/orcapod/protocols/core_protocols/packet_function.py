@@ -1,13 +1,13 @@
 from typing import Any, Protocol, runtime_checkable
 
-from orcapod.protocols.core_protocols.datagrams import Packet
-from orcapod.protocols.core_protocols.labelable import Labelable
-from orcapod.protocols.hashing_protocols import ContentIdentifiable
+from orcapod.protocols.core_protocols.datagrams import PacketProtocol
+from orcapod.protocols.core_protocols.labelable import LabelableProtocol
+from orcapod.protocols.hashing_protocols import ContentIdentifiableProtocol
 from orcapod.types import Schema
 
 
 @runtime_checkable
-class PacketFunction(ContentIdentifiable, Labelable, Protocol):
+class PacketFunctionProtocol(ContentIdentifiableProtocol, LabelableProtocol, Protocol):
     """
     Protocol for packet-processing function.
 
@@ -81,8 +81,8 @@ class PacketFunction(ContentIdentifiable, Labelable, Protocol):
 
     async def async_call(
         self,
-        packet: Packet,
-    ) -> Packet | None:
+        packet: PacketProtocol,
+    ) -> PacketProtocol | None:
         """
         Asynchronously process a single packet
 
@@ -94,7 +94,7 @@ class PacketFunction(ContentIdentifiable, Labelable, Protocol):
         - Filtering operations (by returning None)
 
         The method signature supports:
-        - Packet transformation (modify content)
+        - PacketProtocol transformation (modify content)
         - Filtering (return None to exclude packet)
         - Pass-through (return inputs unchanged)
 
@@ -102,7 +102,7 @@ class PacketFunction(ContentIdentifiable, Labelable, Protocol):
             packet: The data payload to process
 
         Returns:
-            Packet | None: Processed packet, or None to filter it out
+            PacketProtocol | None: Processed packet, or None to filter it out
 
         Raises:
             TypeError: If packet doesn't match input_packet_types
@@ -112,8 +112,8 @@ class PacketFunction(ContentIdentifiable, Labelable, Protocol):
 
     def call(
         self,
-        packet: Packet,
-    ) -> Packet | None:
+        packet: PacketProtocol,
+    ) -> PacketProtocol | None:
         """
         Process a single packet
 
@@ -125,7 +125,7 @@ class PacketFunction(ContentIdentifiable, Labelable, Protocol):
         - Filtering operations (by returning None)
 
         The method signature supports:
-        - Packet transformation (modify content)
+        - PacketProtocol transformation (modify content)
         - Filtering (return None to exclude packet)
         - Pass-through (return inputs unchanged)
 
@@ -133,7 +133,7 @@ class PacketFunction(ContentIdentifiable, Labelable, Protocol):
             packet: The data payload to process
 
         Returns:
-            Packet | None: Processed packet, or None to filter it out
+            PacketProtocol | None: Processed packet, or None to filter it out
 
         Raises:
             TypeError: If packet doesn't match input_packet_types

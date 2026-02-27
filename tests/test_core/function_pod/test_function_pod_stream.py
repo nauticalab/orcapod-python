@@ -2,7 +2,7 @@
 Tests for FunctionPodStream.
 
 Covers:
-- Stream protocol conformance
+- StreamProtocol protocol conformance
 - keys() and output_schema()
 - iter_packets()
 - as_table()
@@ -15,20 +15,20 @@ from collections.abc import Mapping
 import pyarrow as pa
 import pytest
 
-from orcapod.protocols.core_protocols import Stream
-from orcapod.protocols.core_protocols.datagrams import Packet, Tag
+from orcapod.protocols.core_protocols import StreamProtocol
+from orcapod.protocols.core_protocols.datagrams import PacketProtocol, TagProtocol
 
 from ..conftest import make_int_stream
 
 
 # ---------------------------------------------------------------------------
-# 1. Stream protocol conformance
+# 1. StreamProtocol protocol conformance
 # ---------------------------------------------------------------------------
 
 
 class TestFunctionPodStreamProtocolConformance:
     def test_satisfies_stream_protocol(self, double_pod):
-        assert isinstance(double_pod.process(make_int_stream()), Stream)
+        assert isinstance(double_pod.process(make_int_stream()), StreamProtocol)
 
     def test_has_source_property(self, double_pod):
         _ = double_pod.process(make_int_stream()).source
@@ -98,8 +98,8 @@ class TestFunctionPodStreamIterPackets:
 
     def test_each_pair_has_tag_and_packet(self, double_pod):
         for tag, packet in double_pod.process(make_int_stream()).iter_packets():
-            assert isinstance(tag, Tag)
-            assert isinstance(packet, Packet)
+            assert isinstance(tag, TagProtocol)
+            assert isinstance(packet, PacketProtocol)
 
     def test_output_packet_values_are_doubled(self, double_pod):
         for i, (_, packet) in enumerate(

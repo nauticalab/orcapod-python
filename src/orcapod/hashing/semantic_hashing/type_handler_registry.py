@@ -1,7 +1,7 @@
 """
-Type Handler Registry for the SemanticHasher system.
+Type Handler Registry for the SemanticHasherProtocol system.
 
-Provides a registry through which TypeHandler implementations can be
+Provides a registry through which TypeHandlerProtocol implementations can be
 registered for specific Python types. Lookup is MRO-aware: if no handler
 is registered for an exact type, the registry walks the MRO of the object's
 class to find the nearest ancestor for which a handler has been registered.
@@ -27,14 +27,14 @@ import threading
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from orcapod.protocols.hashing_protocols import TypeHandler
+    from orcapod.protocols.hashing_protocols import TypeHandlerProtocol
 
 logger = logging.getLogger(__name__)
 
 
 class TypeHandlerRegistry:
     """
-    Registry mapping Python types to TypeHandler instances.
+    Registry mapping Python types to TypeHandlerProtocol instances.
 
     Lookup is MRO-aware: when no handler is registered for the exact type of
     an object, the registry walks the object's MRO (most-derived first) until
@@ -50,14 +50,14 @@ class TypeHandlerRegistry:
 
     def __init__(self) -> None:
         # Maps type -> handler; insertion order is preserved but lookup uses MRO.
-        self._handlers: dict[type, "TypeHandler"] = {}
+        self._handlers: dict[type, "TypeHandlerProtocol"] = {}
         self._lock = threading.RLock()
 
     # ------------------------------------------------------------------
     # Registration
     # ------------------------------------------------------------------
 
-    def register(self, target_type: type, handler: "TypeHandler") -> None:
+    def register(self, target_type: type, handler: "TypeHandlerProtocol") -> None:
         """
         Register a handler for a specific Python type.
 
@@ -67,7 +67,7 @@ class TypeHandlerRegistry:
         Args:
             target_type: The Python type (or class) for which the handler
                          should be used.  Must be a ``type`` object.
-            handler:     A TypeHandler instance whose ``handle()`` method will
+            handler:     A TypeHandlerProtocol instance whose ``handle()`` method will
                          be called when an object of ``target_type`` (or a
                          subclass with no more specific handler) is encountered
                          during structure resolution.
@@ -110,7 +110,7 @@ class TypeHandlerRegistry:
     # Lookup
     # ------------------------------------------------------------------
 
-    def get_handler(self, obj: Any) -> "TypeHandler | None":
+    def get_handler(self, obj: Any) -> "TypeHandlerProtocol | None":
         """
         Look up the handler for *obj* using MRO-aware resolution.
 
@@ -122,7 +122,7 @@ class TypeHandlerRegistry:
             obj: The object for which a handler is needed.
 
         Returns:
-            The registered TypeHandler, or None if no handler is registered
+            The registered TypeHandlerProtocol, or None if no handler is registered
             for the object's type or any of its base classes.
         """
         obj_type = type(obj)
@@ -147,7 +147,7 @@ class TypeHandlerRegistry:
 
         return None
 
-    def get_handler_for_type(self, target_type: type) -> "TypeHandler | None":
+    def get_handler_for_type(self, target_type: type) -> "TypeHandlerProtocol | None":
         """
         Look up the handler for a *type object* (rather than an instance).
 
@@ -158,7 +158,7 @@ class TypeHandlerRegistry:
             target_type: The type to look up.
 
         Returns:
-            The registered TypeHandler, or None.
+            The registered TypeHandlerProtocol, or None.
         """
         with self._lock:
             handler = self._handlers.get(target_type)

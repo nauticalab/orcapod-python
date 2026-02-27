@@ -1,26 +1,26 @@
 from orcapod.types import ColumnConfig
 
-from .datagrams import Datagram, Packet, Tag
-from .function_pod import FunctionPod
-from .operator_pod import OperatorPod
-from .packet_function import PacketFunction
-from .pod import ArgumentGroup, Pod
-from .source_pod import SourcePod
-from .streams import Stream
-from .trackers import Tracker, TrackerManager
+from .datagrams import DatagramProtocol, PacketProtocol, TagProtocol
+from .function_pod import FunctionPodProtocol
+from .operator_pod import OperatorPodProtocol
+from .packet_function import PacketFunctionProtocol
+from .pod import ArgumentGroup, PodProtocol
+from .source_pod import SourcePodProtocol
+from .streams import StreamProtocol
+from .trackers import TrackerProtocol, TrackerManagerProtocol
 
 __all__ = [
     "ColumnConfig",
-    "Datagram",
-    "Tag",
-    "Packet",
-    "Stream",
-    "Pod",
+    "DatagramProtocol",
+    "TagProtocol",
+    "PacketProtocol",
+    "StreamProtocol",
+    "PodProtocol",
     "ArgumentGroup",
-    "SourcePod",
-    "FunctionPod",
-    "OperatorPod",
-    "PacketFunction",
-    "Tracker",
-    "TrackerManager",
+    "SourcePodProtocol",
+    "FunctionPodProtocol",
+    "OperatorPodProtocol",
+    "PacketFunctionProtocol",
+    "TrackerProtocol",
+    "TrackerManagerProtocol",
 ]

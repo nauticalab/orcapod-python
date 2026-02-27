@@ -19,8 +19,8 @@ from orcapod.hashing.hash_utils import (
     get_function_components,
     get_function_signature,
 )
-from orcapod.protocols.core_protocols import Packet, PacketFunction
-from orcapod.protocols.database_protocols import ArrowDatabase
+from orcapod.protocols.core_protocols import PacketProtocol, PacketFunctionProtocol
+from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.system_constants import constants
 from orcapod.types import DataValue, Schema, SchemaLike
 from orcapod.utils import schema_utils
@@ -85,7 +85,7 @@ def parse_function_outputs(
 
 class PacketFunctionBase(TraceableBase):
     """
-    Abstract base class for PacketFunction, defining the interface and common functionality.
+    Abstract base class for PacketFunctionProtocol, defining the interface and common functionality.
     """
 
     def __init__(
@@ -200,14 +200,14 @@ class PacketFunctionBase(TraceableBase):
         ...
 
     @abstractmethod
-    def call(self, packet: Packet) -> Packet | None:
+    def call(self, packet: PacketProtocol) -> PacketProtocol | None:
         """
         Process the input packet and return the output packet.
         """
         ...
 
     @abstractmethod
-    async def async_call(self, packet: Packet) -> Packet | None:
+    async def async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
         """
         Asynchronously process the input packet and return the output packet.
         """
@@ -350,7 +350,7 @@ class PythonPacketFunction(PacketFunctionBase):
         """
         self._active = active
 
-    def call(self, packet: Packet) -> Packet | None:
+    def call(self, packet: PacketProtocol) -> PacketProtocol | None:
         if not self._active:
             return None
         values = self._function(**packet.as_dict())
@@ -372,16 +372,16 @@ class PythonPacketFunction(PacketFunctionBase):
             data_context=self.data_context,
         )
 
-    async def async_call(self, packet: Packet) -> Packet | None:
+    async def async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
         raise NotImplementedError("Async call not implemented for synchronous function")
 
 
 class PacketFunctionWrapper(PacketFunctionBase):
     """
-    Wrapper around a PacketFunction to modify or extend its behavior.
+    Wrapper around a PacketFunctionProtocol to modify or extend its behavior.
     """
 
-    def __init__(self, packet_function: PacketFunction, **kwargs) -> None:
+    def __init__(self, packet_function: PacketFunctionProtocol, **kwargs) -> None:
         super().__init__(**kwargs)
         self._packet_function = packet_function
 
@@ -418,16 +418,16 @@ class PacketFunctionWrapper(PacketFunctionBase):
     def get_execution_data(self) -> dict[str, Any]:
         return self._packet_function.get_execution_data()
 
-    def call(self, packet: Packet) -> Packet | None:
+    def call(self, packet: PacketProtocol) -> PacketProtocol | None:
         return self._packet_function.call(packet)
 
-    async def async_call(self, packet: Packet) -> Packet | None:
+    async def async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
         return await self._packet_function.async_call(packet)
 
 
 class CachedPacketFunction(PacketFunctionWrapper):
     """
-    Wrapper around a PacketFunction that caches results for identical input packets.
+    Wrapper around a PacketFunctionProtocol that caches results for identical input packets.
     """
 
     # cloumn name containing indication of whether the result was computed
@@ -435,8 +435,8 @@ class CachedPacketFunction(PacketFunctionWrapper):
 
     def __init__(
         self,
-        packet_function: PacketFunction,
-        result_database: ArrowDatabase,
+        packet_function: PacketFunctionProtocol,
+        result_database: ArrowDatabaseProtocol,
         record_path_prefix: tuple[str, ...] = (),
         **kwargs,
     ) -> None:
@@ -462,11 +462,11 @@ class CachedPacketFunction(PacketFunctionWrapper):
 
     def call(
         self,
-        packet: Packet,
+        packet: PacketProtocol,
         *,
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
-    ) -> Packet | None:
+    ) -> PacketProtocol | None:
         # execution_engine_hash = execution_engine.name if execution_engine else "default"
         output_packet = None
         if not skip_cache_lookup:
@@ -485,7 +485,9 @@ class CachedPacketFunction(PacketFunctionWrapper):
 
         return output_packet
 
-    def get_cached_output_for_packet(self, input_packet: Packet) -> Packet | None:
+    def get_cached_output_for_packet(
+        self, input_packet: PacketProtocol
+    ) -> PacketProtocol | None:
         """
         Retrieve the output packet from the result store based on the input packet.
         If more than one output packet is found, conflict resolution strategy
@@ -534,10 +536,10 @@ class CachedPacketFunction(PacketFunctionWrapper):
 
     def record_packet(
         self,
-        input_packet: Packet,
-        output_packet: Packet,
+        input_packet: PacketProtocol,
+        output_packet: PacketProtocol,
         skip_duplicates: bool = False,
-    ) -> Packet:
+    ) -> PacketProtocol:
         """
         Record the output packet against the input packet in the result store.
         """
