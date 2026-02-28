@@ -25,6 +25,55 @@ class DataContextAwareProtocol(Protocol):
 
 
 @runtime_checkable
+class PipelineElementProtocol(Protocol):
+    """
+    Protocol for objects that have a stable identity as an element in a
+    pipeline graph — determined by schema and upstream topology, not by
+    data content.
+
+    This is a parallel identity chain to ContentIdentifiableProtocol.
+    Where content identity captures the precise, data-inclusive identity of
+    an object, pipeline identity captures only what is structurally meaningful
+    for pipeline database path scoping: the schemas and the recursive topology
+    of the upstream computation.
+
+    The base case (RootSource) returns a hash of (tag_schema, packet_schema).
+    Every other element recurses through the pipeline_hash() of its upstream
+    inputs, with the hash values themselves (ContentHash objects) used as
+    terminal leaves so no special hasher mode is required.
+
+    Two sources with identical schemas processed through the same function pod
+    graph will produce the same pipeline_hash() at every downstream node,
+    enabling automatic multi-source table sharing in the pipeline database.
+    """
+
+    def pipeline_identity_structure(self) -> Any:
+        """
+        Return a structure representing this element's pipeline identity.
+
+        At source nodes (base case): return (tag_schema, packet_schema).
+        At all other nodes: return a structure containing references to
+        upstream pipeline elements and/or packet functions as raw objects.
+        The pipeline resolver threaded through pipeline_hash() ensures that
+        PipelineElementProtocol objects are resolved via pipeline_hash() and
+        other ContentIdentifiable objects via content_hash(), both using the
+        same hasher throughout the computation.
+        """
+        ...
+
+    def pipeline_hash(self, hasher=None) -> ContentHash:
+        """
+        Return the pipeline-level hash of this element, computed from
+        pipeline_identity_structure() and cached by hasher_id.
+
+        Args:
+            hasher: Optional semantic hasher to use.  When omitted, resolved
+                from the element's data_context.
+        """
+        ...
+
+
+@runtime_checkable
 class ContentIdentifiableProtocol(Protocol):
     """
     Protocol for objects that can express their semantic identity as a plain
@@ -61,11 +110,16 @@ class ContentIdentifiableProtocol(Protocol):
         """
         ...
 
-    def content_hash(self) -> ContentHash:
+    def content_hash(self, hasher=None) -> ContentHash:
         """
-        Returns the content hash. Note that the context and algorithm used for computing
-        the hash is dependent on the object implementing this. If you'd prefer to use
-        your own algorithm, hash the identity_structure instead.
+        Returns the content hash.
+
+        Args:
+            hasher: Optional semantic hasher to use for the entire recursive
+                computation.  When omitted, resolved from the object's
+                data_context (or injected hasher for mixin-based objects).
+                The same hasher propagates to all nested ContentIdentifiable
+                objects, ensuring one consistent context per computation.
         """
         ...
 
@@ -128,12 +182,21 @@ class SemanticHasherProtocol(Protocol):
     representation with a warning instead.
     """
 
-    def hash_object(self, obj: Any) -> ContentHash:
+    def hash_object(
+        self,
+        obj: Any,
+        resolver: Callable[[Any], ContentHash] | None = None,
+    ) -> ContentHash:
         """
         Hash *obj* based on its semantic content.
 
         Args:
             obj: The object to hash.
+            resolver: Optional callable invoked for any ContentIdentifiable
+                object encountered during hashing.  When provided it overrides
+                the default obj.content_hash() call, allowing the caller to
+                control which identity chain is used and to propagate a
+                consistent hasher through the full recursive computation.
 
         Returns:
             ContentHash: Stable, content-based hash of the object.

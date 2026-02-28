@@ -1,37 +1,30 @@
 from __future__ import annotations
 
-from abc import abstractmethod
-from collections.abc import Collection, Iterator
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from orcapod.core.base import TraceableBase
+from orcapod.core.streams.base import StreamBase
 from orcapod.errors import FieldNotResolvableError
 from orcapod.protocols.core_protocols import StreamProtocol
-from orcapod.types import ColumnConfig, Schema
-
-if TYPE_CHECKING:
-    import pyarrow as pa
 
 
-class RootSource(TraceableBase):
+class RootSource(StreamBase):
     """
-    Abstract base class for all sources in Orcapod.
+    Abstract base class for all root sources in Orcapod.
 
-    A RootSource is a PodProtocol that takes no input streams — it is the root of a
-    computational graph, producing data from an external source (file, database,
-    in-memory data, etc.).
+    A RootSource is a pure stream — the root of a computational graph, producing
+    data from an external source (file, database, in-memory data, etc.) with no
+    upstream dependencies.
 
-    It simultaneously satisfies both the PodProtocol protocol and the StreamProtocol protocol:
+    As a StreamProtocol:
+    - ``source`` returns ``None`` (no upstream source pod)
+    - ``upstreams`` is always empty
+    - ``keys``, ``output_schema``, ``iter_packets``, ``as_table`` are abstract
+      and must be implemented by concrete subclasses
 
-    - As a PodProtocol:  ``process()`` is called with no input streams and returns a
-      StreamProtocol.  ``validate_inputs`` rejects any provided streams.
-      ``argument_symmetry`` always returns an empty ordered group.
-
-    - As a StreamProtocol: all stream methods (``keys``, ``output_schema``,
-      ``iter_packets``, ``as_table``) delegate straight through to
-      ``self.process()``.  ``source`` returns ``self``; ``upstreams`` is always
-      empty.  No caching is performed at this level — caching is the
-      responsibility of concrete subclasses.
+    As a PipelineElementProtocol:
+    - ``pipeline_identity_structure()`` returns ``(tag_schema, packet_schema)``
+      — schema-only, no data content — forming the base case of the pipeline
+      identity Merkle chain.
 
     Source identity
     ---------------
@@ -50,10 +43,10 @@ class RootSource(TraceableBase):
     implementation raises ``FieldNotResolvableError``; concrete subclasses
     that back addressable data should override it.
 
-    Concrete subclasses must implement:
-    - ``process(*streams, label=None) -> StreamProtocol``
-    - ``output_schema(*streams, columns=..., all_info=...) -> tuple[Schema, Schema]``
-    - ``identity_structure() -> Any``  (required by TraceableBase)
+    Concrete subclasses must implement (all inherited as abstract from StreamBase):
+    - ``identity_structure() -> Any``
+    - ``pipeline_identity_structure()`` is provided here (schema-only)
+    - ``iter_packets()``, ``keys()``, ``as_table()``, ``output_schema()``
     """
 
     def __init__(
@@ -112,87 +105,29 @@ class RootSource(TraceableBase):
         )
 
     # -------------------------------------------------------------------------
-    # PodProtocol protocol
+    # PipelineElementProtocol — schema-only identity (base case of Merkle chain)
+    # -------------------------------------------------------------------------
+
+    def pipeline_identity_structure(self) -> Any:
+        """
+        Return (tag_schema, packet_schema) as the pipeline identity for this
+        source.  Schema-only: no data content is included, so sources with
+        identical schemas share the same pipeline hash and therefore the same
+        pipeline database table.
+        """
+        tag_schema, packet_schema = self.output_schema()
+        return (tag_schema, packet_schema)
+
+    # -------------------------------------------------------------------------
+    # StreamProtocol protocol
     # -------------------------------------------------------------------------
 
     @property
-    def uri(self) -> tuple[str, ...]:
-        return (self.__class__.__name__, self.content_hash().to_hex())
-
-    def validate_inputs(self, *streams: StreamProtocol) -> None:
-        """Sources accept no input streams."""
-        if streams:
-            raise ValueError(
-                f"{self.__class__.__name__} is a source and takes no input streams, "
-                f"but {len(streams)} stream(s) were provided."
-            )
-
-    def argument_symmetry(self, streams: Collection[StreamProtocol]) -> tuple[()]:
-        """Sources have no input arguments."""
-        if streams:
-            raise ValueError(
-                f"{self.__class__.__name__} is a source and takes no input streams."
-            )
-        return ()
-
-    @abstractmethod
-    def output_schema(
-        self,
-        *streams: StreamProtocol,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> tuple[Schema, Schema]:
-        """
-        Return the (tag_schema, packet_schema) for this source.
-
-        Compatible with both the PodProtocol protocol (which passes ``*streams``) and
-        the StreamProtocol protocol (which passes no positional arguments).  Concrete
-        implementations should ignore ``streams`` — it will always be empty for
-        a source.
-        """
-        ...
-
-    @abstractmethod
-    def process(
-        self, *streams: StreamProtocol, label: str | None = None
-    ) -> StreamProtocol:
-        """
-        Return a StreamProtocol representing the current state of this source.
-
-        Concrete subclasses choose their own execution and caching model.
-        This method is called with no input streams.
-        """
-        ...
-
-    # -------------------------------------------------------------------------
-    # StreamProtocol protocol — pure delegation to self.process()
-    # -------------------------------------------------------------------------
-
-    @property
-    def source(self) -> "RootSource":
-        """A source is its own source."""
-        return self
+    def source(self) -> None:
+        """Root sources have no upstream source pod."""
+        return None
 
     @property
     def upstreams(self) -> tuple[StreamProtocol, ...]:
         """Sources have no upstream dependencies."""
         return ()
-
-    def keys(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        return self.process().keys(columns=columns, all_info=all_info)
-
-    def iter_packets(self) -> Iterator[tuple[Any, Any]]:
-        return self.process().iter_packets()
-
-    def as_table(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> "pa.Table":
-        return self.process().as_table(columns=columns, all_info=all_info)

@@ -13,11 +13,6 @@ get_versioned_semantic_hasher()
     Return the current-version SemanticHasherProtocol (the new content-based
     recursive hasher that replaces BasicObjectHasher).
 
-get_versioned_object_hasher()
-    Alias for get_versioned_semantic_hasher(), kept so that the context
-    registry JSON ("object_hasher" key) and any existing call-sites
-    continue to work without modification.
-
 get_versioned_semantic_arrow_hasher()
     Return the current-version SemanticArrowHasher (Arrow table hasher
     with semantic-type support).
@@ -101,32 +96,6 @@ def get_versioned_semantic_hasher(
         hasher_id=hasher_id,
         type_handler_registry=type_handler_registry,
         strict=strict,
-    )
-
-
-def get_versioned_object_hasher(
-    hasher_id: str = _CURRENT_SEMANTIC_HASHER_ID,
-    strict: bool = True,
-    type_handler_registry: "hp.TypeHandlerRegistry | None" = None,  # type: ignore[name-defined]
-) -> hp.SemanticHasherProtocol:
-    """
-    Return the current-version object hasher.
-
-    This is a backward-compatible alias for ``get_versioned_semantic_hasher()``.
-    It exists so that:
-
-      * The context registry JSON file (which references "object_hasher") and
-        the ``DataContext.object_hasher`` field continue to work without any
-        changes.
-      * Call-sites that were already using ``get_versioned_object_hasher()``
-        transparently receive the new SemanticHasherProtocol implementation.
-
-    All parameters are forwarded verbatim to ``get_versioned_semantic_hasher()``.
-    """
-    return get_versioned_semantic_hasher(
-        hasher_id=hasher_id,
-        strict=strict,
-        type_handler_registry=type_handler_registry,
     )
 
 

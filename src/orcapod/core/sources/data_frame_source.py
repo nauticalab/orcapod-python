@@ -6,8 +6,6 @@ import logging
 
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
 from orcapod.core.sources.base import RootSource
-from orcapod.core.streams.table_stream import TableStream
-from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils import polars_data_utils
 from orcapod.utils.lazy_module import LazyModule
@@ -79,14 +77,27 @@ class DataFrameSource(RootSource):
 
     def output_schema(
         self,
-        *streams: StreamProtocol,
+        *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
         return self._arrow_source.output_schema(columns=columns, all_info=all_info)
 
-    def process(
-        self, *streams: StreamProtocol, label: str | None = None
-    ) -> TableStream:
-        self.validate_inputs(*streams)
-        return self._arrow_source.process()
+    def keys(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        return self._arrow_source.keys(columns=columns, all_info=all_info)
+
+    def iter_packets(self):
+        return self._arrow_source.iter_packets()
+
+    def as_table(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> "pa.Table":
+        return self._arrow_source.as_table(columns=columns, all_info=all_info)

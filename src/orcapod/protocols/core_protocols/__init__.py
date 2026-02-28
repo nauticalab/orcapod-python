@@ -1,11 +1,12 @@
 from orcapod.types import ColumnConfig
+from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 
 from .datagrams import DatagramProtocol, PacketProtocol, TagProtocol
 from .function_pod import FunctionPodProtocol
 from .operator_pod import OperatorPodProtocol
 from .packet_function import PacketFunctionProtocol
 from .pod import ArgumentGroup, PodProtocol
-from .source_pod import SourcePodProtocol
+from .sources import SourceProtocol
 from .streams import StreamProtocol
 from .trackers import TrackerProtocol, TrackerManagerProtocol
 
@@ -14,10 +15,11 @@ __all__ = [
     "DatagramProtocol",
     "TagProtocol",
     "PacketProtocol",
+    "SourceProtocol",
     "StreamProtocol",
     "PodProtocol",
     "ArgumentGroup",
-    "SourcePodProtocol",
+    "PipelineElementProtocol",
     "FunctionPodProtocol",
     "OperatorPodProtocol",
     "PacketFunctionProtocol",

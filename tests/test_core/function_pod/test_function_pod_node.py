@@ -1,11 +1,11 @@
 """
-Tests for FunctionPodNode covering:
+Tests for FunctionNode covering:
 - Construction, pipeline_path, uri
-- validate_inputs and argument_symmetry
-- output_schema
+- output_schema and keys
 - process_packet and add_pipeline_record
-- process() / __call__()
+- iter_packets, run(), stream interface
 - get_all_records: empty DB, correctness, ColumnConfig (meta/source/system_tags/all_info)
+- pipeline_identity_structure and pipeline_hash
 - pipeline_path_prefix
 - result path conventions
 """
@@ -19,13 +19,14 @@ import pytest
 
 from orcapod.core.datagrams import DictPacket, DictTag
 from orcapod.core.function_pod import (
-    FunctionPodNode,
-    FunctionPodNodeStream,
+    FunctionNode,
+    FunctionPod,
 )
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.streams import TableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.protocols.core_protocols import StreamProtocol
+from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 from orcapod.system_constants import constants
 
 from ..conftest import double, make_int_stream
@@ -40,10 +41,10 @@ def _make_node(
     pf: PythonPacketFunction,
     n: int = 3,
     db: InMemoryArrowDatabase | None = None,
-) -> FunctionPodNode:
+) -> FunctionNode:
     if db is None:
         db = InMemoryArrowDatabase()
-    return FunctionPodNode(
+    return FunctionNode(
         packet_function=pf,
         input_stream=make_int_stream(n=n),
         pipeline_database=db,
@@ -54,7 +55,7 @@ def _make_node_with_system_tags(
     pf: PythonPacketFunction,
     n: int = 3,
     db: InMemoryArrowDatabase | None = None,
-) -> FunctionPodNode:
+) -> FunctionNode:
     """Build a node whose input stream has an explicit system-tag column ('run')."""
     if db is None:
         db = InMemoryArrowDatabase()
@@ -66,16 +67,16 @@ def _make_node_with_system_tags(
         }
     )
     stream = TableStream(table, tag_columns=["id"], system_tag_columns=["run"])
-    return FunctionPodNode(
+    return FunctionNode(
         packet_function=pf,
         input_stream=stream,
         pipeline_database=db,
     )
 
 
-def _fill_node(node: FunctionPodNode) -> None:
+def _fill_node(node: FunctionNode) -> None:
     """Process all packets so the DB is populated."""
-    list(node.process().iter_packets())
+    node.run()
 
 
 # ---------------------------------------------------------------------------
@@ -83,12 +84,12 @@ def _fill_node(node: FunctionPodNode) -> None:
 # ---------------------------------------------------------------------------
 
 
-class TestFunctionPodNodeConstruction:
+class TestFunctionNodeConstruction:
     @pytest.fixture
-    def node(self, double_pf) -> FunctionPodNode:
+    def node(self, double_pf) -> FunctionNode:
         db = InMemoryArrowDatabase()
         stream = make_int_stream(n=3)
-        return FunctionPodNode(
+        return FunctionNode(
             packet_function=double_pf,
             input_stream=stream,
             pipeline_database=db,
@@ -119,6 +120,21 @@ class TestFunctionPodNodeConstruction:
         for part in node.uri:
             assert part in node.pipeline_path
 
+    def test_node_is_stream_protocol(self, node):
+        assert isinstance(node, StreamProtocol)
+
+    def test_node_is_pipeline_element_protocol(self, node):
+        assert isinstance(node, PipelineElementProtocol)
+
+    def test_source_is_function_pod(self, node):
+        assert isinstance(node.source, FunctionPod)
+
+    def test_upstreams_contains_input_stream(self, node):
+        upstreams = node.upstreams
+        assert isinstance(upstreams, tuple)
+        assert len(upstreams) == 1
+        assert isinstance(upstreams[0], StreamProtocol)
+
     def test_incompatible_stream_raises_on_construction(self, double_pf):
         db = InMemoryArrowDatabase()
         bad_stream = TableStream(
@@ -131,7 +147,7 @@ class TestFunctionPodNodeConstruction:
             tag_columns=["id"],
         )
         with pytest.raises(ValueError):
-            FunctionPodNode(
+            FunctionNode(
                 packet_function=double_pf,
                 input_stream=bad_stream,
                 pipeline_database=db,
@@ -139,7 +155,7 @@ class TestFunctionPodNodeConstruction:
 
     def test_result_database_defaults_to_pipeline_database(self, double_pf):
         db = InMemoryArrowDatabase()
-        node = FunctionPodNode(
+        node = FunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
@@ -149,7 +165,7 @@ class TestFunctionPodNodeConstruction:
     def test_separate_result_database_accepted(self, double_pf):
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
-        node = FunctionPodNode(
+        node = FunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=2),
             pipeline_database=pipeline_db,
@@ -159,53 +175,21 @@ class TestFunctionPodNodeConstruction:
 
 
 # ---------------------------------------------------------------------------
-# 2. validate_inputs and argument_symmetry
+# 2. output_schema
 # ---------------------------------------------------------------------------
 
 
-class TestFunctionPodNodeValidation:
+class TestFunctionNodeOutputSchema:
     @pytest.fixture
-    def node(self, double_pf) -> FunctionPodNode:
+    def node(self, double_pf) -> FunctionNode:
         db = InMemoryArrowDatabase()
-        return FunctionPodNode(
+        return FunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
 
-    def test_validate_inputs_with_no_streams_succeeds(self, node: FunctionPodNode):
-        node.validate_inputs()  # must not raise
-
-    def test_validate_inputs_with_any_stream_raises(self, node: FunctionPodNode):
-        extra = make_int_stream(n=2)
-        with pytest.raises(ValueError):
-            node.validate_inputs(extra)
-
-    def test_argument_symmetry_empty_raises(self, node: FunctionPodNode):
-        with pytest.raises(ValueError):
-            node.argument_symmetry([make_int_stream()])
-
-    def test_argument_symmetry_no_streams_returns_empty(self, node: FunctionPodNode):
-        result = node.argument_symmetry([])
-        assert result == ()
-
-
-# ---------------------------------------------------------------------------
-# 3. output_schema
-# ---------------------------------------------------------------------------
-
-
-class TestFunctionPodNodeOutputSchema:
-    @pytest.fixture
-    def node(self, double_pf) -> FunctionPodNode:
-        db = InMemoryArrowDatabase()
-        return FunctionPodNode(
-            packet_function=double_pf,
-            input_stream=make_int_stream(n=3),
-            pipeline_database=db,
-        )
-
-    def test_output_schema_returns_two_mappings(self, node: FunctionPodNode):
+    def test_output_schema_returns_two_mappings(self, node: FunctionNode):
         tag_schema, packet_schema = node.output_schema()
         assert isinstance(tag_schema, Mapping)
         assert isinstance(packet_schema, Mapping)
@@ -227,15 +211,15 @@ class TestFunctionPodNodeOutputSchema:
 
 
 # ---------------------------------------------------------------------------
-# 4. process_packet and add_pipeline_record
+# 3. process_packet and add_pipeline_record
 # ---------------------------------------------------------------------------
 
 
-class TestFunctionPodNodeProcessPacket:
+class TestFunctionNodeProcessPacket:
     @pytest.fixture
-    def node(self, double_pf) -> FunctionPodNode:
+    def node(self, double_pf) -> FunctionNode:
         db = InMemoryArrowDatabase()
-        return FunctionPodNode(
+        return FunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
@@ -288,36 +272,101 @@ class TestFunctionPodNodeProcessPacket:
 
 
 # ---------------------------------------------------------------------------
-# 5. process() / __call__()
+# 4. iter_packets / run() stream interface
 # ---------------------------------------------------------------------------
 
 
-class TestFunctionPodNodeProcess:
+class TestFunctionNodeStreamInterface:
     @pytest.fixture
-    def node(self, double_pf) -> FunctionPodNode:
+    def node(self, double_pf) -> FunctionNode:
         db = InMemoryArrowDatabase()
-        return FunctionPodNode(
+        return FunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
 
-    def test_process_returns_function_pod_node_stream(self, node):
-        result = node.process()
-        assert isinstance(result, FunctionPodNodeStream)
-        assert [packet["result"] for tag, packet in result.iter_packets()] == [0, 2, 4]
+    def test_iter_packets_correct_values(self, node):
+        assert [packet["result"] for _, packet in node.iter_packets()] == [0, 2, 4]
 
-    def test_call_operator_returns_function_pod_node_stream(self, node):
-        result = node()
-        assert isinstance(result, FunctionPodNodeStream)
+    def test_node_is_stream_protocol(self, node):
+        assert isinstance(node, StreamProtocol)
 
-    def test_process_with_extra_streams_raises(self, node):
-        with pytest.raises(ValueError):
-            node.process(make_int_stream(n=2))
+    def test_dunder_iter_delegates_to_iter_packets(self, node):
+        assert len(list(node)) == len(list(node.iter_packets()))
 
-    def test_process_output_is_stream_protocol(self, node):
-        result = node.process()
-        assert isinstance(result, StreamProtocol)
+    def test_run_fills_database(self, node):
+        node.run()
+        records = node.get_all_records()
+        assert records is not None
+        assert records.num_rows == 3
+
+
+# ---------------------------------------------------------------------------
+# 5. pipeline identity
+# ---------------------------------------------------------------------------
+
+
+class TestFunctionNodePipelineIdentity:
+    def test_pipeline_hash_same_schema_same_hash(self, double_pf):
+        db = InMemoryArrowDatabase()
+        node1 = FunctionNode(
+            packet_function=double_pf,
+            input_stream=make_int_stream(n=3),
+            pipeline_database=db,
+        )
+        node2 = FunctionNode(
+            packet_function=double_pf,
+            input_stream=make_int_stream(n=5),  # different data, same schema
+            pipeline_database=db,
+        )
+        assert node1.pipeline_hash() == node2.pipeline_hash()
+
+    def test_pipeline_hash_different_data_same_hash(self, double_pf):
+        db = InMemoryArrowDatabase()
+        stream_a = make_int_stream(n=3)
+        # Build a stream with same schema (id: int64, x: int64) but different values
+        stream_b = TableStream(
+            pa.table(
+                {
+                    "id": pa.array([10, 11, 12], type=pa.int64()),
+                    "x": pa.array([100, 200, 300], type=pa.int64()),
+                }
+            ),
+            tag_columns=["id"],
+        )
+        node_a = FunctionNode(
+            packet_function=double_pf, input_stream=stream_a, pipeline_database=db
+        )
+        node_b = FunctionNode(
+            packet_function=double_pf, input_stream=stream_b, pipeline_database=db
+        )
+        # Same schema → same pipeline hash
+        assert node_a.pipeline_hash() == node_b.pipeline_hash()
+        # Different data → different content hash
+        assert node_a.content_hash() != node_b.content_hash()
+
+    def test_pipeline_hash_is_consistent(self, double_pf):
+        node = _make_node(double_pf, n=3)
+        assert node.pipeline_hash() == node.pipeline_hash()
+
+    def test_pipeline_node_hash_in_uri_is_schema_based(self, double_pf):
+        """pipeline_node_hash in uri must be derived from pipeline_hash (schema-only),
+        not content_hash (data-inclusive)."""
+        db = InMemoryArrowDatabase()
+        node1 = FunctionNode(
+            packet_function=double_pf,
+            input_stream=make_int_stream(n=3),
+            pipeline_database=db,
+        )
+        node2 = FunctionNode(
+            packet_function=double_pf,
+            input_stream=make_int_stream(n=99),  # different data
+            pipeline_database=db,
+        )
+        # Both nodes must have identical URIs since they share schema
+        assert node1.uri == node2.uri
+        assert node1.pipeline_path == node2.pipeline_path
 
 
 # ---------------------------------------------------------------------------
@@ -342,7 +391,7 @@ class TestGetAllRecordsEmpty:
 
 class TestGetAllRecordsValues:
     @pytest.fixture
-    def filled_node(self, double_pf) -> FunctionPodNode:
+    def filled_node(self, double_pf) -> FunctionNode:
         node = _make_node(double_pf, n=4)
         _fill_node(node)
         return node
@@ -384,7 +433,7 @@ class TestGetAllRecordsValues:
 
 class TestGetAllRecordsMetaColumns:
     @pytest.fixture
-    def filled_node(self, double_pf) -> FunctionPodNode:
+    def filled_node(self, double_pf) -> FunctionNode:
         node = _make_node(double_pf, n=3)
         _fill_node(node)
         return node
@@ -433,7 +482,7 @@ class TestGetAllRecordsMetaColumns:
 
 class TestGetAllRecordsSourceColumns:
     @pytest.fixture
-    def filled_node(self, double_pf) -> FunctionPodNode:
+    def filled_node(self, double_pf) -> FunctionNode:
         node = _make_node(double_pf, n=3)
         _fill_node(node)
         return node
@@ -468,7 +517,7 @@ class TestGetAllRecordsSourceColumns:
 
 class TestGetAllRecordsSystemTagColumns:
     @pytest.fixture
-    def filled_node_with_sys_tags(self, double_pf) -> FunctionPodNode:
+    def filled_node_with_sys_tags(self, double_pf) -> FunctionNode:
         node = _make_node_with_system_tags(double_pf, n=3)
         _fill_node(node)
         return node
@@ -509,13 +558,13 @@ class TestGetAllRecordsSystemTagColumns:
 
 class TestGetAllRecordsAllInfo:
     @pytest.fixture
-    def filled_node(self, double_pf) -> FunctionPodNode:
+    def filled_node(self, double_pf) -> FunctionNode:
         node = _make_node(double_pf, n=3)
         _fill_node(node)
         return node
 
     @pytest.fixture
-    def filled_node_with_sys_tags(self, double_pf) -> FunctionPodNode:
+    def filled_node_with_sys_tags(self, double_pf) -> FunctionNode:
         node = _make_node_with_system_tags(double_pf, n=3)
         _fill_node(node)
         return node
@@ -569,11 +618,11 @@ class TestGetAllRecordsAllInfo:
 # ---------------------------------------------------------------------------
 
 
-class TestFunctionPodNodePipelinePathPrefix:
+class TestFunctionNodePipelinePathPrefix:
     def test_prefix_prepended_to_pipeline_path(self, double_pf):
         db = InMemoryArrowDatabase()
         prefix = ("my_pipeline", "stage_1")
-        node = FunctionPodNode(
+        node = FunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
@@ -584,7 +633,7 @@ class TestFunctionPodNodePipelinePathPrefix:
 
     def test_no_prefix_pipeline_path_equals_uri(self, double_pf):
         db = InMemoryArrowDatabase()
-        node = FunctionPodNode(
+        node = FunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
@@ -597,10 +646,10 @@ class TestFunctionPodNodePipelinePathPrefix:
 # ---------------------------------------------------------------------------
 
 
-class TestFunctionPodNodeResultPath:
+class TestFunctionNodeResultPath:
     def test_result_records_stored_under_result_suffix_path(self, double_pf):
         db = InMemoryArrowDatabase()
-        node = FunctionPodNode(
+        node = FunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=2),
             pipeline_database=db,

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from orcapod.config import Config
 from orcapod.contexts import DataContext
-from orcapod.core.base import TraceableBase
+from orcapod.core.base import PipelineElementBase, TraceableBase
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
@@ -182,7 +182,7 @@ class StaticOutputPod(TraceableBase):
         return self.process(*streams, **kwargs)
 
 
-class DynamicPodStream(StreamBase):
+class DynamicPodStream(StreamBase, PipelineElementBase):
     """
     Recomputable stream wrapping a PodBase
 
@@ -207,6 +207,20 @@ class DynamicPodStream(StreamBase):
         self._set_modified_time(None)
         self._cached_time: datetime | None = None
         self._cached_stream: StreamProtocol | None = None
+
+    def identity_structure(self) -> Any:
+        structure = (self._pod,)
+        if self._upstreams:
+            structure += (self._pod.argument_symmetry(self._upstreams),)
+        return structure
+
+    def pipeline_identity_structure(self) -> Any:
+        from orcapod.protocols.hashing_protocols import PipelineElementProtocol
+
+        if isinstance(self._pod, PipelineElementProtocol):
+            return (self._pod, *self._upstreams)
+        tag_schema, packet_schema = self.output_schema()
+        return (tag_schema, packet_schema)
 
     @property
     def source(self) -> PodProtocol:

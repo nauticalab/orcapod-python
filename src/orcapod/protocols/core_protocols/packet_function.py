@@ -2,12 +2,17 @@ from typing import Any, Protocol, runtime_checkable
 
 from orcapod.protocols.core_protocols.datagrams import PacketProtocol
 from orcapod.protocols.core_protocols.labelable import LabelableProtocol
-from orcapod.protocols.hashing_protocols import ContentIdentifiableProtocol
+from orcapod.protocols.hashing_protocols import (
+    ContentIdentifiableProtocol,
+    PipelineElementProtocol,
+)
 from orcapod.types import Schema
 
 
 @runtime_checkable
-class PacketFunctionProtocol(ContentIdentifiableProtocol, LabelableProtocol, Protocol):
+class PacketFunctionProtocol(
+    ContentIdentifiableProtocol, PipelineElementProtocol, LabelableProtocol, Protocol
+):
     """
     Protocol for packet-processing function.
 

@@ -2,12 +2,14 @@
 Protocol conformance and comprehensive functionality tests for all source implementations.
 
 Every concrete source (ArrowTableSource, DictSource, ListSource, DataFrameSource)
-must satisfy both the PodProtocol protocol and the StreamProtocol protocol — i.e. SourcePodProtocol.
+must satisfy both StreamProtocol and PipelineElementProtocol — i.e. it is a pure
+stream that is the root of the computational graph.
 
-Tests are structured in three layers:
-1. Protocol conformance  — isinstance checks against PodProtocol, StreamProtocol, SourcePodProtocol
-2. PodProtocol-side behaviour    — uri, validate_inputs, argument_symmetry, output_schema, process
-3. StreamProtocol-side behaviour — source, upstreams, keys, output_schema, iter_packets, as_table
+Tests are structured in two layers:
+1. Protocol conformance  — isinstance checks against StreamProtocol,
+                           PipelineElementProtocol, RootSource
+2. StreamProtocol-side behaviour — source (None), upstreams (empty), keys,
+                                   output_schema, iter_packets, as_table
 """
 
 from __future__ import annotations
@@ -23,8 +25,8 @@ from orcapod.core.sources import (
     ListSource,
     RootSource,
 )
-from orcapod.protocols.core_protocols import PodProtocol, StreamProtocol
-from orcapod.protocols.core_protocols.source_pod import SourcePodProtocol
+from orcapod.protocols.core_protocols import SourceProtocol, StreamProtocol
+from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 from orcapod.types import Schema
 
 
@@ -92,14 +94,7 @@ ALL_SOURCE_FIXTURES = ["arrow_src", "dict_src", "list_src", "df_src"]
 
 
 class TestProtocolConformance:
-    """Every source must satisfy PodProtocol, StreamProtocol, and SourcePodProtocol at runtime."""
-
-    @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_is_pod(self, src_fixture, request):
-        src = request.getfixturevalue(src_fixture)
-        assert isinstance(src, PodProtocol), (
-            f"{type(src).__name__} does not satisfy PodProtocol"
-        )
+    """Every source must satisfy StreamProtocol, PipelineElementProtocol, and SourceProtocol."""
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_is_stream(self, src_fixture, request):
@@ -109,10 +104,10 @@ class TestProtocolConformance:
         )
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_is_source_pod(self, src_fixture, request):
+    def test_is_pipeline_element(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
-        assert isinstance(src, SourcePodProtocol), (
-            f"{type(src).__name__} does not satisfy SourcePodProtocol"
+        assert isinstance(src, PipelineElementProtocol), (
+            f"{type(src).__name__} does not satisfy PipelineElementProtocol"
         )
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
@@ -120,60 +115,21 @@ class TestProtocolConformance:
         src = request.getfixturevalue(src_fixture)
         assert isinstance(src, RootSource)
 
+    @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
+    def test_is_source_protocol(self, src_fixture, request):
+        """Every source must satisfy SourceProtocol (source_id + resolve_field)."""
+        src = request.getfixturevalue(src_fixture)
+        assert isinstance(src, SourceProtocol), (
+            f"{type(src).__name__} does not satisfy SourceProtocol"
+        )
+
 
 # ---------------------------------------------------------------------------
-# 2. PodProtocol-side behaviour
+# 2. output_schema
 # ---------------------------------------------------------------------------
 
 
-class TestPodUri:
-    @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_uri_is_tuple_of_strings(self, src_fixture, request):
-        src = request.getfixturevalue(src_fixture)
-        assert isinstance(src.uri, tuple)
-        assert all(isinstance(part, str) for part in src.uri)
-
-    @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_uri_starts_with_class_name(self, src_fixture, request):
-        src = request.getfixturevalue(src_fixture)
-        assert src.uri[0] == type(src).__name__
-
-    @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_uri_is_deterministic(self, src_fixture, request):
-        src = request.getfixturevalue(src_fixture)
-        assert src.uri == src.uri
-
-
-class TestPodValidateInputs:
-    @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_no_streams_accepted(self, src_fixture, request):
-        src = request.getfixturevalue(src_fixture)
-        src.validate_inputs()  # must not raise
-
-    @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_any_stream_raises(self, src_fixture, request):
-        src = request.getfixturevalue(src_fixture)
-        dummy_stream = src.process()  # a valid stream to pass
-        with pytest.raises(ValueError):
-            src.validate_inputs(dummy_stream)
-
-
-class TestPodArgumentSymmetry:
-    @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_empty_streams_returns_empty_tuple(self, src_fixture, request):
-        src = request.getfixturevalue(src_fixture)
-        result = src.argument_symmetry([])
-        assert result == ()
-
-    @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_non_empty_streams_raises(self, src_fixture, request):
-        src = request.getfixturevalue(src_fixture)
-        dummy_stream = src.process()
-        with pytest.raises(ValueError):
-            src.argument_symmetry([dummy_stream])
-
-
-class TestPodOutputSchema:
+class TestSourceOutputSchema:
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_returns_two_schemas(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
@@ -187,14 +143,6 @@ class TestPodOutputSchema:
         tag_schema, packet_schema = src.output_schema()
         assert isinstance(tag_schema, Schema)
         assert isinstance(packet_schema, Schema)
-
-    @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_called_with_streams_still_works(self, src_fixture, request):
-        """PodProtocol protocol passes *streams; sources should ignore them gracefully."""
-        src = request.getfixturevalue(src_fixture)
-        # output_schema is called with no positional streams — same as stream protocol
-        tag_schema, packet_schema = src.output_schema()
-        assert isinstance(tag_schema, Schema)
 
     def test_arrow_src_tag_schema_has_id(self, arrow_src):
         tag_schema, _ = arrow_src.output_schema()
@@ -221,39 +169,17 @@ class TestPodOutputSchema:
         assert "id" in tag_schema
 
 
-class TestPodProcess:
-    @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_returns_stream(self, src_fixture, request):
-        src = request.getfixturevalue(src_fixture)
-        result = src.process()
-        assert isinstance(result, StreamProtocol)
-
-    @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_called_with_streams_raises(self, src_fixture, request):
-        src = request.getfixturevalue(src_fixture)
-        dummy = src.process()
-        with pytest.raises(ValueError):
-            src.process(dummy)
-
-    @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_process_returns_same_stream_on_repeat_calls(self, src_fixture, request):
-        """Static sources return the same TableStream object each time."""
-        src = request.getfixturevalue(src_fixture)
-        s1 = src.process()
-        s2 = src.process()
-        assert s1 is s2
-
-
 # ---------------------------------------------------------------------------
-# 3. StreamProtocol-side behaviour (via RootSource delegation)
+# 4. StreamProtocol-side behaviour
 # ---------------------------------------------------------------------------
 
 
 class TestStreamSource:
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_source_is_self(self, src_fixture, request):
+    def test_source_is_none(self, src_fixture, request):
+        """RootSource is a pure stream — source returns None."""
         src = request.getfixturevalue(src_fixture)
-        assert src.source is src
+        assert src.source is None
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_upstreams_is_empty_tuple(self, src_fixture, request):
@@ -396,7 +322,7 @@ class TestStreamAsTable:
 
 
 # ---------------------------------------------------------------------------
-# 4. source_id property
+# 5. source_id property
 # ---------------------------------------------------------------------------
 
 
@@ -421,7 +347,7 @@ class TestSourceId:
 
 
 # ---------------------------------------------------------------------------
-# 5. Content hash and identity
+# 6. Content hash and identity
 # ---------------------------------------------------------------------------
 
 
@@ -444,7 +370,37 @@ class TestContentHash:
 
 
 # ---------------------------------------------------------------------------
-# 6. Edge cases
+# 7. Pipeline hash (PipelineElementProtocol)
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineHash:
+    @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
+    def test_pipeline_hash_is_stable(self, src_fixture, request):
+        src = request.getfixturevalue(src_fixture)
+        assert src.pipeline_hash() == src.pipeline_hash()
+
+    def test_same_schema_same_pipeline_hash(self):
+        table = pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
+        src1 = ArrowTableSource(table=table)
+        src2 = ArrowTableSource(
+            table=pa.table({"x": pa.array([99, 100, 101], type=pa.int64())})
+        )
+        # Same schema → same pipeline hash
+        assert src1.pipeline_hash() == src2.pipeline_hash()
+
+    def test_different_schema_different_pipeline_hash(self):
+        src1 = ArrowTableSource(
+            table=pa.table({"x": pa.array([1, 2], type=pa.int64())})
+        )
+        src2 = ArrowTableSource(
+            table=pa.table({"y": pa.array([1, 2], type=pa.int64())})
+        )
+        assert src1.pipeline_hash() != src2.pipeline_hash()
+
+
+# ---------------------------------------------------------------------------
+# 8. Edge cases
 # ---------------------------------------------------------------------------
 
 

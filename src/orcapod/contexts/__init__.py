@@ -7,7 +7,7 @@ should be interpreted and processed throughout the OrcaPod system.
 A DataContext contains:
 - Semantic type registry for handling structured data types
 - Arrow hasher for hashing Arrow tables
-- Object hasher for general Python object hashing
+- Semantic hasher for general Python object hashing
 - Versioning information for reproducibility
 
 Example usage:
@@ -168,9 +168,9 @@ def get_default_context() -> DataContext:
     return resolve_context()
 
 
-def get_default_object_hasher() -> hp.SemanticHasherProtocol:
+def get_default_semantic_hasher() -> hp.SemanticHasherProtocol:
     """
-    Get the default object hasher.
+    Get the default semantic hasher.
 
     Returns:
         SemanticHasherProtocol instance for the default context

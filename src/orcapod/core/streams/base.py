@@ -6,7 +6,7 @@ from collections.abc import Collection, Iterator, Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from orcapod.core.base import TraceableBase
+from orcapod.core.base import PipelineElementBase, TraceableBase
 from orcapod.protocols.core_protocols import (
     PacketProtocol,
     PodProtocol,
@@ -32,7 +32,7 @@ else:
 logger = logging.getLogger(__name__)
 
 
-class StreamBase(TraceableBase):
+class StreamBase(TraceableBase, PipelineElementBase):
     @property
     @abstractmethod
     def source(self) -> PodProtocol | None: ...
@@ -70,17 +70,6 @@ class StreamBase(TraceableBase):
             # use the invocation operation label
             return self.source.label
         return None
-
-    def identity_structure(self) -> Any:
-        # Identity of a PodStream is determined by the pod and its upstreams
-        if self.source is None:
-            # TODO: consider what ought to be the identity structure for non-sourced stream
-            return (None,)
-
-        structure = (self.source,)
-        if len(self.upstreams) > 0:
-            structure += (self.source.argument_symmetry(self.upstreams),)
-        return structure
 
     def join(
         self, other_stream: StreamProtocol, label: str | None = None

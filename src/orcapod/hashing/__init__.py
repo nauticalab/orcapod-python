@@ -3,9 +3,8 @@ OrcaPod hashing package.
 
 Public API
 ----------
-New (preferred) names:
   BaseSemanticHasher           -- content-based recursive object hasher (concrete)
-  SemanticHasherProtocol               -- protocol for semantic hashers
+  SemanticHasherProtocol       -- protocol for semantic hashers
   TypeHandlerRegistry          -- registry mapping types to TypeHandlerProtocol instances
   get_default_semantic_hasher  -- global default SemanticHasherProtocol factory
   get_default_type_handler_registry -- global default TypeHandlerRegistry factory
@@ -20,7 +19,6 @@ Built-in handlers (importable for custom registry setup):
   register_builtin_handlers
 
 Legacy names (kept for backward compatibility):
-  get_default_object_hasher -- alias for get_default_semantic_hasher()
   HashableMixin             -- legacy mixin from legacy_core (deprecated)
 
 Utility:
@@ -39,7 +37,6 @@ Utility:
 # ---------------------------------------------------------------------------
 from orcapod.hashing.defaults import (
     get_default_arrow_hasher,
-    get_default_object_hasher,
     get_default_semantic_hasher,
     get_default_type_handler_registry,
 )
@@ -142,7 +139,6 @@ __all__ = [
     "hash_file",
     # ---- Legacy / backward-compatible ----
     # TODO: remove legacy section
-    "get_default_object_hasher",
     "get_default_arrow_hasher",
     "HashableMixin",
     "hash_to_hex",

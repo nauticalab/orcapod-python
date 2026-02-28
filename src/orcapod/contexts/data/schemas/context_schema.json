@@ -11,7 +11,7 @@
         "semantic_registry",
         "type_converter",
         "arrow_hasher",
-        "object_hasher",
+        "semantic_hasher",
         "type_handler_registry"
     ],
     "properties": {
@@ -55,13 +55,13 @@
             "$ref": "#/$defs/objectspec",
             "description": "ObjectSpec for the Arrow hasher component"
         },
-        "object_hasher": {
+        "semantic_hasher": {
             "$ref": "#/$defs/objectspec",
-            "description": "ObjectSpec for the object hasher component"
+            "description": "ObjectSpec for the semantic hasher component"
         },
         "type_handler_registry": {
             "$ref": "#/$defs/objectspec",
-            "description": "ObjectSpec for the TypeHandlerRegistry used by the object hasher"
+            "description": "ObjectSpec for the TypeHandlerRegistry used by the semantic hasher"
         },
         "metadata": {
             "type": "object",
@@ -189,17 +189,10 @@
                     }
                 }
             },
-            "object_hasher": {
-                "_class": "orcapod.hashing.object_hashers.BasicObjectHasher",
+            "semantic_hasher": {
+                "_class": "orcapod.hashing.semantic_hashing.semantic_hasher.BaseSemanticHasher",
                 "_config": {
-                    "hasher_id": "object_v0.1",
-                    "function_info_extractor": {
-                        "_class": "orcapod.hashing.function_info_extractors.FunctionSignatureExtractor",
-                        "_config": {
-                            "include_module": true,
-                            "include_defaults": true
-                        }
-                    }
+                    "hasher_id": "semantic_v0.1"
                 }
             },
             "metadata": {

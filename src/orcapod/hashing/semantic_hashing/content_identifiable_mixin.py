@@ -89,43 +89,54 @@ class ContentIdentifiableMixin:
     semantic_hasher:
         Optional BaseSemanticHasher instance to use.  When omitted, the hasher
         is obtained from the default data context via
-        ``orcapod.contexts.get_default_context().object_hasher``, which is
+        ``orcapod.contexts.get_default_context().semantic_hasher``, which is
         the single source of truth for versioned component configuration.
     """
 
     def __init__(
-        self, *, semantic_hasher: "BaseSemanticHasher | None" = None, **kwargs: Any
+        self, *, semantic_hasher: BaseSemanticHasher | None = None, **kwargs: Any
     ) -> None:
         # Cooperative MRO-friendly init -- forward remaining kwargs up the chain.
         super().__init__(**kwargs)
         # Store injected hasher (may be None; resolved lazily on first use).
-        self._semantic_hasher: BaseSemanticHasher | None = semantic_hasher
-        # Lazily populated content hash cache.
-        self._cached_content_hash: ContentHash | None = None
+        self._semantic_hasher = semantic_hasher
+        # Content hash cache keyed by hasher_id.
+        self._content_hash_cache: dict[str, ContentHash] = {}
 
     # ------------------------------------------------------------------
     # Core content-hash API
     # ------------------------------------------------------------------
 
-    def content_hash(self) -> ContentHash:
+    def content_hash(self, hasher=None) -> ContentHash:
         """
         Return a stable ContentHash based on the object's semantic content.
 
-        The hash is computed once and cached.  To force recomputation (e.g.
-        after a mutation), call ``_invalidate_content_hash_cache()`` first.
+        The hasher is used for the entire recursive computation — all nested
+        ContentIdentifiable objects are resolved using the same hasher.
+        Results are cached by hasher_id so repeated calls with the same
+        hasher are free.
+
+        Args:
+            hasher: Optional semantic hasher to use.  When omitted, resolved
+                via _get_hasher() (injected hasher or default context).
 
         Returns:
             ContentHash: Deterministic, content-based hash of this object.
         """
-        if self._cached_content_hash is None:
+        if hasher is None:
             hasher = self._get_hasher()
+        cache_key = hasher.hasher_id
+        if cache_key not in self._content_hash_cache:
             structure = self.identity_structure()  # type: ignore[attr-defined]
             logger.debug(
                 "ContentIdentifiableMixin.content_hash: computing hash for %s",
                 type(self).__name__,
             )
-            self._cached_content_hash = hasher.hash_object(structure)
-        return self._cached_content_hash
+            resolver = lambda obj: obj.content_hash(hasher)
+            self._content_hash_cache[cache_key] = hasher.hash_object(
+                structure, resolver=resolver
+            )
+        return self._content_hash_cache[cache_key]
 
     def identity_structure(self) -> Any:
         """
@@ -198,7 +209,7 @@ class ContentIdentifiableMixin:
         content so that the next call to ``content_hash()`` recomputes from
         scratch.
         """
-        self._cached_content_hash = None
+        self._content_hash_cache.clear()
 
     # ------------------------------------------------------------------
     # Hasher resolution
@@ -211,8 +222,8 @@ class ContentIdentifiableMixin:
         Resolution order:
           1. The instance-level ``_semantic_hasher`` attribute (set at
              construction or injected directly).
-          2. The object hasher from the default data context, obtained via
-             ``orcapod.contexts.get_default_context().object_hasher``.
+          2. The semantic hasher from the default data context, obtained via
+             ``orcapod.contexts.get_default_context().semantic_hasher``.
              The data context is the single source of truth for versioned
              component configuration; going through it ensures that the
              hasher is consistent with all other components (arrow hasher,

@@ -33,7 +33,7 @@
             }
         }
     },
-    "object_hasher": {
+    "semantic_hasher": {
         "_class": "orcapod.hashing.semantic_hashing.semantic_hasher.BaseSemanticHasher",
         "_config": {
             "hasher_id": "semantic_v0.1",

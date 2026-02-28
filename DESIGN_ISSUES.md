@@ -5,6 +5,36 @@ Each item has a status: `open`, `in progress`, or `resolved`.
 
 ---
 
+## `src/orcapod/core/base.py`
+
+### B1 — `PipelineElementBase` should be merged into `TraceableBase`
+**Status:** open
+**Severity:** medium
+
+`TraceableBase` and `PipelineElementBase` co-occur in every active computation-node class
+(`StreamBase`, `PacketFunctionBase`, `_FunctionPodBase`). The two current exceptions are design
+gaps rather than intentional choices:
+
+- `StaticOutputPod(TraceableBase)` — should implement `PipelineElementProtocol`; its absence
+  forced `DynamicPodStream.pipeline_identity_structure()` to include an `isinstance` check as
+  a workaround.
+- `Invocation(TraceableBase)` — legacy tracking mechanism, planned for revision.
+
+Note: merging into `TraceableBase` is correct at the *computation-node* level.
+`ContentIdentifiableBase` (which `TraceableBase` builds on) should **not** absorb
+`PipelineElementBase` — data datagrams (`Tag`, `Packet`) are legitimately content-identifiable
+without being pipeline elements.
+
+**Proposed fix:**
+1. Add `PipelineElementBase` to `TraceableBase`'s bases in `core/base.py`.
+2. Add `pipeline_identity_structure()` to `StaticOutputPod`.
+3. Simplify `DynamicPodStream.pipeline_identity_structure()` — remove the `isinstance` fallback.
+4. Remove now-redundant explicit `PipelineElementBase` from `StreamBase`, `PacketFunctionBase`,
+   `_FunctionPodBase` declarations.
+5. Address `Invocation` as part of its planned revision.
+
+---
+
 ## `src/orcapod/core/packet_function.py`
 
 ### P1 — `parse_function_outputs` is dead code

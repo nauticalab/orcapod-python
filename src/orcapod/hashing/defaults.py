@@ -45,20 +45,6 @@ def get_default_semantic_hasher() -> hp.SemanticHasherProtocol:
     return get_default_context().semantic_hasher
 
 
-def get_default_object_hasher() -> hp.SemanticHasherProtocol:
-    """
-    Return the SemanticHasherProtocol from the default data context.
-
-    Alias for ``get_default_semantic_hasher()``, kept so that existing
-    call-sites that reference ``get_default_object_hasher`` continue to
-    work without modification.
-
-    Returns:
-        SemanticHasherProtocol: The object hasher from the default data context.
-    """
-    return get_default_semantic_hasher()
-
-
 def get_default_arrow_hasher(
     cache_file_hash: bool | hp.StringCacherProtocol = True,
 ) -> hp.ArrowHasherProtocol:

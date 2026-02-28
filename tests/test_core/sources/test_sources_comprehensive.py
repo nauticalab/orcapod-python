@@ -43,8 +43,7 @@ from orcapod.core.sources import (
     SourceRegistry,
 )
 from orcapod.errors import FieldNotResolvableError
-from orcapod.protocols.core_protocols import PodProtocol, StreamProtocol
-from orcapod.protocols.core_protocols.source_pod import SourcePodProtocol
+from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.types import Schema
 
 
@@ -135,27 +134,11 @@ class TestCSVSource:
         with pytest.raises(Exception):
             CSVSource(file_path=str(tmp_path / "no_such_file.csv"))
 
-    def test_is_pod(self, csv_path):
-        assert isinstance(CSVSource(file_path=csv_path), PodProtocol)
-
     def test_is_stream(self, csv_path):
         assert isinstance(CSVSource(file_path=csv_path), StreamProtocol)
 
-    def test_is_source_pod(self, csv_path):
-        assert isinstance(CSVSource(file_path=csv_path), SourcePodProtocol)
-
     def test_is_root_source(self, csv_path):
         assert isinstance(CSVSource(file_path=csv_path), RootSource)
-
-    def test_process_returns_stream(self, csv_path):
-        src = CSVSource(file_path=csv_path)
-        assert isinstance(src.process(), StreamProtocol)
-
-    def test_process_with_stream_raises(self, csv_path):
-        src = CSVSource(file_path=csv_path)
-        dummy = src.process()
-        with pytest.raises(ValueError):
-            src.process(dummy)
 
     def test_output_schema_returns_two_schemas(self, csv_path):
         src = CSVSource(file_path=csv_path, tag_columns=["user_id"])
@@ -220,23 +203,11 @@ class TestDeltaTableSource:
         with pytest.raises(ValueError, match="Delta table not found"):
             DeltaTableSource(delta_table_path=tmp_path / "no_delta_here")
 
-    def test_is_pod(self, delta_path):
-        assert isinstance(DeltaTableSource(delta_table_path=delta_path), PodProtocol)
-
     def test_is_stream(self, delta_path):
         assert isinstance(DeltaTableSource(delta_table_path=delta_path), StreamProtocol)
 
-    def test_is_source_pod(self, delta_path):
-        assert isinstance(
-            DeltaTableSource(delta_table_path=delta_path), SourcePodProtocol
-        )
-
     def test_is_root_source(self, delta_path):
         assert isinstance(DeltaTableSource(delta_table_path=delta_path), RootSource)
-
-    def test_process_returns_stream(self, delta_path):
-        src = DeltaTableSource(delta_table_path=delta_path)
-        assert isinstance(src.process(), StreamProtocol)
 
     def test_output_schema_returns_two_schemas(self, delta_path):
         src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])

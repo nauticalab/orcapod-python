@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.sources.base import RootSource
 from orcapod.core.streams.table_stream import TableStream
 from orcapod.errors import FieldNotResolvableError
-from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils import arrow_data_utils
@@ -135,7 +134,6 @@ class ArrowTableSource(RootSource):
             table=self._table,
             tag_columns=self._tag_columns,
             system_tag_columns=self._system_tag_columns,
-            source=self,
         )
 
     # -------------------------------------------------------------------------
@@ -218,14 +216,27 @@ class ArrowTableSource(RootSource):
 
     def output_schema(
         self,
-        *streams: StreamProtocol,
+        *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
         return self._stream.output_schema(columns=columns, all_info=all_info)
 
-    def process(
-        self, *streams: StreamProtocol, label: str | None = None
-    ) -> TableStream:
-        self.validate_inputs(*streams)
-        return self._stream
+    def keys(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        return self._stream.keys(columns=columns, all_info=all_info)
+
+    def iter_packets(self):
+        return self._stream.iter_packets()
+
+    def as_table(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> "pa.Table":
+        return self._stream.as_table(columns=columns, all_info=all_info)

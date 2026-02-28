@@ -9,8 +9,10 @@ from orcapod.core.datagrams import (
     ArrowTag,
     DictTag,
 )
+from orcapod.core.base import PipelineElementBase
 from orcapod.core.streams.base import StreamBase
 from orcapod.protocols.core_protocols import PodProtocol, StreamProtocol, TagProtocol
+from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils import arrow_utils
@@ -25,7 +27,7 @@ else:
 logger = logging.getLogger(__name__)
 
 
-class TableStream(StreamBase):
+class TableStream(StreamBase, PipelineElementBase):
     """
     An immutable stream based on a PyArrow Table.
     This stream is designed to be used with data that is already in a tabular format,
@@ -161,6 +163,14 @@ class TableStream(StreamBase):
                 self._tag_columns,
             )
         return super().identity_structure()
+
+    def pipeline_identity_structure(self) -> Any:
+        if self._source is None or not isinstance(
+            self._source, PipelineElementProtocol
+        ):
+            tag_schema, packet_schema = self.output_schema()
+            return (tag_schema, packet_schema)
+        return (self._source, *self._upstreams)
 
     @property
     def source(self) -> PodProtocol | None:

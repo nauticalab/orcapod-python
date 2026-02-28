@@ -201,7 +201,7 @@ class GraphTracker(AutoRegisteringContextBasedTracker):
         # This is used to track the computational graph and the invocations of kernels
         self.kernel_invocations: set[Invocation] = set()
         self.invocation_to_pod_lut: dict[Invocation, cp.PodProtocol] = {}
-        self.invocation_to_source_lut: dict[Invocation, cp.SourcePodProtocol] = {}
+        self.invocation_to_source_lut: dict[Invocation, cp.StreamProtocol] = {}
 
     def _record_kernel_and_get_invocation(
         self,
@@ -226,7 +226,7 @@ class GraphTracker(AutoRegisteringContextBasedTracker):
         self._record_kernel_and_get_invocation(kernel, upstreams, label)
 
     def record_source_invocation(
-        self, source: cp.SourcePodProtocol, label: str | None = None
+        self, source: cp.StreamProtocol, label: str | None = None
     ) -> None:
         """
         Record the output stream of a source invocation in the tracker.

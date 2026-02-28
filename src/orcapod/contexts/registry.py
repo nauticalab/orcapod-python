@@ -145,7 +145,7 @@ class JSONDataContextRegistry:
             "version",
             "type_converter",
             "arrow_hasher",
-            "object_hasher",
+            "semantic_hasher",
             "type_handler_registry",
         ]
         missing_fields = [field for field in required_fields if field not in spec]
@@ -291,9 +291,9 @@ class JSONDataContextRegistry:
                 spec["type_handler_registry"], ref_lut=ref_lut
             )
 
-            logger.debug(f"Creating object hasher for {version}")
-            ref_lut["object_hasher"] = parse_objectspec(
-                spec["object_hasher"], ref_lut=ref_lut
+            logger.debug(f"Creating semantic hasher for {version}")
+            ref_lut["semantic_hasher"] = parse_objectspec(
+                spec["semantic_hasher"], ref_lut=ref_lut
             )
 
             return DataContext(
@@ -302,7 +302,7 @@ class JSONDataContextRegistry:
                 description=description,
                 type_converter=ref_lut["type_converter"],
                 arrow_hasher=ref_lut["arrow_hasher"],
-                semantic_hasher=ref_lut["object_hasher"],
+                semantic_hasher=ref_lut["semantic_hasher"],
                 type_handler_registry=ref_lut["type_handler_registry"],
             )
 

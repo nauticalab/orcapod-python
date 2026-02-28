@@ -13,7 +13,7 @@ from uuid_utils import uuid7
 
 from orcapod.config import Config
 from orcapod.contexts import DataContext
-from orcapod.core.base import TraceableBase
+from orcapod.core.base import PipelineElementBase, TraceableBase
 from orcapod.core.datagrams import ArrowPacket, DictPacket
 from orcapod.hashing.hash_utils import (
     get_function_components,
@@ -83,7 +83,7 @@ def parse_function_outputs(
     return dict(zip(output_keys, output_values))
 
 
-class PacketFunctionBase(TraceableBase):
+class PacketFunctionBase(TraceableBase, PipelineElementBase):
     """
     Abstract base class for PacketFunctionProtocol, defining the interface and common functionality.
     """
@@ -146,6 +146,9 @@ class PacketFunctionBase(TraceableBase):
         )
 
     def identity_structure(self) -> Any:
+        return self.uri
+
+    def pipeline_identity_structure(self) -> Any:
         return self.uri
 
     @property

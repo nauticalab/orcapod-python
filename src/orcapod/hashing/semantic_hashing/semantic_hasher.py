@@ -66,7 +66,7 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from orcapod.hashing.semantic_hashing.type_handler_registry import TypeHandlerRegistry
@@ -125,7 +125,9 @@ class BaseSemanticHasher:
         return self._strict
 
     def hash_object(
-        self, obj: Any, process_identity_structure: bool = False
+        self,
+        obj: Any,
+        resolver: Callable[[Any], ContentHash] | None = None,
     ) -> ContentHash:
         """
         Hash *obj* based on its semantic content.
@@ -137,13 +139,17 @@ class BaseSemanticHasher:
         - Primitive          → JSON-serialised and hashed directly
         - Structure          → structurally expanded then hashed
         - Handler match      → handler produces a value, recurse
-        - ContentIdentifiableProtocol→ identity_structure() produces a value, recurse
+        - ContentIdentifiableProtocol→ resolver(obj) if resolver provided, else obj.content_hash()
         - Unknown type       → TypeError in strict mode; best-effort otherwise
 
         Args:
             obj: The object to hash.
-            process_identity_structure: If False(default), when hashing ContentIdentifiableProtocol object, its content_hash method is invoked.
-                                        If True, ContentIdentifiableProtocol is hashed by hashing the identity_structure
+            resolver: Optional callable invoked for any ContentIdentifiableProtocol
+                object encountered during hashing.  When provided it overrides the
+                default ``obj.content_hash()`` call, allowing the caller to control
+                which identity chain is used (e.g. pipeline_hash vs content_hash)
+                and to propagate a consistent semantic hasher through the full
+                recursive computation.
 
         Returns:
             ContentHash: Stable, content-based hash of the object.
@@ -158,7 +164,9 @@ class BaseSemanticHasher:
 
         # Structures: expand into a tagged tree, then hash the tree.
         if _is_structure(obj):
-            expanded = self._expand_structure(obj, _visited=frozenset())
+            expanded = self._expand_structure(
+                obj, _visited=frozenset(), resolver=resolver
+            )
             return self._hash_to_content_hash(expanded)
 
         # Handler dispatch: the handler produces a new value; recurse.
@@ -169,16 +177,16 @@ class BaseSemanticHasher:
                 type(obj).__name__,
                 type(handler).__name__,
             )
-            return self.hash_object(handler.handle(obj, self))
+            return self.hash_object(handler.handle(obj, self), resolver=resolver)
 
-        # ContentIdentifiableProtocol: expand via identity_structure(); recurse.
+        # ContentIdentifiableProtocol: use resolver if provided, else content_hash().
         if isinstance(obj, hp.ContentIdentifiableProtocol):
-            if process_identity_structure:
+            if resolver is not None:
                 logger.debug(
-                    "hash_object: hashing identity structure of ContentIdentifiableProtocol %s",
+                    "hash_object: resolving ContentIdentifiableProtocol %s via resolver",
                     type(obj).__name__,
                 )
-                return self.hash_object(obj.identity_structure())
+                return resolver(obj)
             else:
                 logger.debug(
                     "hash_object: using ContentIdentifiableProtocol %s's content_hash",
@@ -198,6 +206,7 @@ class BaseSemanticHasher:
         self,
         obj: Any,
         _visited: frozenset[int],
+        resolver: Callable[[Any], ContentHash] | None = None,
     ) -> Any:
         """
         Expand a container object into a JSON-serialisable tagged tree.
@@ -238,22 +247,29 @@ class BaseSemanticHasher:
         _visited = _visited | {obj_id}
 
         if _is_namedtuple(obj):
-            return self._expand_namedtuple(obj, _visited)
+            return self._expand_namedtuple(obj, _visited, resolver=resolver)
 
         if isinstance(obj, (dict, Mapping)):
-            return self._expand_mapping(obj, _visited)
+            return self._expand_mapping(obj, _visited, resolver=resolver)
 
         if isinstance(obj, list):
-            return [self._expand_element(item, _visited) for item in obj]
+            return [
+                self._expand_element(item, _visited, resolver=resolver) for item in obj
+            ]
 
         if isinstance(obj, tuple):
             return {
                 "__type__": "tuple",
-                "items": [self._expand_element(item, _visited) for item in obj],
+                "items": [
+                    self._expand_element(item, _visited, resolver=resolver)
+                    for item in obj
+                ],
             }
 
         if isinstance(obj, (set, frozenset)):
-            expanded_items = [self._expand_element(item, _visited) for item in obj]
+            expanded_items = [
+                self._expand_element(item, _visited, resolver=resolver) for item in obj
+            ]
             return {
                 "__type__": "set",
                 "items": sorted(expanded_items, key=str),
@@ -262,7 +278,12 @@ class BaseSemanticHasher:
         # Should not be reached if _is_structure() is consistent.
         raise TypeError(f"_expand_structure called on non-structure type {type(obj)!r}")
 
-    def _expand_element(self, obj: Any, _visited: frozenset[int]) -> Any:
+    def _expand_element(
+        self,
+        obj: Any,
+        _visited: frozenset[int],
+        resolver: Callable[[Any], ContentHash] | None = None,
+    ) -> Any:
         """
         Expand a single element within a structure.
 
@@ -271,24 +292,25 @@ class BaseSemanticHasher:
         - Everything else → call hash_object, embed to_string() as leaf
         """
         if isinstance(obj, (type(None), bool, int, float, str, ContentHash)):
-            return self._expand_structure(obj, _visited)
+            return self._expand_structure(obj, _visited, resolver=resolver)
 
         if _is_structure(obj):
-            return self._expand_structure(obj, _visited)
+            return self._expand_structure(obj, _visited, resolver=resolver)
 
         # Non-structure, non-primitive: hash independently and embed token.
-        return self.hash_object(obj).to_string()
+        return self.hash_object(obj, resolver=resolver).to_string()
 
     def _expand_mapping(
         self,
         obj: Mapping,
         _visited: frozenset[int],
+        resolver: Callable[[Any], ContentHash] | None = None,
     ) -> dict:
         """Expand a dict/Mapping into a sorted native JSON object."""
         items: dict[str, Any] = {}
         for k, v in obj.items():
-            str_key = str(self._expand_element(k, _visited))
-            items[str_key] = self._expand_element(v, _visited)
+            str_key = str(self._expand_element(k, _visited, resolver=resolver))
+            items[str_key] = self._expand_element(v, _visited, resolver=resolver)
         # Sort for determinism regardless of insertion order.
         return dict(sorted(items.items()))
 
@@ -296,11 +318,14 @@ class BaseSemanticHasher:
         self,
         obj: Any,
         _visited: frozenset[int],
+        resolver: Callable[[Any], ContentHash] | None = None,
     ) -> dict:
         """Expand a namedtuple into a tagged dict preserving field names."""
         fields: tuple[str, ...] = obj._fields
         expanded_fields = {
-            field: self._expand_element(getattr(obj, field), _visited)
+            field: self._expand_element(
+                getattr(obj, field), _visited, resolver=resolver
+            )
             for field in fields
         }
         return {

@@ -30,7 +30,7 @@ class DataContext:
         description: Human-readable description of this context
         semantic_type_registry: Registry of semantic type converters
         arrow_hasher: Arrow table hasher for this context
-        object_hasher: General object hasher for this context
+        semantic_hasher: General semantic hasher for this context
         type_handler_registry: Registry of TypeHandlerProtocol instances for SemanticHasherProtocol
     """
 

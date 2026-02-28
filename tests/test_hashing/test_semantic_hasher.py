@@ -1134,160 +1134,261 @@ class TestJsonNormalizationConsistency:
 
 
 # ---------------------------------------------------------------------------
-# 18. hash_object process_identity_structure flag
+# 18. hash_object resolver parameter
 # ---------------------------------------------------------------------------
 
 
-class TestProcessIdentityStructure:
+class TestResolver:
     """
-    Verify the two modes of hash_object when applied to ContentIdentifiableProtocol objects:
+    Verify the resolver parameter of hash_object.
 
-      process_identity_structure=False (default):
-        hash_object defers to obj.content_hash(), which uses the object's own
-        BaseSemanticHasher (potentially different from the calling hasher).
-        The result reflects the object's local hasher configuration.
+    When resolver=None (default), hash_object falls back to obj.content_hash()
+    for ContentIdentifiableProtocol objects -- the object's own hasher is used.
 
-      process_identity_structure=True:
-        hash_object calls obj.identity_structure() and hashes the result
-        using the *calling* hasher, ignoring the object's local hasher.
-
-    For non-ContentIdentifiableProtocol objects the flag has no observable effect.
+    When a resolver is provided, it overrides that default for every
+    ContentIdentifiable encountered during the computation, including objects
+    nested inside structures.  This enables uniform-hasher propagation: the
+    caller controls which identity chain and which hasher is used throughout
+    the full recursive computation.
     """
 
-    def test_default_mode_uses_object_content_hash(self):
-        """With process_identity_structure=False (default), hash_object returns
-        exactly what obj.content_hash() returns -- using the object's own hasher."""
+    def test_no_resolver_uses_obj_content_hash(self):
+        """Without a resolver hash_object returns obj.content_hash() -- using
+        the object's own hasher."""
         calling_hasher = make_hasher(strict=True)
-        # Give the object a *different* hasher (different hasher_id)
-        obj_hasher_id_hasher = BaseSemanticHasher(hasher_id="obj_hasher_v1")
-        rec = SimpleRecord("hello", 1, semantic_hasher=obj_hasher_id_hasher)
-
-        result = calling_hasher.hash_object(rec, process_identity_structure=False)
-        # Must equal what the object's own content_hash() returns
-        assert result == rec.content_hash()
-        # And its method tag must be the object's hasher_id, NOT the calling hasher's
-        assert result.method == "obj_hasher_v1"
-
-    def test_process_identity_structure_uses_calling_hasher(self):
-        """With process_identity_structure=True, hash_object processes the
-        identity_structure using the *calling* hasher."""
         obj_hasher = BaseSemanticHasher(hasher_id="obj_hasher_v1")
-        calling_hasher = make_hasher(strict=True)  # hasher_id = "test_v1"
         rec = SimpleRecord("hello", 1, semantic_hasher=obj_hasher)
 
-        result = calling_hasher.hash_object(rec, process_identity_structure=True)
-        # Must equal hashing the identity_structure directly through the calling hasher
+        result = calling_hasher.hash_object(rec)
+        assert result == rec.content_hash()
+        assert result.method == "obj_hasher_v1"
+
+    def test_resolver_overrides_default(self):
+        """When a resolver is provided it takes priority over obj.content_hash()."""
+        calling_hasher = make_hasher(strict=True)
+        obj_hasher = BaseSemanticHasher(hasher_id="obj_hasher_v1")
+        rec = SimpleRecord("hello", 1, semantic_hasher=obj_hasher)
+
+        # Resolver that uses the calling hasher instead of the object's own hasher
+        resolver = lambda obj: calling_hasher.hash_object(obj.identity_structure())
+        result = calling_hasher.hash_object(rec, resolver=resolver)
+
         assert result == calling_hasher.hash_object(rec.identity_structure())
-        # The method tag must be the *calling* hasher's id
         assert result.method == "test_v1"
 
-    def test_two_modes_differ_when_hashers_differ(self):
-        """When the object's hasher differs from the calling hasher, the two modes
-        produce different hashes."""
+    def test_resolver_differs_from_no_resolver_when_hashers_differ(self):
+        """When the object's hasher differs from the calling hasher, resolver and
+        no-resolver produce different results."""
         obj_hasher = BaseSemanticHasher(hasher_id="obj_v99")
-        calling_hasher = make_hasher(strict=True)  # hasher_id = "test_v1"
+        calling_hasher = make_hasher(strict=True)
         rec = SimpleRecord("data", 42, semantic_hasher=obj_hasher)
 
-        h_defer = calling_hasher.hash_object(rec, process_identity_structure=False)
-        h_process = calling_hasher.hash_object(rec, process_identity_structure=True)
-
-        # Different hasher_ids produce different ContentHash method tags
-        assert h_defer.method != h_process.method
-        # And therefore different hashes
-        assert h_defer != h_process
-
-    def test_two_modes_agree_when_hashers_are_equivalent(self):
-        """When the object's hasher is equivalent to the calling hasher (same
-        configuration, same hasher_id), both modes produce the same hash."""
-        # Both use hasher_id="test_v1" with the same registry
-        hasher_a = make_hasher(strict=True)
-        hasher_b = make_hasher(strict=True)
-        rec = SimpleRecord("same", 7, semantic_hasher=hasher_a)
-
-        h_defer = hasher_b.hash_object(rec, process_identity_structure=False)
-        h_process = hasher_b.hash_object(rec, process_identity_structure=True)
-
-        assert h_defer == h_process
-
-    def test_default_argument_is_false(self):
-        """Calling hash_object without the flag is equivalent to False."""
-        obj_hasher = BaseSemanticHasher(hasher_id="obj_hasher_v1")
-        calling_hasher = make_hasher(strict=True)
-        rec = SimpleRecord("x", 0, semantic_hasher=obj_hasher)
-
-        assert calling_hasher.hash_object(rec) == calling_hasher.hash_object(
-            rec, process_identity_structure=False
+        h_no_resolver = calling_hasher.hash_object(rec)
+        h_resolver = calling_hasher.hash_object(
+            rec,
+            resolver=lambda obj: calling_hasher.hash_object(obj.identity_structure()),
         )
 
-    def test_content_hash_cached_result_used_in_defer_mode(self):
-        """In defer mode the object's cached content_hash is reused -- calling
-        hash_object twice returns the identical ContentHash object."""
-        obj_hasher = BaseSemanticHasher(hasher_id="cached_v1")
+        assert h_no_resolver.method == "obj_v99"
+        assert h_resolver.method == "test_v1"
+        assert h_no_resolver != h_resolver
+
+    def test_resolver_propagates_through_list(self):
+        """Resolver is applied to CI objects nested inside a list."""
         calling_hasher = make_hasher(strict=True)
-        rec = SimpleRecord("y", 5, semantic_hasher=obj_hasher)
-
-        # Prime the cache
-        first_call = rec.content_hash()
-        result = calling_hasher.hash_object(rec, process_identity_structure=False)
-        # Should be the exact same object (cache hit)
-        assert result is first_call
-
-    # ------------------------------------------------------------------
-    # Non-ContentIdentifiableProtocol objects: flag has no effect
-    # ------------------------------------------------------------------
-
-    def test_flag_has_no_effect_on_primitives(self):
-        """process_identity_structure has no observable effect on primitives."""
-        h = make_hasher(strict=True)
-        for value in [42, "hello", None, True, 3.14]:
-            assert h.hash_object(
-                value, process_identity_structure=False
-            ) == h.hash_object(value, process_identity_structure=True)
-
-    def test_flag_has_no_effect_on_plain_structures(self):
-        """process_identity_structure has no effect on plain dicts/lists/sets/tuples."""
-        h = make_hasher(strict=True)
-        structures = [
-            [1, 2, 3],
-            {"a": 1, "b": 2},
-            {10, 20, 30},
-            (7, 8, 9),
-        ]
-        for s in structures:
-            assert h.hash_object(s, process_identity_structure=False) == h.hash_object(
-                s, process_identity_structure=True
-            )
-
-    def test_flag_has_no_effect_on_content_hash_terminal(self):
-        """process_identity_structure has no effect when the object is a ContentHash."""
-        h = make_hasher(strict=True)
-        ch = ContentHash("some_method", b"\xaa" * 32)
-        assert h.hash_object(ch, process_identity_structure=False) is ch
-        assert h.hash_object(ch, process_identity_structure=True) is ch
-
-    def test_flag_has_no_effect_on_handler_dispatched_types(self):
-        """process_identity_structure has no effect on types handled by a registered
-        TypeHandlerProtocol (e.g. bytes, UUID)."""
-        h = make_hasher(strict=True)
-        u = UUID("550e8400-e29b-41d4-a716-446655440000")
-        assert h.hash_object(u, process_identity_structure=False) == h.hash_object(
-            u, process_identity_structure=True
-        )
-        assert h.hash_object(
-            b"data", process_identity_structure=False
-        ) == h.hash_object(b"data", process_identity_structure=True)
-
-    def test_nested_content_identifiable_in_structure_respects_defer_mode(self):
-        """When a ContentIdentifiableProtocol is embedded inside a structure, the calling
-        hasher expands the structure and encounters the CI object via _expand_element,
-        which always calls hash_object(obj) to get a token.  In that context
-        the default (defer) mode is used -- the embedded object contributes its
-        own content_hash token to the parent structure."""
         obj_hasher = BaseSemanticHasher(hasher_id="inner_v1")
-        calling_hasher = make_hasher(strict=True)
         inner = SimpleRecord("inner", 99, semantic_hasher=obj_hasher)
 
-        # The token embedded for `inner` inside the list should equal inner.content_hash()
-        token_from_inner_ch = calling_hasher.hash_object([inner.content_hash()])
-        token_from_list = calling_hasher.hash_object([inner])
-        assert token_from_inner_ch == token_from_list
+        # With no resolver the embedded token uses inner's own hasher_id
+        no_resolver_result = calling_hasher.hash_object([inner])
+        expected_no_resolver = calling_hasher.hash_object([inner.content_hash()])
+        assert no_resolver_result == expected_no_resolver
+
+        # With a resolver that uses calling_hasher for inner, the token differs
+        resolver = lambda obj: calling_hasher.hash_object(obj.identity_structure())
+        resolver_result = calling_hasher.hash_object([inner], resolver=resolver)
+        inner_via_calling = calling_hasher.hash_object(inner.identity_structure())
+        expected_resolver = calling_hasher.hash_object([inner_via_calling])
+        assert resolver_result == expected_resolver
+
+        assert no_resolver_result != resolver_result
+
+    def test_resolver_propagates_through_tuple(self):
+        """Resolver is applied to CI objects nested inside a tuple."""
+        calling_hasher = make_hasher(strict=True)
+        obj_hasher = BaseSemanticHasher(hasher_id="inner_v1")
+        inner = SimpleRecord("x", 1, semantic_hasher=obj_hasher)
+
+        resolver = lambda obj: calling_hasher.hash_object(obj.identity_structure())
+        result_with_resolver = calling_hasher.hash_object((inner,), resolver=resolver)
+        inner_hash = calling_hasher.hash_object(inner.identity_structure())
+        expected = calling_hasher.hash_object((inner_hash,))
+        assert result_with_resolver == expected
+
+    def test_resolver_propagates_through_dict(self):
+        """Resolver is applied to CI objects nested inside a dict value."""
+        calling_hasher = make_hasher(strict=True)
+        obj_hasher = BaseSemanticHasher(hasher_id="inner_v1")
+        inner = SimpleRecord("v", 2, semantic_hasher=obj_hasher)
+
+        resolver = lambda obj: calling_hasher.hash_object(obj.identity_structure())
+        result = calling_hasher.hash_object({"key": inner}, resolver=resolver)
+        inner_hash = calling_hasher.hash_object(inner.identity_structure())
+        expected = calling_hasher.hash_object({"key": inner_hash})
+        assert result == expected
+
+    def test_resolver_not_called_for_primitives(self):
+        """Resolver has no observable effect on primitive values."""
+        h = make_hasher(strict=True)
+        called = []
+        resolver = lambda obj: (called.append(obj), obj.content_hash())[1]
+        for value in [42, "hello", None, True, 3.14]:
+            h.hash_object(value, resolver=resolver)
+        assert called == []
+
+    def test_resolver_not_called_for_content_hash_terminal(self):
+        """Resolver has no effect when the object is a ContentHash terminal."""
+        h = make_hasher(strict=True)
+        called = []
+        resolver = lambda obj: (called.append(obj), obj.content_hash())[1]
+        ch = ContentHash("some_method", b"\xaa" * 32)
+        result = h.hash_object(ch, resolver=resolver)
+        assert result is ch
+        assert called == []
+
+    def test_resolver_propagates_through_handler_result(self):
+        """When a registered handler returns a ContentIdentifiable, the resolver
+        is applied to that result."""
+        calling_hasher = make_hasher(strict=True)
+        obj_hasher = BaseSemanticHasher(hasher_id="inner_v1")
+        inner = SimpleRecord("inner", 5, semantic_hasher=obj_hasher)
+
+        resolved = []
+
+        def resolver(obj):
+            resolved.append(obj)
+            return calling_hasher.hash_object(obj.identity_structure())
+
+        # bytes has a registered handler; use a CI object directly to verify
+        # resolver is applied after handler dispatch
+        result = calling_hasher.hash_object(inner, resolver=resolver)
+        assert resolved == [inner]
+        assert result == calling_hasher.hash_object(inner.identity_structure())
+
+    def test_cached_result_reused_across_calls(self):
+        """content_hash() caches by hasher_id -- the same ContentHash object is
+        returned on repeated calls with the same hasher."""
+        obj_hasher = BaseSemanticHasher(hasher_id="cached_v1")
+        rec = SimpleRecord("y", 5, semantic_hasher=obj_hasher)
+
+        first = rec.content_hash()
+        second = rec.content_hash()
+        assert first is second
+
+
+# ---------------------------------------------------------------------------
+# 19. Uniform hasher propagation through a chain of ContentIdentifiables
+# ---------------------------------------------------------------------------
+
+
+class TestUniformHasherPropagation:
+    """
+    Verify that when content_hash() is triggered on an object, the hasher
+    from that entry point propagates uniformly through the entire recursive
+    chain — nested objects are resolved using the entry point's hasher, NOT
+    their own stored hasher.
+
+    This enforces the principle: one data context per hash computation.
+    """
+
+    def test_entry_point_hasher_overrides_nested_hasher(self):
+        """outer.content_hash() uses outer's hasher for inner, even though inner
+        holds a different hasher."""
+        hasher_a = BaseSemanticHasher(hasher_id="hasher_a")
+        hasher_b = BaseSemanticHasher(hasher_id="hasher_b")
+
+        inner = SimpleRecord("inner", 1, semantic_hasher=hasher_a)
+        outer = NestedRecord("outer", inner, semantic_hasher=hasher_b)
+
+        result = outer.content_hash()
+
+        # Entry point is outer (hasher_b), so the top-level result tag is hasher_b
+        assert result.method == "hasher_b"
+
+        # Verify: result equals computing everything with hasher_b uniformly
+        expected_uniform = hasher_b.hash_object(
+            outer.identity_structure(),
+            resolver=lambda obj: obj.content_hash(hasher_b),
+        )
+        assert result == expected_uniform
+
+        # Verify: result differs from a mixed computation (inner uses its own hasher_a)
+        inner_with_own_hasher = inner.content_hash()  # uses hasher_a
+        assert inner_with_own_hasher.method == "hasher_a"
+        mixed_result = hasher_b.hash_object(
+            {"label": "outer", "inner": inner_with_own_hasher}
+        )
+        assert result != mixed_result
+
+    def test_three_level_chain_uses_entry_hasher_throughout(self):
+        """In a three-level chain A→B→C, calling C.content_hash() uses C's hasher
+        for A and B as well, even though each holds a different hasher."""
+        hasher_a = BaseSemanticHasher(hasher_id="hasher_a")
+        hasher_b = BaseSemanticHasher(hasher_id="hasher_b")
+        hasher_c = BaseSemanticHasher(hasher_id="hasher_c")
+
+        a = SimpleRecord("a", 1, semantic_hasher=hasher_a)
+        b = NestedRecord("b", a, semantic_hasher=hasher_b)
+
+        # c wraps b — use ListRecord as a convenient wrapper
+        c = ListRecord([b], semantic_hasher=hasher_c)
+
+        result = c.content_hash()
+        assert result.method == "hasher_c"
+
+        # b resolved under hasher_c (not its own hasher_b)
+        b_under_c = b.content_hash(hasher_c)
+        assert b_under_c.method == "hasher_c"
+        assert b_under_c != b.content_hash()  # differs from b's own-context hash
+
+        # a resolved under hasher_c (not its own hasher_a) — two levels deep
+        a_under_c = a.content_hash(hasher_c)
+        assert a_under_c.method == "hasher_c"
+        assert a_under_c != a.content_hash()  # differs from a's own-context hash
+
+        # Reconstruct expected result using hasher_c uniformly throughout
+        expected = hasher_c.hash_object(
+            c.identity_structure(),
+            resolver=lambda obj: obj.content_hash(hasher_c),
+        )
+        assert result == expected
+
+    def test_independent_call_still_uses_own_hasher(self):
+        """When an intermediate object is called directly (not as part of a larger
+        chain), it uses its own stored hasher as before."""
+        hasher_a = BaseSemanticHasher(hasher_id="hasher_a")
+        hasher_b = BaseSemanticHasher(hasher_id="hasher_b")
+
+        inner = SimpleRecord("inner", 1, semantic_hasher=hasher_a)
+        outer = NestedRecord("outer", inner, semantic_hasher=hasher_b)
+
+        # Each called independently uses its own hasher
+        assert inner.content_hash().method == "hasher_a"
+        assert outer.content_hash().method == "hasher_b"
+
+    def test_cache_keyed_by_hasher_id_avoids_recomputation(self):
+        """The cache is keyed by hasher_id, so a nested object computed under
+        hasher_c is cached and reused on a second call with hasher_c."""
+        hasher_a = BaseSemanticHasher(hasher_id="hasher_a")
+        hasher_c = BaseSemanticHasher(hasher_id="hasher_c")
+
+        inner = SimpleRecord("inner", 42, semantic_hasher=hasher_a)
+
+        first = inner.content_hash(hasher_c)
+        second = inner.content_hash(hasher_c)
+        assert first is second  # same object — cache hit
+
+        # But inner's own-context hash (hasher_a) is a different cache entry
+        own = inner.content_hash()
+        assert own is not first
+        assert own.method == "hasher_a"

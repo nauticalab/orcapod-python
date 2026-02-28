@@ -1,6 +1,5 @@
 import importlib
 from typing import Any
-from weakref import ref
 
 
 def parse_objectspec(

@@ -1,8 +1,9 @@
-from orcapod.protocols.hashing_protocols import FunctionInfoExtractorProtocol
+import inspect
 from collections.abc import Callable
 from typing import Any, Literal
+
+from orcapod.protocols.hashing_protocols import FunctionInfoExtractorProtocol
 from orcapod.types import Schema
-import inspect
 
 
 class FunctionNameExtractor:

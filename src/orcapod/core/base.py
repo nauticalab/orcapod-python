@@ -107,7 +107,7 @@ class ContentIdentifiableBase(DataContextMixin, ABC):
     based on their content rather than their identity in memory. Specifically, the identity of the
     object is determined by the structure returned by the `identity_structure` method.
     The hash of the object is computed based on the `identity_structure` using the provided `ObjectHasher`,
-    which defaults to the one returned by `get_default_object_hasher`.
+    which defaults to the one returned by `get_default_semantic_hasher`.
     Two content-identifiable objects are considered equal if their `identity_structure` returns the same value.
     """
 
@@ -123,7 +123,7 @@ class ContentIdentifiableBase(DataContextMixin, ABC):
             identity_structure_hasher (ObjectHasher | None): An instance of ObjectHasher to use for hashing.
         """
         super().__init__(data_context=data_context, config=config)
-        self._cached_content_hash: ContentHash | None = None
+        self._content_hash_cache: dict[str, ContentHash] = {}
         self._cached_int_hash: int | None = None
 
     @abstractmethod
@@ -140,23 +140,33 @@ class ContentIdentifiableBase(DataContextMixin, ABC):
         """
         ...
 
-    def content_hash(self) -> ContentHash:
+    def content_hash(self, hasher=None) -> ContentHash:
         """
         Compute a hash based on the content of this object.
 
+        The hasher is used for the entire recursive computation — all nested
+        ContentIdentifiable objects are resolved using the same hasher, ensuring
+        one consistent context per hash computation.
+
+        Args:
+            hasher: Optional semantic hasher to use.  When omitted, the hasher
+                is resolved from this object's data_context and the result is
+                cached by hasher_id for reuse.  When provided explicitly, the
+                result is also cached by hasher_id, so repeated calls with the
+                same hasher are free.
+
         Returns:
-            bytes: A byte representation of the hash based on the content.
-                   If no identity structure is provided, return None.
+            ContentHash: Stable, content-based hash of the object.
         """
-        if self._cached_content_hash is None:
-            # hash of content identifiable should be identical to
-            # the hash of its identity_structure
-            structure = self.identity_structure()
-            # processed_structure = process_structure(structure)
-            self._cached_content_hash = self.data_context.semantic_hasher.hash_object(
-                structure
+        if hasher is None:
+            hasher = self.data_context.semantic_hasher
+        cache_key = hasher.hasher_id
+        if cache_key not in self._content_hash_cache:
+            resolver = lambda obj: obj.content_hash(hasher)
+            self._content_hash_cache[cache_key] = hasher.hash_object(
+                self.identity_structure(), resolver=resolver
             )
-        return self._cached_content_hash
+        return self._content_hash_cache[cache_key]
 
     def __hash__(self) -> int:
         """
@@ -183,6 +193,75 @@ class ContentIdentifiableBase(DataContextMixin, ABC):
             return NotImplemented
 
         return self.identity_structure() == other.identity_structure()
+
+
+class PipelineElementBase(ABC):
+    """
+    Mixin providing pipeline-level identity for objects that participate in a
+    pipeline graph.
+
+    This is a parallel identity chain to ContentIdentifiableBase. Content
+    identity (content_hash) captures the precise, data-inclusive identity of
+    an object. Pipeline identity (pipeline_hash) captures only what is
+    structurally meaningful for pipeline database path scoping: schemas and
+    the recursive topology of upstream computation, with no data content.
+
+    Must be used alongside DataContextMixin (directly or via TraceableBase),
+    which provides self.data_context used by pipeline_hash().
+
+    The only class that needs to override pipeline_identity_structure() in a
+    non-trivial way is RootSource, which returns (tag_schema, packet_schema)
+    as the base case of the recursion. All other pipeline elements return
+    structures built from the pipeline_hash() values of their upstream
+    components — ContentHash objects are terminal in the semantic hasher, so
+    no special hashing mode is required.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._pipeline_hash_cache: dict[str, ContentHash] = {}
+
+    @abstractmethod
+    def pipeline_identity_structure(self) -> Any:
+        """
+        Return a structure representing this element's pipeline identity.
+
+        Implementations may return raw ContentIdentifiable objects (such as
+        upstream stream or pod references) as leaves — the pipeline resolver
+        threaded through pipeline_hash() ensures that PipelineElementProtocol
+        objects are resolved via pipeline_hash() and other ContentIdentifiable
+        objects via content_hash(), both using the same hasher throughout.
+        """
+        ...
+
+    def pipeline_hash(self, hasher=None) -> ContentHash:
+        """
+        Return the pipeline-level hash of this element, computed from
+        pipeline_identity_structure() and cached by hasher_id.
+
+        The hasher is used for the entire recursive computation — all nested
+        objects are resolved using the same hasher, ensuring one consistent
+        context per hash computation.
+
+        Args:
+            hasher: Optional semantic hasher to use.  When omitted, resolved
+                from this object's data_context.
+        """
+        if hasher is None:
+            hasher = self.data_context.semantic_hasher
+        cache_key = hasher.hasher_id
+        if cache_key not in self._pipeline_hash_cache:
+            from orcapod.protocols.hashing_protocols import PipelineElementProtocol
+
+            def resolver(obj: Any) -> ContentHash:
+                if isinstance(obj, PipelineElementProtocol):
+                    return obj.pipeline_hash(hasher)
+                return obj.content_hash(hasher)
+
+            self._pipeline_hash_cache[cache_key] = hasher.hash_object(
+                self.pipeline_identity_structure(), resolver=resolver
+            )
+        return self._pipeline_hash_cache[cache_key]
 
 
 class TemporalMixin:

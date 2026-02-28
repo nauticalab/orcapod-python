@@ -48,16 +48,16 @@ class NodeBase(
         self._pipeline_path_prefix = pipeline_path_prefix
         # compute invocation hash - note that empty () is passed into identity_structure to signify
         # identity structure of invocation with no input streams
-        self.pipeline_node_hash = self.data_context.object_hasher.hash_object(
+        self.pipeline_node_hash = self.data_context.semantic_hasher.hash_object(
             self.identity_structure(())
         ).to_string()
         tag_types, packet_types = self.types(include_system_tags=True)
 
-        self.tag_schema_hash = self.data_context.object_hasher.hash_object(
+        self.tag_schema_hash = self.data_context.semantic_hasher.hash_object(
             tag_types
         ).to_string()
 
-        self.packet_schema_hash = self.data_context.object_hasher.hash_object(
+        self.packet_schema_hash = self.data_context.semantic_hasher.hash_object(
             packet_types
         ).to_string()
 

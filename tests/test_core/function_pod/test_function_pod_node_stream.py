@@ -1,5 +1,5 @@
 """
-Tests for FunctionPodNodeStream covering:
+Tests for FunctionNode's stream interface covering:
 - iter_packets: correctness, repeatability, __iter__
 - as_table: correctness, ColumnConfig (content_hash, sort_by_tags)
 - output_schema and keys
@@ -7,7 +7,7 @@ Tests for FunctionPodNodeStream covering:
 - Inactive packet function behaviour
 - DB-backed Phase 1: cached results served without recomputation
 - DB Phase 2: only missing entries computed
-- is_stale: freshly created, after upstream modified, after source pod updated
+- is_stale: freshly created, after upstream modified
 - clear_cache: resets state, produces same results on re-iteration
 - Automatic staleness detection in iter_packets / as_table
 """
@@ -19,8 +19,8 @@ import pytest
 
 from collections.abc import Mapping
 
-from orcapod.core.function_pod import FunctionPodNode, FunctionPodNodeStream
-from orcapod.core.packet_function import PacketFunctionProtocol, PythonPacketFunction
+from orcapod.core.function_pod import FunctionNode, FunctionPod
+from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.streams import TableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.protocols.core_protocols import StreamProtocol
@@ -37,19 +37,19 @@ def _make_node(
     pf: PythonPacketFunction,
     n: int = 3,
     db: InMemoryArrowDatabase | None = None,
-) -> FunctionPodNode:
+) -> FunctionNode:
     if db is None:
         db = InMemoryArrowDatabase()
-    return FunctionPodNode(
+    return FunctionNode(
         packet_function=pf,
         input_stream=make_int_stream(n=n),
         pipeline_database=db,
     )
 
 
-def _fill_node(node: FunctionPodNode) -> None:
+def _fill_node(node: FunctionNode) -> None:
     """Process all packets so the DB is populated."""
-    list(node.process().iter_packets())
+    node.run()
 
 
 # ---------------------------------------------------------------------------
@@ -57,54 +57,53 @@ def _fill_node(node: FunctionPodNode) -> None:
 # ---------------------------------------------------------------------------
 
 
-class TestFunctionPodNodeStreamBasic:
+class TestFunctionNodeStreamBasic:
     @pytest.fixture
-    def node_stream(self, double_pf) -> FunctionPodNodeStream:
+    def node(self, double_pf) -> FunctionNode:
         db = InMemoryArrowDatabase()
-        node = FunctionPodNode(
+        return FunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
-        return node.process()
 
-    def test_iter_packets_yields_correct_count(self, node_stream):
-        assert len(list(node_stream.iter_packets())) == 3
+    def test_iter_packets_yields_correct_count(self, node):
+        assert len(list(node.iter_packets())) == 3
 
-    def test_iter_packets_correct_values(self, node_stream):
-        for i, (_, packet) in enumerate(node_stream.iter_packets()):
+    def test_iter_packets_correct_values(self, node):
+        for i, (_, packet) in enumerate(node.iter_packets()):
             assert packet["result"] == i * 2
 
-    def test_iter_is_repeatable(self, node_stream):
-        first = [(t["id"], p["result"]) for t, p in node_stream.iter_packets()]
-        second = [(t["id"], p["result"]) for t, p in node_stream.iter_packets()]
+    def test_iter_is_repeatable(self, node):
+        first = [(t["id"], p["result"]) for t, p in node.iter_packets()]
+        second = [(t["id"], p["result"]) for t, p in node.iter_packets()]
         assert first == second
 
-    def test_dunder_iter_delegates_to_iter_packets(self, node_stream):
-        assert len(list(node_stream)) == len(list(node_stream.iter_packets()))
+    def test_dunder_iter_delegates_to_iter_packets(self, node):
+        assert len(list(node)) == len(list(node.iter_packets()))
 
-    def test_as_table_returns_pyarrow_table(self, node_stream):
-        assert isinstance(node_stream.as_table(), pa.Table)
+    def test_as_table_returns_pyarrow_table(self, node):
+        assert isinstance(node.as_table(), pa.Table)
 
-    def test_as_table_has_correct_row_count(self, node_stream):
-        assert len(node_stream.as_table()) == 3
+    def test_as_table_has_correct_row_count(self, node):
+        assert len(node.as_table()) == 3
 
-    def test_as_table_contains_tag_columns(self, node_stream):
-        assert "id" in node_stream.as_table().column_names
+    def test_as_table_contains_tag_columns(self, node):
+        assert "id" in node.as_table().column_names
 
-    def test_as_table_contains_packet_columns(self, node_stream):
-        assert "result" in node_stream.as_table().column_names
+    def test_as_table_contains_packet_columns(self, node):
+        assert "result" in node.as_table().column_names
 
-    def test_source_is_fp_node(self, node_stream, double_pf):
-        assert isinstance(node_stream.source, FunctionPodNode)
+    def test_source_is_function_pod(self, node, double_pf):
+        assert isinstance(node.source, FunctionPod)
 
-    def test_upstreams_contains_input_stream(self, node_stream):
-        upstreams = node_stream.upstreams
+    def test_upstreams_contains_input_stream(self, node):
+        upstreams = node.upstreams
         assert isinstance(upstreams, tuple)
         assert len(upstreams) == 1
 
-    def test_output_schema_matches_node_output_schema(self, node_stream):
-        tag_schema, packet_schema = node_stream.output_schema()
+    def test_output_schema_has_result_in_packet_schema(self, node):
+        tag_schema, packet_schema = node.output_schema()
         assert isinstance(tag_schema, Mapping)
         assert isinstance(packet_schema, Mapping)
         assert "result" in packet_schema
@@ -115,10 +114,10 @@ class TestFunctionPodNodeStreamBasic:
 # ---------------------------------------------------------------------------
 
 
-class TestFunctionPodNodeStreamColumnConfig:
+class TestFunctionNodeColumnConfig:
     def test_as_table_content_hash_column(self, double_pf):
-        node_stream = _make_node(double_pf, n=3).process()
-        table = node_stream.as_table(columns={"content_hash": True})
+        node = _make_node(double_pf, n=3)
+        table = node.as_table(columns={"content_hash": True})
         assert "_content_hash" in table.column_names
         assert len(table.column("_content_hash")) == 3
 
@@ -131,12 +130,12 @@ class TestFunctionPodNodeStreamColumnConfig:
             }
         )
         input_stream = TableStream(reversed_table, tag_columns=["id"])
-        node = FunctionPodNode(
+        node = FunctionNode(
             packet_function=double_pf,
             input_stream=input_stream,
             pipeline_database=db,
         )
-        result = node.process().as_table(columns={"sort_by_tags": True})
+        result = node.as_table(columns={"sort_by_tags": True})
         ids: list[int] = result.column("id").to_pylist()  # type: ignore[assignment]
         assert ids == sorted(ids)
 
@@ -146,11 +145,11 @@ class TestFunctionPodNodeStreamColumnConfig:
 # ---------------------------------------------------------------------------
 
 
-class TestFunctionPodNodeStreamInactive:
+class TestFunctionNodeInactive:
     def test_as_table_returns_empty_when_packet_function_inactive(self, double_pf):
         double_pf.set_active(False)
-        node_stream = _make_node(double_pf, n=3).process()
-        table = node_stream.as_table()
+        node = _make_node(double_pf, n=3)
+        table = node.as_table()
         assert isinstance(table, pa.Table)
         assert len(table) == 0
 
@@ -164,13 +163,13 @@ class TestFunctionPodNodeStreamInactive:
         n = 3
         db = InMemoryArrowDatabase()
         node1 = _make_node(double_pf, n=n, db=db)
-        table1 = node1.process().as_table()
+        table1 = node1.as_table()
         assert len(table1) == n
 
         double_pf.set_active(False)
 
         node2 = _make_node(double_pf, n=n, db=db)
-        table2 = node2.process().as_table()
+        table2 = node2.as_table()
 
         assert isinstance(table2, pa.Table)
         assert len(table2) == n
@@ -181,7 +180,7 @@ class TestFunctionPodNodeStreamInactive:
     def test_inactive_fresh_db_yields_no_packets(self, double_pf):
         double_pf.set_active(False)
         node = _make_node(double_pf, n=3)
-        assert list(node.process().iter_packets()) == []
+        assert list(node.iter_packets()) == []
 
     def test_inactive_filled_db_serves_cached_results(self, double_pf):
         n = 3
@@ -190,7 +189,7 @@ class TestFunctionPodNodeStreamInactive:
 
         double_pf.set_active(False)
         node2 = _make_node(double_pf, n=n, db=db)
-        packets = list(node2.process().iter_packets())
+        packets = list(node2.iter_packets())
         assert len(packets) == n
 
     def test_inactive_node_with_separate_fresh_db_yields_empty(self, double_pf):
@@ -200,7 +199,7 @@ class TestFunctionPodNodeStreamInactive:
 
         double_pf.set_active(False)
         node3 = _make_node(double_pf, n=n, db=InMemoryArrowDatabase())
-        table = node3.process().as_table()
+        table = node3.as_table()
         assert isinstance(table, pa.Table)
         assert len(table) == 0
 
@@ -240,8 +239,8 @@ class TestIterPacketsDbPhase:
         n = 4
         db = InMemoryArrowDatabase()
 
-        table1 = _make_node(double_pf, n=n, db=db).process().as_table()
-        table2 = _make_node(double_pf, n=n, db=db).process().as_table()
+        table1 = _make_node(double_pf, n=n, db=db).as_table()
+        table2 = _make_node(double_pf, n=n, db=db).as_table()
 
         assert sorted(table1.column("result").to_pylist()) == sorted(
             table2.column("result").to_pylist()
@@ -251,7 +250,7 @@ class TestIterPacketsDbPhase:
         n = 5
         db = InMemoryArrowDatabase()
         _fill_node(_make_node(double_pf, n=n, db=db))
-        packets = list(_make_node(double_pf, n=n, db=db).process().iter_packets())
+        packets = list(_make_node(double_pf, n=n, db=db).iter_packets())
         assert len(packets) == n
 
     def test_fresh_db_always_computes(self, double_pf):
@@ -298,14 +297,14 @@ class TestIterPacketsMissingEntriesOnly:
         n = 4
         db = InMemoryArrowDatabase()
         _fill_node(_make_node(double_pf, n=2, db=db))
-        packets = list(_make_node(double_pf, n=n, db=db).process().iter_packets())
+        packets = list(_make_node(double_pf, n=n, db=db).iter_packets())
         assert len(packets) == n
 
     def test_partial_fill_all_values_correct(self, double_pf):
         n = 4
         db = InMemoryArrowDatabase()
         _fill_node(_make_node(double_pf, n=2, db=db))
-        table = _make_node(double_pf, n=n, db=db).process().as_table()
+        table = _make_node(double_pf, n=n, db=db).as_table()
         assert sorted(table.column("result").to_pylist()) == [0, 2, 4, 6]
 
     def test_already_full_db_zero_additional_calls(self, double_pf):
@@ -332,82 +331,67 @@ class TestIterPacketsMissingEntriesOnly:
 # ---------------------------------------------------------------------------
 
 
-class TestFunctionPodNodeStreamStaleness:
+class TestFunctionNodeStaleness:
     # --- is_stale ---
 
-    def test_is_stale_false_immediately_after_process(self, double_pf):
-        """A freshly created stream whose upstream has not changed is not stale."""
-        node_stream = _make_node(double_pf, n=3).process()
-        assert not node_stream.is_stale
+    def test_is_stale_false_immediately_after_creation(self, double_pf):
+        """A freshly created FunctionNode whose upstream has not changed is not stale."""
+        node = _make_node(double_pf, n=3)
+        assert not node.is_stale
 
     def test_is_stale_true_after_upstream_modified(self, double_pf):
         import time
 
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
-        node = FunctionPodNode(
+        node = FunctionNode(
             packet_function=double_pf,
             input_stream=input_stream,
             pipeline_database=db,
         )
-        node_stream = node.process()
-        list(node_stream.iter_packets())
+        list(node.iter_packets())
 
         time.sleep(0.01)
         input_stream._update_modified_time()
 
-        assert node_stream.is_stale
-
-    def test_is_stale_true_after_source_pod_updated(self, double_pf):
-        """Updating the source pod's modified time makes the stream stale."""
-        import time
-
-        node = _make_node(double_pf, n=3)
-        node_stream = node.process()
-        list(node_stream.iter_packets())
-
-        time.sleep(0.01)
-        node._update_modified_time()
-
-        assert node_stream.is_stale
+        assert node.is_stale
 
     def test_is_stale_false_after_clear_cache(self, double_pf):
         import time
 
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
-        node = FunctionPodNode(
+        node = FunctionNode(
             packet_function=double_pf,
             input_stream=input_stream,
             pipeline_database=db,
         )
-        node_stream = node.process()
-        list(node_stream.iter_packets())
+        list(node.iter_packets())
 
         time.sleep(0.01)
         input_stream._update_modified_time()
-        assert node_stream.is_stale
+        assert node.is_stale
 
-        node_stream.clear_cache()
-        assert not node_stream.is_stale
+        node.clear_cache()
+        assert not node.is_stale
 
     # --- clear_cache ---
 
     def test_clear_cache_resets_output_packets(self, double_pf):
-        node_stream = _make_node(double_pf, n=3).process()
-        list(node_stream.iter_packets())
-        assert len(node_stream._cached_output_packets) == 3
+        node = _make_node(double_pf, n=3)
+        list(node.iter_packets())
+        assert len(node._cached_output_packets) == 3
 
-        node_stream.clear_cache()
-        assert len(node_stream._cached_output_packets) == 0
-        assert node_stream._cached_output_table is None
+        node.clear_cache()
+        assert len(node._cached_output_packets) == 0
+        assert node._cached_output_table is None
 
     def test_clear_cache_produces_same_results_on_re_iteration(self, double_pf):
-        node_stream = _make_node(double_pf, n=3).process()
-        table_before = node_stream.as_table()
+        node = _make_node(double_pf, n=3)
+        table_before = node.as_table()
 
-        node_stream.clear_cache()
-        table_after = node_stream.as_table()
+        node.clear_cache()
+        table_after = node.as_table()
 
         assert sorted(table_before.column("result").to_pylist()) == sorted(
             table_after.column("result").to_pylist()
@@ -420,36 +404,18 @@ class TestFunctionPodNodeStreamStaleness:
 
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
-        node = FunctionPodNode(
+        node = FunctionNode(
             packet_function=double_pf,
             input_stream=input_stream,
             pipeline_database=db,
         )
-        node_stream = node.process()
-        first = list(node_stream.iter_packets())
+        first = list(node.iter_packets())
 
         time.sleep(0.01)
         input_stream._update_modified_time()
-        assert node_stream.is_stale
+        assert node.is_stale
 
-        second = list(node_stream.iter_packets())
-        assert len(second) == len(first)
-        assert [p["result"] for _, p in second] == [p["result"] for _, p in first]
-
-    def test_iter_packets_auto_clears_when_source_pod_updated(self, double_pf):
-        """iter_packets re-populates automatically when the source pod is modified."""
-        import time
-
-        node = _make_node(double_pf, n=3)
-        node_stream = node.process()
-        first = list(node_stream.iter_packets())
-        assert len(node_stream._cached_output_packets) == 3
-
-        time.sleep(0.01)
-        node._update_modified_time()
-        assert node_stream.is_stale
-
-        second = list(node_stream.iter_packets())
+        second = list(node.iter_packets())
         assert len(second) == len(first)
         assert [p["result"] for _, p in second] == [p["result"] for _, p in first]
 
@@ -458,52 +424,33 @@ class TestFunctionPodNodeStreamStaleness:
 
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
-        node = FunctionPodNode(
+        node = FunctionNode(
             packet_function=double_pf,
             input_stream=input_stream,
             pipeline_database=db,
         )
-        node_stream = node.process()
-        table_before = node_stream.as_table()
+        table_before = node.as_table()
         assert len(table_before) == 3
 
         time.sleep(0.01)
         input_stream._update_modified_time()
 
-        table_after = node_stream.as_table()
-        assert len(table_after) == 3
-        assert sorted(table_after.column("result").to_pylist()) == sorted(
-            table_before.column("result").to_pylist()
-        )
-
-    def test_as_table_auto_clears_when_source_pod_updated(self, double_pf):
-        """as_table re-populates automatically when the source pod is modified."""
-        import time
-
-        node = _make_node(double_pf, n=3)
-        node_stream = node.process()
-        table_before = node_stream.as_table()
-        assert len(table_before) == 3
-
-        time.sleep(0.01)
-        node._update_modified_time()
-
-        table_after = node_stream.as_table()
+        table_after = node.as_table()
         assert len(table_after) == 3
         assert sorted(table_after.column("result").to_pylist()) == sorted(
             table_before.column("result").to_pylist()
         )
 
     def test_no_auto_clear_when_not_stale(self, double_pf):
-        node_stream = _make_node(double_pf, n=3).process()
-        list(node_stream.iter_packets())
-        cached_count = len(node_stream._cached_output_packets)
+        node = _make_node(double_pf, n=3)
+        list(node.iter_packets())
+        cached_count = len(node._cached_output_packets)
 
-        list(node_stream.iter_packets())
-        assert len(node_stream._cached_output_packets) == cached_count
+        list(node.iter_packets())
+        assert len(node._cached_output_packets) == cached_count
 
     def test_as_table_no_auto_clear_when_not_stale(self, double_pf):
-        node_stream = _make_node(double_pf, n=3).process()
-        table_before = node_stream.as_table()
-        table_after = node_stream.as_table()
+        node = _make_node(double_pf, n=3)
+        table_before = node.as_table()
+        table_after = node.as_table()
         assert table_before.equals(table_after)
