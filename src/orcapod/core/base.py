@@ -161,10 +161,13 @@ class ContentIdentifiableBase(DataContextMixin, ABC):
         if hasher is None:
             hasher = self.data_context.semantic_hasher
         cache_key = hasher.hasher_id
+
+        def content_resolver(obj):
+            return obj.content_hash(hasher)
+
         if cache_key not in self._content_hash_cache:
-            resolver = lambda obj: obj.content_hash(hasher)
             self._content_hash_cache[cache_key] = hasher.hash_object(
-                self.identity_structure(), resolver=resolver
+                self.identity_structure(), resolver=content_resolver
             )
         return self._content_hash_cache[cache_key]
 
@@ -195,7 +198,7 @@ class ContentIdentifiableBase(DataContextMixin, ABC):
         return self.identity_structure() == other.identity_structure()
 
 
-class PipelineElementBase(ABC):
+class PipelineElementBase(DataContextMixin, ABC):
     """
     Mixin providing pipeline-level identity for objects that participate in a
     pipeline graph.
@@ -253,13 +256,13 @@ class PipelineElementBase(ABC):
         if cache_key not in self._pipeline_hash_cache:
             from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 
-            def resolver(obj: Any) -> ContentHash:
+            def pipeline_resolver(obj: Any) -> ContentHash:
                 if isinstance(obj, PipelineElementProtocol):
                     return obj.pipeline_hash(hasher)
                 return obj.content_hash(hasher)
 
             self._pipeline_hash_cache[cache_key] = hasher.hash_object(
-                self.pipeline_identity_structure(), resolver=resolver
+                self.pipeline_identity_structure(), resolver=pipeline_resolver
             )
         return self._pipeline_hash_cache[cache_key]
 
