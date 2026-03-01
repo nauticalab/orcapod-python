@@ -74,9 +74,13 @@ class ArrowTableSource(RootSource):
         # Drop system columns from the raw input.
         table = arrow_data_utils.drop_system_columns(table)
 
-        self._tag_columns = tuple(
-            col for col in tag_columns if col in table.column_names
-        )
+        missing_tags = set(tag_columns) - set(table.column_names)
+        if missing_tags:
+            raise ValueError(
+                f"tag_columns not found in table: {missing_tags}. "
+                f"Available columns: {list(table.column_names)}"
+            )
+        self._tag_columns = tuple(tag_columns)
         self._system_tag_columns = tuple(system_tag_columns)
 
         # Validate record_id_column early.

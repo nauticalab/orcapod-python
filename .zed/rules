@@ -194,7 +194,7 @@ Prefixes are computed from SystemConstant in system_constants.py.
 
 ### Important implementation details
 
-- ArrowTableSource silently filters out tag columns not present in the table.
+- ArrowTableSource raises ValueError if any tag_columns are not in the table.
 - ArrowTableStream requires at least one packet column; raises ValueError otherwise.
 - FunctionNode Phase 1 returns ALL records in the shared pipeline_path DB table.
   Phase 2 skips inputs whose hash is already in the DB.

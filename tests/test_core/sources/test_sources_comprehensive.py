@@ -536,18 +536,38 @@ class TestArrowTableSourceAdditional:
         with pytest.raises(FieldNotResolvableError):
             src.resolve_field("", "x")
 
-    def test_tag_columns_not_present_in_table_are_silently_dropped(self):
-        """tag_columns that don't exist in the table are filtered out silently."""
+    def test_tag_columns_not_present_in_table_raises(self):
+        """tag_columns that don't exist in the table raise ValueError."""
         table = pa.table(
             {
                 "id": pa.array([1], type=pa.int64()),
                 "val": pa.array([42], type=pa.int64()),
             }
         )
-        src = ArrowTableSource(table=table, tag_columns=["nonexistent", "id"])
-        # 'nonexistent' is silently dropped; 'id' becomes the tag column
+        with pytest.raises(ValueError, match="tag_columns not found in table"):
+            ArrowTableSource(table=table, tag_columns=["nonexistent", "id"])
+
+    def test_tag_columns_all_missing_raises(self):
+        """All tag_columns missing from the table raises ValueError."""
+        table = pa.table(
+            {
+                "id": pa.array([1], type=pa.int64()),
+                "val": pa.array([42], type=pa.int64()),
+            }
+        )
+        with pytest.raises(ValueError, match="tag_columns not found in table"):
+            ArrowTableSource(table=table, tag_columns=["foo", "bar"])
+
+    def test_tag_columns_all_valid_succeeds(self):
+        """tag_columns that all exist in the table work correctly."""
+        table = pa.table(
+            {
+                "id": pa.array([1], type=pa.int64()),
+                "val": pa.array([42], type=pa.int64()),
+            }
+        )
+        src = ArrowTableSource(table=table, tag_columns=["id"])
         tag_keys, packet_keys = src.keys()
-        assert "nonexistent" not in tag_keys
         assert "id" in tag_keys
         assert "val" in packet_keys
 

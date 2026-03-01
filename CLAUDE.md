@@ -229,7 +229,7 @@ and `as_table()` methods. `all_info=True` sets everything to True.
 
 ### Important implementation details
 
-- `ArrowTableSource.__init__` silently filters out tag columns not present in the table.
+- `ArrowTableSource.__init__` raises `ValueError` if any `tag_columns` are not in the table.
 - `ArrowTableStream` requires at least one packet column; raises `ValueError` otherwise.
 - `FunctionNode.iter_packets()` Phase 1 returns ALL records in the shared `pipeline_path`
   DB table (not filtered to current inputs). Phase 2 skips inputs whose hash is already
