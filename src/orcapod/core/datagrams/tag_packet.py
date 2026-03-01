@@ -226,7 +226,7 @@ class Tag(Datagram):
     def copy(self, include_cache: bool = True, preserve_id: bool = False) -> Self:
         new_tag = super().copy(include_cache=include_cache, preserve_id=preserve_id)
         new_tag._system_tags = dict(self._system_tags)
-        new_tag._system_tags_python_schema = dict(self._system_tags_python_schema)
+        new_tag._system_tags_python_schema = self._system_tags_python_schema
         new_tag._system_tags_table = self._system_tags_table if include_cache else None
         return new_tag
 
@@ -386,12 +386,12 @@ class Packet(Datagram):
         columns: "ColumnConfig | dict[str, Any] | None" = None,
         all_info: bool = False,
     ) -> Schema:
-        schema = super().schema(columns=columns, all_info=all_info)
+        schema = dict(super().schema(columns=columns, all_info=all_info))
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
         if column_config.source:
             for key in super().keys():
                 schema[f"{constants.SOURCE_PREFIX}{key}"] = str
-        return schema
+        return Schema(schema)
 
     def arrow_schema(
         self,

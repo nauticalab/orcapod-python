@@ -36,7 +36,7 @@ def parse_objectspec(
         return obj_spec
 
 
-def _resolve_type_from_spec(spec: dict) -> type:
+def _resolve_type_from_spec(spec: dict[str, Any]) -> type:
     """Resolve a ``{"_type": "module.ClassName"}`` spec to the actual Python type.
 
     Bare names without a dot (e.g. ``"bytes"``) are resolved from ``builtins``.

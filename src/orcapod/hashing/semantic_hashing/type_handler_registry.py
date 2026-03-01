@@ -22,13 +22,15 @@ handler = registry.get_handler(some_object)
 
 from __future__ import annotations
 
-import importlib
 import logging
 import threading
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from orcapod.protocols.hashing_protocols import TypeHandlerProtocol
+    from orcapod.protocols.hashing_protocols import (
+        ArrowHasherProtocol,
+        TypeHandlerProtocol,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +52,7 @@ class TypeHandlerRegistry:
     """
 
     def __init__(
-        self, handlers: "list[tuple[type, TypeHandlerProtocol]] | None" = None
+        self, handlers: list[tuple[type, TypeHandlerProtocol]] | None = None
     ) -> None:
         """
         Args:
@@ -62,7 +64,7 @@ class TypeHandlerRegistry:
                 instantiate the handler.
         """
         # Maps type -> handler; insertion order is preserved but lookup uses MRO.
-        self._handlers: dict[type, "TypeHandlerProtocol"] = {}
+        self._handlers: dict[type, TypeHandlerProtocol] = {}
         self._lock = threading.RLock()
         if handlers:
             for target_type, handler in handlers:
@@ -72,7 +74,7 @@ class TypeHandlerRegistry:
     # Registration
     # ------------------------------------------------------------------
 
-    def register(self, target_type: type, handler: "TypeHandlerProtocol") -> None:
+    def register(self, target_type: type, handler: TypeHandlerProtocol) -> None:
         """
         Register a handler for a specific Python type.
 
@@ -249,7 +251,7 @@ class BuiltinTypeHandlerRegistry(TypeHandlerRegistry):
     step is required after construction.
     """
 
-    def __init__(self, arrow_hasher=None) -> None:
+    def __init__(self, arrow_hasher: "ArrowHasherProtocol | None" = None) -> None:
         super().__init__()
         from orcapod.hashing.semantic_hashing.builtin_handlers import (
             register_builtin_handlers,

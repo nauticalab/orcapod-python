@@ -25,6 +25,7 @@ from uuid_utils import uuid7
 
 from orcapod import contexts
 from orcapod.core.base import ContentIdentifiableBase
+from orcapod.protocols.semantic_types_protocols import TypeConverterProtocol
 from orcapod.semantic_types import infer_python_schema_from_pylist_data
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, DataValue, Schema, SchemaLike
@@ -414,7 +415,7 @@ class Datagram(ContentIdentifiableBase):
         return self._datagram_id
 
     @property
-    def converter(self):
+    def converter(self) -> TypeConverterProtocol:
         """Semantic type converter for this datagram's data context."""
         return self.data_context.type_converter
 

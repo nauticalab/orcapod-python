@@ -169,18 +169,22 @@ class TestDatagramArrowBacked:
         d = Datagram(arrow_table(a=1, b=2))
         d2 = d.select("a")
         assert d2._data_dict is None
+        assert d2._data_table is not None
         assert d2._data_table.column_names == ["a"]
 
     def test_drop_stays_arrow_backed(self):
         d = Datagram(arrow_table(a=1, b=2))
         d2 = d.drop("b")
         assert d2._data_dict is None
+
+        assert d2._data_table is not None
         assert d2._data_table.column_names == ["a"]
 
     def test_rename_stays_arrow_backed(self):
         d = Datagram(arrow_table(a=1, b=2))
         d2 = d.rename({"a": "x"})
         assert d2._data_dict is None
+        assert d2._data_table is not None
         assert "x" in d2._data_table.column_names
         assert "a" not in d2._data_table.column_names
 
@@ -304,6 +308,7 @@ class TestTagLazySystemTagsTable:
         tbl = tbl.append_column(sys_col, pa.array(["run1"], type=pa.large_string()))
         t = Tag(tbl)
         # System tag column removed from primary data table
+        assert t._data_table is not None
         assert sys_col not in t._data_table.column_names
         # Captured in the system_tags dict
         assert t._system_tags[sys_col] == "run1"
@@ -451,6 +456,7 @@ class TestRecordBatchInput:
         tbl = tbl.append_column(sys_col, pa.array(["r1"], type=pa.large_string()))
         batch = tbl.to_batches()[0]
         t = Tag(batch.slice(0, 1))
+        assert t._data_table is not None
         assert sys_col not in t._data_table.column_names
         assert t._system_tags[sys_col] == "r1"
         assert t._data_dict is None

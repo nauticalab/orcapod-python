@@ -33,17 +33,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from orcapod.protocols.hashing_protocols import (
-    ArrowHasherProtocol,
-    FileContentHasherProtocol,
-)
 from orcapod.types import PathLike, Schema
 
 if TYPE_CHECKING:
     from orcapod.hashing.semantic_hashing.type_handler_registry import (
         TypeHandlerRegistry,
     )
-    from orcapod.protocols.hashing_protocols import SemanticHasherProtocol
+    from orcapod.protocols.hashing_protocols import (
+        ArrowHasherProtocol,
+        FileContentHasherProtocol,
+        SemanticHasherProtocol,
+    )
 
 logger = logging.getLogger(__name__)
 

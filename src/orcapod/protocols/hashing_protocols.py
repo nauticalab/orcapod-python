@@ -221,14 +221,14 @@ class FileContentHasherProtocol(Protocol):
     def hash_file(self, file_path: PathLike) -> ContentHash: ...
 
 
+@runtime_checkable
 class ArrowHasherProtocol(Protocol):
     """Protocol for hashing arrow packets."""
 
-    def get_hasher_id(self) -> str: ...
+    @property
+    def hasher_id(self) -> str: ...
 
-    def hash_table(
-        self, table: "pa.Table | pa.RecordBatch", prefix_hasher_id: bool = True
-    ) -> ContentHash: ...
+    def hash_table(self, table: "pa.Table | pa.RecordBatch") -> ContentHash: ...
 
 
 class StringCacherProtocol(Protocol):

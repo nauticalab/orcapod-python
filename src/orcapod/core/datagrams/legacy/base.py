@@ -9,17 +9,18 @@ together with the legacy classes.
 
 import logging
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from uuid_utils import uuid7
 
 from orcapod.core.base import ContentIdentifiableBase
+from orcapod.protocols.semantic_types_protocols import TypeConverterProtocol
 from orcapod.types import DataValue
 from orcapod.utils.lazy_module import LazyModule
 
 logger = logging.getLogger(__name__)
 
-if __import__("typing").TYPE_CHECKING:
+if TYPE_CHECKING:
     import pyarrow as pa
 else:
     pa = LazyModule("pyarrow")
@@ -52,11 +53,11 @@ class BaseDatagram(ContentIdentifiableBase):
         raise NotImplementedError()
 
     @property
-    def converter(self):
+    def converter(self) -> TypeConverterProtocol:
         """Semantic type converter for this datagram's data context."""
         return self.data_context.type_converter
 
-    def with_context_key(self, new_context_key: str):
+    def with_context_key(self, new_context_key: str) -> "BaseDatagram":
         """Create a new datagram with a different data-context key."""
         from orcapod import contexts
 
@@ -64,7 +65,9 @@ class BaseDatagram(ContentIdentifiableBase):
         new_datagram._data_context = contexts.resolve_context(new_context_key)
         return new_datagram
 
-    def copy(self, include_cache: bool = True, preserve_id: bool = True):
+    def copy(
+        self, include_cache: bool = True, preserve_id: bool = True
+    ) -> "BaseDatagram":
         """Shallow-copy skeleton used by subclass copy() implementations.
 
         Uses ``object.__new__`` to avoid calling ``__init__``, so all fields
