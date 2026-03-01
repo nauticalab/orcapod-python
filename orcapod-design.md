@@ -1,49 +1,111 @@
-# OrcaPod — Comprehensive Design Specification
+# OrcaPod — Design Specification
 
 ---
 
 ## Core Abstractions
 
-- **Packet** — the atomic unit of data flowing through the system. Every packet carries:
-  - **Data** — content organized into named columns
-  - **Schema** — explicit type information, embedded in the packet (not resolved from a central registry)
-  - **Source info** — per-field provenance pointers (see below)
-  - **Tags** — key-value metadata, human-friendly and non-authoritative
-  - **System tags** — framework-managed hidden provenance columns (see below)
+### Datagram
 
-- **Stream** — a sequence of packets, analogous to a channel in concurrent programming. Streams are abstract and composable — they can be joined, merged, or otherwise combined by operator pods to yield new streams.
+The **datagram** is the universal immutable data container in OrcaPod. A datagram holds named columns with explicit type information and supports lazy conversion between Python dict and Apache Arrow representations. Datagrams come in two specialized forms:
 
-- **Source Pod** — creates new packets with new provenance and system tags, representing a **provenance boundary** by definition. Generalizes over zero or more input streams:
+- **Tag** — metadata columns attached to a packet for routing, filtering, and annotation. Tags carry additional **system tags** — framework-managed hidden provenance columns that are excluded from content identity by default.
 
-  - **Root source pod** — takes zero input streams and pulls data from the external world (file, database, API, etc.). The zero-input case is the degenerate special case of the general form.
-  - **Derived source pod** — takes one or more input streams and may read their tags, packet content, or both to drive packet creation. Represents an **explicit materialization declaration** — a way of saying "this intermediate result is semantically meaningful enough to be treated as a first-class source entry in the pipeline database," detached from the upstream stream that produced it.
+- **Packet** — data columns carrying the computational payload. Packets carry additional **source info** — per-column provenance tokens tracing each value back to its originating source and record.
 
-  Derived source pods serve two distinct and well-motivated purposes:
-  1. **Semantic materialization** — domain-meaningful intermediate constructs (e.g. a daily top-3 selection by a content-carried metric, a trial, a session) are given durable identity in the pipeline database. Without this, such constructs exist only as transient operator outputs with no stable reference point or historical record.
-  2. **Pipeline decoupling** — once materialized, downstream pipelines reference the derived source directly, independent of the upstream topology that produced it. Upstream pipelines can evolve without destabilizing downstream analyses built against the materialized intermediate.
+Datagrams are always constructed from either a Python dict or an Arrow table/record batch. The alternative representation is computed lazily and cached. Content hashing always uses the Arrow representation; value access always uses the Python dict.
 
-  Derived source pods support two run modes:
+### Stream
 
-  - **Live mode** — the upstream stream is fully executed, the derived source materializes the new output into the pipeline database, and feeds it into the downstream pipeline. Used for processing current data, e.g. computing today's top-3 models and running downstream analysis on them.
-  - **Historical mode** — the upstream stream is bypassed entirely. The derived source queries the pipeline database directly, replaying past materialized entries into the downstream pipeline. Used for analyzing past sets, e.g. running downstream analysis across all previously recorded top-3 sets.
+A **stream** is a sequence of (Tag, Packet) pairs over a shared schema. Streams define two column groups — tag columns and packet columns — and provide lazy iteration, table materialization, and schema introspection. Streams are the fundamental data-flow abstraction: every source emits one, every operator consumes and produces them, and every function pod iterates over them.
 
-  In both modes, downstream function pod caching operates identically — cache lookup is purely `pod_signature + input_packet_hash → output`, with no awareness of provenance, tags, run mode, or how the packet arrived. If a packet from a historical entry was previously fed through the same downstream function pods, cached results are served automatically. This means historical mode reruns are computationally cheap for entries whose downstream results are already cached, and the benefit compounds as the pipeline database accumulates more materialized entries over time.
+The concrete implementation is `ArrowTableStream`, backed by an immutable PyArrow Table with explicit tag/packet column assignment.
 
-  Since source pods establish new provenance, the framework makes no claims about what drove their creation. Tags are not a fundamental provenance source for data — they are routing and metadata signals. The fundamental distinction between pod types is their relationship to provenance: **source pods start a provenance chain, function pods continue one**.
+### Source
 
-- **Function Pod** — a computation that consumes a **single packet** from a single stream and produces an output packet. Function pods never inspect stream structure or tags.
+A **source** produces a stream from external data with no upstream dependencies, forming the base case of the pipeline graph. Sources establish provenance: each row gets a source-info token and a system tag column encoding the source's schema hash.
 
-- **Operator Pod** — a structural pod that operates on streams. Operator pods can read packet content and tags, and can introduce arbitrary tags, but are subject to one fundamental constraint: **every packet value in an operator pod's output must be traceable to a concrete value already present in the input packets.** Operator pods cannot synthesize or compute new packet values — doing so would break the source info chain. They perform joins, merges, splits, selections, column renames, batching, and tag operations within this constraint. Examples: join, merge, rename, batch, tag-promote.
+- **Root source** — loads data from the external world (file, database, in-memory table). All root sources delegate to `ArrowTableSource`, which wraps the data in an `ArrowTableStream` with provenance annotations. Concrete subclasses include `CSVSource`, `DeltaTableSource`, `DataFrameSource`, `DictSource`, and `ListSource`.
 
-- **Pipeline** — a specifically wired graph of function pods and operator pods, itself hashed from its composition to serve as a unique pipeline signature.
+- **Derived source** — wraps the computed output of a `FunctionNode` or `OperatorNode`, reading from their pipeline database. Represents an explicit materialization declaration — an intermediate result given durable identity in the pipeline database, detached from the upstream topology that produced it.
+
+Every source has a `source_id` — a canonical registry name used to register the source in a `SourceRegistry` so that provenance tokens in downstream data can be resolved back to the originating source. If not explicitly provided, `source_id` defaults to a truncated content hash.
+
+### Function Pod
+
+A **function pod** wraps a **packet function** — a stateless computation that consumes a single packet and produces an output packet. Function pods never inspect tags or stream structure; they operate purely on packet content. When given multiple input streams, a function pod joins them via a configurable multi-stream handler (defaulting to `Join`) before iterating.
+
+Two execution models exist:
+
+- **FunctionPod + FunctionPodStream** — lazy, in-memory evaluation. The function pod processes each (tag, packet) pair from the input stream on demand, caching results by index.
+
+- **FunctionNode** — database-backed evaluation with incremental computation. Execution proceeds in two phases:
+  1. **Phase 1**: yield cached results from the pipeline database for inputs whose hashes are already stored.
+  2. **Phase 2**: compute results for any remaining input packets, store them in the database, and yield.
+
+  Pipeline database scoping uses `pipeline_hash()` (schema+topology only), so FunctionNodes with identical functions and schema-compatible sources share the same database table.
+
+### Operator
+
+An **operator** is a structural pod that transforms streams without synthesizing new packet values. Every packet value in an operator's output must be traceable to a concrete value already present in the input packets — operators perform joins, merges, splits, selections, column renames, batching, and tag operations within this constraint.
+
+Operators are subclasses of `StaticOutputPod` organized by input arity:
+
+| Base Class | Arity | Examples |
+|---|---|---|
+| `UnaryOperator` | Exactly 1 input | Batch, SelectTagColumns, DropPacketColumns, MapTags, MapPackets, PolarsFilter |
+| `BinaryOperator` | Exactly 2 inputs | MergeJoin, SemiJoin |
+| `NonZeroInputOperator` | 1 or more inputs | Join |
+
+Each operator declares its **argument symmetry** — whether inputs commute (`frozenset`, order-invariant) or have fixed positions (`tuple`, order-dependent). This determines how upstream hashes are combined for pipeline identity.
+
+The `OperatorNode` is the database-backed counterpart, analogous to `FunctionNode` for function pods. It applies the operator, materializes the output with per-row record hashes, and stores the result in the pipeline database.
+
+---
+
+## Operator Catalog
+
+### Join
+Variable-arity inner join on shared tag columns. Non-overlapping packet columns are required — colliding packet columns raise `InputValidationError`. Tag schema is the union of all input tag schemas; packet schema is the union. Inputs are canonically ordered by `pipeline_hash` for deterministic system tag column naming. Commutative (declared via `frozenset` argument symmetry).
+
+### MergeJoin
+Binary inner join that handles colliding packet columns by merging their values into sorted `list[T]`. Colliding columns must have identical types. Non-colliding columns are kept as scalars. Corresponding source-info columns are reordered to match the sort order of their packet column. Commutative — commutativity comes from sorting merged values, not from ordering input streams.
+
+### SemiJoin
+Binary semi-join: returns entries from the left stream that match on overlapping columns in the right stream. Output schema matches the left stream exactly. Non-commutative.
+
+### Batch
+Groups rows into batches of a configurable size. All column types become `list[T]`. Optionally drops incomplete final batches.
+
+### SelectTagColumns / SelectPacketColumns
+Keep only specified tag or packet columns. Optional `strict` mode raises on missing columns.
+
+### DropTagColumns / DropPacketColumns
+Remove specified tag or packet columns. `DropPacketColumns` also removes associated source-info columns.
+
+### MapTags / MapPackets
+Rename tag or packet columns via a name mapping. `MapPackets` automatically renames associated source-info columns. Optional `drop_unmapped` mode removes columns not in the mapping.
+
+### PolarsFilter
+Applies Polars filtering predicates to rows. Output schema is unchanged from input.
 
 ---
 
 ## Schema as a First-Class Citizen
 
-Every object in OrcaPod has a clear type and schema association. Schema is embedded explicitly in every packet rather than resolved against a central registry, making packets fully self-describing and the system decentralized.
+Every stream exposes `output_schema()` returning `(tag_schema, packet_schema)` as `Schema` objects — immutable mappings from field names to Python types with support for optional fields. Schema is embedded explicitly at every level rather than resolved against a central registry, making streams fully self-describing.
 
-**Schema linkage** — distinct schemas can be linked to each other to express relationships (equivalence, subtyping, evolution, transformation). These links are maintained as external metadata and do not influence individual pod computations. Schema linkage informs pipeline assembly and validation but is not part of the execution record.
+The `ColumnConfig` dataclass controls what metadata columns are included in schema and data output:
+
+| Field | Controls |
+|---|---|
+| `meta` | System metadata columns (`__` prefix) |
+| `context` | Data context column |
+| `source` | Source-info provenance columns (`_source_` prefix) |
+| `system_tags` | System tag columns (`_tag::` prefix) |
+| `content_hash` | Per-row content hash column |
+| `sort_by_tags` | Whether to sort output by tag columns |
+
+Operators predict their output schema — including system tag column names — without performing the actual computation.
 
 ---
 
@@ -53,266 +115,248 @@ Tags are key-value pairs attached to every packet providing human-friendly metad
 
 - **Non-authoritative** — never used for cache lookup or pod identity computation
 - **Auto-propagated** — tags flow forward through the pipeline automatically
-- **Mutable** — can be annotated after the fact without affecting packet identity
 - **The basis for joins** — operator pods join streams by matching tag keys, never by inspecting packet content
 
 **Tag merging in joins:**
 - **Shared tag keys** — act as the join predicate; values must match for packets to be joined
-- **Non-shared tag keys** — propagate freely into the merged output packet's tags
-
-
+- **Non-shared tag keys** — propagate freely into the joined output's tags
 
 ---
 
-## Operator Pod / Function Pod Boundary
+## Operator / Function Pod Boundary
 
 This is a strict and critical separation:
 
-| | Operator Pod | Function Pod |
+| | Operator | Function Pod |
 |---|---|---|
 | Inspects packet content | Never | Yes |
 | Inspects / uses tags | Yes | No |
 | Can rename columns | Yes | No |
-| Stream arity | Multiple in, one out | Single stream in, single stream out |
+| Stream arity | Configurable (unary/binary/N-ary) | Single stream in, single stream out |
 | Cached by content hash | No | Yes |
+| Synthesizes new values | No | Yes |
 
-Column renaming by operator pods allows join conflicts to be avoided without contaminating source info — the column name changes but the source info pointer remains intact, always traceable to the original producing pod.
+Column renaming by operators allows join conflicts to be avoided without contaminating source info — the column name changes but the source info pointer remains intact, always traceable to the original producing pod.
 
 ---
 
 ## Identity and Hashing
 
-OrcaPod uses a cascading content-addressed identity model:
+OrcaPod maintains two parallel identity chains implemented as recursive Merkle-like hash trees:
 
-- **Packet identity** — hash of data + schema
-- **Function pod identity** — hash of canonical name + input/output schemas + implementation artifact (type-dependent)
-- **Pipeline identity** — hash of the specific composition of specifically identified function pods and operator pods
+### Content Hash (`content_hash()`)
 
-A change anywhere in this chain produces a distinct identity, making silent drift impossible.
+Data-inclusive identity capturing the precise semantic content of an object:
 
----
-
-## Function Pod Signatures
-
-Every function pod has a unique signature reflecting its input/output schemas and implementation. Signature computation is type-dependent:
-
-| Pod Type | Signature Inputs |
+| Component | What Gets Hashed |
 |---|---|
-| Python function | Canonical name + I/O schemas + source/bytecode hash + input parameters signature hash + Git version |
-| REST endpoint | Canonical name + I/O schemas + interface contract hash |
-| RPC | Canonical name + I/O schemas + service/method + interface definition hash |
-| Docker image | Canonical name + I/O schemas + image digest |
+| RootSource | Class name + tag columns + table content hash |
+| PacketFunction | URI (canonical name + output schema hash + version + type ID) |
+| FunctionPodStream | Function pod + argument symmetry of inputs |
+| Operator | Operator class + identity structure |
+| ArrowTableStream | Producer + upstreams (or table content if no producer) |
+| Datagram | Arrow table content |
+| DerivedSource | Origin node's content hash |
 
-Docker image-based pods offer the strongest reproducibility guarantee as the image digest captures code, dependencies, and runtime environment completely.
+Content hashes use a `BaseSemanticHasher` that recursively expands structures, dispatches to type-specific handlers, and terminates at `ContentHash` leaves (preventing hash-of-hash inflation).
 
-**Canonical naming** follows a URL-style convention (e.g. `github.com/eywalker/sampler`) providing global uniqueness and discoverability. OrcaPod fetches implementation artifacts directly from the specified source via a pluggable fetcher abstraction. A local artifact cache keyed by content hash avoids redundant remote fetches.
+### Pipeline Hash (`pipeline_hash()`)
 
-Canonical names are user-assigned. Renaming a pod should be treated as creating a new pod — it invalidates downstream pipeline hashes.
+Schema-and-topology-only identity used for database path scoping. Excludes data content so that different sources with identical schemas share database tables:
+
+| Component | What Gets Hashed |
+|---|---|
+| RootSource | `(tag_schema, packet_schema)` — base case |
+| PacketFunction | Raw packet function object (via content hash) |
+| FunctionPodStream | Function pod + input stream pipeline hashes |
+| Operator | Operator class + argument symmetry (pipeline hashes of inputs) |
+| ArrowTableStream | Producer + upstreams pipeline hashes (or schema if no producer) |
+| DerivedSource | Inherited from RootSource: `(tag_schema, packet_schema)` |
+
+Pipeline hash uses a **resolver pattern** — a callback that routes `PipelineElementProtocol` objects through `pipeline_hash()` and other `ContentIdentifiable` objects through `content_hash()` — ensuring the correct identity chain is used for nested objects within a single hash computation.
+
+### ContentHash Type
+
+All hashes are represented as `ContentHash` — a frozen dataclass pairing a method identifier (e.g., `"object_v0.1"`, `"arrow_v2.1"`) with raw digest bytes. The method name enables detecting version mismatches across hash configurations. Conversions: `.to_hex()`, `.to_int()`, `.to_uuid()`, `.to_base64()`, `.to_string()`.
+
+### Argument Symmetry and Upstream Commutativity
+
+Each pod declares how upstream hashes are combined:
+
+- **Commutative** (`frozenset`) — upstream hashes sorted before combining. Used when input order is semantically irrelevant (Join, MergeJoin).
+- **Non-commutative** (`tuple`) — upstream hashes combined in declared order. Used when input position is significant (SemiJoin).
+- **Partial symmetry** — nesting expresses mixed constraints, e.g. `(frozenset([a, b]), c)`.
 
 ---
 
-## Function Pod Storage Model
+## Packet Function Signatures
 
-Function pod outputs are stored in tables using a two-tier identity structure:
+Every packet function has a unique signature reflecting its input/output schemas and implementation. The function's URI encodes:
 
-### Table Identity (coarse-grained, schema-defining)
-Determines which table outputs are stored in:
-- Function type
-- Canonical name
-- Major version
-- Output schema hash
+```
+(canonical_function_name, output_schema_hash, major_version, packet_function_type_id)
+```
 
-A new table is created when any of these change. Major version signals a breaking change.
-
-### Row Identity (fine-grained, execution-defining)
-Each row contains:
-- **Unique row ID** — UUID, finest-grain identifier for a specific execution result
-- **Input packet hash** — the hash of the single input packet consumed
-- **Minor version**
-- **Output columns** — one column per output field
-- **Function-type-dependent identifying info**, e.g. for Python: function content hash, input parameters signature hash, Git version, execution environment info
+For Python functions specifically, the identity structure includes the function's bytecode hash, input parameters signature, and Git version information.
 
 ---
 
 ## Source Info
 
-Every field in every packet carries a **source info** string — a fully qualified provenance pointer to the exact function pod table row and column that produced it:
+Every packet column carries a **source info** string — a provenance pointer to the source and record that produced the value:
 
 ```
-{function_type}:{function_name}:{major_version}:{output_schema_hash}::{row_uuid}:{output_column}[::[indexer]]
+{source_name}::{record_id}::{column_name}
 ```
 
-The `::` separates table-level identity (left) from row/column-level identity (right).
+Where:
+- `source_name` — human-readable name of the originating source (defaults to `source_id`)
+- `record_id` — row identifier, either positional (`row_0`) or column-based (`user_id=abc123`)
+- `column_name` — the original column name
 
-**Nested indexing** follows Python-style syntax, e.g.:
-```
-...::row_uuid:output_column::[5]["name"][3]
-```
+Source info columns are stored with a `_source_` prefix and are excluded from content hashing and standard output by default. They are included when `ColumnConfig(source=True)` is set.
 
-Source info is **immutable through the pipeline** — set once when a function pod produces an output and survives all downstream operator transformations including column renames.
-
----
-
-## Pipeline Graph Identity — Merkle Chain
-
-Pipeline identity is computed as a Merkle tree over the computation graph. Each node's chain hash commits to:
-
-1. **The node's own identifying elements** — for operator pods: canonical name + critical parameters; for function pods: function type + canonical name + version + input/output schemas
-2. **The recursive chain hashes of its parent nodes**
-
-Any node's hash is a cryptographic summary of its entire upstream computation history. Source nodes (raw input packets) are identified purely by their content hash, forming the base case of the recursion.
-
-**Subgraph reuse** follows naturally — shared upstream subgraphs have identical chain hashes and cached results are reusable across pipelines.
-
-### Upstream Commutativity
-
-Each pod defines how parent chain hashes are combined:
-
-- **Ordered `[A, B]`** — parent chain hashes combined in declared order. Used when input position is semantically significant.
-- **Unordered `(A, B)`** — parent chain hashes sorted by hash value then combined. Used when the pod is symmetric over its inputs.
-
-For library-provided operator pods, commutativity is implicitly encoded in the canonical name. For user-defined function pods, ordered inputs is the default.
+Source info is **immutable through the pipeline** — set once when a source creates the data and preserved through all downstream operator transformations including column renames.
 
 ---
 
 ## System Tags
 
-System tags are **framework-managed, hidden provenance columns** automatically attached to every packet. Unlike user tags, they are authoritative and guaranteed to maintain perfect traceability from any result row back to its original source rows, regardless of user tagging discipline.
+System tags are **framework-managed, hidden provenance columns** automatically attached to every packet. Unlike user tags, they are authoritative and guaranteed to maintain perfect traceability from any result row back to its original source rows.
 
 ### Source System Tags
 
-Each source packet is assigned a system tag that uniquely identifies its origin in a source-type-dependent way:
-- **File source** → full file path
-- **CSV source** → file path + row number
-- Other source types → appropriate unique locator
-
-System tag **values** have the format:
-```
-source_id:original_row_id
-```
-
-### System Tag Column Naming
-
-System tag **column names** encode both source identity and pipeline path:
+Each source automatically adds a system tag column named:
 
 ```
-source_hash:canonical_position:upstream_template_id:canonical_position:upstream_template_id:...
+_tag::source:{schema_hash}
 ```
 
-Where:
-- `source_hash` — hash combining source packet schema + source user tag schema
-- `canonical_position` — position of input stream, canonically ordered for commutative operations
-- `upstream_template_id` — recursive template hash of the upstream node feeding this position
-- Chain length equals the number of name-extending operations in the path
+Where `schema_hash` is derived from the source's `(tag_schema, packet_schema)`. Values are the same source-info tokens as source info columns: `{source_name}::{record_id}`.
 
 ### Three Evolution Rules
 
 **1. Name-Preserving (~90% of operations)**
-Single-table operations (filter, transform, sort, select, rename). System tag column name, type, and value all pass through unchanged.
+Single-stream operations (filter, select, rename, batch, map). System tag column name and value pass through unchanged.
 
 **2. Name-Extending (multi-input operations)**
-Joins, merges, unions, stacks. Each incoming system tag column name is extended with `:canonical_position:upstream_template_id`. Values remain unchanged (`source_id:row_id`). Canonical position assignment respects commutativity — for commutative operations, inputs are sorted by upstream template ID to ensure identical column names regardless of wiring order.
+Joins and merges. Each incoming system tag column name is extended with `::{pipeline_hash}:{canonical_position}`. Values remain unchanged. Canonical position assignment respects commutativity — for commutative operations, inputs are sorted by `pipeline_hash` to ensure identical column names regardless of wiring order.
+
+For example, joining two streams with the same `pipeline_hash` `abc123`:
+```
+_tag::source:schema1::abc123:0    (first stream by canonical position)
+_tag::source:schema1::abc123:1    (second stream by canonical position)
+```
 
 **3. Type-Evolving (aggregation operations)**
-Group-by, batch, window, reduce operations. Column name is unchanged but type evolves: `String → List[String] → List[List[String]]` for nested aggregations. Values collect all contributing source row IDs.
+Batch and similar grouping operations. Column name is unchanged but type evolves: `str → list[str]` as values collect all contributing source row IDs.
 
-### Chained Joins
+### System Tag Value Sorting
 
-When joins are chained, system tag column names grow by appending `:position:template_id` at each join. Column name length is naturally bounded by pipeline DAG depth (typically 5–15 operations deep, yielding ~35–65 character names). Pipelines grow wide (multiple sources) rather than deep in practice, so the number of system tag columns scales with source count, not individual name length.
+For commutative operators (Join, MergeJoin), system tag values from same-`pipeline_hash` streams are sorted per row after the join. This ensures `Op(A, B)` and `Op(B, A)` produce identical system tag columns and values.
 
-### Template ID and Instance ID
+### Schema Prediction
 
-The caching system separates **source-agnostic pipeline logic** from **source-specific execution context**:
+Operators predict output system tag column names at schema time — without performing the actual computation — by computing `pipeline_hash` values and canonical positions. This is exposed via `output_schema(columns={"system_tags": True})`.
 
-- **Template ID** — recursive hash of pipeline structure and operations only, no source schema information. Same pipeline topology → same template ID regardless of which sources are bound. Commutative operations sort parent template IDs for canonical ordering.
+---
 
-- **Instance ID** — hash of template ID + source assignment mapping + concrete source schemas. Determines the exact cache table path for a specific pipeline instantiation.
+## Pipeline Database Scoping
 
-### Cache Table Path
+Function pods and operators use `pipeline_hash()` to scope their database tables:
+
+### FunctionNode Pipeline Path
 
 ```
-pipeline_name:kernel_id:template_id:instance_id
+{pipeline_path_prefix} / {function_name} / {output_schema_hash} / v{major_version} / {function_type_id} / node:{pipeline_hash}
 ```
 
-For function pods specifically:
+### OperatorNode Pipeline Path
+
 ```
-pipeline_name:pod_name:output_schema_hash:major_version:pipeline_identity:tag_schema_hash
+{pipeline_path_prefix} / {operator_class} / {operator_content_hash} / node:{pipeline_hash}
 ```
 
 ### Multi-Source Table Sharing
 
-Sources with identical packet schema and user tag schema processed through the same pipeline structure share cache tables automatically. Different source instances (e.g. `customers_2023`, `customers_2024`) coexist in the same table, differentiated by system tag values and a `_source_identity` metadata column. This enables natural cross-source analytics without separate table management.
+Sources with identical schemas produce identical `pipeline_hash` values. When processed through the same pipeline structure, they share database tables automatically. Different source instances (e.g., `customers_2023`, `customers_2024`) coexist in the same table, differentiated by system tag values and record hashes. This enables natural cross-source analytics without separate table management.
 
-### Pipeline Composition Modes
+---
 
-**Pipeline Extension** — logically extending an existing pipeline. System tags preserve full lineage history, column names continue accumulating position:template extensions, values preserve original source identity.
+## Derived Sources and Pipeline Composition
 
-**Pipeline Boundary** — materializing a pipeline result as a new independent source. System tags reset to a fresh source schema based on the materialized result. Enables clean provenance breaks when results become general-purpose data sources.
+Derived sources bridge pipeline stages by materializing intermediate results:
+
+- **Construction**: `function_node.as_source()` or `operator_node.as_source()` returns a `DerivedSource` that reads from the node's pipeline database.
+- **Identity**: Content hash ties to the origin node's content hash; pipeline hash is schema-only (inherited from `RootSource`).
+- **Use case**: Downstream pipelines reference the derived source directly, independent of the upstream topology that produced it.
+
+Derived sources serve two purposes:
+1. **Semantic materialization** — domain-meaningful intermediate constructs (e.g., a daily top-3 selection, a trial, a session) are given durable identity in the pipeline database.
+2. **Pipeline decoupling** — once materialized, downstream pipelines can evolve independently of upstream topology.
 
 ---
 
 ## Provenance Graph
 
-Data provenance in OrcaPod fundamentally focuses on **data-generating pods only** — namely source pods and function pods. Since operator pods never inspect or transform packet content, and joins are driven purely by tags, operator pods leave no meaningful computational footprint on the data itself.
+Data provenance focuses on **data-generating entities only** — sources and function pods. Since operators never synthesize new packet values, they leave no computational footprint on the data itself.
 
-The provenance graph is therefore a **bipartite graph of sources and function pods**, with edges encoded as source info pointers per output field. This is significantly simpler than the full pipeline graph.
+The provenance graph is a **bipartite graph of sources and function pods**, with edges encoded as source info pointers per output field. Operator pod topology is captured implicitly in system tag column names and the pipeline Merkle chain but operators do not appear as nodes in the provenance graph.
 
-Operator pod topology is captured implicitly and structurally in system tag column names (via template/instance ID chains) and in the pipeline Merkle chain — but operator pods do not appear as nodes in the provenance graph. This means:
-
-- **Operator pods can be refactored, reordered, or replaced** without invalidating the fundamental data provenance story, as long as the source and function pod chain remains intact
-- **Provenance queries are simpler** — tracing a result back to its origins only requires traversing source info pointers between function pod table entries, not reconstructing the full operator topology
-- **Provenance is robust** — the data lineage story is told entirely by what generated and transformed the data, not by how it was routed
-
----
-
-## Two-Tier Caching
-
-### Function-Level Caching
-Caches pure computational results independent of pipeline context. Entry keyed by `function_content_hash + input_packet_hash`. Results shared across pipelines and minor versions. Provenance-agnostic — caches by packet content, not source identity.
-
-### Pipeline-Level Caching
-Caches pipeline-specific results with full provenance context via the template/instance ID structure. Schema-compatible sources share tables automatically. System tags maintained throughout.
-
-These two tiers are complementary: function-level caching maximizes computational reuse; pipeline-level caching maintains perfect provenance.
+This means:
+- **Operators can be refactored** without invalidating data provenance
+- **Provenance queries are simpler** — tracing a result requires only following source info pointers between function pod table entries
+- **Provenance is robust** — lineage is told by what generated and transformed the data, not by how it was routed
 
 ---
 
-## Caching and Execution Modes
+## Execution Models
 
-Every computation record explicitly distinguishes execution modes:
+Three execution models coexist:
 
-- **Computed** — pod executed fresh, result produced and cached
-- **Cache hit** — result retrieved from cache, prior provenance referenced
-- **Verified** — result recomputed and matched cached hash, confirming reproducibility
+### Lazy In-Memory (FunctionPod → FunctionPodStream)
+The function pod processes each packet on demand. Results are cached by index in memory. No database persistence. Suitable for exploration and one-off computations.
 
----
+### Static with Recomputation (StaticOutputPod → DynamicPodStream)
+The operator's `static_process` produces a complete output stream. `DynamicPodStream` wraps it with timestamp-based staleness detection and automatic recomputation when upstreams change.
 
-## Verification as a Core Feature
-
-The ability to rerun and verify the exact chain of computation is a critical feature of OrcaPod. A pipeline run in verify mode recomputes every step and checks output hashes against stored results, producing a **reproducibility certificate**.
-
-Verification is all-or-nothing per chain. Failures identify precisely which pod on which packet produced a divergent hash.
+### Database-Backed Incremental (FunctionNode / OperatorNode)
+Results are persisted in a pipeline database. Incremental computation: only process inputs whose hashes are not already in the database. Per-row record hashes enable deduplication. Suitable for production pipelines with expensive computations.
 
 ---
 
-## Determinism and Equivalence
+## Data Context
 
-Function pods carry a field declaring expected determinism. This gates verification behavior:
+Every object is associated with a `DataContext` providing:
 
+| Component | Purpose |
+|---|---|
+| `semantic_hasher` | Recursive, type-aware object hashing for content/pipeline identity |
+| `arrow_hasher` | Arrow table/record batch hashing |
+| `type_converter` | Python ↔ Arrow type conversion |
+| `context_key` | Identifier for this context configuration |
+
+The data context ensures consistent hashing and type conversion across the pipeline. It is propagated through construction and accessible via the `DataContextMixin`.
+
+---
+
+## Verification
+
+The ability to rerun and verify the exact chain of computation is a core feature. A pipeline run in verify mode recomputes every step and checks output hashes against stored results, producing a reproducibility certificate.
+
+Function pods carry a determinism declaration:
 - **Deterministic pods** — verified by exact hash equality
 - **Non-deterministic pods** — verified by an associated equivalence measure
 
-**Equivalence measures** are externally associative on function pods — not on schemas — because the same data type can require different notions of closeness in different computational contexts (floating point tolerance, distributional similarity, domain-specific metrics, etc.).
-
-The determinism flag is the simple case today, intended to generalize into a richer equivalence specification. Exact hash equality is the degenerate case where tolerance is zero.
+Equivalence measures are externally associated with function pods — not with schemas — because the same data type can require different notions of closeness in different computational contexts.
 
 ---
 
 ## Separation of Concerns
 
-A consistent architectural principle runs through OrcaPod: **computational identity is separated from computational semantics**.
+A consistent architectural principle: **computational identity is separated from computational semantics**.
 
-The content-addressed computation layer handles identity — pure, self-contained, uncontaminated by higher-level concerns. External associations carry richer semantic context for different consumers:
+The content-addressed computation layer handles identity — pure, self-contained, uncontaminated by higher-level concerns. External associations carry richer semantic context:
 
 | Association | Informs |
 |---|---|
@@ -321,9 +365,3 @@ The content-addressed computation layer handles identity — pure, self-containe
 | Confidence levels | Registry / ecosystem tooling |
 
 None of these influence actual pod execution.
-
----
-
-## Confidence Levels
-
-Reproducibility guarantees vary by pod type and naming discipline. Confidence levels will be maintained by a future pod library/registry service rather than the core framework. The core framework emits sufficient execution metadata (fetcher type, ref pinning, execution mode) for a registry to compute confidence levels without re-examination.
