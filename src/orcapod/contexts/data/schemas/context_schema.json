@@ -63,6 +63,14 @@
             "$ref": "#/$defs/objectspec",
             "description": "ObjectSpec for the TypeHandlerRegistry used by the semantic hasher"
         },
+        "file_hasher": {
+            "$ref": "#/$defs/objectspec",
+            "description": "ObjectSpec for the file content hasher (used by PathContentHandler)"
+        },
+        "function_info_extractor": {
+            "$ref": "#/$defs/objectspec",
+            "description": "ObjectSpec for the function info extractor (used by FunctionHandler)"
+        },
         "metadata": {
             "type": "object",
             "description": "Optional metadata about this context",
@@ -112,18 +120,12 @@
             "oneOf": [
                 {
                     "type": "object",
-                    "required": [
-                        "_class"
-                    ],
+                    "required": ["_class"],
                     "properties": {
                         "_class": {
                             "type": "string",
                             "pattern": "^[a-zA-Z_][a-zA-Z0-9_.]*\\.[a-zA-Z_][a-zA-Z0-9_]*$",
-                            "description": "Fully qualified class name",
-                            "examples": [
-                                "orcapod.types.semantic_types.SemanticTypeRegistry",
-                                "orcapod.hashing.arrow_hashers.SemanticArrowHasher"
-                            ]
+                            "description": "Fully qualified class name"
                         },
                         "_config": {
                             "type": "object",
@@ -134,19 +136,30 @@
                     "additionalProperties": false
                 },
                 {
+                    "type": "object",
+                    "required": ["_ref"],
+                    "properties": {
+                        "_ref": {"type": "string", "description": "Reference to a named component"}
+                    },
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "required": ["_type"],
+                    "properties": {
+                        "_type": {"type": "string", "description": "Dotted Python type string, e.g. 'pathlib.Path'"}
+                    },
+                    "additionalProperties": false
+                },
+                {
                     "type": "array",
-                    "description": "Array of object specifications",
+                    "description": "Array or tuple of object specifications",
                     "items": {
                         "$ref": "#/$defs/objectspec"
                     }
                 },
                 {
-                    "type": [
-                        "string",
-                        "number",
-                        "boolean",
-                        "null"
-                    ],
+                    "type": ["string", "number", "boolean", "null"],
                     "description": "Primitive values"
                 }
             ]

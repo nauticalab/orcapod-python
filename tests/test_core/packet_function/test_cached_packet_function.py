@@ -26,7 +26,7 @@ import time
 
 import pytest
 
-from orcapod.core.datagrams import DictPacket
+from orcapod.core.datagrams import Packet
 from orcapod.core.packet_function import (
     CachedPacketFunction,
     PacketFunctionWrapper,
@@ -65,13 +65,13 @@ def cached_pf(inner_pf, db) -> CachedPacketFunction:
 
 
 @pytest.fixture
-def input_packet() -> DictPacket:
-    return DictPacket({"x": 3, "y": 4})
+def input_packet() -> Packet:
+    return Packet({"x": 3, "y": 4})
 
 
 @pytest.fixture
-def other_input_packet() -> DictPacket:
-    return DictPacket({"x": 10, "y": 20})
+def other_input_packet() -> Packet:
+    return Packet({"x": 10, "y": 20})
 
 
 # ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@ import sys
 
 import pytest
 
-from orcapod.core.datagrams import DictPacket
+from orcapod.core.datagrams import Packet
 from orcapod.core.packet_function import PythonPacketFunction, parse_function_outputs
 from orcapod.protocols.core_protocols import PacketFunctionProtocol
 
@@ -50,8 +50,8 @@ def multi_pf() -> PythonPacketFunction:
 
 
 @pytest.fixture
-def add_packet() -> DictPacket:
-    return DictPacket({"x": 1, "y": 2})
+def add_packet() -> Packet:
+    return Packet({"x": 1, "y": 2})
 
 
 # ---------------------------------------------------------------------------
@@ -354,13 +354,13 @@ class TestCall:
         assert add_pf.call(add_packet) is None
 
     def test_multiple_output_keys(self, multi_pf):
-        packet = DictPacket({"a": 3, "b": 4})
+        packet = Packet({"a": 3, "b": 4})
         result = multi_pf.call(packet)
         assert result["sum"] == 7  # 3 + 4
         assert result["product"] == 12  # 3 * 4
 
     def test_multiple_output_keys_source_info(self, multi_pf):
-        packet = DictPacket({"a": 3, "b": 4})
+        packet = Packet({"a": 3, "b": 4})
         result = multi_pf.call(packet)
         source = result.source_info()
         assert "sum" in source
@@ -393,7 +393,7 @@ class TestCallErrors:
             input_schema={"a": int, "b": int},
             output_schema={"x": int, "y": int},
         )
-        packet = DictPacket({"a": 1, "b": 2})
+        packet = Packet({"a": 1, "b": 2})
         with pytest.raises(ValueError):
             pf.call(packet)
 
@@ -408,7 +408,7 @@ class TestCallErrors:
             input_schema={"a": int, "b": int},
             output_schema={"x": int, "y": int},
         )
-        packet = DictPacket({"a": 1, "b": 2})
+        packet = Packet({"a": 1, "b": 2})
         with pytest.raises(ValueError):
             pf.call(packet)
 

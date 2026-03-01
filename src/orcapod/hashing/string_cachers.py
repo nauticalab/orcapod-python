@@ -312,7 +312,7 @@ class SQLiteCacher(StringCacherProtocol):
                     CREATE TABLE IF NOT EXISTS cache_entries (
                         key TEXT PRIMARY KEY,
                         value TEXT NOT NULL,
-                        last_accessed REAL DEFAULT (strftime('%f', 'now'))
+                        last_accessed REAL DEFAULT (strftime('%s', 'now'))
                     )
                 """)
                 conn.execute("""
@@ -396,7 +396,7 @@ class SQLiteCacher(StringCacherProtocol):
                             conn.execute(
                                 """
                                 INSERT OR REPLACE INTO cache_entries (key, value, last_accessed)
-                                VALUES (?, ?, strftime('%f', 'now'))
+                                VALUES (?, ?, strftime('%s', 'now'))
                             """,
                                 (key, value),
                             )

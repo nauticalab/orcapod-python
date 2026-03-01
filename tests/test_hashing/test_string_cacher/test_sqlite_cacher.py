@@ -175,8 +175,8 @@ def test_timestamp_updates():
             )
             initial_time = cursor.fetchone()[0]
 
-        # Wait a bit and access the key
-        time.sleep(0.1)
+        # Wait a bit and access the key (integer-second timestamp needs >= 1 s gap)
+        time.sleep(1)
         cacher.get_cached("key1")
         cacher.force_sync()
 

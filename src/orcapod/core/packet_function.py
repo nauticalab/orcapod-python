@@ -14,7 +14,7 @@ from uuid_utils import uuid7
 from orcapod.config import Config
 from orcapod.contexts import DataContext
 from orcapod.core.base import PipelineElementBase, TraceableBase
-from orcapod.core.datagrams import ArrowPacket, DictPacket
+from orcapod.core.datagrams import Packet
 from orcapod.hashing.hash_utils import (
     get_function_components,
     get_function_signature,
@@ -367,7 +367,7 @@ class PythonPacketFunction(PacketFunctionBase):
 
         source_info = {k: combine(self.uri, (record_id,), (k,)) for k in output_data}
 
-        return DictPacket(
+        return Packet(
             output_data,
             source_info=source_info,
             record_id=record_id,
@@ -531,7 +531,7 @@ class CachedPacketFunction(PacketFunctionWrapper):
         )
 
         # note that data context will be loaded from the result store
-        return ArrowPacket(
+        return Packet(
             result_table,
             record_id=record_id,
             meta_info={self.RESULT_COMPUTED_FLAG: False},

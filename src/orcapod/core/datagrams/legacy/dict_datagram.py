@@ -3,7 +3,7 @@ from collections.abc import Collection, Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Self, cast
 
 from orcapod import contexts
-from orcapod.core.datagrams.base import BaseDatagram
+from orcapod.core.datagrams.legacy.base import BaseDatagram
 from orcapod.protocols.hashing_protocols import ContentHash
 from orcapod.semantic_types import infer_python_schema_from_pylist_data
 from orcapod.system_constants import constants

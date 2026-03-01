@@ -22,6 +22,7 @@ handler = registry.get_handler(some_object)
 
 from __future__ import annotations
 
+import importlib
 import logging
 import threading
 from typing import TYPE_CHECKING, Any
@@ -48,10 +49,24 @@ class TypeHandlerRegistry:
     global singleton can be safely used from multiple threads.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self, handlers: "list[tuple[type, TypeHandlerProtocol]] | None" = None
+    ) -> None:
+        """
+        Args:
+            handlers: Optional list of ``(target_type, handler)`` pairs to
+                register at construction time.  Designed for use with
+                ``parse_objectspec``: the JSON spec provides a list of
+                two-element arrays where the first element uses ``_type``
+                to resolve a Python type and the second uses ``_class`` to
+                instantiate the handler.
+        """
         # Maps type -> handler; insertion order is preserved but lookup uses MRO.
         self._handlers: dict[type, "TypeHandlerProtocol"] = {}
         self._lock = threading.RLock()
+        if handlers:
+            for target_type, handler in handlers:
+                self.register(target_type, handler)
 
     # ------------------------------------------------------------------
     # Registration
@@ -234,10 +249,10 @@ class BuiltinTypeHandlerRegistry(TypeHandlerRegistry):
     step is required after construction.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, arrow_hasher=None) -> None:
         super().__init__()
         from orcapod.hashing.semantic_hashing.builtin_handlers import (
             register_builtin_handlers,
         )
 
-        register_builtin_handlers(self)
+        register_builtin_handlers(self, arrow_hasher=arrow_hasher)

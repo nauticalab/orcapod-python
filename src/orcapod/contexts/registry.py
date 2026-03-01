@@ -261,40 +261,31 @@ class JSONDataContextRegistry:
                     f"Failed to resolve context '{context_string}': {e}"
                 )
 
+    # Top-level keys that are metadata, not instantiable components.
+    _METADATA_KEYS = frozenset({"context_key", "version", "description", "metadata"})
+
     def _create_context_from_spec(self, spec: dict[str, Any]) -> DataContext:
-        """Create DataContext instance from validated specification."""
+        """Create DataContext instance from validated specification.
+
+        All top-level keys whose value is a dict with a ``_class`` entry are
+        built in JSON order and added to a shared ``ref_lut``.  This means
+        new versioned components (e.g. ``file_hasher``, ``function_info_extractor``)
+        can be added to the JSON without touching this method — they are
+        instantiated automatically and become available as ``_ref`` targets for
+        later components in the same file.
+        """
         try:
-            # Parse each component using ObjectSpec
             context_key = spec["context_key"]
             version = spec["version"]
             description = spec.get("description", "")
-            ref_lut = {}
+            ref_lut: dict[str, Any] = {}
 
-            logger.debug(f"Creating semantic registry for {version}")
-            ref_lut["semantic_registry"] = parse_objectspec(
-                spec["semantic_registry"],
-                ref_lut=ref_lut,
-            )
-
-            logger.debug(f"Creating type converter for {version}")
-            ref_lut["type_converter"] = parse_objectspec(
-                spec["type_converter"], ref_lut=ref_lut
-            )
-
-            logger.debug(f"Creating arrow hasher for {version}")
-            ref_lut["arrow_hasher"] = parse_objectspec(
-                spec["arrow_hasher"], ref_lut=ref_lut
-            )
-
-            logger.debug(f"Creating type handler registry for {version}")
-            ref_lut["type_handler_registry"] = parse_objectspec(
-                spec["type_handler_registry"], ref_lut=ref_lut
-            )
-
-            logger.debug(f"Creating semantic hasher for {version}")
-            ref_lut["semantic_hasher"] = parse_objectspec(
-                spec["semantic_hasher"], ref_lut=ref_lut
-            )
+            for key, value in spec.items():
+                if key in self._METADATA_KEYS:
+                    continue
+                if isinstance(value, dict) and "_class" in value:
+                    logger.debug(f"Creating {key} for context {version}")
+                    ref_lut[key] = parse_objectspec(value, ref_lut=ref_lut)
 
             return DataContext(
                 context_key=context_key,

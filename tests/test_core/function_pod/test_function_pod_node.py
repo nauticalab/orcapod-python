@@ -17,7 +17,7 @@ from collections.abc import Mapping
 import pyarrow as pa
 import pytest
 
-from orcapod.core.datagrams import DictPacket, DictTag
+from orcapod.core.datagrams import Packet, Tag
 from orcapod.core.function_pod import (
     FunctionNode,
     FunctionPod,
@@ -226,21 +226,21 @@ class TestFunctionNodeProcessPacket:
         )
 
     def test_process_packet_returns_tag_and_packet(self, node):
-        tag = DictTag({"id": 0})
-        packet = DictPacket({"x": 5})
+        tag = Tag({"id": 0})
+        packet = Packet({"x": 5})
         out_tag, out_packet = node.process_packet(tag, packet)
         assert out_tag is tag
         assert out_packet is not None
 
     def test_process_packet_value_correct(self, node):
-        tag = DictTag({"id": 0})
-        packet = DictPacket({"x": 6})
+        tag = Tag({"id": 0})
+        packet = Packet({"x": 6})
         _, out_packet = node.process_packet(tag, packet)
         assert out_packet["result"] == 12  # 6 * 2
 
     def test_process_packet_adds_pipeline_record(self, node, double_pf):
-        tag = DictTag({"id": 0})
-        packet = DictPacket({"x": 3})
+        tag = Tag({"id": 0})
+        packet = Packet({"x": 3})
         node.process_packet(tag, packet)
         db = node._pipeline_database
         db.flush()
@@ -249,8 +249,8 @@ class TestFunctionNodeProcessPacket:
         assert all_records.num_rows >= 1
 
     def test_process_packet_second_call_same_input_deduplicates(self, node):
-        tag = DictTag({"id": 0})
-        packet = DictPacket({"x": 3})
+        tag = Tag({"id": 0})
+        packet = Packet({"x": 3})
         node.process_packet(tag, packet)
         node.process_packet(tag, packet)
         db = node._pipeline_database
@@ -260,9 +260,9 @@ class TestFunctionNodeProcessPacket:
         assert all_records.num_rows == 1
 
     def test_process_two_packets_add_two_entries(self, node):
-        tag = DictTag({"id": 0})
-        packet1 = DictPacket({"x": 3})
-        packet2 = DictPacket({"x": 4})
+        tag = Tag({"id": 0})
+        packet1 = Packet({"x": 3})
+        packet2 = Packet({"x": 4})
         node.process_packet(tag, packet1)
         node.process_packet(tag, packet2)
         db = node._pipeline_database
@@ -654,8 +654,8 @@ class TestFunctionNodeResultPath:
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
         )
-        tag = DictTag({"id": 0})
-        packet = DictPacket({"x": 5})
+        tag = Tag({"id": 0})
+        packet = Packet({"x": 5})
         node.process_packet(tag, packet)
         db.flush()
 

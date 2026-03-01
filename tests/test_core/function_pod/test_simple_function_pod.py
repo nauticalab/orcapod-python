@@ -17,7 +17,7 @@ from collections.abc import Mapping
 import pyarrow as pa
 import pytest
 
-from orcapod.core.datagrams import DictPacket, DictTag
+from orcapod.core.datagrams import Packet, Tag
 from orcapod.core.function_pod import FunctionPodStream, FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.streams import TableStream
@@ -50,8 +50,8 @@ class TestSimpleFunctionPodProtocolConformance:
         double_pod.validate_inputs(make_int_stream())
 
     def test_has_process_packet_method(self, double_pod):
-        tag = DictTag({"id": 0})
-        packet = DictPacket({"x": 5})
+        tag = Tag({"id": 0})
+        packet = Packet({"x": 5})
         out_tag, out_packet = double_pod.process_packet(tag, packet)
         assert out_tag is tag
         assert out_packet is not None
@@ -221,18 +221,16 @@ class TestSimpleFunctionPodInputSchemaValidation:
 
 class TestSimpleFunctionPodProcessPacket:
     def test_returns_tag_and_packet_tuple(self, double_pod):
-        result = double_pod.process_packet(DictTag({"id": 0}), DictPacket({"x": 7}))
+        result = double_pod.process_packet(Tag({"id": 0}), Packet({"x": 7}))
         assert len(result) == 2
 
     def test_output_tag_is_input_tag(self, double_pod):
-        tag = DictTag({"id": 42})
-        out_tag, _ = double_pod.process_packet(tag, DictPacket({"x": 3}))
+        tag = Tag({"id": 42})
+        out_tag, _ = double_pod.process_packet(tag, Packet({"x": 3}))
         assert out_tag is tag
 
     def test_output_packet_has_correct_value(self, double_pod):
-        _, out_packet = double_pod.process_packet(
-            DictTag({"id": 0}), DictPacket({"x": 6})
-        )
+        _, out_packet = double_pod.process_packet(Tag({"id": 0}), Packet({"x": 6}))
         assert out_packet is not None
         assert out_packet["result"] == 12  # 6 * 2
 

@@ -4,11 +4,7 @@ from itertools import repeat
 from typing import TYPE_CHECKING, Any, cast
 
 from orcapod import contexts
-from orcapod.core.datagrams import (
-    ArrowPacket,
-    ArrowTag,
-    DictTag,
-)
+from orcapod.core.datagrams import Packet, Tag
 from orcapod.core.base import PipelineElementBase
 from orcapod.core.streams.base import StreamBase
 from orcapod.protocols.core_protocols import PodProtocol, StreamProtocol, TagProtocol
@@ -143,7 +139,7 @@ class TableStream(StreamBase, PipelineElementBase):
         #     )
         # )
 
-        self._cached_elements: list[tuple[TagProtocol, ArrowPacket]] | None = None
+        self._cached_elements: list[tuple[TagProtocol, Packet]] | None = None
         self._update_modified_time()  # set modified time to now
 
     def identity_structure(self) -> Any:
@@ -277,7 +273,7 @@ class TableStream(StreamBase, PipelineElementBase):
         """
         self._cached_elements = None
 
-    def iter_packets(self) -> Iterator[tuple[TagProtocol, ArrowPacket]]:
+    def iter_packets(self) -> Iterator[tuple[TagProtocol, Packet]]:
         """
         Iterates over the packets in the stream.
         Each packet is represented as a tuple of (TagProtocol, PacketProtocol).
@@ -290,7 +286,7 @@ class TableStream(StreamBase, PipelineElementBase):
                 tags = self._table.select(self._all_tag_columns)
                 tag_batches = tags.to_batches()
             else:
-                tag_batches = repeat(DictTag({}))
+                tag_batches = repeat(Tag({}))
 
             # TODO: come back and clean up this logic
 
@@ -299,15 +295,15 @@ class TableStream(StreamBase, PipelineElementBase):
             for tag_batch, packet_batch in zip(tag_batches, packets.to_batches()):
                 for i in range(len(packet_batch)):
                     if tag_present:
-                        tag = ArrowTag(
+                        tag = Tag(
                             tag_batch.slice(i, 1),  # type: ignore
                             data_context=self.data_context,
                         )
 
                     else:
-                        tag = cast(DictTag, tag_batch)
+                        tag = cast(Tag, tag_batch)
 
-                    packet = ArrowPacket(
+                    packet = Packet(
                         packet_batch.slice(i, 1),
                         source_info=self._source_info_table.slice(i, 1).to_pylist()[0],
                         data_context=self.data_context,

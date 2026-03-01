@@ -33,7 +33,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from orcapod.protocols.hashing_protocols import FileContentHasherProtocol
+from orcapod.protocols.hashing_protocols import (
+    ArrowHasherProtocol,
+    FileContentHasherProtocol,
+)
 from orcapod.types import PathLike, Schema
 
 if TYPE_CHECKING:
@@ -169,6 +172,35 @@ class TypeObjectHandler:
         return f"type:{module}.{qualname}"
 
 
+class ArrowTableHandler:
+    """
+    Handler for ``pa.Table`` and ``pa.RecordBatch`` objects.
+
+    Delegates to the injected ``ArrowHasherProtocol`` to produce a stable,
+    content-addressed ``ContentHash`` of the Arrow table data.  The returned
+    ``ContentHash`` is recognised as a terminal by ``hash_object`` and
+    returned as-is — no further recursion occurs.
+
+    Args:
+        arrow_hasher: Any object satisfying ArrowHasherProtocol (i.e. has a
+                      ``hash_table(table) -> ContentHash`` method).
+    """
+
+    def __init__(self, arrow_hasher: ArrowHasherProtocol) -> None:
+        self.arrow_hasher = arrow_hasher
+
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
+        import pyarrow as _pa
+
+        if isinstance(obj, _pa.RecordBatch):
+            obj = _pa.Table.from_batches([obj])
+        if not isinstance(obj, _pa.Table):
+            raise TypeError(
+                f"ArrowTableHandler: expected pa.Table or pa.RecordBatch, got {type(obj)!r}"
+            )
+        return self.arrow_hasher.hash_table(obj)
+
+
 class SchemaHandler:
     """
     Handler for :class:`~orcapod.types.Schema` objects.
@@ -200,6 +232,7 @@ def register_builtin_handlers(
     registry: "TypeHandlerRegistry",
     file_hasher: Any = None,
     function_info_extractor: Any = None,
+    arrow_hasher: "ArrowHasherProtocol | None" = None,
 ) -> None:
     """
     Register all built-in TypeHandlers into *registry*.
@@ -208,12 +241,12 @@ def register_builtin_handlers(
     first accessed via ``get_default_type_handler_registry()``.  It can also
     be called manually to populate a custom registry.
 
-    Path and function handling require auxiliary objects (a FileContentHasherProtocol
-    and a FunctionInfoExtractorProtocol respectively).  When these are not supplied,
-    sensible defaults are constructed:
+    Path, function, and Arrow table handling require auxiliary objects.
+    When these are not supplied, sensible defaults are constructed:
 
       - ``BasicFileHasher`` (SHA-256, 64 KiB buffer) for Path handling.
       - ``FunctionSignatureExtractor`` for function handling.
+      - ``SemanticArrowHasher`` (SHA-256, logical serialisation) for Arrow table handling.
 
     Args:
         registry:
@@ -226,6 +259,12 @@ def register_builtin_handlers(
             Optional object satisfying FunctionInfoExtractorProtocol (i.e. has an
             ``extract_function_info(func) -> dict`` method).  Defaults to
             ``FunctionSignatureExtractor``.
+        arrow_hasher:
+            Optional object satisfying ArrowHasherProtocol (i.e. has a
+            ``hash_table(table) -> ContentHash`` method).  Defaults to a
+            ``SemanticArrowHasher`` configured with SHA-256 and logical serialisation.
+            Should be the data context's arrow hasher when called from a versioned
+            context so that hashing is consistent across all components.
     """
     # Resolve defaults for auxiliary objects ----------------------------
     if file_hasher is None:
@@ -241,6 +280,17 @@ def register_builtin_handlers(
         function_info_extractor = FunctionSignatureExtractor(
             include_module=True,
             include_defaults=True,
+        )
+
+    if arrow_hasher is None:
+        from orcapod.hashing.arrow_hashers import SemanticArrowHasher
+        from orcapod.semantic_types.semantic_registry import SemanticTypeRegistry
+
+        arrow_hasher = SemanticArrowHasher(
+            semantic_registry=SemanticTypeRegistry(),
+            hasher_id="arrow_v0.1",
+            hash_algorithm="sha256",
+            serialization_method="logical",
         )
 
     # Register handlers -------------------------------------------------
@@ -274,6 +324,13 @@ def register_builtin_handlers(
     # Schema objects -- must come after type handler so Schema is matched
     # specifically rather than falling through to the Mapping expansion path
     registry.register(Schema, SchemaHandler())
+
+    # Arrow tables and record batches -- delegate to the injected arrow hasher
+    import pyarrow as _pa
+
+    arrow_table_handler = ArrowTableHandler(arrow_hasher)
+    registry.register(_pa.Table, arrow_table_handler)
+    registry.register(_pa.RecordBatch, arrow_table_handler)
 
     logger.debug(
         "register_builtin_handlers: registered %d built-in handlers",
