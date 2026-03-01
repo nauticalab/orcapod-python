@@ -103,22 +103,18 @@ class TestFunctionNodeConstruction:
         assert isinstance(path, tuple)
         assert all(isinstance(p, str) for p in path)
 
-    def test_uri_is_tuple_of_strings(self, node):
-        uri = node.uri
-        assert isinstance(uri, tuple)
-        assert all(isinstance(part, str) for part in uri)
+    def test_pipeline_path_ends_with_node_hash(self, node):
+        path = node.pipeline_path
+        assert path[-1].startswith("node:")
 
-    def test_uri_contains_node_component(self, node):
-        uri_str = ":".join(node.uri)
-        assert "node:" in uri_str
-
-    def test_uri_contains_tag_component(self, node):
-        uri_str = ":".join(node.uri)
-        assert "tag:" in uri_str
-
-    def test_pipeline_path_includes_uri(self, node):
-        for part in node.uri:
+    def test_pipeline_path_contains_packet_function_uri(self, node):
+        pf_uri = node._cached_packet_function.uri
+        for part in pf_uri:
             assert part in node.pipeline_path
+
+    def test_pipeline_path_has_no_tag_schema_hash(self, node):
+        path = node.pipeline_path
+        assert not any(segment.startswith("tag:") for segment in path)
 
     def test_node_is_stream_protocol(self, node):
         assert isinstance(node, StreamProtocol)
@@ -364,8 +360,7 @@ class TestFunctionNodePipelineIdentity:
             input_stream=make_int_stream(n=99),  # different data
             pipeline_database=db,
         )
-        # Both nodes must have identical URIs since they share schema
-        assert node1.uri == node2.uri
+        # Both nodes must have identical pipeline_paths since they share schema
         assert node1.pipeline_path == node2.pipeline_path
 
 
@@ -631,14 +626,16 @@ class TestFunctionNodePipelinePathPrefix:
         pipeline_path = node.pipeline_path
         assert pipeline_path[: len(prefix)] == prefix
 
-    def test_no_prefix_pipeline_path_equals_uri(self, double_pf):
+    def test_no_prefix_pipeline_path_starts_with_pf_uri(self, double_pf):
         db = InMemoryArrowDatabase()
         node = FunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
         )
-        assert node.pipeline_path == node.uri
+        pf_uri = node._cached_packet_function.uri
+        assert node.pipeline_path[: len(pf_uri)] == pf_uri
+        assert node.pipeline_path[-1].startswith("node:")
 
 
 # ---------------------------------------------------------------------------

@@ -59,8 +59,6 @@ class PolarsFilter(UnaryOperator):
         return ArrowTableStream(
             filtered_table,
             tag_columns=stream.keys()[0],
-            producer=self,
-            upstreams=(stream,),
         )
 
     def validate_unary_input(self, stream: StreamProtocol) -> None:
@@ -127,8 +125,6 @@ class SelectPacketColumns(UnaryOperator):
         return ArrowTableStream(
             modified_table,
             tag_columns=tag_columns,
-            producer=self,
-            upstreams=(stream,),
         )
 
     def validate_unary_input(self, stream: StreamProtocol) -> None:

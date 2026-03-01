@@ -11,35 +11,39 @@ if TYPE_CHECKING:
     import pyarrow as pa
 
     from orcapod.core.function_pod import FunctionNode
+    from orcapod.core.operator_node import OperatorNode
 else:
     pa = LazyModule("pyarrow")
 
 
 class DerivedSource(RootSource):
     """
-    A static stream backed by the computed records of a FunctionNode.
+    A static stream backed by the computed records of a DB-backed stream node.
 
-    Created by ``FunctionNode.as_source()``, this source reads from the pipeline
-    and result databases, presenting the computed results as an immutable stream
-    usable as input to downstream processing.
+    Created by ``FunctionNode.as_source()`` or ``OperatorNode.as_source()``,
+    this source reads from the pipeline database, presenting the computed
+    results as an immutable stream usable as input to downstream processing.
+
+    The origin must implement ``get_all_records()``, ``output_schema()``,
+    ``keys()``, and ``content_hash()``.
 
     Identity
     --------
-    - ``content_hash``: tied to the specific FunctionNode's content hash —
-      unique to this exact computation (function + input data).
+    - ``content_hash``: tied to the specific origin node's content hash —
+      unique to this exact computation.
     - ``pipeline_hash``: inherited from RootSource — schema-only, so multiple
       DerivedSources with identical schemas share the same pipeline DB table.
 
     Usage
     -----
-    Call ``FunctionNode.run()`` before accessing a DerivedSource to ensure the
+    Call ``origin.run()`` before accessing a DerivedSource to ensure the
     pipeline database has been populated.  Accessing iter_packets / as_table on
     an empty database raises ``ValueError``.
     """
 
     def __init__(
         self,
-        origin: "FunctionNode",
+        origin: "FunctionNode | OperatorNode",
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -72,7 +76,7 @@ class DerivedSource(RootSource):
             if records is None:
                 raise ValueError(
                     "DerivedSource has no computed records. "
-                    "Call FunctionNode.run() first to populate the pipeline database."
+                    "Call origin.run() first to populate the pipeline database."
                 )
             self._cached_table = records
         tag_keys = self._origin.keys()[0]

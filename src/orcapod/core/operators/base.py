@@ -7,20 +7,7 @@ from orcapod.protocols.core_protocols import ArgumentGroup, StreamProtocol
 from orcapod.types import ColumnConfig, Schema
 
 
-class OperatorPodProtocol(StaticOutputPod):
-    """
-    Base class for all operators.
-    Operators are basic pods that can be used to perform operations on streams.
-
-    They are defined as a callable that takes a (possibly empty) collection of streams as the input
-    and returns a new stream as output.
-    """
-
-    def identity_structure(self) -> Any:
-        return self.__class__.__name__
-
-
-class UnaryOperator(OperatorPodProtocol):
+class UnaryOperator(StaticOutputPod):
     """
     Base class for all unary operators.
     """
@@ -50,8 +37,8 @@ class UnaryOperator(OperatorPodProtocol):
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
         """
-        This method should be implemented by subclasses to return the typespecs of the input and output streams.
-        It takes two streams as input and returns a tuple of typespecs.
+        This method should be implemented by subclasses to return the schemas of the input and output streams.
+        It takes two streams as input and returns a tuple of schemas.
         """
         ...
 
@@ -83,7 +70,7 @@ class UnaryOperator(OperatorPodProtocol):
         return (tuple(streams)[0],)
 
 
-class BinaryOperator(OperatorPodProtocol):
+class BinaryOperator(StaticOutputPod):
     """
     Base class for all operators.
     """
@@ -125,6 +112,14 @@ class BinaryOperator(OperatorPodProtocol):
         """
         ...
 
+    def static_process(self, *streams: StreamProtocol) -> StreamProtocol:
+        """
+        Forward method for binary operators.
+        It expects exactly two streams as input.
+        """
+        left_stream, right_stream = streams
+        return self.binary_static_process(left_stream, right_stream)
+
     def output_schema(
         self,
         *streams: StreamProtocol,
@@ -151,7 +146,7 @@ class BinaryOperator(OperatorPodProtocol):
             return tuple(streams)
 
 
-class NonZeroInputOperator(OperatorPodProtocol):
+class NonZeroInputOperator(StaticOutputPod):
     """
     Operators that work with at least one input stream.
     This is useful for operators that can take a variable number of (but at least one ) input streams,

@@ -309,7 +309,7 @@ class TestFunctionNodePipelineHashFix:
             ),
             pipeline_database=db,
         )
-        assert node1.uri == node2.uri
+        assert node1.pipeline_path == node2.pipeline_path
 
     def test_different_data_yields_different_content_hash(self, double_pf):
         """Same schema, different actual data → content_hash must differ."""
@@ -360,13 +360,15 @@ class TestFunctionNodePipelineHashFix:
         )
         assert node.pipeline_path[: len(prefix)] == prefix
 
-    def test_pipeline_path_without_prefix_equals_uri(self, double_pf):
+    def test_pipeline_path_without_prefix_starts_with_pf_uri(self, double_pf):
         node = FunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=2),
             pipeline_database=InMemoryArrowDatabase(),
         )
-        assert node.pipeline_path == node.uri
+        pf_uri = node._cached_packet_function.uri
+        assert node.pipeline_path[: len(pf_uri)] == pf_uri
+        assert node.pipeline_path[-1].startswith("node:")
 
 
 # ---------------------------------------------------------------------------

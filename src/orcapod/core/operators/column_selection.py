@@ -48,8 +48,6 @@ class SelectTagColumns(UnaryOperator):
         return ArrowTableStream(
             modified_table,
             tag_columns=new_tag_columns,
-            producer=self,
-            upstreams=(stream,),
         )
 
     def validate_unary_input(self, stream: StreamProtocol) -> None:
@@ -84,12 +82,12 @@ class SelectTagColumns(UnaryOperator):
 
         return new_tag_schema, packet_schema
 
-    def op_identity_structure(self, stream: StreamProtocol | None = None) -> Any:
+    def identity_structure(self) -> Any:
         return (
             self.__class__.__name__,
             self.columns,
             self.strict,
-        ) + ((stream,) if stream is not None else ())
+        )
 
 
 class SelectPacketColumns(UnaryOperator):
@@ -129,8 +127,6 @@ class SelectPacketColumns(UnaryOperator):
         return ArrowTableStream(
             modified_table,
             tag_columns=tag_columns,
-            producer=self,
-            upstreams=(stream,),
         )
 
     def validate_unary_input(self, stream: StreamProtocol) -> None:
@@ -208,8 +204,6 @@ class DropTagColumns(UnaryOperator):
         return ArrowTableStream(
             modified_table,
             tag_columns=new_tag_columns,
-            producer=self,
-            upstreams=(stream,),
         )
 
     def validate_unary_input(self, stream: StreamProtocol) -> None:
@@ -288,8 +282,6 @@ class DropPacketColumns(UnaryOperator):
         return ArrowTableStream(
             modified_table,
             tag_columns=tag_columns,
-            producer=self,
-            upstreams=(stream,),
         )
 
     def validate_unary_input(self, stream: StreamProtocol) -> None:
@@ -344,7 +336,7 @@ class MapTags(UnaryOperator):
         self.drop_unmapped = drop_unmapped
         super().__init__(**kwargs)
 
-    def unary_execute(self, stream: StreamProtocol) -> StreamProtocol:
+    def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         tag_columns, packet_columns = stream.keys()
         missing_tags = set(tag_columns) - set(self.name_map.keys())
 
@@ -370,8 +362,6 @@ class MapTags(UnaryOperator):
         return ArrowTableStream(
             renamed_table,
             tag_columns=new_tag_columns,
-            producer=self,
-            upstreams=(stream,),
         )
 
     def validate_unary_input(self, stream: StreamProtocol) -> None:
@@ -406,14 +396,14 @@ class MapTags(UnaryOperator):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        tag_typespec, packet_typespec = stream.output_schema(
+        tag_schema, packet_schema = stream.output_schema(
             columns=columns, all_info=all_info
         )
 
-        # Create new packet typespec with renamed keys
-        new_tag_typespec = {self.name_map.get(k, k): v for k, v in tag_typespec.items()}
+        # Create new packet schema with renamed keys
+        new_tag_schema = {self.name_map.get(k, k): v for k, v in tag_schema.items()}
 
-        return new_tag_typespec, packet_typespec
+        return new_tag_schema, packet_schema
 
     def identity_structure(self) -> Any:
         return (

@@ -1,0 +1,281 @@
+from __future__ import annotations
+
+import logging
+from collections.abc import Iterator
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
+
+from orcapod import contexts
+from orcapod.config import Config
+from orcapod.core.base import PipelineElementBase, TraceableBase
+from orcapod.core.static_output_pod import StaticOutputPod
+from orcapod.core.streams.base import StreamBase
+from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
+from orcapod.protocols.core_protocols import (
+    PacketProtocol,
+    StreamProtocol,
+    TagProtocol,
+    TrackerManagerProtocol,
+)
+from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
+from orcapod.system_constants import constants
+from orcapod.types import ColumnConfig, Schema
+from orcapod.utils.lazy_module import LazyModule
+
+logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    import pyarrow as pa
+else:
+    pa = LazyModule("pyarrow")
+
+
+class OperatorNode(StreamBase, PipelineElementBase):
+    """
+    A DB-backed stream node that applies an operator to input streams.
+
+    Analogous to ``FunctionNode`` for function pods, but simpler:
+
+    - The operator's ``static_process`` produces a complete output table
+      (no per-packet caching or two-table join).
+    - The output is stored in a single pipeline database table.
+    - Staleness is determined by ``is_stale`` propagation to upstream sources.
+    - ``as_source()`` returns a ``DerivedSource`` for downstream consumption.
+
+    Pipeline path structure::
+
+        pipeline_path_prefix / operator.uri / node:{pipeline_hash}
+
+    Where ``pipeline_hash`` is the schema+topology hash that already encodes
+    tag and packet schema information. No redundant ``tag_schema_hash`` segment.
+    """
+
+    HASH_COLUMN_NAME = "_record_hash"
+
+    def __init__(
+        self,
+        operator: StaticOutputPod,
+        input_streams: tuple[StreamProtocol, ...] | list[StreamProtocol],
+        pipeline_database: ArrowDatabaseProtocol,
+        pipeline_path_prefix: tuple[str, ...] = (),
+        tracker_manager: TrackerManagerProtocol | None = None,
+        label: str | None = None,
+        data_context: str | contexts.DataContext | None = None,
+        config: Config | None = None,
+    ):
+        if tracker_manager is None:
+            tracker_manager = DEFAULT_TRACKER_MANAGER
+        self.tracker_manager = tracker_manager
+
+        self._operator = operator
+        self._input_streams = tuple(input_streams)
+        self._pipeline_database = pipeline_database
+        self._pipeline_path_prefix = pipeline_path_prefix
+
+        super().__init__(
+            label=label,
+            data_context=data_context,
+            config=config,
+        )
+
+        # Validate inputs eagerly
+        self._operator.validate_inputs(*self._input_streams)
+
+        # Compute pipeline node hash (schema+topology only)
+        self._pipeline_node_hash = self.pipeline_hash().to_string()
+
+        # Stream-level caching state
+        self._cached_output_stream: StreamProtocol | None = None
+        self._cached_output_table: pa.Table | None = None
+        self._set_modified_time(None)
+
+    # ------------------------------------------------------------------
+    # Identity
+    # ------------------------------------------------------------------
+
+    def identity_structure(self) -> Any:
+        return (self._operator, self._operator.argument_symmetry(self._input_streams))
+
+    def pipeline_identity_structure(self) -> Any:
+        return (self._operator, self._operator.argument_symmetry(self._input_streams))
+
+    # ------------------------------------------------------------------
+    # Stream interface
+    # ------------------------------------------------------------------
+
+    @property
+    def producer(self) -> StaticOutputPod:
+        return self._operator
+
+    @property
+    def upstreams(self) -> tuple[StreamProtocol, ...]:
+        return self._input_streams
+
+    @property
+    def pipeline_path(self) -> tuple[str, ...]:
+        return (
+            self._pipeline_path_prefix
+            + self._operator.uri
+            + (f"node:{self._pipeline_node_hash}",)
+        )
+
+    def keys(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        tag_schema, packet_schema = self.output_schema(
+            columns=columns, all_info=all_info
+        )
+        return tuple(tag_schema.keys()), tuple(packet_schema.keys())
+
+    def output_schema(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]:
+        return self._operator.output_schema(
+            *self._input_streams,
+            columns=columns,
+            all_info=all_info,
+        )
+
+    # ------------------------------------------------------------------
+    # Computation and caching
+    # ------------------------------------------------------------------
+
+    def clear_cache(self) -> None:
+        """Discard all in-memory cached state."""
+        self._cached_output_stream = None
+        self._cached_output_table = None
+        self._update_modified_time()
+
+    def run(self) -> None:
+        """
+        Execute the operator if stale or not yet computed.
+
+        Calls ``static_process`` on the operator, materializes the output
+        as an Arrow table, computes per-row record hashes, and stores the
+        result in the pipeline database.
+        """
+        if self.is_stale:
+            self.clear_cache()
+
+        if self._cached_output_stream is not None:
+            return
+
+        # Compute
+        self._cached_output_stream = self._operator.static_process(
+            *self._input_streams,
+        )
+
+        # Materialize
+        output_table = self._cached_output_stream.as_table(
+            columns={"source": True, "system_tags": True},
+        )
+
+        # Per-row record hashes for dedup
+        arrow_hasher = self.data_context.arrow_hasher
+        record_hashes = []
+        for batch in output_table.to_batches():
+            for i in range(len(batch)):
+                record_hashes.append(
+                    arrow_hasher.hash_table(batch.slice(i, 1)).to_hex()
+                )
+
+        output_table = output_table.add_column(
+            0,
+            self.HASH_COLUMN_NAME,
+            pa.array(record_hashes, type=pa.large_string()),
+        )
+
+        # Store
+        self._pipeline_database.add_records(
+            self.pipeline_path,
+            output_table,
+            record_id_column=self.HASH_COLUMN_NAME,
+            skip_duplicates=True,
+        )
+
+        self._cached_output_table = output_table.drop(self.HASH_COLUMN_NAME)
+        self._update_modified_time()
+
+    def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
+        self.run()
+        assert self._cached_output_stream is not None
+        return self._cached_output_stream.iter_packets()
+
+    def as_table(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> "pa.Table":
+        self.run()
+        assert self._cached_output_stream is not None
+        return self._cached_output_stream.as_table(columns=columns, all_info=all_info)
+
+    # ------------------------------------------------------------------
+    # DB retrieval
+    # ------------------------------------------------------------------
+
+    def get_all_records(
+        self,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> "pa.Table | None":
+        """
+        Retrieve all stored records from the pipeline database.
+
+        Returns the stored output table with column filtering applied
+        per ``ColumnConfig`` conventions.
+        """
+        results = self._pipeline_database.get_all_records(self.pipeline_path)
+        if results is None:
+            return None
+
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+
+        drop_columns = []
+        if not column_config.meta and not column_config.all_info:
+            drop_columns.extend(
+                c for c in results.column_names if c.startswith(constants.META_PREFIX)
+            )
+        if not column_config.source and not column_config.all_info:
+            drop_columns.extend(
+                c for c in results.column_names if c.startswith(constants.SOURCE_PREFIX)
+            )
+        if not column_config.system_tags and not column_config.all_info:
+            drop_columns.extend(
+                c
+                for c in results.column_names
+                if c.startswith(constants.SYSTEM_TAG_PREFIX)
+            )
+        if drop_columns:
+            results = results.drop(
+                [c for c in drop_columns if c in results.column_names]
+            )
+
+        return results if results.num_rows > 0 else None
+
+    # ------------------------------------------------------------------
+    # DerivedSource
+    # ------------------------------------------------------------------
+
+    def as_source(self):
+        """Return a DerivedSource backed by the DB records of this node."""
+        from orcapod.core.sources.derived_source import DerivedSource
+
+        return DerivedSource(
+            origin=self,
+            data_context=self.data_context_key,
+            config=self.orcapod_config,
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"OperatorNode(operator={self._operator!r}, "
+            f"upstreams={self._input_streams!r})"
+        )

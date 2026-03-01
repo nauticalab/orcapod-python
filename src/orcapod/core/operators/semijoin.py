@@ -39,17 +39,15 @@ class SemiJoin(BinaryOperator):
         right_tag_schema, right_packet_schema = right_stream.output_schema()
 
         # Find overlapping columns across all columns (tags + packets)
-        left_all_typespec = schema_utils.union_typespecs(
+        left_all_schema = schema_utils.union_schemas(
             left_tag_schema, left_packet_schema
         )
-        right_all_typespec = schema_utils.union_typespecs(
+        right_all_schema = schema_utils.union_schemas(
             right_tag_schema, right_packet_schema
         )
 
         common_keys = tuple(
-            schema_utils.intersection_typespecs(
-                left_all_typespec, right_all_typespec
-            ).keys()
+            schema_utils.intersection_schemas(left_all_schema, right_all_schema).keys()
         )
 
         # If no overlapping columns, return the left stream unmodified
@@ -72,8 +70,6 @@ class SemiJoin(BinaryOperator):
         return ArrowTableStream(
             semi_joined_table,
             tag_columns=tuple(left_tag_schema.keys()),
-            producer=self,
-            upstreams=(left_stream, right_stream),
         )
 
     def binary_output_schema(
@@ -99,24 +95,27 @@ class SemiJoin(BinaryOperator):
         Checks that overlapping columns have compatible types.
         """
         try:
-            left_tag_typespec, left_packet_typespec = left_stream.output_schema()
-            right_tag_typespec, right_packet_typespec = right_stream.output_schema()
+            left_tag_schema, left_packet_schema = left_stream.output_schema()
+            right_tag_schema, right_packet_schema = right_stream.output_schema()
 
             # Check that overlapping columns have compatible types across all columns
-            left_all_typespec = schema_utils.union_typespecs(
-                left_tag_typespec, left_packet_typespec
+            left_all_schema = schema_utils.union_schemas(
+                left_tag_schema, left_packet_schema
             )
-            right_all_typespec = schema_utils.union_typespecs(
-                right_tag_typespec, right_packet_typespec
+            right_all_schema = schema_utils.union_schemas(
+                right_tag_schema, right_packet_schema
             )
 
-            # intersection_typespecs will raise an error if types are incompatible
-            schema_utils.intersection_typespecs(left_all_typespec, right_all_typespec)
+            # intersection_schemas will raise an error if types are incompatible
+            schema_utils.intersection_schemas(left_all_schema, right_all_schema)
 
         except Exception as e:
             raise InputValidationError(
                 f"Input streams are not compatible for semi-join: {e}"
             ) from e
+
+    def is_commutative(self) -> bool:
+        return False
 
     def identity_structure(self) -> Any:
         return self.__class__.__name__

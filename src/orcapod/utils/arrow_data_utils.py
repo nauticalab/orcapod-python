@@ -78,10 +78,73 @@ def append_to_system_tags(table: pa.Table, value: str) -> pa.Table:
         raise ValueError("Table is empty")
 
     column_name_map = {
-        c: f"{c}:{value}" if c.startswith(constants.SYSTEM_TAG_PREFIX) else c
+        c: f"{c}{constants.BLOCK_SEPARATOR}{value}"
+        if c.startswith(constants.SYSTEM_TAG_PREFIX)
+        else c
         for c in table.column_names
     }
     return table.rename_columns(column_name_map)
+
+
+def sort_system_tag_values(table: pa.Table) -> pa.Table:
+    """Sort system tag values for columns that share the same base name.
+
+    System tag columns that differ only by their canonical position (the final
+    :N in the column name) represent streams with the same pipeline_hash that
+    were joined. For commutativity, their values must be sorted per row so that
+    the result is independent of input order.
+
+    For each group of columns sharing the same base, values are sorted per row
+    and reassigned in canonical position order (lowest position gets smallest value).
+    """
+    sys_tag_cols = [
+        c for c in table.column_names if c.startswith(constants.SYSTEM_TAG_PREFIX)
+    ]
+
+    if not sys_tag_cols:
+        return table
+
+    # Group by base (everything except the final :position)
+    groups: dict[str, list[tuple[str, str]]] = {}
+    for col in sys_tag_cols:
+        base, sep, position = col.rpartition(constants.FIELD_SEPARATOR)
+        if sep and position.isdigit():
+            groups.setdefault(base, []).append((col, position))
+
+    # For each group with >1 member, sort values per row
+    for base, members in groups.items():
+        if len(members) <= 1:
+            continue
+
+        # Sort members by position for consistent column ordering
+        members.sort(key=lambda m: int(m[1]))
+        col_names = [m[0] for m in members]
+
+        # Get values for all columns in this group
+        col_values = [table.column(c).to_pylist() for c in col_names]
+
+        # Sort per row across the group
+        sorted_col_values: list[list] = [[] for _ in col_names]
+        for row_idx in range(table.num_rows):
+            row_vals = [
+                col_values[col_idx][row_idx] for col_idx in range(len(col_names))
+            ]
+            row_vals.sort()
+            for col_idx, val in enumerate(row_vals):
+                sorted_col_values[col_idx].append(val)
+
+        # Replace columns with sorted values (preserve original positions)
+        for col_idx, col_name in enumerate(col_names):
+            orig_col_type = table.column(col_name).type
+            tbl_idx = table.column_names.index(col_name)
+            table = table.drop(col_name)
+            table = table.add_column(
+                tbl_idx,
+                col_name,
+                pa.array(sorted_col_values[col_idx], type=orig_col_type),
+            )
+
+    return table
 
 
 def add_source_info(

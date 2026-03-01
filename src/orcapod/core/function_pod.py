@@ -41,7 +41,7 @@ else:
 
 class _FunctionPodBase(TraceableBase, PipelineElementBase):
     """
-    A think wrapper around a packet function, creating a pod that applies the
+    A thin wrapper around a packet function, creating a pod that applies the
     packet function on each and every input packet.
     """
 
@@ -111,12 +111,12 @@ class _FunctionPodBase(TraceableBase, PipelineElementBase):
 
     def _validate_input_schema(self, input_schema: Schema) -> None:
         expected_packet_schema = self.packet_function.input_packet_schema
-        if not schema_utils.check_typespec_compatibility(
+        if not schema_utils.check_schema_compatibility(
             input_schema, expected_packet_schema
         ):
             # TODO: use custom exception type for better error handling
             raise ValueError(
-                f"Incoming packet data type {input_schema} is not compatible with expected input typespec {expected_packet_schema}"
+                f"Incoming packet data type {input_schema} is not compatible with expected input schema {expected_packet_schema}"
             )
 
     def process_packet(
@@ -639,12 +639,12 @@ class FunctionNode(StreamBase, PipelineElementBase):
         # validate the input stream
         _, incoming_packet_types = input_stream.output_schema()
         expected_packet_schema = packet_function.input_packet_schema
-        if not schema_utils.check_typespec_compatibility(
+        if not schema_utils.check_schema_compatibility(
             incoming_packet_types, expected_packet_schema
         ):
             # TODO: use custom exception type for better error handling
             raise ValueError(
-                f"Incoming packet data type {incoming_packet_types} from {input_stream} is not compatible with expected input typespec {expected_packet_schema}"
+                f"Incoming packet data type {incoming_packet_types} from {input_stream} is not compatible with expected input schema {expected_packet_schema}"
             )
 
         self._input_stream = input_stream
@@ -658,12 +658,6 @@ class FunctionNode(StreamBase, PipelineElementBase):
             self._cached_packet_function.output_packet_schema
         ).to_string()
 
-        # compute tag schema hash, inclusive of system tags
-        tag_schema, _ = self.output_schema(columns={"system_tags": True})
-        self._tag_schema_hash = self.data_context.semantic_hasher.hash_object(
-            tag_schema
-        ).to_string()
-
         # stream-level caching state
         self._cached_input_iterator = input_stream.iter_packets()
         self._update_modified_time()  # set modified time AFTER obtaining the iterator
@@ -675,10 +669,10 @@ class FunctionNode(StreamBase, PipelineElementBase):
 
     def identity_structure(self) -> Any:
         # Identity is the combination of the cached packet function + fixed input stream
-        return (self._cached_packet_function, (self._input_stream,))
+        return (self._cached_packet_function, self._input_stream)
 
     def pipeline_identity_structure(self) -> Any:
-        return (self._function_pod, self._input_stream)
+        return (self._cached_packet_function, self._input_stream)
 
     @property
     def producer(self) -> FunctionPod:
@@ -690,14 +684,10 @@ class FunctionNode(StreamBase, PipelineElementBase):
 
     @property
     def pipeline_path(self) -> tuple[str, ...]:
-        return self._pipeline_path_prefix + self.uri
-
-    @property
-    def uri(self) -> tuple[str, ...]:
-        # TODO: revisit organization of the URI components
-        return self._cached_packet_function.uri + (
-            f"node:{self._pipeline_node_hash}",
-            f"tag:{self._tag_schema_hash}",
+        return (
+            self._pipeline_path_prefix
+            + self._cached_packet_function.uri
+            + (f"node:{self._pipeline_node_hash}",)
         )
 
     def keys(

@@ -1,4 +1,4 @@
-# Library of functions for working with TypeSpecs and for extracting TypeSpecs from a function's signature
+# Library of functions for working with Schemas and for extracting Schemas from a function's signature
 
 import inspect
 import logging
@@ -11,14 +11,14 @@ from orcapod.types import Schema, SchemaLike
 logger = logging.getLogger(__name__)
 
 
-def verify_packet_schema(packet: dict, schema: Schema) -> bool:
-    """Verify that the dictionary's types match the expected types in the typespec."""
+def verify_packet_schema(packet: dict, schema: SchemaLike) -> bool:
+    """Verify that the dictionary's types match the expected types in the schema."""
     from beartype.door import is_bearable
 
-    # verify that packet contains no keys not in typespec
+    # verify that packet contains no keys not in schema
     if set(packet.keys()) - set(schema.keys()):
         logger.warning(
-            f"PacketProtocol contains keys not in typespec: {set(packet.keys()) - set(schema.keys())}. "
+            f"PacketProtocol contains keys not in schema: {set(packet.keys()) - set(schema.keys())}. "
         )
         return False
     for key, type_info in schema.items():
@@ -36,8 +36,8 @@ def verify_packet_schema(packet: dict, schema: Schema) -> bool:
 
 # TODO: is_subhint does not handle invariance properly
 # so when working with mutable types, we have to make sure to perform deep copy
-def check_typespec_compatibility(
-    incoming_types: Schema, receiving_types: Schema
+def check_schema_compatibility(
+    incoming_types: SchemaLike, receiving_types: Schema
 ) -> bool:
     from beartype.door import is_subhint
 
@@ -240,20 +240,21 @@ def extract_function_schemas(
     )
 
 
-def get_typespec_from_dict(
-    data: Mapping, typespec: Schema | None = None, default=str
+def infer_schema_from_dict(
+    data: Mapping, schema: SchemaLike | None = None, default=str
 ) -> Schema:
     """
-    Returns a TypeSpec for the given dictionary.
-    The TypeSpec is a mapping from field name to Python type. If typespec is provided, then
-    it is used as a base when inferring types for the fields in dict
+    Returns a Schema for the given dictionary by inferring types from values.
+    If schema is provided, it is used as a base when inferring types for the fields in dict.
     """
-    if typespec is None:
-        typespec = {}
-    return {
-        key: typespec.get(key, type(value) if value is not None else default)
-        for key, value in data.items()
-    }
+    if schema is None:
+        schema = {}
+    return Schema(
+        {
+            key: schema.get(key, type(value) if value is not None else default)
+            for key, value in data.items()
+        }
+    )
 
 
 # def get_compatible_type(type1: Any, type2: Any) -> Any:
@@ -331,62 +332,35 @@ def get_compatible_type(type1: Any, type2: Any) -> Any:
         return _GenericAlias(origin1, tuple(compatible_args))
 
 
-def union_typespecs(*typespecs: Schema) -> Schema:
-    # Merge the two TypeSpecs but raise an error if conflicts in types are found
-    merged = dict(typespecs[0])
-    for typespec in typespecs[1:]:
-        for key, right_type in typespec.items():
+def union_schemas(*schemas: SchemaLike) -> Schema:
+    """Merge multiple schemas, raising an error if type conflicts are found."""
+    merged = dict(schemas[0])
+    for schema in schemas[1:]:
+        for key, right_type in schema.items():
             merged[key] = (
                 get_compatible_type(merged[key], right_type)
                 if key in merged
                 else right_type
             )
-    return merged
+    return Schema(merged)
 
 
-def intersection_typespecs(*typespecs: Schema) -> Schema:
+def intersection_schemas(*schemas: SchemaLike) -> Schema:
     """
-    Returns the intersection of all TypeSpecs, only returning keys that are present in all typespecs.
-    If a key is present in both TypeSpecs, the type must be the same.
+    Returns the intersection of all schemas, only returning keys that are present in all schemas.
+    If a key is present in multiple schemas, the types must be compatible.
     """
+    common_keys = set(schemas[0].keys())
+    for schema in schemas[1:]:
+        common_keys.intersection_update(schema.keys())
 
-    # Find common keys and ensure types match
-
-    common_keys = set(typespecs[0].keys())
-    for typespec in typespecs[1:]:
-        common_keys.intersection_update(typespec.keys())
-
-    intersection = {k: typespecs[0][k] for k in common_keys}
-    for typespec in typespecs[1:]:
+    intersection = {k: schemas[0][k] for k in common_keys}
+    for schema in schemas[1:]:
         for key in common_keys:
             try:
-                intersection[key] = get_compatible_type(
-                    intersection[key], typespec[key]
-                )
+                intersection[key] = get_compatible_type(intersection[key], schema[key])
             except TypeError:
-                # If types are not compatible, raise an error
                 raise TypeError(
-                    f"Type conflict for key '{key}': {intersection[key]} vs {typespec[key]}"
+                    f"Type conflict for key '{key}': {intersection[key]} vs {schema[key]}"
                 )
-    return intersection
-
-
-# def intersection_typespecs(left: TypeSpec, right: TypeSpec) -> TypeSpec:
-#     """
-#     Returns the intersection of two TypeSpecs, only returning keys that are present in both.
-#     If a key is present in both TypeSpecs, the type must be the same.
-#     """
-
-#     # Find common keys and ensure types match
-#     common_keys = set(left.keys()).intersection(set(right.keys()))
-#     intersection = {}
-#     for key in common_keys:
-#         try:
-#             intersection[key] = get_compatible_type(left[key], right[key])
-#         except TypeError:
-#             # If types are not compatible, raise an error
-#             raise TypeError(
-#                 f"Type conflict for key '{key}': {left[key]} vs {right[key]}"
-#             )
-
-#     return intersection
+    return Schema(intersection)

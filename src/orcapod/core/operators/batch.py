@@ -66,7 +66,10 @@ class Batch(UnaryOperator):
             batched_data.append(next_batch)
 
         batched_table = pa.Table.from_pylist(batched_data)
-        return ArrowTableStream(batched_table, tag_columns=tag_columns)
+        return ArrowTableStream(
+            batched_table,
+            tag_columns=tag_columns,
+        )
 
     def unary_output_schema(
         self,
@@ -76,8 +79,8 @@ class Batch(UnaryOperator):
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
         """
-        This method should be implemented by subclasses to return the typespecs of the input and output streams.
-        It takes two streams as input and returns a tuple of typespecs.
+        This method should be implemented by subclasses to return the schemas of the input and output streams.
+        It takes two streams as input and returns a tuple of schemas.
         """
         tag_types, packet_types = stream.output_schema(
             columns=columns, all_info=all_info

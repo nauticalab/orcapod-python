@@ -81,7 +81,7 @@ def append_to_system_tags(df: "pl.DataFrame", value: str) -> "pl.DataFrame":
 
     df.rename
     column_name_map = {
-        c: f"{c}:{value}"
+        c: f"{c}{constants.BLOCK_SEPARATOR}{value}"
         for c in df.columns
         if c.startswith(constants.SYSTEM_TAG_PREFIX)
     }

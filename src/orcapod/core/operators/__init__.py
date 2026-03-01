@@ -8,10 +8,12 @@ from .column_selection import (
 from .filters import PolarsFilter
 from .join import Join
 from .mappers import MapPackets, MapTags
+from .merge_join import MergeJoin
 from .semijoin import SemiJoin
 
 __all__ = [
     "Join",
+    "MergeJoin",
     "SemiJoin",
     "MapTags",
     "MapPackets",

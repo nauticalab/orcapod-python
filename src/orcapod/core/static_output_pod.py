@@ -184,12 +184,10 @@ class StaticOutputPod(TraceableBase):
 
 class DynamicPodStream(StreamBase, PipelineElementBase):
     """
-    Recomputable stream wrapping a PodBase
+    Recomputable stream wrapping a StaticOutputPod
 
-    This stream is used to represent the output of a PodBase invocation.
+    This stream is used to represent the output of a StaticOutputPod invocation.
 
-    For a more general recomputable stream for PodProtocol (orcapod.protocols.PodProtocol), use
-    PodStream.
     """
 
     def __init__(
@@ -215,12 +213,10 @@ class DynamicPodStream(StreamBase, PipelineElementBase):
         return structure
 
     def pipeline_identity_structure(self) -> Any:
-        from orcapod.protocols.hashing_protocols import PipelineElementProtocol
-
-        if isinstance(self._pod, PipelineElementProtocol):
-            return (self._pod, *self._upstreams)
-        tag_schema, packet_schema = self.output_schema()
-        return (tag_schema, packet_schema)
+        structure = (self._pod,)
+        if self._upstreams:
+            structure += (self._pod.argument_symmetry(self._upstreams),)
+        return structure
 
     @property
     def producer(self) -> PodProtocol:
