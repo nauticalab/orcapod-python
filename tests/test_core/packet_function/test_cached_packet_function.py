@@ -523,3 +523,38 @@ class TestConflictResolution:
         result = cpf.get_cached_output_for_packet(input_packet)
         assert result is not None
         assert result["result"] == 7  # 3 + 4
+
+
+# ---------------------------------------------------------------------------
+# 17. RESULT_COMPUTED_FLAG — freshly computed vs fetched from cache
+# ---------------------------------------------------------------------------
+
+
+class TestResultComputedFlag:
+    """Verify the meta flag that distinguishes fresh computation from cache hits."""
+
+    def test_cache_miss_sets_computed_true(self, cached_pf, input_packet):
+        result = cached_pf.call(input_packet)
+        assert result is not None
+        flag = result.get_meta_value(CachedPacketFunction.RESULT_COMPUTED_FLAG)
+        assert flag is True
+
+    def test_cache_hit_sets_computed_false(self, cached_pf, input_packet):
+        cached_pf.call(input_packet)  # first call — populates cache
+        result = cached_pf.call(input_packet)  # second call — cache hit
+        assert result is not None
+        flag = result.get_meta_value(CachedPacketFunction.RESULT_COMPUTED_FLAG)
+        assert flag is False
+
+    def test_skip_cache_lookup_sets_computed_true(self, cached_pf, input_packet):
+        cached_pf.call(input_packet)  # populate cache
+        result = cached_pf.call(input_packet, skip_cache_lookup=True)
+        assert result is not None
+        flag = result.get_meta_value(CachedPacketFunction.RESULT_COMPUTED_FLAG)
+        assert flag is True
+
+    def test_skip_cache_insert_sets_computed_true(self, cached_pf, input_packet):
+        result = cached_pf.call(input_packet, skip_cache_insert=True)
+        assert result is not None
+        flag = result.get_meta_value(CachedPacketFunction.RESULT_COMPUTED_FLAG)
+        assert flag is True

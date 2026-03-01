@@ -6,7 +6,7 @@ from collections.abc import Collection, Iterator, Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from orcapod.core.base import PipelineElementBase, TraceableBase
+from orcapod.core.base import TraceableBase
 from orcapod.protocols.core_protocols import (
     PacketProtocol,
     PodProtocol,
@@ -32,7 +32,7 @@ else:
 logger = logging.getLogger(__name__)
 
 
-class StreamBase(TraceableBase, PipelineElementBase):
+class StreamBase(TraceableBase):
     @property
     @abstractmethod
     def producer(self) -> PodProtocol | None: ...

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from orcapod.config import Config
 from orcapod.contexts import DataContext
-from orcapod.core.base import PipelineElementBase, TraceableBase
+from orcapod.core.base import TraceableBase
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
@@ -45,6 +45,13 @@ class StaticOutputPod(TraceableBase):
     ) -> None:
         self.tracker_manager = tracker_manager or DEFAULT_TRACKER_MANAGER
         super().__init__(**kwargs)
+
+    def pipeline_identity_structure(self) -> Any:
+        """
+        Pipeline identity for operators defaults to their content identity structure.
+        Operators are stateless — their pipeline identity IS their content identity.
+        """
+        return self.identity_structure()
 
     @property
     def uri(self) -> tuple[str, ...]:
@@ -182,7 +189,7 @@ class StaticOutputPod(TraceableBase):
         return self.process(*streams, **kwargs)
 
 
-class DynamicPodStream(StreamBase, PipelineElementBase):
+class DynamicPodStream(StreamBase):
     """
     Recomputable stream wrapping a StaticOutputPod
 

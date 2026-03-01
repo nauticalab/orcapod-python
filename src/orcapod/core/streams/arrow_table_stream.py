@@ -4,7 +4,6 @@ from itertools import repeat
 from typing import TYPE_CHECKING, Any, cast
 
 from orcapod import contexts
-from orcapod.core.base import PipelineElementBase
 from orcapod.core.datagrams import Packet, Tag
 from orcapod.core.streams.base import StreamBase
 from orcapod.protocols.core_protocols import PodProtocol, StreamProtocol, TagProtocol
@@ -23,7 +22,7 @@ else:
 logger = logging.getLogger(__name__)
 
 
-class ArrowTableStream(StreamBase, PipelineElementBase):
+class ArrowTableStream(StreamBase):
     """
     An immutable stream based on a PyArrow Table.
     This stream is designed to be used with data that is already in a tabular format,

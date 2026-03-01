@@ -8,7 +8,6 @@ and tests the core behaviour of ArrowTableStream.
 import pyarrow as pa
 import pytest
 
-from orcapod.core.base import PipelineElementBase
 from orcapod.core.streams import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
 from orcapod.protocols.core_protocols.streams import StreamProtocol
@@ -78,47 +77,11 @@ class TestStreamBasePipelineElementBase:
         with pytest.raises(TypeError):
             IncompleteStream()  # type: ignore[abstract]
 
-    def test_explicit_pipeline_element_base_workaround_satisfies_stream_protocol(self):
-        """
-        Explicitly adding PipelineElementBase alongside StreamBase (diamond inheritance)
-        still works — Python MRO handles it cleanly.
-        """
-
-        class FixedStream(StreamBase, PipelineElementBase):
-            @property
-            def producer(self):
-                return None
-
-            @property
-            def upstreams(self):
-                return ()
-
-            def output_schema(self, *, columns=None, all_info=False):
-                return Schema.empty(), Schema.empty()
-
-            def keys(self, *, columns=None, all_info=False):
-                return (), ()
-
-            def iter_packets(self):
-                return iter([])
-
-            def as_table(self, *, columns=None, all_info=False):
-                return pa.table({})
-
-            def identity_structure(self):
-                return ("fixed",)
-
-            def pipeline_identity_structure(self):
-                return ("fixed",)
-
-        stream = FixedStream()
-        assert isinstance(stream, StreamProtocol)
-
     def test_stream_base_alone_plus_pipeline_identity_satisfies_stream_protocol(self):
         """
         A class that only inherits StreamBase and implements both abstract methods
         satisfies StreamProtocol — pipeline_hash() is provided by StreamBase via
-        PipelineElementBase, with no need for explicit double-inheritance.
+        TraceableBase which includes PipelineElementBase.
         """
 
         class FixedStreamBaseOnly(StreamBase):

@@ -319,11 +319,17 @@ class TemporalMixin:
         return self._modified_time > timestamp
 
 
-class TraceableBase(TemporalMixin, LabelableMixin, ContentIdentifiableBase):
+class TraceableBase(
+    TemporalMixin, LabelableMixin, ContentIdentifiableBase, PipelineElementBase
+):
     """
     Base class for all default traceable entities, providing common functionality
     including data context awareness, content-based identity, (semantic) labeling,
-    and modification timestamp.
+    modification timestamp, and pipeline identity.
+
+    Every computation-node class (streams, packet functions, pods) inherits from
+    TraceableBase, getting both content identity (content_hash) and pipeline
+    identity (pipeline_hash) automatically.
     """
 
     def __init__(

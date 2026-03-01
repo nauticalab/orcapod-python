@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from orcapod import contexts
 from orcapod.config import Config
-from orcapod.core.base import PipelineElementBase, TraceableBase
+from orcapod.core.base import TraceableBase
 from orcapod.core.operators import Join
 from orcapod.core.packet_function import CachedPacketFunction, PythonPacketFunction
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
@@ -39,7 +39,7 @@ else:
     pl = LazyModule("polars")
 
 
-class _FunctionPodBase(TraceableBase, PipelineElementBase):
+class _FunctionPodBase(TraceableBase):
     """
     A thin wrapper around a packet function, creating a pod that applies the
     packet function on each and every input packet.
@@ -166,21 +166,6 @@ class _FunctionPodBase(TraceableBase, PipelineElementBase):
             StreamProtocol: The resulting output stream
         """
         ...
-        logger.debug(f"Invoking kernel {self} on streams: {streams}")
-
-        input_stream = self.handle_input_streams(*streams)
-
-        # perform input stream schema validation
-        self._validate_input_schema(input_stream.output_schema()[1])
-        self.tracker_manager.record_packet_function_invocation(
-            self.packet_function, input_stream, label=label
-        )
-        output_stream = FunctionPodStream(
-            function_pod=self,
-            input_stream=input_stream,
-            label=label,
-        )
-        return output_stream
 
     def __call__(
         self, *streams: StreamProtocol, label: str | None = None
@@ -253,7 +238,7 @@ class FunctionPod(_FunctionPodBase):
         return self.process(*streams, label=label)
 
 
-class FunctionPodStream(StreamBase, PipelineElementBase):
+class FunctionPodStream(StreamBase):
     """
     Recomputable stream wrapping a packet function.
     """
@@ -577,7 +562,7 @@ class WrappedFunctionPod(_FunctionPodBase):
         return self._function_pod.process(*streams, label=label)
 
 
-class FunctionNode(StreamBase, PipelineElementBase):
+class FunctionNode(StreamBase):
     """
     A DB-backed stream node that applies a cached packet function to an input stream.
 
@@ -1039,250 +1024,3 @@ class FunctionNode(StreamBase, PipelineElementBase):
             data_context=self.data_context_key,
             config=self.orcapod_config,
         )
-
-
-# class CachedFunctionPod(WrappedFunctionPod):
-#     """
-#     A pod that caches the results of the wrapped pod.
-#     This is useful for pods that are expensive to compute and can benefit from caching.
-#     """
-
-#     # name of the column in the tag store that contains the packet hash
-#     DATA_RETRIEVED_FLAG = f"{constants.META_PREFIX}data_retrieved"
-
-#     def __init__(
-#         self,
-#         pod: cp.PodProtocol,
-#         result_database: ArrowDatabaseProtocol,
-#         record_path_prefix: tuple[str, ...] = (),
-#         match_tier: str | None = None,
-#         retrieval_mode: Literal["latest", "most_specific"] = "latest",
-#         **kwargs,
-#     ):
-#         super().__init__(pod, **kwargs)
-#         self.record_path_prefix = record_path_prefix
-#         self.result_database = result_database
-#         self.match_tier = match_tier
-#         self.retrieval_mode = retrieval_mode
-#         self.mode: Literal["production", "development"] = "production"
-
-#     def set_mode(self, mode: str) -> None:
-#         if mode not in ("production", "development"):
-#             raise ValueError(f"Invalid mode: {mode}")
-#         self.mode = mode
-
-#     @property
-#     def version(self) -> str:
-#         return self.pod.version
-
-#     @property
-#     def record_path(self) -> tuple[str, ...]:
-#         """
-#         Return the path to the record in the result store.
-#         This is used to store the results of the pod.
-#         """
-#         return self.record_path_prefix + self.reference
-
-#     def call(
-#         self,
-#         tag: cp.TagProtocol,
-#         packet: cp.PacketProtocol,
-#         record_id: str | None = None,
-#         execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
-#         | None = None,
-#         skip_cache_lookup: bool = False,
-#         skip_cache_insert: bool = False,
-#     ) -> tuple[cp.TagProtocol, cp.PacketProtocol | None]:
-#         # TODO: consider logic for overwriting existing records
-#         execution_engine_hash = execution_engine.name if execution_engine else "default"
-#         if record_id is None:
-#             record_id = self.get_record_id(
-#                 packet, execution_engine_hash=execution_engine_hash
-#             )
-#         output_packet = None
-#         if not skip_cache_lookup and self.mode == "production":
-#             print("Checking for cache...")
-#             output_packet = self.get_cached_output_for_packet(packet)
-#             if output_packet is not None:
-#                 print(f"Cache hit for {packet}!")
-#         if output_packet is None:
-#             tag, output_packet = super().call(
-#                 tag, packet, record_id=record_id, execution_engine=execution_engine
-#             )
-#             if (
-#                 output_packet is not None
-#                 and not skip_cache_insert
-#                 and self.mode == "production"
-#             ):
-#                 self.record_packet(packet, output_packet, record_id=record_id)
-
-#         return tag, output_packet
-
-#     async def async_call(
-#         self,
-#         tag: cp.TagProtocol,
-#         packet: cp.PacketProtocol,
-#         record_id: str | None = None,
-#         execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
-#         | None = None,
-#         skip_cache_lookup: bool = False,
-#         skip_cache_insert: bool = False,
-#     ) -> tuple[cp.TagProtocol, cp.PacketProtocol | None]:
-#         # TODO: consider logic for overwriting existing records
-#         execution_engine_hash = execution_engine.name if execution_engine else "default"
-
-#         if record_id is None:
-#             record_id = self.get_record_id(
-#                 packet, execution_engine_hash=execution_engine_hash
-#             )
-#         output_packet = None
-#         if not skip_cache_lookup:
-#             output_packet = self.get_cached_output_for_packet(packet)
-#         if output_packet is None:
-#             tag, output_packet = await super().async_call(
-#                 tag, packet, record_id=record_id, execution_engine=execution_engine
-#             )
-#             if output_packet is not None and not skip_cache_insert:
-#                 self.record_packet(
-#                     packet,
-#                     output_packet,
-#                     record_id=record_id,
-#                     execution_engine=execution_engine,
-#                 )
-
-#         return tag, output_packet
-
-#     def forward(self, *streams: cp.StreamProtocol) -> cp.StreamProtocol:
-#         assert len(streams) == 1, "PodBase.forward expects exactly one input stream"
-#         return CachedPodStream(pod=self, input_stream=streams[0])
-
-#     def record_packet(
-#         self,
-#         input_packet: cp.PacketProtocol,
-#         output_packet: cp.PacketProtocol,
-#         record_id: str | None = None,
-#         execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
-#         | None = None,
-#         skip_duplicates: bool = False,
-#     ) -> cp.PacketProtocol:
-#         """
-#         Record the output packet against the input packet in the result store.
-#         """
-#         data_table = output_packet.as_table(include_context=True, include_source=True)
-
-#         for i, (k, v) in enumerate(self.tiered_pod_id.items()):
-#             # add the tiered pod ID to the data table
-#             data_table = data_table.add_column(
-#                 i,
-#                 f"{constants.POD_ID_PREFIX}{k}",
-#                 pa.array([v], type=pa.large_string()),
-#             )
-
-#         # add the input packet hash as a column
-#         data_table = data_table.add_column(
-#             0,
-#             constants.INPUT_PACKET_HASH,
-#             pa.array([str(input_packet.content_hash())], type=pa.large_string()),
-#         )
-#         # add execution engine information
-#         execution_engine_hash = execution_engine.name if execution_engine else "default"
-#         data_table = data_table.append_column(
-#             constants.EXECUTION_ENGINE,
-#             pa.array([execution_engine_hash], type=pa.large_string()),
-#         )
-
-#         # add computation timestamp
-#         timestamp = datetime.now(timezone.utc)
-#         data_table = data_table.append_column(
-#             constants.POD_TIMESTAMP,
-#             pa.array([timestamp], type=pa.timestamp("us", tz="UTC")),
-#         )
-
-#         if record_id is None:
-#             record_id = self.get_record_id(
-#                 input_packet, execution_engine_hash=execution_engine_hash
-#             )
-
-#         self.result_database.add_record(
-#             self.record_path,
-#             record_id,
-#             data_table,
-#             skip_duplicates=skip_duplicates,
-#         )
-#         # if result_flag is None:
-#         #     # TODO: do more specific error handling
-#         #     raise ValueError(
-#         #         f"Failed to record packet {input_packet} in result store {self.result_store}"
-#         #     )
-#         # # TODO: make store return retrieved table
-#         return output_packet
-
-#     def get_cached_output_for_packet(self, input_packet: cp.PacketProtocol) -> cp.PacketProtocol | None:
-#         """
-#         Retrieve the output packet from the result store based on the input packet.
-#         If more than one output packet is found, conflict resolution strategy
-#         will be applied.
-#         If the output packet is not found, return None.
-#         """
-#         # result_table = self.result_store.get_record_by_id(
-#         #     self.record_path,
-#         #     self.get_entry_hash(input_packet),
-#         # )
-
-#         # get all records with matching the input packet hash
-#         # TODO: add match based on match_tier if specified
-#         constraints = {constants.INPUT_PACKET_HASH: str(input_packet.content_hash())}
-#         if self.match_tier is not None:
-#             constraints[f"{constants.POD_ID_PREFIX}{self.match_tier}"] = (
-#                 self.pod.tiered_pod_id[self.match_tier]
-#             )
-
-#         result_table = self.result_database.get_records_with_column_value(
-#             self.record_path,
-#             constraints,
-#         )
-#         if result_table is None or result_table.num_rows == 0:
-#             return None
-
-#         if result_table.num_rows > 1:
-#             logger.info(
-#                 f"Performing conflict resolution for multiple records for {input_packet.content_hash().display_name()}"
-#             )
-#             if self.retrieval_mode == "latest":
-#                 result_table = result_table.sort_by(
-#                     self.DATA_RETRIEVED_FLAG, ascending=False
-#                 ).take([0])
-#             elif self.retrieval_mode == "most_specific":
-#                 # match by the most specific pod ID
-#                 # trying next level if not found
-#                 for k, v in reversed(self.tiered_pod_id.items()):
-#                     search_result = result_table.filter(
-#                         pc.field(f"{constants.POD_ID_PREFIX}{k}") == v
-#                     )
-#                     if search_result.num_rows > 0:
-#                         result_table = search_result.take([0])
-#                         break
-#                 if result_table.num_rows > 1:
-#                     logger.warning(
-#                         f"No matching record found for {input_packet.content_hash().display_name()} with tiered pod ID {self.tiered_pod_id}"
-#                     )
-#                     result_table = result_table.sort_by(
-#                         self.DATA_RETRIEVED_FLAG, ascending=False
-#                     ).take([0])
-
-#             else:
-#                 raise ValueError(
-#                     f"Unknown retrieval mode: {self.retrieval_mode}. Supported modes are 'latest' and 'most_specific'."
-#                 )
-
-#         pod_id_columns = [
-#             f"{constants.POD_ID_PREFIX}{k}" for k in self.tiered_pod_id.keys()
-#         ]
-#         result_table = result_table.drop_columns(pod_id_columns)
-#         result_table = result_table.drop_columns(constants.INPUT_PACKET_HASH)
-
-#         # note that data context will be loaded from the result store
-#         return ArrowPacket(
-#             result_table,
-#             meta_info={self.DATA_RETRIEVED_FLAG: str(datetime.now(timezone.utc))},
-#         )

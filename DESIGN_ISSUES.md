@@ -8,7 +8,7 @@ Each item has a status: `open`, `in progress`, or `resolved`.
 ## `src/orcapod/core/base.py`
 
 ### B1 — `PipelineElementBase` should be merged into `TraceableBase`
-**Status:** open
+**Status:** resolved
 **Severity:** medium
 
 `TraceableBase` and `PipelineElementBase` co-occur in every active computation-node class
@@ -25,13 +25,11 @@ Note: merging into `TraceableBase` is correct at the *computation-node* level.
 `PipelineElementBase` — data datagrams (`Tag`, `Packet`) are legitimately content-identifiable
 without being pipeline elements.
 
-**Proposed fix:**
-1. Add `PipelineElementBase` to `TraceableBase`'s bases in `core/base.py`.
-2. Add `pipeline_identity_structure()` to `StaticOutputPod`.
-3. Simplify `DynamicPodStream.pipeline_identity_structure()` — remove the `isinstance` fallback.
-4. Remove now-redundant explicit `PipelineElementBase` from `StreamBase`, `PacketFunctionBase`,
-   `_FunctionPodBase` declarations.
-5. Address `Invocation` as part of its planned revision.
+**Fix:** Added `PipelineElementBase` to `TraceableBase`'s bases. Added
+`pipeline_identity_structure()` to `StaticOutputPod`. Removed redundant explicit
+`PipelineElementBase` from `StreamBase`, `ArrowTableStream`, `PacketFunctionBase`,
+`_FunctionPodBase`, `FunctionPodStream`, `FunctionNode`, `OperatorNode`, and
+`DynamicPodStream` declarations.
 
 ---
 
@@ -51,14 +49,17 @@ Updated tests accordingly.
 ---
 
 ### P2 — `CachedPacketFunction.call` silently drops the `RESULT_COMPUTED_FLAG`
-**Status:** open
+**Status:** resolved
 **Severity:** high
 On a cache miss, the flag is set but the result is discarded:
 ```python
 output_packet.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: True})  # return value ignored
 ```
 If `with_meta_columns` returns a new packet (immutable update), the flag is never actually
-attached. Fix: `output_packet = output_packet.with_meta_columns(...)`.
+attached.
+
+**Fix:** Assigned the return value: `output_packet = output_packet.with_meta_columns(...)`.
+Added tests verifying the flag is `True` on cache miss and `False` on cache hit.
 
 ---
 
@@ -84,26 +85,28 @@ caches `self._output_packet_schema_hash` (different attribute name) via
 ---
 
 ### P5 — Large dead commented-out block in `get_all_cached_outputs`
-**Status:** open
+**Status:** resolved
 **Severity:** low
 The block commenting out `pod_id_columns` removal is leftover from an old design. It makes it
-ambiguous whether system columns are actually filtered. Should be removed.
+ambiguous whether system columns are actually filtered.
+
+**Fix:** Deleted the commented-out block.
 
 ---
 
 ## `src/orcapod/core/function_pod.py`
 
-### F1 — `TrackedPacketFunctionPod.process` is `@abstractmethod` with unreachable body code
-**Status:** open
+### F1 — `_FunctionPodBase.process` is `@abstractmethod` with unreachable body code
+**Status:** resolved
 **Severity:** high
 The method is decorated `@abstractmethod` but has real logic after the `...` (handle_input_streams,
 schema validation, tracker recording, FunctionPodStream construction). Since Python never executes
-the body of an abstract method via normal dispatch, this code is unreachable. `SimpleFunctionPod`
+the body of an abstract method via normal dispatch, this code is unreachable. `FunctionPod`
 then duplicates this logic verbatim.
 
-The base body should either be moved to a protected helper (e.g. `_build_output_stream`) that
-subclasses call, or `process` should not be abstract and subclasses override only the parts that
-differ.
+**Fix:** Removed the unreachable body code from `_FunctionPodBase.process()`, keeping it as
+a pure abstract method with only `...`. `FunctionPod.process()` retains its own concrete
+implementation.
 
 ---
 

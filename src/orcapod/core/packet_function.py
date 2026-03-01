@@ -13,7 +13,7 @@ from uuid_utils import uuid7
 
 from orcapod.config import Config
 from orcapod.contexts import DataContext
-from orcapod.core.base import PipelineElementBase, TraceableBase
+from orcapod.core.base import TraceableBase
 from orcapod.core.datagrams import Packet
 from orcapod.hashing.hash_utils import (
     get_function_components,
@@ -83,7 +83,7 @@ def parse_function_outputs(
     return dict(zip(output_keys, output_values))
 
 
-class PacketFunctionBase(TraceableBase, PipelineElementBase):
+class PacketFunctionBase(TraceableBase):
     """
     Abstract base class for PacketFunctionProtocol, defining the interface and common functionality.
     """
@@ -484,7 +484,9 @@ class CachedPacketFunction(PacketFunctionWrapper):
                 if not skip_cache_insert:
                     self.record_packet(packet, output_packet)
                 # add meta column to indicate that this was computed
-                output_packet.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: True})
+                output_packet = output_packet.with_meta_columns(
+                    **{self.RESULT_COMPUTED_FLAG: True}
+                )
 
         return output_packet
 
@@ -611,13 +613,5 @@ class CachedPacketFunction(PacketFunctionWrapper):
         )
         if result_table is None or result_table.num_rows == 0:
             return None
-
-        # if not include_system_columns:
-        #     # remove input packet hash and tiered pod ID columns
-        #     pod_id_columns = [
-        #         f"{constants.POD_ID_PREFIX}{k}" for k in self.tiered_pod_id.keys()
-        #     ]
-        #     result_table = result_table.drop_columns(pod_id_columns)
-        #     result_table = result_table.drop_columns(constants.INPUT_PACKET_HASH_COL)
 
         return result_table

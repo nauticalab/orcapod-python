@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod import contexts
 from orcapod.config import Config
-from orcapod.core.base import PipelineElementBase, TraceableBase
+from orcapod.core.base import TraceableBase
 from orcapod.core.static_output_pod import StaticOutputPod
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
@@ -30,7 +30,7 @@ else:
     pa = LazyModule("pyarrow")
 
 
-class OperatorNode(StreamBase, PipelineElementBase):
+class OperatorNode(StreamBase):
     """
     A DB-backed stream node that applies an operator to input streams.
 
