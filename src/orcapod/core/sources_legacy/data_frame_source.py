@@ -1,7 +1,7 @@
 from collections.abc import Collection
 from typing import TYPE_CHECKING, Any
 
-from orcapod.core.streams import TableStream
+from orcapod.core.streams import ArrowTableStream
 from orcapod.protocols import core_protocols as cp
 from orcapod.types import Schema
 from orcapod.utils.lazy_module import LazyModule
@@ -110,10 +110,10 @@ class DataFrameSource(SourceBase):
 
         self._df = df
 
-        self._table_stream = TableStream(
+        self._table_stream = ArrowTableStream(
             table=self._df.to_arrow(),
             tag_columns=self.tag_columns,
-            source=self,
+            producer=self,
             upstreams=(),
         )
 

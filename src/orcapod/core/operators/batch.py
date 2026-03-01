@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.operators.base import UnaryOperator
-from orcapod.core.streams import TableStream
+from orcapod.core.streams import ArrowTableStream
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.types import ColumnConfig
 from orcapod.utils.lazy_module import LazyModule
@@ -66,7 +66,7 @@ class Batch(UnaryOperator):
             batched_data.append(next_batch)
 
         batched_table = pa.Table.from_pylist(batched_data)
-        return TableStream(batched_table, tag_columns=tag_columns)
+        return ArrowTableStream(batched_table, tag_columns=tag_columns)
 
     def unary_output_schema(
         self,

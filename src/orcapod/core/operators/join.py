@@ -2,7 +2,7 @@ from collections.abc import Collection
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.operators.base import NonZeroInputOperator
-from orcapod.core.streams import TableStream
+from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import ArgumentGroup, StreamProtocol
 from orcapod.types import ColumnConfig, Schema
@@ -131,10 +131,10 @@ class Join(NonZeroInputOperator):
         reordered_columns = [col for col in table.column_names if col in tag_keys]
         reordered_columns += [col for col in table.column_names if col not in tag_keys]
 
-        return TableStream(
+        return ArrowTableStream(
             table.select(reordered_columns),
             tag_columns=tuple(tag_keys),
-            source=self,
+            producer=self,
             upstreams=streams,
         )
 

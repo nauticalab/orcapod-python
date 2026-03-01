@@ -20,7 +20,7 @@ import pytest
 from orcapod.core.datagrams import Packet, Tag
 from orcapod.core.function_pod import FunctionPodStream, FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
-from orcapod.core.streams import TableStream
+from orcapod.core.streams import ArrowTableStream
 from orcapod.protocols.core_protocols import FunctionPodProtocol
 
 from ..conftest import add, double, make_int_stream, to_upper
@@ -105,8 +105,8 @@ class TestSimpleFunctionPodProcess:
             list(via_call.iter_packets())
         )
 
-    def test_output_stream_source_is_pod(self, double_pod):
-        assert double_pod.process(make_int_stream()).source is double_pod
+    def test_output_stream_producer_is_pod(self, double_pod):
+        assert double_pod.process(make_int_stream()).producer is double_pod
 
     def test_output_stream_upstream_is_input(self, double_pod):
         input_stream = make_int_stream()
@@ -138,7 +138,7 @@ class TestSimpleFunctionPodInputSchemaValidation:
         double_pod.validate_inputs(make_int_stream())
 
     def test_wrong_key_name_raises(self, double_pod):
-        stream = TableStream(
+        stream = ArrowTableStream(
             pa.table(
                 {
                     "id": pa.array([0, 1, 2], type=pa.int64()),
@@ -151,7 +151,7 @@ class TestSimpleFunctionPodInputSchemaValidation:
             double_pod.process(stream)
 
     def test_wrong_packet_type_raises(self, double_pod):
-        stream = TableStream(
+        stream = ArrowTableStream(
             pa.table(
                 {
                     "id": pa.array([0, 1, 2], type=pa.int64()),
@@ -164,7 +164,7 @@ class TestSimpleFunctionPodInputSchemaValidation:
             double_pod.process(stream)
 
     def test_missing_required_key_raises(self, add_pod):
-        stream = TableStream(
+        stream = ArrowTableStream(
             pa.table(
                 {
                     "id": pa.array([0, 1], type=pa.int64()),
@@ -183,7 +183,7 @@ class TestSimpleFunctionPodInputSchemaValidation:
         pod = FunctionPod(
             packet_function=PythonPacketFunction(add_with_default, output_keys="result")
         )
-        stream = TableStream(
+        stream = ArrowTableStream(
             pa.table(
                 {
                     "id": pa.array([0, 1], type=pa.int64()),
@@ -201,7 +201,7 @@ class TestSimpleFunctionPodInputSchemaValidation:
         pod = FunctionPod(
             packet_function=PythonPacketFunction(add_with_default, output_keys="result")
         )
-        stream = TableStream(
+        stream = ArrowTableStream(
             pa.table(
                 {
                     "id": pa.array([0, 1], type=pa.int64()),
@@ -243,7 +243,7 @@ class TestSimpleFunctionPodProcessPacket:
 class TestSimpleFunctionPodMultiStream:
     def test_two_streams_are_joined_before_processing(self, add_pod):
         n = 3
-        stream_x = TableStream(
+        stream_x = ArrowTableStream(
             pa.table(
                 {
                     "id": pa.array(list(range(n)), type=pa.int64()),
@@ -252,7 +252,7 @@ class TestSimpleFunctionPodMultiStream:
             ),
             tag_columns=["id"],
         )
-        stream_y = TableStream(
+        stream_y = ArrowTableStream(
             pa.table(
                 {
                     "id": pa.array(list(range(n)), type=pa.int64()),

@@ -38,7 +38,7 @@ class StreamProtocol(TraceableProtocol, PipelineElementProtocol, Protocol):
     # TODO: add substream system
 
     @property
-    def source(self) -> "PodProtocol | None":
+    def producer(self) -> "PodProtocol | None":
         """
         The pod that produced this stream, if any.
 

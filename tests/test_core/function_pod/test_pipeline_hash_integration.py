@@ -16,8 +16,8 @@ across Phases 1–5 of the redesign:
     RootSource.pipeline_hash() is (tag_schema, packet_schema) only
     Same-schema sources share pipeline_hash regardless of data
 
-  Phase 4 — TableStream pipeline_hash
-    TableStream (no source) → schema-based pipeline_hash
+  Phase 4 — ArrowTableStream pipeline_hash
+    ArrowTableStream (no source) → schema-based pipeline_hash
     Two same-schema TableStreams share pipeline_hash even with different data
 
   Phase 5 — FunctionNode and THE CORE FIX
@@ -38,7 +38,7 @@ import pytest
 from orcapod.core.function_pod import FunctionNode, FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource, DictSource, ListSource
-from orcapod.core.streams import TableStream
+from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.protocols.hashing_protocols import ContentHash, PipelineElementProtocol
 
@@ -211,7 +211,7 @@ class TestRootSourcePipelineHash:
 
 
 # ---------------------------------------------------------------------------
-# Phase 4: TableStream pipeline_hash
+# Phase 4: ArrowTableStream pipeline_hash
 # ---------------------------------------------------------------------------
 
 
@@ -234,7 +234,7 @@ class TestTableStreamPipelineHash:
     def test_different_data_same_schema_different_content_hash(self):
         """Same schema → same pipeline_hash, but data is different → different content_hash."""
         s1 = make_int_stream(n=3)
-        s2 = TableStream(
+        s2 = ArrowTableStream(
             pa.table(
                 {
                     "id": pa.array([10, 11, 12], type=pa.int64()),
@@ -247,13 +247,13 @@ class TestTableStreamPipelineHash:
         assert s1.content_hash() != s2.content_hash()
 
     def test_table_stream_pipeline_hash_equals_source_pipeline_hash(self):
-        """TableStream backed by a source should inherit the source's pipeline_hash
+        """ArrowTableStream backed by a source should inherit the source's pipeline_hash
         at the stream level (it is the RootSource itself here)."""
         src = ArrowTableSource(
             table=pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
         )
         # The source IS a stream; its pipeline_hash is schema-only
-        s = TableStream(pa.table({"x": pa.array([1, 2, 3], type=pa.int64())}))
+        s = ArrowTableStream(pa.table({"x": pa.array([1, 2, 3], type=pa.int64())}))
         # Both have same schema, so same pipeline_hash
         assert src.pipeline_hash() == s.pipeline_hash()
 
@@ -298,7 +298,7 @@ class TestFunctionNodePipelineHashFix:
         )
         node2 = FunctionNode(
             packet_function=double_pf,
-            input_stream=TableStream(
+            input_stream=ArrowTableStream(
                 pa.table(
                     {
                         "id": pa.array([10, 11, 12, 13], type=pa.int64()),
@@ -321,7 +321,7 @@ class TestFunctionNodePipelineHashFix:
         )
         node2 = FunctionNode(
             packet_function=double_pf,
-            input_stream=TableStream(
+            input_stream=ArrowTableStream(
                 pa.table(
                     {
                         "id": pa.array([10, 11, 12], type=pa.int64()),
@@ -506,7 +506,7 @@ class TestPipelineDbScoping:
     def test_pipeline_hash_chain_root_to_function_node(self, double_pf):
         """
         Verify the full Merkle-like chain:
-          RootSource.pipeline_hash  →  TableStream.pipeline_hash
+          RootSource.pipeline_hash  →  ArrowTableStream.pipeline_hash
             →  FunctionNode.pipeline_hash
 
         Two pipelines (same schema, different data) must share pipeline_hash

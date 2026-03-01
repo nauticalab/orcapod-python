@@ -175,16 +175,16 @@ class TestThreePodChain:
         ).as_table()
         assert "id" in table.column_names
 
-    def test_each_intermediate_stream_has_correct_source(
+    def test_each_intermediate_stream_has_correct_producer(
         self, double_pod, add_one_pod, square_pod
     ):
         src = make_int_stream(n=3)
         s1 = double_pod.process(src)
         s2 = add_one_pod.process(s1)
         s3 = square_pod.process(s2)
-        assert s1.source is double_pod
-        assert s2.source is add_one_pod
-        assert s3.source is square_pod
+        assert s1.producer is double_pod
+        assert s2.producer is add_one_pod
+        assert s3.producer is square_pod
 
 
 # ---------------------------------------------------------------------------

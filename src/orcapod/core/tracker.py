@@ -149,8 +149,8 @@ class Invocation(TraceableBase):
     def parents(self) -> tuple["Invocation", ...]:
         parent_invoctions = []
         for stream in self.upstreams:
-            if stream.source is not None:
-                parent_invoctions.append(Invocation(stream.source, stream.upstreams))
+            if stream.producer is not None:
+                parent_invoctions.append(Invocation(stream.producer, stream.upstreams))
             else:
                 # import JIT to avoid circular imports
                 from orcapod.core.sources.base import StreamSource

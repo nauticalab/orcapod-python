@@ -2,7 +2,7 @@ from collections.abc import Collection
 from typing import TYPE_CHECKING, Any
 
 
-from orcapod.core.streams import TableStream
+from orcapod.core.streams import ArrowTableStream
 from orcapod.protocols import core_protocols as cp
 from orcapod.types import PathLike, Schema
 from orcapod.utils.lazy_module import LazyModule
@@ -59,7 +59,7 @@ class DeltaTableSource(SourceBase):
 
         self._source_name = source_name
         self._tag_columns = tuple(tag_columns)
-        self._cached_table_stream: TableStream | None = None
+        self._cached_table_stream: ArrowTableStream | None = None
 
         # Auto-register with global registry
         if auto_register:
@@ -105,7 +105,7 @@ class DeltaTableSource(SourceBase):
         Generate stream from Delta table data.
 
         Returns:
-            TableStream containing all data from the Delta table
+            ArrowTableStream containing all data from the Delta table
         """
         if self._cached_table_stream is None:
             # Refresh table to get latest data
@@ -116,10 +116,10 @@ class DeltaTableSource(SourceBase):
                 as_large_types=True
             ).to_table()
 
-            self._cached_table_stream = TableStream(
+            self._cached_table_stream = ArrowTableStream(
                 table=table_data,
                 tag_columns=self._tag_columns,
-                source=self,
+                producer=self,
             )
         return self._cached_table_stream
 

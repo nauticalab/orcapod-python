@@ -7,7 +7,7 @@ import pytest
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
-from orcapod.core.streams import TableStream
+from orcapod.core.streams import ArrowTableStream
 
 
 # ---------------------------------------------------------------------------
@@ -27,19 +27,19 @@ def to_upper(name: str) -> str:
     return name.upper()
 
 
-def make_int_stream(n: int = 3) -> TableStream:
-    """TableStream with tag=id (int), packet=x (int)."""
+def make_int_stream(n: int = 3) -> ArrowTableStream:
+    """ArrowTableStream with tag=id (int), packet=x (int)."""
     table = pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
             "x": pa.array(list(range(n)), type=pa.int64()),
         }
     )
-    return TableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, tag_columns=["id"])
 
 
-def make_two_col_stream(n: int = 3) -> TableStream:
-    """TableStream with tag=id, packet={x, y} for add_pf."""
+def make_two_col_stream(n: int = 3) -> ArrowTableStream:
+    """ArrowTableStream with tag=id, packet={x, y} for add_pf."""
     table = pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
@@ -47,7 +47,7 @@ def make_two_col_stream(n: int = 3) -> TableStream:
             "y": pa.array([i * 10 for i in range(n)], type=pa.int64()),
         }
     )
-    return TableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, tag_columns=["id"])
 
 
 # ---------------------------------------------------------------------------

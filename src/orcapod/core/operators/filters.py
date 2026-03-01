@@ -3,7 +3,7 @@ from collections.abc import Collection, Iterable, Mapping
 from typing import TYPE_CHECKING, Any, TypeAlias
 
 from orcapod.core.operators.base import UnaryOperator
-from orcapod.core.streams import TableStream
+from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.system_constants import constants
@@ -56,10 +56,10 @@ class PolarsFilter(UnaryOperator):
         df = pl.DataFrame(table)
         filtered_table = df.filter(*self.predicates, **self.constraints).to_arrow()
 
-        return TableStream(
+        return ArrowTableStream(
             filtered_table,
             tag_columns=stream.keys()[0],
-            source=self,
+            producer=self,
             upstreams=(stream,),
         )
 
@@ -124,10 +124,10 @@ class SelectPacketColumns(UnaryOperator):
 
         modified_table = table.drop_columns(packet_columns_to_drop)
 
-        return TableStream(
+        return ArrowTableStream(
             modified_table,
             tag_columns=tag_columns,
-            source=self,
+            producer=self,
             upstreams=(stream,),
         )
 

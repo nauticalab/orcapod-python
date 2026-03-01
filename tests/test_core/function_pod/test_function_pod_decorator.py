@@ -18,7 +18,7 @@ from orcapod.core.function_pod import FunctionPodStream, FunctionPod, function_p
 from orcapod.protocols.core_protocols import FunctionPodProtocol, StreamProtocol
 
 from ..conftest import make_int_stream
-from orcapod.core.streams import TableStream
+from orcapod.core.streams import ArrowTableStream
 
 
 # Module-level decorated functions (lambdas are forbidden by the decorator)
@@ -130,7 +130,7 @@ class TestFunctionPodDecoratorEndToEnd:
 
     def test_multiple_output_keys_end_to_end(self):
         n = 3
-        stream = TableStream(
+        stream = ArrowTableStream(
             pa.table(
                 {
                     "id": pa.array(list(range(n)), type=pa.int64()),

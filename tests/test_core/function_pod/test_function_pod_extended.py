@@ -19,7 +19,7 @@ from orcapod.core.function_pod import (
     function_pod,
 )
 from orcapod.core.packet_function import CachedPacketFunction, PythonPacketFunction
-from orcapod.core.streams import TableStream
+from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.protocols.core_protocols import StreamProtocol
 
@@ -42,7 +42,7 @@ class TestTrackedPacketFunctionPodHandleInputStreams:
         assert result is stream
 
     def test_multiple_streams_returns_joined_stream(self, add_pod):
-        stream_x = TableStream(
+        stream_x = ArrowTableStream(
             pa.table(
                 {
                     "id": pa.array([0, 1], type=pa.int64()),
@@ -51,7 +51,7 @@ class TestTrackedPacketFunctionPodHandleInputStreams:
             ),
             tag_columns=["id"],
         )
-        stream_y = TableStream(
+        stream_y = ArrowTableStream(
             pa.table(
                 {
                     "id": pa.array([0, 1], type=pa.int64()),
@@ -163,7 +163,7 @@ class TestFunctionPodStreamSortByTags:
                 "x": pa.array(list(reversed(range(n))), type=pa.int64()),
             }
         )
-        stream = double_pod.process(TableStream(table, tag_columns=["id"]))
+        stream = double_pod.process(ArrowTableStream(table, tag_columns=["id"]))
         result = stream.as_table(columns={"sort_by_tags": True})
         ids: list[int] = result.column("id").to_pylist()  # type: ignore[assignment]
         assert ids == sorted(ids)
@@ -177,7 +177,7 @@ class TestFunctionPodStreamSortByTags:
                 "x": pa.array(reversed_ids, type=pa.int64()),
             }
         )
-        stream = double_pod.process(TableStream(table, tag_columns=["id"]))
+        stream = double_pod.process(ArrowTableStream(table, tag_columns=["id"]))
         result = stream.as_table()
         ids: list[int] = result.column("id").to_pylist()  # type: ignore[assignment]
         assert ids == reversed_ids

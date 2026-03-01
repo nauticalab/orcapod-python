@@ -8,7 +8,7 @@ from pyarrow.lib import Table
 from orcapod.core.datagrams import DictTag
 from orcapod.core.executable_pod import TrackedKernelBase
 from orcapod.core.streams import (
-    TableStream,
+    ArrowTableStream,
     KernelStream,
     StatefulStreamBase,
 )

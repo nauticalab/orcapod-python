@@ -36,7 +36,7 @@ class LazyPodResultStream(StreamBase):
     def __init__(
         self, pod: cp.PodProtocol, prepared_stream: cp.StreamProtocol, **kwargs
     ):
-        super().__init__(source=pod, upstreams=(prepared_stream,), **kwargs)
+        super().__init__(producer=pod, upstreams=(prepared_stream,), **kwargs)
         self.pod = pod
         self.prepared_stream = prepared_stream
         # capture the immutable iterator from the prepared stream

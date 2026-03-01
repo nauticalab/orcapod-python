@@ -1,7 +1,7 @@
+from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
-from orcapod.core.streams.table_stream import TableStream
 
 __all__ = [
+    "ArrowTableStream",
     "StreamBase",
-    "TableStream",
 ]

@@ -26,7 +26,7 @@ class DataFrameSource(RootSource):
     The DataFrame is converted to an Arrow table and then handled identically
     to ``ArrowTableSource``, including source-info provenance annotation and
     schema-hash system tags.  Because the data is immutable after construction
-    the same ``TableStream`` is returned from every ``process()`` call.
+    the same ``ArrowTableStream`` is returned from every ``process()`` call.
     """
 
     def __init__(

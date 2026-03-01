@@ -184,7 +184,7 @@ class Pipeline(GraphTracker):
             node = self.wrap_invocation(invocation, new_input_streams=input_streams)
 
             for parent in node.upstreams:
-                node_graph.add_edge(parent.source, node)
+                node_graph.add_edge(parent.producer, node)
 
             invocation_to_stream_lut[invocation] = node()
             name_candidates.setdefault(node.label, []).append(node)

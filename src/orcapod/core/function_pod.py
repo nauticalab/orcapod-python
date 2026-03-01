@@ -10,8 +10,8 @@ from orcapod.config import Config
 from orcapod.core.base import PipelineElementBase, TraceableBase
 from orcapod.core.operators import Join
 from orcapod.core.packet_function import CachedPacketFunction, PythonPacketFunction
+from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
-from orcapod.core.streams.table_stream import TableStream
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
     ArgumentGroup,
@@ -279,7 +279,7 @@ class FunctionPodStream(StreamBase, PipelineElementBase):
         self._cached_content_hash_column: pa.Array | None = None
 
     @property
-    def source(self) -> PodProtocol:
+    def producer(self) -> PodProtocol:
         return self._function_pod
 
     @property
@@ -681,7 +681,7 @@ class FunctionNode(StreamBase, PipelineElementBase):
         return (self._function_pod, self._input_stream)
 
     @property
-    def source(self) -> FunctionPod:
+    def producer(self) -> FunctionPod:
         return self._function_pod
 
     @property
@@ -913,13 +913,13 @@ class FunctionNode(StreamBase, PipelineElementBase):
             computed_hashes: set[str] = set()
             if existing is not None and existing.num_rows > 0:
                 tag_keys = self._input_stream.keys()[0]
-                # Strip the meta column before handing to TableStream so it only
+                # Strip the meta column before handing to ArrowTableStream so it only
                 # sees tag + output-packet columns.
                 hash_col = constants.INPUT_PACKET_HASH_COL
                 hash_values = cast(list[str], existing.column(hash_col).to_pylist())
                 computed_hashes = set(hash_values)
                 data_table = existing.drop([hash_col])
-                existing_stream = TableStream(data_table, tag_columns=tag_keys)
+                existing_stream = ArrowTableStream(data_table, tag_columns=tag_keys)
                 for i, (tag, packet) in enumerate(existing_stream.iter_packets()):
                     self._cached_output_packets[i] = (tag, packet)
                     yield tag, packet

@@ -30,8 +30,8 @@ class TestFunctionPodStreamProtocolConformance:
     def test_satisfies_stream_protocol(self, double_pod):
         assert isinstance(double_pod.process(make_int_stream()), StreamProtocol)
 
-    def test_has_source_property(self, double_pod):
-        _ = double_pod.process(make_int_stream()).source
+    def test_has_producer_property(self, double_pod):
+        _ = double_pod.process(make_int_stream()).producer
 
     def test_has_upstreams_property(self, double_pod):
         assert isinstance(double_pod.process(make_int_stream()).upstreams, tuple)
@@ -182,7 +182,7 @@ class TestFunctionPodStreamStaleness:
 
         assert stream.is_stale
 
-    def test_is_stale_true_after_source_pod_updated(self, double_pod):
+    def test_is_stale_true_after_producer_updated(self, double_pod):
         """Updating the source pod's modified time makes the stream stale."""
         import time
 
@@ -210,7 +210,7 @@ class TestFunctionPodStreamStaleness:
         assert len(second) == len(first)
         assert [p["result"] for _, p in second] == [p["result"] for _, p in first]
 
-    def test_iter_packets_auto_clears_when_source_pod_updated(self, double_pod):
+    def test_iter_packets_auto_clears_when_producer_updated(self, double_pod):
         """iter_packets re-populates automatically when the source pod is modified."""
         import time
 
@@ -226,7 +226,7 @@ class TestFunctionPodStreamStaleness:
         assert len(second) == len(first)
         assert [p["result"] for _, p in second] == [p["result"] for _, p in first]
 
-    def test_as_table_auto_clears_when_source_pod_updated(self, double_pod):
+    def test_as_table_auto_clears_when_producer_updated(self, double_pod):
         """as_table re-populates automatically when the source pod is modified."""
         import time
 

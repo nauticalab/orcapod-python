@@ -2,7 +2,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.operators.base import UnaryOperator
-from orcapod.core.streams import TableStream
+from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.system_constants import constants
@@ -65,8 +65,8 @@ class MapPackets(UnaryOperator):
         if self.drop_unmapped and unmapped_columns:
             renamed_table = renamed_table.drop_columns(list(unmapped_columns))
 
-        return TableStream(
-            renamed_table, tag_columns=tag_columns, source=self, upstreams=(stream,)
+        return ArrowTableStream(
+            renamed_table, tag_columns=tag_columns, producer=self, upstreams=(stream,)
         )
 
     def validate_unary_input(self, stream: StreamProtocol) -> None:
@@ -161,8 +161,11 @@ class MapTags(UnaryOperator):
             # drop any tags that are not in the name map
             renamed_table = renamed_table.drop_columns(list(missing_tags))
 
-        return TableStream(
-            renamed_table, tag_columns=new_tag_columns, source=self, upstreams=(stream,)
+        return ArrowTableStream(
+            renamed_table,
+            tag_columns=new_tag_columns,
+            producer=self,
+            upstreams=(stream,),
         )
 
     def validate_unary_input(self, stream: StreamProtocol) -> None:

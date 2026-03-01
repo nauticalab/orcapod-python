@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.operators.base import BinaryOperator
-from orcapod.core.streams import TableStream
+from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.types import ColumnConfig, Schema
@@ -69,10 +69,10 @@ class SemiJoin(BinaryOperator):
             join_type="left semi",
         )
 
-        return TableStream(
+        return ArrowTableStream(
             semi_joined_table,
             tag_columns=tuple(left_tag_schema.keys()),
-            source=self,
+            producer=self,
             upstreams=(left_stream, right_stream),
         )
 

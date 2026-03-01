@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.sources.base import RootSource
-from orcapod.core.streams.table_stream import TableStream
+from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.lazy_module import LazyModule
 
@@ -66,7 +66,7 @@ class DerivedSource(RootSource):
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         return self._origin.keys(columns=columns, all_info=all_info)
 
-    def _get_stream(self) -> TableStream:
+    def _get_stream(self) -> ArrowTableStream:
         if self._cached_table is None:
             records = self._origin.get_all_records()
             if records is None:
@@ -76,7 +76,7 @@ class DerivedSource(RootSource):
                 )
             self._cached_table = records
         tag_keys = self._origin.keys()[0]
-        return TableStream(self._cached_table, tag_columns=tag_keys)
+        return ArrowTableStream(self._cached_table, tag_columns=tag_keys)
 
     def iter_packets(self):
         return self._get_stream().iter_packets()

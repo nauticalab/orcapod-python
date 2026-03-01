@@ -23,7 +23,7 @@ from orcapod.core.function_pod import (
     FunctionPod,
 )
 from orcapod.core.packet_function import PythonPacketFunction
-from orcapod.core.streams import TableStream
+from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.protocols.hashing_protocols import PipelineElementProtocol
@@ -66,7 +66,7 @@ def _make_node_with_system_tags(
             "x": pa.array(list(range(n)), type=pa.int64()),
         }
     )
-    stream = TableStream(table, tag_columns=["id"], system_tag_columns=["run"])
+    stream = ArrowTableStream(table, tag_columns=["id"], system_tag_columns=["run"])
     return FunctionNode(
         packet_function=pf,
         input_stream=stream,
@@ -126,8 +126,8 @@ class TestFunctionNodeConstruction:
     def test_node_is_pipeline_element_protocol(self, node):
         assert isinstance(node, PipelineElementProtocol)
 
-    def test_source_is_function_pod(self, node):
-        assert isinstance(node.source, FunctionPod)
+    def test_producer_is_function_pod(self, node):
+        assert isinstance(node.producer, FunctionPod)
 
     def test_upstreams_contains_input_stream(self, node):
         upstreams = node.upstreams
@@ -137,7 +137,7 @@ class TestFunctionNodeConstruction:
 
     def test_incompatible_stream_raises_on_construction(self, double_pf):
         db = InMemoryArrowDatabase()
-        bad_stream = TableStream(
+        bad_stream = ArrowTableStream(
             pa.table(
                 {
                     "id": pa.array([0, 1], type=pa.int64()),
@@ -326,7 +326,7 @@ class TestFunctionNodePipelineIdentity:
         db = InMemoryArrowDatabase()
         stream_a = make_int_stream(n=3)
         # Build a stream with same schema (id: int64, x: int64) but different values
-        stream_b = TableStream(
+        stream_b = ArrowTableStream(
             pa.table(
                 {
                     "id": pa.array([10, 11, 12], type=pa.int64()),

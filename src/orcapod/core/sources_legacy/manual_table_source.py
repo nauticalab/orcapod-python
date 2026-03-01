@@ -6,7 +6,7 @@ from deltalake import DeltaTable, write_deltalake
 from deltalake.exceptions import TableNotFoundError
 
 from orcapod.core.sources.source_registry import SourceRegistry
-from orcapod.core.streams import TableStream
+from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import DuplicateTagError
 from orcapod.protocols import core_protocols as cp
 from orcapod.types import Schema, SchemaLike
@@ -127,8 +127,8 @@ class ManualDeltaTableSource(SourceBase):
                 as_large_types=True
             ).to_table()
 
-        return TableStream(
-            arrow_data, tag_columns=self.tag_columns, source=self, upstreams=()
+        return ArrowTableStream(
+            arrow_data, tag_columns=self.tag_columns, producer=self, upstreams=()
         )
 
     def source_identity_structure(self) -> Any:

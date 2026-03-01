@@ -8,7 +8,7 @@ from orcapod.types import Schema
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 from orcapod.core.streams.base import StreamBase
-from orcapod.core.streams.table_stream import TableStream
+from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 
 
 if TYPE_CHECKING:
@@ -36,7 +36,7 @@ class CachedPodStream(StreamBase):
 
     # TODO: define interface for storage or pod storage
     def __init__(self, pod: cp.CachedPod, input_stream: cp.StreamProtocol, **kwargs):
-        super().__init__(source=pod, upstreams=(input_stream,), **kwargs)
+        super().__init__(producer=pod, upstreams=(input_stream,), **kwargs)
         self.pod = pod
         self.input_stream = input_stream
         self._set_modified_time()  # set modified time to when we obtain the iterator
@@ -118,13 +118,13 @@ class CachedPodStream(StreamBase):
 
             if existing is not None and existing.num_rows > 0:
                 # If there are existing entries, we can cache them
-                existing_stream = TableStream(existing, tag_columns=tag_keys)
+                existing_stream = ArrowTableStream(existing, tag_columns=tag_keys)
                 for tag, packet in existing_stream.iter_packets():
                     cached_results.append((tag, packet))
 
             pending_calls = []
             if missing is not None and missing.num_rows > 0:
-                for tag, packet in TableStream(missing, tag_columns=tag_keys):
+                for tag, packet in ArrowTableStream(missing, tag_columns=tag_keys):
                     # Since these packets are known to be missing, skip the cache lookup
                     pending = self.pod.async_call(
                         tag,
@@ -211,13 +211,13 @@ class CachedPodStream(StreamBase):
 
         if existing is not None and existing.num_rows > 0:
             # If there are existing entries, we can cache them
-            existing_stream = TableStream(existing, tag_columns=tag_keys)
+            existing_stream = ArrowTableStream(existing, tag_columns=tag_keys)
             for tag, packet in existing_stream.iter_packets():
                 cached_results.append((tag, packet))
 
         if missing is not None and missing.num_rows > 0:
             hash_to_output_lut: dict[str, cp.PacketProtocol | None] = {}
-            for tag, packet in TableStream(missing, tag_columns=tag_keys):
+            for tag, packet in ArrowTableStream(missing, tag_columns=tag_keys):
                 # Since these packets are known to be missing, skip the cache lookup
                 packet_hash = packet.content_hash().to_string()
                 if packet_hash in hash_to_output_lut:
@@ -327,14 +327,14 @@ class CachedPodStream(StreamBase):
 
             if existing is not None and existing.num_rows > 0:
                 # If there are existing entries, we can cache them
-                existing_stream = TableStream(existing, tag_columns=tag_keys)
+                existing_stream = ArrowTableStream(existing, tag_columns=tag_keys)
                 for tag, packet in existing_stream.iter_packets():
                     cached_results.append((tag, packet))
                     yield tag, packet
 
             if missing is not None and missing.num_rows > 0:
                 hash_to_output_lut: dict[str, cp.PacketProtocol | None] = {}
-                for tag, packet in TableStream(missing, tag_columns=tag_keys):
+                for tag, packet in ArrowTableStream(missing, tag_columns=tag_keys):
                     # Since these packets are known to be missing, skip the cache lookup
                     packet_hash = packet.content_hash().to_string()
                     if packet_hash in hash_to_output_lut:

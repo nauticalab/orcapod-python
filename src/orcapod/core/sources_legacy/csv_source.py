@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING, Any
 
 
 from orcapod.core.streams import (
-    TableStream,
+    ArrowTableStream,
 )
 from orcapod.protocols import core_protocols as cp
 from orcapod.types import Schema
@@ -50,10 +50,10 @@ class CSVSource(SourceBase):
         # Load current state of the file
         table = csv.read_csv(self.file_path)
 
-        return TableStream(
+        return ArrowTableStream(
             table=table,
             tag_columns=self.tag_columns,
-            source=self,
+            producer=self,
             upstreams=(),
         )
 

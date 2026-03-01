@@ -306,7 +306,7 @@ class TestDictSourceAdditional:
         assert "value" in packet_schema
 
     def test_empty_data_raises(self):
-        """An empty DictSource cannot build a valid TableStream."""
+        """An empty DictSource cannot build a valid ArrowTableStream."""
         with pytest.raises(Exception):
             DictSource(data=[], tag_columns=["id"])
 

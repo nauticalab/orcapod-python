@@ -27,7 +27,7 @@ import pytest
 
 from orcapod.core.function_pod import FunctionNode
 from orcapod.core.sources import DerivedSource, RootSource
-from orcapod.core.streams import TableStream
+from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.protocols.hashing_protocols import PipelineElementProtocol
@@ -76,10 +76,10 @@ class TestDerivedSourceConstruction:
         src = _make_node(n=3).as_source()
         assert isinstance(src, PipelineElementProtocol)
 
-    def test_source_is_none(self):
+    def test_producer_is_none(self):
         """DerivedSource is a root stream — source returns None."""
         src = _make_node(n=3).as_source()
-        assert src.source is None
+        assert src.producer is None
 
     def test_upstreams_is_empty(self):
         src = _make_node(n=3).as_source()
@@ -199,7 +199,7 @@ class TestDerivedSourceRoundTrip:
                 "x": src.as_table().column("result"),
             }
         )
-        result_stream = TableStream(result_table, tag_columns=["id"])
+        result_stream = ArrowTableStream(result_table, tag_columns=["id"])
 
         double_result = PythonPacketFunction(double, output_keys="result")
         node2 = FunctionNode(

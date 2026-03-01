@@ -21,7 +21,7 @@ from collections.abc import Mapping
 
 from orcapod.core.function_pod import FunctionNode, FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
-from orcapod.core.streams import TableStream
+from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.protocols.core_protocols import StreamProtocol
 
@@ -94,8 +94,8 @@ class TestFunctionNodeStreamBasic:
     def test_as_table_contains_packet_columns(self, node):
         assert "result" in node.as_table().column_names
 
-    def test_source_is_function_pod(self, node, double_pf):
-        assert isinstance(node.source, FunctionPod)
+    def test_producer_is_function_pod(self, node, double_pf):
+        assert isinstance(node.producer, FunctionPod)
 
     def test_upstreams_contains_input_stream(self, node):
         upstreams = node.upstreams
@@ -129,7 +129,7 @@ class TestFunctionNodeColumnConfig:
                 "x": pa.array([4, 3, 2, 1, 0], type=pa.int64()),
             }
         )
-        input_stream = TableStream(reversed_table, tag_columns=["id"])
+        input_stream = ArrowTableStream(reversed_table, tag_columns=["id"])
         node = FunctionNode(
             packet_function=double_pf,
             input_stream=input_stream,

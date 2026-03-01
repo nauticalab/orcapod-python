@@ -176,10 +176,10 @@ class TestSourceOutputSchema:
 
 class TestStreamSource:
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_source_is_none(self, src_fixture, request):
+    def test_producer_is_none(self, src_fixture, request):
         """RootSource is a pure stream — source returns None."""
         src = request.getfixturevalue(src_fixture)
-        assert src.source is None
+        assert src.producer is None
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_upstreams_is_empty_tuple(self, src_fixture, request):

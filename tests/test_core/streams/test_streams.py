@@ -1,17 +1,18 @@
 """
 Tests for core stream implementations.
 
-Verifies that StreamBase and TableStream correctly implement the StreamProtocol protocol,
-and tests the core behaviour of TableStream.
+Verifies that StreamBase and ArrowTableStream correctly implement the StreamProtocol protocol,
+and tests the core behaviour of ArrowTableStream.
 """
 
 import pyarrow as pa
 import pytest
 
 from orcapod.core.base import PipelineElementBase
-from orcapod.core.streams import TableStream
+from orcapod.core.streams import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
 from orcapod.protocols.core_protocols.streams import StreamProtocol
+from orcapod.types import Schema
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -21,8 +22,8 @@ from orcapod.protocols.core_protocols.streams import StreamProtocol
 def make_table_stream(
     tag_columns: list[str] | None = None,
     n_rows: int = 3,
-) -> TableStream:
-    """Create a minimal TableStream for testing."""
+) -> ArrowTableStream:
+    """Create a minimal ArrowTableStream for testing."""
     tag_columns = tag_columns or ["id"]
     table = pa.table(
         {
@@ -30,7 +31,7 @@ def make_table_stream(
             "value": pa.array([f"v{i}" for i in range(n_rows)], type=pa.large_string()),
         }
     )
-    return TableStream(table, tag_columns=tag_columns)
+    return ArrowTableStream(table, tag_columns=tag_columns)
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +54,7 @@ class TestStreamBasePipelineElementBase:
 
         class IncompleteStream(StreamBase):
             @property
-            def source(self):
+            def producer(self):
                 return None
 
             @property
@@ -61,7 +62,7 @@ class TestStreamBasePipelineElementBase:
                 return ()
 
             def output_schema(self, *, columns=None, all_info=False):
-                return {}, {}
+                return Schema.empty(), Schema.empty()
 
             def keys(self, *, columns=None, all_info=False):
                 return (), ()
@@ -75,7 +76,7 @@ class TestStreamBasePipelineElementBase:
             # identity_structure and pipeline_identity_structure intentionally omitted
 
         with pytest.raises(TypeError):
-            IncompleteStream()
+            IncompleteStream()  # type: ignore[abstract]
 
     def test_explicit_pipeline_element_base_workaround_satisfies_stream_protocol(self):
         """
@@ -85,7 +86,7 @@ class TestStreamBasePipelineElementBase:
 
         class FixedStream(StreamBase, PipelineElementBase):
             @property
-            def source(self):
+            def producer(self):
                 return None
 
             @property
@@ -93,7 +94,7 @@ class TestStreamBasePipelineElementBase:
                 return ()
 
             def output_schema(self, *, columns=None, all_info=False):
-                return {}, {}
+                return Schema.empty(), Schema.empty()
 
             def keys(self, *, columns=None, all_info=False):
                 return (), ()
@@ -122,7 +123,7 @@ class TestStreamBasePipelineElementBase:
 
         class FixedStreamBaseOnly(StreamBase):
             @property
-            def source(self):
+            def producer(self):
                 return None
 
             @property
@@ -130,7 +131,7 @@ class TestStreamBasePipelineElementBase:
                 return ()
 
             def output_schema(self, *, columns=None, all_info=False):
-                return {}, {}
+                return Schema.empty(), Schema.empty()
 
             def keys(self, *, columns=None, all_info=False):
                 return (), ()
@@ -157,20 +158,20 @@ class TestStreamBasePipelineElementBase:
 
 
 class TestStreamProtocolConformance:
-    """Verify that StreamBase (via TableStream) satisfies the StreamProtocol protocol."""
+    """Verify that StreamBase (via ArrowTableStream) satisfies the StreamProtocol protocol."""
 
     def test_stream_base_is_subclass_of_stream_protocol(self):
         """StreamBase must be a structural subtype of StreamProtocol (runtime check)."""
         # isinstance on a Protocol checks structural conformance at method-name level
         stream = make_table_stream()
         assert isinstance(stream, StreamProtocol), (
-            "TableStream instance does not satisfy the StreamProtocol protocol"
+            "ArrowTableStream instance does not satisfy the StreamProtocol protocol"
         )
 
-    def test_stream_has_source_property(self):
+    def test_stream_has_producer_property(self):
         stream = make_table_stream()
         # attribute must exist and be accessible
-        _ = stream.source
+        _ = stream.producer
 
     def test_stream_has_upstreams_property(self):
         stream = make_table_stream()
@@ -205,7 +206,7 @@ class TestStreamProtocolConformance:
 
 
 # ---------------------------------------------------------------------------
-# TableStream construction
+# ArrowTableStream construction
 # ---------------------------------------------------------------------------
 
 
@@ -224,17 +225,17 @@ class TestTableStreamConstruction:
     def test_missing_tag_column_raises(self):
         table = pa.table({"value": pa.array([1, 2])})
         with pytest.raises(ValueError):
-            TableStream(table, tag_columns=["nonexistent"])
+            ArrowTableStream(table, tag_columns=["nonexistent"])
 
     def test_no_packet_column_raises(self):
         # A table where all columns are tags → no packet columns → should raise
         table = pa.table({"id": pa.array([1, 2])})
         with pytest.raises(ValueError):
-            TableStream(table, tag_columns=["id"])
+            ArrowTableStream(table, tag_columns=["id"])
 
-    def test_source_defaults_to_none(self):
+    def test_producer_defaults_to_none(self):
         stream = make_table_stream()
-        assert stream.source is None
+        assert stream.producer is None
 
     def test_upstreams_defaults_to_empty(self):
         stream = make_table_stream()
@@ -242,7 +243,7 @@ class TestTableStreamConstruction:
 
 
 # ---------------------------------------------------------------------------
-# TableStream.keys()
+# ArrowTableStream.keys()
 # ---------------------------------------------------------------------------
 
 
@@ -259,14 +260,14 @@ class TestTableStreamKeys:
 
     def test_no_tag_columns(self):
         table = pa.table({"a": pa.array([1]), "b": pa.array([2])})
-        stream = TableStream(table, tag_columns=[])
+        stream = ArrowTableStream(table, tag_columns=[])
         tag_keys, packet_keys = stream.keys()
         assert tag_keys == ()
         assert set(packet_keys) == {"a", "b"}
 
 
 # ---------------------------------------------------------------------------
-# TableStream.output_schema()
+# ArrowTableStream.output_schema()
 # ---------------------------------------------------------------------------
 
 
@@ -286,7 +287,7 @@ class TestTableStreamOutputSchema:
 
 
 # ---------------------------------------------------------------------------
-# TableStream.iter_packets()
+# ArrowTableStream.iter_packets()
 # ---------------------------------------------------------------------------
 
 
@@ -336,7 +337,7 @@ class TestTableStreamIterPackets:
 
 
 # ---------------------------------------------------------------------------
-# TableStream.as_table()
+# ArrowTableStream.as_table()
 # ---------------------------------------------------------------------------
 
 
@@ -365,7 +366,7 @@ class TestTableStreamAsTable:
 
 
 # ---------------------------------------------------------------------------
-# TableStream.__iter__ (convenience)
+# ArrowTableStream.__iter__ (convenience)
 # ---------------------------------------------------------------------------
 
 
@@ -374,3 +375,118 @@ class TestTableStreamIter:
         stream = make_table_stream(n_rows=3)
         via_iter = list(stream)
         assert len(via_iter) == len(via_iter)
+
+
+# ---------------------------------------------------------------------------
+# ArrowTableStream.identity_structure()
+# ---------------------------------------------------------------------------
+
+
+class TestArrowTableStreamIdentityStructure:
+    """Tests for both branches of ArrowTableStream.identity_structure()."""
+
+    # -- no-source branch (source is None) -----------------------------------
+
+    def test_no_producer_content_hash_returns_content_hash(self):
+        from orcapod.types import ContentHash
+
+        stream = make_table_stream()
+        assert isinstance(stream.content_hash(), ContentHash)
+
+    def test_no_producer_same_data_same_hash(self):
+        """Identical tables produce identical content hashes."""
+        table = pa.table(
+            {
+                "id": pa.array([1, 2, 3], type=pa.int64()),
+                "value": pa.array([10, 20, 30], type=pa.int64()),
+            }
+        )
+        s1 = ArrowTableStream(table, tag_columns=["id"])
+        s2 = ArrowTableStream(table, tag_columns=["id"])
+        assert s1.content_hash() == s2.content_hash()
+
+    def test_no_producer_different_data_different_hash(self):
+        """Different table contents produce different content hashes."""
+        t1 = pa.table(
+            {
+                "id": pa.array([1, 2, 3], type=pa.int64()),
+                "value": pa.array([10, 20, 30], type=pa.int64()),
+            }
+        )
+        t2 = pa.table(
+            {
+                "id": pa.array([1, 2, 3], type=pa.int64()),
+                "value": pa.array([10, 20, 99], type=pa.int64()),
+            }
+        )
+        s1 = ArrowTableStream(t1, tag_columns=["id"])
+        s2 = ArrowTableStream(t2, tag_columns=["id"])
+        assert s1.content_hash() != s2.content_hash()
+
+    def test_no_producer_identity_structure_contains_table(self):
+        """identity_structure() for sourceless stream embeds a pa.Table."""
+        stream = make_table_stream()
+        structure = stream.identity_structure()
+        assert any(isinstance(elem, pa.Table) for elem in structure)
+
+    # -- with-source branch (source is not None) -----------------------------
+
+    def _make_named_source(self, name: str):
+        """Return a minimal ContentIdentifiableBase with a fixed identity."""
+        from orcapod.core.base import ContentIdentifiableBase
+
+        class NamedSource(ContentIdentifiableBase):
+            def __init__(self, n: str) -> None:
+                super().__init__()
+                self._name = n
+
+            def identity_structure(self):
+                return (self._name,)
+
+        return NamedSource(name)
+
+    def test_with_producer_identity_structure_starts_with_producer(self):
+        """identity_structure() returns (source, *upstreams) when source is set."""
+        src = self._make_named_source("src_a")
+        table = pa.table(
+            {
+                "id": pa.array([1, 2], type=pa.int64()),
+                "v": pa.array([10, 20], type=pa.int64()),
+            }
+        )
+        stream = ArrowTableStream(table, tag_columns=["id"], producer=src)
+        structure = stream.identity_structure()
+        assert structure[0] is src
+
+    def test_with_producer_content_hash_reflects_producer_identity(self):
+        """Same source → same content hash even when underlying tables differ."""
+        src = self._make_named_source("shared_source")
+        t1 = pa.table(
+            {
+                "id": pa.array([1, 2], type=pa.int64()),
+                "v": pa.array([10, 20], type=pa.int64()),
+            }
+        )
+        t2 = pa.table(
+            {
+                "id": pa.array([3, 4], type=pa.int64()),
+                "v": pa.array([30, 40], type=pa.int64()),
+            }
+        )
+        s1 = ArrowTableStream(t1, tag_columns=["id"], producer=src)
+        s2 = ArrowTableStream(t2, tag_columns=["id"], producer=src)
+        assert s1.content_hash() == s2.content_hash()
+
+    def test_with_different_producers_different_hash(self):
+        """Different sources → different content hashes even for identical tables."""
+        src_a = self._make_named_source("source_a")
+        src_b = self._make_named_source("source_b")
+        table = pa.table(
+            {
+                "id": pa.array([1, 2], type=pa.int64()),
+                "v": pa.array([10, 20], type=pa.int64()),
+            }
+        )
+        s1 = ArrowTableStream(table, tag_columns=["id"], producer=src_a)
+        s2 = ArrowTableStream(table, tag_columns=["id"], producer=src_b)
+        assert s1.content_hash() != s2.content_hash()

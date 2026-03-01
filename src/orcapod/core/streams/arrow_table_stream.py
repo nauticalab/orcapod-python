@@ -4,8 +4,8 @@ from itertools import repeat
 from typing import TYPE_CHECKING, Any, cast
 
 from orcapod import contexts
-from orcapod.core.datagrams import Packet, Tag
 from orcapod.core.base import PipelineElementBase
+from orcapod.core.datagrams import Packet, Tag
 from orcapod.core.streams.base import StreamBase
 from orcapod.protocols.core_protocols import PodProtocol, StreamProtocol, TagProtocol
 from orcapod.protocols.hashing_protocols import PipelineElementProtocol
@@ -23,7 +23,7 @@ else:
 logger = logging.getLogger(__name__)
 
 
-class TableStream(StreamBase, PipelineElementBase):
+class ArrowTableStream(StreamBase, PipelineElementBase):
     """
     An immutable stream based on a PyArrow Table.
     This stream is designed to be used with data that is already in a tabular format,
@@ -41,13 +41,13 @@ class TableStream(StreamBase, PipelineElementBase):
         tag_columns: Collection[str] = (),
         system_tag_columns: Collection[str] = (),
         source_info: dict[str, str | None] | None = None,
-        source: PodProtocol | None = None,
+        producer: PodProtocol | None = None,
         upstreams: tuple[StreamProtocol, ...] = (),
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
 
-        self._source = source
+        self._producer = producer
         self._upstreams = upstreams
 
         data_table, data_context_table = arrow_utils.split_by_column_groups(
@@ -128,49 +128,30 @@ class TableStream(StreamBase, PipelineElementBase):
         self._system_tag_schema = system_tag_schema
         self._all_tag_schema = all_tag_schema
         self._packet_schema = packet_schema
-        # self._tag_converter = SemanticConverter.from_semantic_schema(
-        #     schemas.SemanticSchema.from_arrow_schema(
-        #         tag_schema, self._data_context.semantic_type_registry
-        #     )
-        # )
-        # self._packet_converter = SemanticConverter.from_semantic_schema(
-        #     schemas.SemanticSchema.from_arrow_schema(
-        #         packet_schema, self._data_context.semantic_type_registry
-        #     )
-        # )
 
         self._cached_elements: list[tuple[TagProtocol, Packet]] | None = None
         self._update_modified_time()  # set modified time to now
 
     def identity_structure(self) -> Any:
-        """
-        Returns a hash of the content of the stream.
-        This is used to identify the content of the stream.
-        """
-        if self.source is None:
-            table_hash = self.data_context.arrow_hasher.hash_table(
-                self.as_table(
-                    all_info=True,
-                ),
-            )
-            return (
-                self.__class__.__name__,
-                table_hash,
-                self._tag_columns,
-            )
-        return super().identity_structure()
+        if self._producer is not None:
+            return (self._producer, *self._upstreams)
+        return (
+            self.__class__.__name__,
+            self.as_table(all_info=True),
+            self._tag_columns,
+        )
 
     def pipeline_identity_structure(self) -> Any:
-        if self._source is None or not isinstance(
-            self._source, PipelineElementProtocol
+        if self._producer is None or not isinstance(
+            self._producer, PipelineElementProtocol
         ):
             tag_schema, packet_schema = self.output_schema()
             return (tag_schema, packet_schema)
-        return (self._source, *self._upstreams)
+        return (self._producer, *self._upstreams)
 
     @property
-    def source(self) -> PodProtocol | None:
-        return self._source
+    def producer(self) -> PodProtocol | None:
+        return self._producer
 
     @property
     def upstreams(self) -> tuple[StreamProtocol, ...]:

@@ -18,7 +18,7 @@ class ListSource(RootSource):
     (default) or the dict returned by ``tag_function(element, index)``.
 
     The list is converted to an Arrow table at construction time so the same
-    ``TableStream`` is returned from every ``process()`` call.  Source-info
+    ``ArrowTableStream`` is returned from every ``process()`` call.  Source-info
     provenance and schema-hash system tags are added via ``ArrowTableSource``.
 
     Parameters

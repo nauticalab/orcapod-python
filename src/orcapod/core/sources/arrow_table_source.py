@@ -4,7 +4,7 @@ from collections.abc import Collection
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.sources.base import RootSource
-from orcapod.core.streams.table_stream import TableStream
+from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.errors import FieldNotResolvableError
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
@@ -36,8 +36,8 @@ class ArrowTableSource(RootSource):
 
     Strips system columns from the input table, adds per-row source-info
     provenance columns and a system tag column encoding the schema hash, then
-    wraps the result in a ``TableStream``.  Because the table is immutable the
-    same ``TableStream`` is returned from every ``process()`` call.
+    wraps the result in a ``ArrowTableStream``.  Because the table is immutable the
+    same ``ArrowTableStream`` is returned from every ``process()`` call.
 
     Parameters
     ----------
@@ -130,7 +130,7 @@ class ArrowTableSource(RootSource):
         )
 
         self._table = table
-        self._stream = TableStream(
+        self._stream = ArrowTableStream(
             table=self._table,
             tag_columns=self._tag_columns,
             system_tag_columns=self._system_tag_columns,

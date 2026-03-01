@@ -123,7 +123,7 @@ class RootSource(StreamBase):
     # -------------------------------------------------------------------------
 
     @property
-    def source(self) -> None:
+    def producer(self) -> None:
         """Root sources have no upstream source pod."""
         return None
 

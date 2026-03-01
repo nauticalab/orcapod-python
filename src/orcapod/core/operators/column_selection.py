@@ -3,7 +3,7 @@ from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.operators.base import UnaryOperator
-from orcapod.core.streams import TableStream
+from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.system_constants import constants
@@ -45,10 +45,10 @@ class SelectTagColumns(UnaryOperator):
 
         modified_table = table.drop_columns(list(tags_to_drop))
 
-        return TableStream(
+        return ArrowTableStream(
             modified_table,
             tag_columns=new_tag_columns,
-            source=self,
+            producer=self,
             upstreams=(stream,),
         )
 
@@ -126,10 +126,10 @@ class SelectPacketColumns(UnaryOperator):
 
         modified_table = table.drop_columns(packet_columns_to_drop)
 
-        return TableStream(
+        return ArrowTableStream(
             modified_table,
             tag_columns=tag_columns,
-            source=self,
+            producer=self,
             upstreams=(stream,),
         )
 
@@ -205,10 +205,10 @@ class DropTagColumns(UnaryOperator):
 
         modified_table = table.drop_columns(list(columns_to_drop))
 
-        return TableStream(
+        return ArrowTableStream(
             modified_table,
             tag_columns=new_tag_columns,
-            source=self,
+            producer=self,
             upstreams=(stream,),
         )
 
@@ -285,10 +285,10 @@ class DropPacketColumns(UnaryOperator):
 
         modified_table = table.drop_columns(columns_to_drop)
 
-        return TableStream(
+        return ArrowTableStream(
             modified_table,
             tag_columns=tag_columns,
-            source=self,
+            producer=self,
             upstreams=(stream,),
         )
 
@@ -367,8 +367,11 @@ class MapTags(UnaryOperator):
             # drop any tags that are not in the name map
             renamed_table = renamed_table.drop_columns(list(missing_tags))
 
-        return TableStream(
-            renamed_table, tag_columns=new_tag_columns, source=self, upstreams=(stream,)
+        return ArrowTableStream(
+            renamed_table,
+            tag_columns=new_tag_columns,
+            producer=self,
+            upstreams=(stream,),
         )
 
     def validate_unary_input(self, stream: StreamProtocol) -> None:

@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 class StreamBase(TraceableBase, PipelineElementBase):
     @property
     @abstractmethod
-    def source(self) -> PodProtocol | None: ...
+    def producer(self) -> PodProtocol | None: ...
 
     @property
     @abstractmethod
@@ -55,20 +55,20 @@ class StreamBase(TraceableBase, PipelineElementBase):
         - A ``None`` timestamp on an upstream or source means "modification
           time unknown" → conservatively treat as stale.
         - Immutable streams with no upstreams and no source (e.g.
-          ``TableStream``) always return ``False``.
+          ``ArrowTableStream``) always return ``False``.
         """
         own_time: datetime | None = self.last_modified
         if own_time is None:
             return True
         candidates: list[datetime | None] = [s.last_modified for s in self.upstreams]
-        if self.source is not None:
-            candidates.append(self.source.last_modified)
+        if self.producer is not None:
+            candidates.append(self.producer.last_modified)
         return any(t is None or t > own_time for t in candidates)
 
     def computed_label(self) -> str | None:
-        if self.source is not None:
+        if self.producer is not None:
             # use the invocation operation label
-            return self.source.label
+            return self.producer.label
         return None
 
     def join(

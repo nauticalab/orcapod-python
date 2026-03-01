@@ -223,7 +223,7 @@ class DynamicPodStream(StreamBase, PipelineElementBase):
         return (tag_schema, packet_schema)
 
     @property
-    def source(self) -> PodProtocol:
+    def producer(self) -> PodProtocol:
         return self._pod
 
     @property
@@ -327,4 +327,4 @@ class DynamicPodStream(StreamBase, PipelineElementBase):
         return self._cached_stream.iter_packets()
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(kernel={self.source}, upstreams={self.upstreams})"
+        return f"{self.__class__.__name__}(kernel={self.producer}, upstreams={self.upstreams})"
