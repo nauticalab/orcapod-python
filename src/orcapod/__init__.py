@@ -1,7 +1,12 @@
 # from .config import DEFAULT_CONFIG, Config
 # from .core import DEFAULT_TRACKER_MANAGER
 # from .core.packet_function import PythonPacketFunction
-from .core.function_pod import FunctionNode, FunctionPod, function_pod
+from .core.function_pod import (
+    FunctionNode,
+    FunctionPod,
+    PersistentFunctionNode,
+    function_pod,
+)
 from .core.sources import (
     ArrowTableSource,
     DataFrameSource,
@@ -19,6 +24,7 @@ from .core.sources import (
 
 __all__ = [
     "FunctionNode",
+    "PersistentFunctionNode",
     "FunctionPod",
     "function_pod",
     "ArrowTableSource",

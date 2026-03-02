@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from orcapod import contexts
 from orcapod.config import Config
-from orcapod.core.base import TraceableBase
 from orcapod.core.static_output_pod import StaticOutputPod
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
@@ -17,6 +15,7 @@ from orcapod.protocols.core_protocols import (
     TagProtocol,
     TrackerManagerProtocol,
 )
+from orcapod.protocols.core_protocols.operator_pod import OperatorPodProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
@@ -32,32 +31,19 @@ else:
 
 class OperatorNode(StreamBase):
     """
-    A DB-backed stream node that applies an operator to input streams.
+    Non-persistent stream node representing an operator invocation.
 
-    Analogous to ``FunctionNode`` for function pods, but simpler:
-
-    - The operator's ``static_process`` produces a complete output table
-      (no per-packet caching or two-table join).
-    - The output is stored in a single pipeline database table.
-    - Staleness is determined by ``is_stale`` propagation to upstream sources.
-    - ``as_source()`` returns a ``DerivedSource`` for downstream consumption.
-
-    Pipeline path structure::
-
-        pipeline_path_prefix / operator.uri / node:{pipeline_hash}
-
-    Where ``pipeline_hash`` is the schema+topology hash that already encodes
-    tag and packet schema information. No redundant ``tag_schema_hash`` segment.
+    Provides the core stream interface (identity, schema, iteration) without
+    any database persistence. Subclass ``PersistentOperatorNode`` adds DB-backed
+    storage and record deduplication.
     """
 
-    HASH_COLUMN_NAME = "_record_hash"
+    node_type = "operator"
 
     def __init__(
         self,
-        operator: StaticOutputPod,
+        operator: OperatorPodProtocol,
         input_streams: tuple[StreamProtocol, ...] | list[StreamProtocol],
-        pipeline_database: ArrowDatabaseProtocol,
-        pipeline_path_prefix: tuple[str, ...] = (),
         tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
         data_context: str | contexts.DataContext | None = None,
@@ -69,8 +55,6 @@ class OperatorNode(StreamBase):
 
         self._operator = operator
         self._input_streams = tuple(input_streams)
-        self._pipeline_database = pipeline_database
-        self._pipeline_path_prefix = pipeline_path_prefix
 
         super().__init__(
             label=label,
@@ -80,9 +64,6 @@ class OperatorNode(StreamBase):
 
         # Validate inputs eagerly
         self._operator.validate_inputs(*self._input_streams)
-
-        # Compute pipeline node hash (schema+topology only)
-        self._pipeline_node_hash = self.pipeline_hash().to_string()
 
         # Stream-level caching state
         self._cached_output_stream: StreamProtocol | None = None
@@ -110,14 +91,6 @@ class OperatorNode(StreamBase):
     @property
     def upstreams(self) -> tuple[StreamProtocol, ...]:
         return self._input_streams
-
-    @property
-    def pipeline_path(self) -> tuple[str, ...]:
-        return (
-            self._pipeline_path_prefix
-            + self._operator.uri
-            + (f"node:{self._pipeline_node_hash}",)
-        )
 
     def keys(
         self,
@@ -151,6 +124,95 @@ class OperatorNode(StreamBase):
         self._cached_output_stream = None
         self._cached_output_table = None
         self._update_modified_time()
+
+    def run(self) -> None:
+        """Execute the operator if stale or not yet computed."""
+        if self.is_stale:
+            self.clear_cache()
+
+        if self._cached_output_stream is not None:
+            return
+
+        self._cached_output_stream = self._operator.static_process(
+            *self._input_streams,
+        )
+        self._update_modified_time()
+
+    def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
+        self.run()
+        assert self._cached_output_stream is not None
+        return self._cached_output_stream.iter_packets()
+
+    def as_table(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> "pa.Table":
+        self.run()
+        assert self._cached_output_stream is not None
+        return self._cached_output_stream.as_table(columns=columns, all_info=all_info)
+
+    def __repr__(self) -> str:
+        return (
+            f"{type(self).__name__}(operator={self._operator!r}, "
+            f"upstreams={self._input_streams!r})"
+        )
+
+
+class PersistentOperatorNode(OperatorNode):
+    """
+    DB-backed stream node that applies an operator to input streams.
+
+    Extends ``OperatorNode`` with:
+
+    - Pipeline record storage with per-row deduplication
+    - ``get_all_records()`` for retrieving stored results
+    - ``as_source()`` for creating a ``DerivedSource`` from DB records
+
+    Pipeline path structure::
+
+        pipeline_path_prefix / operator.uri / node:{pipeline_hash}
+
+    Where ``pipeline_hash`` is the schema+topology hash that already encodes
+    tag and packet schema information.
+    """
+
+    HASH_COLUMN_NAME = "_record_hash"
+
+    def __init__(
+        self,
+        operator: StaticOutputPod,
+        input_streams: tuple[StreamProtocol, ...] | list[StreamProtocol],
+        pipeline_database: ArrowDatabaseProtocol,
+        pipeline_path_prefix: tuple[str, ...] = (),
+        tracker_manager: TrackerManagerProtocol | None = None,
+        label: str | None = None,
+        data_context: str | contexts.DataContext | None = None,
+        config: Config | None = None,
+    ):
+        super().__init__(
+            operator=operator,
+            input_streams=input_streams,
+            tracker_manager=tracker_manager,
+            label=label,
+            data_context=data_context,
+            config=config,
+        )
+
+        self._pipeline_database = pipeline_database
+        self._pipeline_path_prefix = pipeline_path_prefix
+
+        # Compute pipeline node hash (schema+topology only)
+        self._pipeline_node_hash = self.pipeline_hash().to_string()
+
+    @property
+    def pipeline_path(self) -> tuple[str, ...]:
+        return (
+            self._pipeline_path_prefix
+            + self._operator.uri
+            + (f"node:{self._pipeline_node_hash}",)
+        )
 
     def run(self) -> None:
         """
@@ -201,21 +263,6 @@ class OperatorNode(StreamBase):
 
         self._cached_output_table = output_table.drop(self.HASH_COLUMN_NAME)
         self._update_modified_time()
-
-    def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
-        self.run()
-        assert self._cached_output_stream is not None
-        return self._cached_output_stream.iter_packets()
-
-    def as_table(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> "pa.Table":
-        self.run()
-        assert self._cached_output_stream is not None
-        return self._cached_output_stream.as_table(columns=columns, all_info=all_info)
 
     # ------------------------------------------------------------------
     # DB retrieval
@@ -272,10 +319,4 @@ class OperatorNode(StreamBase):
             origin=self,
             data_context=self.data_context_key,
             config=self.orcapod_config,
-        )
-
-    def __repr__(self) -> str:
-        return (
-            f"OperatorNode(operator={self._operator!r}, "
-            f"upstreams={self._input_streams!r})"
         )

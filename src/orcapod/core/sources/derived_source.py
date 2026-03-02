@@ -10,8 +10,8 @@ from orcapod.utils.lazy_module import LazyModule
 if TYPE_CHECKING:
     import pyarrow as pa
 
-    from orcapod.core.function_pod import FunctionNode
-    from orcapod.core.operator_node import OperatorNode
+    from orcapod.core.function_pod import PersistentFunctionNode
+    from orcapod.core.operator_node import PersistentOperatorNode
 else:
     pa = LazyModule("pyarrow")
 
@@ -20,7 +20,7 @@ class DerivedSource(RootSource):
     """
     A static stream backed by the computed records of a DB-backed stream node.
 
-    Created by ``FunctionNode.as_source()`` or ``OperatorNode.as_source()``,
+    Created by ``PersistentFunctionNode.as_source()`` or ``PersistentOperatorNode.as_source()``,
     this source reads from the pipeline database, presenting the computed
     results as an immutable stream usable as input to downstream processing.
 
@@ -43,7 +43,7 @@ class DerivedSource(RootSource):
 
     def __init__(
         self,
-        origin: "FunctionNode | OperatorNode",
+        origin: "PersistentFunctionNode | PersistentOperatorNode",
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -51,7 +51,7 @@ class DerivedSource(RootSource):
         self._cached_table: pa.Table | None = None
 
     def identity_structure(self) -> Any:
-        # Tied precisely to the specific FunctionNode's data identity
+        # Tied precisely to the specific node's data identity
         return (self._origin.content_hash(),)
 
     def output_schema(

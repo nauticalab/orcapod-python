@@ -108,7 +108,7 @@ class MapPackets(UnaryOperator):
             if k in self.name_map or not self.drop_unmapped
         }
 
-        return tag_schema, new_packet_schema
+        return tag_schema, Schema(new_packet_schema)
 
     def identity_structure(self) -> Any:
         return (
@@ -206,7 +206,7 @@ class MapTags(UnaryOperator):
             if k in self.name_map or not self.drop_unmapped
         }
 
-        return new_tag_schema, packet_schema
+        return Schema(new_tag_schema), packet_schema
 
     def identity_structure(self) -> Any:
         return (

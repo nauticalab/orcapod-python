@@ -111,13 +111,13 @@ class Join(NonZeroInputOperator):
 
         # Canonically order streams by pipeline_hash for deterministic
         # system tag column names regardless of input order (Join is commutative)
-        streams = self.order_input_streams(*streams)
+        ordered_streams = self.order_input_streams(*streams)
 
         COMMON_JOIN_KEY = "_common"
 
         n_char = self.orcapod_config.system_tag_hash_n_char
 
-        stream = streams[0]
+        stream = ordered_streams[0]
 
         tag_keys, _ = [set(k) for k in stream.keys()]
         table = stream.as_table(columns={"source": True, "system_tags": True})
@@ -128,7 +128,7 @@ class Join(NonZeroInputOperator):
             f"{stream.pipeline_hash().to_hex(n_char)}:0",
         )
 
-        for idx, next_stream in enumerate(streams[1:], start=1):
+        for idx, next_stream in enumerate(ordered_streams[1:], start=1):
             next_tag_keys, _ = next_stream.keys()
             next_table = next_stream.as_table(
                 columns={"source": True, "system_tags": True}

@@ -1,21 +1,21 @@
 """
 Tests for DerivedSource — Phase 6 of the redesign.
 
-DerivedSource is returned by FunctionNode.as_source() and presents the
-DB-computed results of a FunctionNode as a static, reusable stream.
+DerivedSource is returned by PersistentFunctionNode.as_source() and presents the
+DB-computed results of a PersistentFunctionNode as a static, reusable stream.
 
 Coverage:
-- Construction via FunctionNode.as_source()
+- Construction via PersistentFunctionNode.as_source()
 - Protocol conformance: RootSource, StreamProtocol, PipelineElementProtocol
 - source == None, upstreams == () (pure stream, no upstream pod)
 - iter_packets() and as_table() raise ValueError before run()
-- Correct data after FunctionNode.run()
-- output_schema() and keys() delegate to origin FunctionNode
-- content_hash() tied to origin FunctionNode's content hash
+- Correct data after PersistentFunctionNode.run()
+- output_schema() and keys() delegate to origin PersistentFunctionNode
+- content_hash() tied to origin PersistentFunctionNode's content hash
 - Same-origin DerivedSources share content_hash
 - pipeline_hash() is schema-only (RootSource base case)
 - Different-data same-schema DerivedSources share pipeline_hash but differ in content_hash
-- Round-trip: FunctionNode → DerivedSource → iter_packets / as_table
+- Round-trip: PersistentFunctionNode → DerivedSource → iter_packets / as_table
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from collections.abc import Mapping
 import pyarrow as pa
 import pytest
 
-from orcapod.core.function_pod import FunctionNode
+from orcapod.core.function_pod import PersistentFunctionNode
 from orcapod.core.sources import DerivedSource, RootSource
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
@@ -40,13 +40,15 @@ from ..conftest import double, make_int_stream
 # ---------------------------------------------------------------------------
 
 
-def _make_node(n: int = 3, db: InMemoryArrowDatabase | None = None) -> FunctionNode:
+def _make_node(
+    n: int = 3, db: InMemoryArrowDatabase | None = None
+) -> PersistentFunctionNode:
     from orcapod.core.packet_function import PythonPacketFunction
 
     if db is None:
         db = InMemoryArrowDatabase()
     pf = PythonPacketFunction(double, output_keys="result")
-    return FunctionNode(
+    return PersistentFunctionNode(
         packet_function=pf,
         input_stream=make_int_stream(n=n),
         pipeline_database=db,
@@ -156,7 +158,7 @@ class TestDerivedSourceAfterRun:
 
 class TestDerivedSourceRoundTrip:
     def test_derived_source_matches_node_output(self):
-        """Data from DerivedSource must exactly match data from FunctionNode."""
+        """Data from DerivedSource must exactly match data from PersistentFunctionNode."""
         node = _make_node(n=5)
         # Collect from node directly
         node_results = sorted(p["result"] for _, p in node.iter_packets())
@@ -184,7 +186,7 @@ class TestDerivedSourceRoundTrip:
         assert node_packet_schema == src_packet_schema
 
     def test_derived_source_can_feed_downstream_node(self):
-        """DerivedSource can be used as input to another FunctionNode."""
+        """DerivedSource can be used as input to another PersistentFunctionNode."""
         from orcapod.core.packet_function import PythonPacketFunction
 
         node1 = _make_node(n=3)
@@ -202,7 +204,7 @@ class TestDerivedSourceRoundTrip:
         result_stream = ArrowTableStream(result_table, tag_columns=["id"])
 
         double_result = PythonPacketFunction(double, output_keys="result")
-        node2 = FunctionNode(
+        node2 = PersistentFunctionNode(
             packet_function=double_result,
             input_stream=result_stream,
             pipeline_database=InMemoryArrowDatabase(),  # fresh DB
@@ -286,7 +288,7 @@ class TestDerivedSourceIdentity:
         assert src1.content_hash() == src2.content_hash()
 
     def test_content_hash_tied_to_origin(self):
-        """DerivedSource content_hash is derived from origin FunctionNode's content_hash."""
+        """DerivedSource content_hash is derived from origin PersistentFunctionNode's content_hash."""
         db = InMemoryArrowDatabase()
         node = _make_node(n=3, db=db)
         node.run()
@@ -309,7 +311,7 @@ class TestDerivedSourceIdentity:
         """
         DerivedSource inherits RootSource.pipeline_identity_structure() = (tag_schema, packet_schema).
         Two DerivedSources with identical schemas share the same pipeline_hash even if
-        the underlying FunctionNode processed different data.
+        the underlying PersistentFunctionNode processed different data.
         """
         node_a = _make_node(n=3)
         node_a.run()
@@ -333,7 +335,7 @@ class TestDerivedSourceIdentity:
         node_double.run()
         src_double = node_double.as_source()
 
-        node_triple = FunctionNode(
+        node_triple = PersistentFunctionNode(
             packet_function=triple_pf,
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
@@ -354,12 +356,12 @@ class TestDerivedSourceIdentity:
         pf = PythonPacketFunction(double, output_keys="result")
         stream = make_int_stream(n=3)
 
-        node_a = FunctionNode(
+        node_a = PersistentFunctionNode(
             packet_function=pf,
             input_stream=stream,
             pipeline_database=InMemoryArrowDatabase(),
         )
-        node_b = FunctionNode(
+        node_b = PersistentFunctionNode(
             packet_function=pf,
             input_stream=stream,
             pipeline_database=InMemoryArrowDatabase(),

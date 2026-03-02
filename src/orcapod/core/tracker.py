@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections import defaultdict
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
-from orcapod.core.base import TraceableBase
+from orcapod.core.function_pod import FunctionNode
+from orcapod.core.operator_node import OperatorNode
 from orcapod.protocols import core_protocols as cp
 
 if TYPE_CHECKING:
@@ -59,8 +59,7 @@ class BasicTrackerManager:
         label: str | None = None,
     ) -> None:
         """
-        Record the output stream of a pod invocation in the tracker.
-        This is used to track the computational graph and the invocations of pods.
+        Record the invocation of a pod in the tracker.
         """
         for tracker in self.get_active_trackers():
             tracker.record_pod_invocation(pod, upstreams, label=label)
@@ -72,8 +71,7 @@ class BasicTrackerManager:
         label: str | None = None,
     ) -> None:
         """
-        Record the output stream of a pod invocation in the tracker.
-        This is used to track the computational graph and the invocations of pods.
+        Record the invocation of a packet function to the tracker.
         """
         for tracker in self.get_active_trackers():
             tracker.record_packet_function_invocation(
@@ -131,64 +129,55 @@ class AutoRegisteringContextBasedTracker(ABC):
         self.set_active(False)
 
 
-class Invocation(TraceableBase):
-    def __init__(
-        self,
-        kernel: cp.PodProtocol,
-        upstreams: tuple[cp.StreamProtocol, ...] = (),
-        label: str | None = None,
-    ) -> None:
-        """
-        Represents an invocation of a kernel with its upstream streams.
-        This is used to track the computational graph and the invocations of kernels.
-        """
-        super().__init__(label=label)
-        self.kernel = kernel
-        self.upstreams = upstreams
+# ---------------------------------------------------------------------------
+# SourceNode
+# ---------------------------------------------------------------------------
 
-    def parents(self) -> tuple["Invocation", ...]:
-        parent_invoctions = []
-        for stream in self.upstreams:
-            if stream.producer is not None:
-                parent_invoctions.append(Invocation(stream.producer, stream.upstreams))
-            else:
-                # import JIT to avoid circular imports
-                from orcapod.core.sources.base import StreamSource
 
-                source = StreamSource(stream)
-                parent_invoctions.append(Invocation(source))
+class SourceNode:
+    """Represents a root source stream in the computation graph."""
 
-        return tuple(parent_invoctions)
+    node_type = "source"
 
-    def computed_label(self) -> str | None:
-        """
-        Compute a label for this invocation based on its kernel and upstreams.
-        If label is not explicitly set for this invocation and computed_label returns a valid value,
-        it will be used as label of this invocation.
-        """
-        return self.kernel.label
+    def __init__(self, stream: cp.StreamProtocol, label: str | None = None) -> None:
+        self.stream = stream
+        self.label = label or getattr(stream, "label", None)
 
-    def identity_structure(self) -> Any:
-        """
-        Return a structure that represents the identity of this invocation.
-        This is used to uniquely identify the invocation in the tracker.
-        """
-        # if no upstreams, then we want to identify the source directly
-        if not self.upstreams:
-            return self.kernel.identity_structure()
-        return self.kernel.identity_structure()
+    @property
+    def producer(self) -> None:
+        return None
+
+    @property
+    def upstreams(self) -> tuple[()]:
+        return ()
 
     def __repr__(self) -> str:
-        return f"Invocation(kernel={self.kernel}, upstreams={self.upstreams}, label={self.label})"
+        return f"SourceNode(stream={self.stream!r}, label={self.label!r})"
+
+
+GraphNode = SourceNode | FunctionNode | OperatorNode
+# Full type once FunctionNode/OperatorNode are imported:
+#   GraphNode = SourceNode | FunctionNode | OperatorNode
+# Kept as Union[SourceNode, Any] to avoid circular imports.
+
+
+# ---------------------------------------------------------------------------
+# GraphTracker
+# ---------------------------------------------------------------------------
 
 
 class GraphTracker(AutoRegisteringContextBasedTracker):
     """
-    A tracker that records the invocations of operations and generates a graph
-    of the invocations and their dependencies.
-    """
+    A tracker that records invocations and builds a directed graph of
+    typed graph nodes (FunctionNode, OperatorNode, SourceNode) connected
+    by their upstream dependencies.
 
-    # Thread-local storage to track active trackers
+    Upstream resolution strategy:
+    - stream.producer is None → root source → create/reuse SourceNode
+    - stream.producer matched by id() → return the recorded node
+    - stream.producer is a FunctionPod → look up via its packet_function
+    - Unknown producer → treat as source (graceful fallback)
+    """
 
     def __init__(
         self,
@@ -196,43 +185,57 @@ class GraphTracker(AutoRegisteringContextBasedTracker):
         **kwargs,
     ) -> None:
         super().__init__(tracker_manager=tracker_manager)
+        # id(producer) → node  (Python object identity; safe within the tracker's lifetime)
+        self._producer_to_node: dict[int, GraphNode] = {}
+        # id(stream) → SourceNode  (dedup root sources)
+        self._source_to_node: dict[int, SourceNode] = {}
+        # ordered list of all recorded nodes
+        self._nodes: list[GraphNode] = []
 
-        # Dictionary to map kernels to the streams they have invoked
-        # This is used to track the computational graph and the invocations of kernels
-        self.kernel_invocations: set[Invocation] = set()
-        self.invocation_to_pod_lut: dict[Invocation, cp.PodProtocol] = {}
-        self.invocation_to_source_lut: dict[Invocation, cp.StreamProtocol] = {}
+    def _get_or_create_source_node(self, stream: cp.StreamProtocol) -> SourceNode:
+        sid = id(stream)
+        if sid not in self._source_to_node:
+            node = SourceNode(stream=stream, label=getattr(stream, "label", None))
+            self._source_to_node[sid] = node
+            self._nodes.append(node)
+        return self._source_to_node[sid]
 
-    def _record_kernel_and_get_invocation(
+    def _resolve_upstream_node(self, stream: cp.StreamProtocol) -> GraphNode:
+        if stream.producer is None:
+            return self._get_or_create_source_node(stream)
+        # Operator match: stream.producer is the pod itself
+        if id(stream.producer) in self._producer_to_node:
+            return self._producer_to_node[id(stream.producer)]
+        # Function pod match: stream.producer is a FunctionPod,
+        # look up via its packet_function
+        pf = getattr(stream.producer, "packet_function", None)
+        if pf is not None and id(pf) in self._producer_to_node:
+            return self._producer_to_node[id(pf)]
+        # Unknown producer — treat as source
+        return self._get_or_create_source_node(stream)
+
+    def _resolve_upstream_nodes(
+        self, upstreams: tuple[cp.StreamProtocol, ...]
+    ) -> tuple[GraphNode, ...]:
+        return tuple(self._resolve_upstream_node(s) for s in upstreams)
+
+    def record_packet_function_invocation(
         self,
-        kernel: cp.PodProtocol,
-        upstreams: tuple[cp.StreamProtocol, ...],
-        label: str | None = None,
-    ) -> Invocation:
-        invocation = Invocation(kernel, upstreams, label=label)
-        self.kernel_invocations.add(invocation)
-        return invocation
-
-    def record_kernel_invocation(
-        self,
-        kernel: cp.PodProtocol,
-        upstreams: tuple[cp.StreamProtocol, ...],
+        packet_function: cp.PacketFunctionProtocol,
+        input_stream: cp.StreamProtocol,
         label: str | None = None,
     ) -> None:
-        """
-        Record the output stream of a kernel invocation in the tracker.
-        This is used to track the computational graph and the invocations of kernels.
-        """
-        self._record_kernel_and_get_invocation(kernel, upstreams, label)
+        from orcapod.core.function_pod import FunctionNode
 
-    def record_source_invocation(
-        self, source: cp.StreamProtocol, label: str | None = None
-    ) -> None:
-        """
-        Record the output stream of a source invocation in the tracker.
-        """
-        invocation = self._record_kernel_and_get_invocation(source, (), label)
-        self.invocation_to_source_lut[invocation] = source
+        upstream_nodes = self._resolve_upstream_nodes((input_stream,))
+        node = FunctionNode(
+            packet_function=packet_function,
+            input_stream=input_stream,
+            label=label,
+        )
+        node._upstream_graph_nodes = upstream_nodes
+        self._producer_to_node[id(packet_function)] = node
+        self._nodes.append(node)
 
     def record_pod_invocation(
         self,
@@ -240,30 +243,38 @@ class GraphTracker(AutoRegisteringContextBasedTracker):
         upstreams: tuple[cp.StreamProtocol, ...] = (),
         label: str | None = None,
     ) -> None:
-        """
-        Record the output stream of a pod invocation in the tracker.
-        """
-        invocation = self._record_kernel_and_get_invocation(pod, upstreams, label)
-        self.invocation_to_pod_lut[invocation] = pod
+        from orcapod.core.operator_node import OperatorNode
 
-    def reset(self) -> dict[cp.PodProtocol, list[cp.StreamProtocol]]:
-        """
-        Reset the tracker and return the recorded invocations.
-        """
-        recorded_streams = self.kernel_to_invoked_stream_lut
-        self.kernel_to_invoked_stream_lut = defaultdict(list)
-        return recorded_streams
+        upstream_nodes = self._resolve_upstream_nodes(upstreams)
+        node = OperatorNode(
+            operator=pod,
+            input_streams=upstreams,
+            label=label,
+        )
+        node._upstream_graph_nodes = upstream_nodes
+        self._producer_to_node[id(pod)] = node
+        self._nodes.append(node)
+
+    @property
+    def nodes(self) -> list[GraphNode]:
+        return list(self._nodes)
+
+    def reset(self) -> None:
+        """Clear all recorded state."""
+        self._producer_to_node.clear()
+        self._source_to_node.clear()
+        self._nodes.clear()
 
     def generate_graph(self) -> "nx.DiGraph":
         import networkx as nx
 
         G = nx.DiGraph()
-
-        # Add edges for each invocation
-        for invocation in self.kernel_invocations:
-            G.add_node(invocation)
-            for upstream_invocation in invocation.parents():
-                G.add_edge(upstream_invocation, invocation)
+        for node in self._nodes:
+            G.add_node(node)
+            upstream_nodes = getattr(node, "_upstream_graph_nodes", None)
+            if upstream_nodes is not None:
+                for upstream in upstream_nodes:
+                    G.add_edge(upstream, node)
         return G
 
 

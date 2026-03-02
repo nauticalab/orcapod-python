@@ -1,5 +1,5 @@
 """
-Tests for FunctionNode covering:
+Tests for PersistentFunctionNode covering:
 - Construction, pipeline_path, uri
 - output_schema and keys
 - process_packet and add_pipeline_record
@@ -19,7 +19,7 @@ import pytest
 
 from orcapod.core.datagrams import Packet, Tag
 from orcapod.core.function_pod import (
-    FunctionNode,
+    PersistentFunctionNode,
     FunctionPod,
 )
 from orcapod.core.packet_function import PythonPacketFunction
@@ -41,10 +41,10 @@ def _make_node(
     pf: PythonPacketFunction,
     n: int = 3,
     db: InMemoryArrowDatabase | None = None,
-) -> FunctionNode:
+) -> PersistentFunctionNode:
     if db is None:
         db = InMemoryArrowDatabase()
-    return FunctionNode(
+    return PersistentFunctionNode(
         packet_function=pf,
         input_stream=make_int_stream(n=n),
         pipeline_database=db,
@@ -55,7 +55,7 @@ def _make_node_with_system_tags(
     pf: PythonPacketFunction,
     n: int = 3,
     db: InMemoryArrowDatabase | None = None,
-) -> FunctionNode:
+) -> PersistentFunctionNode:
     """Build a node whose input stream has an explicit system-tag column ('run')."""
     if db is None:
         db = InMemoryArrowDatabase()
@@ -67,14 +67,14 @@ def _make_node_with_system_tags(
         }
     )
     stream = ArrowTableStream(table, tag_columns=["id"], system_tag_columns=["run"])
-    return FunctionNode(
+    return PersistentFunctionNode(
         packet_function=pf,
         input_stream=stream,
         pipeline_database=db,
     )
 
 
-def _fill_node(node: FunctionNode) -> None:
+def _fill_node(node: PersistentFunctionNode) -> None:
     """Process all packets so the DB is populated."""
     node.run()
 
@@ -86,10 +86,10 @@ def _fill_node(node: FunctionNode) -> None:
 
 class TestFunctionNodeConstruction:
     @pytest.fixture
-    def node(self, double_pf) -> FunctionNode:
+    def node(self, double_pf) -> PersistentFunctionNode:
         db = InMemoryArrowDatabase()
         stream = make_int_stream(n=3)
-        return FunctionNode(
+        return PersistentFunctionNode(
             packet_function=double_pf,
             input_stream=stream,
             pipeline_database=db,
@@ -143,7 +143,7 @@ class TestFunctionNodeConstruction:
             tag_columns=["id"],
         )
         with pytest.raises(ValueError):
-            FunctionNode(
+            PersistentFunctionNode(
                 packet_function=double_pf,
                 input_stream=bad_stream,
                 pipeline_database=db,
@@ -151,7 +151,7 @@ class TestFunctionNodeConstruction:
 
     def test_result_database_defaults_to_pipeline_database(self, double_pf):
         db = InMemoryArrowDatabase()
-        node = FunctionNode(
+        node = PersistentFunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
@@ -161,7 +161,7 @@ class TestFunctionNodeConstruction:
     def test_separate_result_database_accepted(self, double_pf):
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
-        node = FunctionNode(
+        node = PersistentFunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=2),
             pipeline_database=pipeline_db,
@@ -177,15 +177,15 @@ class TestFunctionNodeConstruction:
 
 class TestFunctionNodeOutputSchema:
     @pytest.fixture
-    def node(self, double_pf) -> FunctionNode:
+    def node(self, double_pf) -> PersistentFunctionNode:
         db = InMemoryArrowDatabase()
-        return FunctionNode(
+        return PersistentFunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
 
-    def test_output_schema_returns_two_mappings(self, node: FunctionNode):
+    def test_output_schema_returns_two_mappings(self, node: PersistentFunctionNode):
         tag_schema, packet_schema = node.output_schema()
         assert isinstance(tag_schema, Mapping)
         assert isinstance(packet_schema, Mapping)
@@ -213,9 +213,9 @@ class TestFunctionNodeOutputSchema:
 
 class TestFunctionNodeProcessPacket:
     @pytest.fixture
-    def node(self, double_pf) -> FunctionNode:
+    def node(self, double_pf) -> PersistentFunctionNode:
         db = InMemoryArrowDatabase()
-        return FunctionNode(
+        return PersistentFunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
@@ -274,9 +274,9 @@ class TestFunctionNodeProcessPacket:
 
 class TestFunctionNodeStreamInterface:
     @pytest.fixture
-    def node(self, double_pf) -> FunctionNode:
+    def node(self, double_pf) -> PersistentFunctionNode:
         db = InMemoryArrowDatabase()
-        return FunctionNode(
+        return PersistentFunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
@@ -306,12 +306,12 @@ class TestFunctionNodeStreamInterface:
 class TestFunctionNodePipelineIdentity:
     def test_pipeline_hash_same_schema_same_hash(self, double_pf):
         db = InMemoryArrowDatabase()
-        node1 = FunctionNode(
+        node1 = PersistentFunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
-        node2 = FunctionNode(
+        node2 = PersistentFunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=5),  # different data, same schema
             pipeline_database=db,
@@ -331,10 +331,10 @@ class TestFunctionNodePipelineIdentity:
             ),
             tag_columns=["id"],
         )
-        node_a = FunctionNode(
+        node_a = PersistentFunctionNode(
             packet_function=double_pf, input_stream=stream_a, pipeline_database=db
         )
-        node_b = FunctionNode(
+        node_b = PersistentFunctionNode(
             packet_function=double_pf, input_stream=stream_b, pipeline_database=db
         )
         # Same schema → same pipeline hash
@@ -350,12 +350,12 @@ class TestFunctionNodePipelineIdentity:
         """pipeline_node_hash in uri must be derived from pipeline_hash (schema-only),
         not content_hash (data-inclusive)."""
         db = InMemoryArrowDatabase()
-        node1 = FunctionNode(
+        node1 = PersistentFunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
-        node2 = FunctionNode(
+        node2 = PersistentFunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=99),  # different data
             pipeline_database=db,
@@ -386,7 +386,7 @@ class TestGetAllRecordsEmpty:
 
 class TestGetAllRecordsValues:
     @pytest.fixture
-    def filled_node(self, double_pf) -> FunctionNode:
+    def filled_node(self, double_pf) -> PersistentFunctionNode:
         node = _make_node(double_pf, n=4)
         _fill_node(node)
         return node
@@ -428,7 +428,7 @@ class TestGetAllRecordsValues:
 
 class TestGetAllRecordsMetaColumns:
     @pytest.fixture
-    def filled_node(self, double_pf) -> FunctionNode:
+    def filled_node(self, double_pf) -> PersistentFunctionNode:
         node = _make_node(double_pf, n=3)
         _fill_node(node)
         return node
@@ -477,7 +477,7 @@ class TestGetAllRecordsMetaColumns:
 
 class TestGetAllRecordsSourceColumns:
     @pytest.fixture
-    def filled_node(self, double_pf) -> FunctionNode:
+    def filled_node(self, double_pf) -> PersistentFunctionNode:
         node = _make_node(double_pf, n=3)
         _fill_node(node)
         return node
@@ -512,7 +512,7 @@ class TestGetAllRecordsSourceColumns:
 
 class TestGetAllRecordsSystemTagColumns:
     @pytest.fixture
-    def filled_node_with_sys_tags(self, double_pf) -> FunctionNode:
+    def filled_node_with_sys_tags(self, double_pf) -> PersistentFunctionNode:
         node = _make_node_with_system_tags(double_pf, n=3)
         _fill_node(node)
         return node
@@ -553,13 +553,13 @@ class TestGetAllRecordsSystemTagColumns:
 
 class TestGetAllRecordsAllInfo:
     @pytest.fixture
-    def filled_node(self, double_pf) -> FunctionNode:
+    def filled_node(self, double_pf) -> PersistentFunctionNode:
         node = _make_node(double_pf, n=3)
         _fill_node(node)
         return node
 
     @pytest.fixture
-    def filled_node_with_sys_tags(self, double_pf) -> FunctionNode:
+    def filled_node_with_sys_tags(self, double_pf) -> PersistentFunctionNode:
         node = _make_node_with_system_tags(double_pf, n=3)
         _fill_node(node)
         return node
@@ -617,7 +617,7 @@ class TestFunctionNodePipelinePathPrefix:
     def test_prefix_prepended_to_pipeline_path(self, double_pf):
         db = InMemoryArrowDatabase()
         prefix = ("my_pipeline", "stage_1")
-        node = FunctionNode(
+        node = PersistentFunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
@@ -628,7 +628,7 @@ class TestFunctionNodePipelinePathPrefix:
 
     def test_no_prefix_pipeline_path_starts_with_pf_uri(self, double_pf):
         db = InMemoryArrowDatabase()
-        node = FunctionNode(
+        node = PersistentFunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
@@ -646,7 +646,7 @@ class TestFunctionNodePipelinePathPrefix:
 class TestFunctionNodeResultPath:
     def test_result_records_stored_under_result_suffix_path(self, double_pf):
         db = InMemoryArrowDatabase()
-        node = FunctionNode(
+        node = PersistentFunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=2),
             pipeline_database=db,

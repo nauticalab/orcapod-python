@@ -1,5 +1,5 @@
 """
-Tests for FunctionNode's stream interface covering:
+Tests for PersistentFunctionNode's stream interface covering:
 - iter_packets: correctness, repeatability, __iter__
 - as_table: correctness, ColumnConfig (content_hash, sort_by_tags)
 - output_schema and keys
@@ -19,7 +19,7 @@ import pytest
 
 from collections.abc import Mapping
 
-from orcapod.core.function_pod import FunctionNode, FunctionPod
+from orcapod.core.function_pod import PersistentFunctionNode, FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
@@ -37,17 +37,17 @@ def _make_node(
     pf: PythonPacketFunction,
     n: int = 3,
     db: InMemoryArrowDatabase | None = None,
-) -> FunctionNode:
+) -> PersistentFunctionNode:
     if db is None:
         db = InMemoryArrowDatabase()
-    return FunctionNode(
+    return PersistentFunctionNode(
         packet_function=pf,
         input_stream=make_int_stream(n=n),
         pipeline_database=db,
     )
 
 
-def _fill_node(node: FunctionNode) -> None:
+def _fill_node(node: PersistentFunctionNode) -> None:
     """Process all packets so the DB is populated."""
     node.run()
 
@@ -59,9 +59,9 @@ def _fill_node(node: FunctionNode) -> None:
 
 class TestFunctionNodeStreamBasic:
     @pytest.fixture
-    def node(self, double_pf) -> FunctionNode:
+    def node(self, double_pf) -> PersistentFunctionNode:
         db = InMemoryArrowDatabase()
-        return FunctionNode(
+        return PersistentFunctionNode(
             packet_function=double_pf,
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
@@ -130,7 +130,7 @@ class TestFunctionNodeColumnConfig:
             }
         )
         input_stream = ArrowTableStream(reversed_table, tag_columns=["id"])
-        node = FunctionNode(
+        node = PersistentFunctionNode(
             packet_function=double_pf,
             input_stream=input_stream,
             pipeline_database=db,
@@ -335,7 +335,7 @@ class TestFunctionNodeStaleness:
     # --- is_stale ---
 
     def test_is_stale_false_immediately_after_creation(self, double_pf):
-        """A freshly created FunctionNode whose upstream has not changed is not stale."""
+        """A freshly created PersistentFunctionNode whose upstream has not changed is not stale."""
         node = _make_node(double_pf, n=3)
         assert not node.is_stale
 
@@ -344,7 +344,7 @@ class TestFunctionNodeStaleness:
 
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
-        node = FunctionNode(
+        node = PersistentFunctionNode(
             packet_function=double_pf,
             input_stream=input_stream,
             pipeline_database=db,
@@ -361,7 +361,7 @@ class TestFunctionNodeStaleness:
 
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
-        node = FunctionNode(
+        node = PersistentFunctionNode(
             packet_function=double_pf,
             input_stream=input_stream,
             pipeline_database=db,
@@ -404,7 +404,7 @@ class TestFunctionNodeStaleness:
 
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
-        node = FunctionNode(
+        node = PersistentFunctionNode(
             packet_function=double_pf,
             input_stream=input_stream,
             pipeline_database=db,
@@ -424,7 +424,7 @@ class TestFunctionNodeStaleness:
 
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
-        node = FunctionNode(
+        node = PersistentFunctionNode(
             packet_function=double_pf,
             input_stream=input_stream,
             pipeline_database=db,

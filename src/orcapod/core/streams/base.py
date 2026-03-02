@@ -6,6 +6,8 @@ from collections.abc import Collection, Iterator, Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from annotated_types import Not
+
 from orcapod.core.base import TraceableBase
 from orcapod.protocols.core_protocols import (
     PacketProtocol,
@@ -40,6 +42,15 @@ class StreamBase(TraceableBase):
     @property
     @abstractmethod
     def upstreams(self) -> tuple[StreamProtocol, ...]: ...
+
+    def identity_structure(self) -> Any:
+        if self.producer is not None:
+            return (self.producer, self.producer.argument_symmetry(self.upstreams))
+
+        raise NotImplementedError("StreamBase.identity_structure")
+
+    def pipeline_identity_structure(self) -> Any:
+        return self.identity_structure()
 
     @property
     def is_stale(self) -> bool:

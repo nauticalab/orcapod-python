@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import orcapod.protocols.core_protocols.execution_engine
 from orcapod import contexts
-from orcapod.core.tracker import GraphTracker, Invocation
+from orcapod.core.tracker import GraphTracker
 from orcapod.pipeline.nodes import KernelNode, PodNodeProtocol
 from orcapod.protocols import core_protocols as cp
 from orcapod.protocols import database_protocols as dbp

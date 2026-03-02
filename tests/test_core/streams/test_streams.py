@@ -5,11 +5,14 @@ Verifies that StreamBase and ArrowTableStream correctly implement the StreamProt
 and tests the core behaviour of ArrowTableStream.
 """
 
+from typing import cast
+
 import pyarrow as pa
 import pytest
 
 from orcapod.core.streams import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
+from orcapod.protocols.core_protocols.pod import PodProtocol
 from orcapod.protocols.core_protocols.streams import StreamProtocol
 from orcapod.types import Schema
 
@@ -47,18 +50,11 @@ class TestStreamBasePipelineElementBase:
 
     def test_stream_base_subclass_missing_abstract_methods_raises(self):
         """
-        StreamBase is abstract w.r.t. both identity_structure() and
-        pipeline_identity_structure(). Omitting either raises TypeError at instantiation.
+        StreamBase is abstract w.r.t. both producer and upstreams properties
         """
 
         class IncompleteStream(StreamBase):
-            @property
-            def producer(self):
-                return None
-
-            @property
-            def upstreams(self):
-                return ()
+            # producer and upstreams properties intentionally omitted
 
             def output_schema(self, *, columns=None, all_info=False):
                 return Schema.empty(), Schema.empty()
@@ -72,14 +68,12 @@ class TestStreamBasePipelineElementBase:
             def as_table(self, *, columns=None, all_info=False):
                 return pa.table({})
 
-            # identity_structure and pipeline_identity_structure intentionally omitted
-
         with pytest.raises(TypeError):
             IncompleteStream()  # type: ignore[abstract]
 
-    def test_stream_base_alone_plus_pipeline_identity_satisfies_stream_protocol(self):
+    def test_stream_base_alone_plus_properties_satisfies_stream_protocol(self):
         """
-        A class that only inherits StreamBase and implements both abstract methods
+        A class that only inherits StreamBase and implements both abstract properties
         satisfies StreamProtocol — pipeline_hash() is provided by StreamBase via
         TraceableBase which includes PipelineElementBase.
         """
@@ -104,12 +98,6 @@ class TestStreamBasePipelineElementBase:
 
             def as_table(self, *, columns=None, all_info=False):
                 return pa.table({})
-
-            def identity_structure(self):
-                return ("fixed",)
-
-            def pipeline_identity_structure(self):
-                return ("fixed",)
 
         stream = FixedStreamBaseOnly()
         assert isinstance(stream, StreamProtocol)
@@ -394,11 +382,11 @@ class TestArrowTableStreamIdentityStructure:
 
     # -- with-source branch (source is not None) -----------------------------
 
-    def _make_named_source(self, name: str):
+    def _make_named_producer(self, name: str) -> PodProtocol:
         """Return a minimal ContentIdentifiableBase with a fixed identity."""
         from orcapod.core.base import ContentIdentifiableBase
 
-        class NamedSource(ContentIdentifiableBase):
+        class NamedProducer(ContentIdentifiableBase):
             def __init__(self, n: str) -> None:
                 super().__init__()
                 self._name = n
@@ -406,11 +394,11 @@ class TestArrowTableStreamIdentityStructure:
             def identity_structure(self):
                 return (self._name,)
 
-        return NamedSource(name)
+        return cast(PodProtocol, NamedProducer(name))
 
     def test_with_producer_identity_structure_starts_with_producer(self):
         """identity_structure() returns (source, *upstreams) when source is set."""
-        src = self._make_named_source("src_a")
+        src = self._make_named_producer("src_a")
         table = pa.table(
             {
                 "id": pa.array([1, 2], type=pa.int64()),
@@ -423,7 +411,7 @@ class TestArrowTableStreamIdentityStructure:
 
     def test_with_producer_content_hash_reflects_producer_identity(self):
         """Same source → same content hash even when underlying tables differ."""
-        src = self._make_named_source("shared_source")
+        src = self._make_named_producer("shared_source")
         t1 = pa.table(
             {
                 "id": pa.array([1, 2], type=pa.int64()),
@@ -442,8 +430,8 @@ class TestArrowTableStreamIdentityStructure:
 
     def test_with_different_producers_different_hash(self):
         """Different sources → different content hashes even for identical tables."""
-        src_a = self._make_named_source("source_a")
-        src_b = self._make_named_source("source_b")
+        src_a = self._make_named_producer("source_a")
+        src_b = self._make_named_producer("source_b")
         table = pa.table(
             {
                 "id": pa.array([1, 2], type=pa.int64()),
