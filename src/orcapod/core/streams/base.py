@@ -6,8 +6,6 @@ from collections.abc import Collection, Iterator, Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from annotated_types import Not
-
 from orcapod.core.base import TraceableBase
 from orcapod.protocols.core_protocols import (
     PacketProtocol,

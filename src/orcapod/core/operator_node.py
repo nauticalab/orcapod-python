@@ -85,12 +85,16 @@ class OperatorNode(StreamBase):
     # ------------------------------------------------------------------
 
     @property
-    def producer(self) -> StaticOutputPod:
+    def producer(self) -> OperatorPodProtocol:
         return self._operator
 
     @property
     def upstreams(self) -> tuple[StreamProtocol, ...]:
         return self._input_streams
+
+    @upstreams.setter
+    def upstreams(self, value: tuple[StreamProtocol, ...]) -> None:
+        self._input_streams = value
 
     def keys(
         self,
@@ -133,7 +137,7 @@ class OperatorNode(StreamBase):
         if self._cached_output_stream is not None:
             return
 
-        self._cached_output_stream = self._operator.static_process(
+        self._cached_output_stream = self._operator.process(
             *self._input_streams,
         )
         self._update_modified_time()
@@ -229,7 +233,7 @@ class PersistentOperatorNode(OperatorNode):
             return
 
         # Compute
-        self._cached_output_stream = self._operator.static_process(
+        self._cached_output_stream = self._operator.process(
             *self._input_streams,
         )
 

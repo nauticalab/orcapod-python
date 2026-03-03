@@ -41,7 +41,7 @@ def _make_node(
     if db is None:
         db = InMemoryArrowDatabase()
     return PersistentFunctionNode(
-        packet_function=pf,
+        function_pod=FunctionPod(packet_function=pf),
         input_stream=make_int_stream(n=n),
         pipeline_database=db,
     )
@@ -62,7 +62,7 @@ class TestFunctionNodeStreamBasic:
     def node(self, double_pf) -> PersistentFunctionNode:
         db = InMemoryArrowDatabase()
         return PersistentFunctionNode(
-            packet_function=double_pf,
+            function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
@@ -131,7 +131,7 @@ class TestFunctionNodeColumnConfig:
         )
         input_stream = ArrowTableStream(reversed_table, tag_columns=["id"])
         node = PersistentFunctionNode(
-            packet_function=double_pf,
+            function_pod=FunctionPod(packet_function=double_pf),
             input_stream=input_stream,
             pipeline_database=db,
         )
@@ -345,7 +345,7 @@ class TestFunctionNodeStaleness:
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
         node = PersistentFunctionNode(
-            packet_function=double_pf,
+            function_pod=FunctionPod(packet_function=double_pf),
             input_stream=input_stream,
             pipeline_database=db,
         )
@@ -362,7 +362,7 @@ class TestFunctionNodeStaleness:
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
         node = PersistentFunctionNode(
-            packet_function=double_pf,
+            function_pod=FunctionPod(packet_function=double_pf),
             input_stream=input_stream,
             pipeline_database=db,
         )
@@ -405,7 +405,7 @@ class TestFunctionNodeStaleness:
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
         node = PersistentFunctionNode(
-            packet_function=double_pf,
+            function_pod=FunctionPod(packet_function=double_pf),
             input_stream=input_stream,
             pipeline_database=db,
         )
@@ -425,7 +425,7 @@ class TestFunctionNodeStaleness:
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
         node = PersistentFunctionNode(
-            packet_function=double_pf,
+            function_pod=FunctionPod(packet_function=double_pf),
             input_stream=input_stream,
             pipeline_database=db,
         )

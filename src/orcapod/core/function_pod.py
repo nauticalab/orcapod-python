@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 from orcapod import contexts
 from orcapod.config import Config
 from orcapod.core.base import TraceableBase
-from orcapod.core.operators import Join
 from orcapod.core.packet_function import CachedPacketFunction, PythonPacketFunction
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
@@ -87,6 +86,8 @@ class _FunctionPodBase(TraceableBase):
         )
 
     def multi_stream_handler(self) -> PodProtocol:
+        from orcapod.core.operators import Join
+
         return Join()
 
     def validate_inputs(self, *streams: StreamProtocol) -> None:
@@ -217,8 +218,8 @@ class FunctionPod(_FunctionPodBase):
 
         # perform input stream schema validation
         self._validate_input_schema(input_stream.output_schema()[1])
-        self.tracker_manager.record_packet_function_invocation(
-            self.packet_function, input_stream, label=label
+        self.tracker_manager.record_function_pod_invocation(
+            self, input_stream, label=label
         )
         output_stream = FunctionPodStream(
             function_pod=self,
@@ -575,7 +576,7 @@ class FunctionNode(StreamBase):
 
     def __init__(
         self,
-        packet_function: PacketFunctionProtocol,
+        function_pod: FunctionPodProtocol,
         input_stream: StreamProtocol,
         tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
@@ -585,16 +586,10 @@ class FunctionNode(StreamBase):
         if tracker_manager is None:
             tracker_manager = DEFAULT_TRACKER_MANAGER
         self.tracker_manager = tracker_manager
-        self._packet_function = packet_function
+        self._packet_function = function_pod.packet_function
 
         # FunctionPod used for the `producer` property and pipeline identity
-        self._function_pod = FunctionPod(
-            packet_function=packet_function,
-            label=label,
-            data_context=data_context,
-            config=config,
-        )
-
+        self._function_pod = function_pod
         super().__init__(
             label=label,
             data_context=data_context,
@@ -603,7 +598,7 @@ class FunctionNode(StreamBase):
 
         # validate the input stream
         _, incoming_packet_types = input_stream.output_schema()
-        expected_packet_schema = packet_function.input_packet_schema
+        expected_packet_schema = self._packet_function.input_packet_schema
         if not schema_utils.check_schema_compatibility(
             incoming_packet_types, expected_packet_schema
         ):
@@ -624,12 +619,18 @@ class FunctionNode(StreamBase):
         self._cached_content_hash_column: pa.Array | None = None
 
     @property
-    def producer(self) -> FunctionPod:
+    def producer(self) -> FunctionPodProtocol:
         return self._function_pod
 
     @property
     def upstreams(self) -> tuple[StreamProtocol, ...]:
         return (self._input_stream,)
+
+    @upstreams.setter
+    def upstreams(self, value: tuple[StreamProtocol, ...]) -> None:
+        if len(value) != 1:
+            raise ValueError("FunctionPod can only have one upstream")
+        self._input_stream = value[0]
 
     def keys(
         self,
@@ -659,9 +660,6 @@ class FunctionNode(StreamBase):
         self._cached_output_table = None
         self._cached_content_hash_column = None
         self._update_modified_time()
-
-    def __iter__(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
-        return self.iter_packets()
 
     def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
         if self.is_stale:
@@ -795,7 +793,7 @@ class PersistentFunctionNode(FunctionNode):
 
     def __init__(
         self,
-        packet_function: PacketFunctionProtocol,
+        function_pod: FunctionPodProtocol,
         input_stream: StreamProtocol,
         pipeline_database: ArrowDatabaseProtocol,
         result_database: ArrowDatabaseProtocol | None = None,
@@ -806,7 +804,7 @@ class PersistentFunctionNode(FunctionNode):
         config: Config | None = None,
     ):
         super().__init__(
-            packet_function=packet_function,
+            function_pod=function_pod,
             input_stream=input_stream,
             tracker_manager=tracker_manager,
             label=label,
@@ -820,8 +818,9 @@ class PersistentFunctionNode(FunctionNode):
             # set result path to be within the pipeline path with "_result" appended
             result_path_prefix = pipeline_path_prefix + ("_result",)
 
-        self._cached_packet_function = CachedPacketFunction(
-            packet_function,
+        # replace the packet function with a cached version
+        self._packet_function = CachedPacketFunction(
+            self._packet_function,
             result_database=result_database,
             record_path_prefix=result_path_prefix,
         )
@@ -833,20 +832,20 @@ class PersistentFunctionNode(FunctionNode):
         self._pipeline_node_hash = self.pipeline_hash().to_string()
 
         self._output_schema_hash = self.data_context.semantic_hasher.hash_object(
-            self._cached_packet_function.output_packet_schema
+            self._packet_function.output_packet_schema
         ).to_string()
 
     def identity_structure(self) -> Any:
-        return (self._cached_packet_function, self._input_stream)
+        return (self._packet_function, self._input_stream)
 
     def pipeline_identity_structure(self) -> Any:
-        return (self._cached_packet_function, self._input_stream)
+        return (self._packet_function, self._input_stream)
 
     @property
     def pipeline_path(self) -> tuple[str, ...]:
         return (
             self._pipeline_path_prefix
-            + self._cached_packet_function.uri
+            + self._packet_function.uri
             + (f"node:{self._pipeline_node_hash}",)
         )
 
@@ -870,7 +869,7 @@ class PersistentFunctionNode(FunctionNode):
         Returns:
             tuple[TagProtocol, PacketProtocol | None]: tag + output packet (or None if filtered)
         """
-        output_packet = self._cached_packet_function.call(
+        output_packet = self._packet_function.call(
             packet,
             skip_cache_lookup=skip_cache_lookup,
             skip_cache_insert=skip_cache_insert,
@@ -880,7 +879,7 @@ class PersistentFunctionNode(FunctionNode):
             # check if the packet was computed or retrieved from cache
             result_computed = bool(
                 output_packet.get_meta_value(
-                    self._cached_packet_function.RESULT_COMPUTED_FLAG, False
+                    self._packet_function.RESULT_COMPUTED_FLAG, False
                 )
             )
             self.add_pipeline_record(
@@ -979,8 +978,8 @@ class PersistentFunctionNode(FunctionNode):
         - ``system_tags`` — include ``_tag::*`` system tag columns
         - ``all_info``    — shorthand for all of the above
         """
-        results = self._cached_packet_function._result_database.get_all_records(
-            self._cached_packet_function.record_path,
+        results = self._packet_function._result_database.get_all_records(
+            self._packet_function.record_path,
             record_id_column=constants.PACKET_RECORD_ID,
         )
         taginfo = self._pipeline_database.get_all_records(self.pipeline_path)

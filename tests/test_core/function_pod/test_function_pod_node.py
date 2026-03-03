@@ -45,7 +45,7 @@ def _make_node(
     if db is None:
         db = InMemoryArrowDatabase()
     return PersistentFunctionNode(
-        packet_function=pf,
+        function_pod=FunctionPod(packet_function=pf),
         input_stream=make_int_stream(n=n),
         pipeline_database=db,
     )
@@ -68,7 +68,7 @@ def _make_node_with_system_tags(
     )
     stream = ArrowTableStream(table, tag_columns=["id"], system_tag_columns=["run"])
     return PersistentFunctionNode(
-        packet_function=pf,
+        function_pod=FunctionPod(packet_function=pf),
         input_stream=stream,
         pipeline_database=db,
     )
@@ -90,7 +90,7 @@ class TestFunctionNodeConstruction:
         db = InMemoryArrowDatabase()
         stream = make_int_stream(n=3)
         return PersistentFunctionNode(
-            packet_function=double_pf,
+            function_pod=FunctionPod(packet_function=double_pf),
             input_stream=stream,
             pipeline_database=db,
         )
@@ -108,7 +108,7 @@ class TestFunctionNodeConstruction:
         assert path[-1].startswith("node:")
 
     def test_pipeline_path_contains_packet_function_uri(self, node):
-        pf_uri = node._cached_packet_function.uri
+        pf_uri = node._packet_function.uri
         for part in pf_uri:
             assert part in node.pipeline_path
 
@@ -144,7 +144,7 @@ class TestFunctionNodeConstruction:
         )
         with pytest.raises(ValueError):
             PersistentFunctionNode(
-                packet_function=double_pf,
+                function_pod=FunctionPod(packet_function=double_pf),
                 input_stream=bad_stream,
                 pipeline_database=db,
             )
@@ -152,7 +152,7 @@ class TestFunctionNodeConstruction:
     def test_result_database_defaults_to_pipeline_database(self, double_pf):
         db = InMemoryArrowDatabase()
         node = PersistentFunctionNode(
-            packet_function=double_pf,
+            function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
         )
@@ -162,7 +162,7 @@ class TestFunctionNodeConstruction:
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
         node = PersistentFunctionNode(
-            packet_function=double_pf,
+            function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=2),
             pipeline_database=pipeline_db,
             result_database=result_db,
@@ -180,7 +180,7 @@ class TestFunctionNodeOutputSchema:
     def node(self, double_pf) -> PersistentFunctionNode:
         db = InMemoryArrowDatabase()
         return PersistentFunctionNode(
-            packet_function=double_pf,
+            function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
@@ -216,7 +216,7 @@ class TestFunctionNodeProcessPacket:
     def node(self, double_pf) -> PersistentFunctionNode:
         db = InMemoryArrowDatabase()
         return PersistentFunctionNode(
-            packet_function=double_pf,
+            function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
@@ -277,7 +277,7 @@ class TestFunctionNodeStreamInterface:
     def node(self, double_pf) -> PersistentFunctionNode:
         db = InMemoryArrowDatabase()
         return PersistentFunctionNode(
-            packet_function=double_pf,
+            function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
@@ -307,12 +307,12 @@ class TestFunctionNodePipelineIdentity:
     def test_pipeline_hash_same_schema_same_hash(self, double_pf):
         db = InMemoryArrowDatabase()
         node1 = PersistentFunctionNode(
-            packet_function=double_pf,
+            function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
         node2 = PersistentFunctionNode(
-            packet_function=double_pf,
+            function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=5),  # different data, same schema
             pipeline_database=db,
         )
@@ -332,10 +332,14 @@ class TestFunctionNodePipelineIdentity:
             tag_columns=["id"],
         )
         node_a = PersistentFunctionNode(
-            packet_function=double_pf, input_stream=stream_a, pipeline_database=db
+            function_pod=FunctionPod(packet_function=double_pf),
+            input_stream=stream_a,
+            pipeline_database=db,
         )
         node_b = PersistentFunctionNode(
-            packet_function=double_pf, input_stream=stream_b, pipeline_database=db
+            function_pod=FunctionPod(packet_function=double_pf),
+            input_stream=stream_b,
+            pipeline_database=db,
         )
         # Same schema → same pipeline hash
         assert node_a.pipeline_hash() == node_b.pipeline_hash()
@@ -351,12 +355,12 @@ class TestFunctionNodePipelineIdentity:
         not content_hash (data-inclusive)."""
         db = InMemoryArrowDatabase()
         node1 = PersistentFunctionNode(
-            packet_function=double_pf,
+            function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
         node2 = PersistentFunctionNode(
-            packet_function=double_pf,
+            function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=99),  # different data
             pipeline_database=db,
         )
@@ -618,7 +622,7 @@ class TestFunctionNodePipelinePathPrefix:
         db = InMemoryArrowDatabase()
         prefix = ("my_pipeline", "stage_1")
         node = PersistentFunctionNode(
-            packet_function=double_pf,
+            function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
             pipeline_path_prefix=prefix,
@@ -629,11 +633,11 @@ class TestFunctionNodePipelinePathPrefix:
     def test_no_prefix_pipeline_path_starts_with_pf_uri(self, double_pf):
         db = InMemoryArrowDatabase()
         node = PersistentFunctionNode(
-            packet_function=double_pf,
+            function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
         )
-        pf_uri = node._cached_packet_function.uri
+        pf_uri = node._packet_function.uri
         assert node.pipeline_path[: len(pf_uri)] == pf_uri
         assert node.pipeline_path[-1].startswith("node:")
 
@@ -647,7 +651,7 @@ class TestFunctionNodeResultPath:
     def test_result_records_stored_under_result_suffix_path(self, double_pf):
         db = InMemoryArrowDatabase()
         node = PersistentFunctionNode(
-            packet_function=double_pf,
+            function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
         )
@@ -656,7 +660,7 @@ class TestFunctionNodeResultPath:
         node.process_packet(tag, packet)
         db.flush()
 
-        result_path = node._cached_packet_function.record_path
+        result_path = node._packet_function.record_path
         assert result_path[-1] == "_result" or any(
             "_result" in part for part in result_path
         )

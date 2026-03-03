@@ -1,5 +1,7 @@
 """Hash strategy protocols for dependency injection."""
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -110,7 +112,7 @@ class ContentIdentifiableProtocol(Protocol):
         """
         ...
 
-    def content_hash(self, hasher=None) -> ContentHash:
+    def content_hash(self, hasher: SemanticHasherProtocol | None = None) -> ContentHash:
         """
         Returns the content hash.
 

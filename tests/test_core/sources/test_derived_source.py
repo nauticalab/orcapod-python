@@ -21,11 +21,12 @@ Coverage:
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import cast
 
 import pyarrow as pa
 import pytest
 
-from orcapod.core.function_pod import PersistentFunctionNode
+from orcapod.core.function_pod import FunctionPod, PersistentFunctionNode
 from orcapod.core.sources import DerivedSource, RootSource
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
@@ -33,7 +34,6 @@ from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 
 from ..conftest import double, make_int_stream
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -49,7 +49,7 @@ def _make_node(
         db = InMemoryArrowDatabase()
     pf = PythonPacketFunction(double, output_keys="result")
     return PersistentFunctionNode(
-        packet_function=pf,
+        function_pod=FunctionPod(packet_function=pf),
         input_stream=make_int_stream(n=n),
         pipeline_database=db,
     )
@@ -161,11 +161,11 @@ class TestDerivedSourceRoundTrip:
         """Data from DerivedSource must exactly match data from PersistentFunctionNode."""
         node = _make_node(n=5)
         # Collect from node directly
-        node_results = sorted(p["result"] for _, p in node.iter_packets())
+        node_results = sorted(cast(int, p["result"]) for _, p in node.iter_packets())
 
         # Now get via DerivedSource
         src = node.as_source()
-        src_results = sorted(p["result"] for _, p in src.iter_packets())
+        src_results = sorted(cast(int, p["result"]) for _, p in src.iter_packets())
 
         assert node_results == src_results
 
@@ -199,19 +199,21 @@ class TestDerivedSourceRoundTrip:
             {
                 "id": src.as_table().column("id"),
                 "x": src.as_table().column("result"),
+                # type: ignore[arg-type]
             }
         )
+
         result_stream = ArrowTableStream(result_table, tag_columns=["id"])
 
         double_result = PythonPacketFunction(double, output_keys="result")
         node2 = PersistentFunctionNode(
-            packet_function=double_result,
+            function_pod=FunctionPod(packet_function=double_result),
             input_stream=result_stream,
             pipeline_database=InMemoryArrowDatabase(),  # fresh DB
         )
 
         # node2 doubles the already-doubled values: 0*2*2=0, 1*2*2=4, 2*2*2=8
-        results = sorted(p["result"] for _, p in node2.iter_packets())
+        results = sorted(cast(int, p["result"]) for _, p in node2.iter_packets())
         assert results == [0, 4, 8]
 
 
@@ -336,7 +338,7 @@ class TestDerivedSourceIdentity:
         src_double = node_double.as_source()
 
         node_triple = PersistentFunctionNode(
-            packet_function=triple_pf,
+            function_pod=FunctionPod(packet_function=triple_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
@@ -357,12 +359,12 @@ class TestDerivedSourceIdentity:
         stream = make_int_stream(n=3)
 
         node_a = PersistentFunctionNode(
-            packet_function=pf,
+            function_pod=FunctionPod(packet_function=pf),
             input_stream=stream,
             pipeline_database=InMemoryArrowDatabase(),
         )
         node_b = PersistentFunctionNode(
-            packet_function=pf,
+            function_pod=FunctionPod(packet_function=pf),
             input_stream=stream,
             pipeline_database=InMemoryArrowDatabase(),
         )

@@ -173,7 +173,9 @@ class StaticOutputPod(TraceableBase):
 
         # perform input stream validation
         self.validate_inputs(*streams)
-        self.tracker_manager.record_pod_invocation(self, upstreams=streams, label=label)
+        self.tracker_manager.record_operator_pod_invocation(
+            self, upstreams=streams, label=label
+        )
         output_stream = DynamicPodStream(
             pod=self,
             upstreams=streams,

@@ -1,15 +1,14 @@
 """
 Tests for the tracker module covering:
 
-- SourceNode: construction, properties, repr
+- SourceNode: construction, properties, delegation, repr
 - BasicTrackerManager: register/deregister, active state, no_tracking context
 - AutoRegisteringContextBasedTracker: context manager lifecycle
 - GraphTracker:
-    - record_packet_function_invocation → creates FunctionNode
-    - record_pod_invocation → creates OperatorNode
-    - Upstream resolution: source, known producer, packet_function fallback, unknown fallback
+    - record_function_pod_invocation → creates FunctionNode, stores edges
+    - record_operator_pod_invocation → creates OperatorNode, stores edges
+    - compile() → topological walk, SourceNode creation, upstream rewiring
     - Source deduplication
-    - generate_graph() → correct nx.DiGraph
     - reset() clears all state
     - nodes property
 - End-to-end: FunctionPod.process() and StaticOutputPod.process() inside tracker context
@@ -20,17 +19,17 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from orcapod.core.function_pod import FunctionNode, FunctionPod
+from orcapod.core.function_pod import FunctionNode, FunctionPod, function_pod
 from orcapod.core.operator_node import OperatorNode
 from orcapod.core.operators import Join, SelectTagColumns
 from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.sources.arrow_table_source import ArrowTableSource
 from orcapod.core.streams import ArrowTableStream
 from orcapod.core.tracker import (
     BasicTrackerManager,
     GraphTracker,
     SourceNode,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -68,6 +67,17 @@ def _make_two_col_stream(n: int = 3) -> ArrowTableStream:
     return ArrowTableStream(table, tag_columns=["id"])
 
 
+def _make_y_stream(n: int = 3) -> ArrowTableStream:
+    """Stream with tag=id, packet=y (non-overlapping with _make_stream)."""
+    table = pa.table(
+        {
+            "id": pa.array(list(range(n)), type=pa.int64()),
+            "y": pa.array([i * 10 for i in range(n)], type=pa.int64()),
+        }
+    )
+    return ArrowTableStream(table, tag_columns=["id"])
+
+
 # ---------------------------------------------------------------------------
 # SourceNode
 # ---------------------------------------------------------------------------
@@ -91,7 +101,14 @@ class TestSourceNode:
         stream = _make_stream()
         stream._label = "stream_label"
         node = SourceNode(stream=stream)
+        # computed_label defers to wrapped stream's label
         assert node.label == "stream_label"
+
+    def test_label_defaults_to_stream_label(self):
+        stream = _make_stream()
+        node = SourceNode(stream=stream)
+        # No explicit label → computed_label defers to stream.label
+        assert node.label == stream.label
 
     def test_label_argument_overrides_stream(self):
         stream = _make_stream()
@@ -105,6 +122,27 @@ class TestSourceNode:
         r = repr(node)
         assert "SourceNode" in r
         assert "test" in r
+
+    def test_content_hash_matches_stream(self):
+        stream = _make_stream()
+        node = SourceNode(stream=stream)
+        assert node.content_hash() == stream.content_hash()
+
+    def test_upstreams_setter_rejects_nonempty(self):
+        stream = _make_stream()
+        node = SourceNode(stream=stream)
+        with pytest.raises(ValueError, match="empty"):
+            node.upstreams = (_make_stream(),)
+
+    def test_delegates_output_schema(self):
+        stream = _make_stream()
+        node = SourceNode(stream=stream)
+        assert node.output_schema() == stream.output_schema()
+
+    def test_delegates_keys(self):
+        stream = _make_stream()
+        node = SourceNode(stream=stream)
+        assert node.keys() == stream.keys()
 
 
 # ---------------------------------------------------------------------------
@@ -194,312 +232,346 @@ class TestGraphTrackerLifecycle:
 
 
 # ---------------------------------------------------------------------------
-# GraphTracker — recording and upstream resolution
+# GraphTracker — recording
 # ---------------------------------------------------------------------------
 
 
 class TestGraphTrackerRecording:
-    def test_record_packet_function_creates_function_node(self):
+    def test_record_function_pod_creates_function_node(self):
         pf = PythonPacketFunction(_double, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
         with GraphTracker(tracker_manager=mgr) as tracker:
-            tracker.record_packet_function_invocation(pf, stream, label="dbl")
+            tracker.record_function_pod_invocation(pod, stream, label="dbl")
 
-        assert len(tracker.nodes) == 2  # SourceNode + FunctionNode
-        source_node = tracker.nodes[0]
-        fn_node = tracker.nodes[1]
-
-        assert isinstance(source_node, SourceNode)
-        assert source_node.stream is stream
-
+        # Should have one FunctionNode in node_lut
+        assert len(tracker._node_lut) == 1
+        fn_node = list(tracker._node_lut.values())[0]
         assert isinstance(fn_node, FunctionNode)
         assert fn_node.node_type == "function"
-        assert fn_node._upstream_graph_nodes == (source_node,)
 
-    def test_record_pod_invocation_creates_operator_node(self):
+    def test_record_function_pod_stores_edge(self):
+        pf = PythonPacketFunction(_double, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
+        stream = _make_stream()
+        mgr = BasicTrackerManager()
+
+        with GraphTracker(tracker_manager=mgr) as tracker:
+            tracker.record_function_pod_invocation(pod, stream)
+
+        assert len(tracker._graph_edges) == 1
+        upstream_hash, node_hash = tracker._graph_edges[0]
+        assert upstream_hash == stream.content_hash().to_string()
+        assert node_hash in tracker._node_lut
+
+    def test_record_function_pod_stores_upstream_stream(self):
+        pf = PythonPacketFunction(_double, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
+        stream = _make_stream()
+        mgr = BasicTrackerManager()
+
+        with GraphTracker(tracker_manager=mgr) as tracker:
+            tracker.record_function_pod_invocation(pod, stream)
+
+        stream_hash = stream.content_hash().to_string()
+        assert stream_hash in tracker._upstreams
+        assert tracker._upstreams[stream_hash] is stream
+
+    def test_record_operator_pod_creates_operator_node(self):
         stream = _make_stream()
         op = SelectTagColumns(columns=["id"])
         mgr = BasicTrackerManager()
 
         with GraphTracker(tracker_manager=mgr) as tracker:
-            tracker.record_pod_invocation(op, upstreams=(stream,), label="select")
+            tracker.record_operator_pod_invocation(op, upstreams=(stream,))
 
-        assert len(tracker.nodes) == 2  # SourceNode + OperatorNode
-        source_node = tracker.nodes[0]
-        op_node = tracker.nodes[1]
-
-        assert isinstance(source_node, SourceNode)
+        assert len(tracker._node_lut) == 1
+        op_node = list(tracker._node_lut.values())[0]
         assert isinstance(op_node, OperatorNode)
         assert op_node.node_type == "operator"
-        assert op_node._upstream_graph_nodes == (source_node,)
 
-    def test_source_deduplication(self):
-        """Same stream used in two recordings → single SourceNode."""
-        pf1 = PythonPacketFunction(_double, output_keys="result")
-        pf2 = PythonPacketFunction(_double, output_keys="out")
-        stream = _make_stream()
-        mgr = BasicTrackerManager()
-
-        with GraphTracker(tracker_manager=mgr) as tracker:
-            tracker.record_packet_function_invocation(pf1, stream)
-            # Create a FunctionNode output stream to chain
-            fn_node = tracker.nodes[1]
-            # Use the same source stream for another function
-            tracker.record_packet_function_invocation(pf2, stream)
-
-        # Should have: 1 SourceNode, 2 FunctionNodes
-        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
-        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
-        assert len(source_nodes) == 1
-        assert len(fn_nodes) == 2
-        # Both FunctionNodes share the same SourceNode upstream
-        assert (
-            fn_nodes[0]._upstream_graph_nodes[0] is fn_nodes[1]._upstream_graph_nodes[0]
-        )
-
-    def test_operator_upstream_resolution_via_producer(self):
-        """When stream.producer matches a recorded pod, resolve to that node."""
-        stream = _make_stream()
-        op = SelectTagColumns(columns=["id"])
-        mgr = BasicTrackerManager()
-
-        with GraphTracker(tracker_manager=mgr) as tracker:
-            # Simulate: operator processes the stream, output stream has producer=op
-            tracker.record_pod_invocation(op, upstreams=(stream,))
-            op_node = tracker.nodes[1]
-
-            # Create an output stream whose producer is the operator
-            output = op.process(stream)  # DynamicPodStream with producer=op
-
-            # Now record another operator reading from output
-            op2 = SelectTagColumns(columns=["id"])
-            tracker.record_pod_invocation(op2, upstreams=(output,))
-
-        last_node = tracker.nodes[-1]
-        assert isinstance(last_node, OperatorNode)
-        # The upstream should be the first OperatorNode, not a SourceNode
-        assert last_node._upstream_graph_nodes == (op_node,)
-
-    def test_function_pod_upstream_resolution_via_packet_function(self):
-        """When stream.producer is a FunctionPod, resolve via packet_function."""
-        pf = PythonPacketFunction(_double, output_keys="result")
-        stream = _make_stream()
-        pod = FunctionPod(packet_function=pf)
-        mgr = BasicTrackerManager()
-
-        with GraphTracker(tracker_manager=mgr) as tracker:
-            # Record the packet function invocation (as FunctionPod.process does)
-            tracker.record_packet_function_invocation(pf, stream)
-            fn_node = tracker.nodes[1]
-
-            # FunctionPod.process creates a FunctionPodStream with producer=pod
-            # and pod.packet_function == pf
-            output = pod.process(stream)
-
-            # Now record a second function reading from the FunctionPodStream
-            pf2 = PythonPacketFunction(_inc_result, output_keys="out")
-            tracker.record_packet_function_invocation(pf2, output)
-
-        last_fn = tracker.nodes[-1]
-        assert isinstance(last_fn, FunctionNode)
-        # Upstream should resolve to the first FunctionNode via packet_function
-        assert last_fn._upstream_graph_nodes == (fn_node,)
-
-    def test_unknown_producer_treated_as_source(self):
-        """Stream with an unknown producer is treated as a source."""
-
-        class FakeProducer:
-            pass
-
-        class FakeStream:
-            producer = FakeProducer()
-            label = "fake"
-
-            def output_schema(self, **kwargs):
-                from orcapod.types import Schema
-
-                return Schema({"id": int}), Schema({"x": int})
-
-            def keys(self, **kwargs):
-                return ("id",), ("x",)
-
-            def iter_packets(self):
-                return iter([])
-
-        fake = FakeStream()
-        pf = PythonPacketFunction(_double, output_keys="result")
-        mgr = BasicTrackerManager()
-
-        with GraphTracker(tracker_manager=mgr) as tracker:
-            tracker.record_packet_function_invocation(pf, fake)
-
-        # Unknown producer → treated as source
-        assert len(tracker.nodes) == 2
-        assert isinstance(tracker.nodes[0], SourceNode)
-        assert tracker.nodes[0].stream is fake
-
-    def test_multi_input_operator(self):
-        """Join with two input streams → 2 SourceNodes + 1 OperatorNode."""
+    def test_record_operator_pod_stores_edges(self):
         stream_a = _make_stream()
-        table_b = pa.table(
-            {
-                "id": pa.array([0, 1, 2], type=pa.int64()),
-                "y": pa.array([10, 20, 30], type=pa.int64()),
-            }
-        )
-        stream_b = ArrowTableStream(table_b, tag_columns=["id"])
+        stream_b = _make_y_stream()
         op = Join()
         mgr = BasicTrackerManager()
 
         with GraphTracker(tracker_manager=mgr) as tracker:
-            tracker.record_pod_invocation(op, upstreams=(stream_a, stream_b))
+            tracker.record_operator_pod_invocation(op, upstreams=(stream_a, stream_b))
 
+        assert len(tracker._graph_edges) == 2
+
+    def test_nodes_returns_copy(self):
+        mgr = BasicTrackerManager()
+        pf = PythonPacketFunction(_double, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
+
+        with GraphTracker(tracker_manager=mgr) as tracker:
+            tracker.record_function_pod_invocation(pod, _make_stream())
+            nodes = tracker.nodes
+            nodes.clear()
+            # Original unaffected
+            assert len(tracker.nodes) == 1
+
+    def test_reset_clears_all(self):
+        pf = PythonPacketFunction(_double, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
+        stream = _make_stream()
+        mgr = BasicTrackerManager()
+
+        with GraphTracker(tracker_manager=mgr) as tracker:
+            tracker.record_function_pod_invocation(pod, stream)
+            assert len(tracker.nodes) == 1
+
+            tracker.reset()
+            assert len(tracker.nodes) == 0
+            assert len(tracker._upstreams) == 0
+            assert len(tracker._graph_edges) == 0
+
+
+# ---------------------------------------------------------------------------
+# GraphTracker — compile()
+# ---------------------------------------------------------------------------
+
+
+class TestGraphTrackerCompile:
+    """Tests for compile() which resolves content-hash edges into node-to-node
+    upstream relationships via topological sort."""
+
+    def test_compile_single_function_pod(self):
+        """Source stream → FunctionNode: compile creates SourceNode and wires upstream."""
+        pf = PythonPacketFunction(_double, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
+        stream = _make_stream()
+        mgr = BasicTrackerManager()
+
+        with GraphTracker(tracker_manager=mgr) as tracker:
+            tracker.record_function_pod_invocation(pod, stream)
+            tracker.compile()
+
+        # After compile: 1 SourceNode + 1 FunctionNode
+        assert len(tracker._node_lut) == 2
+        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
+        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
+        assert len(source_nodes) == 1
+        assert len(fn_nodes) == 1
+
+        # SourceNode wraps the original stream
+        assert source_nodes[0].stream is stream
+        assert source_nodes[0].upstreams == ()
+
+        # FunctionNode's upstream is now the SourceNode
+        assert fn_nodes[0].upstreams == (source_nodes[0],)
+
+    def test_compile_single_operator(self):
+        """Source stream → Operator: compile creates SourceNode and wires upstream."""
+        stream = _make_stream()
+        op = SelectTagColumns(columns=["id"])
+        mgr = BasicTrackerManager()
+
+        with GraphTracker(tracker_manager=mgr) as tracker:
+            tracker.record_operator_pod_invocation(op, upstreams=(stream,))
+            tracker.compile()
+
+        assert len(tracker._node_lut) == 2
+        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
+        op_nodes = [n for n in tracker.nodes if isinstance(n, OperatorNode)]
+        assert len(source_nodes) == 1
+        assert len(op_nodes) == 1
+        assert op_nodes[0].upstreams == (source_nodes[0],)
+
+    def test_compile_operator_with_two_inputs(self):
+        """Two source streams → Join: compile creates 2 SourceNodes."""
+        stream_a = _make_stream()
+        stream_b = _make_y_stream()
+        op = Join()
+        mgr = BasicTrackerManager()
+
+        with GraphTracker(tracker_manager=mgr) as tracker:
+            tracker.record_operator_pod_invocation(op, upstreams=(stream_a, stream_b))
+
+        assert len(tracker._node_lut) == 3
         source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
         op_nodes = [n for n in tracker.nodes if isinstance(n, OperatorNode)]
         assert len(source_nodes) == 2
         assert len(op_nodes) == 1
-        assert len(op_nodes[0]._upstream_graph_nodes) == 2
 
+        # OperatorNode's upstreams are both SourceNodes
+        assert len(op_nodes[0].upstreams) == 2
+        assert all(isinstance(u, SourceNode) for u in op_nodes[0].upstreams)
 
-# ---------------------------------------------------------------------------
-# GraphTracker — generate_graph
-# ---------------------------------------------------------------------------
+    def test_compile_chained_function_pods(self):
+        """Source → fn1 → fn2: compile wires SourceNode → FunctionNode1 → FunctionNode2.
 
-
-class TestGraphTrackerGraph:
-    def test_generate_graph_simple_chain(self):
-        """Source → FunctionNode: 2 nodes, 1 edge."""
-        pf = PythonPacketFunction(_double, output_keys="result")
-        stream = _make_stream()
-        mgr = BasicTrackerManager()
-
-        with GraphTracker(tracker_manager=mgr) as tracker:
-            tracker.record_packet_function_invocation(pf, stream)
-
-        G = tracker.generate_graph()
-        assert len(G.nodes) == 2
-        assert len(G.edges) == 1
-
-        source_node = tracker.nodes[0]
-        fn_node = tracker.nodes[1]
-        assert G.has_edge(source_node, fn_node)
-
-    def test_generate_graph_two_source_join(self):
-        """Two sources → Join: 3 nodes, 2 edges."""
-        stream_a = _make_stream()
-        table_b = pa.table(
-            {
-                "id": pa.array([0, 1, 2], type=pa.int64()),
-                "y": pa.array([10, 20, 30], type=pa.int64()),
-            }
-        )
-        stream_b = ArrowTableStream(table_b, tag_columns=["id"])
-        op = Join()
-        mgr = BasicTrackerManager()
-
-        with GraphTracker(tracker_manager=mgr) as tracker:
-            tracker.record_pod_invocation(op, upstreams=(stream_a, stream_b))
-
-        G = tracker.generate_graph()
-        assert len(G.nodes) == 3
-        assert len(G.edges) == 2
-
-    def test_generate_graph_chained(self):
-        """Source → FunctionNode → Operator → FunctionNode: 4 nodes, 3 edges."""
+        The key insight: FunctionNode and FunctionPodStream have the same
+        identity_structure for the same (function_pod, input_stream), so
+        content hashes match and edges connect across the chain.
+        """
         pf1 = PythonPacketFunction(_double, output_keys="result")
         pf2 = PythonPacketFunction(_inc_result, output_keys="out")
+        pod1 = FunctionPod(packet_function=pf1)
+        pod2 = FunctionPod(packet_function=pf2)
         stream = _make_stream()
-        pod = FunctionPod(packet_function=pf1)
         mgr = BasicTrackerManager()
+        pod1.tracker_manager = mgr
+        pod2.tracker_manager = mgr
 
         with GraphTracker(tracker_manager=mgr) as tracker:
-            # Step 1: FunctionPod processes stream
-            tracker.record_packet_function_invocation(pf1, stream)
-            fn1_output = pod.process(stream)  # producer=pod, pod.packet_function=pf1
+            mid = pod1.process(stream)  # records fn1, returns FunctionPodStream
+            _ = pod2.process(mid)  # records fn2, mid.content_hash == fn1.content_hash
+            tracker.compile()
 
-            # Step 2: Operator processes fn1_output
-            op = SelectTagColumns(columns=["id"])
-            tracker.record_pod_invocation(op, upstreams=(fn1_output,))
-            op_output = op.process(fn1_output)  # producer=op
+        assert len(tracker._node_lut) == 3
+        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
+        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
+        assert len(source_nodes) == 1
+        assert len(fn_nodes) == 2
 
-            # Step 3: Another function processes op_output
-            tracker.record_packet_function_invocation(pf2, op_output)
+        # Identify fn1 and fn2 by checking their packet_function
+        fn1 = next(n for n in fn_nodes if n._packet_function is pf1)
+        fn2 = next(n for n in fn_nodes if n._packet_function is pf2)
 
-        G = tracker.generate_graph()
-        assert len(G.nodes) == 4  # source, fn1, op, fn2
-        assert len(G.edges) == 3
+        # Chain: SourceNode → fn1 → fn2
+        assert fn1.upstreams == (source_nodes[0],)
+        assert fn2.upstreams == (fn1,)
 
-        # Verify chain: source → fn1 → op → fn2
-        source = tracker.nodes[0]
-        fn1 = tracker.nodes[1]
-        op_node = tracker.nodes[2]
-        fn2 = tracker.nodes[3]
-        assert G.has_edge(source, fn1)
-        assert G.has_edge(fn1, op_node)
-        assert G.has_edge(op_node, fn2)
+    def test_compile_function_then_operator(self):
+        """Source → FunctionPod → Operator: compile wires SourceNode → FunctionNode → OperatorNode."""
+        pf = PythonPacketFunction(_double, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
+        op = SelectTagColumns(columns=["id"])
+        stream = _make_stream()
+        mgr = BasicTrackerManager()
+        pod.tracker_manager = mgr
+        op.tracker_manager = mgr
 
-    def test_generate_graph_diamond(self):
-        """
-        Diamond shape: source → fn1, source → fn2, (fn1,fn2) → join.
-        5 nodes, 4 edges.
+        with GraphTracker(tracker_manager=mgr) as tracker:
+            mid = pod.process(stream)
+            _ = op.process(mid)
+            tracker.compile()
+
+        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
+        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
+        op_nodes = [n for n in tracker.nodes if isinstance(n, OperatorNode)]
+        assert len(source_nodes) == 1
+        assert len(fn_nodes) == 1
+        assert len(op_nodes) == 1
+
+        assert fn_nodes[0].upstreams == (source_nodes[0],)
+        assert op_nodes[0].upstreams == (fn_nodes[0],)
+
+    def test_compile_operator_then_function(self):
+        """Source → Operator → FunctionPod: compile wires SourceNode → OperatorNode → FunctionNode."""
+        stream = _make_stream()
+        op = SelectTagColumns(columns=["id"])
+        pf = PythonPacketFunction(_double, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
+        mgr = BasicTrackerManager()
+        op.tracker_manager = mgr
+        pod.tracker_manager = mgr
+
+        with GraphTracker(tracker_manager=mgr) as tracker:
+            mid = op.process(stream)
+            _ = pod.process(mid)
+            tracker.compile()
+
+        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
+        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
+        op_nodes = [n for n in tracker.nodes if isinstance(n, OperatorNode)]
+        assert len(source_nodes) == 1
+        assert len(op_nodes) == 1
+        assert len(fn_nodes) == 1
+
+        assert op_nodes[0].upstreams == (source_nodes[0],)
+        assert fn_nodes[0].upstreams == (op_nodes[0],)
+
+    def test_compile_diamond(self):
+        """Diamond: source → fn1, source → fn2, (fn1, fn2) → join.
+
+        Same source used twice → single SourceNode (dedup by content hash).
         """
         pf1 = PythonPacketFunction(_double, output_keys="result")
         pf2 = PythonPacketFunction(_double, output_keys="out")
-        stream = _make_stream()
         pod1 = FunctionPod(packet_function=pf1)
         pod2 = FunctionPod(packet_function=pf2)
+        op = Join()
+        stream = _make_stream()
         mgr = BasicTrackerManager()
+        pod1.tracker_manager = mgr
+        pod2.tracker_manager = mgr
+        op.tracker_manager = mgr
 
         with GraphTracker(tracker_manager=mgr) as tracker:
-            # Branch 1
-            tracker.record_packet_function_invocation(pf1, stream)
-            fn1_output = pod1.process(stream)
+            mid1 = pod1.process(stream)
+            mid2 = pod2.process(stream)
+            _ = op.process(mid1, mid2)
+            tracker.compile()
 
-            # Branch 2
-            tracker.record_packet_function_invocation(pf2, stream)
-            fn2_output = pod2.process(stream)
+        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
+        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
+        op_nodes = [n for n in tracker.nodes if isinstance(n, OperatorNode)]
 
-            # Merge via Join
-            op = Join()
-            tracker.record_pod_invocation(op, upstreams=(fn1_output, fn2_output))
+        # 1 source (deduped), 2 function nodes, 1 operator node
+        assert len(source_nodes) == 1
+        assert len(fn_nodes) == 2
+        assert len(op_nodes) == 1
 
-        G = tracker.generate_graph()
-        assert len(G.nodes) == 4  # 1 source (deduped), fn1, fn2, join
-        assert len(G.edges) == 4  # source→fn1, source→fn2, fn1→join, fn2→join
+        # Both function nodes have the same source upstream
+        for fn in fn_nodes:
+            assert fn.upstreams == (source_nodes[0],)
 
+        # Join's upstreams are the two FunctionNodes
+        assert len(op_nodes[0].upstreams) == 2
+        assert all(isinstance(u, FunctionNode) for u in op_nodes[0].upstreams)
 
-# ---------------------------------------------------------------------------
-# GraphTracker — reset and nodes
-# ---------------------------------------------------------------------------
-
-
-class TestGraphTrackerReset:
-    def test_reset_clears_all(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
+    def test_compile_source_deduplication(self):
+        """Same stream used as input to two separate function pods → single SourceNode."""
+        pf1 = PythonPacketFunction(_double, output_keys="result")
+        pf2 = PythonPacketFunction(_double, output_keys="out")
+        pod1 = FunctionPod(packet_function=pf1)
+        pod2 = FunctionPod(packet_function=pf2)
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
         with GraphTracker(tracker_manager=mgr) as tracker:
-            tracker.record_packet_function_invocation(pf, stream)
-            assert len(tracker.nodes) == 2
+            tracker.record_function_pod_invocation(pod1, stream)
+            tracker.record_function_pod_invocation(pod2, stream)
+            tracker.compile()
 
-            tracker.reset()
-            assert len(tracker.nodes) == 0
-            assert len(tracker._producer_to_node) == 0
-            assert len(tracker._source_to_node) == 0
+        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
+        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
+        assert len(source_nodes) == 1
+        assert len(fn_nodes) == 2
 
-    def test_nodes_returns_copy(self):
+        # Both FunctionNodes share the same SourceNode upstream
+        assert fn_nodes[0].upstreams[0] is fn_nodes[1].upstreams[0]
+
+    def test_compile_two_independent_sources(self):
+        """Two different source streams → two distinct SourceNodes."""
+        pf = PythonPacketFunction(_double, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
+        stream_a = _make_stream(n=3)
+        stream_b = _make_stream(n=5)
         mgr = BasicTrackerManager()
 
         with GraphTracker(tracker_manager=mgr) as tracker:
-            pf = PythonPacketFunction(_double, output_keys="result")
-            tracker.record_packet_function_invocation(pf, _make_stream())
-            nodes = tracker.nodes
-            nodes.clear()
-            # Original unaffected
-            assert len(tracker.nodes) == 2
+            tracker.record_function_pod_invocation(pod, stream_a)
+            tracker.record_function_pod_invocation(pod, stream_b)
+            tracker.compile()
+
+        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
+        assert len(source_nodes) == 2
+
+    def test_compile_empty_tracker(self):
+        """Compile on empty tracker is a no-op."""
+        mgr = BasicTrackerManager()
+
+        with GraphTracker(tracker_manager=mgr) as tracker:
+            tracker.compile()
+
+        assert len(tracker.nodes) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -518,13 +590,16 @@ class TestFunctionPodTrackerIntegration:
 
         with GraphTracker(tracker_manager=mgr) as tracker:
             _ = pod.process(stream)
+            tracker.compile()
 
-        assert len(tracker.nodes) == 2
-        assert isinstance(tracker.nodes[0], SourceNode)
-        assert isinstance(tracker.nodes[1], FunctionNode)
-        assert tracker.nodes[1]._upstream_graph_nodes == (tracker.nodes[0],)
+        assert len(tracker._node_lut) == 2
+        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
+        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
+        assert len(source_nodes) == 1
+        assert len(fn_nodes) == 1
+        assert fn_nodes[0].upstreams == (source_nodes[0],)
 
-    def test_chained_function_pods(self):
+    def test_chained_function_pods_end_to_end(self):
         """Two FunctionPods chained: source → fn1 → fn2."""
         pf1 = PythonPacketFunction(_double, output_keys="result")
         pf2 = PythonPacketFunction(_inc_result, output_keys="out")
@@ -538,16 +613,17 @@ class TestFunctionPodTrackerIntegration:
         with GraphTracker(tracker_manager=mgr) as tracker:
             mid = pod1.process(stream)
             _ = pod2.process(mid)
+            tracker.compile()
 
-        assert len(tracker.nodes) == 3
-        source = tracker.nodes[0]
-        fn1 = tracker.nodes[1]
-        fn2 = tracker.nodes[2]
-        assert isinstance(source, SourceNode)
-        assert isinstance(fn1, FunctionNode)
-        assert isinstance(fn2, FunctionNode)
-        assert fn1._upstream_graph_nodes == (source,)
-        assert fn2._upstream_graph_nodes == (fn1,)
+        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
+        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
+        assert len(source_nodes) == 1
+        assert len(fn_nodes) == 2
+
+        fn1 = next(n for n in fn_nodes if n._packet_function is pf1)
+        fn2 = next(n for n in fn_nodes if n._packet_function is pf2)
+        assert fn1.upstreams == (source_nodes[0],)
+        assert fn2.upstreams == (fn1,)
 
 
 # ---------------------------------------------------------------------------
@@ -565,10 +641,13 @@ class TestOperatorTrackerIntegration:
 
         with GraphTracker(tracker_manager=mgr) as tracker:
             _ = op.process(stream)
+            tracker.compile()
 
-        assert len(tracker.nodes) == 2
-        assert isinstance(tracker.nodes[0], SourceNode)
-        assert isinstance(tracker.nodes[1], OperatorNode)
+        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
+        op_nodes = [n for n in tracker.nodes if isinstance(n, OperatorNode)]
+        assert len(source_nodes) == 1
+        assert len(op_nodes) == 1
+        assert op_nodes[0].upstreams == (source_nodes[0],)
 
     def test_operator_chain(self):
         """Source → operator1 → operator2."""
@@ -582,16 +661,12 @@ class TestOperatorTrackerIntegration:
         with GraphTracker(tracker_manager=mgr) as tracker:
             mid = op1.process(stream)
             _ = op2.process(mid)
+            tracker.compile()
 
-        assert len(tracker.nodes) == 3
-        source = tracker.nodes[0]
-        op1_node = tracker.nodes[1]
-        op2_node = tracker.nodes[2]
-        assert isinstance(source, SourceNode)
-        assert isinstance(op1_node, OperatorNode)
-        assert isinstance(op2_node, OperatorNode)
-        assert op1_node._upstream_graph_nodes == (source,)
-        assert op2_node._upstream_graph_nodes == (op1_node,)
+        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
+        op_nodes = [n for n in tracker.nodes if isinstance(n, OperatorNode)]
+        assert len(source_nodes) == 1
+        assert len(op_nodes) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -603,6 +678,7 @@ class TestManagerBroadcast:
     def test_records_broadcast_to_all_active_trackers(self):
         """BasicTrackerManager broadcasts recordings to all active trackers."""
         pf = PythonPacketFunction(_double, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
@@ -610,19 +686,171 @@ class TestManagerBroadcast:
         tracker2 = GraphTracker(tracker_manager=mgr)
 
         with tracker1, tracker2:
-            mgr.record_packet_function_invocation(pf, stream)
+            mgr.record_function_pod_invocation(pod, stream)
 
-        assert len(tracker1.nodes) == 2
-        assert len(tracker2.nodes) == 2
+        assert len(tracker1.nodes) == 1
+        assert len(tracker2.nodes) == 1
 
     def test_no_tracking_suppresses_recording(self):
         """no_tracking context suppresses recording."""
         pf = PythonPacketFunction(_double, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
         with GraphTracker(tracker_manager=mgr) as tracker:
             with mgr.no_tracking():
-                mgr.record_packet_function_invocation(pf, stream)
+                mgr.record_function_pod_invocation(pod, stream)
 
         assert len(tracker.nodes) == 0
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: BMI pipeline with ArrowTableSource, @function_pod, default tracker
+# ---------------------------------------------------------------------------
+
+
+@function_pod(output_keys="height_m")
+def _cm_to_m(height_cm: int) -> float:
+    return height_cm / 100.0
+
+
+@function_pod(output_keys="bmi")
+def _compute_bmi(height_m: float, weight_kg: int) -> float:
+    return round(weight_kg / (height_m**2), 2)
+
+
+class TestBMIPipelineEndToEnd:
+    """Full pipeline: two ArrowTableSources → @function_pod → Join → @function_pod.
+
+    Uses DEFAULT_TRACKER_MANAGER (no explicit wiring) to verify that the
+    default plumbing works out of the box.
+
+    Pipeline:
+        heights(person_id, height_cm) ──► cm_to_m ──┐
+                                                      ├──► Join ──► compute_bmi
+        weights(person_id, weight_kg) ──────────────┘
+    """
+
+    @pytest.fixture()
+    def sources(self):
+        heights = ArrowTableSource(
+            pa.table(
+                {
+                    "person_id": pa.array([1, 2, 3], type=pa.int64()),
+                    "height_cm": pa.array([170, 185, 160], type=pa.int64()),
+                }
+            ),
+            tag_columns=["person_id"],
+            source_name="heights",
+        )
+        weights = ArrowTableSource(
+            pa.table(
+                {
+                    "person_id": pa.array([1, 2, 3], type=pa.int64()),
+                    "weight_kg": pa.array([70, 90, 55], type=pa.int64()),
+                }
+            ),
+            tag_columns=["person_id"],
+            source_name="weights",
+        )
+        return heights, weights
+
+    @pytest.fixture()
+    def expected_bmi(self):
+        return {
+            1: round(70 / (1.70**2), 2),
+            2: round(90 / (1.85**2), 2),
+            3: round(55 / (1.60**2), 2),
+        }
+
+    def test_pipeline_output_values(self, sources, expected_bmi):
+        """The pipeline produces correct BMI values."""
+        heights, weights = sources
+
+        tracker = GraphTracker()
+        with tracker:
+            converted = _cm_to_m.pod(heights)
+            joined = Join()(converted, weights)
+            bmi_stream = _compute_bmi.pod(joined)
+
+        for tag, packet in bmi_stream.iter_packets():
+            pid = tag["person_id"]
+            assert packet["bmi"] == expected_bmi[pid], (
+                f"person_id={pid}: got {packet['bmi']}, expected {expected_bmi[pid]}"
+            )
+
+    def test_compiled_graph_structure(self, sources):
+        """After compile(), the graph has the expected node types and count."""
+        heights, weights = sources
+
+        tracker = GraphTracker()
+        with tracker:
+            converted = _cm_to_m.pod(heights)
+            joined = Join()(converted, weights)
+            _cm_bmi = _compute_bmi.pod(joined)
+
+        tracker.compile()
+
+        src_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
+        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
+        op_nodes = [n for n in tracker.nodes if isinstance(n, OperatorNode)]
+
+        assert len(src_nodes) == 2
+        assert len(fn_nodes) == 2
+        assert len(op_nodes) == 1
+
+    def test_compiled_graph_all_upstreams_are_nodes(self, sources):
+        """Every upstream reference is a graph node after compile()."""
+        heights, weights = sources
+
+        tracker = GraphTracker()
+        with tracker:
+            converted = _cm_to_m.pod(heights)
+            joined = Join()(converted, weights)
+            _ = _compute_bmi.pod(joined)
+
+        tracker.compile()
+
+        for node in tracker.nodes:
+            for up in node.upstreams:
+                assert isinstance(up, (SourceNode, FunctionNode, OperatorNode)), (
+                    f"Upstream of {node.label} is {type(up).__name__}, expected a graph node"
+                )
+
+    def test_compiled_graph_wiring(self, sources):
+        """Verify specific upstream wiring: cm_to_m←source, join←(cm_to_m, source), bmi←join."""
+        heights, weights = sources
+
+        tracker = GraphTracker()
+        with tracker:
+            converted = _cm_to_m.pod(heights)
+            joined = Join()(converted, weights)
+            _ = _compute_bmi.pod(joined)
+
+        tracker.compile()
+
+        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
+        op_nodes = [n for n in tracker.nodes if isinstance(n, OperatorNode)]
+
+        # cm_to_m has a single SourceNode upstream
+        cm_node = next(
+            n for n in fn_nodes if n._packet_function is _cm_to_m.pod.packet_function
+        )
+        assert len(cm_node.upstreams) == 1
+        assert isinstance(cm_node.upstreams[0], SourceNode)
+
+        # Join has one FunctionNode upstream (cm_to_m) and one SourceNode (weights)
+        join_node = op_nodes[0]
+        assert len(join_node.upstreams) == 2
+        upstream_types = {type(u).__name__ for u in join_node.upstreams}
+        assert upstream_types == {"FunctionNode", "SourceNode"}
+
+        # compute_bmi has the Join OperatorNode as its single upstream
+        bmi_node = next(
+            n
+            for n in fn_nodes
+            if n._packet_function is _compute_bmi.pod.packet_function
+        )
+        assert len(bmi_node.upstreams) == 1
+        assert isinstance(bmi_node.upstreams[0], OperatorNode)
