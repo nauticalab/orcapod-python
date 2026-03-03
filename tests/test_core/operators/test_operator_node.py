@@ -28,6 +28,7 @@ from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.protocols.hashing_protocols import PipelineElementProtocol
+from orcapod.types import CacheMode
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +100,7 @@ def _make_node(
     streams: tuple[ArrowTableStream, ...],
     db: InMemoryArrowDatabase | None = None,
     prefix: tuple[str, ...] = (),
+    cache_mode: CacheMode = CacheMode.OFF,
 ) -> PersistentOperatorNode:
     if db is None:
         db = InMemoryArrowDatabase()
@@ -106,6 +108,7 @@ def _make_node(
         operator=operator,
         input_streams=streams,
         pipeline_database=db,
+        cache_mode=cache_mode,
         pipeline_path_prefix=prefix,
     )
 
@@ -276,9 +279,18 @@ class TestOperatorNodeArgumentSymmetry:
 
 
 class TestOperatorNodeRunAndStorage:
-    def test_run_populates_db(self, simple_stream, db):
+    def test_run_off_does_not_write_db(self, simple_stream, db):
+        """CacheMode.OFF: compute but do not write to DB."""
         op = MapPackets({"x": "renamed_x"})
-        node = _make_node(op, (simple_stream,), db=db)
+        node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.OFF)
+        node.run()
+        records = node.get_all_records()
+        assert records is None  # OFF never writes
+
+    def test_run_log_populates_db(self, simple_stream, db):
+        """CacheMode.LOG: compute and write to DB."""
+        op = MapPackets({"x": "renamed_x"})
+        node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         node.run()
         records = node.get_all_records()
         assert records is not None
@@ -286,13 +298,13 @@ class TestOperatorNodeRunAndStorage:
 
     def test_get_all_records_before_run_returns_none(self, simple_stream, db):
         op = MapPackets({"x": "renamed_x"})
-        node = _make_node(op, (simple_stream,), db=db)
+        node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         records = node.get_all_records()
         assert records is None
 
     def test_get_all_records_has_correct_columns(self, simple_stream, db):
         op = MapPackets({"x": "renamed_x"})
-        node = _make_node(op, (simple_stream,), db=db)
+        node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         node.run()
         records = node.get_all_records()
         assert records is not None
@@ -301,7 +313,7 @@ class TestOperatorNodeRunAndStorage:
 
     def test_get_all_records_column_config_source(self, simple_stream, db):
         op = MapPackets({"x": "renamed_x"})
-        node = _make_node(op, (simple_stream,), db=db)
+        node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         node.run()
         records = node.get_all_records(columns={"source": True})
         assert records is not None
@@ -310,7 +322,7 @@ class TestOperatorNodeRunAndStorage:
 
     def test_run_idempotent(self, simple_stream, db):
         op = MapPackets({"x": "renamed_x"})
-        node = _make_node(op, (simple_stream,), db=db)
+        node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         node.run()
         records1 = node.get_all_records()
         node.run()  # second run should be no-op (cached)
@@ -335,7 +347,9 @@ class TestOperatorNodeRunAndStorage:
 
     def test_join_run_and_retrieve(self, left_stream, right_stream, db):
         op = Join()
-        node = _make_node(op, (left_stream, right_stream), db=db)
+        node = _make_node(
+            op, (left_stream, right_stream), db=db, cache_mode=CacheMode.LOG
+        )
         node.run()
         records = node.get_all_records()
         assert records is not None
@@ -346,13 +360,40 @@ class TestOperatorNodeRunAndStorage:
 
     def test_drop_columns_run_and_retrieve(self, two_packet_stream, db):
         op = DropPacketColumns("y")
-        node = _make_node(op, (two_packet_stream,), db=db)
+        node = _make_node(op, (two_packet_stream,), db=db, cache_mode=CacheMode.LOG)
         node.run()
         records = node.get_all_records()
         assert records is not None
         assert records.num_rows == 3
         assert "x" in records.column_names
         assert "y" not in records.column_names
+
+    def test_replay_from_cache(self, simple_stream, db):
+        """CacheMode.REPLAY: skip computation, load from DB."""
+        op = MapPackets({"x": "renamed_x"})
+        # First, populate cache with LOG mode
+        node_log = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
+        node_log.run()
+
+        # Then replay from cache
+        node_replay = _make_node(
+            op, (simple_stream,), db=db, cache_mode=CacheMode.REPLAY
+        )
+        table = node_replay.as_table()
+        assert table.num_rows == 3
+        assert "renamed_x" in table.column_names
+
+    def test_replay_no_cache_returns_empty_stream(self, simple_stream, db):
+        """CacheMode.REPLAY with no cached data yields an empty stream."""
+        op = MapPackets({"x": "renamed_x"})
+        node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.REPLAY)
+        node.run()
+        table = node.as_table()
+        assert table.num_rows == 0
+        # Schema is still correct
+        tag_keys, packet_keys = node.keys()
+        assert set(tag_keys).issubset(set(table.column_names))
+        assert set(packet_keys).issubset(set(table.column_names))
 
 
 # ---------------------------------------------------------------------------
@@ -365,14 +406,14 @@ class TestOperatorNodeDerivedSource:
         from orcapod.core.sources.derived_source import DerivedSource
 
         op = MapPackets({"x": "renamed_x"})
-        node = _make_node(op, (simple_stream,), db=db)
+        node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         node.run()
         source = node.as_source()
         assert isinstance(source, DerivedSource)
 
     def test_as_source_round_trip(self, simple_stream, db):
         op = MapPackets({"x": "renamed_x"})
-        node = _make_node(op, (simple_stream,), db=db)
+        node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         node.run()
         source = node.as_source()
         # iter_packets should yield the same data
@@ -381,14 +422,14 @@ class TestOperatorNodeDerivedSource:
 
     def test_as_source_schema_matches(self, simple_stream, db):
         op = MapPackets({"x": "renamed_x"})
-        node = _make_node(op, (simple_stream,), db=db)
+        node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         node.run()
         source = node.as_source()
         assert source.output_schema() == node.output_schema()
 
     def test_as_source_before_run_raises(self, simple_stream, db):
         op = MapPackets({"x": "renamed_x"})
-        node = _make_node(op, (simple_stream,), db=db)
+        node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         source = node.as_source()
         with pytest.raises(ValueError, match="no computed records"):
             list(source.iter_packets())

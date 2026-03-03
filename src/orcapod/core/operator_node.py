@@ -18,7 +18,7 @@ from orcapod.protocols.core_protocols import (
 from orcapod.protocols.core_protocols.operator_pod import OperatorPodProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.system_constants import constants
-from orcapod.types import ColumnConfig, Schema
+from orcapod.types import CacheMode, ColumnConfig, Schema
 from orcapod.utils.lazy_module import LazyModule
 
 logger = logging.getLogger(__name__)
@@ -173,13 +173,21 @@ class PersistentOperatorNode(OperatorNode):
     - Pipeline record storage with per-row deduplication
     - ``get_all_records()`` for retrieving stored results
     - ``as_source()`` for creating a ``DerivedSource`` from DB records
+    - Three-tier cache mode: OFF / LOG / REPLAY
 
     Pipeline path structure::
 
-        pipeline_path_prefix / operator.uri / node:{pipeline_hash}
+        pipeline_path_prefix / operator.uri / node:{content_hash}
 
-    Where ``pipeline_hash`` is the schema+topology hash that already encodes
-    tag and packet schema information.
+    Where ``content_hash`` is the data-inclusive hash that encodes both
+    pipeline structure and upstream source identities, ensuring each
+    unique source combination gets its own cache table.
+
+    Cache modes
+    -----------
+    - **OFF** (default): compute, don't write to DB.
+    - **LOG**: compute AND write to DB (append-only historical record).
+    - **REPLAY**: skip computation, flow cached results downstream.
     """
 
     HASH_COLUMN_NAME = "_record_hash"
@@ -189,6 +197,7 @@ class PersistentOperatorNode(OperatorNode):
         operator: StaticOutputPod,
         input_streams: tuple[StreamProtocol, ...] | list[StreamProtocol],
         pipeline_database: ArrowDatabaseProtocol,
+        cache_mode: CacheMode = CacheMode.OFF,
         pipeline_path_prefix: tuple[str, ...] = (),
         tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
@@ -206,9 +215,15 @@ class PersistentOperatorNode(OperatorNode):
 
         self._pipeline_database = pipeline_database
         self._pipeline_path_prefix = pipeline_path_prefix
+        self._cache_mode = cache_mode
 
-        # Compute pipeline node hash (schema+topology only)
-        self._pipeline_node_hash = self.pipeline_hash().to_string()
+        # Use content_hash (data-inclusive) so each source combination
+        # gets its own cache table.
+        self._pipeline_node_hash = self.content_hash().to_string()
+
+    @property
+    def cache_mode(self) -> CacheMode:
+        return self._cache_mode
 
     @property
     def pipeline_path(self) -> tuple[str, ...]:
@@ -218,31 +233,22 @@ class PersistentOperatorNode(OperatorNode):
             + (f"node:{self._pipeline_node_hash}",)
         )
 
-    def run(self) -> None:
-        """
-        Execute the operator if stale or not yet computed.
-
-        Calls ``static_process`` on the operator, materializes the output
-        as an Arrow table, computes per-row record hashes, and stores the
-        result in the pipeline database.
-        """
-        if self.is_stale:
-            self.clear_cache()
-
-        if self._cached_output_stream is not None:
-            return
-
-        # Compute
+    def _compute_and_store(self) -> None:
+        """Compute operator output, optionally store in DB."""
         self._cached_output_stream = self._operator.process(
             *self._input_streams,
         )
 
-        # Materialize
+        if self._cache_mode == CacheMode.OFF:
+            self._update_modified_time()
+            return
+
+        # Materialize for DB storage (LOG and REPLAY modes)
         output_table = self._cached_output_stream.as_table(
             columns={"source": True, "system_tags": True},
         )
 
-        # Per-row record hashes for dedup
+        # Per-row record hashes for dedup: hash(tag + packet + system_tag)
         arrow_hasher = self.data_context.arrow_hasher
         record_hashes = []
         for batch in output_table.to_batches():
@@ -257,7 +263,7 @@ class PersistentOperatorNode(OperatorNode):
             pa.array(record_hashes, type=pa.large_string()),
         )
 
-        # Store
+        # Store (identical rows across runs naturally deduplicate)
         self._pipeline_database.add_records(
             self.pipeline_path,
             output_table,
@@ -267,6 +273,48 @@ class PersistentOperatorNode(OperatorNode):
 
         self._cached_output_table = output_table.drop(self.HASH_COLUMN_NAME)
         self._update_modified_time()
+
+    def _replay_from_cache(self) -> None:
+        """Load cached results from DB, skip computation.
+
+        If no cached records exist yet, produces an empty stream with
+        the correct schema (zero rows, correct columns).
+        """
+        from orcapod.core.streams.arrow_table_stream import ArrowTableStream
+
+        records = self._pipeline_database.get_all_records(self.pipeline_path)
+        if records is None:
+            # Build an empty table with the correct schema
+            tag_schema, packet_schema = self.output_schema()
+            type_converter = self.data_context.type_converter
+            empty_fields = {}
+            for name, py_type in {**tag_schema, **packet_schema}.items():
+                arrow_type = type_converter.python_type_to_arrow_type(py_type)
+                empty_fields[name] = pa.array([], type=arrow_type)
+            records = pa.table(empty_fields)
+
+        tag_keys = self.keys()[0]
+        self._cached_output_stream = ArrowTableStream(records, tag_columns=tag_keys)
+        self._update_modified_time()
+
+    def run(self) -> None:
+        """
+        Execute the operator according to the current cache mode.
+
+        - **OFF**: always compute, no DB writes.
+        - **LOG**: always compute, write results to DB.
+        - **REPLAY**: skip computation, load from DB.
+        """
+        if self.is_stale:
+            self.clear_cache()
+
+        if self._cached_output_stream is not None:
+            return
+
+        if self._cache_mode == CacheMode.REPLAY:
+            self._replay_from_cache()
+        else:
+            self._compute_and_store()
 
     # ------------------------------------------------------------------
     # DB retrieval

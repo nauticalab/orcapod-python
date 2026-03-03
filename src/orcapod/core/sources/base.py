@@ -28,14 +28,14 @@ class RootSource(StreamBase):
 
     Source identity
     ---------------
-    Every source has a ``source_id`` — a canonical name that can be used to
-    register the source in a ``SourceRegistry`` so that provenance tokens
-    embedded in downstream data can be resolved back to the originating source
-    object.  Registration is an explicit external action; the source itself
-    does not self-register.
+    Every source has a ``source_id`` — a canonical name that determines the
+    source's content identity and is used in the ``SourceRegistry`` so that
+    provenance tokens embedded in downstream data can be resolved back to the
+    originating source object.
 
-    If ``source_id`` is not provided at construction it defaults to the content
-    hash of the source (stable for fixed datasets).
+    Concrete subclasses must ensure ``_source_id`` is set by the end of
+    ``__init__``.  File-backed sources (DeltaTableSource, CSVSource) default
+    to the file path; ``ArrowTableSource`` defaults to the table's data hash.
 
     Field resolution
     ----------------
@@ -55,7 +55,7 @@ class RootSource(StreamBase):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        self._explicit_source_id = source_id
+        self._source_id = source_id
 
     # -------------------------------------------------------------------------
     # Source identity
@@ -65,13 +65,15 @@ class RootSource(StreamBase):
     def source_id(self) -> str:
         """
         Canonical name for this source used in the registry and provenance
-        strings.  Defaults to the content hash when not explicitly set.
+        strings.  Must be set by the end of ``__init__`` in concrete subclasses.
         """
-        if self._explicit_source_id is not None:
-            return self._explicit_source_id
-        return self.content_hash().to_hex(
-            char_count=self.orcapod_config.path_hash_n_char
-        )
+        if self._source_id is None:
+            raise ValueError(
+                f"{self.__class__.__name__}._source_id was not set. "
+                "Concrete subclasses must ensure _source_id is populated "
+                "by the end of __init__."
+            )
+        return self._source_id
 
     # -------------------------------------------------------------------------
     # Field resolution
@@ -105,8 +107,8 @@ class RootSource(StreamBase):
         )
 
     def computed_label(self) -> str | None:
-        """Return the explicit source_id as the label when set."""
-        return self._explicit_source_id
+        """Return the source_id as the label."""
+        return self._source_id
 
     # -------------------------------------------------------------------------
     # PipelineElementProtocol — schema-only identity (base case of Merkle chain)

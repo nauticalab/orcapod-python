@@ -101,8 +101,14 @@ class ArrowTableSource(RootSource):
             (tag_python, packet_python)
         ).to_hex(char_count=self.orcapod_config.schema_hash_n_char)
 
-        # Derive a stable table hash (used in identity_structure).
+        # Derive a stable table hash for data identity.
         self._table_hash = self.data_context.arrow_hasher.hash_table(table)
+
+        # Default source_id to table hash when not explicitly provided.
+        if self._source_id is None:
+            self._source_id = self._table_hash.to_hex(
+                char_count=self.orcapod_config.path_hash_n_char
+            )
 
         # Keep a clean copy for resolve_field lookups (no system columns).
         self._data_table = table
@@ -118,10 +124,17 @@ class ArrowTableSource(RootSource):
         table = arrow_data_utils.add_source_info(
             table, source_info, exclude_columns=self._tag_columns
         )
-        table = arrow_data_utils.add_system_tag_column(
+
+        # System tags: paired source_id and record_id columns
+        record_id_values = [
+            _make_record_id(record_id_column, i, row)
+            for i, row in enumerate(rows_as_dicts)
+        ]
+        table = arrow_data_utils.add_system_tag_columns(
             table,
-            f"source{constants.FIELD_SEPARATOR}{self._schema_hash}",
-            source_info,
+            self._schema_hash,
+            self.source_id,
+            record_id_values,
         )
 
         self._table = table
@@ -207,7 +220,7 @@ class ArrowTableSource(RootSource):
         return self._table
 
     def identity_structure(self) -> Any:
-        return (self.__class__.__name__, self._tag_columns, self._table_hash)
+        return (self.__class__.__name__, self.output_schema(), self.source_id)
 
     def output_schema(
         self,

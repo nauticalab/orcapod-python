@@ -342,13 +342,13 @@ Each unique combination of pipeline structure and source identities gets its own
 Operators compute over the stream (joins, aggregations, window functions). Their outputs are meaningful only as a complete set given a specific input. Unlike function pods, operator results cannot be safely mixed across source combinations within a shared table because the distributive property does not hold for most operators. For example, with a join: `(X ⋈ Y) ∪ (X' ⋈ Y') ≠ (X ∪ X') ⋈ (Y ∪ Y')`. The shared table would miss cross-terms `X ⋈ Y'` and `X' ⋈ Y`. Cache invalidation is also cleaner per-table (drop/mark stale) rather than selectively purging rows by system tag.
 
 **Critical correctness caveat:**
-Even scoped to content hash, operator caches are **not guaranteed to be complete** with respect to the full picture of all packets ever yielded by the sources. Because sources may use canonical identity for their content hash, the same source identity may yield different packet sets over time. The cache accumulates per-run snapshots:
+Even scoped to content hash, operator caches are **not guaranteed to be complete** with respect to the full picture of all packets ever yielded by the sources. Because sources may use canonical identity for their content hash, the same source identity may yield different packet sets over time. The cache accumulates result rows across runs:
 
 - Run 1: `X ⋈ Y` is cached.
-- Run 2: Sources yield `X'` and `Y'`. The operator computes `X' ⋈ Y'` and appends to cache.
+- Run 2: Sources yield `X'` and `Y'`. The operator computes `X' ⋈ Y'` and appends new rows to cache.
 - The cache now contains `(X ⋈ Y) ∪ (X' ⋈ Y')`, which is **not** equivalent to `(X ∪ X') ⋈ (Y ∪ Y')`.
 
-The operator cache is strictly an **append-only log of per-run result snapshots**, not a cumulative materialization.
+The operator cache is strictly an **append-only historical record**, not a cumulative materialization. Identical output rows across runs naturally deduplicate (keyed by `hash(tag + packet + system_tag)`). Run-level grouping and tracking is managed separately outside the cache mechanism.
 
 **Behavior:**
 - Cache is **off by default**. Operator computation is always triggered fresh in a typical run.
@@ -363,7 +363,7 @@ The operator cache is strictly an **append-only log of per-run result snapshots*
 | Logging | Yes | Always | Audit trail, run-over-run comparison |
 | Historical replay | Yes (prior) | Skipped | Explicitly flowing prior results downstream |
 
-**Semantic guarantee:** The cache is a **historical log**. It records what was produced, not what would be produced now. It must never be silently substituted for fresh computation.
+**Semantic guarantee:** The cache is a **historical record**. It records what was produced, not what would be produced now. Identical output rows across runs are deduplicated. It must never be silently substituted for fresh computation.
 
 ### Caching Summary
 
@@ -371,7 +371,7 @@ The operator cache is strictly an **append-only log of per-run result snapshots*
 |----------|-----------|--------------|--------------|
 | Cache table scope | Canonical source identity | Structural pipeline hash | Content hash (structure + sources) |
 | Default state | Always on | Always on | Off |
-| Semantic role | Cumulative record | Reusable lookup | Historical log |
+| Semantic role | Cumulative record | Reusable lookup | Historical record |
 | Correctness | Always correct | Always correct | Per-run snapshots only |
 | Cross-source sharing | N/A (one source per table) | Yes, via system tag columns | No (separate tables) |
 | Computation on cache hit | Dedup and merge | Skip (use cached result) | Recompute by default |

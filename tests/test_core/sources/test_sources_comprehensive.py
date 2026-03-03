@@ -282,13 +282,13 @@ class TestDataFrameSourceAdditional:
         df = pl.DataFrame(
             {
                 "x": [1, 2],
-                "_tag::something": ["a", "b"],
+                "_tag_something": ["a", "b"],
             }
         )
         src = DataFrameSource(data=df)
         tag_keys, packet_keys = src.keys()
-        assert "_tag::something" not in tag_keys
-        assert "_tag::something" not in packet_keys
+        assert "_tag_something" not in tag_keys
+        assert "_tag_something" not in packet_keys
 
     def test_source_id_in_provenance_tokens(self):
         df = pl.DataFrame({"id": [1, 2, 3], "value": ["a", "b", "c"]})
@@ -552,12 +552,21 @@ class TestArrowTableSourceAdditional:
         src = ArrowTableSource(table=table, system_tag_columns=["sys_col"])
         assert "sys_col" in src._system_tag_columns
 
-    def test_as_table_all_info_includes_system_tag_column(self):
-        """as_table(all_info=True) exposes the _tag::source:… column."""
+    def test_as_table_all_info_includes_system_tag_columns(self):
+        """as_table(all_info=True) exposes paired _tag_source_id and _tag_record_id columns."""
+        from orcapod.system_constants import constants
+
         table = pa.table({"x": pa.array([1, 2], type=pa.int64())})
         src = ArrowTableSource(table=table)
         enriched = src.as_table(all_info=True)
-        assert any(c.startswith("_tag::source") for c in enriched.column_names)
+        assert any(
+            c.startswith(constants.SYSTEM_TAG_SOURCE_ID_PREFIX)
+            for c in enriched.column_names
+        )
+        assert any(
+            c.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX)
+            for c in enriched.column_names
+        )
 
     def test_resolve_field_on_empty_record_id_prefix_raises(self):
         """An empty string record_id raises FieldNotResolvableError."""

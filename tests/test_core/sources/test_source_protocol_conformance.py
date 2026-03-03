@@ -301,7 +301,7 @@ class TestStreamAsTable:
     def test_default_no_system_columns(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
         table = src.as_table()
-        assert not any(c.startswith("_tag::") for c in table.column_names)
+        assert not any(c.startswith("_tag_") for c in table.column_names)
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_all_info_adds_source_columns(self, src_fixture, request):
@@ -450,11 +450,11 @@ class TestEdgeCases:
         table = pa.table(
             {
                 "x": pa.array([1, 2], type=pa.int64()),
-                "_tag::something": pa.array(["a", "b"], type=pa.large_string()),
+                "_tag_something": pa.array(["a", "b"], type=pa.large_string()),
             }
         )
         src = ArrowTableSource(table=table)
         # system columns should not appear in data keys
         tag_keys, packet_keys = src.keys()
-        assert "_tag::something" not in tag_keys
-        assert "_tag::something" not in packet_keys
+        assert "_tag_something" not in tag_keys
+        assert "_tag_something" not in packet_keys

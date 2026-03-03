@@ -16,6 +16,7 @@ import os
 import uuid
 from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
+from enum import Enum
 from types import UnionType
 from typing import Any, Self, TypeAlias
 
@@ -243,6 +244,27 @@ class Schema(Mapping[str, DataType]):
             A new ``Schema`` containing zero fields.
         """
         return cls({})
+
+
+class CacheMode(Enum):
+    """Controls operator pod caching behaviour.
+
+    Attributes
+    ----------
+    OFF
+        No cache writes, always compute.  Default for operator pods.
+    LOG
+        Cache writes **and** computation.  The operator always recomputes;
+        the cache serves as an append-only historical record.
+    REPLAY
+        Skip computation and flow cached results downstream.  Only
+        appropriate when the user explicitly wants to use the historical
+        record (e.g. auditing or run-over-run comparison).
+    """
+
+    OFF = "off"
+    LOG = "log"
+    REPLAY = "replay"
 
 
 @dataclass(frozen=True, slots=True)

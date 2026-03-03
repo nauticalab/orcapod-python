@@ -54,8 +54,8 @@ class SemiJoin(BinaryOperator):
         if not common_keys:
             return left_stream
 
-        # include source info for left stream
-        left_table = left_stream.as_table(columns={"source": True})
+        # include source info and system tags for left stream
+        left_table = left_stream.as_table(columns={"source": True, "system_tags": True})
 
         # Get the right table for matching
         right_table = right_stream.as_table()

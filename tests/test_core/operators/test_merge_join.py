@@ -439,7 +439,7 @@ class TestMergeJoinOutputSchema:
         sys_tag_keys = [
             k for k in tag_schema if k.startswith(constants.SYSTEM_TAG_PREFIX)
         ]
-        assert len(sys_tag_keys) == 2
+        assert len(sys_tag_keys) == 4  # 2 sources × 2 fields (source_id + record_id)
 
     def test_output_schema_system_tags_match_actual_output(
         self, left_source, right_source
@@ -508,9 +508,8 @@ class TestMergeJoinOutputSchema:
         )
 
         assert predicted == actual
-        # Must have 2 distinct system tag columns
-        assert len(predicted) == 2
-        assert predicted[0] != predicted[1]
+        # Must have 4 system tag columns (2 per source: source_id + record_id)
+        assert len(predicted) == 4
 
     def test_output_schema_all_info_includes_system_tags(
         self, left_source, right_source
@@ -524,7 +523,7 @@ class TestMergeJoinOutputSchema:
         sys_tag_keys = [
             k for k in tag_schema if k.startswith(constants.SYSTEM_TAG_PREFIX)
         ]
-        assert len(sys_tag_keys) == 2
+        assert len(sys_tag_keys) == 4  # 2 sources × 2 fields
 
     def test_predicted_schema_matches_result_stream_schema(
         self, left_source, right_source
@@ -594,26 +593,27 @@ class TestMergeJoinSystemTags:
     def _parse_system_tag_column(col, constants):
         """Parse system tag column name into its component blocks.
 
-        Format: _tag::source:{source_hash}::{stream_hash}:{canonical_position}
+        Format: _tag_{field_type}::{schema_hash}::{stream_hash}:{canonical_position}
+        Returns: (field_type, schema_hash, stream_hash, index)
         """
         after_prefix = col[len(constants.SYSTEM_TAG_PREFIX) :]
         blocks = after_prefix.split(constants.BLOCK_SEPARATOR)
-        source_block_fields = blocks[0].split(constants.FIELD_SEPARATOR)
-        join_block_fields = blocks[1].split(constants.FIELD_SEPARATOR)
-        source_hash = source_block_fields[1]
+        field_type = blocks[0]
+        schema_hash = blocks[1]
+        join_block_fields = blocks[2].split(constants.FIELD_SEPARATOR)
         stream_hash = join_block_fields[0]
         index = join_block_fields[1]
-        return source_hash, stream_hash, index
+        return field_type, schema_hash, stream_hash, index
 
     def test_two_system_tag_columns_produced(self, left_source, right_source):
-        """MergeJoin of two sources should produce 2 system tag columns."""
+        """MergeJoin of two sources should produce 4 system tag columns (2 per source: source_id + record_id)."""
         from orcapod.system_constants import constants
 
         op = MergeJoin()
         result = op.static_process(left_source, right_source)
         result_table = result.as_table(columns={"system_tags": True})
         sys_cols = self._get_system_tag_columns(result_table, constants)
-        assert len(sys_cols) == 2
+        assert len(sys_cols) == 4
 
     def test_system_tag_canonical_positions(self, left_source, right_source):
         """System tag columns should carry canonical position indices
@@ -628,13 +628,18 @@ class TestMergeJoinSystemTags:
         result_table = result.as_table(columns={"system_tags": True})
         sys_cols = self._get_system_tag_columns(result_table, constants)
 
+        # Filter to just source_id columns for position checking
+        sid_cols = [
+            c for c in sys_cols if c.startswith(constants.SYSTEM_TAG_SOURCE_ID_PREFIX)
+        ]
+
         # Independently determine expected ordering
         sources = [left_source, right_source]
         sorted_sources = sorted(sources, key=lambda s: s.pipeline_hash().to_hex())
 
         for expected_idx, expected_source in enumerate(sorted_sources):
-            source_hash, stream_hash, index_str = self._parse_system_tag_column(
-                sys_cols[expected_idx], constants
+            field_type, schema_hash, stream_hash, index_str = (
+                self._parse_system_tag_column(sid_cols[expected_idx], constants)
             )
             expected_stream_hash = expected_source.pipeline_hash().to_hex(n_char)
             assert stream_hash == expected_stream_hash
@@ -675,13 +680,18 @@ class TestMergeJoinSystemTags:
         result_table = result.as_table(columns={"system_tags": True})
         sys_cols = self._get_system_tag_columns(result_table, constants)
 
-        # Must have 2 distinct system tag columns
-        assert len(sys_cols) == 2
-        assert sys_cols[0] != sys_cols[1]
+        # Must have 4 system tag columns (2 per source: source_id + record_id)
+        assert len(sys_cols) == 4
+
+        # Filter to source_id columns only for position checking
+        sid_cols = [
+            c for c in sys_cols if c.startswith(constants.SYSTEM_TAG_SOURCE_ID_PREFIX)
+        ]
+        assert len(sid_cols) == 2
 
         # Both should have the same pipeline_hash but different positions
-        _, hash_0, pos_0 = self._parse_system_tag_column(sys_cols[0], constants)
-        _, hash_1, pos_1 = self._parse_system_tag_column(sys_cols[1], constants)
+        _, _, hash_0, pos_0 = self._parse_system_tag_column(sid_cols[0], constants)
+        _, _, hash_1, pos_1 = self._parse_system_tag_column(sid_cols[1], constants)
 
         assert hash_0 == hash_1  # Same pipeline hash
         assert pos_0 != pos_1  # Different canonical positions
@@ -706,8 +716,12 @@ class TestMergeJoinSystemTags:
         result_table = result.as_table(columns={"system_tags": True})
         sys_cols = self._get_system_tag_columns(result_table, constants)
 
-        _, hash_0, _ = self._parse_system_tag_column(sys_cols[0], constants)
-        _, hash_1, _ = self._parse_system_tag_column(sys_cols[1], constants)
+        # Filter to source_id columns for pipeline hash comparison
+        sid_cols = [
+            c for c in sys_cols if c.startswith(constants.SYSTEM_TAG_SOURCE_ID_PREFIX)
+        ]
+        _, _, hash_0, _ = self._parse_system_tag_column(sid_cols[0], constants)
+        _, _, hash_1, _ = self._parse_system_tag_column(sid_cols[1], constants)
 
         assert hash_0 != hash_1
 
@@ -751,7 +765,7 @@ class TestMergeJoinSystemTags:
     def test_system_tag_values_sorted_for_same_pipeline_hash(self):
         """When two streams share the same pipeline_hash, system tag VALUES
         must be sorted per row so that position :0 always gets the
-        lexicographically smaller value.
+        lexicographically smaller (source_id, record_id) tuple.
 
         Uses source_id="zzz_source" vs "aaa_source" to ensure the
         lexicographic order of provenance values is opposite to input order,
@@ -790,22 +804,20 @@ class TestMergeJoinSystemTags:
         table_ba = result_ba.as_table(columns={"system_tags": True})
 
         sys_cols = self._get_system_tag_columns(table_ab, constants)
-        assert len(sys_cols) == 2
+        assert len(sys_cols) == 4  # 2 sources × 2 fields
 
-        # For each row, the value in position :0 should be <= value in position :1
-        for row in table_ab.to_pylist():
-            val_0 = row[sys_cols[0]]
-            val_1 = row[sys_cols[1]]
-            assert val_0 <= val_1, (
-                f"System tag values not sorted: {val_0!r} > {val_1!r}"
-            )
+        # Check source_id columns are sorted
+        sid_cols = sorted(
+            c for c in sys_cols if c.startswith(constants.SYSTEM_TAG_SOURCE_ID_PREFIX)
+        )
+        assert len(sid_cols) == 2
 
         # "aaa_source" < "zzz_source", so position :0 must always hold aaa_source
         for row in table_ab.to_pylist():
-            assert "aaa_source" in row[sys_cols[0]]
-            assert "zzz_source" in row[sys_cols[1]]
+            assert row[sid_cols[0]] == "aaa_source"
+            assert row[sid_cols[1]] == "zzz_source"
 
-        # And swapped inputs must produce identical per-row values
+        # Swapped inputs must produce identical per-row values
         rows_ab = sorted(table_ab.to_pylist(), key=lambda r: r["id"])
         rows_ba = sorted(table_ba.to_pylist(), key=lambda r: r["id"])
 

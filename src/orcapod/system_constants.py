@@ -8,7 +8,9 @@ PF_EXECUTION_PREFIX = "pf_exec_"
 DATA_CONTEXT_KEY = "context_key"
 INPUT_PACKET_HASH_COL = "input_packet_hash"
 PACKET_RECORD_ID = "packet_id"
-SYSTEM_TAG_PREFIX = "tag"
+SYSTEM_TAG_PREFIX_NAME = "tag"
+SYSTEM_TAG_SOURCE_ID_FIELD = "source_id"
+SYSTEM_TAG_RECORD_ID_FIELD = "record_id"
 POD_VERSION = "pod_version"
 EXECUTION_ENGINE = "execution_engine"
 POD_TIMESTAMP = "pod_ts"
@@ -67,7 +69,15 @@ class SystemConstant:
 
     @property
     def SYSTEM_TAG_PREFIX(self) -> str:
-        return f"{self._global_prefix}{DATAGRAM_PREFIX}{SYSTEM_TAG_PREFIX}{self.BLOCK_SEPARATOR}"
+        return f"{self._global_prefix}{DATAGRAM_PREFIX}{SYSTEM_TAG_PREFIX_NAME}_"
+
+    @property
+    def SYSTEM_TAG_SOURCE_ID_PREFIX(self) -> str:
+        return f"{self.SYSTEM_TAG_PREFIX}{SYSTEM_TAG_SOURCE_ID_FIELD}"
+
+    @property
+    def SYSTEM_TAG_RECORD_ID_PREFIX(self) -> str:
+        return f"{self.SYSTEM_TAG_PREFIX}{SYSTEM_TAG_RECORD_ID_FIELD}"
 
     @property
     def POD_VERSION(self) -> str:
