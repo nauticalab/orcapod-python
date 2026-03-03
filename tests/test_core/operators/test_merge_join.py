@@ -244,7 +244,7 @@ class TestMergeJoinSourceColumns:
                 }
             ),
             tag_columns=["id"],
-            source_name="east",
+            source_id="east",
         )
         west = ArrowTableSource(
             pa.table(
@@ -255,7 +255,7 @@ class TestMergeJoinSourceColumns:
                 }
             ),
             tag_columns=["id"],
-            source_name="west",
+            source_id="west",
         )
 
         op = MergeJoin()
@@ -753,7 +753,7 @@ class TestMergeJoinSystemTags:
         must be sorted per row so that position :0 always gets the
         lexicographically smaller value.
 
-        Uses source_name="zzz_source" vs "aaa_source" to ensure the
+        Uses source_id="zzz_source" vs "aaa_source" to ensure the
         lexicographic order of provenance values is opposite to input order,
         proving that sorting actually happened (not just preserved)."""
         from orcapod.system_constants import constants
@@ -766,7 +766,7 @@ class TestMergeJoinSystemTags:
                 }
             ),
             tag_columns=["id"],
-            source_name="zzz_source",
+            source_id="zzz_source",
         )
         src_b = ArrowTableSource(
             pa.table(
@@ -776,7 +776,7 @@ class TestMergeJoinSystemTags:
                 }
             ),
             tag_columns=["id"],
-            source_name="aaa_source",
+            source_id="aaa_source",
         )
 
         assert src_a.pipeline_hash().to_hex() == src_b.pipeline_hash().to_hex()

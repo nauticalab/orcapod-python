@@ -47,9 +47,6 @@ class ArrowTableSource(RootSource):
         Column names whose values form the tag for each row.
     system_tag_columns:
         Additional system-level tag columns.
-    source_name:
-        Human-readable name used in provenance strings.  Defaults to
-        ``self.source_id``.
     record_id_column:
         Column whose values serve as stable record identifiers in provenance
         strings and ``resolve_field`` lookups.  When ``None`` (default) the
@@ -65,7 +62,6 @@ class ArrowTableSource(RootSource):
         table: "pa.Table",
         tag_columns: Collection[str] = (),
         system_tag_columns: Collection[str] = (),
-        source_name: str | None = None,
         record_id_column: str | None = None,
         **kwargs: Any,
     ) -> None:
@@ -108,18 +104,13 @@ class ArrowTableSource(RootSource):
         # Derive a stable table hash (used in identity_structure).
         self._table_hash = self.data_context.arrow_hasher.hash_table(table)
 
-        # Resolve source_name; self.source_id is available now (content_hash ready).
-        if source_name is None:
-            source_name = self.source_id
-        self._source_name = source_name
-
         # Keep a clean copy for resolve_field lookups (no system columns).
         self._data_table = table
 
         # Build per-row source-info strings using stable record IDs.
         rows_as_dicts = table.to_pylist()
         source_info = [
-            f"{self._source_name}{constants.BLOCK_SEPARATOR}"
+            f"{self.source_id}{constants.BLOCK_SEPARATOR}"
             f"{_make_record_id(record_id_column, i, row)}"
             for i, row in enumerate(rows_as_dicts)
         ]

@@ -212,7 +212,7 @@ class TestArrowTableSourceInfoTokens:
         values = table.column(source_col[0]).to_pylist()
         assert all("user_id=" in v for v in values)
 
-    def test_source_name_appears_in_token(self):
+    def test_source_id_appears_in_provenance_token(self):
         src = _make_arrow_source(source_id="my_ds")
         table = src.as_table(all_info=True)
         source_col = [c for c in table.column_names if c.startswith("_source_score")]

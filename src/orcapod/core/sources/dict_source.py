@@ -29,8 +29,8 @@ class DictSource(RootSource):
         data: Collection[Mapping[str, DataValue]],
         tag_columns: Collection[str] = (),
         system_tag_columns: Collection[str] = (),
-        source_name: str | None = None,
         data_schema: SchemaLike | None = None,
+        source_id: str | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -43,10 +43,17 @@ class DictSource(RootSource):
             table=arrow_table,
             tag_columns=tag_columns,
             system_tag_columns=system_tag_columns,
-            source_name=source_name,
+            source_id=source_id,
             data_context=self.data_context,
             config=self.orcapod_config,
         )
+
+    @property
+    def source_id(self) -> str:
+        return self._arrow_source.source_id
+
+    def computed_label(self) -> str | None:
+        return self._arrow_source.computed_label()
 
     def identity_structure(self) -> Any:
         return self._arrow_source.identity_structure()

@@ -31,9 +31,6 @@ class CSVSource(RootSource):
         Column names whose values form the tag for each row.
     system_tag_columns:
         Additional system-level tag columns.
-    source_name:
-        Human-readable name for provenance strings.  Defaults to
-        ``file_path``.
     record_id_column:
         Column whose values serve as stable record identifiers in provenance
         strings and ``resolve_field`` lookups.  When ``None`` (default) the
@@ -49,11 +46,13 @@ class CSVSource(RootSource):
         file_path: str,
         tag_columns: Collection[str] = (),
         system_tag_columns: Collection[str] = (),
-        source_name: str | None = None,
         record_id_column: str | None = None,
+        source_id: str | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(**kwargs)
+        if source_id is None:
+            source_id = file_path
+        super().__init__(source_id=source_id, **kwargs)
 
         import pyarrow.csv as pa_csv
 
@@ -61,15 +60,12 @@ class CSVSource(RootSource):
 
         table: pa.Table = pa_csv.read_csv(file_path)
 
-        if source_name is None:
-            source_name = file_path
-
         self._arrow_source = ArrowTableSource(
             table=table,
             tag_columns=tag_columns,
             system_tag_columns=system_tag_columns,
-            source_name=source_name,
             record_id_column=record_id_column,
+            source_id=self.source_id,
             data_context=self.data_context,
             config=self.orcapod_config,
         )

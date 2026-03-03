@@ -392,6 +392,7 @@ class TestGraphTrackerCompile:
         with GraphTracker(tracker_manager=mgr) as tracker:
             tracker.record_operator_pod_invocation(op, upstreams=(stream_a, stream_b))
 
+        tracker.compile()
         assert len(tracker._node_lut) == 3
         source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
         op_nodes = [n for n in tracker.nodes if isinstance(n, OperatorNode)]
@@ -742,7 +743,7 @@ class TestBMIPipelineEndToEnd:
                 }
             ),
             tag_columns=["person_id"],
-            source_name="heights",
+            source_id="heights",
         )
         weights = ArrowTableSource(
             pa.table(
@@ -752,7 +753,7 @@ class TestBMIPipelineEndToEnd:
                 }
             ),
             tag_columns=["person_id"],
-            source_name="weights",
+            source_id="weights",
         )
         return heights, weights
 

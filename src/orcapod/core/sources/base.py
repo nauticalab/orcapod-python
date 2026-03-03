@@ -104,6 +104,10 @@ class RootSource(StreamBase):
             f"for record {record_id!r}."
         )
 
+    def computed_label(self) -> str | None:
+        """Return the explicit source_id as the label when set."""
+        return self._explicit_source_id
+
     # -------------------------------------------------------------------------
     # PipelineElementProtocol — schema-only identity (base case of Merkle chain)
     # -------------------------------------------------------------------------

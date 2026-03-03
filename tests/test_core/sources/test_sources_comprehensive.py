@@ -4,18 +4,18 @@ behaviours not already exercised in test_sources.py or
 test_source_protocol_conformance.py.
 
 Coverage added here:
-- CSVSource: construction, source_name, record_id_column, resolve_field, file-
-  not-found, protocol conformance
-- DeltaTableSource: construction, source_name, resolve_field, bad path error,
-  protocol conformance
+- CSVSource: construction, source_id defaulting, record_id_column, resolve_field,
+  file-not-found, protocol conformance
+- DeltaTableSource: construction, source_id defaulting, resolve_field, bad path
+  error, protocol conformance
 - DataFrameSource: string tag_columns, resolve_field raises, system-column
-  stripping from Polars input, source_name parameter
-- DictSource: data_schema parameter, empty-data raises, source_name, content
+  stripping from Polars input, source_id parameter
+- DictSource: data_schema parameter, empty-data raises, source_id, content
   hash with explicit schema
 - ListSource: tag_function_hash_mode='signature' and 'content', empty list,
   tag function inference without expected_tag_keys, TagProtocol.as_dict() protocol,
   identity_structure stability
-- ArrowTableSource: table property, source_name distinct from source_id,
+- ArrowTableSource: table property, source_id controls provenance tokens,
   negative row index raises, duplicate record_id takes first match,
   system_tag_columns forwarded, integer record_id_column values
 - SourceRegistry: replace() returns None when no prior entry, replace() with
@@ -103,13 +103,13 @@ class TestCSVSource:
         assert "user_id" in tag_keys
         assert "score" in packet_keys
 
-    def test_source_name_defaults_to_file_path(self, csv_path):
+    def test_source_id_defaults_to_file_path(self, csv_path):
         src = CSVSource(file_path=csv_path)
-        assert src._arrow_source._source_name == csv_path
+        assert src.source_id == csv_path
 
-    def test_source_name_explicit(self, csv_path):
-        src = CSVSource(file_path=csv_path, source_name="my_csv_name")
-        assert src._arrow_source._source_name == "my_csv_name"
+    def test_source_id_explicit_overrides_default(self, csv_path):
+        src = CSVSource(file_path=csv_path, source_id="my_csv_name")
+        assert src.source_id == "my_csv_name"
 
     def test_resolve_field_row_index(self, csv_path):
         src = CSVSource(file_path=csv_path, tag_columns=["user_id"])
@@ -150,6 +150,38 @@ class TestCSVSource:
         src = CSVSource(file_path=csv_path, source_id="my_csv_id")
         assert src.source_id == "my_csv_id"
 
+    def test_same_source_id_yields_equivalent_source_fields(self, tmp_path):
+        """Two CSV files at different paths with same source_id
+        produce identical _source_ provenance columns."""
+        data = "user_id,score\nu1,10\nu2,20\n"
+        dir_a = tmp_path / "dir_a"
+        dir_b = tmp_path / "dir_b"
+        dir_a.mkdir()
+        dir_b.mkdir()
+        csv_a = dir_a / "data.csv"
+        csv_b = dir_b / "data.csv"
+        csv_a.write_text(data)
+        csv_b.write_text(data)
+
+        src_a = CSVSource(
+            file_path=str(csv_a),
+            tag_columns=["user_id"],
+            source_id="shared_name",
+        )
+        src_b = CSVSource(
+            file_path=str(csv_b),
+            tag_columns=["user_id"],
+            source_id="shared_name",
+        )
+
+        table_a = src_a.as_table(all_info=True)
+        table_b = src_b.as_table(all_info=True)
+
+        source_cols = [c for c in table_a.column_names if c.startswith("_source_")]
+        assert source_cols, "Expected _source_ columns"
+        for col in source_cols:
+            assert table_a.column(col).to_pylist() == table_b.column(col).to_pylist()
+
     def test_as_table_returns_pyarrow_table(self, csv_path):
         src = CSVSource(file_path=csv_path)
         assert isinstance(src.as_table(), pa.Table)
@@ -175,13 +207,13 @@ class TestDeltaTableSource:
         assert "id" in tag_keys
         assert "value" in packet_keys
 
-    def test_source_name_defaults_to_directory_name(self, delta_path):
+    def test_source_id_defaults_to_directory_name(self, delta_path):
         src = DeltaTableSource(delta_table_path=delta_path)
-        assert src._arrow_source._source_name == delta_path.name
+        assert src.source_id == delta_path.name
 
-    def test_source_name_explicit(self, delta_path):
-        src = DeltaTableSource(delta_table_path=delta_path, source_name="my_delta")
-        assert src._arrow_source._source_name == "my_delta"
+    def test_source_id_explicit_overrides_default(self, delta_path):
+        src = DeltaTableSource(delta_table_path=delta_path, source_id="my_delta")
+        assert src.source_id == "my_delta"
 
     def test_resolve_field_row_index(self, delta_path):
         src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
@@ -258,9 +290,9 @@ class TestDataFrameSourceAdditional:
         assert "_tag::something" not in tag_keys
         assert "_tag::something" not in packet_keys
 
-    def test_source_name_in_provenance_tokens(self):
+    def test_source_id_in_provenance_tokens(self):
         df = pl.DataFrame({"id": [1, 2, 3], "value": ["a", "b", "c"]})
-        src = DataFrameSource(data=df, tag_columns="id", source_name="df_source")
+        src = DataFrameSource(data=df, tag_columns="id", source_id="df_source")
         table = src.as_table(all_info=True)
         source_cols = [c for c in table.column_names if c.startswith("_source_")]
         assert source_cols
@@ -310,9 +342,9 @@ class TestDictSourceAdditional:
         with pytest.raises(Exception):
             DictSource(data=[], tag_columns=["id"])
 
-    def test_source_name_passed_through(self):
+    def test_source_id_in_provenance_tokens(self):
         data = [{"id": 1, "val": "a"}, {"id": 2, "val": "b"}]
-        src = DictSource(data=data, tag_columns=["id"], source_name="dict_src_name")
+        src = DictSource(data=data, tag_columns=["id"], source_id="dict_src_name")
         table = src.as_table(all_info=True)
         source_cols = [c for c in table.column_names if c.startswith("_source_")]
         assert source_cols
@@ -469,21 +501,19 @@ class TestArrowTableSourceAdditional:
         # The enriched table includes source-info and system-tag columns
         assert any(c.startswith("_source_") for c in enriched.column_names)
 
-    def test_source_name_distinct_from_source_id(self):
-        """source_name appears in provenance tokens; source_id is for the registry."""
+    def test_source_id_controls_provenance_tokens(self):
+        """source_id appears in both provenance tokens and registry key."""
         table = _simple_table()
         src = ArrowTableSource(
             table=table,
             tag_columns=["user_id"],
-            source_name="human_name",
-            source_id="reg_name",
+            source_id="my_source",
         )
-        assert src.source_id == "reg_name"
-        assert src._source_name == "human_name"
+        assert src.source_id == "my_source"
         t = src.as_table(all_info=True)
         source_cols = [c for c in t.column_names if c.startswith("_source_")]
         token = t.column(source_cols[0])[0].as_py()
-        assert token.startswith("human_name::")
+        assert token.startswith("my_source::")
 
     def test_negative_row_index_raises(self):
         """row_-1 parses as -1 which is out of range."""

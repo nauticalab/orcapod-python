@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Collection
 from typing import TYPE_CHECKING, Any
-import logging
 
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
 from orcapod.core.sources.base import RootSource
@@ -12,6 +12,7 @@ from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import polars as pl
+    import pyarrow as pa
     from polars._typing import FrameInitTypes
 else:
     pl = LazyModule("polars")
@@ -34,7 +35,7 @@ class DataFrameSource(RootSource):
         data: "FrameInitTypes",
         tag_columns: str | Collection[str] = (),
         system_tag_columns: Collection[str] = (),
-        source_name: str | None = None,
+        source_id: str | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -67,10 +68,17 @@ class DataFrameSource(RootSource):
             table=df.to_arrow(),
             tag_columns=tag_columns,
             system_tag_columns=system_tag_columns,
-            source_name=source_name,
+            source_id=source_id,
             data_context=self.data_context,
             config=self.orcapod_config,
         )
+
+    @property
+    def source_id(self) -> str:
+        return self._arrow_source.source_id
+
+    def computed_label(self) -> str | None:
+        return self._arrow_source.computed_label()
 
     def identity_structure(self) -> Any:
         return self._arrow_source.identity_structure()

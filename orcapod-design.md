@@ -206,11 +206,11 @@ For Python functions specifically, the identity structure includes the function'
 Every packet column carries a **source info** string — a provenance pointer to the source and record that produced the value:
 
 ```
-{source_name}::{record_id}::{column_name}
+{source_id}::{record_id}::{column_name}
 ```
 
 Where:
-- `source_name` — human-readable name of the originating source (defaults to `source_id`)
+- `source_id` — canonical identifier of the originating source (defaults to content hash)
 - `record_id` — row identifier, either positional (`row_0`) or column-based (`user_id=abc123`)
 - `column_name` — the original column name
 
@@ -232,7 +232,7 @@ Each source automatically adds a system tag column named:
 _tag::source:{schema_hash}
 ```
 
-Where `schema_hash` is derived from the source's `(tag_schema, packet_schema)`. Values are the same source-info tokens as source info columns: `{source_name}::{record_id}`.
+Where `schema_hash` is derived from the source's `(tag_schema, packet_schema)`. Values are the same source-info tokens as source info columns: `{source_id}::{record_id}`.
 
 ### Three Evolution Rules
 

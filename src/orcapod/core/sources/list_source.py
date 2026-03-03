@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Collection
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
 from orcapod.core.sources.base import RootSource
 from orcapod.protocols.core_protocols import TagProtocol
 from orcapod.types import ColumnConfig, Schema
+
+if TYPE_CHECKING:
+    import pyarrow as pa
 
 
 class ListSource(RootSource):
@@ -48,9 +51,11 @@ class ListSource(RootSource):
         tag_function: Callable[[Any, int], dict[str, Any] | TagProtocol] | None = None,
         expected_tag_keys: Collection[str] | None = None,
         tag_function_hash_mode: Literal["content", "signature", "name"] = "name",
+        source_id: str | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
+        self._init_source_id = source_id
 
         self.name = name
         self._elements = list(data)
@@ -74,7 +79,7 @@ class ListSource(RootSource):
         for idx, element in enumerate(self._elements):
             tag_fields = tag_function(element, idx)
             if hasattr(tag_fields, "as_dict"):
-                tag_fields = tag_fields.as_dict()  # TagProtocol protocol → plain dict
+                tag_fields = tag_fields.as_dict()  # type: ignore[mehod] TagProtocol protocol → plain dict
             row = dict(tag_fields)
             row[name] = element
             rows.append(row)
@@ -88,9 +93,17 @@ class ListSource(RootSource):
         self._arrow_source = ArrowTableSource(
             table=self.data_context.type_converter.python_dicts_to_arrow_table(rows),
             tag_columns=tag_columns,
+            source_id=self._init_source_id,
             data_context=self.data_context,
             config=self.orcapod_config,
         )
+
+    @property
+    def source_id(self) -> str:
+        return self._arrow_source.source_id
+
+    def computed_label(self) -> str | None:
+        return self._arrow_source.computed_label()
 
     def _hash_tag_function(self) -> str:
         """Produce a stable hash string for the tag function."""

@@ -1317,7 +1317,7 @@ class TestJoinSystemTagCanonicalOrdering:
 
     def test_system_tag_values_are_per_row_source_provenance(self, three_sources):
         """System tag column values should reflect the source provenance
-        of each row (source_name::record_id format)."""
+        of each row (source_id::record_id format)."""
         from orcapod.system_constants import constants
 
         src_a, src_b, src_c = three_sources
@@ -1331,7 +1331,7 @@ class TestJoinSystemTagCanonicalOrdering:
             assert len(values) == result_table.num_rows
             for val in values:
                 assert isinstance(val, str)
-                # Source provenance format: {source_name}::{record_id}
+                # Source provenance format: {source_id}::{record_id}
                 assert "::" in val
 
     def test_intermediate_operators_produce_different_stream_hash(self):
