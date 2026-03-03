@@ -80,7 +80,7 @@ class SelectTagColumns(UnaryOperator):
         # this ensures all system tag columns are preserved
         new_tag_schema = {k: v for k, v in tag_schema.items() if k not in tags_to_drop}
 
-        return new_tag_schema, packet_schema
+        return Schema(new_tag_schema), packet_schema
 
     def identity_structure(self) -> Any:
         return (
@@ -161,7 +161,7 @@ class SelectPacketColumns(UnaryOperator):
             k: v for k, v in packet_schema.items() if k not in packets_to_drop
         }
 
-        return tag_schema, new_packet_schema
+        return tag_schema, Schema(new_packet_schema)
 
     def identity_structure(self) -> Any:
         return (
@@ -235,7 +235,7 @@ class DropTagColumns(UnaryOperator):
 
         new_tag_schema = {k: v for k, v in tag_schema.items() if k in new_tag_columns}
 
-        return new_tag_schema, packet_schema
+        return Schema(new_tag_schema), packet_schema
 
     def identity_structure(self) -> Any:
         return (
@@ -312,7 +312,7 @@ class DropPacketColumns(UnaryOperator):
             k: v for k, v in packet_schema.items() if k not in self.columns
         }
 
-        return tag_schema, new_packet_schema
+        return tag_schema, Schema(new_packet_schema)
 
     def identity_structure(self) -> Any:
         return (
@@ -403,7 +403,7 @@ class MapTags(UnaryOperator):
         # Create new packet schema with renamed keys
         new_tag_schema = {self.name_map.get(k, k): v for k, v in tag_schema.items()}
 
-        return new_tag_schema, packet_schema
+        return Schema(new_tag_schema), packet_schema
 
     def identity_structure(self) -> Any:
         return (
