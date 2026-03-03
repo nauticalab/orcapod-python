@@ -22,7 +22,7 @@ The concrete implementation is `ArrowTableStream`, backed by an immutable PyArro
 
 ### Source
 
-A **source** produces a stream from external data with no upstream dependencies, forming the base case of the pipeline graph. Sources establish provenance: each row gets a source-info token and a system tag column encoding the source's schema hash.
+A **source** acts as a stream from external data with no upstream dependencies, forming the base case of the pipeline graph. Sources establish provenance: each row gets a source-info token and system tag columns encoding the source's identity.
 
 - **Root source** — loads data from the external world (file, database, in-memory table). All root sources delegate to `ArrowTableSource`, which wraps the data in an `ArrowTableStream` with provenance annotations. Concrete subclasses include `CSVSource`, `DeltaTableSource`, `DataFrameSource`, `DictSource`, and `ListSource`.
 
@@ -101,7 +101,7 @@ The `ColumnConfig` dataclass controls what metadata columns are included in sche
 | `meta` | System metadata columns (`__` prefix) |
 | `context` | Data context column |
 | `source` | Source-info provenance columns (`_source_` prefix) |
-| `system_tags` | System tag columns (`_tag::` prefix) |
+| `system_tags` | System tag columns (`_tag_` prefix) |
 | `content_hash` | Per-row content hash column |
 | `sort_by_tags` | Whether to sort output by tag columns |
 
@@ -224,32 +224,58 @@ Source info is **immutable through the pipeline** — set once when a source cre
 
 System tags are **framework-managed, hidden provenance columns** automatically attached to every packet. Unlike user tags, they are authoritative and guaranteed to maintain perfect traceability from any result row back to its original source rows.
 
+### Flat Column Design
+
+System tags store `source_id` and `record_id` as **separate flat columns** rather than a combined string value. This is a deliberate design choice driven by the caching strategy (see **Caching Strategy** section below).
+
+In function pod cache tables, which are scoped to a structural pipeline hash and thus shared across different source combinations, filtering by source identity is a first-class operation. Storing `source_id` and `record_id` as separate columns makes this a straightforward equality predicate (`WHERE _tag_source_id::schema1 = 'X'`) with clean standard indexing, rather than a prefix match or string parse against a combined value.
+
+This is safe because within any given cache table, the system tag schema is fixed — every row has the same set of system tag fields, determined by the pipeline structure. The column count grows with pipeline depth (more join stages produce more system tag column pairs), but this growth is per-table-schema, not within a table. Different pipeline structures produce different tables with different column layouts, which is the expected and correct behavior.
+
 ### Source System Tags
 
-Each source automatically adds a system tag column named:
+Each source automatically adds a pair of system tag columns using the `_tag_` prefix convention:
 
 ```
-_tag::source:{schema_hash}
+_tag_source_id::{schema_hash}    — the source's canonical source_id
+_tag_record_id::{schema_hash}    — the row identifier within that source
 ```
 
-Where `schema_hash` is derived from the source's `(tag_schema, packet_schema)`. Values are the same source-info tokens as source info columns: `{source_id}::{record_id}`.
+Where `schema_hash` is derived from the source's `(tag_schema, packet_schema)`. The `::` delimiter separates segments of the system tag column name, maintaining consistency with the extension pattern used downstream.
+
+Example at the root level:
+
+```
+_tag_source_id::schema1   (e.g., value: "customers_2024")
+_tag_record_id::schema1   (e.g., value: "row_42" or "user_id=abc123")
+```
 
 ### Three Evolution Rules
 
 **1. Name-Preserving (~90% of operations)**
-Single-stream operations (filter, select, rename, batch, map). System tag column name and value pass through unchanged.
+Single-stream operations (filter, select, rename, batch, map). System tag column names and values pass through unchanged.
 
 **2. Name-Extending (multi-input operations)**
-Joins and merges. Each incoming system tag column name is extended with `::{pipeline_hash}:{canonical_position}`. Values remain unchanged. Canonical position assignment respects commutativity — for commutative operations, inputs are sorted by `pipeline_hash` to ensure identical column names regardless of wiring order.
+Joins and merges. Each incoming system tag column name is extended by appending `::node_pipeline_hash:canonical_position`. The `::` delimiter separates each extension segment, and `:` separates the pipeline hash from the canonical position within a segment. Canonical position assignment respects commutativity — for commutative operations, inputs are sorted by `pipeline_hash` to ensure identical column names regardless of wiring order.
 
-For example, joining two streams with the same `pipeline_hash` `abc123`:
+For example, joining two streams that each carry `_tag_source_id::schema1` / `_tag_record_id::schema1`, through a join with pipeline hash `abc123`:
+
 ```
-_tag::source:schema1::abc123:0    (first stream by canonical position)
-_tag::source:schema1::abc123:1    (second stream by canonical position)
+_tag_source_id::schema1::abc123:0    _tag_record_id::schema1::abc123:0    (first stream by canonical position)
+_tag_source_id::schema1::abc123:1    _tag_record_id::schema1::abc123:1    (second stream by canonical position)
 ```
+
+A subsequent join (pipeline hash `def456`) over those results would further extend:
+
+```
+_tag_source_id::schema1::abc123:0::def456:0
+_tag_record_id::schema1::abc123:0::def456:0
+```
+
+The full column name is a chain of `::` delimited segments tracing the provenance path: `_tag_{field}::{source_schema_hash}::{join1_hash}:{position}::{join2_hash}:{position}::...`
 
 **3. Type-Evolving (aggregation operations)**
-Batch and similar grouping operations. Column name is unchanged but type evolves: `str → list[str]` as values collect all contributing source row IDs.
+Batch and similar grouping operations. Column names are unchanged but types evolve: `str → list[str]` as values collect all contributing source row IDs. Both `source_id` and `record_id` columns evolve independently.
 
 ### System Tag Value Sorting
 
@@ -258,6 +284,99 @@ For commutative operators (Join, MergeJoin), system tag values from same-`pipeli
 ### Schema Prediction
 
 Operators predict output system tag column names at schema time — without performing the actual computation — by computing `pipeline_hash` values and canonical positions. This is exposed via `output_schema(columns={"system_tags": True})`.
+
+---
+
+## Caching Strategy
+
+OrcaPod uses a differentiated caching strategy across its three pod types — source, function, and operator — reflecting the distinct computational semantics of each. The guiding principle is that caching behavior should follow naturally from whether the computation is **cumulative**, **independent**, or **holistic**.
+
+### Source Pod Caching
+
+**Cache table identity:** Canonical source identity (content hash).
+
+Each source gets its own dedicated cache table. Sources are provenance roots — there is no upstream system tag mechanism to disambiguate rows from different sources within a shared table. A cached source table represents a cumulative record of all packets ever observed from that specific source.
+
+**Behavior:**
+- Cache is **always on** by default.
+- Each packet yielded by the source is stored in the cache table keyed by its content-addressable hash.
+- On access, the source pod yields the **merged content of the cache and any new packets** from the live source.
+- **Deduplication is performed at the source pod level** during merge, using content-addressable packet hashes. This ensures the yielded stream represents the complete known universe from the source with no redundancy.
+
+**Semantic guarantee:** The cache is a **correct cumulative record**. The union of cache + live packets is the full set of data ever available from that source.
+
+### Function Pod Caching
+
+Function pod caching is split into two tiers:
+
+1. **Packet-level cache (global):** Maps input packet hash → output packet. Shared globally across all pipelines, enabling identical function calls to reuse results regardless of context.
+2. **Tag-level cache (per structural pipeline):** Maps tag → input packet hash. Scoped to the structural pipeline hash.
+
+**Tag-level cache table identity:** Structural pipeline hash (`pipeline_hash()`).
+
+A single cache table is used for all runs of structurally identical pipelines (same tag and packet schemas at source, followed by the same sequence of operator and function pods), regardless of which specific source combinations were involved. This is safe because function pods operate on individual packets independently — each cached mapping is self-contained and valid regardless of what other rows exist in the table.
+
+**Why structural hash, not content hash:**
+- System tags already carry full provenance, including source identity as separate queryable columns. Rows from different source combinations are distinguishable within a shared table via equality predicates on `source_id` columns (e.g., `WHERE _tag_source_id::schema1 = 'X'`).
+- A shared table provides a natural **cross-source view** — comparing how the same analytical pipeline behaves across different source populations without needing cross-table joins.
+- Content-hash scoping would duplicate disambiguation that system tags already provide, violating the principle against redundant mechanisms.
+
+**Behavior:**
+- Cache is **always on** by default.
+- On a pipeline run, incoming packets are scoped to the current source combination (determined by upstream source pods).
+- The function pod checks the tag-level cache for existing mappings among the incoming tag-packets.
+- **Cache hits** (from this or any prior run over the same structural pipeline) are yielded directly. Cross-source sharing falls out naturally because packet-level computation is source-independent.
+- **Cache misses** trigger computation; results are stored in both the packet-level and tag-level caches.
+
+**Semantic guarantee:** The cache is a **correct reusable lookup**. Every entry is independently valid. The table as a whole is a historical record of all computations processed through this function within this structural pipeline context.
+
+**User guidance:** If a user finds the mixture of results from different source combinations within one table to be unpredictable or undesirable, they should separate pipeline identity explicitly (e.g., by parameterizing the pipeline to produce distinct structural hashes).
+
+### Operator Pod Caching
+
+**Cache table identity:** Content hash (structural pipeline hash + identity hashes of all upstream sources).
+
+Each unique combination of pipeline structure and source identities gets its own cache table. This reflects the fact that operator results are holistic — they depend on the entire input stream, not individual packets.
+
+**Why content hash, not structural hash:**
+Operators compute over the stream (joins, aggregations, window functions). Their outputs are meaningful only as a complete set given a specific input. Unlike function pods, operator results cannot be safely mixed across source combinations within a shared table because the distributive property does not hold for most operators. For example, with a join: `(X ⋈ Y) ∪ (X' ⋈ Y') ≠ (X ∪ X') ⋈ (Y ∪ Y')`. The shared table would miss cross-terms `X ⋈ Y'` and `X' ⋈ Y`. Cache invalidation is also cleaner per-table (drop/mark stale) rather than selectively purging rows by system tag.
+
+**Critical correctness caveat:**
+Even scoped to content hash, operator caches are **not guaranteed to be complete** with respect to the full picture of all packets ever yielded by the sources. Because sources may use canonical identity for their content hash, the same source identity may yield different packet sets over time. The cache accumulates per-run snapshots:
+
+- Run 1: `X ⋈ Y` is cached.
+- Run 2: Sources yield `X'` and `Y'`. The operator computes `X' ⋈ Y'` and appends to cache.
+- The cache now contains `(X ⋈ Y) ∪ (X' ⋈ Y')`, which is **not** equivalent to `(X ∪ X') ⋈ (Y ∪ Y')`.
+
+The operator cache is strictly an **append-only log of per-run result snapshots**, not a cumulative materialization.
+
+**Behavior:**
+- Cache is **off by default**. Operator computation is always triggered fresh in a typical run.
+- Cache can be **explicitly opted into** for historical logging purposes. Even when enabled, the operator still recomputes — the cache serves as a record, not a substitute.
+- A separate, explicit configuration is required to **skip computation and flow the historical cache** to the rest of the pipeline. This is only appropriate when the user intentionally wants to use the historical record (e.g., for auditing or comparing run-over-run results), not as a performance optimization.
+
+**Three-tier opt-in model:**
+
+| Mode | Cache writes | Computation | Use case |
+|------|-------------|-------------|----------|
+| Default (off) | No | Always | Normal pipeline execution |
+| Logging | Yes | Always | Audit trail, run-over-run comparison |
+| Historical replay | Yes (prior) | Skipped | Explicitly flowing prior results downstream |
+
+**Semantic guarantee:** The cache is a **historical log**. It records what was produced, not what would be produced now. It must never be silently substituted for fresh computation.
+
+### Caching Summary
+
+| Property | Source Pod | Function Pod | Operator Pod |
+|----------|-----------|--------------|--------------|
+| Cache table scope | Canonical source identity | Structural pipeline hash | Content hash (structure + sources) |
+| Default state | Always on | Always on | Off |
+| Semantic role | Cumulative record | Reusable lookup | Historical log |
+| Correctness | Always correct | Always correct | Per-run snapshots only |
+| Cross-source sharing | N/A (one source per table) | Yes, via system tag columns | No (separate tables) |
+| Computation on cache hit | Dedup and merge | Skip (use cached result) | Recompute by default |
+
+The overall gradient: sources are always cached and always correct, function pods are always cached and always reusable, operators are optionally logged and never silently substituted. Each level directly follows from whether the computation is cumulative, independent, or holistic.
 
 ---
 
