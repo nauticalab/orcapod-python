@@ -102,6 +102,23 @@ class WritableChannel(Protocol[T]):
 Bounded channels provide natural backpressure: a fast producer blocks on `send()` when the
 buffer is full, automatically throttling without explicit flow control.
 
+### Thread Safety
+
+Channels are backed by `asyncio.Queue`, which is **coroutine-safe but not thread-safe**.
+This is sufficient because all channel operations happen on the event loop thread:
+
+- `async_execute` methods are coroutines running on the event loop
+- Sync `PacketFunction`s run in thread pools via `loop.run_in_executor`, but the result
+  is awaited back on the event loop before `output.send()` is called — the channel is
+  never touched from a worker thread
+- The `async def` signature on `send()`/`receive()` structurally prevents direct calls
+  from non-async (thread) contexts
+
+If a future executor needs to push results directly from worker threads (bypassing the event
+loop), channels should be swapped to a dual sync/async queue (e.g., `janus`) or use
+`loop.call_soon_threadsafe` to marshal back to the event loop. This is not needed for the
+current design.
+
 ---
 
 ## Three Execution Strategies
