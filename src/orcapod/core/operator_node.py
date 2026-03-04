@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Iterator, Sequence
 from typing import TYPE_CHECKING, Any
@@ -7,7 +8,9 @@ from typing import TYPE_CHECKING, Any
 from orcapod.channels import ReadableChannel, WritableChannel
 
 from orcapod import contexts
+from orcapod.channels import Channel, ReadableChannel, WritableChannel
 from orcapod.config import Config
+from orcapod.core.static_output_pod import StaticOutputPod
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
@@ -158,13 +161,25 @@ class OperatorNode(StreamBase):
         assert self._cached_output_stream is not None
         return self._cached_output_stream.as_table(columns=columns, all_info=all_info)
 
+    # ------------------------------------------------------------------
+    # Async channel execution
+    # ------------------------------------------------------------------
+
     async def async_execute(
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
     ) -> None:
-        """Delegate to the wrapped operator's async_execute."""
-        await self._operator.async_execute(inputs, output)
+        """Delegate to the wrapped operator's async_execute.
+
+        Passes pipeline hashes from the input streams so that
+        multi-input operators can compute canonical system-tag
+        column names without storing state during validation.
+        """
+        hashes = [s.pipeline_hash() for s in self._input_streams]
+        await self._operator.async_execute(
+            inputs, output, input_pipeline_hashes=hashes
+        )
 
     def __repr__(self) -> str:
         return (
@@ -242,18 +257,9 @@ class PersistentOperatorNode(OperatorNode):
             + (f"node:{self._pipeline_node_hash}",)
         )
 
-    def _compute_and_store(self) -> None:
-        """Compute operator output, optionally store in DB."""
-        self._cached_output_stream = self._operator.process(
-            *self._input_streams,
-        )
-
-        if self._cache_mode == CacheMode.OFF:
-            self._update_modified_time()
-            return
-
-        # Materialize for DB storage (LOG and REPLAY modes)
-        output_table = self._cached_output_stream.as_table(
+    def _store_output_stream(self, stream: StreamProtocol) -> None:
+        """Materialize stream and store in the pipeline database with per-row dedup."""
+        output_table = stream.as_table(
             columns={"source": True, "system_tags": True},
         )
 
@@ -281,6 +287,18 @@ class PersistentOperatorNode(OperatorNode):
         )
 
         self._cached_output_table = output_table.drop(self.HASH_COLUMN_NAME)
+
+    def _compute_and_store(self) -> None:
+        """Compute operator output, optionally store in DB."""
+        self._cached_output_stream = self._operator.process(
+            *self._input_streams,
+        )
+
+        if self._cache_mode == CacheMode.OFF:
+            self._update_modified_time()
+            return
+
+        self._store_output_stream(self._cached_output_stream)
         self._update_modified_time()
 
     def _replay_from_cache(self) -> None:
@@ -367,6 +385,55 @@ class PersistentOperatorNode(OperatorNode):
             )
 
         return results if results.num_rows > 0 else None
+
+    # ------------------------------------------------------------------
+    # Async channel execution
+    # ------------------------------------------------------------------
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    ) -> None:
+        """Async execution with cache mode handling.
+
+        REPLAY: emit from DB, close output.
+        OFF: delegate to operator, forward results.
+        LOG: delegate to operator, forward + collect results, then store in DB.
+        """
+        try:
+            if self._cache_mode == CacheMode.REPLAY:
+                self._replay_from_cache()
+                assert self._cached_output_stream is not None
+                for tag, packet in self._cached_output_stream.iter_packets():
+                    await output.send((tag, packet))
+                return  # finally block closes output
+
+            # OFF or LOG: delegate to operator, forward results downstream
+            intermediate: Channel[tuple[TagProtocol, PacketProtocol]] = Channel()
+            collected: list[tuple[TagProtocol, PacketProtocol]] = []
+
+            async def forward() -> None:
+                async for item in intermediate.reader:
+                    collected.append(item)
+                    await output.send(item)
+
+            async with asyncio.TaskGroup() as tg:
+                tg.create_task(
+                    self._operator.async_execute(inputs, intermediate.writer)
+                )
+                tg.create_task(forward())
+
+            # TaskGroup has completed — all results are in `collected`
+            # Store if LOG mode (sync DB write, post-hoc)
+            if self._cache_mode == CacheMode.LOG and collected:
+                stream = StaticOutputPod._materialize_to_stream(collected)
+                self._cached_output_stream = stream
+                self._store_output_stream(stream)
+
+            self._update_modified_time()
+        finally:
+            await output.close()
 
     # ------------------------------------------------------------------
     # DerivedSource
