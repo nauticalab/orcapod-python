@@ -56,9 +56,21 @@ def _execute_concurrent(
     """Submit all *packets* to the executor concurrently and return results in order.
 
     Uses ``asyncio.gather`` to run all tasks concurrently, then blocks
-    until all complete.
+    until all complete.  If an event loop is already running (e.g. inside
+    ``async def`` code, notebooks, or pytest-asyncio), falls back to
+    sequential execution to avoid ``RuntimeError``.
     """
     import asyncio
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is not None:
+        # Already inside an event loop -- cannot call asyncio.run().
+        # Fall back to sequential synchronous execution.
+        return [packet_function.call(pkt) for pkt in packets]
 
     async def _gather() -> list[PacketProtocol | None]:
         return list(
@@ -294,25 +306,28 @@ class FunctionPod(_FunctionPodBase):
         Each input (tag, packet) is processed independently. A semaphore
         controls how many packets are in-flight concurrently.
         """
-        pipeline_config = pipeline_config or PipelineConfig()
-        max_concurrency = resolve_concurrency(self._node_config, pipeline_config)
+        try:
+            pipeline_config = pipeline_config or PipelineConfig()
+            max_concurrency = resolve_concurrency(self._node_config, pipeline_config)
 
-        sem = asyncio.Semaphore(max_concurrency) if max_concurrency is not None else None
+            sem = asyncio.Semaphore(max_concurrency) if max_concurrency is not None else None
 
-        async def process_one(tag: TagProtocol, packet: PacketProtocol) -> None:
-            if sem is not None:
-                async with sem:
+            async def process_one(tag: TagProtocol, packet: PacketProtocol) -> None:
+                try:
                     result_packet = await self.packet_function.async_call(packet)
-            else:
-                result_packet = await self.packet_function.async_call(packet)
-            if result_packet is not None:
-                await output.send((tag, result_packet))
+                    if result_packet is not None:
+                        await output.send((tag, result_packet))
+                finally:
+                    if sem is not None:
+                        sem.release()
 
-        async with asyncio.TaskGroup() as tg:
-            async for tag, packet in inputs[0]:
-                tg.create_task(process_one(tag, packet))
-
-        await output.close()
+            async with asyncio.TaskGroup() as tg:
+                async for tag, packet in inputs[0]:
+                    if sem is not None:
+                        await sem.acquire()
+                    tg.create_task(process_one(tag, packet))
+        finally:
+            await output.close()
 
 
 class FunctionPodStream(StreamBase):
