@@ -221,3 +221,6 @@ dj_*_conf.json
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# Nested repo clone (pre-existing artifact)
+orcapod-python/
