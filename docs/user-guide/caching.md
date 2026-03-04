@@ -18,6 +18,7 @@ and operator — reflecting the distinct computational semantics of each.
 Source caching is **always on**. Each source gets its own dedicated cache table scoped to
 its content hash.
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod.core.sources import PersistentSource, ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
@@ -53,6 +54,7 @@ Function pod caching is **always on** and split into two tiers:
 2. **Tag-level cache (per structural pipeline)** — maps `tag → input_hash`. Scoped to
    `pipeline_hash()`.
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod import PersistentFunctionNode, FunctionPod
 from orcapod.databases import InMemoryArrowDatabase
@@ -91,6 +93,7 @@ Table T now has 5 rows, differentiated by system tag source_id columns.
 
 Operator caching is **off by default** and uses a three-tier opt-in model via `CacheMode`:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod.core.operator_node import PersistentOperatorNode
 from orcapod.types import CacheMode
@@ -159,6 +162,7 @@ The operator cache is an **append-only historical record**, not a cumulative mat
 Sources with identical schemas produce identical `pipeline_hash` values. Through the same
 pipeline structure, they share database tables automatically:
 
+<!--pytest-codeblocks:skip-->
 ```python
 # Both use the same pipeline path (same schema, same topology)
 node_a = PersistentFunctionNode(pod, stream_from_clinic_a, pipeline_database=db)

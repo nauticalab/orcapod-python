@@ -50,6 +50,7 @@ data.
 All hashes are represented as `ContentHash` — a frozen dataclass pairing a method identifier
 with raw digest bytes:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod.types import ContentHash
 
@@ -98,6 +99,7 @@ Each pod declares how upstream hashes are combined:
   input position is significant (SemiJoin).
 - **Partial symmetry** — nesting expresses mixed constraints.
 
+<!--pytest-codeblocks:skip-->
 ```python
 # Commutative: Join(A, B) == Join(B, A)
 join.argument_symmetry(streams)  # returns frozenset

@@ -11,6 +11,7 @@ A pipeline has three phases:
 
 Inside a `with pipeline:` block, all pod invocations are captured as non-persistent nodes:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import Pipeline
@@ -38,6 +39,7 @@ graph in topological order and replaces every node with its persistent variant:
 
 `pipeline.run()` executes all compiled nodes in topological order:
 
+<!--pytest-codeblocks:skip-->
 ```python
 pipeline.run()
 
@@ -50,6 +52,7 @@ result_table = pipeline.compute.as_table()
 Every operation inside a pipeline context can be labeled. Labels become attributes on the
 pipeline object:
 
+<!--pytest-codeblocks:skip-->
 ```python
 with pipeline:
     joined = source_a.join(source_b, label="join_data")
@@ -70,6 +73,7 @@ Labels are disambiguated by content hash on collision during incremental compila
 
 After compilation, inspect the compiled nodes:
 
+<!--pytest-codeblocks:skip-->
 ```python
 for name, node in pipeline.compiled_nodes.items():
     print(f"{name}: {type(node).__name__}")
@@ -80,6 +84,7 @@ for name, node in pipeline.compiled_nodes.items():
 All pod invocations are automatically recorded by a global `BasicTrackerManager`. The user
 writes normal imperative code, and the computation graph is captured behind the scenes:
 
+<!--pytest-codeblocks:skip-->
 ```python
 with pipeline:
     # These calls are transparently tracked
@@ -94,6 +99,7 @@ with pipeline:
 Compilation is incremental — re-entering the context, adding more operations, and compiling
 again preserves existing persistent nodes:
 
+<!--pytest-codeblocks:skip-->
 ```python
 pipeline = Pipeline(name="my_pipeline", pipeline_database=db)
 
@@ -120,6 +126,9 @@ pipeline.run()  # only step_b is new
 The simplest setup uses one database for everything:
 
 ```python
+from orcapod.databases import InMemoryArrowDatabase
+from orcapod.pipeline import Pipeline
+
 db = InMemoryArrowDatabase()
 pipeline = Pipeline(name="my_pipeline", pipeline_database=db)
 ```
@@ -128,6 +137,7 @@ pipeline = Pipeline(name="my_pipeline", pipeline_database=db)
 
 Isolate function pod result caches from the main pipeline database:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod.databases import DeltaTableDatabase
 
@@ -152,6 +162,7 @@ Pipelines can be composed across boundaries:
 
 Pipeline B can use Pipeline A's compiled nodes as input:
 
+<!--pytest-codeblocks:skip-->
 ```python
 pipeline_a.run()
 # Use pipeline_a's output as input to pipeline_b
@@ -163,6 +174,7 @@ with pipeline_b:
 
 Create a `DerivedSource` from a persistent node, breaking the upstream Merkle chain:
 
+<!--pytest-codeblocks:skip-->
 ```python
 pipeline_a.run()
 derived = pipeline_a.step_a.as_source()

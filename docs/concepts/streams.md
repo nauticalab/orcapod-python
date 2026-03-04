@@ -25,6 +25,7 @@ stream = ArrowTableStream(table, tag_columns=["id"])
 
 Every stream exposes its schema as a tuple of `(tag_schema, packet_schema)`:
 
+<!--pytest-codeblocks:cont-->
 ```python
 tag_schema, packet_schema = stream.output_schema()
 print(tag_schema)    # Schema({'id': str})
@@ -35,6 +36,7 @@ print(packet_schema) # Schema({'value': int})
 
 Streams provide lazy iteration over (Tag, Packet) pairs:
 
+<!--pytest-codeblocks:cont-->
 ```python
 for tag, packet in stream.iter_packets():
     print(f"Tag: {tag.as_dict()}, Packet: {packet.as_dict()}")
@@ -44,6 +46,7 @@ for tag, packet in stream.iter_packets():
 
 Materialize a stream as a PyArrow table:
 
+<!--pytest-codeblocks:cont-->
 ```python
 table = stream.as_table()
 print(table.to_pandas())
@@ -51,6 +54,7 @@ print(table.to_pandas())
 
 Use `ColumnConfig` to control which metadata columns are included:
 
+<!--pytest-codeblocks:cont-->
 ```python
 from orcapod.types import ColumnConfig
 

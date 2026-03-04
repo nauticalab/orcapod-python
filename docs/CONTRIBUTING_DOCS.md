@@ -22,12 +22,14 @@ issues, or make changes to the documentation infrastructure.
 
 ### Install dependencies
 
+<!--pytest-codeblocks:skip-->
 ```bash
 uv sync --group docs
 ```
 
 ### Live preview
 
+<!--pytest-codeblocks:skip-->
 ```bash
 uv run mkdocs serve
 ```
@@ -36,6 +38,7 @@ Opens a local server at `http://127.0.0.1:8000` with hot-reload on file changes.
 
 ### Build static site
 
+<!--pytest-codeblocks:skip-->
 ```bash
 uv run mkdocs build
 ```
@@ -171,6 +174,7 @@ after the next deployment.
 
 ### Step 4: Verify
 
+<!--pytest-codeblocks:skip-->
 ```bash
 # Check DNS propagation (may take up to 24 hours, usually minutes)
 dig orcapod.org +short

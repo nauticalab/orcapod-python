@@ -9,6 +9,7 @@
 
 Clone the repository and install with `uv`:
 
+<!--pytest-codeblocks:skip-->
 ```bash
 git clone https://github.com/walkerlab/orcapod-python.git
 cd orcapod-python
@@ -17,6 +18,7 @@ uv sync
 
 Or install with pip:
 
+<!--pytest-codeblocks:skip-->
 ```bash
 pip install -e .
 ```
@@ -53,6 +55,7 @@ orcapod has optional dependency groups for extended functionality:
 
 For contributing to orcapod:
 
+<!--pytest-codeblocks:skip-->
 ```bash
 git clone https://github.com/walkerlab/orcapod-python.git
 cd orcapod-python
@@ -61,6 +64,7 @@ uv sync --group dev
 
 Verify your installation:
 
+<!--pytest-codeblocks:skip-->
 ```bash
 uv run pytest tests/ -x -q
 ```

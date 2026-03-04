@@ -21,6 +21,8 @@ print(schema.required_fields)  # frozenset({'name', 'age'})
 ### Schema Operations
 
 ```python
+from orcapod.types import Schema
+
 a = Schema({"x": int, "y": str})
 b = Schema({"y": str, "z": float})
 
@@ -28,10 +30,10 @@ b = Schema({"y": str, "z": float})
 merged = a.merge(b)  # Schema({'x': int, 'y': str, 'z': float})
 
 # Select specific fields
-selected = a.select(["x"])  # Schema({'x': int})
+selected = a.select("x")  # Schema({'x': int})
 
 # Drop specific fields
-dropped = a.drop(["y"])  # Schema({'x': int})
+dropped = a.drop("y")  # Schema({'x': int})
 
 # Compatibility check
 a.is_compatible_with(b)  # True if shared keys have compatible types
@@ -41,6 +43,7 @@ a.is_compatible_with(b)  # True if shared keys have compatible types
 
 Every stream and pod exposes `output_schema()` returning a tuple:
 
+<!--pytest-codeblocks:skip-->
 ```python
 tag_schema, packet_schema = stream.output_schema()
 ```
@@ -86,6 +89,7 @@ config = ColumnConfig.data_only()
 
 Pass `ColumnConfig` to `output_schema()` and `as_table()`:
 
+<!--pytest-codeblocks:skip-->
 ```python
 # Schema with source info columns
 tag_schema, packet_schema = stream.output_schema(

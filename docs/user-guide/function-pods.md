@@ -27,15 +27,19 @@ pf = PythonPacketFunction(
 
 `output_keys` declares the names of the output columns:
 
+<!--pytest-codeblocks:cont-->
 ```python
 # Single output
-pf = PythonPacketFunction(compute_score, output_keys="score")
+def compute_score(age: int) -> float:
+    return age * 1.5
+
+pf_single = PythonPacketFunction(compute_score, output_keys="score")
 
 # Multiple outputs
 def compute_stats(values: list[float]) -> tuple[float, float]:
     return sum(values) / len(values), max(values)
 
-pf = PythonPacketFunction(compute_stats, output_keys=["mean", "max_val"])
+pf_multi = PythonPacketFunction(compute_stats, output_keys=["mean", "max_val"])
 ```
 
 ### Input and Output Schemas
@@ -43,6 +47,7 @@ pf = PythonPacketFunction(compute_stats, output_keys=["mean", "max_val"])
 Packet functions introspect input parameters from the function signature and output types
 from `output_keys`:
 
+<!--pytest-codeblocks:cont-->
 ```python
 print(pf.input_packet_schema)   # Schema({'age': int, 'cholesterol': int})
 print(pf.output_packet_schema)  # Schema({'risk': float})
@@ -50,6 +55,7 @@ print(pf.output_packet_schema)  # Schema({'risk': float})
 
 You can also provide explicit schemas:
 
+<!--pytest-codeblocks:cont-->
 ```python
 from orcapod.types import Schema
 
@@ -65,6 +71,7 @@ pf = PythonPacketFunction(
 
 A `FunctionPod` wraps a packet function and applies it to a stream:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod import FunctionPod
 
@@ -82,6 +89,7 @@ result_stream = pod.process(input_stream)
 
 For convenience, use the decorator to create a function pod in one step:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod import function_pod
 
@@ -96,6 +104,8 @@ result = compute_risk.pod(input_stream)
 The decorator accepts the same parameters as `PythonPacketFunction`:
 
 ```python
+from orcapod import function_pod
+
 @function_pod(
     output_keys=["mean", "std"],
     function_name="statistics",
@@ -114,6 +124,7 @@ Function pods support two execution models:
 
 The default. The function pod processes each packet on demand:
 
+<!--pytest-codeblocks:skip-->
 ```python
 result = pod(input_stream)  # Returns FunctionPodStream
 
@@ -126,6 +137,7 @@ for tag, packet in result.iter_packets():
 
 For incremental computation with caching:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod import FunctionNode, PersistentFunctionNode
 from orcapod.databases import InMemoryArrowDatabase
@@ -167,6 +179,7 @@ provenance clean.
 When given multiple input streams, a function pod joins them first (defaulting to `Join`)
 before iterating:
 
+<!--pytest-codeblocks:skip-->
 ```python
 # These are equivalent:
 result = pod(stream_a, stream_b)
@@ -182,13 +195,17 @@ result = pod(joined)
 When a packet function has an executor with `supports_concurrent_execution = True`,
 `iter_packets()` materializes all remaining inputs and dispatches them concurrently:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod.core.packet_function import PythonPacketFunction
+
+def expensive_computation(data: float) -> float:
+    return data * 2.0
 
 pf = PythonPacketFunction(expensive_computation, output_keys="result")
 
 # With a Ray executor for distributed computation
-from orcapod.core.executors import RayExecutor
+from orcapod.core.executors.ray import RayExecutor
 pf.executor = RayExecutor(num_cpus=4)
 
 pod = FunctionPod(packet_function=pf)

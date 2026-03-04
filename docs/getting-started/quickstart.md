@@ -13,10 +13,11 @@ Python dictionary:
 from orcapod import DictSource
 
 patients = DictSource(
-    data={
-        "patient_id": ["p1", "p2", "p3"],
-        "age": [30, 45, 60],
-    },
+    data=[
+        {"patient_id": "p1", "age": 30},
+        {"patient_id": "p2", "age": 45},
+        {"patient_id": "p3", "age": 60},
+    ],
     tag_columns=["patient_id"],
 )
 ```
@@ -27,6 +28,7 @@ is a packet column.
 
 orcapod supports many source types:
 
+<!--pytest-codeblocks:cont-->
 ```python
 import pyarrow as pa
 from orcapod import ArrowTableSource, ListSource
@@ -37,19 +39,18 @@ arrow_src = ArrowTableSource(
     tag_columns=["id"],
 )
 
-# From a list of dicts
-list_src = ListSource(
-    data=[{"id": "a", "score": 0.9}, {"id": "b", "score": 0.7}],
-    tag_columns=["id"],
-)
+# From a list of objects with a tag function (see ListSource docs for details)
+# list_src = ListSource(name="images", data=[img1, img2], ...)
 ```
 
 ## Exploring Streams
 
 Every source produces a **stream** — an immutable sequence of (Tag, Packet) pairs:
 
+<!--pytest-codeblocks:cont-->
 ```python
-stream = patients.as_stream()
+# Sources implement the stream protocol directly
+stream = patients
 
 # Check the schema
 tag_schema, packet_schema = stream.output_schema()
@@ -65,14 +66,16 @@ for tag, packet in stream.iter_packets():
 
 Use the **Join** operator to combine streams on their shared tag columns:
 
+<!--pytest-codeblocks:cont-->
 ```python
 from orcapod.core.operators import Join
 
 labs = DictSource(
-    data={
-        "patient_id": ["p1", "p2", "p3"],
-        "cholesterol": [180, 220, 260],
-    },
+    data=[
+        {"patient_id": "p1", "cholesterol": 180},
+        {"patient_id": "p2", "cholesterol": 220},
+        {"patient_id": "p3", "cholesterol": 260},
+    ],
     tag_columns=["patient_id"],
 )
 
@@ -88,6 +91,7 @@ print(f"Packets: {packet_schema}")  # Schema({'age': int, 'cholesterol': int})
 **Function pods** apply stateless computations to individual packets. Define a regular Python
 function and wrap it:
 
+<!--pytest-codeblocks:cont-->
 ```python
 from orcapod import FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
@@ -111,6 +115,7 @@ for tag, packet in result.iter_packets():
 
 You can also use the decorator syntax:
 
+<!--pytest-codeblocks:cont-->
 ```python
 from orcapod import function_pod
 
@@ -126,6 +131,7 @@ result = compute_risk.pod(joined)
 Streams are lazy — data is only computed when you request it. Materialize a stream
 as a PyArrow table:
 
+<!--pytest-codeblocks:cont-->
 ```python
 table = result.as_table()
 print(table.to_pandas())
@@ -139,6 +145,7 @@ print(table.to_pandas())
 
 Every value in orcapod is traceable. Use `ColumnConfig` to inspect provenance metadata:
 
+<!--pytest-codeblocks:cont-->
 ```python
 from orcapod.types import ColumnConfig
 

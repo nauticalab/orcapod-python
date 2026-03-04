@@ -23,7 +23,7 @@ table = dg.as_table()
 
 # Schema introspection
 print(dg.schema())  # Schema({'name': str, 'age': int})
-print(dg.keys())    # ('name', 'age')
+print(dg.keys())   # ('name', 'age')
 ```
 
 ### Lazy Conversion
@@ -41,10 +41,12 @@ Datagrams are immutable. Operations like `select()`, `drop()`, `rename()`, and `
 return new datagrams:
 
 ```python
+from orcapod.core.datagrams import Datagram
+
 dg = Datagram({"a": 1, "b": 2, "c": 3})
 
-selected = dg.select(["a", "b"])    # Datagram({'a': 1, 'b': 2})
-dropped = dg.drop(["c"])            # Datagram({'a': 1, 'b': 2})
+selected = dg.select("a", "b")       # Datagram({'a': 1, 'b': 2})
+dropped = dg.drop("c")              # Datagram({'a': 1, 'b': 2})
 renamed = dg.rename({"a": "alpha"}) # Datagram({'alpha': 1, 'b': 2, 'c': 3})
 ```
 
@@ -54,6 +56,7 @@ A **Tag** is a datagram specialization for metadata columns. Tags are used for r
 filtering, joining, and annotation. They carry additional **system tags** — framework-managed
 hidden provenance columns.
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod.core.datagrams import Tag
 
@@ -85,6 +88,7 @@ A **Packet** is a datagram specialization for data payload columns. Packets carr
 **source info** — per-column provenance tokens tracing each value back to its originating
 source and record.
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod.core.datagrams import Packet
 

@@ -13,6 +13,7 @@ triggers computation lazily.
 
 `FunctionPod` → `FunctionPodStream`: processes each packet on demand.
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod import FunctionPod
 
@@ -32,6 +33,7 @@ No database persistence. Suitable for exploration and one-off computations.
 output stream. `DynamicPodStream` wraps it with timestamp-based staleness detection and
 automatic recomputation when upstreams change.
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod.core.operators import Join
 
@@ -44,6 +46,7 @@ table = joined.as_table()            # Triggers computation
 `FunctionNode` / `OperatorNode`: results are persisted. Only inputs whose hashes are not
 already in the database are computed.
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod import PersistentFunctionNode
 
@@ -59,6 +62,7 @@ node.run()  # Phase 1: cached results, Phase 2: compute missing
 
 Every pipeline node implements the `AsyncExecutableProtocol`:
 
+<!--pytest-codeblocks:skip-->
 ```python
 async def async_execute(
     inputs: Sequence[ReadableChannel[tuple[Tag, Packet]]],
@@ -89,6 +93,7 @@ Channels are bounded async queues with explicit close/done signaling:
 
 ### Configuration
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod.types import PipelineConfig, NodeConfig, ExecutorType
 
@@ -107,6 +112,7 @@ node_config = NodeConfig(max_concurrency=1)  # Force sequential
 
 Executors decouple **what** a function computes from **where** it runs:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod.core.executors import LocalExecutor, RayExecutor
 

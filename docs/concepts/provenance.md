@@ -108,6 +108,7 @@ This means:
 
 Use `ColumnConfig` to include provenance columns in output:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod.types import ColumnConfig
 
@@ -127,6 +128,7 @@ Operators predict output system tag column names at schema time — without perf
 actual computation — by computing `pipeline_hash` values and canonical positions. This is
 exposed via:
 
+<!--pytest-codeblocks:skip-->
 ```python
 tag_schema, packet_schema = operator_stream.output_schema(
     columns=ColumnConfig(system_tags=True)

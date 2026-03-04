@@ -36,28 +36,32 @@ From a Python dictionary:
 from orcapod import DictSource
 
 source = DictSource(
-    data={
-        "id": ["a", "b", "c"],
-        "value": [1, 2, 3],
-    },
+    data=[
+        {"id": "a", "value": 1},
+        {"id": "b", "value": 2},
+        {"id": "c", "value": 3},
+    ],
     tag_columns=["id"],
 )
 ```
 
 ### ListSource
 
-From a list of dictionaries:
+From a list of arbitrary Python objects, with a tag function that extracts metadata:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod import ListSource
 
 source = ListSource(
+    name="scores",
     data=[
         {"id": "a", "score": 0.9},
         {"id": "b", "score": 0.7},
         {"id": "c", "score": 0.5},
     ],
-    tag_columns=["id"],
+    tag_function=lambda item, idx: {"id": item["id"]},
+    expected_tag_keys=["id"],
 )
 ```
 
@@ -81,6 +85,7 @@ source = DataFrameSource(df, tag_columns=["id"])
 
 From a Delta Lake table on disk:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from pathlib import Path
 from orcapod.core.sources import DeltaTableSource
@@ -95,6 +100,7 @@ source = DeltaTableSource(
 
 From a CSV file:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod.core.sources import CSVSource
 
@@ -115,8 +121,13 @@ packets (data):
   packet columns.
 
 ```python
+from orcapod import DictSource
+
 source = DictSource(
-    data={"id": ["a", "b"], "x": [1, 2], "y": [3, 4]},
+    data=[
+        {"id": "a", "x": 1, "y": 3},
+        {"id": "b", "x": 2, "y": 4},
+    ],
     tag_columns=["id"],
 )
 
@@ -129,6 +140,7 @@ print(packet_schema) # Schema({'x': int, 'y': int})
 
 Every source has a `source_id` — a canonical name used for provenance tracking:
 
+<!--pytest-codeblocks:skip-->
 ```python
 # Named sources: source_id from the data origin
 delta_src = DeltaTableSource(Path("./patients"), tag_columns=["id"])
@@ -149,6 +161,7 @@ A `DerivedSource` wraps the computed output of a `FunctionNode` or `OperatorNode
 from their pipeline database. It represents a materialization — an intermediate result given
 durable identity:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod import DerivedSource
 from orcapod.core.operators import Join
@@ -170,12 +183,14 @@ Derived sources serve two purposes:
 
 Sources can be registered in a `SourceRegistry` for provenance resolution:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod.core.sources import SourceRegistry
 
 registry = SourceRegistry()
-source = ArrowTableSource(table, tag_columns=["id"], auto_register=True)
-# source is automatically registered in the global registry
+source = ArrowTableSource(table, tag_columns=["id"])
+# Register for provenance resolution
+registry.register(source)
 ```
 
 ## Validation Rules

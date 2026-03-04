@@ -19,11 +19,19 @@ Operators are organized by input arity:
 Variable-arity inner join on shared tag columns:
 
 ```python
+from orcapod import DictSource
 from orcapod.core.operators import Join
 
+source_a = DictSource(
+    data=[{"id": "a", "x": 1}, {"id": "b", "x": 2}, {"id": "c", "x": 3}],
+    tag_columns=["id"],
+)
+source_b = DictSource(
+    data=[{"id": "a", "y": 4}, {"id": "b", "y": 5}, {"id": "c", "y": 6}],
+    tag_columns=["id"],
+)
+
 joined = Join()(source_a, source_b)
-# Or with more inputs
-joined = Join()(source_a, source_b, source_c)
 ```
 
 **Properties:**
@@ -37,6 +45,7 @@ joined = Join()(source_a, source_b, source_c)
 
 Binary inner join that handles colliding packet columns by merging values into sorted lists:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod.core.operators import MergeJoin
 
@@ -64,6 +73,7 @@ MergeJoin result: {id: "p1", score: [0.7, 0.9]}  # sorted
 Binary semi-join: returns entries from the left stream that match on overlapping columns
 in the right stream:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod.core.operators import SemiJoin
 
@@ -79,6 +89,7 @@ filtered = SemiJoin()(left_stream, right_stream)
 
 Groups rows into batches of configurable size:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod.core.operators import Batch
 
@@ -88,15 +99,11 @@ batched = Batch(batch_size=3)(input_stream)
 batched = Batch(batch_size=3, drop_incomplete=True)(input_stream)
 ```
 
-**Properties:**
-
-- All column types become `list[T]` in the output.
-- Optionally drops the final batch if it's smaller than `batch_size`.
-
 ## Column Selection
 
 Keep or remove specific tag or packet columns:
 
+<!--pytest-codeblocks:cont-->
 ```python
 from orcapod.core.operators import (
     SelectTagColumns,
@@ -105,13 +112,13 @@ from orcapod.core.operators import (
     DropPacketColumns,
 )
 
+stream = source_a  # Sources implement the stream protocol
+
 # Keep only specified columns
-selected = SelectPacketColumns(columns=["age", "score"])(stream)
-selected_tags = SelectTagColumns(columns=["id"])(stream)
+selected = SelectPacketColumns(columns=["x"])(stream)
 
 # Remove specified columns
-dropped = DropPacketColumns(columns=["temp_col"])(stream)
-dropped_tags = DropTagColumns(columns=["debug_tag"])(stream)
+dropped = DropPacketColumns(columns=["x"])(stream)
 ```
 
 `SelectTagColumns` and `SelectPacketColumns` accept an optional `strict` parameter that
@@ -123,17 +130,12 @@ raises on missing columns.
 
 Rename tag or packet columns via a mapping:
 
+<!--pytest-codeblocks:cont-->
 ```python
 from orcapod.core.operators import MapTags, MapPackets
 
-renamed = MapPackets(mapping={"old_name": "new_name"})(stream)
-renamed_tags = MapTags(mapping={"old_tag": "new_tag"})(stream)
-
-# Drop unmapped columns
-renamed = MapPackets(
-    mapping={"keep_col": "renamed_col"},
-    drop_unmapped=True,
-)(stream)
+renamed = MapPackets(mapping={"x": "new_x"})(stream)
+renamed_tags = MapTags(mapping={"id": "new_id"})(stream)
 ```
 
 `MapPackets` automatically renames associated source-info columns.
@@ -142,6 +144,7 @@ renamed = MapPackets(
 
 Filter rows using Polars expressions:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod.core.operators import PolarsFilter
 
@@ -155,22 +158,17 @@ filtered = PolarsFilter(age=30)(stream)
 
 Streams and sources expose convenience methods for all operators:
 
+<!--pytest-codeblocks:cont-->
 ```python
-# Instead of:
-from orcapod.core.operators import Join, SelectPacketColumns, MapPackets
-
-joined = Join()(source_a, source_b)
-selected = SelectPacketColumns(columns=["age"])(joined)
-renamed = MapPackets(mapping={"age": "patient_age"})(selected)
-
-# Write:
+# Instead of explicit operator construction:
 joined = source_a.join(source_b)
-selected = joined.select_packet_columns(["age"])
-renamed = selected.map_packets({"age": "patient_age"})
+selected = joined.select_packet_columns(["x"])
+renamed = selected.map_packets({"x": "patient_x"})
 ```
 
 Inside a pipeline context, pass `label` to track each step:
 
+<!--pytest-codeblocks:skip-->
 ```python
 with pipeline:
     joined = source_a.join(source_b, label="join_data")
@@ -181,6 +179,7 @@ with pipeline:
 
 The `OperatorNode` is the database-backed counterpart for operators:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from orcapod.core.operator_node import OperatorNode, PersistentOperatorNode
 from orcapod.databases import InMemoryArrowDatabase

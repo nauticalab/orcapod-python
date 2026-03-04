@@ -60,6 +60,7 @@ pipeline.run()
 Every operation inside a pipeline context can be given a `label`. After compilation and
 execution, access nodes by label as attributes:
 
+<!--pytest-codeblocks:cont-->
 ```python
 # Access results by label
 risk_table = pipeline.compute_risk.as_table()
@@ -75,6 +76,7 @@ print(risk_table.to_pandas()[["patient_id", "risk"]])
 Streams and sources expose convenience methods for common operators, making pipeline
 construction more fluent:
 
+<!--pytest-codeblocks:skip-->
 ```python
 with pipeline:
     joined = patients.join(labs, label="join_data")
@@ -102,6 +104,7 @@ Available convenience methods:
 
 For durable persistence, use `DeltaTableDatabase` instead of `InMemoryArrowDatabase`:
 
+<!--pytest-codeblocks:skip-->
 ```python
 from pathlib import Path
 from orcapod.databases import DeltaTableDatabase
@@ -122,6 +125,7 @@ Results are stored as Delta Lake tables on disk and survive across process resta
 
 When you re-run a pipeline with new data, only the new rows are computed:
 
+<!--pytest-codeblocks:skip-->
 ```python
 # First run: 3 patients
 pipeline.run()  # computes all 3
@@ -166,6 +170,7 @@ When a pipeline compiles, each node is replaced with its persistent variant:
 
 For isolating function pod result caches from the main pipeline database:
 
+<!--pytest-codeblocks:skip-->
 ```python
 pipeline_db = DeltaTableDatabase(base_path=Path("./pipeline"))
 function_db = DeltaTableDatabase(base_path=Path("./functions"))
