@@ -55,6 +55,17 @@ class PacketFunctionExecutorProtocol(Protocol):
         """Asynchronous counterpart of :meth:`execute`."""
         ...
 
+    @property
+    def supports_concurrent_execution(self) -> bool:
+        """
+        Whether this executor can meaningfully run multiple packets concurrently.
+
+        When ``True``, iteration machinery may submit all packets via
+        :meth:`async_execute` concurrently (using ``asyncio.gather``) and
+        collect results before yielding, instead of processing one at a time.
+        """
+        ...
+
     def get_execution_data(self) -> dict[str, Any]:
         """
         Return metadata describing the execution environment.

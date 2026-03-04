@@ -73,6 +73,16 @@ class PacketFunctionExecutorBase(ABC):
         """
         return self.execute(packet_function, packet)
 
+    @property
+    def supports_concurrent_execution(self) -> bool:
+        """
+        Whether this executor can run multiple packets concurrently.
+
+        Default is ``False``.  Subclasses that support truly concurrent
+        execution (e.g. via a remote cluster) should override to ``True``.
+        """
+        return False
+
     def get_execution_data(self) -> dict[str, Any]:
         """
         Metadata describing the execution environment.

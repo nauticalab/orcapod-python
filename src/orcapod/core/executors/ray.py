@@ -50,6 +50,10 @@ class RayExecutor(PacketFunctionExecutorBase):
     def supported_function_type_ids(self) -> frozenset[str]:
         return self.SUPPORTED_TYPES
 
+    @property
+    def supports_concurrent_execution(self) -> bool:
+        return True
+
     def execute(
         self,
         packet_function: PacketFunctionProtocol,
