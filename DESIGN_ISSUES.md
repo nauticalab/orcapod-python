@@ -416,10 +416,10 @@ message text. A shared parameterized validation helper would eliminate the dupli
 ## `src/orcapod/core/operators/` — Async execution
 
 ### O1 — Operators use barrier-mode `async_execute` only; streaming/incremental overrides needed
-**Status:** open
+**Status:** in progress
 **Severity:** medium
 
-All operators currently use the default barrier-mode `async_execute` inherited from
+All operators originally used the default barrier-mode `async_execute` inherited from
 `StaticOutputPod`: collect all input rows into memory, materialize to `ArrowTableStream`(s),
 run the existing sync `static_process`, then emit results. This works correctly but negates the
 latency and memory benefits of the push-based channel model.
@@ -428,20 +428,25 @@ Three categories of improvement are planned:
 
 1. **Streaming overrides (row-by-row, zero buffering)** — for operators that process rows
    independently:
-   - `PolarsFilter` — evaluate predicate per row, emit or drop immediately
-   - `MapTags` / `MapPackets` — rename columns per row, emit immediately
-   - `SelectTagColumns` / `SelectPacketColumns` — project columns per row, emit immediately
-   - `DropTagColumns` / `DropPacketColumns` — drop columns per row, emit immediately
+   - ~~`PolarsFilter` — evaluate predicate per row, emit or drop immediately~~ (kept barrier:
+     Polars expressions require DataFrame context for evaluation)
+   - `MapTags` / `MapPackets` — rename columns per row, emit immediately ✅
+   - `SelectTagColumns` / `SelectPacketColumns` — project columns per row, emit immediately ✅
+   - `DropTagColumns` / `DropPacketColumns` — drop columns per row, emit immediately ✅
 
 2. **Incremental overrides (stateful, eager emit)** — for multi-input operators that can
    produce partial results before all inputs are consumed:
-   - `Join` — symmetric hash join: index each input by tag keys, emit matches as they arrive
-   - `MergeJoin` — same approach, with list-merge on colliding packet columns
-   - `SemiJoin` — buffer the right (filter) input fully, then stream the left input and emit
-     matches (right must be fully consumed first, but left can stream)
+   - `Join` — symmetric hash join (kept barrier: complex system-tag name-extending logic)
+   - `MergeJoin` — same approach (kept barrier: complex column-merging logic)
+   - `SemiJoin` — build right, stream left through hash lookup ✅
 
-3. **Barrier-only (no change needed):**
-   - `Batch` — inherently requires all rows before grouping; barrier mode is correct
+3. **Streaming accumulation:**
+   - `Batch` — emit full batches as they accumulate (`batch_size > 0`); barrier fallback
+     when `batch_size == 0` (batch everything) ✅
+
+**Remaining:** `PolarsFilter` (barrier), `Join` (barrier), `MergeJoin` (barrier) could
+receive incremental overrides in the future but require careful handling of Polars expression
+evaluation and system-tag evolution respectively.
 
 ---
 

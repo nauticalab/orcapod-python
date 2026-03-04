@@ -1,8 +1,10 @@
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
+from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import ArrowTableStream
-from orcapod.protocols.core_protocols import StreamProtocol
+from orcapod.protocols.core_protocols import PacketProtocol, StreamProtocol, TagProtocol
 from orcapod.types import ColumnConfig
 from orcapod.utils.lazy_module import LazyModule
 
@@ -90,6 +92,48 @@ class Batch(UnaryOperator):
 
         # TODO: check if this is really necessary
         return Schema(batched_tag_types), Schema(batched_packet_types)
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    ) -> None:
+        """Streaming batch: emit full batches as they accumulate.
+
+        When ``batch_size > 0``, each group of ``batch_size`` rows is
+        materialized and emitted immediately, allowing downstream consumers
+        to start processing before all input is consumed.  When
+        ``batch_size == 0`` (batch everything), falls back to barrier mode.
+        """
+        try:
+            if self.batch_size == 0:
+                # Must collect all rows — barrier fallback
+                rows = await inputs[0].collect()
+                if rows:
+                    stream = self._materialize_to_stream(rows)
+                    result = self.unary_static_process(stream)
+                    for tag, packet in result.iter_packets():
+                        await output.send((tag, packet))
+                return
+
+            batch: list[tuple[TagProtocol, PacketProtocol]] = []
+            async for tag, packet in inputs[0]:
+                batch.append((tag, packet))
+                if len(batch) >= self.batch_size:
+                    stream = self._materialize_to_stream(batch)
+                    result = self.unary_static_process(stream)
+                    for out_tag, out_packet in result.iter_packets():
+                        await output.send((out_tag, out_packet))
+                    batch = []
+
+            # Flush partial batch
+            if batch and not self.drop_partial_batch:
+                stream = self._materialize_to_stream(batch)
+                result = self.unary_static_process(stream)
+                for out_tag, out_packet in result.iter_packets():
+                    await output.send((out_tag, out_packet))
+        finally:
+            await output.close()
 
     def identity_structure(self) -> Any:
         return (self.__class__.__name__, self.batch_size, self.drop_partial_batch)

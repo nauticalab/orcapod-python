@@ -1,10 +1,11 @@
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
+from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
-from orcapod.protocols.core_protocols import StreamProtocol
+from orcapod.protocols.core_protocols import PacketProtocol, StreamProtocol, TagProtocol
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.lazy_module import LazyModule
@@ -110,6 +111,33 @@ class MapPackets(UnaryOperator):
 
         return tag_schema, Schema(new_packet_schema)
 
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    ) -> None:
+        """Streaming: rename packet columns per row without materializing."""
+        try:
+            rename_map: dict[str, str] | None = None
+            unmapped: list[str] | None = None
+            async for tag, packet in inputs[0]:
+                if rename_map is None:
+                    pkt_keys = packet.keys()
+                    rename_map = {
+                        k: self.name_map[k] for k in pkt_keys if k in self.name_map
+                    }
+                    if self.drop_unmapped:
+                        unmapped = [k for k in pkt_keys if k not in self.name_map]
+                if not rename_map:
+                    await output.send((tag, packet))
+                else:
+                    new_pkt = packet.rename(rename_map)
+                    if unmapped:
+                        new_pkt = new_pkt.drop(*unmapped)
+                    await output.send((tag, new_pkt))
+        finally:
+            await output.close()
+
     def identity_structure(self) -> Any:
         return (
             self.__class__.__name__,
@@ -207,6 +235,33 @@ class MapTags(UnaryOperator):
         }
 
         return Schema(new_tag_schema), packet_schema
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    ) -> None:
+        """Streaming: rename tag columns per row without materializing."""
+        try:
+            rename_map: dict[str, str] | None = None
+            unmapped: list[str] | None = None
+            async for tag, packet in inputs[0]:
+                if rename_map is None:
+                    tag_keys = tag.keys()
+                    rename_map = {
+                        k: self.name_map[k] for k in tag_keys if k in self.name_map
+                    }
+                    if self.drop_unmapped:
+                        unmapped = [k for k in tag_keys if k not in self.name_map]
+                if not rename_map:
+                    await output.send((tag, packet))
+                else:
+                    new_tag = tag.rename(rename_map)
+                    if unmapped:
+                        new_tag = new_tag.drop(*unmapped)
+                    await output.send((new_tag, packet))
+        finally:
+            await output.close()
 
     def identity_structure(self) -> Any:
         return (
