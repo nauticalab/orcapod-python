@@ -1,515 +1,149 @@
-# from abc import abstractmethod
-# from orcapod.core.datagrams import ArrowTag
-# from orcapod.core.pod import KernelStream, WrappedKernel
-# from orcapod.core.sources.base import SourceBase, InvocationBase
-# from orcapod.core.packet_function import CachedPod
-# from orcapod.core.kernels import KernelStream, WrappedKernel
-# from orcapod.core.sources.base import InvocationBase
-# from orcapod.core.pods import CachedPod
-# from orcapod.protocols import core_protocols as cp, database_protocols as dbp
-# import orcapod.protocols.core_protocols.execution_engine
-# from orcapod.types import Schema
-# from orcapod.utils.lazy_module import LazyModule
-# from typing import TYPE_CHECKING, Any
-# from orcapod.contexts.system_constants import constants
-# from orcapod.utils import arrow_utils
-# from collections.abc import Collection
-# from orcapod.core.streams import PodNodeStream
-
-# if TYPE_CHECKING:
-#     import pyarrow as pa
-#     import polars as pl
-#     import pandas as pd
-# else:
-#     pa = LazyModule("pyarrow")
-#     pl = LazyModule("polars")
-#     pd = LazyModule("pandas")
-
-
-# class NodeBase(
-#     InvocationBase,
-# ):
-#     """
-#     Mixin class for pipeline nodes
-#     """
-
-#     def __init__(
-#         self,
-#         input_streams: Collection[cp.StreamProtocol],
-#         pipeline_database: dbp.ArrowDatabaseProtocol,
-#         pipeline_path_prefix: tuple[str, ...] = (),
-#         kernel_type: str = "operator",
-#         **kwargs,
-#     ):
-#         super().__init__(**kwargs)
-#         self.kernel_type = kernel_type
-#         self._cached_stream: KernelStream | None = None
-#         self._input_streams = tuple(input_streams)
-#         self._pipeline_path_prefix = pipeline_path_prefix
-#         # compute invocation hash - note that empty () is passed into identity_structure to signify
-#         # identity structure of invocation with no input streams
-#         self.pipeline_node_hash = self.data_context.semantic_hasher.hash_object(
-#             self.identity_structure(())
-#         ).to_string()
-#         tag_types, packet_types = self.types(include_system_tags=True)
-
-#         self.tag_schema_hash = self.data_context.semantic_hasher.hash_object(
-#             tag_types
-#         ).to_string()
-
-#         self.packet_schema_hash = self.data_context.semantic_hasher.hash_object(
-#             packet_types
-#         ).to_string()
-
-#         self.pipeline_database = pipeline_database
-
-#     @property
-#     def id(self) -> str:
-#         return self.content_hash().to_string()
-
-#     @property
-#     def upstreams(self) -> tuple[cp.StreamProtocol, ...]:
-#         return self._input_streams
-
-#     def track_invocation(
-#         self, *streams: cp.StreamProtocol, label: str | None = None
-#     ) -> None:
-#         # NodeProtocol invocation should not be tracked
-#         return None
-
-#     @property
-#     def contained_kernel(self) -> cp.Kernel:
-#         raise NotImplementedError(
-#             "This property should be implemented by subclasses to return the contained kernel."
-#         )
-
-#     @property
-#     def reference(self) -> tuple[str, ...]:
-#         return self.contained_kernel.reference
-
-#     @property
-#     @abstractmethod
-#     def pipeline_path(self) -> tuple[str, ...]:
-#         """
-#         Return the path to the pipeline run records.
-#         This is used to store the run-associated tag info.
-#         """
-#         ...
-
-#     def validate_inputs(self, *streams: cp.StreamProtocol) -> None:
-#         return
-
-#     # def forward(self, *streams: cp.StreamProtocol) -> cp.StreamProtocol:
-#     #     # TODO: re-evaluate the use here -- consider semi joining with input streams
-#     #     # super().validate_inputs(*self.input_streams)
-#     #     return super().forward(*self.upstreams)  # type: ignore[return-value]
-
-#     def pre_kernel_processing(
-#         self, *streams: cp.StreamProtocol
-#     ) -> tuple[cp.StreamProtocol, ...]:
-#         return self.upstreams
-
-#     def kernel_output_types(
-#         self, *streams: cp.StreamProtocol, include_system_tags: bool = False
-#     ) -> tuple[Schema, Schema]:
-#         """
-#         Return the output types of the node.
-#         This is used to determine the types of the output streams.
-#         """
-#         return self.contained_kernel.output_types(
-#             *self.upstreams, include_system_tags=include_system_tags
-#         )
-
-#     def kernel_identity_structure(
-#         self, streams: Collection[cp.StreamProtocol] | None = None
-#     ) -> Any:
-#         # construct identity structure from the node's information and the
-#         return self.contained_kernel.identity_structure(self.upstreams)
-
-#     def get_all_records(
-#         self, include_system_columns: bool = False
-#     ) -> "pa.Table | None":
-#         """
-#         Retrieve all records associated with the node.
-#         If include_system_columns is True, system columns will be included in the result.
-#         """
-#         raise NotImplementedError("This method should be implemented by subclasses.")
-
-#     def flush(self):
-#         self.pipeline_database.flush()
-
-
-# class KernelNode(NodeBase, WrappedKernel):
-#     """
-#     A node in the pipeline that represents a kernel.
-#     This node can be used to execute the kernel and process data streams.
-#     """
-
-#     HASH_COLUMN_NAME = "_record_hash"
-
-#     def __init__(
-#         self,
-#         kernel: cp.Kernel,
-#         input_streams: Collection[cp.StreamProtocol],
-#         pipeline_database: dbp.ArrowDatabaseProtocol,
-#         pipeline_path_prefix: tuple[str, ...] = (),
-#         **kwargs,
-#     ) -> None:
-#         super().__init__(
-#             kernel=kernel,
-#             input_streams=input_streams,
-#             pipeline_database=pipeline_database,
-#             pipeline_path_prefix=pipeline_path_prefix,
-#             **kwargs,
-#         )
-#         self.skip_recording = True
-
-#     @property
-#     def contained_kernel(self) -> cp.Kernel:
-#         return self.kernel
-
-#     def __repr__(self):
-#         return f"KernelNode(kernel={self.kernel!r})"
-
-#     def __str__(self):
-#         return f"KernelNode:{self.kernel!s}"
-
-#     def forward(self, *streams: cp.StreamProtocol) -> cp.StreamProtocol:
-#         output_stream = super().forward(*streams)
-
-#         if not self.skip_recording:
-#             self.record_pipeline_output(output_stream)
-#         return output_stream
-
-#     def record_pipeline_output(self, output_stream: cp.StreamProtocol) -> None:
-#         key_column_name = self.HASH_COLUMN_NAME
-#         # FIXME: compute record id based on each record in its entirety
-#         output_table = output_stream.as_table(
-#             include_data_context=True,
-#             include_system_tags=True,
-#             include_source=True,
-#         )
-#         # compute hash for output_table
-#         # include system tags
-#         columns_to_hash = (
-#             output_stream.tag_keys(include_system_tags=True)
-#             + output_stream.packet_keys()
-#         )
-
-#         arrow_hasher = self.data_context.arrow_hasher
-#         record_hashes = []
-#         table_to_hash = output_table.select(columns_to_hash)
-
-#         for record_batch in table_to_hash.to_batches():
-#             for i in range(len(record_batch)):
-#                 record_hashes.append(
-#                     arrow_hasher.hash_table(record_batch.slice(i, 1)).to_hex()
-#                 )
-#         # add the hash column
-#         output_table = output_table.add_column(
-#             0, key_column_name, pa.array(record_hashes, type=pa.large_string())
-#         )
-
-#         self.pipeline_database.add_records(
-#             self.pipeline_path,
-#             output_table,
-#             record_id_column=key_column_name,
-#             skip_duplicates=True,
-#         )
-
-#     @property
-#     def pipeline_path(self) -> tuple[str, ...]:
-#         """
-#         Return the path to the pipeline run records.
-#         This is used to store the run-associated tag info.
-#         """
-#         return (
-#             self._pipeline_path_prefix  # pipeline ID
-#             + self.reference  # node ID
-#             + (
-#                 f"node:{self.pipeline_node_hash}",  # pipeline node ID
-#                 f"packet:{self.packet_schema_hash}",  # packet schema ID
-#                 f"tag:{self.tag_schema_hash}",  # tag schema ID
-#             )
-#         )
-
-#     def get_all_records(
-#         self, include_system_columns: bool = False
-#     ) -> "pa.Table | None":
-#         results = self.pipeline_database.get_all_records(self.pipeline_path)
-
-#         if results is None:
-#             return None
-
-#         if not include_system_columns:
-#             system_columns = [
-#                 c
-#                 for c in results.column_names
-#                 if c.startswith(constants.META_PREFIX)
-#                 or c.startswith(constants.DATAGRAM_PREFIX)
-#             ]
-#             results = results.drop(system_columns)
-
-#         return results
-
-
-# class PodNodeProtocol(NodeBase, CachedPod):
-#     def __init__(
-#         self,
-#         pod: cp.PodProtocol,
-#         input_streams: Collection[cp.StreamProtocol],
-#         pipeline_database: dbp.ArrowDatabaseProtocol,
-#         result_database: dbp.ArrowDatabaseProtocol | None = None,
-#         record_path_prefix: tuple[str, ...] = (),
-#         pipeline_path_prefix: tuple[str, ...] = (),
-#         **kwargs,
-#     ) -> None:
-#         super().__init__(
-#             pod=pod,
-#             result_database=result_database,
-#             record_path_prefix=record_path_prefix,
-#             input_streams=input_streams,
-#             pipeline_database=pipeline_database,
-#             pipeline_path_prefix=pipeline_path_prefix,
-#             **kwargs,
-#         )
-#         self._execution_engine_opts: dict[str, Any] = {}
-
-#     @property
-#     def execution_engine_opts(self) -> dict[str, Any]:
-#         return self._execution_engine_opts.copy()
-
-#     @execution_engine_opts.setter
-#     def execution_engine_opts(self, opts: dict[str, Any]) -> None:
-#         self._execution_engine_opts = opts
-
-#     def flush(self):
-#         self.pipeline_database.flush()
-#         if self.result_database is not None:
-#             self.result_database.flush()
-
-#     @property
-#     def contained_kernel(self) -> cp.Kernel:
-#         return self.pod
-
-#     @property
-#     def pipeline_path(self) -> tuple[str, ...]:
-#         """
-#         Return the path to the pipeline run records.
-#         This is used to store the run-associated tag info.
-#         """
-#         return (
-#             self._pipeline_path_prefix  # pipeline ID
-#             + self.reference  # node ID
-#             + (
-#                 f"node:{self.pipeline_node_hash}",  # pipeline node ID
-#                 f"tag:{self.tag_schema_hash}",  # tag schema ID
-#             )
-#         )
-
-#     def __repr__(self):
-#         return f"PodNodeProtocol(pod={self.pod!r})"
-
-#     def __str__(self):
-#         return f"PodNodeProtocol:{self.pod!s}"
-
-#     def call(
-#         self,
-#         tag: cp.TagProtocol,
-#         packet: cp.PacketProtocol,
-#         record_id: str | None = None,
-#         execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
-#         | None = None,
-#         execution_engine: cp.ExecutionEngine | None = None,
-#         execution_engine_opts: dict[str, Any] | None = None,
-#         skip_cache_lookup: bool = False,
-#         skip_cache_insert: bool = False,
-#     ) -> tuple[cp.TagProtocol, cp.PacketProtocol | None]:
-#         execution_engine_hash = execution_engine.name if execution_engine else "default"
-#         if record_id is None:
-#             record_id = self.get_record_id(packet, execution_engine_hash)
-
-#         combined_execution_engine_opts = self.execution_engine_opts
-#         if execution_engine_opts is not None:
-#             combined_execution_engine_opts.update(execution_engine_opts)
-
-#         tag, output_packet = super().call(
-#             tag,
-#             packet,
-#             record_id=record_id,
-#             skip_cache_lookup=skip_cache_lookup,
-#             skip_cache_insert=skip_cache_insert,
-#             execution_engine=execution_engine,
-#             execution_engine_opts=combined_execution_engine_opts,
-#         )
-
-#         # if output_packet is not None:
-#         #     retrieved = (
-#         #         output_packet.get_meta_value(self.DATA_RETRIEVED_FLAG) is not None
-#         #     )
-#         #     # add pipeline record if the output packet is not None
-#         #     # TODO: verify cache lookup logic
-#         #     self.add_pipeline_record(
-#         #         tag,
-#         #         packet,
-#         #         record_id,
-#         #         retrieved=retrieved,
-#         #         skip_cache_lookup=skip_cache_lookup,
-#         #     )
-#         return tag, output_packet
-
-#     async def async_call(
-#         self,
-#         tag: cp.TagProtocol,
-#         packet: cp.PacketProtocol,
-#         record_id: str | None = None,
-#         execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
-#         | None = None,
-#         execution_engine: cp.ExecutionEngine | None = None,
-#         execution_engine_opts: dict[str, Any] | None = None,
-#         skip_cache_lookup: bool = False,
-#         skip_cache_insert: bool = False,
-#     ) -> tuple[cp.TagProtocol, cp.PacketProtocol | None]:
-#         execution_engine_hash = execution_engine.name if execution_engine else "default"
-#         if record_id is None:
-#             record_id = self.get_record_id(packet, execution_engine_hash)
-
-#         combined_execution_engine_opts = self.execution_engine_opts
-#         if execution_engine_opts is not None:
-#             combined_execution_engine_opts.update(execution_engine_opts)
-
-#         tag, output_packet = await super().async_call(
-#             tag,
-#             packet,
-#             record_id=record_id,
-#             skip_cache_lookup=skip_cache_lookup,
-#             skip_cache_insert=skip_cache_insert,
-#             execution_engine=execution_engine,
-#             execution_engine_opts=combined_execution_engine_opts,
-#         )
-
-#         if output_packet is not None:
-#             retrieved = (
-#                 output_packet.get_meta_value(self.DATA_RETRIEVED_FLAG) is not None
-#             )
-#             # add pipeline record if the output packet is not None
-#             # TODO: verify cache lookup logic
-#             self.add_pipeline_record(
-#                 tag,
-#                 packet,
-#                 record_id,
-#                 retrieved=retrieved,
-#                 skip_cache_lookup=skip_cache_lookup,
-#             )
-#         return tag, output_packet
-
-#     def add_pipeline_record(
-#         self,
-#         tag: cp.TagProtocol,
-#         input_packet: cp.PacketProtocol,
-#         packet_record_id: str,
-#         retrieved: bool | None = None,
-#         skip_cache_lookup: bool = False,
-#     ) -> None:
-#         # combine dp.TagProtocol with packet content hash to compute entry hash
-#         # TODO: add system tag columns
-#         # TODO: consider using bytes instead of string representation
-#         tag_with_hash = tag.as_table(include_system_tags=True).append_column(
-#             constants.INPUT_PACKET_HASH,
-#             pa.array([input_packet.content_hash().to_string()], type=pa.large_string()),
-#         )
-
-#         # unique entry ID is determined by the combination of tags, system_tags, and input_packet hash
-#         entry_id = self.data_context.arrow_hasher.hash_table(tag_with_hash).to_string()
-
-#         # check presence of an existing entry with the same entry_id
-#         existing_record = None
-#         if not skip_cache_lookup:
-#             existing_record = self.pipeline_database.get_record_by_id(
-#                 self.pipeline_path,
-#                 entry_id,
-#             )
-
-#         if existing_record is not None:
-#             # if the record already exists, then skip
-#             return
-
-#         # rename all keys to avoid potential collision with result columns
-#         renamed_input_packet = input_packet.rename(
-#             {k: f"_input_{k}" for k in input_packet.keys()}
-#         )
-#         input_packet_info = (
-#             renamed_input_packet.as_table(include_source=True)
-#             .append_column(
-#                 constants.PACKET_RECORD_ID,
-#                 pa.array([packet_record_id], type=pa.large_string()),
-#             )
-#             .append_column(
-#                 f"{constants.META_PREFIX}input_packet{constants.CONTEXT_KEY}",
-#                 pa.array([input_packet.data_context_key], type=pa.large_string()),
-#             )
-#             .append_column(
-#                 self.DATA_RETRIEVED_FLAG,
-#                 pa.array([retrieved], type=pa.bool_()),
-#             )
-#             .drop_columns(list(renamed_input_packet.keys()))
-#         )
-
-#         combined_record = arrow_utils.hstack_tables(
-#             tag.as_table(include_system_tags=True), input_packet_info
-#         )
-
-#         self.pipeline_database.add_record(
-#             self.pipeline_path,
-#             entry_id,
-#             combined_record,
-#             skip_duplicates=False,
-#         )
-
-#     def forward(self, *streams: cp.StreamProtocol) -> cp.StreamProtocol:
-#         # TODO: re-evaluate the use here -- consider semi joining with input streams
-#         # super().validate_inputs(*self.input_streams)
-#         return PodNodeStream(self, *self.upstreams)  # type: ignore[return-value]
-
-#     def get_all_records(
-#         self, include_system_columns: bool = False
-#     ) -> "pa.Table | None":
-#         results = self.result_database.get_all_records(
-#             self.record_path, record_id_column=constants.PACKET_RECORD_ID
-#         )
-
-#         if self.pipeline_database is None:
-#             raise ValueError(
-#                 "Pipeline database is not configured, cannot retrieve tag info"
-#             )
-#         taginfo = self.pipeline_database.get_all_records(
-#             self.pipeline_path,
-#         )
-
-#         if results is None or taginfo is None:
-#             return None
-
-#         # hack - use polars for join as it can deal with complex data type
-#         # TODO: convert the entire load logic to use polars with lazy evaluation
-
-#         joined_info = (
-#             pl.DataFrame(taginfo)
-#             .join(pl.DataFrame(results), on=constants.PACKET_RECORD_ID, how="inner")
-#             .to_arrow()
-#         )
-
-#         # joined_info = taginfo.join(
-#         #     results,
-#         #     constants.PACKET_RECORD_ID,
-#         #     join_type="inner",
-#         # )
-
-#         if not include_system_columns:
-#             system_columns = [
-#                 c
-#                 for c in joined_info.column_names
-#                 if c.startswith(constants.META_PREFIX)
-#                 or c.startswith(constants.DATAGRAM_PREFIX)
-#             ]
-#             joined_info = joined_info.drop(system_columns)
-#         return joined_info
+from __future__ import annotations
+
+import logging
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any
+
+from orcapod import contexts
+from orcapod.config import Config
+from orcapod.core.streams.arrow_table_stream import ArrowTableStream
+from orcapod.core.tracker import SourceNode
+from orcapod.protocols.core_protocols import PacketProtocol, StreamProtocol, TagProtocol
+from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
+from orcapod.types import ColumnConfig, Schema
+from orcapod.utils.lazy_module import LazyModule
+
+if TYPE_CHECKING:
+    import pyarrow as pa
+else:
+    pa = LazyModule("pyarrow")
+
+logger = logging.getLogger(__name__)
+
+
+class PersistentSourceNode(SourceNode):
+    """
+    DB-backed wrapper around any stream, used by ``Pipeline.compile()``
+    to cache leaf stream data.
+
+    Extends ``SourceNode`` (which delegates identity/schema to the wrapped
+    stream) and adds:
+
+    - Materialization of the stream's output into a cache database
+    - Per-row deduplication via content hash
+    - Cached ``ArrowTableStream`` for downstream consumption
+
+    Cache path structure::
+
+        cache_path_prefix / source / node:{content_hash}
+    """
+
+    HASH_COLUMN_NAME = "_record_hash"
+
+    def __init__(
+        self,
+        stream: StreamProtocol,
+        cache_database: ArrowDatabaseProtocol,
+        cache_path_prefix: tuple[str, ...] = (),
+        label: str | None = None,
+        data_context: str | contexts.DataContext | None = None,
+        config: Config | None = None,
+    ) -> None:
+        super().__init__(
+            stream=stream,
+            label=label,
+            data_context=data_context,
+            config=config,
+        )
+        self._cache_database = cache_database
+        self._cache_path_prefix = cache_path_prefix
+        self._cached_stream: ArrowTableStream | None = None
+
+    # -------------------------------------------------------------------------
+    # Cache path
+    # -------------------------------------------------------------------------
+
+    @property
+    def cache_path(self) -> tuple[str, ...]:
+        """Cache table path, scoped to the wrapped stream's content hash."""
+        return self._cache_path_prefix + (
+            "source",
+            f"node:{self.stream.content_hash().to_string()}",
+        )
+
+    # -------------------------------------------------------------------------
+    # Caching logic
+    # -------------------------------------------------------------------------
+
+    def _build_cached_stream(self) -> ArrowTableStream:
+        """
+        Materialize the wrapped stream, store rows in the cache DB
+        (deduped by per-row hash), and return the cached table as an
+        ``ArrowTableStream``.
+        """
+        live_table = self.stream.as_table(columns={"source": True, "system_tags": True})
+
+        # Per-row content hashes for dedup
+        arrow_hasher = self.data_context.arrow_hasher
+        record_hashes: list[str] = []
+        for batch in live_table.to_batches():
+            for i in range(len(batch)):
+                record_hashes.append(
+                    arrow_hasher.hash_table(batch.slice(i, 1)).to_hex()
+                )
+
+        live_with_hash = live_table.add_column(
+            0,
+            self.HASH_COLUMN_NAME,
+            pa.array(record_hashes, type=pa.large_string()),
+        )
+
+        self._cache_database.add_records(
+            self.cache_path,
+            live_with_hash,
+            record_id_column=self.HASH_COLUMN_NAME,
+            skip_duplicates=True,
+        )
+        self._cache_database.flush()
+
+        # Load all cached records (union of current + prior runs)
+        all_records = self._cache_database.get_all_records(self.cache_path)
+        assert all_records is not None, (
+            "Cache should contain records after storing live data."
+        )
+
+        tag_keys = self.stream.keys()[0]
+        return ArrowTableStream(all_records, tag_columns=tag_keys)
+
+    def _ensure_stream(self) -> None:
+        """Build the cached stream on first access."""
+        if self._cached_stream is None:
+            self._cached_stream = self._build_cached_stream()
+            self._update_modified_time()
+
+    # -------------------------------------------------------------------------
+    # Stream interface overrides
+    # -------------------------------------------------------------------------
+
+    def run(self) -> None:
+        """Eagerly populate the cache with live stream data."""
+        self._ensure_stream()
+
+    def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
+        self._ensure_stream()
+        assert self._cached_stream is not None
+        return self._cached_stream.iter_packets()
+
+    def as_table(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> "pa.Table":
+        self._ensure_stream()
+        assert self._cached_stream is not None
+        return self._cached_stream.as_table(columns=columns, all_info=all_info)
+
+    def get_all_records(self) -> "pa.Table | None":
+        """Retrieve all stored records from the cache database."""
+        return self._cache_database.get_all_records(self.cache_path)

@@ -1,0 +1,541 @@
+"""
+Tests for the Pipeline class.
+
+Verifies that Pipeline (a GraphTracker subclass) correctly wraps all nodes
+as persistent variants during compile():
+- Leaf streams → PersistentSourceNode
+- Function pod invocations → PersistentFunctionNode
+- Operator invocations → PersistentOperatorNode
+"""
+
+from __future__ import annotations
+
+import pyarrow as pa
+import pytest
+
+from orcapod.core.function_pod import FunctionPod, PersistentFunctionNode
+from orcapod.core.operator_node import PersistentOperatorNode
+from orcapod.core.operators import Join, MapPackets
+from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.sources import ArrowTableSource
+from orcapod.databases import InMemoryArrowDatabase
+from orcapod.pipeline import Pipeline, PersistentSourceNode
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_source(tag_col: str, packet_col: str, data: dict) -> ArrowTableSource:
+    table = pa.table(
+        {
+            tag_col: pa.array(data[tag_col], type=pa.large_string()),
+            packet_col: pa.array(data[packet_col], type=pa.int64()),
+        }
+    )
+    return ArrowTableSource(table, tag_columns=[tag_col])
+
+
+def _make_two_sources():
+    src_a = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
+    src_b = _make_source("key", "score", {"key": ["a", "b"], "score": [100, 200]})
+    return src_a, src_b
+
+
+def add_values(value: int, score: int) -> int:
+    return value + score
+
+
+def double_value(value: int) -> int:
+    return value * 2
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def pipeline_db():
+    return InMemoryArrowDatabase()
+
+
+@pytest.fixture
+def function_db():
+    return InMemoryArrowDatabase()
+
+
+# ---------------------------------------------------------------------------
+# Tests: compile wraps leaf streams as PersistentSourceNode
+# ---------------------------------------------------------------------------
+
+
+class TestCompileSourceWrapping:
+    def test_compile_wraps_leaf_streams_as_persistent_source_node(self, pipeline_db):
+        src_a, src_b = _make_two_sources()
+        pipeline = Pipeline(name="test_pipe", pipeline_database=pipeline_db)
+
+        with pipeline:
+            joined = Join()(src_a, src_b)
+
+        # The join node should be accessible by label
+        assert pipeline._compiled
+        # Check that there are nodes in the compiled graph
+        assert len(pipeline.compiled_nodes) > 0
+
+        # The node graph should contain PersistentSourceNode instances
+        source_nodes = [
+            n
+            for n in pipeline._node_graph.nodes()
+            if isinstance(n, PersistentSourceNode)
+        ]
+        assert len(source_nodes) == 2
+
+    def test_persistent_source_node_cache_path_prefix(self, pipeline_db):
+        src_a, _ = _make_two_sources()
+        pipeline = Pipeline(name="my_pipeline", pipeline_database=pipeline_db)
+
+        with pipeline:
+            # Use a simple unary operator to trigger a recording
+            MapPackets({"value": "val"})(src_a, label="mapper")
+
+        # Find the PersistentSourceNode
+        source_nodes = [
+            n
+            for n in pipeline._node_graph.nodes()
+            if isinstance(n, PersistentSourceNode)
+        ]
+        assert len(source_nodes) == 1
+        sn = source_nodes[0]
+
+        # cache_path should start with pipeline name prefix
+        assert sn.cache_path[:1] == ("my_pipeline",)
+        assert sn.cache_path[1] == "source"
+        assert sn.cache_path[2].startswith("node:")
+
+
+# ---------------------------------------------------------------------------
+# Tests: compile creates PersistentFunctionNode
+# ---------------------------------------------------------------------------
+
+
+class TestCompileFunctionNode:
+    def test_compile_creates_persistent_function_node(self, pipeline_db):
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(name="fn_pipe", pipeline_database=pipeline_db)
+
+        with pipeline:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        assert "adder" in pipeline.compiled_nodes
+        node = pipeline.compiled_nodes["adder"]
+        assert isinstance(node, PersistentFunctionNode)
+
+    def test_function_node_pipeline_path_prefix(self, pipeline_db):
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(name="fn_pipe", pipeline_database=pipeline_db)
+
+        with pipeline:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        node = pipeline.compiled_nodes["adder"]
+        assert isinstance(node, PersistentFunctionNode)
+        # pipeline_path should start with the pipeline name
+        assert node.pipeline_path[0] == "fn_pipe"
+
+
+# ---------------------------------------------------------------------------
+# Tests: compile creates PersistentOperatorNode
+# ---------------------------------------------------------------------------
+
+
+class TestCompileOperatorNode:
+    def test_compile_creates_persistent_operator_node(self, pipeline_db):
+        src_a, src_b = _make_two_sources()
+
+        pipeline = Pipeline(name="op_pipe", pipeline_database=pipeline_db)
+
+        with pipeline:
+            Join()(src_a, src_b, label="joiner")
+
+        assert "joiner" in pipeline.compiled_nodes
+        node = pipeline.compiled_nodes["joiner"]
+        assert isinstance(node, PersistentOperatorNode)
+
+    def test_operator_node_pipeline_path_prefix(self, pipeline_db):
+        src_a, src_b = _make_two_sources()
+
+        pipeline = Pipeline(name="op_pipe", pipeline_database=pipeline_db)
+
+        with pipeline:
+            Join()(src_a, src_b, label="joiner")
+
+        node = pipeline.compiled_nodes["joiner"]
+        assert isinstance(node, PersistentOperatorNode)
+        assert node.pipeline_path[0] == "op_pipe"
+
+
+# ---------------------------------------------------------------------------
+# Tests: function database handling
+# ---------------------------------------------------------------------------
+
+
+class TestFunctionDatabaseHandling:
+    def test_function_database_none_uses_results_subfolder(self, pipeline_db):
+        """When function_database=None, result path should be pipeline_name/_results."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(
+            name="my_pipe", pipeline_database=pipeline_db, function_database=None
+        )
+
+        with pipeline:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        node = pipeline.compiled_nodes["adder"]
+        assert isinstance(node, PersistentFunctionNode)
+
+        # The CachedPacketFunction's record_path should start with
+        # (pipeline_name, "_results", ...)
+        record_path = node._packet_function.record_path
+        assert record_path[0] == "my_pipe"
+        assert record_path[1] == "_results"
+
+    def test_separate_function_database(self, pipeline_db, function_db):
+        """When function_database is provided, it's used as result_database."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(
+            name="my_pipe",
+            pipeline_database=pipeline_db,
+            function_database=function_db,
+        )
+
+        with pipeline:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        node = pipeline.compiled_nodes["adder"]
+        assert isinstance(node, PersistentFunctionNode)
+
+        # The CachedPacketFunction should use function_db
+        assert node._packet_function._result_database is function_db
+
+
+# ---------------------------------------------------------------------------
+# Tests: label access
+# ---------------------------------------------------------------------------
+
+
+class TestLabelAccess:
+    def test_node_access_by_label(self, pipeline_db):
+        src_a, src_b = _make_two_sources()
+
+        pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
+
+        with pipeline:
+            Join()(src_a, src_b, label="my_join")
+
+        # Access via __getattr__
+        node = pipeline.my_join
+        assert isinstance(node, PersistentOperatorNode)
+
+    def test_label_collision_sorted_by_content_hash(self, pipeline_db):
+        """Two nodes with same label get _1, _2 sorted by content hash."""
+        src_a = _make_source("k", "value", {"k": ["a"], "value": [1]})
+        src_b = _make_source("k", "value", {"k": ["b"], "value": [2]})
+
+        pf1 = PythonPacketFunction(double_value, output_keys="result")
+        pf2 = PythonPacketFunction(double_value, output_keys="result")
+        pod1 = FunctionPod(packet_function=pf1)
+        pod2 = FunctionPod(packet_function=pf2)
+
+        pipeline = Pipeline(name="collision", pipeline_database=pipeline_db)
+
+        with pipeline:
+            pod1(src_a, label="compute")
+            pod2(src_b, label="compute")
+
+        # Both should be disambiguated
+        assert "compute_1" in pipeline.compiled_nodes
+        assert "compute_2" in pipeline.compiled_nodes
+        assert isinstance(pipeline.compute_1, PersistentFunctionNode)
+        assert isinstance(pipeline.compute_2, PersistentFunctionNode)
+
+        # Verify deterministic ordering by content hash
+        hash_1 = pipeline.compute_1.content_hash().to_string()
+        hash_2 = pipeline.compute_2.content_hash().to_string()
+        assert hash_1 <= hash_2
+
+    def test_getattr_raises_for_unknown(self, pipeline_db):
+        pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
+        with pipeline:
+            pass  # empty pipeline
+
+        with pytest.raises(AttributeError, match="Pipeline has no attribute"):
+            _ = pipeline.nonexistent
+
+    def test_dir_includes_node_labels(self, pipeline_db):
+        src_a, src_b = _make_two_sources()
+        pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
+
+        with pipeline:
+            Join()(src_a, src_b, label="my_join")
+
+        d = dir(pipeline)
+        assert "my_join" in d
+
+
+# ---------------------------------------------------------------------------
+# Tests: auto compile and run
+# ---------------------------------------------------------------------------
+
+
+class TestAutoCompileAndRun:
+    def test_auto_compile_on_exit(self, pipeline_db):
+        src_a, src_b = _make_two_sources()
+        pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
+
+        with pipeline:
+            Join()(src_a, src_b, label="joiner")
+
+        # Should be compiled after exiting context
+        assert pipeline._compiled
+        assert "joiner" in pipeline.compiled_nodes
+
+    def test_run_executes_all_nodes(self, pipeline_db):
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(name="run_test", pipeline_database=pipeline_db)
+
+        with pipeline:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        pipeline.run()
+
+        # After run, function node should have records
+        node = pipeline.adder
+        records = node.get_all_records()
+        assert records is not None
+        assert records.num_rows == 2  # two input rows (a, b)
+
+    def test_pipeline_path_prefix_scoping(self, pipeline_db):
+        """All persistent nodes' paths start with pipeline name prefix."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(name="scoped", pipeline_database=pipeline_db)
+
+        with pipeline:
+            joined = Join()(src_a, src_b, label="joiner")
+            pod(joined, label="adder")
+
+        # Check operator node
+        joiner = pipeline.joiner
+        assert joiner.pipeline_path[0] == "scoped"
+
+        # Check function node
+        adder = pipeline.adder
+        assert adder.pipeline_path[0] == "scoped"
+
+        # Check source nodes
+        for n in pipeline._node_graph.nodes():
+            if isinstance(n, PersistentSourceNode):
+                assert n.cache_path[0] == "scoped"
+
+
+# ---------------------------------------------------------------------------
+# Tests: flush
+# ---------------------------------------------------------------------------
+
+
+class TestFlush:
+    def test_flush_flushes_databases(self, pipeline_db, function_db):
+        pipeline = Pipeline(
+            name="test",
+            pipeline_database=pipeline_db,
+            function_database=function_db,
+        )
+        # Just verify it doesn't raise
+        pipeline.flush()
+
+
+# ---------------------------------------------------------------------------
+# Tests: end-to-end
+# ---------------------------------------------------------------------------
+
+
+class TestEndToEnd:
+    def test_end_to_end_source_join_function(self, pipeline_db):
+        """Full pipeline: two sources → Join → FunctionPod.
+
+        Verifies all nodes are persistent and DB records exist after run().
+        """
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(name="e2e", pipeline_database=pipeline_db)
+
+        with pipeline:
+            joined = Join()(src_a, src_b, label="joiner")
+            pod(joined, label="adder")
+
+        # Verify node types
+        assert isinstance(pipeline.joiner, PersistentOperatorNode)
+        assert isinstance(pipeline.adder, PersistentFunctionNode)
+
+        # Run the pipeline
+        pipeline.run()
+
+        # Source nodes should have cached data
+        for n in pipeline._node_graph.nodes():
+            if isinstance(n, PersistentSourceNode):
+                records = n.get_all_records()
+                assert records is not None
+                assert records.num_rows == 2
+
+        # Function node should have results
+        fn_records = pipeline.adder.get_all_records()
+        assert fn_records is not None
+        assert fn_records.num_rows == 2
+
+        # Verify output values
+        table = pipeline.adder.as_table()
+        totals = sorted(table.column("total").to_pylist())
+        # a: 10 + 100 = 110, b: 20 + 200 = 220
+        assert totals == [110, 220]
+
+
+# ---------------------------------------------------------------------------
+# Tests: pipeline extension
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineExtension:
+    def test_extend_pipeline_with_new_sources(self, pipeline_db):
+        """Re-enter pipeline context to add more operations from new sources."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(
+            name="extend", pipeline_database=pipeline_db, auto_compile=False
+        )
+
+        # First context: build the initial graph
+        with pipeline:
+            joined = src_a.join(src_b, label="joiner")
+
+        # Second context: extend the graph with a new source and function pod
+        src_c = _make_source("key", "extra", {"key": ["a", "b"], "extra": [1000, 2000]})
+        with pipeline:
+            wider = joined.join(src_c, label="wider_join")
+            # select only value+score so add_values can process it
+            selected = wider.select_packet_columns(["value", "score"], label="selector")
+            pod(selected, label="adder")
+
+        pipeline.compile()
+
+        assert "joiner" in pipeline.compiled_nodes
+        assert "wider_join" in pipeline.compiled_nodes
+        assert "selector" in pipeline.compiled_nodes
+        assert "adder" in pipeline.compiled_nodes
+        assert isinstance(pipeline.joiner, PersistentOperatorNode)
+        assert isinstance(pipeline.wider_join, PersistentOperatorNode)
+        assert isinstance(pipeline.adder, PersistentFunctionNode)
+
+        pipeline.run()
+
+        table = pipeline.wider_join.as_table()
+        assert table.num_rows == 2
+        assert "extra" in table.column_names
+
+        totals = sorted(pipeline.adder.as_table().column("total").to_pylist())
+        assert totals == [110, 220]
+
+    def test_extend_pipeline_from_compiled_node(self, pipeline_db):
+        """Second context uses an already-compiled persistent node as input."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(name="extend_compiled", pipeline_database=pipeline_db)
+
+        # First context: build and auto-compile
+        with pipeline:
+            joined = src_a.join(src_b, label="joiner")
+            pod(joined, label="adder")
+
+        # pipeline.adder is now a PersistentFunctionNode
+        assert isinstance(pipeline.adder, PersistentFunctionNode)
+
+        # Second context: extend from the compiled node
+        with pipeline:
+            pipeline.adder.map_packets({"total": "final_total"}, label="renamer")
+
+        # Re-compile picks up the extension
+        assert "renamer" in pipeline.compiled_nodes
+        assert isinstance(pipeline.renamer, PersistentOperatorNode)
+
+        pipeline.run()
+
+        table = pipeline.renamer.as_table()
+        assert "final_total" in table.column_names
+        assert sorted(table.column("final_total").to_pylist()) == [110, 220]
+
+    def test_second_pipeline_from_first_pipeline_node(self, pipeline_db):
+        """Pipeline B starts from Pipeline A's final compiled node."""
+        src_a, src_b = _make_two_sources()
+        pf_add = PythonPacketFunction(add_values, output_keys="total")
+        pod_add = FunctionPod(packet_function=pf_add)
+
+        pipe_a = Pipeline(name="pipe_a", pipeline_database=pipeline_db)
+        with pipe_a:
+            joined = src_a.join(src_b, label="joiner")
+            pod_add(joined, label="adder")
+
+        pipe_a.run()
+
+        # Pipeline B uses pipe_a.adder as its input source
+        db_b = InMemoryArrowDatabase()
+        pipe_b = Pipeline(name="pipe_b", pipeline_database=db_b)
+
+        with pipe_b:
+            pipe_a.adder.map_packets({"total": "renamed_total"}, label="renamer")
+
+        assert "renamer" in pipe_b.compiled_nodes
+        assert isinstance(pipe_b.renamer, PersistentOperatorNode)
+
+        # pipe_b should scope everything under "pipe_b"
+        assert pipe_b.renamer.pipeline_path[0] == "pipe_b"
+
+        pipe_b.run()
+
+        table = pipe_b.renamer.as_table()
+        assert "renamed_total" in table.column_names
+        assert sorted(table.column("renamed_total").to_pylist()) == [110, 220]
+
+        # pipe_b's source nodes wrap pipe_a.adder as a PersistentSourceNode
+        source_nodes = [
+            n for n in pipe_b._node_graph.nodes() if isinstance(n, PersistentSourceNode)
+        ]
+        assert len(source_nodes) == 1

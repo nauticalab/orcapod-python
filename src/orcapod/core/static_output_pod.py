@@ -179,6 +179,7 @@ class StaticOutputPod(TraceableBase):
         output_stream = DynamicPodStream(
             pod=self,
             upstreams=streams,
+            label=label,
         )
         return output_stream
 

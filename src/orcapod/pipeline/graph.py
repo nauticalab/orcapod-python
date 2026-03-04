@@ -1,17 +1,14 @@
-import asyncio
+from __future__ import annotations
+
 import logging
 import os
 import tempfile
-from collections.abc import Collection
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
-import orcapod.protocols.core_protocols.execution_engine
-from orcapod import contexts
-from orcapod.core.tracker import GraphTracker
-from orcapod.pipeline.nodes import KernelNode, PodNodeProtocol
+from orcapod.core.tracker import GraphTracker, GraphNode as GraphNodeType
+from orcapod.pipeline.nodes import PersistentSourceNode
 from orcapod.protocols import core_protocols as cp
 from orcapod.protocols import database_protocols as dbp
-from orcapod.protocols.pipeline_protocols import NodeProtocol
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -22,28 +19,9 @@ else:
 logger = logging.getLogger(__name__)
 
 
-def synchronous_run(async_func, *args, **kwargs):
-    """
-    Use existing event loop if available.
-
-    Pros: Reuses existing loop, more efficient
-    Cons: More complex, need to handle loop detection
-    """
-    try:
-        # Check if we're already in an event loop
-        _ = asyncio.get_running_loop()
-
-        def run_in_thread():
-            return asyncio.run(async_func(*args, **kwargs))
-
-        import concurrent.futures
-
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(run_in_thread)
-            return future.result()
-    except RuntimeError:
-        # No event loop running, safe to use asyncio.run()
-        return asyncio.run(async_func(*args, **kwargs))
+# ---------------------------------------------------------------------------
+# Visualization helper (unrelated to pipeline node types)
+# ---------------------------------------------------------------------------
 
 
 class GraphNode:
@@ -64,274 +42,247 @@ class GraphNode:
         )
 
 
+# ---------------------------------------------------------------------------
+# Pipeline
+# ---------------------------------------------------------------------------
+
+
 class Pipeline(GraphTracker):
     """
-    Represents a pipeline in the system.
-    This class extends GraphTracker to manage the execution of kernels and pods in a pipeline.
+    A persistent pipeline that extends ``GraphTracker``.
+
+    During the ``with`` block, operator and function pod invocations are
+    recorded as non-persistent nodes (same as ``GraphTracker``).  On context
+    exit, ``compile()`` replaces every node with its persistent variant:
+
+    - Leaf streams → ``PersistentSourceNode``
+    - Function pod invocations → ``PersistentFunctionNode``
+    - Operator invocations → ``PersistentOperatorNode``
+
+    All persistent nodes share the same ``pipeline_database`` and use
+    ``pipeline_name`` as path prefix, scoping their cache tables.
+
+    Parameters
+    ----------
+    name:
+        Pipeline name (string or tuple).  Used as the path prefix for
+        all cache/pipeline paths within the databases.
+    pipeline_database:
+        Database for pipeline records and operator caches.
+    function_database:
+        Optional separate database for function pod result caches.
+        When ``None``, ``pipeline_database`` is used with a ``_results``
+        subfolder under the pipeline name.
+    auto_compile:
+        If ``True`` (default), ``compile()`` is called automatically
+        when the context manager exits.
     """
 
     def __init__(
         self,
         name: str | tuple[str, ...],
         pipeline_database: dbp.ArrowDatabaseProtocol,
-        results_database: dbp.ArrowDatabaseProtocol | None = None,
+        function_database: dbp.ArrowDatabaseProtocol | None = None,
         tracker_manager: cp.TrackerManagerProtocol | None = None,
-        data_context: str | contexts.DataContext | None = None,
         auto_compile: bool = True,
-    ):
-        super().__init__(tracker_manager=tracker_manager, data_context=data_context)
-        if not isinstance(name, tuple):
-            name = (name,)
-        self.name = name
-        self.pipeline_store_path_prefix = self.name
-        self.results_store_path_prefix = ()
-        if results_database is None:
-            if pipeline_database is None:
-                raise ValueError(
-                    "Either pipeline_database or results_database must be provided"
-                )
-            results_database = pipeline_database
-            self.results_store_path_prefix = self.name + ("_results",)
-        self.pipeline_database = pipeline_database
-        self.results_database = results_database
-        self._nodes: dict[str, NodeProtocol] = {}
-        self.auto_compile = auto_compile
-        self._dirty = False
-        self._ordered_nodes = []  # Track order of invocations
+    ) -> None:
+        super().__init__(tracker_manager=tracker_manager)
+        self._name = (name,) if isinstance(name, str) else tuple(name)
+        self._pipeline_database = pipeline_database
+        self._function_database = function_database
+        self._pipeline_path_prefix = self._name
+        self._nodes: dict[str, GraphNodeType] = {}
+        self._node_graph: "nx.DiGraph | None" = None
+        self._auto_compile = auto_compile
+        self._compiled = False
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
 
     @property
-    def nodes(self) -> dict[str, NodeProtocol]:
+    def name(self) -> tuple[str, ...]:
+        return self._name
+
+    @property
+    def pipeline_database(self) -> dbp.ArrowDatabaseProtocol:
+        return self._pipeline_database
+
+    @property
+    def function_database(self) -> dbp.ArrowDatabaseProtocol | None:
+        return self._function_database
+
+    @property
+    def compiled_nodes(self) -> dict[str, GraphNodeType]:
+        """Return a copy of the compiled nodes dict."""
         return self._nodes.copy()
 
-    @property
-    def function_pods(self) -> dict[str, cp.PodProtocol]:
-        return {
-            label: cast(cp.PodProtocol, node)
-            for label, node in self._nodes.items()
-            if getattr(node, "kernel_type") == "function"
-        }
-
-    @property
-    def source_pods(self) -> dict[str, cp.Source]:
-        return {
-            label: node
-            for label, node in self._nodes.items()
-            if getattr(node, "kernel_type") == "source"
-        }
-
-    @property
-    def operator_pods(self) -> dict[str, cp.Kernel]:
-        return {
-            label: node
-            for label, node in self._nodes.items()
-            if getattr(node, "kernel_type") == "operator"
-        }
+    # ------------------------------------------------------------------
+    # Context manager
+    # ------------------------------------------------------------------
 
     def __exit__(self, exc_type=None, exc_value=None, traceback=None):
-        """
-        Exit the pipeline context, ensuring all nodes are properly closed.
-        """
         super().__exit__(exc_type, exc_value, traceback)
-        if self.auto_compile:
+        if self._auto_compile:
             self.compile()
 
-    def flush(self) -> None:
-        self.pipeline_database.flush()
-        self.results_database.flush()
-
-    def record_kernel_invocation(
-        self,
-        kernel: cp.Kernel,
-        upstreams: tuple[cp.StreamProtocol, ...],
-        label: str | None = None,
-    ) -> None:
-        super().record_kernel_invocation(kernel, upstreams, label)
-        self._dirty = True
-
-    def record_pod_invocation(
-        self,
-        pod: cp.PodProtocol,
-        upstreams: tuple[cp.StreamProtocol, ...] = (),
-        label: str | None = None,
-    ) -> None:
-        super().record_pod_invocation(pod, upstreams, label)
-        self._dirty = True
-
-    def record_packet_function_invocation(
-        self,
-        packet_function: cp.PacketFunctionProtocol,
-        input_stream: cp.StreamProtocol,
-        label: str | None = None,
-    ) -> None:
-        super().record_packet_function_invocation(
-            packet_function, input_stream=input_stream, label=label
-        )
-        self._dirty = True
+    # ------------------------------------------------------------------
+    # Compile
+    # ------------------------------------------------------------------
 
     def compile(self) -> None:
-        import networkx as nx
+        """
+        Replace all recorded nodes with persistent variants.
 
-        name_candidates = {}
+        Walks the graph in topological order and creates:
 
-        invocation_to_stream_lut = {}
-        G = self.generate_graph()
-        node_graph = nx.DiGraph()
-        for invocation in nx.topological_sort(G):
-            input_streams = [
-                invocation_to_stream_lut[parent] for parent in invocation.parents()
-            ]
+        - ``PersistentSourceNode`` for every leaf stream
+        - ``PersistentFunctionNode`` for every function pod invocation
+        - ``PersistentOperatorNode`` for every operator invocation
 
-            node = self.wrap_invocation(invocation, new_input_streams=input_streams)
+        After compile, nodes are accessible by label as attributes on the
+        pipeline instance.
+        """
+        from orcapod.core.function_pod import FunctionNode, PersistentFunctionNode
+        from orcapod.core.operator_node import OperatorNode, PersistentOperatorNode
 
-            for parent in node.upstreams:
-                node_graph.add_edge(parent.producer, node)
+        G = nx.DiGraph()
+        for edge in self._graph_edges:
+            G.add_edge(*edge)
 
-            invocation_to_stream_lut[invocation] = node()
-            name_candidates.setdefault(node.label, []).append(node)
+        persistent_node_map: dict[str, GraphNodeType] = {}
+        name_candidates: dict[str, list[GraphNodeType]] = {}
 
-        # visit through the name candidates and resolve any collisions
+        for node_hash in nx.topological_sort(G):
+            if node_hash not in self._node_lut:
+                # -- Leaf stream: wrap in PersistentSourceNode --
+                stream = self._upstreams[node_hash]
+                persistent_node = PersistentSourceNode(
+                    stream=stream,
+                    cache_database=self._pipeline_database,
+                    cache_path_prefix=self._pipeline_path_prefix,
+                )
+                persistent_node_map[node_hash] = persistent_node
+            else:
+                node = self._node_lut[node_hash]
+
+                if isinstance(node, FunctionNode):
+                    # Rewire input stream to persistent upstream
+                    input_hash = node._input_stream.content_hash().to_string()
+                    rewired_input = persistent_node_map[input_hash]
+
+                    # Determine result database and path prefix
+                    if self._function_database is not None:
+                        result_db = self._function_database
+                        result_prefix = None
+                    else:
+                        result_db = self._pipeline_database
+                        result_prefix = self._name + ("_results",)
+
+                    persistent_node = PersistentFunctionNode(
+                        function_pod=node._function_pod,
+                        input_stream=rewired_input,
+                        pipeline_database=self._pipeline_database,
+                        result_database=result_db,
+                        result_path_prefix=result_prefix,
+                        pipeline_path_prefix=self._pipeline_path_prefix,
+                        label=node.label,
+                    )
+                    persistent_node_map[node_hash] = persistent_node
+
+                elif isinstance(node, OperatorNode):
+                    # Rewire all input streams to persistent upstreams
+                    rewired_inputs = tuple(
+                        persistent_node_map[s.content_hash().to_string()]
+                        for s in node.upstreams
+                    )
+
+                    persistent_node = PersistentOperatorNode(
+                        operator=node._operator,
+                        input_streams=rewired_inputs,
+                        pipeline_database=self._pipeline_database,
+                        pipeline_path_prefix=self._pipeline_path_prefix,
+                        label=node.label,
+                    )
+                    persistent_node_map[node_hash] = persistent_node
+
+                else:
+                    raise TypeError(
+                        f"Unknown node type in pipeline graph: {type(node)}"
+                    )
+
+                # Track for label assignment (only non-leaf nodes)
+                label = (
+                    persistent_node.label
+                    or persistent_node.computed_label()
+                    or "unnamed"
+                )
+                name_candidates.setdefault(label, []).append(persistent_node)
+
+        # Build node graph for run() ordering
+        self._node_graph = nx.DiGraph()
+        for upstream_hash, downstream_hash in self._graph_edges:
+            upstream_node = persistent_node_map.get(upstream_hash)
+            downstream_node = persistent_node_map.get(downstream_hash)
+            if upstream_node is not None and downstream_node is not None:
+                self._node_graph.add_edge(upstream_node, downstream_node)
+        # Add isolated nodes (sources with no downstream in edges)
+        for node in persistent_node_map.values():
+            if node not in self._node_graph:
+                self._node_graph.add_node(node)
+
+        # Assign labels, disambiguating collisions by content hash
+        self._nodes.clear()
         for label, nodes in name_candidates.items():
             if len(nodes) > 1:
-                # If there are multiple nodes with the same label, we need to resolve the collision
-                logger.info(f"Collision detected for label '{label}': {nodes}")
-                for i, node in enumerate(nodes, start=1):
-                    self._nodes[f"{label}_{i}"] = node
-                    node.label = f"{label}_{i}"
+                # Sort by content hash for deterministic disambiguation
+                sorted_nodes = sorted(nodes, key=lambda n: n.content_hash().to_string())
+                for i, node in enumerate(sorted_nodes, start=1):
+                    key = f"{label}_{i}"
+                    self._nodes[key] = node
+                    node._label = key
             else:
                 self._nodes[label] = nodes[0]
-                nodes[0].label = label
 
-        self.label_lut = {v: k for k, v in self._nodes.items()}
+        self._compiled = True
 
-        self.graph = node_graph
+    # ------------------------------------------------------------------
+    # Execution
+    # ------------------------------------------------------------------
 
-    def show_graph(self, **kwargs) -> None:
-        render_graph(self.graph, **kwargs)
-
-    def set_mode(self, mode: str) -> None:
-        if mode not in ("production", "development"):
-            raise ValueError("Mode must be either 'production' or 'development'")
-        for node in self._nodes.values():
-            if hasattr(node, "set_mode"):
-                node.set_mode(mode)
-
-    def run(
-        self,
-        execution_engine: orcapod.protocols.core_protocols.execution_engine.ExecutionEngine
-        | None = None,
-        execution_engine_opts: dict[str, Any] | None = None,
-        run_async: bool | None = None,
-    ) -> None:
-        """Execute the pipeline by running all nodes in the graph.
-
-        This method traverses through all nodes in the graph and executes them sequentially
-        using the specified execution engine. After execution, flushes the pipeline.
-
-        Args:
-            execution_engine (dp.ExecutionEngine | None): The execution engine to use for running
-                the nodes. If None, creates a new default ExecutionEngine instance.
-            run_async (bool | None): Whether to run nodes asynchronously. If None, defaults to
-                the preferred mode based on the execution engine.
-
-        Returns:
-            None
-
-        Note:
-            Current implementation uses a simple traversal through all nodes. Future versions
-            may implement more efficient graph traversal algorithms.
-        """
-        import networkx as nx
-
-        if run_async is True and (
-            execution_engine is None or not execution_engine.supports_async
-        ):
-            raise ValueError(
-                "Cannot run asynchronously with an execution engine that does not support async."
-            )
-
-        # if set to None, determine based on execution engine capabilities
-        if run_async is None:
-            run_async = execution_engine is not None and execution_engine.supports_async
-
-        logger.info(f"Running pipeline with run_async={run_async}")
-
-        for node in nx.topological_sort(self.graph):
-            if run_async:
-                synchronous_run(
-                    node.run_async,
-                    execution_engine=execution_engine,
-                    execution_engine_opts=execution_engine_opts,
-                )
-            else:
-                node.run(
-                    execution_engine=execution_engine,
-                    execution_engine_opts=execution_engine_opts,
-                )
-
+    def run(self) -> None:
+        """Execute all compiled nodes in topological order."""
+        if not self._compiled:
+            self.compile()
+        assert self._node_graph is not None
+        for node in nx.topological_sort(self._node_graph):
+            node.run()
         self.flush()
 
-    def wrap_invocation(
-        self,
-        invocation: Invocation,
-        new_input_streams: Collection[cp.StreamProtocol],
-    ) -> NodeProtocol:
-        if invocation in self.invocation_to_pod_lut:
-            pod = self.invocation_to_pod_lut[invocation]
-            node = PodNodeProtocol(
-                pod=pod,
-                input_streams=new_input_streams,
-                result_database=self.results_database,
-                record_path_prefix=self.results_store_path_prefix,
-                pipeline_database=self.pipeline_database,
-                pipeline_path_prefix=self.pipeline_store_path_prefix,
-                label=invocation.label,
-                kernel_type="function",
-            )
-        elif invocation in self.invocation_to_source_lut:
-            source = self.invocation_to_source_lut[invocation]
-            node = KernelNode(
-                kernel=source,
-                input_streams=new_input_streams,
-                pipeline_database=self.pipeline_database,
-                pipeline_path_prefix=self.pipeline_store_path_prefix,
-                label=invocation.label,
-                kernel_type="source",
-            )
-        else:
-            node = KernelNode(
-                kernel=invocation.kernel,
-                input_streams=new_input_streams,
-                pipeline_database=self.pipeline_database,
-                pipeline_path_prefix=self.pipeline_store_path_prefix,
-                label=invocation.label,
-                kernel_type="operator",
-            )
-        return node
+    def flush(self) -> None:
+        """Flush all databases."""
+        self._pipeline_database.flush()
+        if self._function_database is not None:
+            self._function_database.flush()
+
+    # ------------------------------------------------------------------
+    # Node access by label
+    # ------------------------------------------------------------------
 
     def __getattr__(self, item: str) -> Any:
-        """Allow direct access to pipeline attributes."""
-        if item in self._nodes:
-            return self._nodes[item]
+        # Use __dict__ to avoid recursion during __init__
+        nodes = self.__dict__.get("_nodes", {})
+        if item in nodes:
+            return nodes[item]
         raise AttributeError(f"Pipeline has no attribute '{item}'")
 
     def __dir__(self) -> list[str]:
-        """Return a list of attributes and methods of the pipeline."""
         return list(super().__dir__()) + list(self._nodes.keys())
 
-    def rename(self, old_name: str, new_name: str) -> None:
-        """
-        Rename a node in the pipeline.
-        This will update the label and the internal mapping.
-        """
-        if old_name not in self._nodes:
-            raise KeyError(f"NodeProtocol '{old_name}' does not exist in the pipeline.")
-        if new_name in self._nodes:
-            raise KeyError(f"NodeProtocol '{new_name}' already exists in the pipeline.")
-        node = self._nodes[old_name]
-        del self._nodes[old_name]
-        node.label = new_name
-        self._nodes[new_name] = node
-        logger.info(f"NodeProtocol '{old_name}' renamed to '{new_name}'")
+
+# ===========================================================================
+# Graph Rendering Utilities
+# ===========================================================================
 
 
 class GraphRenderer:
@@ -610,7 +561,6 @@ class GraphRenderer:
                 plt.figure(figsize=figsize, dpi=dpi)
                 plt.imshow(img)
                 plt.axis("off")
-                # plt.title("Example Graph")
                 plt.tight_layout()
                 plt.show()
                 os.unlink(tmp.name)
@@ -708,199 +658,3 @@ class StyleRuleSets:
                 "type_font_color": kernel_type_fcolor,
             },
         }
-
-
-# import networkx as nx
-# # import graphviz
-# import matplotlib.pyplot as plt
-# import matplotlib.image as mpimg
-# import tempfile
-# import os
-
-
-# class GraphRenderer:
-#     """Simple renderer for NetworkX graphs using Graphviz DOT format"""
-
-#     def __init__(self):
-#         """Initialize the renderer"""
-#         pass
-
-#     def _sanitize_node_id(self, node_id: Any) -> str:
-#         """Convert node_id to a valid DOT identifier using hash"""
-#         return f"node_{hash(node_id)}"
-
-#     def _get_node_label(
-#         self, node_id: Any, label_lut: dict[Any, str] | None = None
-#     ) -> str:
-#         """Get label for a node"""
-#         if label_lut and node_id in label_lut:
-#             return label_lut[node_id]
-#         return str(node_id)
-
-#     def generate_dot(
-#         self,
-#         graph: "nx.DiGraph",
-#         label_lut: dict[Any, str] | None = None,
-#         rankdir: str = "TB",
-#         node_shape: str = "box",
-#         node_style: str = "filled",
-#         node_color: str = "lightblue",
-#         edge_color: str = "black",
-#         dpi: int = 150,
-#     ) -> str:
-#         """
-#         Generate DOT syntax from NetworkX graph
-
-#         Args:
-#             graph: NetworkX DiGraph to render
-#             label_lut: Optional dictionary mapping node_id -> display_label
-#             rankdir: Graph direction ('TB', 'BT', 'LR', 'RL')
-#             node_shape: Shape for all nodes
-#             node_style: Style for all nodes
-#             node_color: Fill color for all nodes
-#             edge_color: Color for all edges
-#             dpi: Resolution for rendered image (default 150)
-
-#         Returns:
-#             DOT format string
-#         """
-#         try:
-#             import graphviz
-#         except ImportError as e:
-#             raise ImportError(
-#                 "Graphviz is not installed. Please install graphviz to render graph of the pipeline."
-#             ) from e
-
-#         dot = graphviz.Digraph(comment="NetworkX Graph")
-
-#         # Set graph attributes
-#         dot.attr(rankdir=rankdir, dpi=str(dpi))
-#         dot.attr("node", shape=node_shape, style=node_style, fillcolor=node_color)
-#         dot.attr("edge", color=edge_color)
-
-#         # Add nodes
-#         for node_id in graph.nodes():
-#             sanitized_id = self._sanitize_node_id(node_id)
-#             label = self._get_node_label(node_id, label_lut)
-#             dot.node(sanitized_id, label=label)
-
-#         # Add edges
-#         for source, target in graph.edges():
-#             source_id = self._sanitize_node_id(source)
-#             target_id = self._sanitize_node_id(target)
-#             dot.edge(source_id, target_id)
-
-#         return dot.source
-
-#     def render_graph(
-#         self,
-#         graph: nx.DiGraph,
-#         label_lut: dict[Any, str] | None = None,
-#         show: bool = True,
-#         output_path: str | None = None,
-#         raw_output: bool = False,
-#         rankdir: str = "TB",
-#         figsize: tuple = (6, 4),
-#         dpi: int = 150,
-#         **style_kwargs,
-#     ) -> str | None:
-#         """
-#         Render NetworkX graph using Graphviz
-
-#         Args:
-#             graph: NetworkX DiGraph to render
-#             label_lut: Optional dictionary mapping node_id -> display_label
-#             show: Display the graph using matplotlib
-#             output_path: Save graph to file (e.g., 'graph.png', 'graph.pdf')
-#             raw_output: Return DOT syntax instead of rendering
-#             rankdir: Graph direction ('TB', 'BT', 'LR', 'RL')
-#             figsize: Figure size for matplotlib display
-#             dpi: Resolution for rendered image (default 150)
-#             **style_kwargs: Additional styling (node_color, edge_color, node_shape, etc.)
-
-#         Returns:
-#             DOT syntax if raw_output=True, None otherwise
-#         """
-#         try:
-#             import graphviz
-#         except ImportError as e:
-#             raise ImportError(
-#                 "Graphviz is not installed. Please install graphviz to render graph of the pipeline."
-#             ) from e
-
-#         if raw_output:
-#             return self.generate_dot(graph, label_lut, rankdir, dpi=dpi, **style_kwargs)
-
-#         # Create Graphviz object
-#         dot = graphviz.Digraph(comment="NetworkX Graph")
-#         dot.attr(rankdir=rankdir, dpi=str(dpi))
-
-#         # Apply styling
-#         node_shape = style_kwargs.get("node_shape", "box")
-#         node_style = style_kwargs.get("node_style", "filled")
-#         node_color = style_kwargs.get("node_color", "lightblue")
-#         edge_color = style_kwargs.get("edge_color", "black")
-
-#         dot.attr("node", shape=node_shape, style=node_style, fillcolor=node_color)
-#         dot.attr("edge", color=edge_color)
-
-#         # Add nodes with labels
-#         for node_id in graph.nodes():
-#             sanitized_id = self._sanitize_node_id(node_id)
-#             label = self._get_node_label(node_id, label_lut)
-#             dot.node(sanitized_id, label=label)
-
-#         # Add edges
-#         for source, target in graph.edges():
-#             source_id = self._sanitize_node_id(source)
-#             target_id = self._sanitize_node_id(target)
-#             dot.edge(source_id, target_id)
-
-#         # Handle output
-#         if output_path:
-#             # Save to file
-#             name, ext = os.path.splitext(output_path)
-#             format_type = ext[1:] if ext else "png"
-#             dot.render(name, format=format_type, cleanup=True)
-#             print(f"Graph saved to {output_path}")
-
-#         if show:
-#             # Display with matplotlib
-#             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-#                 dot.render(tmp.name[:-4], format="png", cleanup=True)
-
-#                 import matplotlib.pyplot as plt
-#                 import matplotlib.image as mpimg
-
-#                 # Display with matplotlib
-#                 img = mpimg.imread(tmp.name)
-#                 plt.figure(figsize=figsize)
-#                 plt.imshow(img)
-#                 plt.axis("off")
-#                 plt.title("Graph Visualization")
-#                 plt.tight_layout()
-#                 plt.show()
-
-#                 # Clean up
-#                 os.unlink(tmp.name)
-
-#         return None
-
-
-# # Convenience function for quick rendering
-# def render_graph(
-#     graph: nx.DiGraph, label_lut: dict[Any, str] | None = None, **kwargs
-# ) -> str | None:
-#     """
-#     Convenience function to quickly render a NetworkX graph
-
-#     Args:
-#         graph: NetworkX DiGraph to render
-#         label_lut: Optional dictionary mapping node_id -> display_label
-#         **kwargs: All other arguments passed to GraphRenderer.render_graph()
-
-#     Returns:
-#         DOT syntax if raw_output=True, None otherwise
-#     """
-#     renderer = GraphRenderer()
-#     return renderer.render_graph(graph, label_lut, **kwargs)

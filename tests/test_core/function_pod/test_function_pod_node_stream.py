@@ -307,6 +307,25 @@ class TestIterPacketsMissingEntriesOnly:
         table = _make_node(double_pf, n=n, db=db).as_table()
         assert sorted(table.column("result").to_pylist()) == [0, 2, 4, 6]
 
+    def test_partial_fill_as_table_after_run_on_same_node(self, double_pf):
+        """run() then as_table() on the same node with partial DB records.
+
+        Regression test: Phase 2 must assign contiguous indices to new
+        entries in _cached_output_packets so that the replay path
+        (range(len(...))) can iterate without gaps.
+        """
+        n = 4
+        db = InMemoryArrowDatabase()
+        # Pre-fill DB with 2 of 4 inputs
+        _fill_node(_make_node(double_pf, n=2, db=db))
+        # Create node with 4 inputs (2 cached, 2 new)
+        node = _make_node(double_pf, n=n, db=db)
+        # run() exhausts iter_packets (Phase 1 + Phase 2)
+        node.run()
+        # as_table() re-enters iter_packets via the else/replay branch
+        table = node.as_table()
+        assert sorted(table.column("result").to_pylist()) == [0, 2, 4, 6]
+
     def test_already_full_db_zero_additional_calls(self, double_pf):
         call_count = 0
 

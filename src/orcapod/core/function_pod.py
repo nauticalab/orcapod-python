@@ -797,6 +797,7 @@ class PersistentFunctionNode(FunctionNode):
         input_stream: StreamProtocol,
         pipeline_database: ArrowDatabaseProtocol,
         result_database: ArrowDatabaseProtocol | None = None,
+        result_path_prefix: tuple[str, ...] | None = None,
         pipeline_path_prefix: tuple[str, ...] = (),
         tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
@@ -812,17 +813,22 @@ class PersistentFunctionNode(FunctionNode):
             config=config,
         )
 
-        result_path_prefix: tuple[str, ...] = ()
+        computed_result_path_prefix: tuple[str, ...] = ()
         if result_database is None:
             result_database = pipeline_database
-            # set result path to be within the pipeline path with "_result" appended
-            result_path_prefix = pipeline_path_prefix + ("_result",)
+            computed_result_path_prefix = (
+                result_path_prefix
+                if result_path_prefix is not None
+                else pipeline_path_prefix + ("_result",)
+            )
+        elif result_path_prefix is not None:
+            computed_result_path_prefix = result_path_prefix
 
         # replace the packet function with a cached version
         self._packet_function = CachedPacketFunction(
             self._packet_function,
             result_database=result_database,
-            record_path_prefix=result_path_prefix,
+            record_path_prefix=computed_result_path_prefix,
         )
 
         self._pipeline_database = pipeline_database
@@ -1036,13 +1042,14 @@ class PersistentFunctionNode(FunctionNode):
                     yield tag, packet
 
             # --- Phase 2: process only missing input packets ---
-            offset = len(self._cached_output_packets)
-            for j, (tag, packet) in enumerate(self._cached_input_iterator):
+            next_idx = len(self._cached_output_packets)
+            for tag, packet in self._cached_input_iterator:
                 input_hash = packet.content_hash().to_string()
                 if input_hash in computed_hashes:
                     continue
                 tag, output_packet = self.process_packet(tag, packet)
-                self._cached_output_packets[offset + j] = (tag, output_packet)
+                self._cached_output_packets[next_idx] = (tag, output_packet)
+                next_idx += 1
                 if output_packet is not None:
                     yield tag, output_packet
 
