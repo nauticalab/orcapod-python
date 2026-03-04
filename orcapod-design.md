@@ -468,15 +468,57 @@ async def async_execute(
 
 Nodes consume `(Tag, Packet)` pairs from input channels and produce them to an output channel. This enables push-based, streaming execution where data flows through the pipeline as soon as it's available, with backpressure propagated via bounded channel buffers.
 
-**Operator async strategies:**
+**FunctionPod async strategy:** Streaming mode — each input `(tag, packet)` is processed independently with semaphore-controlled concurrency. Uses `asyncio.TaskGroup` for structured concurrency.
+
+#### Operator Async Strategies
+
+Each operator overrides `async_execute` with the most efficient streaming pattern its semantics permit. The default fallback (inherited from `StaticOutputPod`) is barrier mode: collect all inputs via `asyncio.gather`, materialize to `ArrowTableStream`, call `static_process`, and emit results. Operators override this default when a more incremental strategy is possible.
 
 | Strategy | Description | Operators |
 |---|---|---|
-| **Barrier mode** (default) | Collect all inputs, run `static_process`, emit results | Batch (inherently barrier) |
-| **Streaming overrides** | Process rows individually, zero buffering | PolarsFilter, MapTags, MapPackets, Select/Drop columns |
-| **Incremental overrides** | Stateful, emit partial results as inputs arrive | Join (symmetric hash join), MergeJoin, SemiJoin (buffer right, stream left) |
+| **Per-row streaming** | Transform each `(Tag, Packet)` independently as it arrives; zero buffering beyond the current row | SelectTagColumns, SelectPacketColumns, DropTagColumns, DropPacketColumns, MapTags, MapPackets |
+| **Accumulate-and-emit** | Buffer rows up to `batch_size`, emit full batches immediately, flush partial at end | Batch (`batch_size > 0`) |
+| **Build-probe** | Collect one side fully (build), then stream the other through a hash lookup (probe) | SemiJoin |
+| **Symmetric hash join** | Read both sides concurrently, buffer + index both, emit matches as they're found | Join (2 inputs) |
+| **Barrier mode** | Collect all inputs, run `static_process`, emit results | PolarsFilter, MergeJoin, Batch (`batch_size = 0`), Join (N > 2 inputs) |
 
-**FunctionPod async strategy:** Streaming mode — each input `(tag, packet)` is processed independently with semaphore-controlled concurrency. Uses `asyncio.TaskGroup` for structured concurrency.
+#### Per-Row Streaming (Unary Column/Map Operators)
+
+For operators that transform each row independently (column selection, column dropping, column renaming), the async path iterates `async for tag, packet in inputs[0]` and applies the transformation per row. Column metadata (which columns to drop, the rename map, etc.) is computed lazily on the first row and cached for subsequent rows. This avoids materializing the entire input into an Arrow table, enabling true pipeline-level streaming where upstream producers and downstream consumers run concurrently.
+
+#### Accumulate-and-Emit (Batch)
+
+When `batch_size > 0`, Batch accumulates rows into a buffer and emits a batched result stream each time the buffer reaches `batch_size`. Any partial batch at the end is emitted unless `drop_partial_batch` is set. When `batch_size = 0` (meaning "batch everything into one group"), the operator must see all input before producing output, so it falls back to barrier mode.
+
+#### Build-Probe (SemiJoin)
+
+SemiJoin is non-commutative: the left side is filtered by the right side. The async implementation collects the right (build) side fully, constructs a hash set of its key tuples, then streams the left (probe) side through the lookup — emitting each left row whose keys appear in the right set. This is the same pattern as Kafka's KStream-KTable join: the table side is materialized, the stream side drives output.
+
+#### Symmetric Hash Join
+
+The 2-input Join uses a symmetric hash join — the same algorithm used by Apache Kafka for KStream-KStream joins and by Apache Flink for regular streaming joins. Both input channels are drained concurrently into a shared `asyncio.Queue`. For each arriving row:
+
+1. Buffer the row on its side and index it by the shared key columns.
+2. Probe the opposite side's index for matching keys.
+3. Emit all matches immediately.
+
+When the first rows from both sides have arrived, the shared key columns are determined (intersection of tag column names). Any rows that arrived before shared keys were known are re-indexed and cross-matched in a one-time reconciliation step.
+
+**Comparison with industry stream processors:**
+
+| Aspect | Kafka Streams (KStream-KStream) | Apache Flink (Regular Join) | OrcaPod |
+|---|---|---|---|
+| Algorithm | Symmetric windowed hash join | Symmetric hash join with state TTL | Symmetric hash join |
+| Windowing | Required (sliding window bounds state) | Optional (TTL evicts old state) | Not needed (finite streams) |
+| State backend | RocksDB state stores for fault tolerance | RocksDB / heap state with checkpointing | In-memory buffers |
+| State cleanup | Window expiry evicts old records | TTL or watermark eviction | Natural termination — inputs are finite |
+| N-way joins | Chained pairwise joins | Chained pairwise joins | 2-way: symmetric hash; N > 2: barrier + Arrow join |
+
+The symmetric hash join is optimal for our use case: it emits results with minimum latency (as soon as a match exists on both sides) and requires no windowing complexity since OrcaPod streams are finite. For N > 2 inputs, the operator falls back to barrier mode with Arrow-level join execution, which is efficient for bounded data and avoids the complexity of chaining pairwise streaming joins.
+
+**Why not build-probe for Join?** Since Join is commutative and input sizes are unknown upfront, there is no principled way to choose which side to build vs. probe. Symmetric hash join avoids this asymmetry. SemiJoin, being non-commutative, has a natural build (right) and probe (left) side.
+
+**Why barrier for PolarsFilter and MergeJoin?** PolarsFilter requires a Polars DataFrame context for predicate evaluation, which needs full materialization. MergeJoin's column-merging semantics (colliding columns become sorted `list[T]`) require seeing all rows to produce correctly typed output columns.
 
 ### Sync / Async Equivalence
 
