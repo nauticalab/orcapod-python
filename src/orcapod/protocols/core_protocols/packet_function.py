@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 from typing import Any, Protocol, runtime_checkable
 
 from orcapod.protocols.core_protocols.datagrams import PacketProtocol
+from orcapod.protocols.core_protocols.executor import PacketFunctionExecutorProtocol
 from orcapod.protocols.core_protocols.labelable import LabelableProtocol
 from orcapod.protocols.hashing_protocols import (
     ContentIdentifiableProtocol,
@@ -72,7 +75,7 @@ class PacketFunctionProtocol(
 
         Returns:
             Schema: Output packet schema as a dictionary mapping
-        #"""
+        """
         ...
 
     # ==================== Content-Addressable Identity ====================
@@ -84,64 +87,75 @@ class PacketFunctionProtocol(
         """Raw data defining execution context - system computes hash"""
         ...
 
-    async def async_call(
-        self,
-        packet: PacketProtocol,
-    ) -> PacketProtocol | None:
-        """
-        Asynchronously process a single packet
+    # ==================== Executor ====================
 
-        This is the core method that defines the packet function's computational behavior.
-        It processes one packet at a time, enabling:
-        - Fine-grained caching at the packet level
-        - Parallelization opportunities
-        - Just-in-time evaluation
-        - Filtering operations (by returning None)
-
-        The method signature supports:
-        - PacketProtocol transformation (modify content)
-        - Filtering (return None to exclude packet)
-        - Pass-through (return inputs unchanged)
-
-        Args:
-            packet: The data payload to process
-
-        Returns:
-            PacketProtocol | None: Processed packet, or None to filter it out
-
-        Raises:
-            TypeError: If packet doesn't match input_packet_types
-            ValueError: If packet data is invalid for processing
-        """
+    @property
+    def executor(self) -> PacketFunctionExecutorProtocol | None:
+        """The executor used to run this function, or ``None`` for direct execution."""
         ...
+
+    @executor.setter
+    def executor(self, executor: PacketFunctionExecutorProtocol | None) -> None:
+        """Set or clear the executor."""
+        ...
+
+    # ==================== Execution ====================
 
     def call(
         self,
         packet: PacketProtocol,
     ) -> PacketProtocol | None:
         """
-        Process a single packet
+        Process a single packet, routing through the executor if one is set.
 
-        This is the core method that defines the packet function's computational behavior.
-        It processes one packet at a time, enabling:
-        - Fine-grained caching at the packet level
-        - Parallelization opportunities
-        - Just-in-time evaluation
-        - Filtering operations (by returning None)
-
-        The method signature supports:
-        - PacketProtocol transformation (modify content)
-        - Filtering (return None to exclude packet)
-        - Pass-through (return inputs unchanged)
+        Callers should use this method.  Subclasses should override
+        :meth:`direct_call` to provide the native computation.
 
         Args:
             packet: The data payload to process
 
         Returns:
             PacketProtocol | None: Processed packet, or None to filter it out
-
-        Raises:
-            TypeError: If packet doesn't match input_packet_types
-            ValueError: If packet data is invalid for processing
         """
+        ...
+
+    async def async_call(
+        self,
+        packet: PacketProtocol,
+    ) -> PacketProtocol | None:
+        """
+        Asynchronously process a single packet, routing through the executor
+        if one is set.
+
+        Args:
+            packet: The data payload to process
+
+        Returns:
+            PacketProtocol | None: Processed packet, or None to filter it out
+        """
+        ...
+
+    def direct_call(
+        self,
+        packet: PacketProtocol,
+    ) -> PacketProtocol | None:
+        """
+        Execute the function's native computation on *packet*.
+
+        This is the method executors invoke to bypass executor routing and
+        run the computation directly.
+
+        Args:
+            packet: The data payload to process
+
+        Returns:
+            PacketProtocol | None: Processed packet, or None to filter it out
+        """
+        ...
+
+    async def direct_async_call(
+        self,
+        packet: PacketProtocol,
+    ) -> PacketProtocol | None:
+        """Asynchronous counterpart of :meth:`direct_call`."""
         ...

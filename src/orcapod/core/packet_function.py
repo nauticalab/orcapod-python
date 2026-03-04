@@ -20,6 +20,7 @@ from orcapod.hashing.hash_utils import (
     get_function_signature,
 )
 from orcapod.protocols.core_protocols import PacketFunctionProtocol, PacketProtocol
+from orcapod.protocols.core_protocols.executor import PacketFunctionExecutorProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.system_constants import constants
 from orcapod.types import DataValue, Schema, SchemaLike
@@ -94,10 +95,12 @@ class PacketFunctionBase(TraceableBase):
         label: str | None = None,
         data_context: str | DataContext | None = None,
         config: Config | None = None,
+        executor: PacketFunctionExecutorProtocol | None = None,
     ):
         super().__init__(label=label, data_context=data_context, config=config)
         self._active = True
         self._version = version
+        self._executor: PacketFunctionExecutorProtocol | None = None
 
         # Parse version string to extract major and minor versions
         # 0.5.2 -> 0 and 5.2, 1.3rc -> 1 and 3rc
@@ -111,6 +114,11 @@ class PacketFunctionBase(TraceableBase):
             )
 
         self._output_packet_schema_hash = None
+
+        # Set executor after packet_function_type_id is available (subclass __init__ done)
+        # We defer validation for now; it is checked in the property setter.
+        if executor is not None:
+            self._executor = executor
 
     def computed_label(self) -> str | None:
         """
@@ -202,18 +210,65 @@ class PacketFunctionBase(TraceableBase):
         """Raw data defining execution context"""
         ...
 
-    @abstractmethod
+    # ==================== Executor ====================
+
+    @property
+    def executor(self) -> PacketFunctionExecutorProtocol | None:
+        """The executor used to run this packet function, or ``None`` for direct execution."""
+        return self._executor
+
+    @executor.setter
+    def executor(self, executor: PacketFunctionExecutorProtocol | None) -> None:
+        """
+        Set or clear the executor for this packet function.
+
+        Raises:
+            TypeError: If *executor* does not support this function's
+                ``packet_function_type_id``.
+        """
+        if executor is not None and not executor.supports(self.packet_function_type_id):
+            raise TypeError(
+                f"Executor {executor.executor_type_id!r} does not support "
+                f"packet function type {self.packet_function_type_id!r}. "
+                f"Supported types: {executor.supported_function_type_ids()}"
+            )
+        self._executor = executor
+
+    # ==================== Execution ====================
+
     def call(self, packet: PacketProtocol) -> PacketProtocol | None:
         """
-        Process the input packet and return the output packet.
+        Process a single packet, routing through the executor if one is set.
+
+        Subclasses should override :meth:`direct_call` instead of this method.
+        """
+        if self._executor is not None:
+            return self._executor.execute(self, packet)
+        return self.direct_call(packet)
+
+    async def async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
+        """
+        Asynchronously process a single packet, routing through the executor if set.
+
+        Subclasses should override :meth:`direct_async_call` instead of this method.
+        """
+        if self._executor is not None:
+            return await self._executor.async_execute(self, packet)
+        return await self.direct_async_call(packet)
+
+    @abstractmethod
+    def direct_call(self, packet: PacketProtocol) -> PacketProtocol | None:
+        """
+        Execute the function's native computation on *packet*.
+
+        This is the method executors invoke.  It bypasses executor routing
+        and runs the computation directly.  Subclasses must implement this.
         """
         ...
 
     @abstractmethod
-    async def async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
-        """
-        Asynchronously process the input packet and return the output packet.
-        """
+    async def direct_async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
+        """Asynchronous counterpart of :meth:`direct_call`."""
         ...
 
 
@@ -353,7 +408,7 @@ class PythonPacketFunction(PacketFunctionBase):
         """
         self._active = active
 
-    def call(self, packet: PacketProtocol) -> PacketProtocol | None:
+    def direct_call(self, packet: PacketProtocol) -> PacketProtocol | None:
         if not self._active:
             return None
         values = self._function(**packet.as_dict())
@@ -375,7 +430,7 @@ class PythonPacketFunction(PacketFunctionBase):
             data_context=self.data_context,
         )
 
-    async def async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
+    async def direct_async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
         raise NotImplementedError("Async call not implemented for synchronous function")
 
 
@@ -421,10 +476,31 @@ class PacketFunctionWrapper(PacketFunctionBase):
     def get_execution_data(self) -> dict[str, Any]:
         return self._packet_function.get_execution_data()
 
+    # -- Executor delegation: setting/getting the executor on a wrapper
+    #    transparently targets the wrapped (leaf) packet function.
+
+    @property
+    def executor(self) -> PacketFunctionExecutorProtocol | None:
+        return self._packet_function.executor
+
+    @executor.setter
+    def executor(self, executor: PacketFunctionExecutorProtocol | None) -> None:
+        self._packet_function.executor = executor
+
+    # -- Execution: wrappers delegate to the wrapped function's call(),
+    #    which handles executor routing.  Wrappers do NOT route through
+    #    their own executor (they don't own one).
+
     def call(self, packet: PacketProtocol) -> PacketProtocol | None:
         return self._packet_function.call(packet)
 
     async def async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
+        return await self._packet_function.async_call(packet)
+
+    def direct_call(self, packet: PacketProtocol) -> PacketProtocol | None:
+        return self._packet_function.call(packet)
+
+    async def direct_async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
         return await self._packet_function.async_call(packet)
 
 
