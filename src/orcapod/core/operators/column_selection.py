@@ -94,6 +94,14 @@ class SelectTagColumns(UnaryOperator):
             async for tag, packet in inputs[0]:
                 if tags_to_drop is None:
                     tag_keys = tag.keys()
+                    if self.strict:
+                        missing = set(self.columns) - set(tag_keys)
+                        if missing:
+                            raise InputValidationError(
+                                f"Missing tag columns: {missing}. Make sure all "
+                                f"specified columns to select are present or use "
+                                f"strict=False to ignore missing columns"
+                            )
                     tags_to_drop = [c for c in tag_keys if c not in self.columns]
                 if not tags_to_drop:
                     await output.send((tag, packet))
@@ -194,6 +202,14 @@ class SelectPacketColumns(UnaryOperator):
             async for tag, packet in inputs[0]:
                 if pkts_to_drop is None:
                     pkt_keys = packet.keys()
+                    if self.strict:
+                        missing = set(self.columns) - set(pkt_keys)
+                        if missing:
+                            raise InputValidationError(
+                                f"Missing packet columns: {missing}. Make sure all "
+                                f"specified columns to select are present or use "
+                                f"strict=False to ignore missing columns"
+                            )
                     pkts_to_drop = [c for c in pkt_keys if c not in self.columns]
                 if not pkts_to_drop:
                     await output.send((tag, packet))
@@ -288,9 +304,18 @@ class DropTagColumns(UnaryOperator):
                 if effective_drops is None:
                     tag_keys = tag.keys()
                     if self.strict:
-                        effective_drops = list(self.columns)
-                    else:
-                        effective_drops = [c for c in self.columns if c in tag_keys]
+                        missing = set(self.columns) - set(tag_keys)
+                        if missing:
+                            raise InputValidationError(
+                                f"Missing tag columns: {missing}. Make sure all "
+                                f"specified columns to drop are present or use "
+                                f"strict=False to ignore missing columns"
+                            )
+                    effective_drops = (
+                        list(self.columns)
+                        if self.strict
+                        else [c for c in self.columns if c in tag_keys]
+                    )
                 if not effective_drops:
                     await output.send((tag, packet))
                 else:
@@ -387,9 +412,18 @@ class DropPacketColumns(UnaryOperator):
                 if effective_drops is None:
                     pkt_keys = packet.keys()
                     if self.strict:
-                        effective_drops = list(self.columns)
-                    else:
-                        effective_drops = [c for c in self.columns if c in pkt_keys]
+                        missing = set(self.columns) - set(pkt_keys)
+                        if missing:
+                            raise InputValidationError(
+                                f"Missing packet columns: {missing}. Make sure all "
+                                f"specified columns to drop are present or use "
+                                f"strict=False to ignore missing columns"
+                            )
+                    effective_drops = (
+                        list(self.columns)
+                        if self.strict
+                        else [c for c in self.columns if c in pkt_keys]
+                    )
                 if not effective_drops:
                     await output.send((tag, packet))
                 else:

@@ -142,25 +142,25 @@ class TestAsyncExecuteChannelCloseOnError:
         assert isinstance(results, list)
 
     @pytest.mark.asyncio
-    async def test_static_output_pod_closes_channel_on_error(self):
-        """If _materialize_to_stream gets empty rows, it raises ValueError.
-        The output channel must still be closed."""
+    async def test_static_output_pod_closes_channel_on_empty_input(self):
+        """Empty input should be handled gracefully with channel still closed.
+
+        Streaming async_execute processes rows individually, so empty input
+        simply means zero iterations and a clean close — no error raised.
+        """
         op = SelectPacketColumns(columns=["x"])
 
-        # Feed an empty channel (no rows) — _materialize_to_stream will raise.
         input_ch = Channel(buffer_size=4)
         output_ch = Channel(buffer_size=4)
 
         await input_ch.writer.close()  # empty input
 
-        # The default StaticOutputPod.async_execute tries to materialize
-        # an empty list, raising ValueError. The output should still close.
-        with pytest.raises(ValueError, match="empty"):
-            await op.async_execute([input_ch.reader], output_ch.writer)
+        # Streaming async_execute handles empty input gracefully.
+        await op.async_execute([input_ch.reader], output_ch.writer)
 
-        # Channel should be closed.
+        # Channel should be closed and empty.
         results = await output_ch.reader.collect()
-        assert isinstance(results, list)
+        assert results == []
 
 
 # ===========================================================================
