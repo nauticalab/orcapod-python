@@ -279,17 +279,78 @@ Three categories of improvement are planned:
 
 ---
 
-## `src/orcapod/core/` — Pod Groups (composite pod patterns)
+## `src/orcapod/core/` — AddResult pod and Pod Groups
 
-### G1 — Pod Group abstraction for common multi-pod patterns
+### G1 — `AddResult`: a first-class pod type for packet enrichment
 **Status:** open
 **Severity:** medium
 
-Several common pipeline patterns require wiring multiple pods and operators together in a
-fixed topology. Users currently have to build these manually, which is verbose, error-prone,
-and obscures intent. A **PodGroup** abstraction would encapsulate a reusable sub-graph of
-pods/operators behind a single pod-like interface (`process` for sync, `async_execute` for
-async).
+The most common pipeline pattern is *enrichment*: run a function on a packet and append the
+computed columns to the original packet rather than replacing it. This is logically equivalent
+to `FunctionPod → Join(original, computed)`, but implementing it as a first-class pod type is
+both simpler and more efficient.
+
+#### Why a dedicated pod type, not a composite
+
+A naïve decomposition into `FunctionPod + Join` works but has unnecessary overhead:
+
+1. **Materialization waste** — FunctionPod produces an intermediate stream that is only created
+   to be immediately joined back. AddResult can compute new columns and merge them into the
+   original packet in a single pass, with no intermediate stream.
+2. **Redundant tag matching** — Join must re-match tags that trivially correspond (they came
+   from the same input row). AddResult already holds the (tag, packet) pair and can skip the
+   matching entirely.
+3. **Simpler async path** — streams row-by-row like FunctionPod: read (tag, packet), call
+   the packet function, merge original packet columns + new columns, emit. No broadcast,
+   passthrough channel, or rejoin wiring needed.
+
+#### Relationship to existing pod categories
+
+AddResult occupies a middle ground between operators and function pods:
+
+| | Operator | FunctionPod | **AddResult** |
+|---|---|---|---|
+| Inspects packet content | Never | Yes | Yes |
+| Preserves original packet columns | Yes (structurally) | No (replaces) | **Yes** |
+| Synthesizes new values | No | Yes | **Yes** |
+| Tags | Inspects/uses | Never touches | **Never touches** |
+
+It is a *third kind of pod* — not an operator (it synthesizes new values) and not a function
+pod (it preserves existing packet columns). It wraps a `PacketFunction` like `FunctionPod`
+does, but its `process` / `async_execute` merges the function output back into the original
+packet.
+
+#### API sketch
+
+```python
+# Sync
+grade_pf = PythonPacketFunction(compute_letter_grade, output_keys="letter_grade")
+enriched = AddResult(grade_pf).process(stream)
+# enriched has all original columns + "letter_grade"
+
+# Async (streaming, row-by-row)
+await AddResult(grade_pf).async_execute([input_ch], output_ch)
+```
+
+#### Implementation notes
+
+- `output_schema()` returns `(input_tag_schema, input_packet_schema | function_output_schema)`
+  — the union of original packet columns and new computed columns.
+- Must raise `InputValidationError` if function output keys collide with existing packet
+  column names (same constraint as Join on overlapping packet columns).
+- `pipeline_hash` commits to the wrapped `PacketFunction`'s identity plus the upstream's
+  pipeline hash.
+- `async_execute` can use the same semaphore-based concurrency control as `FunctionPod`.
+
+---
+
+### G2 — Pod Group abstraction for other composite pod patterns
+**Status:** open
+**Severity:** low
+
+Beyond AddResult (which warrants its own pod type — see G1), other composite patterns may
+benefit from a general **PodGroup** abstraction that encapsulates a reusable sub-graph behind
+a single pod-like interface.
 
 A PodGroup:
 - Accepts one or more input streams and produces one output stream (same interface as a pod)
@@ -297,37 +358,9 @@ A PodGroup:
 - Hides the internal wiring from the user
 - Participates in pipeline hashing as a single composite element
 
-#### Planned patterns
-
-1. **AddResult** (enrich/extend pattern) — the most common case. Runs a `FunctionPod` on
-   the input and joins the result back with the original packet, so the output contains
-   *all* original columns plus the new computed columns.
-
-   Internal wiring:
-   ```
-   input ──► broadcast ──┬──► FunctionPod ──┐
-                          │                  ├──► Join ──► enriched output
-                          └── passthrough ───┘
-   ```
-
-   Without PodGroup (current manual approach):
-   ```python
-   grade_pf = PythonPacketFunction(compute_letter_grade, output_keys="letter_grade")
-   grade_pod = FunctionPod(grade_pf)
-   computed = grade_pod.process(stream)
-   enriched = Join()(stream, computed)  # rejoin to get original + new columns
-   ```
-
-   With PodGroup:
-   ```python
-   grade_pf = PythonPacketFunction(compute_letter_grade, output_keys="letter_grade")
-   enriched = AddResult(grade_pf).process(stream)
-   # enriched has all original columns + "letter_grade"
-   ```
-
-2. **Other potential patterns** (to be designed as needs arise):
-   - **ConditionalPod** — route packets to different pods based on a predicate, merge results
-   - **FanOutFanIn** — broadcast to N pods, collect and merge/concat results
-   - **FallbackPod** — try primary pod, fall back to secondary on error/None result
+Potential patterns (to be designed as needs arise):
+- **ConditionalPod** — route packets to different pods based on a predicate, merge results
+- **FanOutFanIn** — broadcast to N pods, collect and merge/concat results
+- **FallbackPod** — try primary pod, fall back to secondary on error/None result
 
 ---
