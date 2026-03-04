@@ -115,10 +115,12 @@ class PacketFunctionBase(TraceableBase):
 
         self._output_packet_schema_hash = None
 
-        # Set executor after packet_function_type_id is available (subclass __init__ done)
-        # We defer validation for now; it is checked in the property setter.
+        # Validate and set via the property setter.  This works because
+        # concrete subclasses define packet_function_type_id as a simple
+        # constant property that does not depend on instance state set
+        # *after* super().__init__().
         if executor is not None:
-            self._executor = executor
+            self.executor = executor
 
     def computed_label(self) -> str | None:
         """

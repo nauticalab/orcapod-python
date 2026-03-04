@@ -487,6 +487,7 @@ def function_pod(
     version: str = "v0.0",
     label: str | None = None,
     result_database: ArrowDatabaseProtocol | None = None,
+    executor: PacketFunctionExecutorProtocol | None = None,
     **kwargs,
 ) -> Callable[..., CallableWithPod]:
     """
@@ -495,6 +496,10 @@ def function_pod(
     Args:
         output_keys: Keys for the function output(s)
         function_name: Name of the function pod; if None, defaults to the function name
+        result_database: Optional database for caching results
+        executor: Optional executor for running the packet function.
+            Compatibility with the packet function type is validated
+            at decoration time (i.e. when the module is loaded).
         **kwargs: Additional keyword arguments to pass to the FunctionPodProtocol constructor. Please refer to the FunctionPodProtocol documentation for details.
 
     Returns:
@@ -514,6 +519,7 @@ def function_pod(
             function_name=function_name or func.__name__,
             version=version,
             label=label,
+            executor=executor,
             **kwargs,
         )
 

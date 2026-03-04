@@ -459,3 +459,74 @@ class TestFunctionNodeExecutorAccess:
         assert len(results) == 2
         assert results[0][1].as_dict()["result"] == 3
         assert len(spy.calls) == 2
+
+
+# ---------------------------------------------------------------------------
+# 8. function_pod decorator with executor
+# ---------------------------------------------------------------------------
+
+
+class TestFunctionPodDecoratorExecutor:
+    def test_decorator_with_executor(self):
+        from orcapod.core.function_pod import function_pod
+
+        spy = SpyExecutor()
+
+        @function_pod(output_keys="result", executor=spy)
+        def my_add(x: int, y: int) -> int:
+            return x + y
+
+        assert my_add.pod.executor is spy
+
+    def test_decorator_executor_routes_through_executor(self):
+        from orcapod.core.function_pod import function_pod
+
+        spy = SpyExecutor()
+
+        @function_pod(output_keys="result", executor=spy)
+        def my_add(x: int, y: int) -> int:
+            return x + y
+
+        stream = _make_add_stream()
+        output = my_add.pod.process(stream)
+        results = list(output.iter_packets())
+        assert len(results) == 2
+        assert results[0][1].as_dict()["result"] == 3
+        assert len(spy.calls) == 2
+
+    def test_decorator_incompatible_executor_raises(self):
+        from orcapod.core.function_pod import function_pod
+
+        executor = NonPythonExecutor()
+
+        with pytest.raises(TypeError, match="does not support"):
+
+            @function_pod(output_keys="result", executor=executor)
+            def my_add(x: int, y: int) -> int:
+                return x + y
+
+    def test_decorator_without_executor_defaults_to_none(self):
+        from orcapod.core.function_pod import function_pod
+
+        @function_pod(output_keys="result")
+        def my_add(x: int, y: int) -> int:
+            return x + y
+
+        assert my_add.pod.executor is None
+
+
+# ---------------------------------------------------------------------------
+# 9. Constructor validation
+# ---------------------------------------------------------------------------
+
+
+class TestConstructorValidation:
+    def test_constructor_validates_compatible_executor(self):
+        executor = PythonOnlyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=executor)
+        assert pf.executor is executor
+
+    def test_constructor_rejects_incompatible_executor(self):
+        executor = NonPythonExecutor()
+        with pytest.raises(TypeError, match="does not support"):
+            PythonPacketFunction(add, output_keys="result", executor=executor)
