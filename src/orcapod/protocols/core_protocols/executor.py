@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from orcapod.protocols.core_protocols.datagrams import PacketProtocol
+
+if TYPE_CHECKING:
+    from orcapod.protocols.core_protocols.packet_function import PacketFunctionProtocol
 
 
 @runtime_checkable
@@ -32,7 +35,7 @@ class PacketFunctionExecutorProtocol(Protocol):
 
     def execute(
         self,
-        packet_function: Any,
+        packet_function: PacketFunctionProtocol,
         packet: PacketProtocol,
     ) -> PacketProtocol | None:
         """Synchronously execute *packet_function* on *packet*.
@@ -44,7 +47,7 @@ class PacketFunctionExecutorProtocol(Protocol):
 
     async def async_execute(
         self,
-        packet_function: Any,
+        packet_function: PacketFunctionProtocol,
         packet: PacketProtocol,
     ) -> PacketProtocol | None:
         """Asynchronous counterpart of ``execute``."""
