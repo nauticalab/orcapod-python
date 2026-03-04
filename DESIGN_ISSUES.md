@@ -278,3 +278,56 @@ Three categories of improvement are planned:
    - `Batch` — inherently requires all rows before grouping; barrier mode is correct
 
 ---
+
+## `src/orcapod/core/` — Pod Groups (composite pod patterns)
+
+### G1 — Pod Group abstraction for common multi-pod patterns
+**Status:** open
+**Severity:** medium
+
+Several common pipeline patterns require wiring multiple pods and operators together in a
+fixed topology. Users currently have to build these manually, which is verbose, error-prone,
+and obscures intent. A **PodGroup** abstraction would encapsulate a reusable sub-graph of
+pods/operators behind a single pod-like interface (`process` for sync, `async_execute` for
+async).
+
+A PodGroup:
+- Accepts one or more input streams and produces one output stream (same interface as a pod)
+- Internally contains a fixed sub-graph of pods, operators, and channels
+- Hides the internal wiring from the user
+- Participates in pipeline hashing as a single composite element
+
+#### Planned patterns
+
+1. **AddResult** (enrich/extend pattern) — the most common case. Runs a `FunctionPod` on
+   the input and joins the result back with the original packet, so the output contains
+   *all* original columns plus the new computed columns.
+
+   Internal wiring:
+   ```
+   input ──► broadcast ──┬──► FunctionPod ──┐
+                          │                  ├──► Join ──► enriched output
+                          └── passthrough ───┘
+   ```
+
+   Without PodGroup (current manual approach):
+   ```python
+   grade_pf = PythonPacketFunction(compute_letter_grade, output_keys="letter_grade")
+   grade_pod = FunctionPod(grade_pf)
+   computed = grade_pod.process(stream)
+   enriched = Join()(stream, computed)  # rejoin to get original + new columns
+   ```
+
+   With PodGroup:
+   ```python
+   grade_pf = PythonPacketFunction(compute_letter_grade, output_keys="letter_grade")
+   enriched = AddResult(grade_pf).process(stream)
+   # enriched has all original columns + "letter_grade"
+   ```
+
+2. **Other potential patterns** (to be designed as needs arise):
+   - **ConditionalPod** — route packets to different pods based on a predicate, merge results
+   - **FanOutFanIn** — broadcast to N pods, collect and merge/concat results
+   - **FallbackPod** — try primary pod, fall back to secondary on error/None result
+
+---
