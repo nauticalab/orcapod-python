@@ -433,7 +433,11 @@ class PythonPacketFunction(PacketFunctionBase):
         )
 
     async def direct_async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
-        raise NotImplementedError("Async call not implemented for synchronous function")
+        """Run the synchronous function in a thread pool via ``run_in_executor``."""
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.direct_call, packet)
 
 
 class PacketFunctionWrapper(PacketFunctionBase):

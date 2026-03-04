@@ -402,9 +402,10 @@ class TestPacketFunctionWrapperDelegation:
         assert result is not None
         assert result["result"] == 7  # 3 + 4
 
-    def test_async_call_propagates_not_implemented(self, wrapper, input_packet):
-        with pytest.raises(NotImplementedError):
-            asyncio.run(wrapper.async_call(input_packet))
+    def test_async_call_delegates_through_wrapper(self, wrapper, input_packet):
+        result = asyncio.run(wrapper.async_call(input_packet))
+        assert result is not None
+        assert result["result"] == 7  # 3 + 4
 
     def test_computed_label_returns_inner_label(self, wrapper, inner_pf):
         assert wrapper.computed_label() == inner_pf.label

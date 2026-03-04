@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from abc import abstractmethod
-from collections.abc import Collection, Iterator
+from collections.abc import Collection, Iterator, Sequence
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, cast
 
+from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.config import Config
 from orcapod.contexts import DataContext
 from orcapod.core.base import TraceableBase
@@ -190,6 +192,77 @@ class StaticOutputPod(TraceableBase):
         logger.debug(f"Invoking pod {self} on streams through __call__: {streams}")
         # perform input stream validation
         return self.process(*streams, **kwargs)
+
+    # ------------------------------------------------------------------
+    # Async channel execution (default barrier mode)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _materialize_to_stream(
+        rows: list[tuple[TagProtocol, PacketProtocol]],
+    ) -> StreamProtocol:
+        """Materialize a list of (Tag, Packet) pairs into an ArrowTableStream.
+
+        Used by the barrier-mode ``async_execute`` to convert collected
+        channel items back into a stream suitable for ``static_process``.
+        """
+        from orcapod.core.datagrams import Tag
+        from orcapod.core.streams.arrow_table_stream import ArrowTableStream
+        from orcapod.utils import arrow_utils
+
+        if not rows:
+            raise ValueError("Cannot materialize an empty list of rows into a stream")
+
+        tag_tables = []
+        packet_tables = []
+        source_info_dicts: list[dict[str, str | None]] = []
+
+        for tag, packet in rows:
+            tag_tables.append(tag.as_table(columns={"system_tags": True}))
+            packet_tables.append(packet.as_table())
+            source_info_dicts.append(packet.source_info())
+
+        combined_tags = pa.concat_tables(tag_tables)
+        combined_packets = pa.concat_tables(packet_tables)
+
+        # Determine which columns are user tags vs system tags
+        first_tag = rows[0][0]
+        if isinstance(first_tag, Tag):
+            user_tag_keys = tuple(first_tag.keys())
+        else:
+            user_tag_keys = tuple(first_tag.keys())
+
+        # Build source_info: for each packet column, use the source info
+        # from the first row (all rows should have the same packet columns)
+        source_info: dict[str, str | None] = {}
+        if source_info_dicts:
+            for key in source_info_dicts[0]:
+                source_info[key] = None
+
+        full_table = arrow_utils.hstack_tables(combined_tags, combined_packets)
+
+        return ArrowTableStream(
+            full_table,
+            tag_columns=user_tag_keys,
+            source_info=source_info,
+        )
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    ) -> None:
+        """Default barrier-mode async execution.
+
+        Collects all inputs, runs ``static_process``, emits results.
+        Subclasses override for streaming or incremental strategies.
+        """
+        all_rows = await asyncio.gather(*(ch.collect() for ch in inputs))
+        streams = [self._materialize_to_stream(rows) for rows in all_rows]
+        result = self.static_process(*streams)
+        for tag, packet in result.iter_packets():
+            await output.send((tag, packet))
+        await output.close()
 
 
 class DynamicPodStream(StreamBase):
