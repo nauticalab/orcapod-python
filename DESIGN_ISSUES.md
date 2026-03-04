@@ -304,21 +304,36 @@ A naïve decomposition into `FunctionPod + Join` works but has unnecessary overh
    the packet function, merge original packet columns + new columns, emit. No broadcast,
    passthrough channel, or rejoin wiring needed.
 
-#### Relationship to existing pod categories
+#### Provenance model: fused implementation, not a third category
 
-AddResult occupies a middle ground between operators and function pods:
+The pipeline's provenance guarantees rest on a clean two-category model:
 
-| | Operator | FunctionPod | **AddResult** |
-|---|---|---|---|
-| Inspects packet content | Never | Yes | Yes |
-| Preserves original packet columns | Yes (structurally) | No (replaces) | **Yes** |
-| Synthesizes new values | No | Yes | **Yes** |
-| Tags | Inspects/uses | Never touches | **Never touches** |
+| Category | Produces new data? | Provenance role |
+|---|---|---|
+| **Source / FunctionPod** | Yes | Provenance tracked — new values are attributed |
+| **Operator** | No | Provenance transparent — every output value traces to a Source or FunctionPod |
 
-It is a *third kind of pod* — not an operator (it synthesizes new values) and not a function
-pod (it preserves existing packet columns). It wraps a `PacketFunction` like `FunctionPod`
-does, but its `process` / `async_execute` merges the function output back into the original
-packet.
+This is powerful because provenance tracking only happens at Source and FunctionPod boundaries.
+Operators are "free" — they restructure but never create values that need attribution.
+
+**AddResult does not introduce a third provenance category.** It is a *fused implementation*
+of a pattern fully expressible in the existing model (`FunctionPod + Join`). Its provenance
+semantics are *derived from* the decomposition, not an extension of the model:
+
+- **Preserved columns** — passed through from upstream, provenance transparent (operator-like).
+  Source-info columns pass through unchanged, exactly as Join would propagate them.
+- **Computed columns** — produced by the wrapped PacketFunction, provenance tracked
+  (function-pod-like). Source-info columns reference the PacketFunction, exactly as
+  FunctionPod would attribute them.
+
+There is no third kind of output column. Every column in an AddResult output has a clear
+provenance story that maps directly to an existing category. The fusion is an optimization —
+analogous to a database query optimizer fusing filter+project into a single scan without
+changing relational algebra semantics.
+
+This means the theoretical model stays clean (Source, Operator, FunctionPod), and AddResult
+is justified as a performance/ergonomic optimization whose correctness can be verified by
+checking equivalence with its decomposition.
 
 #### API sketch
 
@@ -338,8 +353,10 @@ await AddResult(grade_pf).async_execute([input_ch], output_ch)
   — the union of original packet columns and new computed columns.
 - Must raise `InputValidationError` if function output keys collide with existing packet
   column names (same constraint as Join on overlapping packet columns).
-- `pipeline_hash` commits to the wrapped `PacketFunction`'s identity plus the upstream's
-  pipeline hash.
+- `pipeline_hash` should behave as if the decomposition were performed — commits to the
+  wrapped `PacketFunction`'s identity plus the upstream's pipeline hash.
+- Source-info on computed columns references the PacketFunction (as FunctionPod would).
+  Source-info on preserved columns passes through unchanged (as Join would).
 - `async_execute` can use the same semaphore-based concurrency control as `FunctionPod`.
 
 ---
