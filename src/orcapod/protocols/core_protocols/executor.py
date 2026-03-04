@@ -7,13 +7,11 @@ from orcapod.protocols.core_protocols.datagrams import PacketProtocol
 
 @runtime_checkable
 class PacketFunctionExecutorProtocol(Protocol):
-    """
-    Strategy for executing a packet function on a single packet.
+    """Strategy for executing a packet function on a single packet.
 
     Executors decouple *what* a packet function computes from *where/how* it
     runs.  Each executor declares which ``packet_function_type_id`` values it
-    supports so that, e.g., a Ray executor only accepts Python-backed packet
-    functions.
+    supports.
     """
 
     @property
@@ -22,8 +20,7 @@ class PacketFunctionExecutorProtocol(Protocol):
         ...
 
     def supported_function_type_ids(self) -> frozenset[str]:
-        """
-        Set of ``packet_function_type_id`` values this executor can handle.
+        """Return the set of ``packet_function_type_id`` values this executor can handle.
 
         Return an empty frozenset to indicate support for *all* function types.
         """
@@ -38,11 +35,9 @@ class PacketFunctionExecutorProtocol(Protocol):
         packet_function: Any,
         packet: PacketProtocol,
     ) -> PacketProtocol | None:
-        """
-        Synchronously execute *packet_function* on *packet*.
+        """Synchronously execute *packet_function* on *packet*.
 
-        The executor receives the packet function so it can invoke
-        ``packet_function.direct_call(packet)`` (bypassing executor routing)
+        The executor should invoke ``packet_function.direct_call(packet)``
         in the appropriate execution environment.
         """
         ...
@@ -52,25 +47,22 @@ class PacketFunctionExecutorProtocol(Protocol):
         packet_function: Any,
         packet: PacketProtocol,
     ) -> PacketProtocol | None:
-        """Asynchronous counterpart of :meth:`execute`."""
+        """Asynchronous counterpart of ``execute``."""
         ...
 
     @property
     def supports_concurrent_execution(self) -> bool:
-        """
-        Whether this executor can meaningfully run multiple packets concurrently.
+        """Whether this executor can meaningfully run multiple packets concurrently.
 
         When ``True``, iteration machinery may submit all packets via
-        :meth:`async_execute` concurrently (using ``asyncio.gather``) and
-        collect results before yielding, instead of processing one at a time.
+        ``async_execute`` concurrently and collect results before yielding.
         """
         ...
 
     def get_execution_data(self) -> dict[str, Any]:
-        """
-        Return metadata describing the execution environment.
+        """Return metadata describing the execution environment.
 
-        Stored alongside results for observability/provenance but does **not**
+        Stored alongside results for observability/provenance but does not
         affect content or pipeline hashes.
         """
         ...

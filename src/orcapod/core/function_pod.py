@@ -53,13 +53,10 @@ def _execute_concurrent(
     packet_function: PacketFunctionProtocol,
     packets: list[PacketProtocol],
 ) -> list[PacketProtocol | None]:
-    """
-    Submit all *packets* to the executor concurrently via ``async_call``
-    and return results in the same order.
+    """Submit all *packets* to the executor concurrently and return results in order.
 
     Uses ``asyncio.gather`` to run all tasks concurrently, then blocks
-    until all complete.  This is the mechanism that lets a Ray executor
-    fire off all remote tasks at once rather than waiting one-by-one.
+    until all complete.
     """
     import asyncio
 
@@ -74,10 +71,7 @@ def _execute_concurrent(
 
 
 class _FunctionPodBase(TraceableBase):
-    """
-    A thin wrapper around a packet function, creating a pod that applies the
-    packet function on each and every input packet.
-    """
+    """Base pod that applies a packet function to each input packet."""
 
     def __init__(
         self,
@@ -136,20 +130,13 @@ class _FunctionPodBase(TraceableBase):
         return Join()
 
     def validate_inputs(self, *streams: StreamProtocol) -> None:
-        """
-        Validate input streams, raising exceptions if invalid.
-
-        Should check:
-        - Number of input streams
-        - StreamProtocol types and schemas
-        - Kernel-specific requirements
-        - Business logic constraints
+        """Validate input streams, raising exceptions if invalid.
 
         Args:
-            *streams: Input streams to validate
+            *streams: Input streams to validate.
 
         Raises:
-            PodInputValidationError: If inputs are invalid
+            ValueError: If inputs are incompatible with the packet function schema.
         """
         input_stream = self.handle_input_streams(*streams)
         _, incoming_packet_schema = input_stream.output_schema()
@@ -168,24 +155,23 @@ class _FunctionPodBase(TraceableBase):
     def process_packet(
         self, tag: TagProtocol, packet: PacketProtocol
     ) -> tuple[TagProtocol, PacketProtocol | None]:
-        """
-        Process a single packet using the pod's packet function.
+        """Process a single packet using the pod's packet function.
 
         Args:
-            tag: The tag associated with the packet
-            packet: The input packet to process
+            tag: The tag associated with the packet.
+            packet: The input packet to process.
 
         Returns:
-            PacketProtocol | None: The processed output packet, or None if filtered out
+            A ``(tag, output_packet)`` tuple; output_packet is ``None`` if
+            the function filters the packet out.
         """
         return tag, self.packet_function.call(packet)
 
     def handle_input_streams(self, *streams: StreamProtocol) -> StreamProtocol:
-        """
-        Handle multiple input streams by joining them if necessary.
+        """Handle multiple input streams by joining them if necessary.
 
         Args:
-            *streams: Input streams to handle
+            *streams: Input streams to handle.
         """
         # handle multiple input streams
         if len(streams) == 0:
@@ -201,24 +187,23 @@ class _FunctionPodBase(TraceableBase):
     def process(
         self, *streams: StreamProtocol, label: str | None = None
     ) -> StreamProtocol:
-        """
-        Invoke the packet processor on the input stream.
-        If multiple streams are passed in, all streams are joined before processing.
+        """Invoke the packet processor on the input stream(s).
+
+        If multiple streams are passed in, they are joined before processing.
 
         Args:
-            *streams: Input streams to process
+            *streams: Input streams to process.
+            label: Optional label for tracking.
 
         Returns:
-            StreamProtocol: The resulting output stream
+            The resulting output stream.
         """
         ...
 
     def __call__(
         self, *streams: StreamProtocol, label: str | None = None
     ) -> StreamProtocol:
-        """
-        Convenience method to invoke the pod process on a collection of streams,
-        """
+        """Convenience alias for ``process``."""
         logger.debug(f"Invoking pod {self} on streams through __call__: {streams}")
         # perform input stream validation
         return self.process(*streams, label=label)
@@ -261,15 +246,14 @@ class FunctionPod(_FunctionPodBase):
     def process(
         self, *streams: StreamProtocol, label: str | None = None
     ) -> FunctionPodStream:
-        """
-        Invoke the packet processor on the input stream.
-        If multiple streams are passed in, all streams are joined before processing.
+        """Invoke the packet processor on the input stream(s).
 
         Args:
-            *streams: Input streams to process
+            *streams: Input streams to process.
+            label: Optional label for tracking.
 
         Returns:
-            cp.StreamProtocol: The resulting output stream
+            A ``FunctionPodStream`` wrapping the computation.
         """
         logger.debug(f"Invoking kernel {self} on streams: {streams}")
 
@@ -290,9 +274,7 @@ class FunctionPod(_FunctionPodBase):
     def __call__(
         self, *streams: StreamProtocol, label: str | None = None
     ) -> FunctionPodStream:
-        """
-        Convenience method to invoke the pod process on a collection of streams,
-        """
+        """Convenience alias for ``process``."""
         logger.debug(f"Invoking pod {self} on streams through __call__: {streams}")
         # perform input stream validation
         return self.process(*streams, label=label)
@@ -334,9 +316,7 @@ class FunctionPod(_FunctionPodBase):
 
 
 class FunctionPodStream(StreamBase):
-    """
-    Recomputable stream wrapping a packet function.
-    """
+    """Recomputable stream wrapping a packet function."""
 
     def __init__(
         self, function_pod: FunctionPodProtocol, input_stream: StreamProtocol, **kwargs
@@ -410,12 +390,7 @@ class FunctionPodStream(StreamBase):
         )
 
     def clear_cache(self) -> None:
-        """
-        Discard all in-memory cached state and re-acquire the input iterator.
-        Call this when you know the stream content is stale; prefer letting
-        ``iter_packets`` / ``as_table`` detect staleness automatically via
-        ``is_stale`` instead of calling this directly.
-        """
+        """Discard all in-memory cached state and re-acquire the input iterator."""
         self._cached_input_iterator = self._input_stream.iter_packets()
         self._cached_output_packets.clear()
         self._cached_output_table = None
@@ -465,10 +440,7 @@ class FunctionPodStream(StreamBase):
         self,
         packet_function: PacketFunctionProtocol,
     ) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
-        """
-        Collect all remaining input packets, execute them concurrently
-        via the executor's ``async_execute``, then yield results in order.
-        """
+        """Collect remaining inputs, execute concurrently, and yield results in order."""
         input_iter = self._cached_input_iterator
 
         # Materialise remaining inputs and separate cached from uncached.
@@ -593,15 +565,11 @@ class FunctionPodStream(StreamBase):
 class CallableWithPod(Protocol):
     @property
     def pod(self) -> _FunctionPodBase:
-        """
-        Returns associated function pod
-        """
+        """Return the associated function pod."""
         ...
 
     def __call__(self, *args, **kwargs):
-        """
-        Calls the function pod with the given arguments.
-        """
+        """Call the underlying function."""
         ...
 
 
@@ -614,20 +582,19 @@ def function_pod(
     executor: PacketFunctionExecutorProtocol | None = None,
     **kwargs,
 ) -> Callable[..., CallableWithPod]:
-    """
-    Decorator that attaches FunctionPodProtocol as pod attribute.
+    """Decorator that attaches a ``FunctionPod`` as a ``pod`` attribute.
 
     Args:
-        output_keys: Keys for the function output(s)
-        function_name: Name of the function pod; if None, defaults to the function name
-        result_database: Optional database for caching results
+        output_keys: Keys for the function output(s).
+        function_name: Name of the function pod; defaults to ``func.__name__``.
+        version: Version string for the packet function.
+        label: Optional label for tracking.
+        result_database: Optional database for caching results.
         executor: Optional executor for running the packet function.
-            Compatibility with the packet function type is validated
-            at decoration time (i.e. when the module is loaded).
-        **kwargs: Additional keyword arguments to pass to the FunctionPodProtocol constructor. Please refer to the FunctionPodProtocol documentation for details.
+        **kwargs: Forwarded to ``PythonPacketFunction``.
 
     Returns:
-        CallableWithPod: Decorated function with `pod` attribute holding the FunctionPodProtocol instance
+        A decorator that adds a ``pod`` attribute to the wrapped function.
     """
 
     def decorator(func: Callable) -> CallableWithPod:
@@ -665,11 +632,7 @@ def function_pod(
 
 
 class WrappedFunctionPod(_FunctionPodBase):
-    """
-    A wrapper for a function pod, allowing for additional functionality or modifications without changing the original pod.
-    This class is meant to serve as a base class for other pods that need to wrap existing pods.
-    Note that only the call logic is pass through to the wrapped pod, but the forward logic is not.
-    """
+    """Wrapper for a function pod, delegating call logic to the inner pod."""
 
     def __init__(
         self,
@@ -718,12 +681,11 @@ class WrappedFunctionPod(_FunctionPodBase):
 
 
 class FunctionNode(StreamBase):
-    """
-    Non-persistent stream node representing a packet function invocation.
+    """Non-persistent stream node representing a packet function invocation.
 
     Provides the core stream interface (identity, schema, iteration) without
-    any database persistence. Subclass ``PersistentFunctionNode`` adds DB-backed
-    caching and pipeline record storage.
+    any database persistence.  Subclass ``PersistentFunctionNode`` adds
+    DB-backed caching and pipeline record storage.
     """
 
     node_type = "function"
@@ -860,10 +822,7 @@ class FunctionNode(StreamBase):
     def _iter_packets_concurrent(
         self,
     ) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
-        """
-        Collect all remaining input packets, execute them concurrently
-        via the executor's ``async_execute``, then yield results in order.
-        """
+        """Collect remaining inputs, execute concurrently, and yield results in order."""
         input_iter = self._cached_input_iterator
 
         all_inputs: list[tuple[int, TagProtocol, PacketProtocol]] = []
@@ -979,20 +938,11 @@ class FunctionNode(StreamBase):
 
 
 class PersistentFunctionNode(FunctionNode):
-    """
-    DB-backed stream node that applies a cached packet function to an input stream.
+    """DB-backed stream node that applies a cached packet function to an input stream.
 
-    Extends ``FunctionNode`` with:
-
-    - Result caching via ``CachedPacketFunction`` and a result database
-    - Pipeline record storage in a pipeline database
-    - Two-phase iteration: Phase 1 yields cached results, Phase 2 computes missing
-    - ``get_all_records()`` for retrieving stored results
-    - ``as_source()`` for creating a ``DerivedSource`` from DB records
-
-    ``pipeline_hash()`` is schema+topology only, so two PersistentFunctionNode
-    instances with the same packet function and input stream schema will share
-    the same DB table path, regardless of the actual data content.
+    Extends ``FunctionNode`` with result caching via ``CachedPacketFunction``,
+    pipeline record storage, and two-phase iteration (cached first, then compute
+    missing).
     """
 
     def __init__(
@@ -1066,18 +1016,17 @@ class PersistentFunctionNode(FunctionNode):
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
-        """
-        Process a single packet using the cached packet function, recording
-        the result in the pipeline database.
+        """Process a single packet, recording the result in the pipeline database.
 
         Args:
-            tag: The tag associated with the packet
-            packet: The input packet to process
-            skip_cache_lookup: If True, bypass DB lookup for existing result
-            skip_cache_insert: If True, skip writing result to DB
+            tag: The tag associated with the packet.
+            packet: The input packet to process.
+            skip_cache_lookup: If True, bypass DB lookup for existing result.
+            skip_cache_insert: If True, skip writing result to DB.
 
         Returns:
-            tuple[TagProtocol, PacketProtocol | None]: tag + output packet (or None if filtered)
+            A ``(tag, output_packet)`` tuple; output_packet is ``None`` if
+            the function filters the packet out.
         """
         output_packet = self._packet_function.call(
             packet,
@@ -1172,21 +1121,14 @@ class PersistentFunctionNode(FunctionNode):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> "pa.Table | None":
-        """
-        Return all computed results joined with their pipeline tag records.
+        """Return all computed results joined with their pipeline tag records.
 
-        Fetches result packets from the result database (keyed by PACKET_RECORD_ID)
-        and pipeline records from the pipeline database, then inner-joins them on
-        PACKET_RECORD_ID to reconstruct tag + output-packet rows.
+        Args:
+            columns: Column configuration controlling which groups are included.
+            all_info: Shorthand to include all info columns.
 
-        The ``columns`` / ``all_info`` arguments follow the same ``ColumnConfig``
-        convention used throughout the codebase:
-
-        - ``meta``        — include ``__``-prefixed system columns (PACKET_RECORD_ID,
-                            INPUT_PACKET_HASH, __computed, …)
-        - ``source``      — include ``_source_*`` input-packet provenance columns
-        - ``system_tags`` — include ``_tag::*`` system tag columns
-        - ``all_info``    — shorthand for all of the above
+        Returns:
+            A PyArrow table of joined results, or ``None`` if no records exist.
         """
         results = self._packet_function._result_database.get_all_records(
             self._packet_function.record_path,

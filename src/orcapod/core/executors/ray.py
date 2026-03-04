@@ -9,15 +9,13 @@ if TYPE_CHECKING:
 
 
 class RayExecutor(PacketFunctionExecutorBase):
-    """
-    Executor that dispatches Python packet functions to a Ray cluster.
+    """Executor that dispatches Python packet functions to a Ray cluster.
 
     Only supports ``packet_function_type_id == "python.function.v0"``.
 
-    .. note::
-
-       ``ray`` is an optional dependency.  Import errors surface at
-       construction time so callers get a clear message.
+    Note:
+        ``ray`` is an optional dependency.  Import errors surface at
+        construction time so callers get a clear message.
     """
 
     SUPPORTED_TYPES: frozenset[str] = frozenset({"python.function.v0"})

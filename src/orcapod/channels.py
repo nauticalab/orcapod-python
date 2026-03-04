@@ -2,11 +2,6 @@
 
 Provides bounded async channels with close/done signaling, backpressure,
 and fan-out (broadcast) support.
-
-Classes:
-    Channel -- bounded async channel with separate reader/writer views
-    ChannelClosed -- raised when reading from a closed, drained channel
-    ReadableChannel / WritableChannel -- protocol types for type safety
 """
 
 from __future__ import annotations

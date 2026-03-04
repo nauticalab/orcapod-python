@@ -16,8 +16,7 @@ from orcapod.types import Schema
 class PacketFunctionProtocol(
     ContentIdentifiableProtocol, PipelineElementProtocol, LabelableProtocol, Protocol
 ):
-    """
-    Protocol for packet-processing function.
+    """Protocol for a packet-processing function.
 
     Processes individual packets with declared input/output schemas.
     """
@@ -45,37 +44,12 @@ class PacketFunctionProtocol(
 
     @property
     def input_packet_schema(self) -> Schema:
-        """
-        Schema for input packets that this packet function can process.
-
-        Defines the exact schema that input packets must conform to.
-
-        This specification is used for:
-        - Runtime type validation
-        - Compile-time type checking
-        - Schema inference and documentation
-        - Input validation and error reporting
-
-        Returns:
-            Schema: Output packet schema as a dictionary mapping
-        """
+        """Schema describing the input packets this function accepts."""
         ...
 
     @property
     def output_packet_schema(self) -> Schema:
-        """
-        Schema for output packets that this packet function produces.
-
-        This is typically determined by the packet function's computational logic
-        and is used for:
-        - Type checking downstream kernels
-        - Schema inference in complex pipelines
-        - Query planning and optimization
-        - Documentation and developer tooling
-
-        Returns:
-            Schema: Output packet schema as a dictionary mapping
-        """
+        """Schema describing the output packets this function produces."""
         ...
 
     # ==================== Content-Addressable Identity ====================
@@ -105,17 +79,13 @@ class PacketFunctionProtocol(
         self,
         packet: PacketProtocol,
     ) -> PacketProtocol | None:
-        """
-        Process a single packet, routing through the executor if one is set.
-
-        Callers should use this method.  Subclasses should override
-        :meth:`direct_call` to provide the native computation.
+        """Process a single packet, routing through the executor if one is set.
 
         Args:
-            packet: The data payload to process
+            packet: The data payload to process.
 
         Returns:
-            PacketProtocol | None: Processed packet, or None to filter it out
+            The processed packet, or ``None`` to filter it out.
         """
         ...
 
@@ -123,15 +93,13 @@ class PacketFunctionProtocol(
         self,
         packet: PacketProtocol,
     ) -> PacketProtocol | None:
-        """
-        Asynchronously process a single packet, routing through the executor
-        if one is set.
+        """Asynchronously process a single packet, routing through the executor if set.
 
         Args:
-            packet: The data payload to process
+            packet: The data payload to process.
 
         Returns:
-            PacketProtocol | None: Processed packet, or None to filter it out
+            The processed packet, or ``None`` to filter it out.
         """
         ...
 
@@ -139,17 +107,15 @@ class PacketFunctionProtocol(
         self,
         packet: PacketProtocol,
     ) -> PacketProtocol | None:
-        """
-        Execute the function's native computation on *packet*.
+        """Execute the function's native computation on *packet*.
 
-        This is the method executors invoke to bypass executor routing and
-        run the computation directly.
+        This is the method executors invoke, bypassing executor routing.
 
         Args:
-            packet: The data payload to process
+            packet: The data payload to process.
 
         Returns:
-            PacketProtocol | None: Processed packet, or None to filter it out
+            The processed packet, or ``None`` to filter it out.
         """
         ...
 
@@ -157,5 +123,5 @@ class PacketFunctionProtocol(
         self,
         packet: PacketProtocol,
     ) -> PacketProtocol | None:
-        """Asynchronous counterpart of :meth:`direct_call`."""
+        """Asynchronous counterpart of ``direct_call``."""
         ...
