@@ -10,6 +10,8 @@ as persistent variants during compile():
 
 from __future__ import annotations
 
+from typing import cast
+
 import pyarrow as pa
 import pytest
 
@@ -19,8 +21,7 @@ from orcapod.core.operators import Join, MapPackets
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.pipeline import Pipeline, PersistentSourceNode
-
+from orcapod.pipeline import PersistentSourceNode, Pipeline
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -77,13 +78,14 @@ class TestCompileSourceWrapping:
         pipeline = Pipeline(name="test_pipe", pipeline_database=pipeline_db)
 
         with pipeline:
-            joined = Join()(src_a, src_b)
+            _ = Join()(src_a, src_b)
 
         # The join node should be accessible by label
         assert pipeline._compiled
         # Check that there are nodes in the compiled graph
         assert len(pipeline.compiled_nodes) > 0
 
+        assert pipeline._node_graph is not None
         # The node graph should contain PersistentSourceNode instances
         source_nodes = [
             n
@@ -101,6 +103,7 @@ class TestCompileSourceWrapping:
             MapPackets({"value": "val"})(src_a, label="mapper")
 
         # Find the PersistentSourceNode
+        assert pipeline._node_graph is not None
         source_nodes = [
             n
             for n in pipeline._node_graph.nodes()
@@ -355,7 +358,7 @@ class TestAutoCompileAndRun:
         # Check function node
         adder = pipeline.adder
         assert adder.pipeline_path[0] == "scoped"
-
+        assert pipeline._node_graph is not None
         # Check source nodes
         for n in pipeline._node_graph.nodes():
             if isinstance(n, PersistentSourceNode):
@@ -406,6 +409,7 @@ class TestEndToEnd:
         # Run the pipeline
         pipeline.run()
 
+        assert pipeline._node_graph is not None
         # Source nodes should have cached data
         for n in pipeline._node_graph.nodes():
             if isinstance(n, PersistentSourceNode):
@@ -420,7 +424,7 @@ class TestEndToEnd:
 
         # Verify output values
         table = pipeline.adder.as_table()
-        totals = sorted(table.column("total").to_pylist())
+        totals = sorted(cast(list[int], table.column("total").to_pylist()))
         # a: 10 + 100 = 110, b: 20 + 200 = 220
         assert totals == [110, 220]
 
@@ -469,7 +473,9 @@ class TestPipelineExtension:
         assert table.num_rows == 2
         assert "extra" in table.column_names
 
-        totals = sorted(pipeline.adder.as_table().column("total").to_pylist())
+        totals = sorted(
+            cast(list[int], pipeline.adder.as_table().column("total").to_pylist())
+        )
         assert totals == [110, 220]
 
     def test_extend_pipeline_from_compiled_node(self, pipeline_db):
@@ -500,7 +506,10 @@ class TestPipelineExtension:
 
         table = pipeline.renamer.as_table()
         assert "final_total" in table.column_names
-        assert sorted(table.column("final_total").to_pylist()) == [110, 220]
+        assert sorted(cast(list[int], table.column("final_total").to_pylist())) == [
+            110,
+            220,
+        ]
 
     def test_second_pipeline_from_first_pipeline_node(self, pipeline_db):
         """Pipeline B starts from Pipeline A's final compiled node."""
@@ -532,9 +541,13 @@ class TestPipelineExtension:
 
         table = pipe_b.renamer.as_table()
         assert "renamed_total" in table.column_names
-        assert sorted(table.column("renamed_total").to_pylist()) == [110, 220]
+        assert sorted(cast(list[int], table.column("renamed_total").to_pylist())) == [
+            110,
+            220,
+        ]
 
         # pipe_b's source nodes wrap pipe_a.adder as a PersistentSourceNode
+        assert pipe_b._node_graph is not None
         source_nodes = [
             n for n in pipe_b._node_graph.nodes() if isinstance(n, PersistentSourceNode)
         ]
@@ -560,7 +573,6 @@ class TestHashChainExtending:
         with single:
             joined = src_a.join(src_b, label="joiner")
             pod(joined, label="adder")
-            single_stream = single  # capture for later
         # Get content_hash of adder in single pipeline
         with single:
             single._nodes["adder"].map_packets(
@@ -586,6 +598,7 @@ class TestHashChainExtending:
 
         # Extending should produce identical hashes
         assert single_renamer_content == two_renamer_content
+        assert single_renamer_pipeline == two_renamer_pipeline
 
     def test_extending_pipeline_hash_matches_single_pipeline(self, pipeline_db):
         """pipeline_hash is identical whether nodes defined in one or two pipelines."""
@@ -754,6 +767,73 @@ class TestHashChainDetaching:
         # 110*2=220, 220*2=440
         assert sorted(table.column("doubled").to_pylist()) == [220, 440]
 
+    def test_detached_pipeline_hash_matches_equivalent_fresh_source(self, pipeline_db):
+        """A DerivedSource and a fresh ArrowTableSource with the same schema
+        produce identical pipeline_hash downstream, but different content_hash
+        (because source_id differs → different identity_structure)."""
+        src_a, src_b = _make_two_sources()
+        pf_add = PythonPacketFunction(add_values, output_keys="total")
+        pod_add = FunctionPod(packet_function=pf_add)
+        pf_double = PythonPacketFunction(double_value, output_keys="doubled")
+
+        # Pipeline A: sources → join → adder (schema: tag=key, packet=total)
+        db_a = InMemoryArrowDatabase()
+        pipe_a = Pipeline(name="pipe_a", pipeline_database=db_a)
+        with pipe_a:
+            joined = src_a.join(src_b, label="joiner")
+            pod_add(joined, label="adder")
+        pipe_a.run()
+
+        # Branch 1: pipeline from DerivedSource
+        derived = pipe_a.adder.as_source()
+        db_derived = InMemoryArrowDatabase()
+        pipe_derived = Pipeline(name="derived_pipe", pipeline_database=db_derived)
+        with pipe_derived:
+            renamed = derived.map_packets({"total": "value"}, label="renamer")
+            FunctionPod(packet_function=pf_double)(renamed, label="doubler")
+
+        # Branch 2: pipeline from a fresh ArrowTableSource with identical schema
+        # Same schema as DerivedSource: tag=key (large_string), packet=total (int64)
+        fresh_table = pa.table(
+            {
+                "key": pa.array(["x", "y"], type=pa.large_string()),
+                "total": pa.array([999, 888], type=pa.int64()),
+            }
+        )
+        fresh_src = ArrowTableSource(fresh_table, tag_columns=["key"])
+        db_fresh = InMemoryArrowDatabase()
+        pipe_fresh = Pipeline(name="fresh_pipe", pipeline_database=db_fresh)
+        with pipe_fresh:
+            renamed = fresh_src.map_packets({"total": "value"}, label="renamer")
+            FunctionPod(packet_function=pf_double)(renamed, label="doubler")
+
+        # pipeline_hash should be IDENTICAL at every level
+        # (both start from RootSource with same schema → same pipeline identity base case)
+        assert (
+            pipe_derived.renamer.pipeline_hash() == pipe_fresh.renamer.pipeline_hash()
+        )
+        assert (
+            pipe_derived.doubler.pipeline_hash() == pipe_fresh.doubler.pipeline_hash()
+        )
+
+        # content_hash should DIFFER at every level
+        # (different source_id → different identity_structure → different content_hash)
+        assert pipe_derived.renamer.content_hash() != pipe_fresh.renamer.content_hash()
+        assert pipe_derived.doubler.content_hash() != pipe_fresh.doubler.content_hash()
+
+        # Both pipelines should run correctly with their own data
+        pipe_derived.run()
+        pipe_fresh.run()
+        derived_results = sorted(
+            pipe_derived.doubler.as_table().column("doubled").to_pylist()
+        )
+        fresh_results = sorted(
+            pipe_fresh.doubler.as_table().column("doubled").to_pylist()
+        )
+        # 110*2=220, 220*2=440 for derived; 999*2=1998, 888*2=1776 for fresh
+        assert derived_results == [220, 440]
+        assert fresh_results == [1776, 1998]
+
     def test_detached_source_has_source_id(self, pipeline_db):
         """DerivedSource.source_id contains pipeline path info."""
         src_a, src_b = _make_two_sources()
@@ -819,6 +899,7 @@ class TestIncrementalCompile:
         with pipeline:
             src_a.join(src_b, label="joiner")
 
+        assert pipeline._node_graph is not None
         first_source_nodes = {
             id(n)
             for n in pipeline._node_graph.nodes()
@@ -861,4 +942,7 @@ class TestIncrementalCompile:
         # Run to verify everything works end-to-end
         pipeline.run()
         table = pipeline.renamer.as_table()
-        assert sorted(table.column("final_total").to_pylist()) == [110, 220]
+        assert sorted(cast(list[int], table.column("final_total").to_pylist())) == [
+            110,
+            220,
+        ]

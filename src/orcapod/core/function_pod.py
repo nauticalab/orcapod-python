@@ -252,7 +252,9 @@ class FunctionPodStream(StreamBase):
         super().__init__(**kwargs)
 
         # capture the iterator over the input stream
-        self._cached_input_iterator = input_stream.iter_packets()
+        self._cached_input_iterator: (
+            Iterator[tuple[TagProtocol, PacketProtocol]] | None
+        ) = input_stream.iter_packets()
         self._update_modified_time()  # update the modified time to AFTER we obtain the iterator
         # note that the invocation of iter_packets on upstream likely triggeres the modified time
         # to be updated on the usptream. Hence you want to set this stream's modified time after that.
@@ -323,7 +325,8 @@ class FunctionPodStream(StreamBase):
         if self.is_stale:
             self.clear_cache()
         if self._cached_input_iterator is not None:
-            for i, (tag, packet) in enumerate(self._cached_input_iterator):
+            input_iter = self._cached_input_iterator
+            for i, (tag, packet) in enumerate(input_iter):
                 if i in self._cached_output_packets:
                     # Use cached result
                     tag, packet = self._cached_output_packets[i]
@@ -610,7 +613,9 @@ class FunctionNode(StreamBase):
         self._input_stream = input_stream
 
         # stream-level caching state
-        self._cached_input_iterator = input_stream.iter_packets()
+        self._cached_input_iterator: (
+            Iterator[tuple[TagProtocol, PacketProtocol]] | None
+        ) = input_stream.iter_packets()
         self._update_modified_time()  # set modified time AFTER obtaining the iterator
         self._cached_output_packets: dict[
             int, tuple[TagProtocol, PacketProtocol | None]
@@ -665,7 +670,8 @@ class FunctionNode(StreamBase):
         if self.is_stale:
             self.clear_cache()
         if self._cached_input_iterator is not None:
-            for i, (tag, packet) in enumerate(self._cached_input_iterator):
+            input_iter = self._cached_input_iterator
+            for i, (tag, packet) in enumerate(input_iter):
                 if i in self._cached_output_packets:
                     tag, packet = self._cached_output_packets[i]
                     if packet is not None:
@@ -1025,6 +1031,7 @@ class PersistentFunctionNode(FunctionNode):
         if self.is_stale:
             self.clear_cache()
         if self._cached_input_iterator is not None:
+            input_iter = self._cached_input_iterator
             # --- Phase 1: yield already-computed results from the databases ---
             existing = self.get_all_records(columns={"meta": True})
             computed_hashes: set[str] = set()
@@ -1043,7 +1050,7 @@ class PersistentFunctionNode(FunctionNode):
 
             # --- Phase 2: process only missing input packets ---
             next_idx = len(self._cached_output_packets)
-            for tag, packet in self._cached_input_iterator:
+            for tag, packet in input_iter:
                 input_hash = packet.content_hash().to_string()
                 if input_hash in computed_hashes:
                     continue

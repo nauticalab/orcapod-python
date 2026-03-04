@@ -114,7 +114,7 @@ class TestDerivedSourceBeforeRun:
         node = _make_node(n=3)
         src = node.as_source()
         tag_schema, packet_schema = src.output_schema()
-        table = src.as_table()
+        _ = src.as_table()
         assert "id" in tag_schema
         assert "result" in packet_schema
 

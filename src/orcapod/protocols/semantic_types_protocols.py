@@ -1,20 +1,20 @@
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol
 
-from orcapod.types import Schema, SchemaLike
+from orcapod.types import DataType, Schema, SchemaLike
 
 if TYPE_CHECKING:
     import pyarrow as pa
 
 
 class TypeConverterProtocol(Protocol):
-    def python_type_to_arrow_type(self, python_type: type) -> "pa.DataType": ...
+    def python_type_to_arrow_type(self, python_type: DataType) -> "pa.DataType": ...
 
     def python_schema_to_arrow_schema(
         self, python_schema: SchemaLike
     ) -> "pa.Schema": ...
 
-    def arrow_type_to_python_type(self, arrow_type: "pa.DataType") -> type: ...
+    def arrow_type_to_python_type(self, arrow_type: "pa.DataType") -> DataType: ...
 
     def arrow_schema_to_python_schema(self, arrow_schema: "pa.Schema") -> Schema: ...
 
@@ -55,7 +55,7 @@ class SemanticStructConverterProtocol(Protocol):
     """Protocol for converting between Python objects and semantic structs."""
 
     @property
-    def python_type(self) -> type:
+    def python_type(self) -> DataType:
         """The Python type this converter can handle."""
         ...
 
@@ -72,7 +72,7 @@ class SemanticStructConverterProtocol(Protocol):
         """Convert struct dictionary back to Python value."""
         ...
 
-    def can_handle_python_type(self, python_type: type) -> bool:
+    def can_handle_python_type(self, python_type: DataType) -> bool:
         """Check if this converter can handle the given Python type."""
         ...
 

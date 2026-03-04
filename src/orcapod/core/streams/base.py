@@ -82,62 +82,62 @@ class StreamBase(TraceableBase):
 
     def join(
         self, other_stream: StreamProtocol, label: str | None = None
-    ) -> StreamProtocol:
+    ) -> StreamBase:
         """
         Joins this stream with another stream, returning a new stream that contains
         the combined data from both streams.
         """
         from orcapod.core.operators import Join
 
-        return Join()(self, other_stream, label=label)  # type: ignore
+        return Join()(self, other_stream, label=label)
 
     def semi_join(
         self,
         other_stream: StreamProtocol,
         label: str | None = None,
-    ) -> StreamProtocol:
+    ) -> StreamBase:
         """
         Performs a semi-join with another stream, returning a new stream that contains
         only the packets from this stream that have matching tags in the other stream.
         """
         from orcapod.core.operators import SemiJoin
 
-        return SemiJoin()(self, other_stream, label=label)  # type: ignore
+        return SemiJoin()(self, other_stream, label=label)
 
     def map_tags(
         self,
         name_map: Mapping[str, str],
         drop_unmapped: bool = True,
         label: str | None = None,
-    ) -> StreamProtocol:
+    ) -> StreamBase:
         """
         Maps the tags in this stream according to the provided name_map.
         If drop_unmapped is True, any tags that are not in the name_map will be dropped.
         """
         from orcapod.core.operators import MapTags
 
-        return MapTags(name_map, drop_unmapped)(self, label=label)  # type: ignore
+        return MapTags(name_map, drop_unmapped)(self, label=label)
 
     def map_packets(
         self,
         name_map: Mapping[str, str],
         drop_unmapped: bool = True,
         label: str | None = None,
-    ) -> StreamProtocol:
+    ) -> StreamBase:
         """
         Maps the packets in this stream according to the provided packet_map.
         If drop_unmapped is True, any packets that are not in the packet_map will be dropped.
         """
         from orcapod.core.operators import MapPackets
 
-        return MapPackets(name_map, drop_unmapped)(self, label=label)  # type: ignore
+        return MapPackets(name_map, drop_unmapped)(self, label=label)
 
     def batch(
         self,
         batch_size: int = 0,
         drop_partial_batch: bool = False,
         label: str | None = None,
-    ) -> StreamProtocol:
+    ) -> StreamBase:
         """
         Batch stream into fixed-size chunks, each of size batch_size.
         If drop_last is True, any remaining elements that don't fit into a full batch will be dropped.
@@ -146,7 +146,7 @@ class StreamBase(TraceableBase):
 
         return Batch(batch_size=batch_size, drop_partial_batch=drop_partial_batch)(
             self, label=label
-        )  # type: ignore
+        )
 
     def polars_filter(
         self,
@@ -154,7 +154,7 @@ class StreamBase(TraceableBase):
         constraint_map: Mapping[str, Any] | None = None,
         label: str | None = None,
         **constraints: Any,
-    ) -> StreamProtocol:
+    ) -> StreamBase:
         from orcapod.core.operators import PolarsFilter
 
         total_constraints = dict(constraint_map) if constraint_map is not None else {}
@@ -170,7 +170,7 @@ class StreamBase(TraceableBase):
         tag_columns: str | Collection[str],
         strict: bool = True,
         label: str | None = None,
-    ) -> StreamProtocol:
+    ) -> StreamBase:
         """
         Select the specified tag columns from the stream. A ValueError is raised
         if one or more specified tag columns do not exist in the stream unless strict = False.
@@ -184,7 +184,7 @@ class StreamBase(TraceableBase):
         packet_columns: str | Collection[str],
         strict: bool = True,
         label: str | None = None,
-    ) -> StreamProtocol:
+    ) -> StreamBase:
         """
         Select the specified packet columns from the stream. A ValueError is raised
         if one or more specified packet columns do not exist in the stream unless strict = False.
@@ -198,7 +198,7 @@ class StreamBase(TraceableBase):
         tag_columns: str | Collection[str],
         strict: bool = True,
         label: str | None = None,
-    ) -> StreamProtocol:
+    ) -> StreamBase:
         from orcapod.core.operators import DropTagColumns
 
         return DropTagColumns(tag_columns, strict=strict)(self, label=label)
@@ -208,7 +208,7 @@ class StreamBase(TraceableBase):
         packet_columns: str | Collection[str],
         strict: bool = True,
         label: str | None = None,
-    ) -> StreamProtocol:
+    ) -> StreamBase:
         from orcapod.core.operators import DropPacketColumns
 
         return DropPacketColumns(packet_columns, strict=strict)(self, label=label)

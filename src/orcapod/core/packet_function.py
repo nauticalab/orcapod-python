@@ -19,7 +19,7 @@ from orcapod.hashing.hash_utils import (
     get_function_components,
     get_function_signature,
 )
-from orcapod.protocols.core_protocols import PacketProtocol, PacketFunctionProtocol
+from orcapod.protocols.core_protocols import PacketFunctionProtocol, PacketProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.system_constants import constants
 from orcapod.types import DataValue, Schema, SchemaLike

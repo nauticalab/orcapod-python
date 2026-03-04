@@ -10,7 +10,7 @@ from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.tracker import SourceNode
 from orcapod.protocols.core_protocols import PacketProtocol, StreamProtocol, TagProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
-from orcapod.types import ColumnConfig, Schema
+from orcapod.types import ColumnConfig
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
