@@ -246,3 +246,35 @@ does not exist.
 to only columns that exist in the table.
 
 ---
+
+## `src/orcapod/core/operators/` — Async execution
+
+### O1 — Operators use barrier-mode `async_execute` only; streaming/incremental overrides needed
+**Status:** open
+**Severity:** medium
+
+All operators currently use the default barrier-mode `async_execute` inherited from
+`StaticOutputPod`: collect all input rows into memory, materialize to `ArrowTableStream`(s),
+run the existing sync `static_process`, then emit results. This works correctly but negates the
+latency and memory benefits of the push-based channel model.
+
+Three categories of improvement are planned:
+
+1. **Streaming overrides (row-by-row, zero buffering)** — for operators that process rows
+   independently:
+   - `PolarsFilter` — evaluate predicate per row, emit or drop immediately
+   - `MapTags` / `MapPackets` — rename columns per row, emit immediately
+   - `SelectTagColumns` / `SelectPacketColumns` — project columns per row, emit immediately
+   - `DropTagColumns` / `DropPacketColumns` — drop columns per row, emit immediately
+
+2. **Incremental overrides (stateful, eager emit)** — for multi-input operators that can
+   produce partial results before all inputs are consumed:
+   - `Join` — symmetric hash join: index each input by tag keys, emit matches as they arrive
+   - `MergeJoin` — same approach, with list-merge on colliding packet columns
+   - `SemiJoin` — buffer the right (filter) input fully, then stream the left input and emit
+     matches (right must be fully consumed first, but left can stream)
+
+3. **Barrier-only (no change needed):**
+   - `Batch` — inherently requires all rows before grouping; barrier mode is correct
+
+---
