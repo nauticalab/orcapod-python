@@ -684,3 +684,185 @@ class TestEndToEnd:
             pkt_dict = packet.as_dict()
             assert "x" in pkt_dict
             assert "y" not in pkt_dict
+
+
+# ---------------------------------------------------------------------------
+# 9. Async pipeline → synchronous DB retrieval (concrete example)
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncPipelineThenSyncRetrieval:
+    """Demonstrates the full workflow: run an async pipeline, then retrieve
+    results synchronously from the database.
+
+    This is the primary use-case for persistent nodes: async streaming
+    execution populates the DB, and later callers can retrieve results
+    without re-running the pipeline.
+    """
+
+    @pytest.mark.asyncio
+    async def test_persistent_function_node_async_then_sync_db_retrieval(self):
+        """PersistentFunctionNode: async execute → sync get_all_records."""
+        # --- Setup ---
+        def double(x: int) -> int:
+            return x * 2
+
+        pf = PythonPacketFunction(double, output_keys="result")
+        pod = FunctionPod(pf)
+        db = InMemoryArrowDatabase()
+        stream = make_stream(5)  # ids 0..4, x values 0..4
+
+        node = PersistentFunctionNode(pod, stream, pipeline_database=db)
+
+        # --- Async pipeline execution ---
+        input_ch = Channel(buffer_size=16)
+        output_ch = Channel(buffer_size=16)
+
+        async def source_producer():
+            for tag, packet in make_stream(5).iter_packets():
+                await input_ch.writer.send((tag, packet))
+            await input_ch.writer.close()
+
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(source_producer())
+            tg.create_task(node.async_execute([input_ch.reader], output_ch.writer))
+
+        async_results = await output_ch.reader.collect()
+        async_values = sorted(pkt.as_dict()["result"] for _, pkt in async_results)
+        assert async_values == [0, 2, 4, 6, 8]
+
+        # --- Synchronous DB retrieval (no re-computation) ---
+        records = node.get_all_records()
+        assert records is not None
+        assert records.num_rows == 5
+
+        # The DB contains the same result values that were streamed async
+        result_col = records.column("result").to_pylist()
+        assert sorted(result_col) == [0, 2, 4, 6, 8]
+
+        # A *new* node sharing the same DB can also read these records
+        node2 = PersistentFunctionNode(pod, make_stream(5), pipeline_database=db)
+        records2 = node2.get_all_records()
+        assert records2 is not None
+        assert records2.num_rows == 5
+        assert sorted(records2.column("result").to_pylist()) == [0, 2, 4, 6, 8]
+
+    @pytest.mark.asyncio
+    async def test_persistent_operator_node_log_then_sync_db_retrieval(self):
+        """PersistentOperatorNode (LOG): async execute → sync get_all_records."""
+        # --- Setup ---
+        stream = make_two_col_stream(4)  # ids 0..3, x 0..3, y 0,11,22,33
+        op = SelectPacketColumns(["x"])
+        db = InMemoryArrowDatabase()
+
+        node = PersistentOperatorNode(
+            op, [stream], pipeline_database=db, cache_mode=CacheMode.LOG
+        )
+
+        # --- Async pipeline execution ---
+        input_ch = Channel(buffer_size=16)
+        output_ch = Channel(buffer_size=16)
+
+        async def source_producer():
+            for tag, packet in make_two_col_stream(4).iter_packets():
+                await input_ch.writer.send((tag, packet))
+            await input_ch.writer.close()
+
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(source_producer())
+            tg.create_task(node.async_execute([input_ch.reader], output_ch.writer))
+
+        async_results = await output_ch.reader.collect()
+        assert len(async_results) == 4
+        async_x = sorted(pkt.as_dict()["x"] for _, pkt in async_results)
+        assert async_x == [0, 1, 2, 3]
+
+        # --- Synchronous DB retrieval ---
+        records = node.get_all_records()
+        assert records is not None
+        assert records.num_rows == 4
+        assert sorted(records.column("x").to_pylist()) == [0, 1, 2, 3]
+        # 'y' column should NOT be present (was dropped by SelectPacketColumns)
+        assert "y" not in records.column_names
+
+        # --- REPLAY from DB via a new node (no computation) ---
+        replay_node = PersistentOperatorNode(
+            op,
+            [make_two_col_stream(4)],
+            pipeline_database=db,
+            cache_mode=CacheMode.REPLAY,
+        )
+        replay_node.run()
+        replay_table = replay_node.as_table()
+        assert replay_table.num_rows == 4
+        assert sorted(replay_table.column("x").to_pylist()) == [0, 1, 2, 3]
+
+    @pytest.mark.asyncio
+    async def test_multi_stage_async_pipeline_with_db_retrieval(self):
+        """Two-stage async pipeline: Source → FunctionNode → OperatorNode.
+
+        Both nodes are persistent. After async execution, results from each
+        stage can be retrieved synchronously from the database.
+        """
+        # --- Setup stage 1: double(x) ---
+        def double(x: int) -> int:
+            return x * 2
+
+        pf = PythonPacketFunction(double, output_keys="result")
+        pod = FunctionPod(pf)
+        fn_db = InMemoryArrowDatabase()
+        stream = make_stream(3)  # ids 0..2, x 0..2
+
+        fn_node = PersistentFunctionNode(pod, stream, pipeline_database=fn_db)
+
+        # --- Setup stage 2: select only "result" column ---
+        # Build a placeholder stream for schema purposes (OperatorNode needs
+        # to validate inputs at construction time)
+        stage1_table = pa.table(
+            {
+                "id": pa.array([0, 1, 2], type=pa.int64()),
+                "result": pa.array([0, 2, 4], type=pa.int64()),
+            }
+        )
+        stage1_stream = ArrowTableStream(stage1_table, tag_columns=["id"])
+        op = SelectPacketColumns(["result"])
+        op_db = InMemoryArrowDatabase()
+        op_node = PersistentOperatorNode(
+            op, [stage1_stream], pipeline_database=op_db, cache_mode=CacheMode.LOG
+        )
+
+        # --- Async pipeline execution ---
+        ch_source = Channel(buffer_size=16)
+        ch_mid = Channel(buffer_size=16)
+        ch_out = Channel(buffer_size=16)
+
+        async def source_producer():
+            for tag, packet in make_stream(3).iter_packets():
+                await ch_source.writer.send((tag, packet))
+            await ch_source.writer.close()
+
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(source_producer())
+            tg.create_task(
+                fn_node.async_execute([ch_source.reader], ch_mid.writer)
+            )
+            tg.create_task(
+                op_node.async_execute([ch_mid.reader], ch_out.writer)
+            )
+
+        final_results = await ch_out.reader.collect()
+        assert len(final_results) == 3
+        final_values = sorted(pkt.as_dict()["result"] for _, pkt in final_results)
+        assert final_values == [0, 2, 4]
+
+        # --- Sync retrieval from stage 1 DB ---
+        fn_records = fn_node.get_all_records()
+        assert fn_records is not None
+        assert fn_records.num_rows == 3
+        assert sorted(fn_records.column("result").to_pylist()) == [0, 2, 4]
+
+        # --- Sync retrieval from stage 2 DB ---
+        op_records = op_node.get_all_records()
+        assert op_records is not None
+        assert op_records.num_rows == 3
+        assert sorted(op_records.column("result").to_pylist()) == [0, 2, 4]
