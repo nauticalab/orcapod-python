@@ -16,6 +16,14 @@ uv run python -c "..."
 
 Never use `python`, `pytest`, or `python3` directly.
 
+## Branch hygiene
+
+Periodically check the target branch (typically `dev`) for updates and incorporate them into
+your working branch. Before pushing, fetch and rebase onto the latest target branch to avoid
+divergence and merge conflicts. If cherry-picking is needed due to unrelated commit history,
+prefer cherry-picking your commits onto a fresh branch from the target rather than resolving
+massive rebase conflicts.
+
 ## Updating agent instructions
 
 When adding or changing any instruction, update BOTH:
