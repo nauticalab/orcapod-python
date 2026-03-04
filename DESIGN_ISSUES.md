@@ -3,6 +3,14 @@
 A running log of identified design problems, bugs, and code quality issues.
 Each item has a status: `open`, `in progress`, or `resolved`.
 
+**Severity guide:**
+- **critical** — Correctness bugs, silent data loss, or security issues.
+- **high** — Broken or incomplete features that affect users or downstream consumers.
+- **medium** — Performance, error-handling, or code-quality issues worth fixing in the
+  normal course of development.
+- **low** — Nice-to-haves, cosmetic improvements, or speculative refactors.
+- **trivial** — Typos, dead comments, purely cosmetic.
+
 ---
 
 ## `src/orcapod/core/base.py`
@@ -30,6 +38,19 @@ without being pipeline elements.
 `PipelineElementBase` from `StreamBase`, `ArrowTableStream`, `PacketFunctionBase`,
 `_FunctionPodBase`, `FunctionPodStream`, `FunctionNode`, `OperatorNode`, and
 `DynamicPodStream` declarations.
+
+---
+
+### B2 — Mutable `data_context` setter may invalidate cached state
+**Status:** open
+**Severity:** medium
+
+`DataContextMixin.data_context` (line ~92) has a property setter that allows runtime context
+changes. If a stream or pod has already cached schemas or hashes derived from the previous
+context, those caches silently become stale.
+
+Options: (1) remove the setter and make context immutable after construction, or (2) add cache
+invalidation on context change and document when changing context is safe.
 
 ---
 
@@ -91,6 +112,37 @@ The block commenting out `pod_id_columns` removal is leftover from an old design
 ambiguous whether system columns are actually filtered.
 
 **Fix:** Deleted the commented-out block.
+
+---
+
+### P6 — Cache-matching policy (`match_tier`) accepted but never used
+**Status:** open
+**Severity:** high
+
+`CachedPacketFunction.get_cached_output_for_packet()` (line ~547) accepts a `match_tier`
+parameter that is documented in the interface but completely ignored. Cache lookups always use
+exact matching. Two inline TODOs mark this:
+- `# TODO: add match based on match_tier if specified`
+- `# TODO: implement matching policy/strategy`
+
+This means any caller passing a non-default `match_tier` silently gets exact-match behavior,
+which could lead to unnecessary cache misses or incorrect assumptions about cache hit semantics.
+
+Requires: design a matching strategy interface; implement at least exact and fuzzy tiers.
+
+---
+
+### P7 — `PythonPacketFunction.__init__` unconditionally extracts git info
+**Status:** open
+**Severity:** medium
+
+`PythonPacketFunction.__init__()` (line ~324) always calls `get_git_info()`, which runs git
+subprocess commands. This fails or significantly slows initialization in non-git environments
+(CI containers, notebooks, deployed services).
+
+`# TODO: turn this into optional addition`
+
+Fix: add an `include_git_info=True` parameter; skip extraction when `False`.
 
 ---
 
@@ -181,6 +233,72 @@ grouping. It should be co-located with `function_pod` or moved to the protocols 
 
 ---
 
+### F11 — Schema validation raises `ValueError` instead of custom exception
+**Status:** open
+**Severity:** high
+
+`_validate_input_schema()` (line ~162) raises a generic `ValueError` when the packet schema
+is incompatible:
+```python
+# TODO: use custom exception type for better error handling
+```
+
+The codebase already has `InputValidationError` (in `errors.py`) which is the correct exception
+for this case. Using `ValueError` means callers cannot distinguish schema incompatibility from
+other value errors without string-matching the message.
+
+Fix: change `ValueError` to `InputValidationError`.
+
+---
+
+### F12 — System tag columns excluded from cache entry ID
+**Status:** open
+**Severity:** high
+
+`FunctionPodNode.record_packet_for_cache()` (line ~1077) builds a tag table for entry-ID
+computation but excludes system tag columns:
+```python
+# TODO: add system tag columns
+```
+
+Two packets with identical user tags but different provenance (arriving from different
+pipeline branches, thus having different system tags) produce the same cache key. This can
+cause cache collisions where a result computed for one pipeline branch is returned for
+another.
+
+Fix: include system tag columns in the `tag_with_hash` table before computing the entry ID hash.
+
+---
+
+### F13 — `_FunctionPodBase.output_schema()` omits source-info columns
+**Status:** open
+**Severity:** medium
+
+`output_schema()` (line ~238) does not include source-info columns even when `ColumnConfig`
+requests them:
+```python
+# TODO: handle and extend to include additional columns
+```
+
+This means callers using `columns={"source": True}` on a FunctionPod's output schema get an
+incomplete schema, inconsistent with `as_table()` which does include source columns.
+
+---
+
+### F14 — `FunctionPodStream.as_table()` uses Polars detour for Arrow sorting
+**Status:** open
+**Severity:** medium
+
+`as_table()` (line ~568) converts Arrow → Polars → sort → Arrow when sorting by tags:
+```python
+# TODO: reimplement using polars natively
+```
+
+The comment is misleading — the fix is actually to use PyArrow's native `.sort_by()` method
+directly, eliminating the Polars dependency for this code path and reducing conversion overhead.
+
+---
+
 ### F10 — `FunctionPodNodeStream.iter_packets` recomputes every packet on every call
 **Status:** resolved
 **Severity:** high
@@ -244,6 +362,54 @@ does not exist.
 `FunctionPodNodeStream.as_table()` with a column-existence check. Also made the final
 `output_table = self._cached_output_table.drop(drop_columns)` safe by filtering `drop_columns`
 to only columns that exist in the table.
+
+---
+
+## `src/orcapod/core/streams/`
+
+### ST1 — `drop_packet_columns` may leave orphan source-info columns
+**Status:** open
+**Severity:** medium
+
+The `StreamProtocol.drop_packet_columns()` method (line ~309) drops data columns but it is
+unclear whether the corresponding `_source_<col>` columns are also removed:
+```python
+# TODO: check to make sure source columns are also dropped
+```
+
+If source-info columns survive after the data column is dropped, downstream consumers may see
+stale provenance data or schema mismatches.
+
+---
+
+### ST2 — `iter_packets()` does not support table batch streaming
+**Status:** open
+**Severity:** low
+
+`ArrowTableStream.iter_packets()` (line ~261) works only with fully materialized Arrow tables,
+not with `RecordBatchReader` or lazy batch iteration:
+```python
+# TODO: make it work with table batch stream
+```
+
+Relevant for future streaming/chunked processing of large datasets.
+
+---
+
+### ST3 — Column selection operators duplicate `validate_unary_input()` five times
+**Status:** open
+**Severity:** medium
+
+`SelectTagColumns`, `SelectPacketColumns`, `DropTagColumns`, `DropPacketColumns` (in
+`column_selection.py:58`, `137`, `214`, `292`) and `PolarsFilterByPacketColumns`
+(`filters.py:135`) each have near-identical `validate_unary_input()` implementations. All are
+marked:
+```python
+# TODO: remove redundant logic
+```
+
+The only difference between them is which key set (tag vs. packet) is checked and the error
+message text. A shared parameterized validation helper would eliminate the duplication.
 
 ---
 
@@ -379,5 +545,280 @@ Potential patterns (to be designed as needs arise):
 - **ConditionalPod** — route packets to different pods based on a predicate, merge results
 - **FanOutFanIn** — broadcast to N pods, collect and merge/concat results
 - **FallbackPod** — try primary pod, fall back to secondary on error/None result
+
+---
+
+## `src/orcapod/databases/delta_lake_databases.py`
+
+### D1 — `flush()` swallows individual batch write errors
+**Status:** open
+**Severity:** critical
+
+`flush()` (line ~817) iterates over all pending batches, logs errors individually, but never
+raises. Callers have no way to know that writes partially or fully failed:
+```python
+# TODO: capture and re-raise exceptions at the end
+```
+
+This is silent data loss — a batch write can fail and the caller proceeds as if everything
+was persisted.
+
+Fix: accumulate exceptions during the loop; raise an `ExceptionGroup` (or custom aggregate
+error) at the end containing all failures.
+
+---
+
+### D2 — `flush_batch()` uses `mode="overwrite"` for new table creation
+**Status:** open
+**Severity:** high
+
+`flush_batch()` (line ~856) creates new Delta tables with `mode="overwrite"`:
+```python
+# TODO: reconsider mode="overwrite" here
+```
+
+If a table already exists at that path (race condition, stale state, or misconfigured pipeline
+path), existing data is silently destroyed. Should use `mode="error"` to fail fast, or
+`mode="append"` with an explicit existence check.
+
+---
+
+### D3 — `_refresh_existing_ids_cache()` loads entire Delta table into memory
+**Status:** open
+**Severity:** high
+
+The method (line ~252) calls `to_pyarrow_table()` on the full Delta table just to extract the
+ID column:
+```python
+# TODO: replace this with more targetted loading of only the target column and in batches
+```
+
+For large tables, this is a critical memory bottleneck. Delta Lake supports column projection
+(`columns=[id_col]`) and batch reading, which would reduce memory usage by orders of magnitude.
+
+---
+
+### D4 — `_refresh_existing_ids_cache()` catches missing column reactively
+**Status:** open
+**Severity:** high
+
+In the same method (line ~257), if the ID column doesn't exist, a `KeyError` is caught as a
+fallback:
+```python
+# TODO: replace this with proper checking of the table schema first!
+```
+
+Schema should be validated proactively by loading schema metadata before attempting to read
+the column.
+
+---
+
+### D5 — `_handle_schema_compatibility()` uses naive equality and broad exception catching
+**Status:** open
+**Severity:** medium
+
+The method (lines ~467, ~485) compares schemas with simple equality and catches all exceptions:
+```python
+# TODO: perform more careful check
+# TODO: perform more careful error check
+```
+
+Should implement nuanced schema comparison (e.g., field-order invariance, nullable vs.
+non-nullable promotion) and catch specific exceptions rather than bare `except`.
+
+---
+
+### D6 — `defaultdict` used for `_cache_dirty` is not serializable
+**Status:** open
+**Severity:** medium
+
+`__init__()` (line ~69) initializes `_cache_dirty` as `defaultdict(bool)`:
+```python
+# TODO: reconsider this approach as this is NOT serializable
+```
+
+`defaultdict` is not pickle-serializable, which blocks multiprocessing or serialization
+use cases. Fix: use a regular dict with `.get(key, False)`.
+
+---
+
+### D7 — Silent deduplication in `_deduplicate_within_table()`
+**Status:** open
+**Severity:** medium
+
+The method (line ~383) silently drops duplicate rows with no warning:
+```python
+# TODO: consider erroring out if duplicates are found
+```
+
+Duplicates may indicate an upstream bug. Should at least log a warning; consider making
+behavior configurable (warn, error, or silent).
+
+---
+
+## `src/orcapod/hashing/`
+
+### H1 — `FunctionSignatureExtractor` ignores `input_types` and `output_types` parameters
+**Status:** open
+**Severity:** critical
+
+`extract_function_info()` (`function_info_extractors.py:36`) accepts `input_typespec` and
+`output_typespec` but never incorporates them into the extracted signature string:
+```python
+# FIXME: Fix this implementation!!
+# BUG: Currently this is not using the input_types and output_types parameters
+```
+
+The extracted signature is therefore type-agnostic — two functions with identical names but
+different type annotations produce the same hash. This is a correctness bug that can cause
+cache collisions between type-overloaded functions.
+
+Fix: wire the type specs into the signature string; update tests.
+
+---
+
+### H2 — Arrow hasher processes full table at once
+**Status:** open
+**Severity:** medium
+
+`SemanticArrowHasher._process_table_columns()` (`arrow_hashers.py:104`) calls `to_pylist()`
+on the entire table, loading all rows into Python memory:
+```python
+# TODO: Process in batchwise/chunk-wise fashion for memory efficiency
+```
+
+For large tables, this is a significant memory bottleneck. Should use Arrow's `to_batches()`
+for chunk-wise processing.
+
+---
+
+### H3 — Visitor pattern does not traverse map types
+**Status:** open
+**Severity:** medium
+
+`visit_map()` in `visitors.py:225` is a pass-through that does not recurse into map
+keys/values:
+```python
+TODO: Implement proper map traversal if needed for semantic types in keys/values.
+```
+
+Semantic types nested inside map columns will not be processed during hashing, leading to
+incorrect or incomplete hash values.
+
+---
+
+### H4 — Legacy backwards-compatible exports in `hashing/__init__.py`
+**Status:** open
+**Severity:** low
+
+The module (line ~141) re-exports old API names for backwards compatibility:
+```python
+# TODO: remove legacy section
+```
+
+Should be removed in the next breaking release. Consider adding deprecation warnings first.
+
+---
+
+## `src/orcapod/utils/`
+
+### U1 — Source-info column type hard-coded to `large_string`
+**Status:** open
+**Severity:** critical
+
+In `add_source_info_to_table()` (`arrow_utils.py:604`), when source info is a collection it is
+unconditionally cast to `pa.list_(pa.large_string())`:
+```python
+# TODO: this won't work other data types!!!
+```
+
+Any non-string collection values will fail or silently corrupt data. The logic also has an
+unclear nested isinstance check (line ~602: `# TODO: clean up the logic here`).
+
+Fix: inspect collection element types to select the appropriate Arrow type; refactor the
+conditional logic.
+
+---
+
+### U2 — Bare `except` in `get_git_info()`
+**Status:** open
+**Severity:** high
+
+`get_git_info()` (`git_utils.py:55`) catches all exceptions including `KeyboardInterrupt` and
+`SystemExit`:
+```python
+except:  # TODO: specify exception
+```
+
+Fix: catch `(OSError, subprocess.SubprocessError, FileNotFoundError)` specifically.
+
+---
+
+### U3 — `check_arrow_schema_compatibility()` lacks strict mode and type coercion
+**Status:** open
+**Severity:** high
+
+The function (`arrow_utils.py:433`, `462`) documents strict vs. non-strict behavior but only
+partially implements the non-strict path:
+```python
+# TODO: add strict comparison
+# TODO: if not strict, allow type coercion
+```
+
+Currently, the function always raises on type mismatch instead of coercing compatible types
+when in non-strict mode. Users cannot choose between strict field-order checking and permissive
+type promotion.
+
+---
+
+### U4 — `is_subhint` does not handle type invariance
+**Status:** open
+**Severity:** high
+
+`check_schema_compatibility()` (`schema_utils.py:37`) uses beartype's `is_subhint` which
+treats all generics as covariant:
+```python
+# TODO: is_subhint does not handle invariance properly
+```
+
+For mutable containers (`list[int]` vs `list[float]`), this produces false positives —
+schemas are reported as compatible when they are not (e.g., a `list[int]` field is accepted
+where `list[float]` is expected, but appending a float to `list[int]` would fail at runtime).
+
+Options: add an invariance-aware wrapper, switch to a stricter type comparison, or document
+the limitation prominently.
+
+---
+
+## `src/orcapod/contexts/registry.py`
+
+### C1 — Redundant manual validation duplicates JSON Schema checks
+**Status:** open
+**Severity:** medium
+
+`_load_spec_file()` (line ~141) performs manual required-field checking followed by JSON Schema
+validation:
+```python
+# TODO: clean this up -- sounds redundant to the validation performed by schema check
+```
+
+The manual check is fully subsumed by the JSON Schema validation. Either remove the manual
+checks, or make the JSON Schema validation optional and keep manual checks as the fallback.
+
+---
+
+## `src/orcapod/core/tracker.py`
+
+### T1 — `SourceNode.identity_structure()` assumes root source
+**Status:** open
+**Severity:** medium
+
+The method (line ~163) delegates directly to `stream.identity_structure()`:
+```python
+# TODO: revisit this logic for case where stream is not a root source
+```
+
+For derived sources (e.g., `DerivedSource`), the stream may not have a meaningful
+`identity_structure()`. Needs an isinstance check or protocol-based dispatch.
 
 ---
