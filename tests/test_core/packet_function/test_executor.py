@@ -530,3 +530,143 @@ class TestConstructorValidation:
         executor = NonPythonExecutor()
         with pytest.raises(TypeError, match="does not support"):
             PythonPacketFunction(add, output_keys="result", executor=executor)
+
+
+# ---------------------------------------------------------------------------
+# 10. Concurrent iteration
+# ---------------------------------------------------------------------------
+
+
+class ConcurrentSpyExecutor(PacketFunctionExecutorBase):
+    """Executor that supports concurrent execution and tracks sync vs async calls."""
+
+    def __init__(self) -> None:
+        self.sync_calls: list[PacketProtocol] = []
+        self.async_calls: list[PacketProtocol] = []
+
+    @property
+    def executor_type_id(self) -> str:
+        return "concurrent-spy"
+
+    def supported_function_type_ids(self) -> frozenset[str]:
+        return frozenset()
+
+    @property
+    def supports_concurrent_execution(self) -> bool:
+        return True
+
+    def execute(
+        self,
+        packet_function: PacketFunctionProtocol,
+        packet: PacketProtocol,
+    ) -> PacketProtocol | None:
+        self.sync_calls.append(packet)
+        return packet_function.direct_call(packet)
+
+    async def async_execute(
+        self,
+        packet_function: PacketFunctionProtocol,
+        packet: PacketProtocol,
+    ) -> PacketProtocol | None:
+        self.async_calls.append(packet)
+        return packet_function.direct_call(packet)
+
+
+class TestConcurrentIteration:
+    def test_function_pod_stream_uses_async_path(self):
+        from orcapod.core.function_pod import FunctionPod
+
+        spy = ConcurrentSpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pod = FunctionPod(pf)
+
+        stream = _make_add_stream()
+        output_stream = pod.process(stream)
+        results = list(output_stream.iter_packets())
+
+        assert len(results) == 2
+        assert results[0][1].as_dict()["result"] == 3
+        assert results[1][1].as_dict()["result"] == 7
+        # Should have used async path, not sync
+        assert len(spy.async_calls) == 2
+        assert len(spy.sync_calls) == 0
+
+    def test_function_node_uses_async_path(self):
+        from orcapod.core.function_pod import FunctionNode, FunctionPod
+
+        spy = ConcurrentSpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pod = FunctionPod(pf)
+
+        node = FunctionNode(pod, _make_add_stream())
+        results = list(node.iter_packets())
+
+        assert len(results) == 2
+        assert results[0][1].as_dict()["result"] == 3
+        assert results[1][1].as_dict()["result"] == 7
+        assert len(spy.async_calls) == 2
+        assert len(spy.sync_calls) == 0
+
+    def test_non_concurrent_executor_uses_sync_path(self):
+        """SpyExecutor has supports_concurrent_execution=False (default)."""
+        from orcapod.core.function_pod import FunctionNode, FunctionPod
+
+        spy = SpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pod = FunctionPod(pf)
+
+        node = FunctionNode(pod, _make_add_stream())
+        results = list(node.iter_packets())
+
+        assert len(results) == 2
+        # SpyExecutor.execute was called (sync path)
+        assert len(spy.calls) == 2
+
+    def test_no_executor_uses_sync_path(self):
+        from orcapod.core.function_pod import FunctionNode, FunctionPod
+
+        pf = PythonPacketFunction(add, output_keys="result")
+        pod = FunctionPod(pf)
+
+        node = FunctionNode(pod, _make_add_stream())
+        results = list(node.iter_packets())
+
+        assert len(results) == 2
+        assert results[0][1].as_dict()["result"] == 3
+
+    def test_concurrent_results_preserve_order(self):
+        """Results should come back in the same order as inputs."""
+        from orcapod.core.function_pod import FunctionPod
+
+        spy = ConcurrentSpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pod = FunctionPod(pf)
+
+        rows = [
+            {"id": i, "x": i, "y": i * 10}
+            for i in range(5)
+        ]
+        stream = _make_add_stream(rows)
+        output = pod.process(stream)
+        results = [tag_pkt[1].as_dict()["result"] for tag_pkt in output.iter_packets()]
+        assert results == [0, 11, 22, 33, 44]
+
+    def test_second_iteration_uses_cache(self):
+        """After concurrent first pass, second call yields from cache."""
+        from orcapod.core.function_pod import FunctionPod
+
+        spy = ConcurrentSpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pod = FunctionPod(pf)
+
+        stream = _make_add_stream()
+        output_stream = pod.process(stream)
+
+        # First iteration: concurrent
+        first = list(output_stream.iter_packets())
+        assert len(spy.async_calls) == 2
+
+        # Second iteration: from cache, no new executor calls
+        second = list(output_stream.iter_packets())
+        assert len(spy.async_calls) == 2  # unchanged
+        assert len(first) == len(second)

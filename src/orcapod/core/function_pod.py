@@ -39,6 +39,38 @@ else:
     pl = LazyModule("polars")
 
 
+def _executor_supports_concurrent(
+    packet_function: PacketFunctionProtocol,
+) -> bool:
+    """Return True if the packet function's executor supports concurrent execution."""
+    executor = packet_function.executor
+    return executor is not None and executor.supports_concurrent_execution
+
+
+def _execute_concurrent(
+    packet_function: PacketFunctionProtocol,
+    packets: list[PacketProtocol],
+) -> list[PacketProtocol | None]:
+    """
+    Submit all *packets* to the executor concurrently via ``async_call``
+    and return results in the same order.
+
+    Uses ``asyncio.gather`` to run all tasks concurrently, then blocks
+    until all complete.  This is the mechanism that lets a Ray executor
+    fire off all remote tasks at once rather than waiting one-by-one.
+    """
+    import asyncio
+
+    async def _gather() -> list[PacketProtocol | None]:
+        return list(
+            await asyncio.gather(
+                *[packet_function.async_call(pkt) for pkt in packets]
+            )
+        )
+
+    return asyncio.run(_gather())
+
+
 class _FunctionPodBase(TraceableBase):
     """
     A thin wrapper around a packet function, creating a pod that applies the
@@ -346,29 +378,70 @@ class FunctionPodStream(StreamBase):
         if self.is_stale:
             self.clear_cache()
         if self._cached_input_iterator is not None:
-            input_iter = self._cached_input_iterator
-            for i, (tag, packet) in enumerate(input_iter):
-                if i in self._cached_output_packets:
-                    # Use cached result
-                    tag, packet = self._cached_output_packets[i]
-                    if packet is not None:
-                        yield tag, packet
-                else:
-                    # Process packet
-                    tag, output_packet = self._function_pod.process_packet(tag, packet)
-                    self._cached_output_packets[i] = (tag, output_packet)
-                    if output_packet is not None:
-                        # Update shared cache for future iterators (optimization)
-                        yield tag, output_packet
-
-            # Mark completion by releasing the iterator
-            self._cached_input_iterator = None
+            pf = self._function_pod.packet_function
+            if _executor_supports_concurrent(pf):
+                yield from self._iter_packets_concurrent(pf)
+            else:
+                yield from self._iter_packets_sequential()
         else:
             # Yield from snapshot of complete cache
             for i in range(len(self._cached_output_packets)):
                 tag, packet = self._cached_output_packets[i]
                 if packet is not None:
                     yield tag, packet
+
+    def _iter_packets_sequential(
+        self,
+    ) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
+        input_iter = self._cached_input_iterator
+        for i, (tag, packet) in enumerate(input_iter):
+            if i in self._cached_output_packets:
+                # Use cached result
+                tag, packet = self._cached_output_packets[i]
+                if packet is not None:
+                    yield tag, packet
+            else:
+                # Process packet
+                tag, output_packet = self._function_pod.process_packet(tag, packet)
+                self._cached_output_packets[i] = (tag, output_packet)
+                if output_packet is not None:
+                    yield tag, output_packet
+
+        # Mark completion by releasing the iterator
+        self._cached_input_iterator = None
+
+    def _iter_packets_concurrent(
+        self,
+        packet_function: PacketFunctionProtocol,
+    ) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
+        """
+        Collect all remaining input packets, execute them concurrently
+        via the executor's ``async_execute``, then yield results in order.
+        """
+        input_iter = self._cached_input_iterator
+
+        # Materialise remaining inputs and separate cached from uncached.
+        all_inputs: list[tuple[int, TagProtocol, PacketProtocol]] = []
+        to_compute: list[tuple[int, TagProtocol, PacketProtocol]] = []
+        for i, (tag, packet) in enumerate(input_iter):
+            all_inputs.append((i, tag, packet))
+            if i not in self._cached_output_packets:
+                to_compute.append((i, tag, packet))
+        self._cached_input_iterator = None
+
+        # Submit uncached packets concurrently and cache results.
+        if to_compute:
+            results = _execute_concurrent(
+                packet_function, [pkt for _, _, pkt in to_compute]
+            )
+            for (i, tag, _), output_packet in zip(to_compute, results):
+                self._cached_output_packets[i] = (tag, output_packet)
+
+        # Yield everything in original order.
+        for i, *_ in all_inputs:
+            tag, packet = self._cached_output_packets[i]
+            if packet is not None:
+                yield tag, packet
 
     def as_table(
         self,
@@ -707,23 +780,60 @@ class FunctionNode(StreamBase):
         if self.is_stale:
             self.clear_cache()
         if self._cached_input_iterator is not None:
-            input_iter = self._cached_input_iterator
-            for i, (tag, packet) in enumerate(input_iter):
-                if i in self._cached_output_packets:
-                    tag, packet = self._cached_output_packets[i]
-                    if packet is not None:
-                        yield tag, packet
-                else:
-                    output_packet = self._packet_function.call(packet)
-                    self._cached_output_packets[i] = (tag, output_packet)
-                    if output_packet is not None:
-                        yield tag, output_packet
-            self._cached_input_iterator = None
+            if _executor_supports_concurrent(self._packet_function):
+                yield from self._iter_packets_concurrent()
+            else:
+                yield from self._iter_packets_sequential()
         else:
             for i in range(len(self._cached_output_packets)):
                 tag, packet = self._cached_output_packets[i]
                 if packet is not None:
                     yield tag, packet
+
+    def _iter_packets_sequential(
+        self,
+    ) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
+        input_iter = self._cached_input_iterator
+        for i, (tag, packet) in enumerate(input_iter):
+            if i in self._cached_output_packets:
+                tag, packet = self._cached_output_packets[i]
+                if packet is not None:
+                    yield tag, packet
+            else:
+                output_packet = self._packet_function.call(packet)
+                self._cached_output_packets[i] = (tag, output_packet)
+                if output_packet is not None:
+                    yield tag, output_packet
+        self._cached_input_iterator = None
+
+    def _iter_packets_concurrent(
+        self,
+    ) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
+        """
+        Collect all remaining input packets, execute them concurrently
+        via the executor's ``async_execute``, then yield results in order.
+        """
+        input_iter = self._cached_input_iterator
+
+        all_inputs: list[tuple[int, TagProtocol, PacketProtocol]] = []
+        to_compute: list[tuple[int, TagProtocol, PacketProtocol]] = []
+        for i, (tag, packet) in enumerate(input_iter):
+            all_inputs.append((i, tag, packet))
+            if i not in self._cached_output_packets:
+                to_compute.append((i, tag, packet))
+        self._cached_input_iterator = None
+
+        if to_compute:
+            results = _execute_concurrent(
+                self._packet_function, [pkt for _, _, pkt in to_compute]
+            )
+            for (i, tag, _), output_packet in zip(to_compute, results):
+                self._cached_output_packets[i] = (tag, output_packet)
+
+        for i, *_ in all_inputs:
+            tag, packet = self._cached_output_packets[i]
+            if packet is not None:
+                yield tag, packet
 
     def as_table(
         self,
