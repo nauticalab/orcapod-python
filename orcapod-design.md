@@ -34,9 +34,11 @@ Every source has a `source_id` — a canonical registry name used to register th
 
 A **function pod** wraps a **packet function** — a stateless computation that consumes a single packet and produces an output packet. Function pods never inspect tags or stream structure; they operate purely on packet content. When given multiple input streams, a function pod joins them via a configurable multi-stream handler (defaulting to `Join`) before iterating.
 
+Packet functions support pluggable executors (see **Packet Function Executor System**). When an executor is set, `call()` routes through `executor.execute()` and `async_call()` routes through `executor.async_execute()`. When no executor is set, the function's native `direct_call()` / `direct_async_call()` is invoked directly. For `PythonPacketFunction`, `direct_async_call` runs the synchronous function in a thread pool via `asyncio.run_in_executor`.
+
 Two execution models exist:
 
-- **FunctionPod + FunctionPodStream** — lazy, in-memory evaluation. The function pod processes each (tag, packet) pair from the input stream on demand, caching results by index.
+- **FunctionPod + FunctionPodStream** — lazy, in-memory evaluation. The function pod processes each (tag, packet) pair from the input stream on demand, caching results by index. When the attached executor declares `supports_concurrent_execution = True`, `iter_packets()` materializes all remaining inputs and dispatches them concurrently via `asyncio.gather` over `async_call`, yielding results in order.
 
 - **FunctionNode** — database-backed evaluation with incremental computation. Execution proceeds in two phases:
   1. **Phase 1**: yield cached results from the pipeline database for inputs whose hashes are already stored.
@@ -59,6 +61,8 @@ Operators are subclasses of `StaticOutputPod` organized by input arity:
 Each operator declares its **argument symmetry** — whether inputs commute (`frozenset`, order-invariant) or have fixed positions (`tuple`, order-dependent). This determines how upstream hashes are combined for pipeline identity.
 
 The `OperatorNode` is the database-backed counterpart, analogous to `FunctionNode` for function pods. It applies the operator, materializes the output with per-row record hashes, and stores the result in the pipeline database.
+
+Every operator inherits a default barrier-mode `async_execute` from its base class (collect all inputs, run `static_process`, emit results). Subclasses can override for streaming or incremental strategies (see **Execution Models**).
 
 ---
 
@@ -431,16 +435,214 @@ This means:
 
 ## Execution Models
 
-Three execution models coexist:
+OrcaPod supports two complementary execution strategies — **synchronous pull-based** and **asynchronous push-based** — that produce semantically identical results. The choice of strategy is an execution concern, not a data-identity concern: neither content hashes nor pipeline hashes depend on how the pipeline was executed.
 
-### Lazy In-Memory (FunctionPod → FunctionPodStream)
-The function pod processes each packet on demand. Results are cached by index in memory. No database persistence. Suitable for exploration and one-off computations.
+### Synchronous Execution (Pull-Based)
 
-### Static with Recomputation (StaticOutputPod → DynamicPodStream)
+The default model. Callers invoke `process()` on a pod, which returns a stream. Iteration over the stream triggers computation lazily.
+
+Three variants exist within the synchronous model:
+
+**1. Lazy In-Memory (FunctionPod → FunctionPodStream)**
+The function pod processes each packet on demand via `iter_packets()`. Results are cached by index in memory. No database persistence. Suitable for exploration and one-off computations.
+
+**2. Static with Recomputation (StaticOutputPod → DynamicPodStream)**
 The operator's `static_process` produces a complete output stream. `DynamicPodStream` wraps it with timestamp-based staleness detection and automatic recomputation when upstreams change.
 
-### Database-Backed Incremental (FunctionNode / OperatorNode)
-Results are persisted in a pipeline database. Incremental computation: only process inputs whose hashes are not already in the database. Per-row record hashes enable deduplication. Suitable for production pipelines with expensive computations.
+**3. Database-Backed Incremental (FunctionNode / OperatorNode → PersistentFunctionNode / PersistentOperatorNode)**
+Results are persisted in a pipeline database. Incremental computation: only process inputs whose hashes are not already in the database. Per-row record hashes enable deduplication. Suitable for production pipelines with expensive computations. `PersistentFunctionNode` extends `FunctionNode` with result caching via `CachedPacketFunction` and two-phase iteration (Phase 1: yield cached results, Phase 2: compute missing). `PersistentOperatorNode` extends `OperatorNode` with three-tier caching (off / log / replay).
+
+**Concurrent execution within sync mode:**
+When a `PacketFunctionExecutor` with `supports_concurrent_execution = True` is attached (e.g. `RayExecutor`), `FunctionPodStream.iter_packets()` materializes all remaining input packets and dispatches them concurrently via the executor's `async_execute`, collecting results in order. This provides data-parallel speedup without leaving the synchronous call model.
+
+### Asynchronous Execution (Push-Based Channels)
+
+Every pipeline node — source, operator, or function pod — implements the `AsyncExecutableProtocol`:
+
+```python
+async def async_execute(
+    inputs: Sequence[ReadableChannel[tuple[Tag, Packet]]],
+    output: WritableChannel[tuple[Tag, Packet]],
+) -> None
+```
+
+Nodes consume `(Tag, Packet)` pairs from input channels and produce them to an output channel. This enables push-based, streaming execution where data flows through the pipeline as soon as it's available, with backpressure propagated via bounded channel buffers.
+
+**Operator async strategies:**
+
+| Strategy | Description | Operators |
+|---|---|---|
+| **Barrier mode** (default) | Collect all inputs, run `static_process`, emit results | Batch (inherently barrier) |
+| **Streaming overrides** | Process rows individually, zero buffering | PolarsFilter, MapTags, MapPackets, Select/Drop columns |
+| **Incremental overrides** | Stateful, emit partial results as inputs arrive | Join (symmetric hash join), MergeJoin, SemiJoin (buffer right, stream left) |
+
+**FunctionPod async strategy:** Streaming mode — each input `(tag, packet)` is processed independently with semaphore-controlled concurrency. Uses `asyncio.TaskGroup` for structured concurrency.
+
+### Sync / Async Equivalence
+
+Both execution paths produce identical output given identical inputs. The sync path is simpler to debug and compose; the async path enables pipeline-level parallelism and streaming. The `PipelineConfig.executor` field selects between them:
+
+| `ExecutorType` | Mechanism | Use case |
+|---|---|---|
+| `SYNCHRONOUS` | `process()` chain with pull-based materialization | Interactive exploration, debugging |
+| `ASYNC_CHANNELS` | `async_execute()` with push-based channels | Production pipelines, concurrent I/O |
+
+---
+
+## Channel System
+
+Channels are the communication primitive for push-based async execution. They are bounded async queues with explicit close/done signaling and backpressure.
+
+### Channel
+
+A `Channel[T]` is a bounded async buffer (default capacity 64) with separate reader and writer views:
+
+- **`WritableChannel`** — `send(item)` blocks when the buffer is full (backpressure). `close()` signals that no more items will be sent.
+- **`ReadableChannel`** — `receive()` blocks until an item is available. Raises `ChannelClosed` when the channel is closed and drained. Supports `async for` iteration and `collect()` to drain into a list.
+
+### BroadcastChannel
+
+A `BroadcastChannel[T]` fans out items from a single writer to multiple independent readers. Each `add_reader()` creates a reader with its own queue, so downstream consumers read at their own pace without interfering.
+
+### Backpressure
+
+Backpressure propagates naturally: when a downstream reader is slow, the writer blocks on `send()` once the buffer fills. This prevents unbounded memory growth and creates natural flow control through the pipeline graph.
+
+---
+
+## Packet Function Executor System
+
+Executors decouple **what** a packet function computes from **where** and **how** it runs. Every `PacketFunctionBase` has an optional `executor` slot. When set, `call()` and `async_call()` route through the executor instead of calling the function directly.
+
+### Routing
+
+```
+packet_function.call(packet)
+    ├── executor is set → executor.execute(packet_function, packet)
+    └── executor is None → packet_function.direct_call(packet)
+
+packet_function.async_call(packet)
+    ├── executor is set → executor.async_execute(packet_function, packet)
+    └── executor is None → packet_function.direct_async_call(packet)
+```
+
+Executors call `direct_call()` / `direct_async_call()` internally, which are the native computation methods that subclasses implement. This two-level routing ensures executors can wrap the computation without infinite recursion.
+
+### Executor Types
+
+| Executor | `executor_type_id` | Supported Types | Concurrent | Description |
+|---|---|---|---|---|
+| `LocalExecutor` | `"local"` | All | No | Runs in-process. Default. |
+| `RayExecutor` | `"ray.v0"` | `"python.function.v0"` | Yes | Dispatches to a Ray cluster. Configurable CPUs/GPUs/resources. |
+
+### Type Safety
+
+Each executor declares `supported_function_type_ids()`. Setting an incompatible executor raises `ValueError` at assignment time, not at execution time. An empty set means "supports all types" (used by `LocalExecutor`).
+
+### Identity Separation
+
+Executors are **not** part of content or pipeline identity. The same function produces the same hash regardless of whether it runs locally or on Ray. Executor metadata is captured separately via `get_execution_data()` for observability but does not affect hashing or caching.
+
+### Concurrency Configuration
+
+Two-level configuration controls per-node concurrency in async mode:
+
+- **`PipelineConfig`** — pipeline-level defaults: `executor` type, `channel_buffer_size`, `default_max_concurrency`.
+- **`NodeConfig`** — per-node override: `max_concurrency`. `None` inherits from pipeline config. `1` forces sequential execution (useful for rate-limited APIs or order-preserving operations).
+
+`resolve_concurrency(node_config, pipeline_config)` returns the effective limit. In `FunctionPod.async_execute`, this limit governs an `asyncio.Semaphore` controlling how many packets are in-flight concurrently.
+
+---
+
+## Pipeline Compilation and Orchestration
+
+### Graph Tracking
+
+All pod invocations are automatically recorded by a global `BasicTrackerManager`. When a `StaticOutputPod.process()` or `FunctionPod.process()` is called, the tracker manager broadcasts the invocation to all registered trackers. This enables transparent DAG construction — the user writes normal imperative code, and the computation graph is captured behind the scenes.
+
+`GraphTracker` is the base tracker implementation. It maintains:
+- A **node lookup table** (`_node_lut`) mapping content hashes to `FunctionNode`, `OperatorNode`, or `SourceNode` objects.
+- An **upstream map** (`_upstreams`) mapping stream content hashes to stream objects.
+- A directed **edge list** (`_graph_edges`) recording (upstream_hash → downstream_hash) relationships.
+
+`GraphTracker.compile()` builds a `networkx.DiGraph`, topologically sorts it, and wraps unregistered leaf hashes in `SourceNode` objects, producing a complete typed DAG.
+
+### Pipeline
+
+`Pipeline` extends `GraphTracker` with persistence. Its lifecycle has three phases:
+
+**1. Recording phase (context manager).** Within a `with pipeline:` block, the pipeline registers itself as an active tracker. All pod invocations are captured as non-persistent nodes.
+
+**2. Compilation phase (`compile()`).** On context exit (if `auto_compile=True`), `compile()` walks the graph in topological order and replaces every node with its persistent variant:
+
+| Non-persistent | Persistent | Scoped by |
+|---|---|---|
+| Leaf stream | `PersistentSourceNode` | Stream content hash |
+| `FunctionNode` | `PersistentFunctionNode` | Pipeline hash (schema+topology) |
+| `OperatorNode` | `PersistentOperatorNode` | Content hash (structure+sources) |
+
+All persistent nodes share the same `pipeline_database` with the pipeline's name as path prefix. An optional separate `function_database` can be provided for function pod result caches.
+
+Compilation is **incremental**: re-entering the context, adding more operations, and compiling again preserves existing persistent nodes. Labels are disambiguated by content hash on collision.
+
+**3. Execution phase (`run()`).** Executes all compiled nodes in topological order by calling `node.run()` on each, then flushes all databases. Compiled nodes are accessible by label as attributes on the pipeline instance (e.g., `pipeline.compute_grades`).
+
+### Persistent Nodes
+
+| Node type | Behavior |
+|---|---|
+| `PersistentSourceNode` | Materializes the wrapped stream into a cache DB with per-row deduplication via content hash. On subsequent access, returns the union of cached + live data. |
+| `PersistentFunctionNode` | DB-backed two-phase iteration: Phase 1 yields cached results from the pipeline database, Phase 2 computes only missing inputs. Uses `CachedPacketFunction` for packet-level result caching. |
+| `PersistentOperatorNode` | DB-backed with three-tier cache mode: OFF (default, always recompute), LOG (compute and write to DB), REPLAY (skip computation, load from DB). |
+
+### Pipeline Composition
+
+Pipelines can be composed across boundaries:
+- **Cross-pipeline references** — Pipeline B can use Pipeline A's compiled nodes as input streams.
+- **Chain detachment** via `.as_source()` — `PersistentFunctionNode.as_source()` and `PersistentOperatorNode.as_source()` return a `DerivedSource` that reads from the pipeline database, breaking the upstream Merkle chain. Downstream pipelines reference the derived source directly, independent of the upstream topology that produced it.
+
+---
+
+## Fused Pod Pattern
+
+### Motivation
+
+The strict operator / function pod boundary is central to OrcaPod's provenance guarantees: operators never synthesize values (provenance transparent), function pods always synthesize values (provenance tracked). This two-category model keeps provenance tracking simple and robust.
+
+However, certain common patterns require combining both behaviors in a single logical operation. The most common is **enrichment** — running a function on a packet and appending the computed columns to the original packet rather than replacing it. The naïve decomposition into `FunctionPod + Join` works but incurs unnecessary overhead: an intermediate stream is materialized only to be immediately joined back, and the join must re-match tags that trivially correspond because they came from the same input row.
+
+### Fused Pods as Optimization, Not Extension
+
+A **fused pod** is an implementation-level pod type that combines the behaviors of multiple existing pod types into a single pass, without introducing a new provenance category. Its correctness is verified by checking equivalence with its decomposition.
+
+The key invariant: **every column in a fused pod's output maps to exactly one existing provenance category.**
+
+- **Preserved columns** (from upstream) — provenance transparent, source-info passes through unchanged. This is the operator-like component.
+- **Computed columns** (from the wrapped PacketFunction) — provenance tracked, source-info references the PacketFunction. This is the function-pod-like component.
+
+There is no third kind of output column. The theoretical provenance model stays clean (Source, Operator, FunctionPod), and fused pods are justified as performance/ergonomic optimizations whose provenance semantics are *derived from* the existing model rather than extending it.
+
+This is analogous to how a database query optimizer fuses filter+project into a single scan without changing the relational algebra semantics.
+
+### AddResult
+
+The first planned fused pod. Wraps a `PacketFunction` and merges the function output back into the original packet:
+
+```python
+grade_pf = PythonPacketFunction(compute_letter_grade, output_keys="letter_grade")
+enriched = AddResult(grade_pf).process(stream)
+# enriched has all original columns + "letter_grade"
+```
+
+Equivalent decomposition: `FunctionPod(pf).process(stream)` → `Join()(stream, computed)`.
+
+Efficiency gains: no intermediate stream materialization, no redundant tag matching, no broadcast/rejoin wiring. The async path streams row-by-row like FunctionPod.
+
+Implementation constraints:
+- `output_schema()` returns `(input_tag_schema, input_packet_schema | function_output_schema)`.
+- Raises `InputValidationError` if function output keys collide with existing packet column names.
+- `pipeline_hash` commits to the wrapped PacketFunction's identity plus the upstream's pipeline hash (as if the decomposition were performed).
+- Source-info on computed columns references the PacketFunction. Source-info on preserved columns passes through unchanged.
 
 ---
 
