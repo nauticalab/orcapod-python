@@ -27,6 +27,11 @@ When fixing a bug or addressing a design problem:
 When discovering a new issue that won't be fixed immediately, ask the user whether it should be
 logged in DESIGN_ISSUES.md before adding it.
 
+## Docstrings
+
+Use Google style (https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings)
+Python docstrings everywhere.
+
 ## Git commits
 
 Always use Conventional Commits style (https://www.conventionalcommits.org/):
