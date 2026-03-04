@@ -135,7 +135,15 @@ patients_v2 = ArrowTableSource(
     tag_columns=["patient_id"],
 )
 
-# Rebuild pipeline with updated source
+labs_v2 = ArrowTableSource(
+    pa.table({
+        "patient_id": pa.array(["p1", "p2", "p3", "p4"], type=pa.large_string()),
+        "cholesterol": pa.array([180, 220, 260, 200], type=pa.int64()),
+    }),
+    tag_columns=["patient_id"],
+)
+
+# Rebuild pipeline with updated sources
 pipeline2 = Pipeline(name="risk_pipeline", pipeline_database=db)
 with pipeline2:
     joined = patients_v2.join(labs_v2, label="join_data")

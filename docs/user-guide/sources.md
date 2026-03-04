@@ -151,6 +151,7 @@ durable identity:
 
 ```python
 from orcapod import DerivedSource
+from orcapod.core.operators import Join
 
 # After running a pipeline node
 derived = function_node.as_source()

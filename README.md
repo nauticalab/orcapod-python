@@ -92,6 +92,7 @@ uv run pytest tests/
 uv run pytest tests/ --cov=src --cov-report=term-missing
 
 # Build documentation locally
+uv sync --group docs
 uv run mkdocs serve
 ```
 

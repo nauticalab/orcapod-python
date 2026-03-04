@@ -53,7 +53,7 @@ pipeline object:
 ```python
 with pipeline:
     joined = source_a.join(source_b, label="join_data")
-    risk_pod(joined, label="compute_risk")
+    risk_stream = risk_pod(joined, label="compute_risk")
     cat_pod(risk_stream, label="categorize")
 
 pipeline.run()
