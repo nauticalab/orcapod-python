@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.executors.base import PacketFunctionExecutorBase
@@ -12,6 +13,11 @@ class RayExecutor(PacketFunctionExecutorBase):
     """Executor that dispatches Python packet functions to a Ray cluster.
 
     Only supports ``packet_function_type_id == "python.function.v0"``.
+
+    The caller is responsible for calling ``ray.init(...)`` before using
+    this executor.  If ``ray_address`` is provided and Ray has not been
+    initialized yet, this executor will call ``ray.init(address=...)``
+    lazily on first use.
 
     Note:
         ``ray`` is an optional dependency.  Import errors surface at
@@ -41,6 +47,16 @@ class RayExecutor(PacketFunctionExecutorBase):
         self._num_gpus = num_gpus
         self._resources = resources
 
+    def _ensure_ray_initialized(self) -> None:
+        """Initialize Ray if it has not been initialized yet."""
+        import ray
+
+        if not ray.is_initialized():
+            if self._ray_address is not None:
+                ray.init(address=self._ray_address)
+            else:
+                ray.init()
+
     @property
     def executor_type_id(self) -> str:
         return "ray.v0"
@@ -52,6 +68,17 @@ class RayExecutor(PacketFunctionExecutorBase):
     def supports_concurrent_execution(self) -> bool:
         return True
 
+    def _build_remote_opts(self) -> dict[str, Any]:
+        """Build the Ray remote options dict from instance config."""
+        opts: dict[str, Any] = {}
+        if self._num_cpus is not None:
+            opts["num_cpus"] = self._num_cpus
+        if self._num_gpus is not None:
+            opts["num_gpus"] = self._num_gpus
+        if self._resources is not None:
+            opts["resources"] = self._resources
+        return opts
+
     def execute(
         self,
         packet_function: PacketFunctionProtocol,
@@ -59,15 +86,9 @@ class RayExecutor(PacketFunctionExecutorBase):
     ) -> PacketProtocol | None:
         import ray
 
-        remote_opts: dict[str, Any] = {}
-        if self._num_cpus is not None:
-            remote_opts["num_cpus"] = self._num_cpus
-        if self._num_gpus is not None:
-            remote_opts["num_gpus"] = self._num_gpus
-        if self._resources is not None:
-            remote_opts["resources"] = self._resources
+        self._ensure_ray_initialized()
 
-        @ray.remote(**remote_opts)
+        @ray.remote(**self._build_remote_opts())
         def _run(pf: Any, pkt: Any) -> Any:
             return pf.direct_call(pkt)
 
@@ -81,20 +102,15 @@ class RayExecutor(PacketFunctionExecutorBase):
     ) -> PacketProtocol | None:
         import ray
 
-        remote_opts: dict[str, Any] = {}
-        if self._num_cpus is not None:
-            remote_opts["num_cpus"] = self._num_cpus
-        if self._num_gpus is not None:
-            remote_opts["num_gpus"] = self._num_gpus
-        if self._resources is not None:
-            remote_opts["resources"] = self._resources
+        self._ensure_ray_initialized()
 
-        @ray.remote(**remote_opts)
+        @ray.remote(**self._build_remote_opts())
         def _run(pf: Any, pkt: Any) -> Any:
             return pf.direct_call(pkt)
 
         ref = _run.remote(packet_function, packet)
-        return await ref
+        future = ref.future()
+        return await asyncio.wrap_future(future)
 
     def get_execution_data(self) -> dict[str, Any]:
         data: dict[str, Any] = {
