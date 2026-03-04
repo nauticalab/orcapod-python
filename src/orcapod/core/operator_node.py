@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod import contexts
 from orcapod.config import Config
-from orcapod.core.static_output_pod import StaticOutputPod
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
@@ -194,7 +193,7 @@ class PersistentOperatorNode(OperatorNode):
 
     def __init__(
         self,
-        operator: StaticOutputPod,
+        operator: OperatorPodProtocol,
         input_streams: tuple[StreamProtocol, ...] | list[StreamProtocol],
         pipeline_database: ArrowDatabaseProtocol,
         cache_mode: CacheMode = CacheMode.OFF,
@@ -367,8 +366,12 @@ class PersistentOperatorNode(OperatorNode):
         """Return a DerivedSource backed by the DB records of this node."""
         from orcapod.core.sources.derived_source import DerivedSource
 
+        path_str = "/".join(self.pipeline_path)
+        content_frag = self.content_hash().to_string()[:16]
+        source_id = f"{path_str}:{content_frag}"
         return DerivedSource(
             origin=self,
+            source_id=source_id,
             data_context=self.data_context_key,
             config=self.orcapod_config,
         )

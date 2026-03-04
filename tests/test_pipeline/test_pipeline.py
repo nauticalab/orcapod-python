@@ -539,3 +539,326 @@ class TestPipelineExtension:
             n for n in pipe_b._node_graph.nodes() if isinstance(n, PersistentSourceNode)
         ]
         assert len(source_nodes) == 1
+
+
+# ---------------------------------------------------------------------------
+# Tests: hash chain — extending preserves hashes
+# ---------------------------------------------------------------------------
+
+
+class TestHashChainExtending:
+    def test_extending_content_hash_matches_single_pipeline(self, pipeline_db):
+        """An operator downstream of pipe_a.adder in pipe_b has the same
+        content_hash as if it were defined in a single pipeline."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        # Single pipeline baseline
+        db_single = InMemoryArrowDatabase()
+        single = Pipeline(name="single", pipeline_database=db_single)
+        with single:
+            joined = src_a.join(src_b, label="joiner")
+            pod(joined, label="adder")
+            single_stream = single  # capture for later
+        # Get content_hash of adder in single pipeline
+        with single:
+            single._nodes["adder"].map_packets(
+                {"total": "final_total"}, label="renamer"
+            )
+        single_renamer_content = single.renamer.content_hash()
+        single_renamer_pipeline = single.renamer.pipeline_hash()
+
+        # Two-pipeline version: pipe_a has adder, pipe_b uses pipe_a.adder → renamer
+        db_a = InMemoryArrowDatabase()
+        pipe_a = Pipeline(name="a", pipeline_database=db_a)
+        with pipe_a:
+            joined = src_a.join(src_b, label="joiner")
+            pod(joined, label="adder")
+
+        db_b = InMemoryArrowDatabase()
+        pipe_b = Pipeline(name="b", pipeline_database=db_b)
+        with pipe_b:
+            pipe_a.adder.map_packets({"total": "final_total"}, label="renamer")
+
+        two_renamer_content = pipe_b.renamer.content_hash()
+        two_renamer_pipeline = pipe_b.renamer.pipeline_hash()
+
+        # Extending should produce identical hashes
+        assert single_renamer_content == two_renamer_content
+
+    def test_extending_pipeline_hash_matches_single_pipeline(self, pipeline_db):
+        """pipeline_hash is identical whether nodes defined in one or two pipelines."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        # Single pipeline
+        db_single = InMemoryArrowDatabase()
+        single = Pipeline(name="single", pipeline_database=db_single)
+        with single:
+            joined = src_a.join(src_b, label="joiner")
+            pod(joined, label="adder")
+        with single:
+            single.adder.map_packets({"total": "final_total"}, label="renamer")
+        single_pipeline_hash = single.renamer.pipeline_hash()
+
+        # Two pipelines
+        db_a = InMemoryArrowDatabase()
+        pipe_a = Pipeline(name="a", pipeline_database=db_a)
+        with pipe_a:
+            joined = src_a.join(src_b, label="joiner")
+            pod(joined, label="adder")
+
+        db_b = InMemoryArrowDatabase()
+        pipe_b = Pipeline(name="b", pipeline_database=db_b)
+        with pipe_b:
+            pipe_a.adder.map_packets({"total": "final_total"}, label="renamer")
+
+        assert single_pipeline_hash == pipe_b.renamer.pipeline_hash()
+
+    def test_extending_same_pipeline_hashes_match_single_context(self, pipeline_db):
+        """Re-entering the same pipeline context preserves hash chain."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        # Single context baseline
+        db1 = InMemoryArrowDatabase()
+        single = Pipeline(name="s", pipeline_database=db1, auto_compile=False)
+        with single:
+            joined = src_a.join(src_b, label="joiner")
+            pod(joined, label="adder")
+            MapPackets({"total": "final_total"})(joined, label="renamer")
+        single.compile()
+
+        # Two contexts
+        db2 = InMemoryArrowDatabase()
+        multi = Pipeline(name="m", pipeline_database=db2, auto_compile=False)
+        with multi:
+            joined = src_a.join(src_b, label="joiner")
+            pod(joined, label="adder")
+        with multi:
+            MapPackets({"total": "final_total"})(joined, label="renamer")
+        multi.compile()
+
+        # adder hashes match (same upstream structure)
+        assert single.adder.content_hash() == multi.adder.content_hash()
+        assert single.adder.pipeline_hash() == multi.adder.pipeline_hash()
+
+
+# ---------------------------------------------------------------------------
+# Tests: hash chain — detaching via .as_source() breaks chain
+# ---------------------------------------------------------------------------
+
+
+class TestHashChainDetaching:
+    def test_detached_content_hash_differs_from_extending(self, pipeline_db):
+        """DerivedSource (via .as_source()) has different content_hash than
+        using the node directly for extending."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        db_a = InMemoryArrowDatabase()
+        pipe_a = Pipeline(name="pipe_a", pipeline_database=db_a)
+        with pipe_a:
+            joined = src_a.join(src_b, label="joiner")
+            pod(joined, label="adder")
+        pipe_a.run()
+
+        # Extending: use pipe_a.adder directly as input
+        db_ext = InMemoryArrowDatabase()
+        pipe_ext = Pipeline(name="ext", pipeline_database=db_ext)
+        with pipe_ext:
+            pipe_a.adder.map_packets({"total": "final_total"}, label="renamer")
+        ext_hash = pipe_ext.renamer.content_hash()
+
+        # Detaching: use pipe_a.adder.as_source() as input
+        derived_src = pipe_a.adder.as_source()
+        db_det = InMemoryArrowDatabase()
+        pipe_det = Pipeline(name="det", pipeline_database=db_det)
+        with pipe_det:
+            derived_src.map_packets({"total": "final_total"}, label="renamer")
+        det_hash = pipe_det.renamer.content_hash()
+
+        # Hashes should differ — detaching breaks the chain
+        assert ext_hash != det_hash
+
+    def test_detached_pipeline_hash_is_schema_only(self, pipeline_db):
+        """DerivedSource inherits RootSource.pipeline_identity_structure()
+        = (tag_schema, packet_schema), breaking the upstream Merkle chain."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        db = InMemoryArrowDatabase()
+        pipe = Pipeline(name="pipe", pipeline_database=db)
+        with pipe:
+            joined = src_a.join(src_b, label="joiner")
+            pod(joined, label="adder")
+        pipe.run()
+
+        derived_src = pipe.adder.as_source()
+        # DerivedSource pipeline_hash should be the RootSource base case
+        # (schema-only, no upstream topology)
+        tag_schema, packet_schema = derived_src.output_schema()
+        # Pipeline hash should NOT equal the origin node's pipeline hash
+        assert derived_src.pipeline_hash() != pipe.adder.pipeline_hash()
+        # But two DerivedSources with same schema should share pipeline_hash
+        derived_src2 = pipe.adder.as_source()
+        assert derived_src.pipeline_hash() == derived_src2.pipeline_hash()
+
+    def test_detached_pipeline_downstream_hash_differs_from_extending(
+        self, pipeline_db
+    ):
+        """A full pipeline built from .as_source() produces different hashes
+        at every downstream node compared to extending directly."""
+        src_a, src_b = _make_two_sources()
+        pf_add = PythonPacketFunction(add_values, output_keys="total")
+        pod_add = FunctionPod(packet_function=pf_add)
+        pf_double = PythonPacketFunction(double_value, output_keys="doubled")
+
+        # Pipeline A: sources → join → adder
+        db_a = InMemoryArrowDatabase()
+        pipe_a = Pipeline(name="pipe_a", pipeline_database=db_a)
+        with pipe_a:
+            joined = src_a.join(src_b, label="joiner")
+            pod_add(joined, label="adder")
+        pipe_a.run()
+
+        # Extending: pipe_b uses pipe_a.adder directly → renamer → doubler
+        db_ext = InMemoryArrowDatabase()
+        pipe_ext = Pipeline(name="ext", pipeline_database=db_ext)
+        with pipe_ext:
+            renamed = pipe_a.adder.map_packets({"total": "value"}, label="renamer")
+            FunctionPod(packet_function=pf_double)(renamed, label="doubler")
+
+        # Detaching: pipe_c uses pipe_a.adder.as_source() → renamer → doubler
+        derived = pipe_a.adder.as_source()
+        db_det = InMemoryArrowDatabase()
+        pipe_det = Pipeline(name="det", pipeline_database=db_det)
+        with pipe_det:
+            renamed = derived.map_packets({"total": "value"}, label="renamer")
+            FunctionPod(packet_function=pf_double)(renamed, label="doubler")
+
+        # Both content_hash and pipeline_hash should differ at every level
+        assert pipe_ext.renamer.content_hash() != pipe_det.renamer.content_hash()
+        assert pipe_ext.renamer.pipeline_hash() != pipe_det.renamer.pipeline_hash()
+        assert pipe_ext.doubler.content_hash() != pipe_det.doubler.content_hash()
+        assert pipe_ext.doubler.pipeline_hash() != pipe_det.doubler.pipeline_hash()
+
+        # But the detached pipeline should still be runnable and correct
+        pipe_det.run()
+        table = pipe_det.doubler.as_table()
+        # 110*2=220, 220*2=440
+        assert sorted(table.column("doubled").to_pylist()) == [220, 440]
+
+    def test_detached_source_has_source_id(self, pipeline_db):
+        """DerivedSource.source_id contains pipeline path info."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        db = InMemoryArrowDatabase()
+        pipe = Pipeline(name="my_pipe", pipeline_database=db)
+        with pipe:
+            joined = src_a.join(src_b, label="joiner")
+            pod(joined, label="adder")
+        pipe.run()
+
+        derived_src = pipe.adder.as_source()
+        sid = derived_src.source_id
+        assert isinstance(sid, str)
+        # Should contain the pipeline name
+        assert "my_pipe" in sid
+        # Should contain a content hash fragment
+        content_frag = pipe.adder.content_hash().to_string()[:16]
+        assert content_frag in sid
+
+
+# ---------------------------------------------------------------------------
+# Tests: incremental compile preserves existing nodes
+# ---------------------------------------------------------------------------
+
+
+class TestIncrementalCompile:
+    def test_recompile_preserves_existing_node_objects(self, pipeline_db):
+        """After re-entering context and compiling, existing persistent nodes
+        are the same Python objects (identity via `is`)."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(name="incr", pipeline_database=pipeline_db)
+
+        # First compile
+        with pipeline:
+            joined = src_a.join(src_b, label="joiner")
+            pod(joined, label="adder")
+
+        first_joiner = pipeline.joiner
+        first_adder = pipeline.adder
+
+        # Second context: extend
+        with pipeline:
+            pipeline.adder.map_packets({"total": "final_total"}, label="renamer")
+
+        # Original nodes should be the exact same objects
+        assert pipeline.joiner is first_joiner
+        assert pipeline.adder is first_adder
+        # New node should exist
+        assert "renamer" in pipeline.compiled_nodes
+
+    def test_recompile_preserves_existing_source_nodes(self, pipeline_db):
+        """PersistentSourceNode objects from first compile survive second compile."""
+        src_a, src_b = _make_two_sources()
+
+        pipeline = Pipeline(name="incr_src", pipeline_database=pipeline_db)
+
+        with pipeline:
+            src_a.join(src_b, label="joiner")
+
+        first_source_nodes = {
+            id(n)
+            for n in pipeline._node_graph.nodes()
+            if isinstance(n, PersistentSourceNode)
+        }
+
+        # Extend with another operation
+        with pipeline:
+            pipeline.joiner.map_packets({"value": "val"}, label="renamer")
+
+        second_source_nodes = {
+            id(n)
+            for n in pipeline._node_graph.nodes()
+            if isinstance(n, PersistentSourceNode)
+        }
+
+        # All original source nodes should be preserved (same object ids)
+        assert first_source_nodes.issubset(second_source_nodes)
+
+    def test_recompile_adds_new_nodes_without_replacing_old(self, pipeline_db):
+        """New operations appear in compiled_nodes alongside preserved old ones."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(name="incr_add", pipeline_database=pipeline_db)
+
+        with pipeline:
+            joined = src_a.join(src_b, label="joiner")
+            pod(joined, label="adder")
+
+        assert len(pipeline.compiled_nodes) == 2  # joiner + adder
+
+        with pipeline:
+            pipeline.adder.map_packets({"total": "final_total"}, label="renamer")
+
+        assert len(pipeline.compiled_nodes) == 3  # joiner + adder + renamer
+        assert isinstance(pipeline.renamer, PersistentOperatorNode)
+
+        # Run to verify everything works end-to-end
+        pipeline.run()
+        table = pipeline.renamer.as_table()
+        assert sorted(table.column("final_total").to_pylist()) == [110, 220]

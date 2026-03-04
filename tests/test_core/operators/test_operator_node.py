@@ -427,12 +427,15 @@ class TestOperatorNodeDerivedSource:
         source = node.as_source()
         assert source.output_schema() == node.output_schema()
 
-    def test_as_source_before_run_raises(self, simple_stream, db):
+    def test_as_source_before_run_returns_empty(self, simple_stream, db):
         op = MapPackets({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         source = node.as_source()
-        with pytest.raises(ValueError, match="no computed records"):
-            list(source.iter_packets())
+        # Before run, DerivedSource returns an empty stream (zero rows)
+        assert list(source.iter_packets()) == []
+        table = source.as_table()
+        assert table.num_rows == 0
+        assert "renamed_x" in table.column_names
 
 
 # ---------------------------------------------------------------------------

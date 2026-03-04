@@ -92,6 +92,7 @@ class Pipeline(GraphTracker):
         self._function_database = function_database
         self._pipeline_path_prefix = self._name
         self._nodes: dict[str, GraphNodeType] = {}
+        self._persistent_node_map: dict[str, GraphNodeType] = {}
         self._node_graph: "nx.DiGraph | None" = None
         self._auto_compile = auto_compile
         self._compiled = False
@@ -150,10 +151,23 @@ class Pipeline(GraphTracker):
         for edge in self._graph_edges:
             G.add_edge(*edge)
 
-        persistent_node_map: dict[str, GraphNodeType] = {}
+        # Seed from existing persistent nodes (incremental compile)
+        persistent_node_map: dict[str, GraphNodeType] = dict(self._persistent_node_map)
         name_candidates: dict[str, list[GraphNodeType]] = {}
 
         for node_hash in nx.topological_sort(G):
+            if node_hash in persistent_node_map:
+                # Already compiled — reuse, but track for label assignment
+                existing_node = persistent_node_map[node_hash]
+                if node_hash in self._node_lut:
+                    label = (
+                        existing_node.label
+                        or existing_node.computed_label()
+                        or "unnamed"
+                    )
+                    name_candidates.setdefault(label, []).append(existing_node)
+                continue
+
             if node_hash not in self._node_lut:
                 # -- Leaf stream: wrap in PersistentSourceNode --
                 stream = self._upstreams[node_hash]
@@ -218,6 +232,9 @@ class Pipeline(GraphTracker):
                     or "unnamed"
                 )
                 name_candidates.setdefault(label, []).append(persistent_node)
+
+        # Save persistent node map for incremental re-compile
+        self._persistent_node_map = persistent_node_map
 
         # Build node graph for run() ordering
         self._node_graph = nx.DiGraph()

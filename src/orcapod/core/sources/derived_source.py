@@ -36,17 +36,21 @@ class DerivedSource(RootSource):
 
     Usage
     -----
-    Call ``origin.run()`` before accessing a DerivedSource to ensure the
-    pipeline database has been populated.  Accessing iter_packets / as_table on
-    an empty database raises ``ValueError``.
+    If the origin has not been run yet, the DerivedSource will present an
+    empty stream (zero rows) with the correct schema.  After ``origin.run()``,
+    it reflects the computed records.
     """
 
     def __init__(
         self,
         origin: "PersistentFunctionNode | PersistentOperatorNode",
+        source_id: str | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(**kwargs)
+        if source_id is None:
+            origin_hash = origin.content_hash().to_string()[:16]
+            source_id = f"derived:{origin_hash}"
+        super().__init__(source_id=source_id, **kwargs)
         self._origin = origin
         self._cached_table: pa.Table | None = None
 
@@ -74,11 +78,25 @@ class DerivedSource(RootSource):
         if self._cached_table is None:
             records = self._origin.get_all_records()
             if records is None:
-                raise ValueError(
-                    "DerivedSource has no computed records. "
-                    "Call origin.run() first to populate the pipeline database."
+                # Build empty table with correct schema
+                tag_schema, packet_schema = self._origin.output_schema()
+                tag_keys = self._origin.keys()[0]
+                tc = self.data_context.type_converter
+                fields = [
+                    pa.field(k, tc.python_type_to_arrow_type(tag_schema[k]))
+                    for k in tag_keys
+                ]
+                fields += [
+                    pa.field(k, tc.python_type_to_arrow_type(v))
+                    for k, v in packet_schema.items()
+                ]
+                arrow_schema = pa.schema(fields)
+                self._cached_table = pa.table(
+                    {f.name: pa.array([], type=f.type) for f in arrow_schema},
+                    schema=arrow_schema,
                 )
-            self._cached_table = records
+            else:
+                self._cached_table = records
         tag_keys = self._origin.keys()[0]
         return ArrowTableStream(self._cached_table, tag_columns=tag_keys)
 

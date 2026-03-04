@@ -8,7 +8,7 @@ Coverage:
 - Construction via PersistentFunctionNode.as_source()
 - Protocol conformance: RootSource, StreamProtocol, PipelineElementProtocol
 - source == None, upstreams == () (pure stream, no upstream pod)
-- iter_packets() and as_table() raise ValueError before run()
+- iter_packets() and as_table() return empty results before run()
 - Correct data after PersistentFunctionNode.run()
 - output_schema() and keys() delegate to origin PersistentFunctionNode
 - content_hash() tied to origin PersistentFunctionNode's content hash
@@ -89,20 +89,34 @@ class TestDerivedSourceConstruction:
 
 
 # ---------------------------------------------------------------------------
-# 2. Access before run() raises
+# 2. Access before run() returns empty stream
 # ---------------------------------------------------------------------------
 
 
 class TestDerivedSourceBeforeRun:
-    def test_iter_packets_raises_before_run(self):
+    def test_iter_packets_empty_before_run(self):
         src = _make_node(n=3).as_source()
-        with pytest.raises(ValueError, match="run"):
-            list(src.iter_packets())
+        assert list(src.iter_packets()) == []
 
-    def test_as_table_raises_before_run(self):
+    def test_as_table_empty_before_run(self):
         src = _make_node(n=3).as_source()
-        with pytest.raises(ValueError, match="run"):
-            src.as_table()
+        table = src.as_table()
+        assert table.num_rows == 0
+
+    def test_empty_table_has_correct_columns_before_run(self):
+        node = _make_node(n=3)
+        src = node.as_source()
+        table = src.as_table()
+        assert "id" in table.column_names
+        assert "result" in table.column_names
+
+    def test_empty_table_schema_matches_origin(self):
+        node = _make_node(n=3)
+        src = node.as_source()
+        tag_schema, packet_schema = src.output_schema()
+        table = src.as_table()
+        assert "id" in tag_schema
+        assert "result" in packet_schema
 
 
 # ---------------------------------------------------------------------------
@@ -372,3 +386,50 @@ class TestDerivedSourceIdentity:
         node_b.run()
         # Same function + same input stream → same content_hash → same DerivedSource content_hash
         assert node_a.as_source().content_hash() == node_b.as_source().content_hash()
+
+
+# ---------------------------------------------------------------------------
+# 7. source_id
+# ---------------------------------------------------------------------------
+
+
+class TestDerivedSourceId:
+    def test_source_id_is_set(self):
+        node = _make_node(n=3)
+        src = node.as_source()
+        # Should not raise
+        assert isinstance(src.source_id, str)
+
+    def test_source_id_contains_pipeline_path(self):
+        node = _make_node(n=3)
+        src = node.as_source()
+        # source_id from as_source() includes pipeline path segments
+        sid = src.source_id
+        assert "/" in sid  # path separator from pipeline_path
+
+    def test_source_id_contains_content_hash_fragment(self):
+        node = _make_node(n=3)
+        src = node.as_source()
+        content_frag = node.content_hash().to_string()[:16]
+        assert content_frag in src.source_id
+
+    def test_different_nodes_different_source_ids(self):
+        node_a = _make_node(n=3)
+        node_b = _make_node(n=5)
+        src_a = node_a.as_source()
+        src_b = node_b.as_source()
+        assert src_a.source_id != src_b.source_id
+
+    def test_same_node_same_source_id(self):
+        node = _make_node(n=3)
+        src_a = node.as_source()
+        src_b = node.as_source()
+        assert src_a.source_id == src_b.source_id
+
+    def test_explicit_source_id_overrides_default(self):
+        node = _make_node(n=3)
+        src = DerivedSource(
+            origin=node,
+            source_id="custom_id",
+        )
+        assert src.source_id == "custom_id"

@@ -1070,8 +1070,12 @@ class PersistentFunctionNode(FunctionNode):
         """Return a DerivedSource backed by the DB records of this node."""
         from orcapod.core.sources.derived_source import DerivedSource
 
+        path_str = "/".join(self.pipeline_path)
+        content_frag = self.content_hash().to_string()[:16]
+        source_id = f"{path_str}:{content_frag}"
         return DerivedSource(
             origin=self,
+            source_id=source_id,
             data_context=self.data_context_key,
             config=self.orcapod_config,
         )
