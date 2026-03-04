@@ -120,6 +120,8 @@ nav:
       - Databases: api/databases.md
       - Errors: api/errors.md
       - Configuration: api/configuration.md
+  - Contributing:
+      - Documentation Site Setup: CONTRIBUTING_DOCS.md
 
 extra:
   social:
