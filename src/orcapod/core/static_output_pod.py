@@ -224,12 +224,14 @@ class StaticOutputPod(TraceableBase):
         Collects all inputs, runs ``static_process``, emits results.
         Subclasses override for streaming or incremental strategies.
         """
-        all_rows = await asyncio.gather(*(ch.collect() for ch in inputs))
-        streams = [self._materialize_to_stream(rows) for rows in all_rows]
-        result = self.static_process(*streams)
-        for tag, packet in result.iter_packets():
-            await output.send((tag, packet))
-        await output.close()
+        try:
+            all_rows = await asyncio.gather(*(ch.collect() for ch in inputs))
+            streams = [self._materialize_to_stream(rows) for rows in all_rows]
+            result = self.static_process(*streams)
+            for tag, packet in result.iter_packets():
+                await output.send((tag, packet))
+        finally:
+            await output.close()
 
 
 class DynamicPodStream(StreamBase):

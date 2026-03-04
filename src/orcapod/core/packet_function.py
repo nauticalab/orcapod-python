@@ -461,9 +461,9 @@ class PacketFunctionWrapper(PacketFunctionBase):
     def executor(self, executor: PacketFunctionExecutorProtocol | None) -> None:
         self._packet_function.executor = executor
 
-    # -- Execution: wrappers delegate to the wrapped function's call(),
-    #    which handles executor routing.  Wrappers do NOT route through
-    #    their own executor (they don't own one).
+    # -- Execution: call/async_call delegate to the wrapped function's
+    #    call/async_call which handles executor routing.  direct_call /
+    #    direct_async_call bypass executor routing as their names imply.
 
     def call(self, packet: PacketProtocol) -> PacketProtocol | None:
         return self._packet_function.call(packet)
@@ -472,10 +472,10 @@ class PacketFunctionWrapper(PacketFunctionBase):
         return await self._packet_function.async_call(packet)
 
     def direct_call(self, packet: PacketProtocol) -> PacketProtocol | None:
-        return self._packet_function.call(packet)
+        return self._packet_function.direct_call(packet)
 
     async def direct_async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
-        return await self._packet_function.async_call(packet)
+        return await self._packet_function.direct_async_call(packet)
 
 
 class CachedPacketFunction(PacketFunctionWrapper):

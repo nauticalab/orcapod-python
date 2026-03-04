@@ -74,12 +74,14 @@ class UnaryOperator(StaticOutputPod):
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
     ) -> None:
         """Barrier-mode: collect single input, run unary_static_process, emit."""
-        rows = await inputs[0].collect()
-        stream = self._materialize_to_stream(rows)
-        result = self.static_process(stream)
-        for tag, packet in result.iter_packets():
-            await output.send((tag, packet))
-        await output.close()
+        try:
+            rows = await inputs[0].collect()
+            stream = self._materialize_to_stream(rows)
+            result = self.static_process(stream)
+            for tag, packet in result.iter_packets():
+                await output.send((tag, packet))
+        finally:
+            await output.close()
 
 
 class BinaryOperator(StaticOutputPod):
@@ -154,15 +156,17 @@ class BinaryOperator(StaticOutputPod):
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
     ) -> None:
         """Barrier-mode: collect both inputs concurrently, run binary_static_process, emit."""
-        left_rows, right_rows = await asyncio.gather(
-            inputs[0].collect(), inputs[1].collect()
-        )
-        left_stream = self._materialize_to_stream(left_rows)
-        right_stream = self._materialize_to_stream(right_rows)
-        result = self.static_process(left_stream, right_stream)
-        for tag, packet in result.iter_packets():
-            await output.send((tag, packet))
-        await output.close()
+        try:
+            left_rows, right_rows = await asyncio.gather(
+                inputs[0].collect(), inputs[1].collect()
+            )
+            left_stream = self._materialize_to_stream(left_rows)
+            right_stream = self._materialize_to_stream(right_rows)
+            result = self.static_process(left_stream, right_stream)
+            for tag, packet in result.iter_packets():
+                await output.send((tag, packet))
+        finally:
+            await output.close()
 
 
 class NonZeroInputOperator(StaticOutputPod):
