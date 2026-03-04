@@ -173,7 +173,6 @@ class StaticOutputPod(TraceableBase):
         Used by the barrier-mode ``async_execute`` to convert collected
         channel items back into a stream suitable for ``static_process``.
         """
-        from orcapod.core.datagrams import Tag
         from orcapod.core.streams.arrow_table_stream import ArrowTableStream
         from orcapod.utils import arrow_utils
 
@@ -182,29 +181,19 @@ class StaticOutputPod(TraceableBase):
 
         tag_tables = []
         packet_tables = []
-        source_info_dicts: list[dict[str, str | None]] = []
 
         for tag, packet in rows:
             tag_tables.append(tag.as_table(columns={"system_tags": True}))
-            packet_tables.append(packet.as_table())
-            source_info_dicts.append(packet.source_info())
+            packet_tables.append(packet.as_table(columns={"source": True}))
 
         combined_tags = pa.concat_tables(tag_tables)
         combined_packets = pa.concat_tables(packet_tables)
 
-        # Determine which columns are user tags vs system tags
-        first_tag = rows[0][0]
-        if isinstance(first_tag, Tag):
-            user_tag_keys = tuple(first_tag.keys())
-        else:
-            user_tag_keys = tuple(first_tag.keys())
+        user_tag_keys = tuple(rows[0][0].keys())
 
-        # Build source_info: for each packet column, use the source info
-        # from the first row (all rows should have the same packet columns)
-        source_info: dict[str, str | None] = {}
-        if source_info_dicts:
-            for key in source_info_dicts[0]:
-                source_info[key] = None
+        # Preserve actual source_info provenance from the first row
+        # (all rows share the same packet columns and source tokens).
+        source_info = rows[0][1].source_info()
 
         full_table = arrow_utils.hstack_tables(combined_tags, combined_packets)
 
