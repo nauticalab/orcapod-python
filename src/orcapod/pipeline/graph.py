@@ -267,14 +267,37 @@ class Pipeline(GraphTracker):
     # Execution
     # ------------------------------------------------------------------
 
-    def run(self) -> None:
-        """Execute all compiled nodes in topological order."""
+    def run(self, config: "PipelineConfig | None" = None) -> None:
+        """Execute all compiled nodes.
+
+        Args:
+            config: Pipeline configuration.  When ``config.executor`` is
+                ``ExecutorType.ASYNC_CHANNELS``, the pipeline runs
+                asynchronously via the orchestrator.  Otherwise nodes are
+                executed synchronously in topological order.
+        """
+        from orcapod.types import ExecutorType, PipelineConfig
+
+        config = config or PipelineConfig()
+
         if not self._compiled:
             self.compile()
-        assert self._node_graph is not None
-        for node in nx.topological_sort(self._node_graph):
-            node.run()
+
+        if config.executor == ExecutorType.ASYNC_CHANNELS:
+            self._run_async(config)
+        else:
+            assert self._node_graph is not None
+            for node in nx.topological_sort(self._node_graph):
+                node.run()
+
         self.flush()
+
+    def _run_async(self, config: "PipelineConfig") -> None:
+        """Run the pipeline asynchronously using the orchestrator."""
+        from orcapod.pipeline.orchestrator import AsyncPipelineOrchestrator
+
+        orchestrator = AsyncPipelineOrchestrator()
+        orchestrator.run(self, config)
 
     def flush(self) -> None:
         """Flush all databases."""

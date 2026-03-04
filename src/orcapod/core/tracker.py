@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Generator, Iterator
+from collections.abc import Generator, Iterator, Sequence
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, TypeAlias
+
+from orcapod.channels import ReadableChannel, WritableChannel
 
 from orcapod import contexts
 from orcapod.config import Config
@@ -208,6 +210,21 @@ class SourceNode(StreamBase):
 
     def iter_packets(self) -> Iterator[tuple[cp.TagProtocol, cp.PacketProtocol]]:
         return self.stream.iter_packets()
+
+    def run(self) -> None:
+        """No-op for source nodes — data is already available."""
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[cp.TagProtocol, cp.PacketProtocol]]],
+        output: WritableChannel[tuple[cp.TagProtocol, cp.PacketProtocol]],
+    ) -> None:
+        """Push all (tag, packet) pairs from the wrapped stream to the output channel."""
+        try:
+            for tag, packet in self.stream.iter_packets():
+                await output.send((tag, packet))
+        finally:
+            await output.close()
 
 
 GraphNode: TypeAlias = "SourceNode | FunctionNode | OperatorNode"

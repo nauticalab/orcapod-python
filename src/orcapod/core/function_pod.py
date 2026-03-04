@@ -945,6 +945,40 @@ class FunctionNode(StreamBase):
             )
         return output_table
 
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        pipeline_config: PipelineConfig | None = None,
+    ) -> None:
+        """Streaming async execution for FunctionNode."""
+        try:
+            pipeline_config = pipeline_config or PipelineConfig()
+            node_config = (
+                self._function_pod.node_config
+                if hasattr(self._function_pod, "node_config")
+                else NodeConfig()
+            )
+            max_concurrency = resolve_concurrency(node_config, pipeline_config)
+            sem = asyncio.Semaphore(max_concurrency) if max_concurrency is not None else None
+
+            async def process_one(tag: TagProtocol, packet: PacketProtocol) -> None:
+                try:
+                    result_packet = self._packet_function.call(packet)
+                    if result_packet is not None:
+                        await output.send((tag, result_packet))
+                finally:
+                    if sem is not None:
+                        sem.release()
+
+            async with asyncio.TaskGroup() as tg:
+                async for tag, packet in inputs[0]:
+                    if sem is not None:
+                        await sem.acquire()
+                    tg.create_task(process_one(tag, packet))
+        finally:
+            await output.close()
+
     def __repr__(self) -> str:
         return (
             f"{type(self).__name__}(packet_function={self._packet_function!r}, "

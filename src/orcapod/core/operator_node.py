@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import TYPE_CHECKING, Any
+
+from orcapod.channels import ReadableChannel, WritableChannel
 
 from orcapod import contexts
 from orcapod.config import Config
@@ -155,6 +157,14 @@ class OperatorNode(StreamBase):
         self.run()
         assert self._cached_output_stream is not None
         return self._cached_output_stream.as_table(columns=columns, all_info=all_info)
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    ) -> None:
+        """Delegate to the wrapped operator's async_execute."""
+        await self._operator.async_execute(inputs, output)
 
     def __repr__(self) -> str:
         return (
