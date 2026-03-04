@@ -4,7 +4,7 @@ Regression tests for bugs fixed in the packet-function-executor-system branch.
 Covers:
 1. async_execute output channel closed on exception (try/finally)
 2. PacketFunctionWrapper.direct_call/direct_async_call bypass executor routing
-3. _execute_concurrent falls back when inside a running event loop
+3. Concurrent iteration falls back to sequential inside a running event loop
 4. FunctionPod.async_execute backpressure bounds pending tasks
 5. _materialize_to_stream preserves source_info provenance tokens
 6. RayExecutor._ensure_ray_initialized uses ray_address
@@ -23,7 +23,7 @@ import pytest
 from orcapod.channels import Channel, ChannelClosed
 from orcapod.core.datagrams import Packet, Tag
 from orcapod.core.executors import LocalExecutor, PacketFunctionExecutorBase
-from orcapod.core.function_pod import FunctionPod, _execute_concurrent
+from orcapod.core.function_pod import FunctionPod, FunctionPodStream
 from orcapod.core.operators import SelectPacketColumns
 from orcapod.core.operators.join import Join
 from orcapod.core.packet_function import (
@@ -219,45 +219,57 @@ class TestWrapperDirectCallBypassesExecutor:
 
 
 # ===========================================================================
-# 3. _execute_concurrent falls back inside running event loop
+# 3. Concurrent iteration falls back inside running event loop
 # ===========================================================================
 
 
-class TestExecuteConcurrentInRunningLoop:
-    """_execute_concurrent must not crash when called from inside
-    an already-running asyncio event loop."""
+class TestConcurrentFallbackInRunningLoop:
+    """_iter_packets_concurrent must not crash when called from inside
+    an already-running asyncio event loop — should fall back to sequential
+    process_packet calls."""
 
     @staticmethod
-    def _make_double_pf() -> PythonPacketFunction:
+    def _make_concurrent_stream() -> tuple[FunctionPodStream, FunctionPod]:
         def double(x: int) -> int:
             return x * 2
 
-        return PythonPacketFunction(double, output_keys="result")
+        pf = PythonPacketFunction(double, output_keys="result")
+        # Attach an executor that reports concurrent support
+        executor = LocalExecutor()
+        pf.executor = executor
+        pod = FunctionPod(pf)
+
+        table = pa.table(
+            {
+                "id": pa.array([0, 1, 2], type=pa.int64()),
+                "x": pa.array([10, 20, 30], type=pa.int64()),
+            }
+        )
+        from orcapod.core.streams.arrow_table_stream import ArrowTableStream
+
+        stream = ArrowTableStream(table, tag_columns=["id"])
+        return pod.process(stream), pod
 
     @pytest.mark.asyncio
     async def test_falls_back_to_sequential_in_async_context(self):
         """When called from async code, should fall back to sequential
         execution instead of raising RuntimeError."""
-        pf = self._make_double_pf()
-
-        packets = [Packet({"x": i}) for i in range(3)]
-        results = _execute_concurrent(pf, packets)
+        pod_stream, _ = self._make_concurrent_stream()
+        results = list(pod_stream.iter_packets())
 
         assert len(results) == 3
-        values = [r.as_dict()["result"] for r in results]
-        assert values == [0, 2, 4]
+        values = sorted(pkt.as_dict()["result"] for _, pkt in results)
+        assert values == [20, 40, 60]
 
     def test_uses_asyncio_run_when_no_loop(self):
         """When there is no running event loop, it should use asyncio.run
         (concurrent path)."""
-        pf = self._make_double_pf()
-
-        packets = [Packet({"x": i}) for i in range(3)]
-        results = _execute_concurrent(pf, packets)
+        pod_stream, _ = self._make_concurrent_stream()
+        results = list(pod_stream.iter_packets())
 
         assert len(results) == 3
-        values = [r.as_dict()["result"] for r in results]
-        assert values == [0, 2, 4]
+        values = sorted(pkt.as_dict()["result"] for _, pkt in results)
+        assert values == [20, 40, 60]
 
 
 # ===========================================================================

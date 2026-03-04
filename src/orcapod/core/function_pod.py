@@ -49,38 +49,6 @@ def _executor_supports_concurrent(
     return executor is not None and executor.supports_concurrent_execution
 
 
-def _execute_concurrent(
-    packet_function: PacketFunctionProtocol,
-    packets: list[PacketProtocol],
-) -> list[PacketProtocol | None]:
-    """Submit all *packets* to the executor concurrently and return results in order.
-
-    Uses ``asyncio.gather`` to run all tasks concurrently, then blocks
-    until all complete.  If an event loop is already running (e.g. inside
-    ``async def`` code, notebooks, or pytest-asyncio), falls back to
-    sequential execution to avoid ``RuntimeError``.
-    """
-    import asyncio
-
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    if loop is not None:
-        # Already inside an event loop -- cannot call asyncio.run().
-        # Fall back to sequential synchronous execution.
-        return [packet_function.call(pkt) for pkt in packets]
-
-    async def _gather() -> list[PacketProtocol | None]:
-        return list(
-            await asyncio.gather(
-                *[packet_function.async_call(pkt) for pkt in packets]
-            )
-        )
-
-    return asyncio.run(_gather())
-
 
 class _FunctionPodBase(TraceableBase):
     """Base pod that applies a packet function to each input packet."""
@@ -178,6 +146,12 @@ class _FunctionPodBase(TraceableBase):
             the function filters the packet out.
         """
         return tag, self.packet_function.call(packet)
+
+    async def async_process_packet(
+        self, tag: TagProtocol, packet: PacketProtocol
+    ) -> tuple[TagProtocol, PacketProtocol | None]:
+        """Async counterpart of ``process_packet``."""
+        return tag, await self.packet_function.async_call(packet)
 
     def handle_input_streams(self, *streams: StreamProtocol) -> StreamProtocol:
         """Handle multiple input streams by joining them if necessary.
@@ -314,7 +288,7 @@ class FunctionPod(_FunctionPodBase):
 
             async def process_one(tag: TagProtocol, packet: PacketProtocol) -> None:
                 try:
-                    result_packet = await self.packet_function.async_call(packet)
+                    tag, result_packet = await self.async_process_packet(tag, packet)
                     if result_packet is not None:
                         await output.send((tag, result_packet))
                 finally:
@@ -419,9 +393,8 @@ class FunctionPodStream(StreamBase):
         if self.is_stale:
             self.clear_cache()
         if self._cached_input_iterator is not None:
-            pf = self._function_pod.packet_function
-            if _executor_supports_concurrent(pf):
-                yield from self._iter_packets_concurrent(pf)
+            if _executor_supports_concurrent(self._function_pod.packet_function):
+                yield from self._iter_packets_concurrent()
             else:
                 yield from self._iter_packets_sequential()
         else:
@@ -453,7 +426,6 @@ class FunctionPodStream(StreamBase):
 
     def _iter_packets_concurrent(
         self,
-        packet_function: PacketFunctionProtocol,
     ) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
         """Collect remaining inputs, execute concurrently, and yield results in order."""
         input_iter = self._cached_input_iterator
@@ -467,12 +439,33 @@ class FunctionPodStream(StreamBase):
                 to_compute.append((i, tag, packet))
         self._cached_input_iterator = None
 
-        # Submit uncached packets concurrently and cache results.
+        # Submit uncached packets concurrently via async_process_packet.
         if to_compute:
-            results = _execute_concurrent(
-                packet_function, [pkt for _, _, pkt in to_compute]
-            )
-            for (i, tag, _), output_packet in zip(to_compute, results):
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop is not None:
+                # Already in event loop — fall back to sequential sync
+                results = [
+                    self._function_pod.process_packet(tag, pkt)
+                    for _, tag, pkt in to_compute
+                ]
+            else:
+                async def _gather() -> list[tuple[TagProtocol, PacketProtocol | None]]:
+                    return list(
+                        await asyncio.gather(
+                            *[
+                                self._function_pod.async_process_packet(tag, pkt)
+                                for _, tag, pkt in to_compute
+                            ]
+                        )
+                    )
+
+                results = asyncio.run(_gather())
+
+            for (i, _, _), (tag, output_packet) in zip(to_compute, results):
                 self._cached_output_packets[i] = (tag, output_packet)
 
         # Yield everything in original order.
@@ -818,6 +811,18 @@ class FunctionNode(StreamBase):
                 if packet is not None:
                     yield tag, packet
 
+    def process_packet(
+        self, tag: TagProtocol, packet: PacketProtocol
+    ) -> tuple[TagProtocol, PacketProtocol | None]:
+        """Process a single packet by delegating to the function pod."""
+        return self._function_pod.process_packet(tag, packet)
+
+    async def async_process_packet(
+        self, tag: TagProtocol, packet: PacketProtocol
+    ) -> tuple[TagProtocol, PacketProtocol | None]:
+        """Async counterpart of ``process_packet``."""
+        return await self._function_pod.async_process_packet(tag, packet)
+
     def _iter_packets_sequential(
         self,
     ) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
@@ -828,7 +833,7 @@ class FunctionNode(StreamBase):
                 if packet is not None:
                     yield tag, packet
             else:
-                output_packet = self._packet_function.call(packet)
+                tag, output_packet = self.process_packet(tag, packet)
                 self._cached_output_packets[i] = (tag, output_packet)
                 if output_packet is not None:
                     yield tag, output_packet
@@ -849,10 +854,31 @@ class FunctionNode(StreamBase):
         self._cached_input_iterator = None
 
         if to_compute:
-            results = _execute_concurrent(
-                self._packet_function, [pkt for _, _, pkt in to_compute]
-            )
-            for (i, tag, _), output_packet in zip(to_compute, results):
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop is not None:
+                # Already in event loop — fall back to sequential sync
+                results = [
+                    self.process_packet(tag, pkt)
+                    for _, tag, pkt in to_compute
+                ]
+            else:
+                async def _gather() -> list[tuple[TagProtocol, PacketProtocol | None]]:
+                    return list(
+                        await asyncio.gather(
+                            *[
+                                self.async_process_packet(tag, pkt)
+                                for _, tag, pkt in to_compute
+                            ]
+                        )
+                    )
+
+                results = asyncio.run(_gather())
+
+            for (i, _, _), (tag, output_packet) in zip(to_compute, results):
                 self._cached_output_packets[i] = (tag, output_packet)
 
         for i, *_ in all_inputs:
@@ -944,6 +970,10 @@ class FunctionNode(StreamBase):
                 .to_arrow()
             )
         return output_table
+
+    # ------------------------------------------------------------------
+    # Async channel execution
+    # ------------------------------------------------------------------
 
     async def async_execute(
         self,
@@ -1085,6 +1115,39 @@ class PersistentFunctionNode(FunctionNode):
 
         if output_packet is not None:
             # check if the packet was computed or retrieved from cache
+            result_computed = bool(
+                output_packet.get_meta_value(
+                    self._packet_function.RESULT_COMPUTED_FLAG, False
+                )
+            )
+            self.add_pipeline_record(
+                tag,
+                packet,
+                packet_record_id=output_packet.datagram_id,
+                computed=result_computed,
+            )
+
+        return tag, output_packet
+
+    async def async_process_packet(
+        self,
+        tag: TagProtocol,
+        packet: PacketProtocol,
+        skip_cache_lookup: bool = False,
+        skip_cache_insert: bool = False,
+    ) -> tuple[TagProtocol, PacketProtocol | None]:
+        """Async counterpart of ``process_packet``.
+
+        Uses the CachedPacketFunction's async_call for computation + result
+        caching.  Pipeline record storage is synchronous (DB protocol is sync).
+        """
+        output_packet = await self._packet_function.async_call(
+            packet,
+            skip_cache_lookup=skip_cache_lookup,
+            skip_cache_insert=skip_cache_insert,
+        )
+
+        if output_packet is not None:
             result_computed = bool(
                 output_packet.get_meta_value(
                     self._packet_function.RESULT_COMPUTED_FLAG, False
@@ -1261,6 +1324,42 @@ class PersistentFunctionNode(FunctionNode):
         """Eagerly process all input packets, filling the pipeline and result databases."""
         for _ in self.iter_packets():
             pass
+
+    # ------------------------------------------------------------------
+    # Async channel execution (two-phase)
+    # ------------------------------------------------------------------
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    ) -> None:
+        """Two-phase async execution: replay cached, then compute missing."""
+        try:
+            # Phase 1: emit existing results from DB
+            existing = self.get_all_records(columns={"meta": True})
+            computed_hashes: set[str] = set()
+            if existing is not None and existing.num_rows > 0:
+                tag_keys = self._input_stream.keys()[0]
+                hash_col = constants.INPUT_PACKET_HASH_COL
+                computed_hashes = set(
+                    cast(list[str], existing.column(hash_col).to_pylist())
+                )
+                data_table = existing.drop([hash_col])
+                existing_stream = ArrowTableStream(data_table, tag_columns=tag_keys)
+                for tag, packet in existing_stream.iter_packets():
+                    await output.send((tag, packet))
+
+            # Phase 2: process packets not already in the DB
+            async for tag, packet in inputs[0]:
+                input_hash = packet.content_hash().to_string()
+                if input_hash in computed_hashes:
+                    continue
+                tag, output_packet = await self.async_process_packet(tag, packet)
+                if output_packet is not None:
+                    await output.send((tag, output_packet))
+        finally:
+            await output.close()
 
     def as_source(self):
         """Return a DerivedSource backed by the DB records of this node."""

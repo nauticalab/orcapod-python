@@ -532,6 +532,30 @@ class CachedPacketFunction(PacketFunctionWrapper):
 
         return output_packet
 
+    async def async_call(
+        self,
+        packet: PacketProtocol,
+        *,
+        skip_cache_lookup: bool = False,
+        skip_cache_insert: bool = False,
+    ) -> PacketProtocol | None:
+        """Async counterpart of ``call`` with cache check and recording."""
+        output_packet = None
+        if not skip_cache_lookup:
+            logger.info("Checking for cache...")
+            output_packet = self.get_cached_output_for_packet(packet)
+            if output_packet is not None:
+                logger.info(f"Cache hit for {packet}!")
+        if output_packet is None:
+            output_packet = await self._packet_function.async_call(packet)
+            if output_packet is not None:
+                if not skip_cache_insert:
+                    self.record_packet(packet, output_packet)
+                output_packet = output_packet.with_meta_columns(
+                    **{self.RESULT_COMPUTED_FLAG: True}
+                )
+        return output_packet
+
     def get_cached_output_for_packet(
         self, input_packet: PacketProtocol
     ) -> PacketProtocol | None:
