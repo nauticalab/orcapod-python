@@ -37,7 +37,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/walkerlab/orcapod-python"
-Documentation = "https://walkerlab.github.io/orcapod-python/"
+Documentation = "https://orcapod.org/"
 
 [project.optional-dependencies]
 redis = ["redis>=6.2.0"]

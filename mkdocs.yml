@@ -1,6 +1,6 @@
 site_name: orcapod
 site_description: Intuitive and powerful library for highly reproducible scientific data pipelines
-site_url: https://walkerlab.github.io/orcapod-python/
+site_url: https://orcapod.org/
 repo_url: https://github.com/walkerlab/orcapod-python
 repo_name: walkerlab/orcapod-python
 
