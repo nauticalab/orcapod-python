@@ -15,6 +15,7 @@ from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
     ArgumentGroup,
     FunctionPodProtocol,
+    PacketFunctionExecutorProtocol,
     PacketFunctionProtocol,
     PacketProtocol,
     PodProtocol,
@@ -64,6 +65,16 @@ class _FunctionPodBase(TraceableBase):
     @property
     def packet_function(self) -> PacketFunctionProtocol:
         return self._packet_function
+
+    @property
+    def executor(self) -> PacketFunctionExecutorProtocol | None:
+        """The executor set on the underlying packet function, or ``None``."""
+        return self._packet_function.executor
+
+    @executor.setter
+    def executor(self, executor: PacketFunctionExecutorProtocol | None) -> None:
+        """Set or clear the executor on the underlying packet function."""
+        self._packet_function.executor = executor
 
     def identity_structure(self) -> Any:
         return self.packet_function.identity_structure()
@@ -269,6 +280,16 @@ class FunctionPodStream(StreamBase):
     @property
     def producer(self) -> PodProtocol:
         return self._function_pod
+
+    @property
+    def executor(self) -> PacketFunctionExecutorProtocol | None:
+        """The executor set on the underlying packet function."""
+        return self._function_pod.packet_function.executor
+
+    @executor.setter
+    def executor(self, executor: PacketFunctionExecutorProtocol | None) -> None:
+        """Set or clear the executor on the underlying packet function."""
+        self._function_pod.packet_function.executor = executor
 
     @property
     def upstreams(self) -> tuple[StreamProtocol, ...]:
@@ -626,6 +647,16 @@ class FunctionNode(StreamBase):
     @property
     def producer(self) -> FunctionPodProtocol:
         return self._function_pod
+
+    @property
+    def executor(self) -> PacketFunctionExecutorProtocol | None:
+        """The executor set on the underlying packet function."""
+        return self._packet_function.executor
+
+    @executor.setter
+    def executor(self, executor: PacketFunctionExecutorProtocol | None) -> None:
+        """Set or clear the executor on the underlying packet function."""
+        self._packet_function.executor = executor
 
     @property
     def upstreams(self) -> tuple[StreamProtocol, ...]:
