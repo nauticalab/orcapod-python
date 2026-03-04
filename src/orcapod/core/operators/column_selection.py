@@ -1,11 +1,12 @@
 import logging
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
+from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
-from orcapod.protocols.core_protocols import StreamProtocol
+from orcapod.protocols.core_protocols import PacketProtocol, StreamProtocol, TagProtocol
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.lazy_module import LazyModule
@@ -81,6 +82,25 @@ class SelectTagColumns(UnaryOperator):
         new_tag_schema = {k: v for k, v in tag_schema.items() if k not in tags_to_drop}
 
         return Schema(new_tag_schema), packet_schema
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    ) -> None:
+        """Streaming: select tag columns per row without materializing."""
+        try:
+            tags_to_drop: list[str] | None = None
+            async for tag, packet in inputs[0]:
+                if tags_to_drop is None:
+                    tag_keys = tag.keys()
+                    tags_to_drop = [c for c in tag_keys if c not in self.columns]
+                if not tags_to_drop:
+                    await output.send((tag, packet))
+                else:
+                    await output.send((tag.drop(*tags_to_drop), packet))
+        finally:
+            await output.close()
 
     def identity_structure(self) -> Any:
         return (
@@ -163,6 +183,25 @@ class SelectPacketColumns(UnaryOperator):
 
         return tag_schema, Schema(new_packet_schema)
 
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    ) -> None:
+        """Streaming: select packet columns per row without materializing."""
+        try:
+            pkts_to_drop: list[str] | None = None
+            async for tag, packet in inputs[0]:
+                if pkts_to_drop is None:
+                    pkt_keys = packet.keys()
+                    pkts_to_drop = [c for c in pkt_keys if c not in self.columns]
+                if not pkts_to_drop:
+                    await output.send((tag, packet))
+                else:
+                    await output.send((tag, packet.drop(*pkts_to_drop)))
+        finally:
+            await output.close()
+
     def identity_structure(self) -> Any:
         return (
             self.__class__.__name__,
@@ -236,6 +275,28 @@ class DropTagColumns(UnaryOperator):
         new_tag_schema = {k: v for k, v in tag_schema.items() if k in new_tag_columns}
 
         return Schema(new_tag_schema), packet_schema
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    ) -> None:
+        """Streaming: drop tag columns per row without materializing."""
+        try:
+            effective_drops: list[str] | None = None
+            async for tag, packet in inputs[0]:
+                if effective_drops is None:
+                    tag_keys = tag.keys()
+                    if self.strict:
+                        effective_drops = list(self.columns)
+                    else:
+                        effective_drops = [c for c in self.columns if c in tag_keys]
+                if not effective_drops:
+                    await output.send((tag, packet))
+                else:
+                    await output.send((tag.drop(*effective_drops), packet))
+        finally:
+            await output.close()
 
     def identity_structure(self) -> Any:
         return (
@@ -313,6 +374,28 @@ class DropPacketColumns(UnaryOperator):
         }
 
         return tag_schema, Schema(new_packet_schema)
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    ) -> None:
+        """Streaming: drop packet columns per row without materializing."""
+        try:
+            effective_drops: list[str] | None = None
+            async for tag, packet in inputs[0]:
+                if effective_drops is None:
+                    pkt_keys = packet.keys()
+                    if self.strict:
+                        effective_drops = list(self.columns)
+                    else:
+                        effective_drops = [c for c in self.columns if c in pkt_keys]
+                if not effective_drops:
+                    await output.send((tag, packet))
+                else:
+                    await output.send((tag, packet.drop(*effective_drops)))
+        finally:
+            await output.close()
 
     def identity_structure(self) -> Any:
         return (

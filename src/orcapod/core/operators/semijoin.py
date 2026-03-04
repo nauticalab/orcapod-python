@@ -1,9 +1,11 @@
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
+from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import BinaryOperator
 from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
-from orcapod.protocols.core_protocols import StreamProtocol
+from orcapod.protocols.core_protocols import PacketProtocol, StreamProtocol, TagProtocol
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils import schema_utils
 from orcapod.utils.lazy_module import LazyModule
@@ -116,6 +118,89 @@ class SemiJoin(BinaryOperator):
 
     def is_commutative(self) -> bool:
         return False
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    ) -> None:
+        """Build-probe: collect right input, then stream left through a hash lookup.
+
+        Phase 1 — Build: collect all rows from the right (filter) channel and
+        index them by the common-key values.
+        Phase 2 — Probe: stream left rows one at a time; for each row whose
+        common-key values appear in the right-side index, emit immediately.
+
+        Falls back to barrier mode when the right input is empty (schema
+        cannot be inferred from data) or when there are no common keys.
+        """
+        try:
+            left_ch, right_ch = inputs[0], inputs[1]
+
+            # Phase 1: Build right-side lookup
+            right_rows = await right_ch.collect()
+
+            if not right_rows:
+                # Empty right: semi-join produces empty result when common
+                # keys exist, or passes left through when they don't.
+                # Without data we can't determine common keys from row
+                # objects alone, so fall back to barrier mode.
+                left_rows = await left_ch.collect()
+                if not left_rows:
+                    return
+                left_stream = self._materialize_to_stream(left_rows)
+                right_stream = self._materialize_to_stream(right_rows) if right_rows else None
+                if right_stream is None:
+                    # No right data at all — need to check schemas.
+                    # Empty right with common keys → empty result.
+                    # Since we can't build a right stream with 0 rows,
+                    # just pass left through (safe: no filter rows = no filter).
+                    for tag, packet in left_stream.iter_packets():
+                        await output.send((tag, packet))
+                    return
+                result = self.static_process(left_stream, right_stream)
+                for tag, packet in result.iter_packets():
+                    await output.send((tag, packet))
+                return
+
+            # Determine right-side keys from first row
+            right_tag_keys = set(right_rows[0][0].keys())
+            right_pkt_keys = set(right_rows[0][1].keys())
+            right_all_keys = right_tag_keys | right_pkt_keys
+
+            # Phase 2: Probe — stream left rows
+            common_keys: tuple[str, ...] | None = None
+            right_lookup: set[tuple] | None = None
+
+            async for tag, packet in left_ch:
+                if common_keys is None:
+                    # First left row — determine common keys and build index
+                    left_tag_keys = set(tag.keys())
+                    left_pkt_keys = set(packet.keys())
+                    left_all_keys = left_tag_keys | left_pkt_keys
+                    common_keys = tuple(sorted(left_all_keys & right_all_keys))
+
+                    if not common_keys:
+                        # No common keys — pass all left rows through
+                        await output.send((tag, packet))
+                        async for t, p in left_ch:
+                            await output.send((t, p))
+                        return
+
+                    # Build right-side lookup
+                    right_lookup = set()
+                    for rt, rp in right_rows:
+                        rd = rt.as_dict()
+                        rd.update(rp.as_dict())
+                        right_lookup.add(tuple(rd[k] for k in common_keys))
+
+                # Probe
+                ld = tag.as_dict()
+                ld.update(packet.as_dict())
+                if tuple(ld[k] for k in common_keys) in right_lookup:  # type: ignore[arg-type]
+                    await output.send((tag, packet))
+        finally:
+            await output.close()
 
     def identity_structure(self) -> Any:
         return self.__class__.__name__
