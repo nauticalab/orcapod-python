@@ -37,6 +37,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/walkerlab/orcapod-python"
+Documentation = "https://walkerlab.github.io/orcapod-python/"
 
 [project.optional-dependencies]
 redis = ["redis>=6.2.0"]
@@ -74,4 +75,10 @@ dev = [
     "ruff>=0.14.4",
     "sphinx>=8.2.3",
     "tqdm>=4.67.1",
+]
+docs = [
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.5.0",
+    "mkdocstrings[python]>=0.27.0",
+    "pymdown-extensions>=10.7",
 ]

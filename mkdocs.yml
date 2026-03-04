@@ -1,0 +1,127 @@
+site_name: orcapod
+site_description: Intuitive and powerful library for highly reproducible scientific data pipelines
+site_url: https://walkerlab.github.io/orcapod-python/
+repo_url: https://github.com/walkerlab/orcapod-python
+repo_name: walkerlab/orcapod-python
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue
+      accent: cyan
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue
+      accent: cyan
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - navigation.instant
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_source: true
+            show_bases: true
+            show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            heading_level: 2
+            members_order: source
+            docstring_style: google
+            docstring_section_style: spacy
+            merge_init_into_class: true
+            show_if_no_docstring: false
+            show_signature_annotations: true
+            separate_signature: true
+            signature_crossrefs: true
+            summary: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - def_list
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quickstart: getting-started/quickstart.md
+      - Building Your First Pipeline: getting-started/first-pipeline.md
+  - Concepts:
+      - Architecture Overview: concepts/architecture.md
+      - Datagrams, Tags & Packets: concepts/datagrams.md
+      - Streams: concepts/streams.md
+      - Identity & Hashing: concepts/identity.md
+      - System Tags & Provenance: concepts/provenance.md
+      - Schema & Column Configuration: concepts/schema.md
+  - User Guide:
+      - Sources: user-guide/sources.md
+      - Function Pods: user-guide/function-pods.md
+      - Operators: user-guide/operators.md
+      - Pipelines: user-guide/pipelines.md
+      - Caching & Persistence: user-guide/caching.md
+      - Execution Models: user-guide/execution.md
+  - API Reference:
+      - Overview: api/index.md
+      - Types: api/types.md
+      - Sources: api/sources.md
+      - Streams: api/streams.md
+      - Datagrams: api/datagrams.md
+      - Function Pods: api/function-pods.md
+      - Packet Functions: api/packet-functions.md
+      - Operators: api/operators.md
+      - Operator & Function Nodes: api/nodes.md
+      - Pipeline: api/pipeline.md
+      - Databases: api/databases.md
+      - Errors: api/errors.md
+      - Configuration: api/configuration.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/walkerlab/orcapod-python

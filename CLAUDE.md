@@ -1,5 +1,10 @@
 # Claude Code instructions for orcapod-python
 
+## Naming convention
+
+Always write "orcapod" with a **lowercase p** — never "OrcaPod" or "Orcapod". This applies
+everywhere: documentation, docstrings, comments, commit messages, and code comments.
+
 ## Running commands
 
 Always run Python commands via `uv run`, e.g.:
