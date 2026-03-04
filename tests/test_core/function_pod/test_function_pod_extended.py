@@ -8,8 +8,6 @@ Extended tests for function_pod.py covering:
 
 from __future__ import annotations
 
-from tkinter import Pack
-
 import pyarrow as pa
 import pytest
 
