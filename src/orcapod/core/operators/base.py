@@ -1,9 +1,18 @@
+from __future__ import annotations
+
+import asyncio
 from abc import abstractmethod
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from typing import Any
 
+from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.static_output_pod import StaticOutputPod
-from orcapod.protocols.core_protocols import ArgumentGroup, StreamProtocol
+from orcapod.protocols.core_protocols import (
+    ArgumentGroup,
+    PacketProtocol,
+    StreamProtocol,
+    TagProtocol,
+)
 from orcapod.types import ColumnConfig, Schema
 
 
@@ -68,6 +77,19 @@ class UnaryOperator(StaticOutputPod):
     def argument_symmetry(self, streams: Collection[StreamProtocol]) -> ArgumentGroup:
         # return single stream as a tuple
         return (tuple(streams)[0],)
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    ) -> None:
+        """Barrier-mode: collect single input, run unary_static_process, emit."""
+        rows = await inputs[0].collect()
+        stream = self._materialize_to_stream(rows)
+        result = self.static_process(stream)
+        for tag, packet in result.iter_packets():
+            await output.send((tag, packet))
+        await output.close()
 
 
 class BinaryOperator(StaticOutputPod):
@@ -144,6 +166,22 @@ class BinaryOperator(StaticOutputPod):
         else:
             # return as ordered group
             return tuple(streams)
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    ) -> None:
+        """Barrier-mode: collect both inputs concurrently, run binary_static_process, emit."""
+        left_rows, right_rows = await asyncio.gather(
+            inputs[0].collect(), inputs[1].collect()
+        )
+        left_stream = self._materialize_to_stream(left_rows)
+        right_stream = self._materialize_to_stream(right_rows)
+        result = self.static_process(left_stream, right_stream)
+        for tag, packet in result.iter_packets():
+            await output.send((tag, packet))
+        await output.close()
 
 
 class NonZeroInputOperator(StaticOutputPod):

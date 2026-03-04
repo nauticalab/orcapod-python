@@ -246,6 +246,64 @@ class Schema(Mapping[str, DataType]):
         return cls({})
 
 
+class ExecutorType(Enum):
+    """Pipeline execution strategy.
+
+    Attributes
+    ----------
+    SYNCHRONOUS
+        Current behavior: ``static_process`` chain with pull-based
+        materialization.
+    ASYNC_CHANNELS
+        Push-based async channel execution via ``async_execute``.
+    """
+
+    SYNCHRONOUS = "synchronous"
+    ASYNC_CHANNELS = "async_channels"
+
+
+@dataclass(frozen=True, slots=True)
+class PipelineConfig:
+    """Pipeline-level execution configuration.
+
+    Attributes:
+        executor: Which execution strategy to use.
+        channel_buffer_size: Max items buffered per channel edge.
+        default_max_concurrency: Pipeline-wide default for per-node
+            concurrency.  ``None`` means unlimited.
+    """
+
+    executor: ExecutorType = ExecutorType.SYNCHRONOUS
+    channel_buffer_size: int = 64
+    default_max_concurrency: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class NodeConfig:
+    """Per-node execution configuration.
+
+    Attributes:
+        max_concurrency: Override for this node's concurrency limit.
+            ``None`` inherits from ``PipelineConfig.default_max_concurrency``.
+            ``1`` means sequential (rate-limited APIs, preserves ordering).
+    """
+
+    max_concurrency: int | None = None
+
+
+def resolve_concurrency(
+    node_config: NodeConfig, pipeline_config: PipelineConfig
+) -> int | None:
+    """Resolve effective concurrency from node and pipeline configs.
+
+    Returns:
+        The concurrency limit to use, or ``None`` for unlimited.
+    """
+    if node_config.max_concurrency is not None:
+        return node_config.max_concurrency
+    return pipeline_config.default_max_concurrency
+
+
 class CacheMode(Enum):
     """Controls operator pod caching behaviour.
 

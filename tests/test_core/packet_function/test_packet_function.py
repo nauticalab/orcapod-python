@@ -419,9 +419,10 @@ class TestCallErrors:
 
 
 class TestAsyncCall:
-    def test_async_call_raises_not_implemented(self, add_pf, add_packet):
-        with pytest.raises(NotImplementedError):
-            asyncio.run(add_pf.async_call(add_packet))
+    def test_async_call_returns_correct_result(self, add_pf, add_packet):
+        result = asyncio.run(add_pf.async_call(add_packet))
+        assert result is not None
+        assert result.as_dict()["result"] == 3  # 1 + 2
 
 
 # ---------------------------------------------------------------------------

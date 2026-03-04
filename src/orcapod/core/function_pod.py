@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from abc import abstractmethod
 from collections.abc import Callable, Collection, Iterator, Sequence
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from orcapod import contexts
+from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.config import Config
 from orcapod.core.base import TraceableBase
 from orcapod.core.packet_function import CachedPacketFunction, PythonPacketFunction
@@ -25,7 +27,7 @@ from orcapod.protocols.core_protocols import (
 )
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.system_constants import constants
-from orcapod.types import ColumnConfig, Schema
+from orcapod.types import ColumnConfig, NodeConfig, PipelineConfig, Schema, resolve_concurrency
 from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -242,6 +244,20 @@ class _FunctionPodBase(TraceableBase):
 
 
 class FunctionPod(_FunctionPodBase):
+
+    def __init__(
+        self,
+        packet_function: PacketFunctionProtocol,
+        node_config: NodeConfig | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(packet_function, **kwargs)
+        self._node_config = node_config or NodeConfig()
+
+    @property
+    def node_config(self) -> NodeConfig:
+        return self._node_config
+
     def process(
         self, *streams: StreamProtocol, label: str | None = None
     ) -> FunctionPodStream:
@@ -280,6 +296,41 @@ class FunctionPod(_FunctionPodBase):
         logger.debug(f"Invoking pod {self} on streams through __call__: {streams}")
         # perform input stream validation
         return self.process(*streams, label=label)
+
+    # ------------------------------------------------------------------
+    # Async channel execution (streaming mode)
+    # ------------------------------------------------------------------
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        pipeline_config: PipelineConfig | None = None,
+    ) -> None:
+        """Streaming async execution with per-packet concurrency control.
+
+        Each input (tag, packet) is processed independently. A semaphore
+        controls how many packets are in-flight concurrently.
+        """
+        pipeline_config = pipeline_config or PipelineConfig()
+        max_concurrency = resolve_concurrency(self._node_config, pipeline_config)
+
+        sem = asyncio.Semaphore(max_concurrency) if max_concurrency is not None else None
+
+        async def process_one(tag: TagProtocol, packet: PacketProtocol) -> None:
+            if sem is not None:
+                async with sem:
+                    result_packet = await self.packet_function.async_call(packet)
+            else:
+                result_packet = await self.packet_function.async_call(packet)
+            if result_packet is not None:
+                await output.send((tag, result_packet))
+
+        async with asyncio.TaskGroup() as tg:
+            async for tag, packet in inputs[0]:
+                tg.create_task(process_one(tag, packet))
+
+        await output.close()
 
 
 class FunctionPodStream(StreamBase):
