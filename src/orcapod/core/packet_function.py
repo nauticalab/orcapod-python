@@ -85,9 +85,7 @@ def parse_function_outputs(
 
 
 class PacketFunctionBase(TraceableBase):
-    """
-    Abstract base class for PacketFunctionProtocol, defining the interface and common functionality.
-    """
+    """Abstract base class for PacketFunctionProtocol."""
 
     def __init__(
         self,
@@ -123,20 +121,17 @@ class PacketFunctionBase(TraceableBase):
             self.executor = executor
 
     def computed_label(self) -> str | None:
-        """
-        If no explicit label is provided, use the canonical function name as the label.
-        """
+        """Return the canonical function name as the label if none was set explicitly."""
         return self.canonical_function_name
 
     @property
     def output_packet_schema_hash(self) -> str:
-        """
-        Return the hash of the output packet schema as a string.
+        """Return the hash of the output packet schema as a string.
 
         The hash is computed lazily on first access and cached for subsequent calls.
 
         Returns:
-            str: The hash string of the output packet schema.
+            The hash string of the output packet schema.
         """
         if self._output_packet_schema_hash is None:
             self._output_packet_schema_hash = (
@@ -172,34 +167,25 @@ class PacketFunctionBase(TraceableBase):
     @property
     @abstractmethod
     def packet_function_type_id(self) -> str:
-        """
-        Unique function type identifier. This identifier is used for equivalence checks.
-        e.g. "python.function.v1"
-        """
+        """Unique function type identifier (e.g. ``"python.function.v1"``)."""
         ...
 
     @property
     @abstractmethod
     def canonical_function_name(self) -> str:
-        """
-        Human-readable function identifier
-        """
+        """Human-readable function identifier."""
         ...
 
     @property
     @abstractmethod
     def input_packet_schema(self) -> Schema:
-        """
-        Return the input typespec for the pod. This is used to validate the input streams.
-        """
+        """Schema describing the input packets this function accepts."""
         ...
 
     @property
     @abstractmethod
     def output_packet_schema(self) -> Schema:
-        """
-        Return the output typespec for the pod. This is used to validate the output streams.
-        """
+        """Schema describing the output packets this function produces."""
         ...
 
     @abstractmethod
@@ -216,13 +202,12 @@ class PacketFunctionBase(TraceableBase):
 
     @property
     def executor(self) -> PacketFunctionExecutorProtocol | None:
-        """The executor used to run this packet function, or ``None`` for direct execution."""
+        """Return the executor used to run this packet function, or ``None`` for direct execution."""
         return self._executor
 
     @executor.setter
     def executor(self, executor: PacketFunctionExecutorProtocol | None) -> None:
-        """
-        Set or clear the executor for this packet function.
+        """Set or clear the executor for this packet function.
 
         Raises:
             TypeError: If *executor* does not support this function's
@@ -239,20 +224,18 @@ class PacketFunctionBase(TraceableBase):
     # ==================== Execution ====================
 
     def call(self, packet: PacketProtocol) -> PacketProtocol | None:
-        """
-        Process a single packet, routing through the executor if one is set.
+        """Process a single packet, routing through the executor if one is set.
 
-        Subclasses should override :meth:`direct_call` instead of this method.
+        Subclasses should override ``direct_call`` instead of this method.
         """
         if self._executor is not None:
             return self._executor.execute(self, packet)
         return self.direct_call(packet)
 
     async def async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
-        """
-        Asynchronously process a single packet, routing through the executor if set.
+        """Asynchronously process a single packet, routing through the executor if set.
 
-        Subclasses should override :meth:`direct_async_call` instead of this method.
+        Subclasses should override ``direct_async_call`` instead of this method.
         """
         if self._executor is not None:
             return await self._executor.async_execute(self, packet)
@@ -260,8 +243,7 @@ class PacketFunctionBase(TraceableBase):
 
     @abstractmethod
     def direct_call(self, packet: PacketProtocol) -> PacketProtocol | None:
-        """
-        Execute the function's native computation on *packet*.
+        """Execute the function's native computation on *packet*.
 
         This is the method executors invoke.  It bypasses executor routing
         and runs the computation directly.  Subclasses must implement this.
@@ -270,16 +252,14 @@ class PacketFunctionBase(TraceableBase):
 
     @abstractmethod
     async def direct_async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
-        """Asynchronous counterpart of :meth:`direct_call`."""
+        """Asynchronous counterpart of ``direct_call``."""
         ...
 
 
 class PythonPacketFunction(PacketFunctionBase):
     @property
     def packet_function_type_id(self) -> str:
-        """
-        Unique function type identifier
-        """
+        """Unique function type identifier."""
         return "python.function.v0"
 
     def __init__(
@@ -364,9 +344,7 @@ class PythonPacketFunction(PacketFunctionBase):
 
     @property
     def canonical_function_name(self) -> str:
-        """
-        Human-readable function identifier
-        """
+        """Human-readable function identifier."""
         return self._function_name
 
     def get_function_variation_data(self) -> dict[str, Any]:
@@ -386,28 +364,20 @@ class PythonPacketFunction(PacketFunctionBase):
 
     @property
     def input_packet_schema(self) -> Schema:
-        """
-        Return the input typespec for the pod. This is used to validate the input streams.
-        """
+        """Schema describing the input packets this function accepts."""
         return self._input_schema
 
     @property
     def output_packet_schema(self) -> Schema:
-        """
-        Return the output typespec for the pod. This is used to validate the output streams.
-        """
+        """Schema describing the output packets this function produces."""
         return self._output_schema
 
     def is_active(self) -> bool:
-        """
-        Check if the pod is active. If not, it will not process any packets.
-        """
+        """Return whether the function is active (will process packets)."""
         return self._active
 
     def set_active(self, active: bool = True) -> None:
-        """
-        Set the active state of the pod. If set to False, the pod will not process any packets.
-        """
+        """Set the active state. If False, ``call`` returns None for every packet."""
         self._active = active
 
     def direct_call(self, packet: PacketProtocol) -> PacketProtocol | None:
@@ -433,7 +403,7 @@ class PythonPacketFunction(PacketFunctionBase):
         )
 
     async def direct_async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
-        """Run the synchronous function in a thread pool via ``run_in_executor``."""
+        """Run the synchronous ``direct_call`` in a thread pool via ``run_in_executor``."""
         import asyncio
 
         loop = asyncio.get_running_loop()
@@ -441,9 +411,7 @@ class PythonPacketFunction(PacketFunctionBase):
 
 
 class PacketFunctionWrapper(PacketFunctionBase):
-    """
-    Wrapper around a PacketFunctionProtocol to modify or extend its behavior.
-    """
+    """Wrapper around a PacketFunctionProtocol to modify or extend its behavior."""
 
     def __init__(self, packet_function: PacketFunctionProtocol, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -511,9 +479,7 @@ class PacketFunctionWrapper(PacketFunctionBase):
 
 
 class CachedPacketFunction(PacketFunctionWrapper):
-    """
-    Wrapper around a PacketFunctionProtocol that caches results for identical input packets.
-    """
+    """Wrapper around a PacketFunctionProtocol that caches results for identical input packets."""
 
     # cloumn name containing indication of whether the result was computed
     RESULT_COMPUTED_FLAG = f"{constants.META_PREFIX}computed"
@@ -531,18 +497,12 @@ class CachedPacketFunction(PacketFunctionWrapper):
         self._auto_flush = True
 
     def set_auto_flush(self, on: bool = True) -> None:
-        """
-        Set the auto-flush behavior of the result database.
-        If set to True, the result database will flush after each record is added.
-        """
+        """Set auto-flush behavior. If True, the database flushes after each record."""
         self._auto_flush = on
 
     @property
     def record_path(self) -> tuple[str, ...]:
-        """
-        Return the path to the record in the result store.
-        This is used to store the results of the pod.
-        """
+        """Return the path to the record in the result store."""
         return self._record_path_prefix + self.uri
 
     def call(
@@ -575,11 +535,12 @@ class CachedPacketFunction(PacketFunctionWrapper):
     def get_cached_output_for_packet(
         self, input_packet: PacketProtocol
     ) -> PacketProtocol | None:
-        """
-        Retrieve the output packet from the result store based on the input packet.
-        If more than one output packet is found, conflict resolution strategy
-        will be applied.
-        If the output packet is not found, return None.
+        """Retrieve the cached output packet for *input_packet*.
+
+        If multiple cached entries exist, the most recent (by timestamp) wins.
+
+        Returns:
+            The cached output packet, or ``None`` if no entry was found.
         """
 
         # get all records with matching the input packet hash
@@ -627,9 +588,7 @@ class CachedPacketFunction(PacketFunctionWrapper):
         output_packet: PacketProtocol,
         skip_duplicates: bool = False,
     ) -> PacketProtocol:
-        """
-        Record the output packet against the input packet in the result store.
-        """
+        """Record the output packet against the input packet in the result store."""
 
         # TODO: consider incorporating execution_engine_opts into the record
         data_table = output_packet.as_table(columns={"source": True, "context": True})
@@ -683,9 +642,14 @@ class CachedPacketFunction(PacketFunctionWrapper):
     def get_all_cached_outputs(
         self, include_system_columns: bool = False
     ) -> "pa.Table | None":
-        """
-        Get all records from the result store for this pod.
-        If include_system_columns is True, include system columns in the result.
+        """Return all cached records from the result store for this function.
+
+        Args:
+            include_system_columns: If True, include system columns
+                (e.g. record_id) in the result.
+
+        Returns:
+            A PyArrow table of cached results, or ``None`` if empty.
         """
         record_id_column = (
             constants.PACKET_RECORD_ID if include_system_columns else None

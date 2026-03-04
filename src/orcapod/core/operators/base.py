@@ -17,24 +17,20 @@ from orcapod.types import ColumnConfig, Schema
 
 
 class UnaryOperator(StaticOutputPod):
-    """
-    Base class for all unary operators.
-    """
+    """Base class for all unary operators."""
 
     @abstractmethod
     def validate_unary_input(self, stream: StreamProtocol) -> None:
-        """
-        This method should be implemented by subclasses to validate the inputs to the operator.
-        It takes two streams as input and raises an error if the inputs are not valid.
+        """Validate the single input stream.
+
+        Raises:
+            ValueError: If the input stream is not valid for this operator.
         """
         ...
 
     @abstractmethod
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
-        """
-        This method should be implemented by subclasses to define the specific behavior of the unary operator.
-        It takes one stream as input and returns a new stream as output.
-        """
+        """Process a single input stream and return a new output stream."""
         ...
 
     @abstractmethod
@@ -45,10 +41,7 @@ class UnaryOperator(StaticOutputPod):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        """
-        This method should be implemented by subclasses to return the schemas of the input and output streams.
-        It takes two streams as input and returns a tuple of schemas.
-        """
+        """Return the (tag, packet) output schemas for the given input stream."""
         ...
 
     def validate_inputs(self, *streams: StreamProtocol) -> None:
@@ -58,10 +51,7 @@ class UnaryOperator(StaticOutputPod):
         return self.validate_unary_input(stream)
 
     def static_process(self, *streams: StreamProtocol) -> StreamProtocol:
-        """
-        Forward method for unary operators.
-        It expects exactly one stream as input.
-        """
+        """Forward to ``unary_static_process`` with the single input stream."""
         stream = streams[0]
         return self.unary_static_process(stream)
 
@@ -93,17 +83,16 @@ class UnaryOperator(StaticOutputPod):
 
 
 class BinaryOperator(StaticOutputPod):
-    """
-    Base class for all operators.
-    """
+    """Base class for all binary operators."""
 
     @abstractmethod
     def validate_binary_inputs(
         self, left_stream: StreamProtocol, right_stream: StreamProtocol
     ) -> None:
-        """
-        Check that the inputs to the binary operator are valid.
-        This method is called before the forward method to ensure that the inputs are valid.
+        """Validate the two input streams.
+
+        Raises:
+            ValueError: If the inputs are not valid for this operator.
         """
         ...
 
@@ -111,10 +100,7 @@ class BinaryOperator(StaticOutputPod):
     def binary_static_process(
         self, left_stream: StreamProtocol, right_stream: StreamProtocol
     ) -> StreamProtocol:
-        """
-        Forward method for binary operators.
-        It expects exactly two streams as input.
-        """
+        """Process two input streams and return a new output stream."""
         ...
 
     @abstractmethod
@@ -129,16 +115,11 @@ class BinaryOperator(StaticOutputPod):
 
     @abstractmethod
     def is_commutative(self) -> bool:
-        """
-        Return True if the operator is commutative (i.e., order of inputs does not matter).
-        """
+        """Return True if the operator is commutative (order of inputs does not matter)."""
         ...
 
     def static_process(self, *streams: StreamProtocol) -> StreamProtocol:
-        """
-        Forward method for binary operators.
-        It expects exactly two streams as input.
-        """
+        """Forward to ``binary_static_process`` with two input streams."""
         left_stream, right_stream = streams
         return self.binary_static_process(left_stream, right_stream)
 
@@ -185,10 +166,10 @@ class BinaryOperator(StaticOutputPod):
 
 
 class NonZeroInputOperator(StaticOutputPod):
-    """
-    Operators that work with at least one input stream.
-    This is useful for operators that can take a variable number of (but at least one ) input streams,
-    such as joins, unions, etc.
+    """Base class for operators that require at least one input stream.
+
+    Useful for operators that accept a variable number of input streams,
+    such as joins and unions.
     """
 
     @abstractmethod
@@ -196,9 +177,10 @@ class NonZeroInputOperator(StaticOutputPod):
         self,
         *streams: StreamProtocol,
     ) -> None:
-        """
-        Check that the inputs to the variable inputs operator are valid.
-        This method is called before the forward method to ensure that the inputs are valid.
+        """Validate the input streams.
+
+        Raises:
+            ValueError: If the inputs are not valid for this operator.
         """
         ...
 

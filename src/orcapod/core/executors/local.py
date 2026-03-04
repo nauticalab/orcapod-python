@@ -9,8 +9,7 @@ if TYPE_CHECKING:
 
 
 class LocalExecutor(PacketFunctionExecutorBase):
-    """
-    Default executor — runs the packet function directly in the current process.
+    """Default executor -- runs the packet function directly in the current process.
 
     Supports all packet function types (``supported_function_type_ids``
     returns an empty set).

@@ -249,13 +249,11 @@ class Schema(Mapping[str, DataType]):
 class ExecutorType(Enum):
     """Pipeline execution strategy.
 
-    Attributes
-    ----------
-    SYNCHRONOUS
-        Current behavior: ``static_process`` chain with pull-based
-        materialization.
-    ASYNC_CHANNELS
-        Push-based async channel execution via ``async_execute``.
+    Attributes:
+        SYNCHRONOUS: Current behavior -- ``static_process`` chain with
+            pull-based materialization.
+        ASYNC_CHANNELS: Push-based async channel execution via
+            ``async_execute``.
     """
 
     SYNCHRONOUS = "synchronous"
@@ -307,17 +305,13 @@ def resolve_concurrency(
 class CacheMode(Enum):
     """Controls operator pod caching behaviour.
 
-    Attributes
-    ----------
-    OFF
-        No cache writes, always compute.  Default for operator pods.
-    LOG
-        Cache writes **and** computation.  The operator always recomputes;
-        the cache serves as an append-only historical record.
-    REPLAY
-        Skip computation and flow cached results downstream.  Only
-        appropriate when the user explicitly wants to use the historical
-        record (e.g. auditing or run-over-run comparison).
+    Attributes:
+        OFF: No cache writes, always compute.  Default for operator pods.
+        LOG: Cache writes and computation.  The operator always recomputes;
+            the cache serves as an append-only historical record.
+        REPLAY: Skip computation and flow cached results downstream.  Only
+            appropriate when the user explicitly wants to use the historical
+            record (e.g. auditing or run-over-run comparison).
     """
 
     OFF = "off"

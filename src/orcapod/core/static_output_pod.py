@@ -33,13 +33,11 @@ else:
 
 
 class StaticOutputPod(TraceableBase):
-    """
-    Abstract Base class for pods with core logic that yields static output stream.
-    The static output stream will be wrapped in DynamicPodStream which will re-execute
-    the pod as necessary to ensure that the output stream is up-to-date.
+    """Abstract base class for pods whose core logic yields a static output stream.
 
-    Furthermore, the invocation of the pod will be tracked by the tracker manager, registering
-    the pod as a general pod invocation.
+    The static output stream is wrapped in ``DynamicPodStream`` which re-executes
+    the pod as necessary to keep the output up-to-date.  Pod invocations are
+    tracked by the tracker manager.
     """
 
     def __init__(
@@ -49,18 +47,12 @@ class StaticOutputPod(TraceableBase):
         super().__init__(**kwargs)
 
     def pipeline_identity_structure(self) -> Any:
-        """
-        Pipeline identity for operators defaults to their content identity structure.
-        Operators are stateless — their pipeline identity IS their content identity.
-        """
+        """Return the pipeline identity, which defaults to content identity for operators."""
         return self.identity_structure()
 
     @property
     def uri(self) -> tuple[str, ...]:
-        """
-        Returns a unique resource identifier for the pod.
-        The pod URI must uniquely determine the schema for the pod
-        """
+        """Return a unique resource identifier for the pod."""
         return (
             f"{self.__class__.__name__}",
             self.content_hash().to_hex(),
@@ -68,43 +60,37 @@ class StaticOutputPod(TraceableBase):
 
     @abstractmethod
     def validate_inputs(self, *streams: StreamProtocol) -> None:
-        """
-        Validate input streams, raising exceptions if invalid.
-
-        Should check:
-        - Number of input streams
-        - StreamProtocol types and schemas
-        - Kernel-specific requirements
-        - Business logic constraints
+        """Validate input streams, raising exceptions if invalid.
 
         Args:
-            *streams: Input streams to validate
+            *streams: Input streams to validate.
 
         Raises:
-            PodInputValidationError: If inputs are invalid
+            PodInputValidationError: If inputs are invalid.
         """
         ...
 
     @abstractmethod
     def argument_symmetry(self, streams: Collection[StreamProtocol]) -> ArgumentGroup:
-        """
-        Describe symmetry/ordering constraints on input arguments.
+        """Describe symmetry/ordering constraints on input arguments.
 
         Returns a structure encoding which arguments can be reordered:
-        - SymmetricGroup (frozenset): Arguments commute (order doesn't matter)
-        - OrderedGroup (tuple): Arguments have fixed positions
-        - Nesting expresses partial symmetry
+        - ``frozenset``: Arguments commute (order doesn't matter).
+        - ``tuple``: Arguments have fixed positions.
+        - Nesting expresses partial symmetry.
 
         Examples:
-            Full symmetry (Join):
+            Full symmetry (Join)::
+
                 return frozenset([a, b, c])
 
-            No symmetry (Concatenate):
+            No symmetry (Concatenate)::
+
                 return (a, b, c)
 
-            Partial symmetry:
+            Partial symmetry::
+
                 return (frozenset([a, b]), c)
-                # a,b are interchangeable, c has fixed position
         """
         ...
 
@@ -115,61 +101,44 @@ class StaticOutputPod(TraceableBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        """
-        Determine output types without triggering computation.
-
-        This method performs type inference based on input stream types,
-        enabling efficient type checking and stream property queries.
-        It should be fast and not trigger any expensive computation.
-
-        Used for:
-        - Pre-execution type validation
-        - Query planning and optimization
-        - Schema inference in complex pipelines
-        - IDE support and developer tooling
+        """Determine output (tag, packet) schemas without triggering computation.
 
         Args:
-            *streams: Input streams to analyze
+            *streams: Input streams to analyze.
+            columns: Column configuration for included column groups.
+            all_info: If True, include all info columns.
 
         Returns:
-            tuple[Schema, Schema]: (tag_types, packet_types) for output
+            A ``(tag_schema, packet_schema)`` tuple.
 
         Raises:
-            ValidationError: If input types are incompatible
-            TypeError: If stream types cannot be processed
+            ValidationError: If input types are incompatible.
         """
         ...
 
     @abstractmethod
     def static_process(self, *streams: StreamProtocol) -> StreamProtocol:
-        """
-        Executes the pod on the input streams, returning a new static output stream.
-        The output of execute is expected to be a static stream and thus only represent
-        instantaneous computation of the pod on the input streams.
-
-        Concrete subclass implementing a PodProtocol should override this method to provide
-        the pod's unique processing logic.
+        """Execute the pod on the input streams and return a static output stream.
 
         Args:
-            *streams: Input streams to process
+            *streams: Input streams to process.
 
         Returns:
-            cp.StreamProtocol: The resulting output stream
+            The resulting output stream.
         """
         ...
 
     def process(
         self, *streams: StreamProtocol, label: str | None = None
     ) -> DynamicPodStream:
-        """
-        Invoke the pod on a collection of streams, returning a KernelStream
-        that represents the computation.
+        """Invoke the pod on input streams and return a ``DynamicPodStream``.
 
         Args:
-            *streams: Input streams to process
+            *streams: Input streams to process.
+            label: Optional label for tracking.
 
         Returns:
-            cp.StreamProtocol: The resulting output stream
+            A ``DynamicPodStream`` wrapping the computation.
         """
         logger.debug(f"Invoking kernel {self} on streams: {streams}")
 
@@ -186,9 +155,7 @@ class StaticOutputPod(TraceableBase):
         return output_stream
 
     def __call__(self, *streams: StreamProtocol, **kwargs) -> DynamicPodStream:
-        """
-        Convenience method to invoke the pod process on a collection of streams,
-        """
+        """Convenience alias for ``process``."""
         logger.debug(f"Invoking pod {self} on streams through __call__: {streams}")
         # perform input stream validation
         return self.process(*streams, **kwargs)
@@ -266,12 +233,7 @@ class StaticOutputPod(TraceableBase):
 
 
 class DynamicPodStream(StreamBase):
-    """
-    Recomputable stream wrapping a StaticOutputPod
-
-    This stream is used to represent the output of a StaticOutputPod invocation.
-
-    """
+    """Recomputable stream wrapping a ``StaticOutputPod`` invocation."""
 
     def __init__(
         self,
@@ -310,10 +272,7 @@ class DynamicPodStream(StreamBase):
         return self._upstreams
 
     def clear_cache(self) -> None:
-        """
-        Clears the cached stream.
-        This is useful for re-processing the stream with the same pod.
-        """
+        """Clear the cached stream, forcing recomputation on next access."""
         self._cached_stream = None
         self._cached_time = None
 
@@ -323,9 +282,7 @@ class DynamicPodStream(StreamBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        """
-        Returns the keys of the tag and packet columns in the stream.
-        """
+        """Return the (tag_keys, packet_keys) column names for this stream."""
         tag_schema, packet_schema = self._pod.output_schema(
             *self.upstreams,
             columns=columns,
@@ -339,9 +296,7 @@ class DynamicPodStream(StreamBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        """
-        Returns the schemas of the tag and packet columns in the stream.
-        """
+        """Return the (tag_schema, packet_schema) for this stream."""
         return self._pod.output_schema(
             *self.upstreams,
             columns=columns,
