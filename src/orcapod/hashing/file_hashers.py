@@ -1,3 +1,5 @@
+import os
+
 from orcapod.hashing.hash_utils import hash_file
 from orcapod.protocols.hashing_protocols import (
     FileContentHasherProtocol,
@@ -35,7 +37,8 @@ class CachedFileHasher:
         self.string_cacher = string_cacher
 
     def hash_file(self, file_path: PathLike) -> ContentHash:
-        cache_key = f"file:{file_path}"
+        stat = os.stat(file_path)
+        cache_key = f"file:{file_path}:{stat.st_mtime_ns}:{stat.st_size}"
         cached_value = self.string_cacher.get_cached(cache_key)
         if cached_value is not None:
             return ContentHash.from_string(cached_value)
