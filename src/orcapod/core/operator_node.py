@@ -5,8 +5,6 @@ import logging
 from collections.abc import Iterator, Sequence
 from typing import TYPE_CHECKING, Any
 
-from orcapod.channels import ReadableChannel, WritableChannel
-
 from orcapod import contexts
 from orcapod.channels import Channel, ReadableChannel, WritableChannel
 from orcapod.config import Config
@@ -411,11 +409,13 @@ class PersistentOperatorNode(OperatorNode):
 
             # OFF or LOG: delegate to operator, forward results downstream
             intermediate: Channel[tuple[TagProtocol, PacketProtocol]] = Channel()
+            should_collect = self._cache_mode == CacheMode.LOG
             collected: list[tuple[TagProtocol, PacketProtocol]] = []
 
             async def forward() -> None:
                 async for item in intermediate.reader:
-                    collected.append(item)
+                    if should_collect:
+                        collected.append(item)
                     await output.send(item)
 
             async with asyncio.TaskGroup() as tg:
@@ -424,9 +424,8 @@ class PersistentOperatorNode(OperatorNode):
                 )
                 tg.create_task(forward())
 
-            # TaskGroup has completed — all results are in `collected`
-            # Store if LOG mode (sync DB write, post-hoc)
-            if self._cache_mode == CacheMode.LOG and collected:
+            # TaskGroup has completed — store if LOG mode (sync DB write, post-hoc)
+            if should_collect and collected:
                 stream = StaticOutputPod._materialize_to_stream(collected)
                 self._cached_output_stream = stream
                 self._store_output_stream(stream)
