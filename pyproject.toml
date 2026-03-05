@@ -54,6 +54,7 @@ version_file = "src/orcapod/_version.py"
 [dependency-groups]
 dev = [
     "httpie>=3.2.4",
+    "hypothesis>=6.0",
     "hydra-core>=1.3.2",
     "imageio>=2.37.0",
     "ipykernel>=6.29.5",

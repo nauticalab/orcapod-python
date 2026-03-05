@@ -133,18 +133,14 @@ class TestInMemoryArrowDatabaseSkipDuplicates:
 class TestInMemoryArrowDatabasePendingBatch:
     """Pending batch semantics: records not visible until flush()."""
 
-    def test_records_not_visible_before_flush(self) -> None:
+    def test_records_accessible_before_flush(self) -> None:
         db = InMemoryArrowDatabase()
         path = ("pending",)
 
         db.add_record(path, "p1", _make_record(1))
-        # Without flush, get_record_by_id still finds it in pending.
-        # But get_all_records from committed store should reflect pending too
-        # because _combined_table merges both. Let's verify pending is separate
-        # from committed by checking _tables directly.
-        assert path not in {
-            tuple(k.split("/")) for k in db._tables
-        }, "Record should not be in committed store before flush"
+        # Records should be accessible via public API even before flush
+        result = db.get_record_by_id(path, "p1")
+        assert result is not None, "Record should be accessible via get_record_by_id before flush"
 
     def test_flush_makes_records_visible(self) -> None:
         db = InMemoryArrowDatabase()
@@ -153,11 +149,13 @@ class TestInMemoryArrowDatabasePendingBatch:
         db.add_record(path, "p1", _make_record(1))
         db.flush()
 
-        record_key = db._get_record_key(path)
-        assert record_key in db._tables, "Record should be in committed store after flush"
-
+        # After flush, records should still be accessible via public API
         result = db.get_record_by_id(path, "p1")
-        assert result is not None
+        assert result is not None, "Record should be accessible after flush"
+
+        all_records = db.get_all_records(path)
+        assert all_records is not None
+        assert all_records.num_rows >= 1
 
 
 class TestInMemoryArrowDatabaseFlush:

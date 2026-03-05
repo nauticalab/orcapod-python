@@ -26,7 +26,7 @@ from orcapod.utils.arrow_data_utils import (
 
 
 class TestAddSystemTagColumns:
-    """Per the design spec, system tag columns are prefixed with _tag:: and
+    """Per the design spec, system tag columns are prefixed with _tag_ and
     track per-row provenance (source_id, record_id pairs)."""
 
     def test_adds_system_tag_columns(self):

@@ -5,7 +5,11 @@ import pytest
 
 from orcapod.core.datagrams.datagram import Datagram
 from orcapod.core.datagrams.tag_packet import Tag
+from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig
+
+# Use the actual system tag prefix from constants
+_SYS_TAG_KEY = f"{constants.SYSTEM_TAG_PREFIX}src:abc"
 
 
 def _make_context():
@@ -23,29 +27,29 @@ class TestTagSystemTagsSeparation:
 
     def test_system_tags_not_in_keys_by_default(self):
         ctx = _make_context()
-        tag = Tag({"x": 1, "y": "hello"}, data_context=ctx, system_tags={"_tag::src:abc": "val"})
+        tag = Tag({"x": 1, "y": "hello"}, data_context=ctx, system_tags={_SYS_TAG_KEY: "val"})
         keys = list(tag.keys())
         assert "x" in keys
         assert "y" in keys
-        assert not any(k.startswith("_tag::") for k in keys)
+        assert not any(k.startswith(constants.SYSTEM_TAG_PREFIX) for k in keys)
 
     def test_system_tags_not_in_as_dict_by_default(self):
         ctx = _make_context()
-        tag = Tag({"x": 1}, data_context=ctx, system_tags={"_tag::src:abc": "val"})
+        tag = Tag({"x": 1}, data_context=ctx, system_tags={_SYS_TAG_KEY: "val"})
         d = tag.as_dict()
-        assert not any(k.startswith("_tag::") for k in d)
+        assert not any(k.startswith(constants.SYSTEM_TAG_PREFIX) for k in d)
 
     def test_system_tags_not_in_as_table_by_default(self):
         ctx = _make_context()
-        tag = Tag({"x": 1}, data_context=ctx, system_tags={"_tag::src:abc": "val"})
+        tag = Tag({"x": 1}, data_context=ctx, system_tags={_SYS_TAG_KEY: "val"})
         table = tag.as_table()
-        assert not any(name.startswith("_tag::") for name in table.column_names)
+        assert not any(name.startswith(constants.SYSTEM_TAG_PREFIX) for name in table.column_names)
 
     def test_system_tags_not_in_schema_by_default(self):
         ctx = _make_context()
-        tag = Tag({"x": 1}, data_context=ctx, system_tags={"_tag::src:abc": "val"})
+        tag = Tag({"x": 1}, data_context=ctx, system_tags={_SYS_TAG_KEY: "val"})
         s = tag.schema()
-        assert not any(k.startswith("_tag::") for k in s)
+        assert not any(k.startswith(constants.SYSTEM_TAG_PREFIX) for k in s)
 
 
 # ---------------------------------------------------------------------------
@@ -57,33 +61,33 @@ class TestTagSystemTagsWithConfig:
 
     def test_keys_with_system_tags_true(self):
         ctx = _make_context()
-        tag = Tag({"x": 1}, data_context=ctx, system_tags={"_tag::src:abc": "val"})
+        tag = Tag({"x": 1}, data_context=ctx, system_tags={_SYS_TAG_KEY: "val"})
         keys = list(tag.keys(columns=ColumnConfig(system_tags=True)))
-        assert any(k.startswith("_tag::") for k in keys)
+        assert any(k.startswith(constants.SYSTEM_TAG_PREFIX) for k in keys)
 
     def test_as_dict_with_system_tags_true(self):
         ctx = _make_context()
-        tag = Tag({"x": 1}, data_context=ctx, system_tags={"_tag::src:abc": "val"})
+        tag = Tag({"x": 1}, data_context=ctx, system_tags={_SYS_TAG_KEY: "val"})
         d = tag.as_dict(columns=ColumnConfig(system_tags=True))
-        assert any(k.startswith("_tag::") for k in d)
+        assert any(k.startswith(constants.SYSTEM_TAG_PREFIX) for k in d)
 
     def test_as_table_with_system_tags_true(self):
         ctx = _make_context()
-        tag = Tag({"x": 1}, data_context=ctx, system_tags={"_tag::src:abc": "val"})
+        tag = Tag({"x": 1}, data_context=ctx, system_tags={_SYS_TAG_KEY: "val"})
         table = tag.as_table(columns=ColumnConfig(system_tags=True))
-        assert any(name.startswith("_tag::") for name in table.column_names)
+        assert any(name.startswith(constants.SYSTEM_TAG_PREFIX) for name in table.column_names)
 
     def test_keys_with_all_info(self):
         ctx = _make_context()
-        tag = Tag({"x": 1}, data_context=ctx, system_tags={"_tag::src:abc": "val"})
+        tag = Tag({"x": 1}, data_context=ctx, system_tags={_SYS_TAG_KEY: "val"})
         keys = list(tag.keys(columns=ColumnConfig.all()))
-        assert any(k.startswith("_tag::") for k in keys)
+        assert any(k.startswith(constants.SYSTEM_TAG_PREFIX) for k in keys)
 
     def test_schema_with_system_tags_true(self):
         ctx = _make_context()
-        tag = Tag({"x": 1}, data_context=ctx, system_tags={"_tag::src:abc": "val"})
+        tag = Tag({"x": 1}, data_context=ctx, system_tags={_SYS_TAG_KEY: "val"})
         s = tag.schema(columns=ColumnConfig(system_tags=True))
-        assert any(k.startswith("_tag::") for k in s)
+        assert any(k.startswith(constants.SYSTEM_TAG_PREFIX) for k in s)
 
 
 # ---------------------------------------------------------------------------
@@ -95,18 +99,18 @@ class TestTagSystemTagsCopy:
 
     def test_system_tags_returns_dict(self):
         ctx = _make_context()
-        tag = Tag({"x": 1}, data_context=ctx, system_tags={"_tag::src:abc": "val"})
+        tag = Tag({"x": 1}, data_context=ctx, system_tags={_SYS_TAG_KEY: "val"})
         st = tag.system_tags()
         assert isinstance(st, dict)
-        assert "_tag::src:abc" in st
+        assert _SYS_TAG_KEY in st
 
     def test_system_tags_is_copy(self):
         ctx = _make_context()
-        tag = Tag({"x": 1}, data_context=ctx, system_tags={"_tag::src:abc": "val"})
+        tag = Tag({"x": 1}, data_context=ctx, system_tags={_SYS_TAG_KEY: "val"})
         st = tag.system_tags()
-        st["_tag::src:abc"] = "modified"
+        st[_SYS_TAG_KEY] = "modified"
         # Original should be unchanged
-        assert tag.system_tags()["_tag::src:abc"] == "val"
+        assert tag.system_tags()[_SYS_TAG_KEY] == "val"
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +122,7 @@ class TestTagCopy:
 
     def test_copy_preserves_system_tags(self):
         ctx = _make_context()
-        tag = Tag({"x": 1}, data_context=ctx, system_tags={"_tag::src:abc": "val"})
+        tag = Tag({"x": 1}, data_context=ctx, system_tags={_SYS_TAG_KEY: "val"})
         copied = tag.copy()
         assert copied is not tag
         assert copied.system_tags() == tag.system_tags()
