@@ -180,14 +180,18 @@ class Join(NonZeroInputOperator):
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
     ) -> None:
-        """Async join with single-input passthrough and symmetric hash join.
+        """Async join: collect all inputs concurrently, then delegate to static_process.
 
         Single input: streams through directly without any buffering.
-        Two inputs: symmetric hash join — each arriving row is immediately
-        probed against the opposite side's buffer, emitting matches
-        without waiting for both inputs to finish.
-        Three or more inputs: collects all inputs concurrently, then
-        delegates to ``static_process`` for the Polars N-way join.
+        Two or more inputs: collects all inputs concurrently, then
+        delegates to ``static_process`` for the Polars join with correct
+        system-tag column renaming.
+
+        Note: a streaming symmetric hash join was considered for the
+        two-input case, but ``static_process`` handles the canonical
+        system-tag name-extending logic (appending
+        ::{pipeline_hash}:{position}) which cannot be replicated
+        correctly without access to pipeline identity metadata.
         """
         try:
             if len(inputs) == 1:
@@ -195,177 +199,19 @@ class Join(NonZeroInputOperator):
                     await output.send((tag, packet))
                 return
 
-            if len(inputs) == 2:
-                await self._symmetric_hash_join(inputs[0], inputs[1], output)
+            # Collect all inputs concurrently
+            all_rows = await asyncio.gather(*(ch.collect() for ch in inputs))
+
+            # Guard against empty inputs — join with an empty side is empty
+            if any(len(rows) == 0 for rows in all_rows):
                 return
 
-            # N > 2: concurrent collection + static_process
-            all_rows = await asyncio.gather(*(ch.collect() for ch in inputs))
             streams = [self._materialize_to_stream(rows) for rows in all_rows]
             result = self.static_process(*streams)
             for tag, packet in result.iter_packets():
                 await output.send((tag, packet))
         finally:
             await output.close()
-
-    async def _symmetric_hash_join(
-        self,
-        left_ch: ReadableChannel[tuple[TagProtocol, PacketProtocol]],
-        right_ch: ReadableChannel[tuple[TagProtocol, PacketProtocol]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
-    ) -> None:
-        """Symmetric hash join for two inputs.
-
-        Both sides are read concurrently via a merged queue.  Each
-        arriving row is added to its side's index and immediately probed
-        against the opposite side.  Matched rows are emitted to
-        ``output`` as soon as found, so downstream consumers can begin
-        work before either input is fully consumed.
-
-        For correct system-tag column naming the implementation falls
-        back to ``static_process`` (which requires materialised streams)
-        when the total result set is ready.
-        """
-        from orcapod.core.datagrams import Packet, Tag
-
-        # Merge both channels into one tagged queue
-        _SENTINEL = object()
-        queue: asyncio.Queue = asyncio.Queue()
-
-        async def _drain(
-            ch: ReadableChannel[tuple[TagProtocol, PacketProtocol]],
-            side: int,
-        ) -> None:
-            async for item in ch:
-                await queue.put((side, item))
-            await queue.put((side, _SENTINEL))
-
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(_drain(left_ch, 0))
-            tg.create_task(_drain(right_ch, 1))
-
-            # -- process items as they arrive --
-            # buffers[i] holds all rows seen so far from input i
-            buffers: list[list[tuple[TagProtocol, PacketProtocol]]] = [[], []]
-            # indexes[i] maps shared-key tuple → list of indices into buffers[i]
-            indexes: list[dict[tuple, list[int]]] = [{}, {}]
-
-            shared_keys: tuple[str, ...] | None = None
-            needs_reindex = False
-            closed_count = 0
-
-            while closed_count < 2:
-                side, item = await queue.get()
-
-                if item is _SENTINEL:
-                    closed_count += 1
-                    continue
-
-                tag, pkt = item
-                other = 1 - side
-
-                # Determine shared tag keys once we have rows from both sides
-                if shared_keys is None:
-                    if not buffers[other]:
-                        # Other side empty — just buffer this row for later
-                        buffers[side].append((tag, pkt))
-                        continue
-
-                    # We have data from both sides; compute shared keys
-                    this_keys = set(tag.keys())
-                    other_keys = set(buffers[other][0][0].keys())
-                    shared_keys = tuple(sorted(this_keys & other_keys))
-                    needs_reindex = True
-
-                # One-time re-index of all rows buffered before shared_keys
-                if needs_reindex:
-                    needs_reindex = False
-                    for buf_side in (0, 1):
-                        for j, (bt, _bp) in enumerate(buffers[buf_side]):
-                            btd = bt.as_dict()
-                            k = (
-                                tuple(btd[sk] for sk in shared_keys)
-                                if shared_keys
-                                else (0,)
-                            )
-                            indexes[buf_side].setdefault(k, []).append(j)
-
-                    # Emit matches for all already-buffered rows across sides
-                    for li, (lt, lp) in enumerate(buffers[0]):
-                        ltd = lt.as_dict()
-                        lk = (
-                            tuple(ltd[sk] for sk in shared_keys)
-                            if shared_keys
-                            else (0,)
-                        )
-                        for ri in indexes[1].get(lk, []):
-                            rt, rp = buffers[1][ri]
-                            await output.send(
-                                self._merge_row_pair(lt, lp, rt, rp, shared_keys)
-                            )
-
-                # Index the new row
-                td = tag.as_dict()
-                key = (
-                    tuple(td[sk] for sk in shared_keys) if shared_keys else (0,)
-                )
-                row_idx = len(buffers[side])
-                buffers[side].append((tag, pkt))
-                indexes[side].setdefault(key, []).append(row_idx)
-
-                # Probe the opposite buffer for matches
-                matching_indices = indexes[other].get(key, [])
-                for mi in matching_indices:
-                    other_tag, other_pkt = buffers[other][mi]
-                    if side == 0:
-                        merged = self._merge_row_pair(
-                            tag, pkt, other_tag, other_pkt, shared_keys
-                        )
-                    else:
-                        merged = self._merge_row_pair(
-                            other_tag, other_pkt, tag, pkt, shared_keys
-                        )
-                    await output.send(merged)
-
-    @staticmethod
-    def _merge_row_pair(
-        left_tag: TagProtocol,
-        left_pkt: PacketProtocol,
-        right_tag: TagProtocol,
-        right_pkt: PacketProtocol,
-        shared_keys: tuple[str, ...],
-    ) -> tuple[TagProtocol, PacketProtocol]:
-        """Merge a matched pair of rows into one joined (Tag, Packet)."""
-        from orcapod.core.datagrams import Packet, Tag
-
-        # Merge tag dicts (shared keys come from left)
-        merged_tag_d: dict = {}
-        merged_tag_d.update(left_tag.as_dict())
-        for k, v in right_tag.as_dict().items():
-            if k not in merged_tag_d:
-                merged_tag_d[k] = v
-
-        # Merge system tags with side suffix to avoid collisions
-        merged_sys: dict = {}
-        for k, v in left_tag.system_tags().items():
-            merged_sys[k] = v
-        for k, v in right_tag.system_tags().items():
-            merged_sys[k] = v
-
-        merged_tag = Tag(merged_tag_d, system_tags=merged_sys)
-
-        # Merge packet dicts (non-overlapping by Join's validation)
-        merged_pkt_d: dict = {}
-        merged_pkt_d.update(left_pkt.as_dict())
-        merged_pkt_d.update(right_pkt.as_dict())
-
-        merged_si: dict = {}
-        merged_si.update(left_pkt.source_info())
-        merged_si.update(right_pkt.source_info())
-
-        merged_pkt = Packet(merged_pkt_d, source_info=merged_si)
-
-        return merged_tag, merged_pkt
 
     def identity_structure(self) -> Any:
         return self.__class__.__name__

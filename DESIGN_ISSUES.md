@@ -436,17 +436,21 @@ Three categories of improvement are planned:
 
 2. **Incremental overrides (stateful, eager emit)** — for multi-input operators that can
    produce partial results before all inputs are consumed:
-   - `Join` — symmetric hash join (kept barrier: complex system-tag name-extending logic)
-   - `MergeJoin` — same approach (kept barrier: complex column-merging logic)
+   - `Join` — concurrent collection + `static_process` delegation. A streaming symmetric
+     hash join was prototyped but reverted: the canonical system-tag name-extending logic
+     (appending `::{pipeline_hash}:{position}`) requires pipeline identity metadata that
+     is not available in the per-row async path. The current async override collects all
+     inputs concurrently and delegates to `static_process` for correctness. ✅
+   - `MergeJoin` — kept barrier: complex column-merging logic
    - `SemiJoin` — build right, stream left through hash lookup ✅
 
 3. **Streaming accumulation:**
    - `Batch` — emit full batches as they accumulate (`batch_size > 0`); barrier fallback
      when `batch_size == 0` (batch everything) ✅
 
-**Remaining:** `PolarsFilter` (barrier), `Join` (barrier), `MergeJoin` (barrier) could
-receive incremental overrides in the future but require careful handling of Polars expression
-evaluation and system-tag evolution respectively.
+**Remaining:** `PolarsFilter` (barrier), `MergeJoin` (barrier) could receive incremental
+overrides in the future but require careful handling of Polars expression evaluation and
+system-tag evolution respectively.
 
 ---
 

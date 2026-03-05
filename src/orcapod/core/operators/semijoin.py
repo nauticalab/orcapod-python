@@ -95,6 +95,9 @@ class SemiJoin(BinaryOperator):
         """
         Validates that the input streams are compatible for semi-join.
         Checks that overlapping columns have compatible types.
+
+        Stores the common keys so that ``async_execute`` can use them
+        to determine the correct empty-right behavior without data.
         """
         try:
             left_tag_schema, left_packet_schema = left_stream.output_schema()
@@ -109,7 +112,8 @@ class SemiJoin(BinaryOperator):
             )
 
             # intersection_schemas will raise an error if types are incompatible
-            schema_utils.intersection_schemas(left_all_schema, right_all_schema)
+            common = schema_utils.intersection_schemas(left_all_schema, right_all_schema)
+            self._validated_common_keys: tuple[str, ...] = tuple(common.keys())
 
         except Exception as e:
             raise InputValidationError(
@@ -118,6 +122,14 @@ class SemiJoin(BinaryOperator):
 
     def is_commutative(self) -> bool:
         return False
+
+    def _common_keys_from_schema(self) -> tuple[str, ...]:
+        """Return the common keys computed during input validation.
+
+        Falls back to an empty tuple if validation hasn't been called
+        (shouldn't happen in normal pipeline execution).
+        """
+        return getattr(self, "_validated_common_keys", ())
 
     async def async_execute(
         self,
@@ -141,25 +153,16 @@ class SemiJoin(BinaryOperator):
             right_rows = await right_ch.collect()
 
             if not right_rows:
-                # Empty right: semi-join produces empty result when common
-                # keys exist, or passes left through when they don't.
-                # Without data we can't determine common keys from row
-                # objects alone, so fall back to barrier mode.
-                left_rows = await left_ch.collect()
-                if not left_rows:
+                # Empty right: determine common keys from the validated
+                # input schemas (set during __init__) to match sync semantics.
+                # Common keys exist → empty result; no common keys → pass left through.
+                common = self._common_keys_from_schema()
+                if common:
+                    # Drain left channel (discard) — result is empty
+                    await left_ch.collect()
                     return
-                left_stream = self._materialize_to_stream(left_rows)
-                right_stream = self._materialize_to_stream(right_rows) if right_rows else None
-                if right_stream is None:
-                    # No right data at all — need to check schemas.
-                    # Empty right with common keys → empty result.
-                    # Since we can't build a right stream with 0 rows,
-                    # just pass left through (safe: no filter rows = no filter).
-                    for tag, packet in left_stream.iter_packets():
-                        await output.send((tag, packet))
-                    return
-                result = self.static_process(left_stream, right_stream)
-                for tag, packet in result.iter_packets():
+                # No common keys — pass all left rows through unchanged
+                async for tag, packet in left_ch:
                     await output.send((tag, packet))
                 return
 
