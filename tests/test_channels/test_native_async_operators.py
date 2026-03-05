@@ -953,6 +953,8 @@ class TestSemiJoinBuildProbe:
 
 
 class TestJoinNativeAsync:
+    """Tests for Join.async_execute (symmetric hash join + N>2 barrier)."""
+
     @pytest.mark.asyncio
     async def test_single_input_passthrough(self):
         stream = make_int_stream(3)
@@ -1250,3 +1252,200 @@ class TestStreamingPipelineIntegration:
             assert packet.keys() == ("mass",)
         masses = sorted(pkt.as_dict()["mass"] for _, pkt in results)
         assert masses == [0.5, 4.0, 12.0]
+
+
+# ===================================================================
+# Sync vs Async system-tag equivalence
+# ===================================================================
+
+
+def _make_source(tag_col: str, packet_col: str, data: dict) -> ArrowTableStream:
+    """Build an ArrowTableSource (which generates system tags) and return its stream."""
+    from orcapod.core.sources.arrow_table_source import ArrowTableSource
+
+    table = pa.table(
+        {
+            tag_col: pa.array(data[tag_col], type=pa.large_string()),
+            packet_col: pa.array(data[packet_col], type=pa.int64()),
+        }
+    )
+    return ArrowTableSource(table, tag_columns=[tag_col])
+
+
+async def run_binary_validated(
+    op, left: ArrowTableStream, right: ArrowTableStream,
+) -> list[tuple]:
+    """Run a binary operator async with prior validation (for system-tag metadata).
+
+    Calls ``validate_inputs`` first so operators like ``Join`` can store
+    pipeline-hash metadata used for system-tag column renaming.
+    """
+    op.validate_inputs(left, right)
+    left_ch = Channel(buffer_size=1024)
+    right_ch = Channel(buffer_size=1024)
+    output_ch = Channel(buffer_size=1024)
+    await feed(left, left_ch)
+    await feed(right, right_ch)
+    await op.async_execute([left_ch.reader, right_ch.reader], output_ch.writer)
+    return await output_ch.reader.collect()
+
+
+def _extract_system_tags(
+    rows: list[tuple],
+) -> list[dict[str, str]]:
+    """Extract sorted system-tag dicts from (tag, packet) pairs."""
+    return sorted(
+        [tag.system_tags() for tag, _ in rows],
+        key=lambda d: sorted(d.items()),
+    )
+
+
+def _extract_system_tag_keys(rows: list[tuple]) -> set[str]:
+    """Collect all unique system-tag keys across rows."""
+    keys: set[str] = set()
+    for tag, _ in rows:
+        keys.update(tag.system_tags().keys())
+    return keys
+
+
+class TestJoinSystemTagEquivalence:
+    """Verify that Join.async_execute produces the same system-tag column
+    names and values as the sync static_process path.
+
+    Uses ``ArrowTableSource`` (which adds system-tag columns) rather than
+    bare ``ArrowTableStream`` to ensure system tags are present.
+    """
+
+    @pytest.mark.asyncio
+    async def test_two_way_system_tag_column_names_match(self):
+        """System-tag column names must be identical between sync and async."""
+        left = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
+        right = _make_source("key", "score", {"key": ["a", "b"], "score": [100, 200]})
+        op = Join()
+
+        # Sync
+        sync_result = op.static_process(left, right)
+        sync_rows = list(sync_result.iter_packets())
+
+        # Async
+        async_rows = await run_binary_validated(op, left, right)
+
+        sync_sys_keys = _extract_system_tag_keys(sync_rows)
+        async_sys_keys = _extract_system_tag_keys(async_rows)
+
+        assert sync_sys_keys, "Expected system tags to be present"
+        assert sync_sys_keys == async_sys_keys
+
+    @pytest.mark.asyncio
+    async def test_two_way_system_tag_values_match(self):
+        """System-tag values for each row must match between sync and async."""
+        left = _make_source("key", "value", {"key": ["a", "b", "c"], "value": [1, 2, 3]})
+        right = _make_source("key", "score", {"key": ["a", "b", "c"], "score": [10, 20, 30]})
+        op = Join()
+
+        sync_result = op.static_process(left, right)
+        sync_rows = list(sync_result.iter_packets())
+        async_rows = await run_binary_validated(op, left, right)
+
+        assert len(sync_rows) == len(async_rows)
+
+        sync_sys = _extract_system_tags(sync_rows)
+        async_sys = _extract_system_tags(async_rows)
+        assert sync_sys == async_sys
+
+    @pytest.mark.asyncio
+    async def test_two_way_system_tag_suffixes_use_pipeline_hash(self):
+        """System-tag column names should contain the pipeline_hash and
+        canonical position, matching the name-extending convention."""
+        left = _make_source("key", "val", {"key": ["x"], "val": [1]})
+        right = _make_source("key", "score", {"key": ["x"], "score": [2]})
+        op = Join()
+
+        async_rows = await run_binary_validated(op, left, right)
+        sys_keys = _extract_system_tag_keys(async_rows)
+
+        # Each system-tag key should end with :{canonical_position}
+        for key in sys_keys:
+            assert key.startswith(constants.SYSTEM_TAG_PREFIX)
+            assert key[-2:] in (":0", ":1"), (
+                f"System tag key {key!r} does not end with :0 or :1"
+            )
+
+    @pytest.mark.asyncio
+    async def test_commutativity_system_tags_identical(self):
+        """Join(A, B) and Join(B, A) should produce identical system tags
+        (Join is commutative — canonical ordering by pipeline_hash)."""
+        src_a = _make_source("id", "x", {"id": ["p", "q"], "x": [1, 2]})
+        src_b = _make_source("id", "y", {"id": ["p", "q"], "y": [10, 20]})
+        op = Join()
+
+        rows_ab = await run_binary_validated(op, src_a, src_b)
+        rows_ba = await run_binary_validated(op, src_b, src_a)
+
+        assert len(rows_ab) == len(rows_ba)
+
+        sys_ab = _extract_system_tags(rows_ab)
+        sys_ba = _extract_system_tags(rows_ba)
+        assert sys_ab == sys_ba
+
+    @pytest.mark.asyncio
+    async def test_three_way_system_tags_match_sync(self):
+        """N>2 barrier fallback should produce the same system tags as sync."""
+        s1 = _make_source("id", "a", {"id": ["m", "n"], "a": [1, 2]})
+        s2 = _make_source("id", "b", {"id": ["m", "n"], "b": [10, 20]})
+        s3 = _make_source("id", "c", {"id": ["m", "n"], "c": [100, 200]})
+        op = Join()
+
+        # Sync
+        sync_result = op.static_process(s1, s2, s3)
+        sync_rows = list(sync_result.iter_packets())
+
+        # Async (N>2 barrier path) — validate first for system-tag metadata
+        op.validate_inputs(s1, s2, s3)
+        ch1 = Channel(buffer_size=64)
+        ch2 = Channel(buffer_size=64)
+        ch3 = Channel(buffer_size=64)
+        out = Channel(buffer_size=64)
+        await feed(s1, ch1)
+        await feed(s2, ch2)
+        await feed(s3, ch3)
+        await op.async_execute([ch1.reader, ch2.reader, ch3.reader], out.writer)
+        async_rows = await out.reader.collect()
+
+        assert len(sync_rows) == len(async_rows)
+
+        sync_sys_keys = _extract_system_tag_keys(sync_rows)
+        async_sys_keys = _extract_system_tag_keys(async_rows)
+        assert sync_sys_keys == async_sys_keys
+
+        sync_sys = _extract_system_tags(sync_rows)
+        async_sys = _extract_system_tags(async_rows)
+        assert sync_sys == async_sys
+
+
+class TestSemiJoinSystemTagEquivalence:
+    """Verify SemiJoin system-tag handling matches between sync and async."""
+
+    @pytest.mark.asyncio
+    async def test_system_tags_preserved_through_semijoin(self):
+        """SemiJoin should preserve left-side system tags in both paths."""
+        left = _make_source("id", "val", {"id": ["a", "b", "c"], "val": [1, 2, 3]})
+        right = _make_source("id", "score", {"id": ["b", "c", "d"], "score": [20, 30, 40]})
+        op = SemiJoin()
+
+        # Sync
+        sync_result = op.static_process(left, right)
+        sync_rows = list(sync_result.iter_packets())
+
+        # Async
+        async_rows = await run_binary_validated(op, left, right)
+
+        assert len(sync_rows) == len(async_rows) == 2
+
+        sync_sys_keys = _extract_system_tag_keys(sync_rows)
+        async_sys_keys = _extract_system_tag_keys(async_rows)
+        assert sync_sys_keys == async_sys_keys
+
+        sync_sys = _extract_system_tags(sync_rows)
+        async_sys = _extract_system_tags(async_rows)
+        assert sync_sys == async_sys
