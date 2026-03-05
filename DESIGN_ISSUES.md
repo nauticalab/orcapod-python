@@ -436,11 +436,9 @@ Three categories of improvement are planned:
 
 2. **Incremental overrides (stateful, eager emit)** — for multi-input operators that can
    produce partial results before all inputs are consumed:
-   - `Join` — concurrent collection + `static_process` delegation. A streaming symmetric
-     hash join was prototyped but reverted: the canonical system-tag name-extending logic
-     (appending `::{pipeline_hash}:{position}`) requires pipeline identity metadata that
-     is not available in the per-row async path. The current async override collects all
-     inputs concurrently and delegates to `static_process` for correctness. ✅
+   - `Join` — symmetric hash join for 2 inputs (streaming, with correct
+     system-tag name-extending via suffix metadata stored during validation);
+     barrier fallback for N>2 inputs via `static_process`. ✅
    - `MergeJoin` — kept barrier: complex column-merging logic
    - `SemiJoin` — build right, stream left through hash lookup ✅
 
