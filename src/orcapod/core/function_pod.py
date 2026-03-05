@@ -981,7 +981,12 @@ class FunctionNode(StreamBase):
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
         pipeline_config: PipelineConfig | None = None,
     ) -> None:
-        """Streaming async execution for FunctionNode."""
+        """Streaming async execution for FunctionNode.
+
+        Routes each packet through ``async_process_packet`` so that
+        subclasses (e.g. ``PersistentFunctionNode``) can override the
+        per-packet logic without re-implementing the concurrency scaffold.
+        """
         try:
             pipeline_config = pipeline_config or PipelineConfig()
             node_config = (
@@ -994,9 +999,11 @@ class FunctionNode(StreamBase):
 
             async def process_one(tag: TagProtocol, packet: PacketProtocol) -> None:
                 try:
-                    result_packet = self._packet_function.call(packet)
+                    tag_out, result_packet = await self.async_process_packet(
+                        tag, packet
+                    )
                     if result_packet is not None:
-                        await output.send((tag, result_packet))
+                        await output.send((tag_out, result_packet))
                 finally:
                     if sem is not None:
                         sem.release()
