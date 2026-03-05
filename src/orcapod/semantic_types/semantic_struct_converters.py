@@ -165,4 +165,7 @@ class PathStructConverter(SemanticStructConverterBase):
             raise IsADirectoryError(f"Path is a directory: {path}")
 
         content_hash = self._file_hasher.hash_file(path)
-        return self._format_hash_string(content_hash.digest, add_prefix=add_prefix)
+        # BasicFileHasher.hash_file returns raw bytes despite the protocol
+        # declaring ContentHash. Handle both cases defensively.
+        digest = content_hash.digest if hasattr(content_hash, "digest") else content_hash
+        return self._format_hash_string(digest, add_prefix=add_prefix)

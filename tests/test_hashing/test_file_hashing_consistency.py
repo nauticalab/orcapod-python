@@ -191,9 +191,11 @@ class TestCrossPathConsistency:
         arrow_hash_hex = path_converter.hash_struct_dict({"path": str(file)})
 
         # Semantic path: file_hasher.hash_file directly (same as PathContentHandler)
+        # BasicFileHasher.hash_file returns raw bytes
         semantic_content_hash = file_hasher.hash_file(file)
+        semantic_hex = semantic_content_hash.hex() if isinstance(semantic_content_hash, bytes) else semantic_content_hash.digest.hex()
 
-        assert arrow_hash_hex == semantic_content_hash.digest.hex()
+        assert arrow_hash_hex == semantic_hex
 
     def test_arrow_and_semantic_same_content_two_files(
         self, path_converter, file_hasher, tmp_path
@@ -207,6 +209,7 @@ class TestCrossPathConsistency:
         file2.write_text(content)
 
         arrow_hex = path_converter.hash_struct_dict({"path": str(file1)})
-        semantic_hex = file_hasher.hash_file(file2).digest.hex()
+        raw = file_hasher.hash_file(file2)
+        semantic_hex = raw.hex() if isinstance(raw, bytes) else raw.digest.hex()
 
         assert arrow_hex == semantic_hex
