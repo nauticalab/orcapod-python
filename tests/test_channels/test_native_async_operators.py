@@ -1275,10 +1275,11 @@ def _make_source(tag_col: str, packet_col: str, data: dict) -> ArrowTableStream:
 async def run_binary_validated(
     op, left: ArrowTableStream, right: ArrowTableStream,
 ) -> list[tuple]:
-    """Run a binary operator async with prior validation (for system-tag metadata).
+    """Run a binary operator async with validation and pipeline hashes.
 
-    Calls ``validate_inputs`` first so operators like ``Join`` can store
-    pipeline-hash metadata used for system-tag column renaming.
+    Calls ``validate_inputs`` for schema validation, then passes
+    ``input_pipeline_hashes`` so operators like ``Join`` can compute
+    canonical system-tag column names.
     """
     op.validate_inputs(left, right)
     left_ch = Channel(buffer_size=1024)
@@ -1286,7 +1287,12 @@ async def run_binary_validated(
     output_ch = Channel(buffer_size=1024)
     await feed(left, left_ch)
     await feed(right, right_ch)
-    await op.async_execute([left_ch.reader, right_ch.reader], output_ch.writer)
+    hashes = [left.pipeline_hash(), right.pipeline_hash()]
+    await op.async_execute(
+        [left_ch.reader, right_ch.reader],
+        output_ch.writer,
+        input_pipeline_hashes=hashes,
+    )
     return await output_ch.reader.collect()
 
 
@@ -1400,7 +1406,7 @@ class TestJoinSystemTagEquivalence:
         sync_result = op.static_process(s1, s2, s3)
         sync_rows = list(sync_result.iter_packets())
 
-        # Async (N>2 barrier path) — validate first for system-tag metadata
+        # Async (N>2 barrier path)
         op.validate_inputs(s1, s2, s3)
         ch1 = Channel(buffer_size=64)
         ch2 = Channel(buffer_size=64)
@@ -1409,7 +1415,12 @@ class TestJoinSystemTagEquivalence:
         await feed(s1, ch1)
         await feed(s2, ch2)
         await feed(s3, ch3)
-        await op.async_execute([ch1.reader, ch2.reader, ch3.reader], out.writer)
+        hashes = [s1.pipeline_hash(), s2.pipeline_hash(), s3.pipeline_hash()]
+        await op.async_execute(
+            [ch1.reader, ch2.reader, ch3.reader],
+            out.writer,
+            input_pipeline_hashes=hashes,
+        )
         async_rows = await out.reader.collect()
 
         assert len(sync_rows) == len(async_rows)

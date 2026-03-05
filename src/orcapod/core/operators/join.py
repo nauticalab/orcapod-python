@@ -13,7 +13,7 @@ from orcapod.protocols.core_protocols import (
     TagProtocol,
 )
 from orcapod.system_constants import constants
-from orcapod.types import ColumnConfig, Schema
+from orcapod.types import ColumnConfig, ContentHash, Schema
 from orcapod.utils import arrow_data_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -35,40 +35,12 @@ class Join(NonZeroInputOperator):
         return (f"{self.__class__.__name__}",)
 
     def validate_nonzero_inputs(self, *streams: StreamProtocol) -> None:
-        """Validate inputs and store system-tag metadata for async execution.
-
-        Computes the canonical ordering and per-input system-tag suffix
-        so that ``async_execute`` can apply correct name-extending logic
-        without needing access to the stream objects.
-        """
+        """Validate that input streams are compatible for joining."""
         try:
             self.output_schema(*streams)
         except Exception as e:
             # raise InputValidationError(f"Input streams are not compatible: {e}") from e
             raise e
-
-        # Store system-tag suffix per original input position.
-        # This is used by the streaming hash join in async_execute.
-        if len(streams) >= 2:
-            n_char = self.orcapod_config.system_tag_hash_n_char
-            ordered = self.order_input_streams(*streams)
-
-            # Map each stream to its canonical position
-            stream_to_canon: dict[int, int] = {}
-            for canon_idx, ostream in enumerate(ordered):
-                for orig_idx, orig_stream in enumerate(streams):
-                    if orig_stream is ostream and orig_idx not in stream_to_canon:
-                        stream_to_canon[orig_idx] = canon_idx
-                        break
-
-            self._async_system_tag_suffixes: list[str] = []
-            for orig_idx in range(len(streams)):
-                canon_idx = stream_to_canon[orig_idx]
-                suffix = (
-                    f"{streams[orig_idx].pipeline_hash().to_hex(n_char)}"
-                    f":{canon_idx}"
-                )
-                self._async_system_tag_suffixes.append(suffix)
 
     def order_input_streams(self, *streams: StreamProtocol) -> list[StreamProtocol]:
         # Canonically order by pipeline_hash for deterministic operation.
@@ -208,10 +180,42 @@ class Join(NonZeroInputOperator):
     # Async execution
     # ------------------------------------------------------------------
 
+    def _compute_system_tag_suffixes(
+        self,
+        input_pipeline_hashes: Sequence[ContentHash],
+    ) -> list[str]:
+        """Compute per-input system-tag suffixes from pipeline hashes.
+
+        Each suffix is ``{truncated_hash}:{canonical_position}`` where
+        canonical position is determined by sorting the hashes (matching
+        the deterministic ordering used by ``static_process``).
+
+        Args:
+            input_pipeline_hashes: Pipeline hash per input, positionally
+                matching the input channels.
+
+        Returns:
+            List of suffix strings, one per input position.
+        """
+        n_char = self.orcapod_config.system_tag_hash_n_char
+        hex_strings = [h.to_hex() for h in input_pipeline_hashes]
+
+        # Canonical order: sorted by full hex (same as order_input_streams)
+        sorted_hexes = sorted(hex_strings)
+
+        suffixes: list[str] = []
+        for orig_idx, hex_str in enumerate(hex_strings):
+            canon_idx = sorted_hexes.index(hex_str)
+            truncated = input_pipeline_hashes[orig_idx].to_hex(n_char)
+            suffixes.append(f"{truncated}:{canon_idx}")
+        return suffixes
+
     async def async_execute(
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        *,
+        input_pipeline_hashes: Sequence[ContentHash] | None = None,
     ) -> None:
         """Async join with streaming symmetric hash join for two inputs.
 
@@ -220,11 +224,17 @@ class Join(NonZeroInputOperator):
         Two inputs: symmetric hash join — each arriving row is
         immediately probed against the opposite side's buffer, emitting
         matches as soon as found.  System-tag columns are correctly
-        renamed using the suffix metadata stored during
-        ``validate_nonzero_inputs``.
+        renamed using the ``input_pipeline_hashes``.
 
         Three or more inputs: collects all inputs concurrently, then
         delegates to ``static_process`` for the Polars N-way join.
+
+        Args:
+            inputs: Readable channels, one per upstream.
+            output: Writable channel for downstream.
+            input_pipeline_hashes: Pipeline hash for each input,
+                positionally matching ``inputs``.  Required for
+                correct system-tag renaming with 2+ inputs.
         """
         try:
             if len(inputs) == 1:
@@ -233,7 +243,14 @@ class Join(NonZeroInputOperator):
                 return
 
             if len(inputs) == 2:
-                await self._symmetric_hash_join(inputs[0], inputs[1], output)
+                suffixes = (
+                    self._compute_system_tag_suffixes(input_pipeline_hashes)
+                    if input_pipeline_hashes is not None
+                    else ["0", "1"]
+                )
+                await self._symmetric_hash_join(
+                    inputs[0], inputs[1], output, suffixes
+                )
                 return
 
             # N > 2: concurrent collection + static_process
@@ -255,6 +272,7 @@ class Join(NonZeroInputOperator):
         left_ch: ReadableChannel[tuple[TagProtocol, PacketProtocol]],
         right_ch: ReadableChannel[tuple[TagProtocol, PacketProtocol]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        suffixes: list[str],
     ) -> None:
         """Symmetric hash join for two inputs.
 
@@ -264,9 +282,12 @@ class Join(NonZeroInputOperator):
         ``output`` as soon as found, so downstream consumers can begin
         work before either input is fully consumed.
 
-        System-tag column names are correctly renamed using the suffix
-        metadata computed during ``validate_nonzero_inputs``, matching
-        the canonical renaming scheme used by ``static_process``.
+        Args:
+            left_ch: Left input channel.
+            right_ch: Right input channel.
+            output: Output channel for matched rows.
+            suffixes: Per-input system-tag suffixes (positional),
+                computed from pipeline hashes and canonical ordering.
         """
         # Bounded queue preserves backpressure — producers block when full.
         _SENTINEL = object()
@@ -280,9 +301,6 @@ class Join(NonZeroInputOperator):
                 await queue.put((side, item))
             await queue.put((side, _SENTINEL))
 
-        # System-tag suffixes computed during validate_nonzero_inputs.
-        # inputs[0] = left = original position 0, inputs[1] = right = original position 1
-        suffixes = getattr(self, "_async_system_tag_suffixes", ["0", "1"])
         block_sep = constants.BLOCK_SEPARATOR
 
         async with asyncio.TaskGroup() as tg:

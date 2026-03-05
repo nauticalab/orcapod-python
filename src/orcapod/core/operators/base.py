@@ -13,7 +13,7 @@ from orcapod.protocols.core_protocols import (
     StreamProtocol,
     TagProtocol,
 )
-from orcapod.types import ColumnConfig, Schema
+from orcapod.types import ColumnConfig, ContentHash, Schema
 
 
 class UnaryOperator(StaticOutputPod):
@@ -72,6 +72,8 @@ class UnaryOperator(StaticOutputPod):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        *,
+        input_pipeline_hashes: Sequence[ContentHash] | None = None,
     ) -> None:
         """Barrier-mode: collect single input, run unary_static_process, emit."""
         try:
@@ -154,6 +156,8 @@ class BinaryOperator(StaticOutputPod):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        *,
+        input_pipeline_hashes: Sequence[ContentHash] | None = None,
     ) -> None:
         """Barrier-mode: collect both inputs concurrently, run binary_static_process, emit."""
         try:

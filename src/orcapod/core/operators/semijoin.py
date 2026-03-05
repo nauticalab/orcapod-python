@@ -135,6 +135,7 @@ class SemiJoin(BinaryOperator):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        **kwargs: Any,
     ) -> None:
         """Build-probe: collect right input, then stream left through a hash lookup.
 
