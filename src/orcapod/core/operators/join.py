@@ -35,11 +35,40 @@ class Join(NonZeroInputOperator):
         return (f"{self.__class__.__name__}",)
 
     def validate_nonzero_inputs(self, *streams: StreamProtocol) -> None:
+        """Validate inputs and store system-tag metadata for async execution.
+
+        Computes the canonical ordering and per-input system-tag suffix
+        so that ``async_execute`` can apply correct name-extending logic
+        without needing access to the stream objects.
+        """
         try:
             self.output_schema(*streams)
         except Exception as e:
             # raise InputValidationError(f"Input streams are not compatible: {e}") from e
             raise e
+
+        # Store system-tag suffix per original input position.
+        # This is used by the streaming hash join in async_execute.
+        if len(streams) >= 2:
+            n_char = self.orcapod_config.system_tag_hash_n_char
+            ordered = self.order_input_streams(*streams)
+
+            # Map each stream to its canonical position
+            stream_to_canon: dict[int, int] = {}
+            for canon_idx, ostream in enumerate(ordered):
+                for orig_idx, orig_stream in enumerate(streams):
+                    if orig_stream is ostream and orig_idx not in stream_to_canon:
+                        stream_to_canon[orig_idx] = canon_idx
+                        break
+
+            self._async_system_tag_suffixes: list[str] = []
+            for orig_idx in range(len(streams)):
+                canon_idx = stream_to_canon[orig_idx]
+                suffix = (
+                    f"{streams[orig_idx].pipeline_hash().to_hex(n_char)}"
+                    f":{canon_idx}"
+                )
+                self._async_system_tag_suffixes.append(suffix)
 
     def order_input_streams(self, *streams: StreamProtocol) -> list[StreamProtocol]:
         # Canonically order by pipeline_hash for deterministic operation.
@@ -175,23 +204,27 @@ class Join(NonZeroInputOperator):
             tag_columns=tuple(tag_keys),
         )
 
+    # ------------------------------------------------------------------
+    # Async execution
+    # ------------------------------------------------------------------
+
     async def async_execute(
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
     ) -> None:
-        """Async join: collect all inputs concurrently, then delegate to static_process.
+        """Async join with streaming symmetric hash join for two inputs.
 
         Single input: streams through directly without any buffering.
-        Two or more inputs: collects all inputs concurrently, then
-        delegates to ``static_process`` for the Polars join with correct
-        system-tag column renaming.
 
-        Note: a streaming symmetric hash join was considered for the
-        two-input case, but ``static_process`` handles the canonical
-        system-tag name-extending logic (appending
-        ::{pipeline_hash}:{position}) which cannot be replicated
-        correctly without access to pipeline identity metadata.
+        Two inputs: symmetric hash join — each arriving row is
+        immediately probed against the opposite side's buffer, emitting
+        matches as soon as found.  System-tag columns are correctly
+        renamed using the suffix metadata stored during
+        ``validate_nonzero_inputs``.
+
+        Three or more inputs: collects all inputs concurrently, then
+        delegates to ``static_process`` for the Polars N-way join.
         """
         try:
             if len(inputs) == 1:
@@ -199,7 +232,11 @@ class Join(NonZeroInputOperator):
                     await output.send((tag, packet))
                 return
 
-            # Collect all inputs concurrently
+            if len(inputs) == 2:
+                await self._symmetric_hash_join(inputs[0], inputs[1], output)
+                return
+
+            # N > 2: concurrent collection + static_process
             all_rows = await asyncio.gather(*(ch.collect() for ch in inputs))
 
             # Guard against empty inputs — join with an empty side is empty
@@ -212,6 +249,190 @@ class Join(NonZeroInputOperator):
                 await output.send((tag, packet))
         finally:
             await output.close()
+
+    async def _symmetric_hash_join(
+        self,
+        left_ch: ReadableChannel[tuple[TagProtocol, PacketProtocol]],
+        right_ch: ReadableChannel[tuple[TagProtocol, PacketProtocol]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    ) -> None:
+        """Symmetric hash join for two inputs.
+
+        Both sides are read concurrently via a merged bounded queue.
+        Each arriving row is added to its side's index and immediately
+        probed against the opposite side.  Matched rows are emitted to
+        ``output`` as soon as found, so downstream consumers can begin
+        work before either input is fully consumed.
+
+        System-tag column names are correctly renamed using the suffix
+        metadata computed during ``validate_nonzero_inputs``, matching
+        the canonical renaming scheme used by ``static_process``.
+        """
+        # Bounded queue preserves backpressure — producers block when full.
+        _SENTINEL = object()
+        queue: asyncio.Queue = asyncio.Queue(maxsize=64)
+
+        async def _drain(
+            ch: ReadableChannel[tuple[TagProtocol, PacketProtocol]],
+            side: int,
+        ) -> None:
+            async for item in ch:
+                await queue.put((side, item))
+            await queue.put((side, _SENTINEL))
+
+        # System-tag suffixes computed during validate_nonzero_inputs.
+        # inputs[0] = left = original position 0, inputs[1] = right = original position 1
+        suffixes = getattr(self, "_async_system_tag_suffixes", ["0", "1"])
+        block_sep = constants.BLOCK_SEPARATOR
+
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(_drain(left_ch, 0))
+            tg.create_task(_drain(right_ch, 1))
+
+            # buffers[i] holds all rows seen so far from input i
+            buffers: list[list[tuple[TagProtocol, PacketProtocol]]] = [[], []]
+            # indexes[i] maps shared-key tuple → list of indices into buffers[i]
+            indexes: list[dict[tuple, list[int]]] = [{}, {}]
+
+            shared_keys: tuple[str, ...] | None = None
+            needs_reindex = False
+            closed_count = 0
+
+            while closed_count < 2:
+                side, item = await queue.get()
+
+                if item is _SENTINEL:
+                    closed_count += 1
+                    continue
+
+                tag, pkt = item
+                other = 1 - side
+
+                # Determine shared tag keys once we have rows from both sides
+                if shared_keys is None:
+                    if not buffers[other]:
+                        # Other side empty — just buffer this row for later
+                        buffers[side].append((tag, pkt))
+                        continue
+
+                    # We have data from both sides; compute shared keys
+                    this_keys = set(tag.keys())
+                    other_keys = set(buffers[other][0][0].keys())
+                    shared_keys = tuple(sorted(this_keys & other_keys))
+                    needs_reindex = True
+
+                # One-time re-index of all rows buffered before shared_keys
+                if needs_reindex:
+                    needs_reindex = False
+                    for buf_side in (0, 1):
+                        for j, (bt, _bp) in enumerate(buffers[buf_side]):
+                            btd = bt.as_dict()
+                            k = (
+                                tuple(btd[sk] for sk in shared_keys)
+                                if shared_keys
+                                else (0,)
+                            )
+                            indexes[buf_side].setdefault(k, []).append(j)
+
+                    # Emit matches for all already-buffered rows across sides
+                    for li, (lt, lp) in enumerate(buffers[0]):
+                        ltd = lt.as_dict()
+                        lk = (
+                            tuple(ltd[sk] for sk in shared_keys)
+                            if shared_keys
+                            else (0,)
+                        )
+                        for ri in indexes[1].get(lk, []):
+                            rt, rp = buffers[1][ri]
+                            await output.send(
+                                self._merge_row_pair(
+                                    lt, lp, rt, rp, suffixes, block_sep
+                                )
+                            )
+
+                # Index the new row
+                td = tag.as_dict()
+                key = (
+                    tuple(td[sk] for sk in shared_keys) if shared_keys else (0,)
+                )
+                row_idx = len(buffers[side])
+                buffers[side].append((tag, pkt))
+                indexes[side].setdefault(key, []).append(row_idx)
+
+                # Probe the opposite buffer for matches
+                matching_indices = indexes[other].get(key, [])
+                for mi in matching_indices:
+                    other_tag, other_pkt = buffers[other][mi]
+                    if side == 0:
+                        merged = self._merge_row_pair(
+                            tag, pkt, other_tag, other_pkt,
+                            suffixes, block_sep,
+                        )
+                    else:
+                        merged = self._merge_row_pair(
+                            other_tag, other_pkt, tag, pkt,
+                            suffixes, block_sep,
+                        )
+                    await output.send(merged)
+
+    @staticmethod
+    def _merge_row_pair(
+        left_tag: TagProtocol,
+        left_pkt: PacketProtocol,
+        right_tag: TagProtocol,
+        right_pkt: PacketProtocol,
+        suffixes: list[str],
+        block_sep: str,
+    ) -> tuple[TagProtocol, PacketProtocol]:
+        """Merge a matched pair of rows into one joined (Tag, Packet).
+
+        System-tag keys are renamed by appending
+        ``{block_sep}{suffix}`` to match the canonical name-extending
+        scheme used by ``static_process``.  System-tag values sharing
+        the same provenance path are sorted for commutativity.
+        """
+        from orcapod.core.datagrams import Packet, Tag
+
+        sys_prefix = constants.SYSTEM_TAG_PREFIX
+
+        # Merge tag dicts (shared keys come from left)
+        merged_tag_d: dict = {}
+        merged_tag_d.update(left_tag.as_dict())
+        for k, v in right_tag.as_dict().items():
+            if k not in merged_tag_d:
+                merged_tag_d[k] = v
+
+        # Rename and merge system tags with canonical suffixes
+        merged_sys: dict = {}
+        for k, v in left_tag.system_tags().items():
+            new_key = (
+                f"{k}{block_sep}{suffixes[0]}"
+                if k.startswith(sys_prefix)
+                else k
+            )
+            merged_sys[new_key] = v
+        for k, v in right_tag.system_tags().items():
+            new_key = (
+                f"{k}{block_sep}{suffixes[1]}"
+                if k.startswith(sys_prefix)
+                else k
+            )
+            merged_sys[new_key] = v
+
+        merged_tag = Tag(merged_tag_d, system_tags=merged_sys)
+
+        # Merge packet dicts (non-overlapping by Join's validation)
+        merged_pkt_d: dict = {}
+        merged_pkt_d.update(left_pkt.as_dict())
+        merged_pkt_d.update(right_pkt.as_dict())
+
+        merged_si: dict = {}
+        merged_si.update(left_pkt.source_info())
+        merged_si.update(right_pkt.source_info())
+
+        merged_pkt = Packet(merged_pkt_d, source_info=merged_si)
+
+        return merged_tag, merged_pkt
 
     def identity_structure(self) -> Any:
         return self.__class__.__name__
