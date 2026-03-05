@@ -39,6 +39,23 @@ logger = logging.getLogger(__name__)
 
 error_handling_options = Literal["raise", "ignore", "warn"]
 
+# ---------------------------------------------------------------------------
+# Shared executor for running async functions synchronously from within
+# an event loop (see PythonPacketFunction._call_async_function_sync).
+# ---------------------------------------------------------------------------
+
+_sync_executor = None
+
+
+def _get_sync_executor():
+    """Return a shared single-thread executor for sync fallback of async fns."""
+    global _sync_executor
+    if _sync_executor is None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        _sync_executor = ThreadPoolExecutor(1)
+    return _sync_executor
+
 
 def parse_function_outputs(
     output_keys: Sequence[str], values: Any
@@ -419,6 +436,10 @@ class PythonPacketFunction(PacketFunctionBase):
         from within a running loop, offloads to a new thread to avoid
         nested event loop errors.
 
+        The coroutine is constructed inside the executor thread (not in the
+        caller thread) to avoid unawaited-coroutine warnings if submission
+        fails.
+
         Args:
             packet: The input packet whose dict form is passed to the function.
 
@@ -427,18 +448,20 @@ class PythonPacketFunction(PacketFunctionBase):
         """
         import asyncio
 
-        coro = self._function(**packet.as_dict())
+        kwargs = packet.as_dict()
+        fn = self._function
         try:
             asyncio.get_running_loop()
         except RuntimeError:
             # No running loop — safe to use asyncio.run()
-            return asyncio.run(coro)
+            return asyncio.run(fn(**kwargs))
         else:
-            # Already in a loop — run in a separate thread with its own loop
-            from concurrent.futures import ThreadPoolExecutor
-
-            with ThreadPoolExecutor(1) as pool:
-                return pool.submit(asyncio.run, coro).result()
+            # Already in a loop — run in a separate thread with its own loop.
+            # The lambda ensures the coroutine is created inside the executor
+            # thread, avoiding unawaited-coroutine warnings on submission failure.
+            return _get_sync_executor().submit(
+                lambda: asyncio.run(fn(**kwargs))
+            ).result()
 
     def direct_call(self, packet: PacketProtocol) -> PacketProtocol | None:
         """Execute the function on *packet* synchronously.

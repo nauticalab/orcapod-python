@@ -296,10 +296,19 @@ def resolve_concurrency(
 
     Returns:
         The concurrency limit to use, or ``None`` for unlimited.
+
+    Raises:
+        ValueError: If the resolved value is ``<= 0``.
     """
     if node_config.max_concurrency is not None:
-        return node_config.max_concurrency
-    return pipeline_config.default_max_concurrency
+        result = node_config.max_concurrency
+    else:
+        result = pipeline_config.default_max_concurrency
+    if result is not None and result <= 0:
+        raise ValueError(
+            f"max_concurrency must be >= 1, got {result}"
+        )
+    return result
 
 
 class CacheMode(Enum):
