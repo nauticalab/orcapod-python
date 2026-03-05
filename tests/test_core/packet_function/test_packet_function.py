@@ -32,6 +32,14 @@ def multi(a: int, b: int) -> tuple[int, int]:
     return a + b, a * b
 
 
+async def async_add(x: int, y: int) -> int:
+    return x + y
+
+
+async def async_multi(a: int, b: int) -> tuple[int, int]:
+    return a + b, a * b
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -47,6 +55,18 @@ def add_pf() -> PythonPacketFunction:
 def multi_pf() -> PythonPacketFunction:
     """PythonPacketFunction wrapping a two-output function."""
     return PythonPacketFunction(multi, output_keys=["sum", "product"])
+
+
+@pytest.fixture
+def async_add_pf() -> PythonPacketFunction:
+    """PythonPacketFunction wrapping an async two-arg addition."""
+    return PythonPacketFunction(async_add, output_keys="result")
+
+
+@pytest.fixture
+def async_multi_pf() -> PythonPacketFunction:
+    """PythonPacketFunction wrapping an async two-output function."""
+    return PythonPacketFunction(async_multi, output_keys=["sum", "product"])
 
 
 @pytest.fixture
@@ -435,3 +455,106 @@ class TestPacketFunctionProtocolConformance:
         assert isinstance(add_pf, PacketFunctionProtocol), (
             "PythonPacketFunction does not satisfy the PacketFunctionProtocol protocol"
         )
+
+    def test_async_python_packet_function_satisfies_protocol(self, async_add_pf):
+        assert isinstance(async_add_pf, PacketFunctionProtocol), (
+            "Async PythonPacketFunction does not satisfy the PacketFunctionProtocol protocol"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 12. Async function support — construction
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncConstruction:
+    def test_is_async_true_for_async_function(self, async_add_pf):
+        assert async_add_pf.is_async is True
+
+    def test_is_async_false_for_sync_function(self, add_pf):
+        assert add_pf.is_async is False
+
+    def test_packet_function_type_id_same_for_async(self, async_add_pf):
+        assert async_add_pf.packet_function_type_id == "python.function.v0"
+
+    def test_input_schema_correct_for_async(self, async_add_pf):
+        schema = async_add_pf.input_packet_schema
+        assert "x" in schema and "y" in schema
+        assert schema["x"] is int
+        assert schema["y"] is int
+
+    def test_output_schema_correct_for_async(self, async_add_pf):
+        schema = async_add_pf.output_packet_schema
+        assert "result" in schema
+        assert schema["result"] is int
+
+    def test_canonical_name_from_async_function(self, async_add_pf):
+        assert async_add_pf.canonical_function_name == "async_add"
+
+    def test_variadic_async_rejected(self):
+        async def bad(*args: int) -> int:
+            return sum(args)
+
+        with pytest.raises(ValueError, match=r"\*args"):
+            PythonPacketFunction(bad, output_keys="result")
+
+
+# ---------------------------------------------------------------------------
+# 13. Async function support — sync call
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncFunctionSyncCall:
+    def test_direct_call_returns_correct_result(self, async_add_pf, add_packet):
+        result = async_add_pf.direct_call(add_packet)
+        assert result is not None
+        assert result["result"] == 3
+
+    def test_call_returns_correct_result(self, async_add_pf, add_packet):
+        result = async_add_pf.call(add_packet)
+        assert result is not None
+        assert result["result"] == 3
+
+    def test_inactive_returns_none(self, async_add_pf, add_packet):
+        async_add_pf.set_active(False)
+        assert async_add_pf.call(add_packet) is None
+
+    def test_multiple_outputs(self, async_multi_pf):
+        packet = Packet({"a": 3, "b": 4})
+        result = async_multi_pf.call(packet)
+        assert result["sum"] == 7
+        assert result["product"] == 12
+
+    def test_source_info_present(self, async_add_pf, add_packet):
+        result = async_add_pf.call(add_packet)
+        source = result.source_info()
+        assert "result" in source
+        assert source["result"].endswith("::result")
+
+
+# ---------------------------------------------------------------------------
+# 14. Async function support — async call
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncFunctionAsyncCall:
+    def test_direct_async_call_awaits_directly(self, async_add_pf, add_packet):
+        result = asyncio.run(async_add_pf.direct_async_call(add_packet))
+        assert result is not None
+        assert result["result"] == 3
+
+    def test_async_call_returns_correct_result(self, async_add_pf, add_packet):
+        result = asyncio.run(async_add_pf.async_call(add_packet))
+        assert result is not None
+        assert result["result"] == 3
+
+    def test_inactive_returns_none(self, async_add_pf, add_packet):
+        async_add_pf.set_active(False)
+        result = asyncio.run(async_add_pf.async_call(add_packet))
+        assert result is None
+
+    def test_multiple_outputs(self, async_multi_pf):
+        packet = Packet({"a": 3, "b": 4})
+        result = asyncio.run(async_multi_pf.async_call(packet))
+        assert result["sum"] == 7
+        assert result["product"] == 12
