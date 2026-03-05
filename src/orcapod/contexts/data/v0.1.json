@@ -60,6 +60,7 @@
                 [{"_type": "types.BuiltinFunctionType"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler", "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
                 [{"_type": "types.MethodType"},          {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler", "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
                 [{"_type": "builtins.type"},       {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.TypeObjectHandler",   "_config": {}}],
+                [{"_type": "types.GenericAlias"},  {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.GenericAliasHandler",  "_config": {}}],
                 [{"_type": "pyarrow.Table"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableHandler",  "_config": {"arrow_hasher": {"_ref": "arrow_hasher"}}}],
                 [{"_type": "pyarrow.RecordBatch"},  {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableHandler",  "_config": {"arrow_hasher": {"_ref": "arrow_hasher"}}}]
             ]

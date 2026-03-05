@@ -172,6 +172,28 @@ class TypeObjectHandler:
         return f"type:{module}.{qualname}"
 
 
+class GenericAliasHandler:
+    """
+    Handler for generic alias type annotations such as ``dict[int, list[int]]``
+    (``types.GenericAlias``) and ``typing`` generics (``typing._GenericAlias``).
+
+    Produces a stable dict containing the origin type and a list of hashed
+    argument types so that structurally identical generic annotations always
+    yield the same hash, and structurally different ones yield different hashes.
+    """
+
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
+        origin = getattr(obj, "__origin__", None)
+        args = getattr(obj, "__args__", None) or ()
+        if origin is None:
+            return f"generic_alias:{obj!r}"
+        return {
+            "__type__": "generic_alias",
+            "origin": hasher.hash_object(origin).to_string(),
+            "args": [hasher.hash_object(arg).to_string() for arg in args],
+        }
+
+
 class ArrowTableHandler:
     """
     Handler for ``pa.Table`` and ``pa.RecordBatch`` objects.
@@ -320,6 +342,19 @@ def register_builtin_handlers(
 
     # type objects (classes used as values, e.g. passed in a dict)
     registry.register(type, TypeObjectHandler())
+
+    # generic alias type annotations: dict[int, str], list[str], etc.
+    import types as _types
+
+    generic_alias_handler = GenericAliasHandler()
+    registry.register(_types.GenericAlias, generic_alias_handler)
+    # typing._GenericAlias covers Optional[X], Union[X, Y], Dict[K, V], etc.
+    try:
+        import typing as _typing
+
+        registry.register(_typing._GenericAlias, generic_alias_handler)  # type: ignore[attr-defined]
+    except AttributeError:
+        pass
 
     # Schema objects -- must come after type handler so Schema is matched
     # specifically rather than falling through to the Mapping expansion path

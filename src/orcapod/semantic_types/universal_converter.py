@@ -632,7 +632,7 @@ class UniversalTypeConverter:
             element_converter = self.get_python_to_arrow_converter(args[0])
             return (
                 lambda value: [element_converter(item) for item in value]
-                if value
+                if value is not None
                 else []
             )
 
@@ -644,7 +644,7 @@ class UniversalTypeConverter:
                     {"key": key_converter(k), "value": value_converter(v)}
                     for k, v in value.items()
                 ]
-                if value
+                if value is not None
                 else []
             )
 
