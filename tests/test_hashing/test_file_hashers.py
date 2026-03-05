@@ -171,14 +171,17 @@ class TestCachedFileHasher:
 
     def test_cache_stores_to_string_format(self, sample_file):
         """The cache must store the full 'method:hex_digest' string."""
+        import os
+
         inner = BasicFileHasher(algorithm="sha256")
         cacher = InMemoryCacher()
         cached = CachedFileHasher(file_hasher=inner, string_cacher=cacher)
 
         result = cached.hash_file(sample_file)
 
-        # Inspect the raw cached value
-        cache_key = f"file:{sample_file}"
+        # Inspect the raw cached value — key includes mtime+size
+        stat = os.stat(sample_file)
+        cache_key = f"file:{sample_file}:{stat.st_mtime_ns}:{stat.st_size}"
         cached_value = cacher.get_cached(cache_key)
 
         assert cached_value is not None
@@ -215,8 +218,12 @@ class TestCachedFileHasher:
         assert restored.method == original.method
         assert restored.digest == original.digest
 
-    def test_different_algorithms_cached_independently(self, tmp_path):
-        """Two CachedFileHashers with different algorithms produce different cached results."""
+    def test_different_algorithms_share_cache_key(self, tmp_path):
+        """Two CachedFileHashers with different algorithms but same path+mtime+size
+        share the same cache key. The second hasher gets the first's cached result.
+
+        This documents a known limitation: the cache key doesn't include the algorithm.
+        """
         f = tmp_path / "file.txt"
         f.write_text("test content")
 
@@ -228,30 +235,29 @@ class TestCachedFileHasher:
 
         md5_inner = BasicFileHasher(algorithm="md5")
         md5_cached = CachedFileHasher(file_hasher=md5_inner, string_cacher=cacher)
-        # Same cache key "file:<path>" — the second call hits the cached sha256 value.
-        # This is a known limitation: the cache key doesn't include the algorithm.
-        # We test that the cached value at least round-trips correctly.
         md5_result = md5_cached.hash_file(f)
 
-        # Since same cache key, md5_cached gets the sha256 result from cache
-        # This documents current behavior — cache key should ideally include algorithm
-        assert md5_result.method == "sha256"  # gets cached sha256 result
+        # Same cache key (same file, same mtime+size), so md5 gets sha256 result
+        assert md5_result.method == "sha256"
+        assert md5_result.digest == sha_result.digest
 
-    def test_modified_content_after_cache(self, cached_file_hasher, tmp_path):
-        """Cache is NOT invalidated when file content changes (documents behavior).
+    def test_modified_content_invalidates_cache(self, cached_file_hasher, tmp_path):
+        """Cache is automatically invalidated when file content changes.
 
-        CachedFileHasher caches by path string, so a modified file still
-        returns the stale cached hash until the cache is cleared.
+        CachedFileHasher includes mtime_ns and file size in the cache key,
+        so writing new content produces a cache miss and a fresh hash.
         """
         f = tmp_path / "mutable.txt"
-        f.write_text("version 1")
+        f.write_text("short")
         first = cached_file_hasher.hash_file(f)
 
-        f.write_text("version 2")
+        # Use different-length content so file size changes even if mtime_ns
+        # doesn't advance (can happen on fast filesystems).
+        f.write_text("much longer content here")
         second = cached_file_hasher.hash_file(f)
 
-        # Same because cached — documents expected caching behavior
-        assert first.digest == second.digest
+        # Different because size changed → cache miss → rehashed
+        assert first.digest != second.digest
 
     def test_clear_cache_forces_rehash(self, tmp_path):
         """After clearing the cache, a modified file produces a new hash."""
@@ -260,10 +266,10 @@ class TestCachedFileHasher:
         cached = CachedFileHasher(file_hasher=inner, string_cacher=cacher)
 
         f = tmp_path / "mutable.txt"
-        f.write_text("version 1")
+        f.write_text("short")
         first = cached.hash_file(f)
 
-        f.write_text("version 2")
+        f.write_text("much longer content here")
         cacher.clear_cache()
         second = cached.hash_file(f)
 
