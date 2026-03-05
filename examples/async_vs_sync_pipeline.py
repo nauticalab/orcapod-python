@@ -5,20 +5,22 @@ Demonstrates the interplay of two independent concurrency axes:
 1. **Pipeline executor** — sync (sequential node execution) vs async
    (concurrent node execution via channels).
 
-2. **Packet function** — sync (blocking ``time.sleep``) vs async
+2. **Packet function** — sync (GIL-holding busy-wait) vs async
    (non-blocking ``asyncio.sleep``).
 
-The four combinations are:
+The sync function uses a pure-Python busy-wait loop that holds the GIL,
+preventing thread-pool concurrency. This makes the difference between
+async+sync and async+async clearly visible:
 
 +---------------------+----------------------------+----------------------------+
-|                     | sync function              | async function             |
+|                     | sync function (holds GIL)  | async function             |
 +---------------------+----------------------------+----------------------------+
 | sync executor       | fully sequential           | sequential (async fn       |
-|                     |                            | called in thread pool)     |
+|                     |                            | called via sync fallback)  |
 +---------------------+----------------------------+----------------------------+
 | async executor      | branches overlap, but      | branches overlap AND       |
-|                     | packets within each branch | packets within each branch |
-|                     | are sequential (blocking)  | run concurrently           |
+|                     | packets serialize on GIL   | packets run concurrently   |
+|                     | (thread pool can't help)   | (native coroutines)        |
 +---------------------+----------------------------+----------------------------+
 
 Usage:
@@ -43,7 +45,7 @@ from orcapod.types import ExecutorType, NodeConfig, PipelineConfig
 # Configuration
 # ---------------------------------------------------------------------------
 
-SLEEP_SECONDS = 0.3  # per-packet sleep duration
+SLEEP_SECONDS = 0.1  # per-packet delay (kept short since busy-wait burns CPU)
 NUM_PACKETS = 6
 
 # ---------------------------------------------------------------------------
@@ -62,6 +64,13 @@ SOURCE_TABLE = pa.table(
 # ---------------------------------------------------------------------------
 
 
+def _busy_wait(seconds: float) -> None:
+    """Burn CPU in a pure-Python loop that never releases the GIL."""
+    end = time.perf_counter() + seconds
+    while time.perf_counter() < end:
+        pass
+
+
 async def async_slow_double(x: int) -> int:
     """Simulate an async I/O-bound operation (e.g. API call)."""
     await asyncio.sleep(SLEEP_SECONDS)
@@ -69,8 +78,8 @@ async def async_slow_double(x: int) -> int:
 
 
 def sync_slow_double(x: int) -> int:
-    """Simulate a blocking I/O-bound operation."""
-    time.sleep(SLEEP_SECONDS)
+    """Simulate a GIL-holding blocking operation (e.g. CPU-bound work)."""
+    _busy_wait(SLEEP_SECONDS)
     return x * 2
 
 
@@ -153,15 +162,18 @@ def main() -> None:
     print("  Analysis:")
     print(f"    sync+sync   {t1:.2f}s  — fully sequential ({NUM_PACKETS}x2 x {SLEEP_SECONDS}s)")
     print(f"    sync+async  {t2:.2f}s  — still sequential (sync executor runs nodes one by one)")
-    print(f"    async+sync  {t3:.2f}s  — branches overlap; sync fn runs in thread pool,")
-    print(f"                          so packets also overlap via threads")
-    print(f"    async+async {t4:.2f}s  — branches overlap; packets overlap via native await")
+    print(f"    async+sync  {t3:.2f}s  — branches overlap, but GIL-holding busy-wait")
+    print(f"                          serializes packets even across threads")
+    print(f"    async+async {t4:.2f}s  — branches overlap AND packets overlap")
+    print(f"                          (native coroutines bypass the GIL entirely)")
     print()
-    print(f"  Note: async+sync ≈ async+async for I/O-bound work because")
-    print(f"  run_in_executor (thread pool) overlaps blocking I/O similarly.")
-    print(f"  Native async wins at scale (coroutines are lighter than threads).")
+    print(f"  Key insight: async+sync is much slower than async+async because")
+    print(f"  the sync function holds the GIL, so run_in_executor threads")
+    print(f"  cannot actually run in parallel. Native async coroutines release")
+    print(f"  control at each 'await', allowing true concurrency.")
     print()
-    print(f"  Speedup (sync+sync vs async+async): {t1 / t4:.1f}x")
+    print(f"  Speedup (sync+sync  vs async+async): {t1 / t4:.1f}x")
+    print(f"  Speedup (async+sync vs async+async): {t3 / t4:.1f}x")
 
 
 if __name__ == "__main__":
