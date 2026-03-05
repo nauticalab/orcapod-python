@@ -1,14 +1,25 @@
-"""Async vs sync pipeline execution comparison.
+"""Async vs sync pipeline execution — 2x2 comparison matrix.
 
-Demonstrates two levels of async benefit:
+Demonstrates the interplay of two independent concurrency axes:
 
-1. **Pipeline-level parallelism** (Pipeline API):
-   Multiple independent branches execute concurrently under the async
-   orchestrator, overlapping I/O across branches.
+1. **Pipeline executor** — sync (sequential node execution) vs async
+   (concurrent node execution via channels).
 
-2. **Packet-level concurrency** (FunctionPod + channels):
-   An async packet function processes all packets concurrently within a
-   single stage, achieving near-constant latency regardless of packet count.
+2. **Packet function** — sync (blocking ``time.sleep``) vs async
+   (non-blocking ``asyncio.sleep``).
+
+The four combinations are:
+
++---------------------+----------------------------+----------------------------+
+|                     | sync function              | async function             |
++---------------------+----------------------------+----------------------------+
+| sync executor       | fully sequential           | sequential (async fn       |
+|                     |                            | called in thread pool)     |
++---------------------+----------------------------+----------------------------+
+| async executor      | branches overlap, but      | branches overlap AND       |
+|                     | packets within each branch | packets within each branch |
+|                     | are sequential (blocking)  | run concurrently           |
++---------------------+----------------------------+----------------------------+
 
 Usage:
     uv run python examples/async_vs_sync_pipeline.py
@@ -22,10 +33,8 @@ import time
 import pyarrow as pa
 
 from orcapod import ArrowTableSource
-from orcapod.channels import Channel
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
-from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import Pipeline
 from orcapod.types import ExecutorType, NodeConfig, PipelineConfig
@@ -65,134 +74,55 @@ def sync_slow_double(x: int) -> int:
     return x * 2
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Part 1: Pipeline API — pipeline-level parallelism
-# ═══════════════════════════════════════════════════════════════════════════
+# ---------------------------------------------------------------------------
+# Pipeline builder
+# ---------------------------------------------------------------------------
 
 
-def build_pipeline_with_branches(use_async_fn: bool) -> Pipeline:
+def build_pipeline(use_async_fn: bool) -> Pipeline:
     """Build a pipeline with two independent branches from the same source.
 
     Pipeline::
 
         source ──┬── slow_double (branch_a)
                  └── slow_double (branch_b)
-
-    The async orchestrator runs both branches concurrently; the sync
-    executor runs them sequentially.
     """
     db = InMemoryArrowDatabase()
-    pipeline = Pipeline(name="branch_demo", pipeline_database=db)
+    pipeline = Pipeline(name="demo", pipeline_database=db)
 
     fn = async_slow_double if use_async_fn else sync_slow_double
     with pipeline:
         source = ArrowTableSource(SOURCE_TABLE, tag_columns=["id"])
         pf_a = PythonPacketFunction(fn, output_keys="result", function_name="branch_a")
         pf_b = PythonPacketFunction(fn, output_keys="result", function_name="branch_b")
-        FunctionPod(packet_function=pf_a)(source, label="branch_a")
-        FunctionPod(packet_function=pf_b)(source, label="branch_b")
+        FunctionPod(
+            packet_function=pf_a,
+            node_config=NodeConfig(max_concurrency=NUM_PACKETS),
+        )(source, label="branch_a")
+        FunctionPod(
+            packet_function=pf_b,
+            node_config=NodeConfig(max_concurrency=NUM_PACKETS),
+        )(source, label="branch_b")
 
     return pipeline
 
 
-def run_pipeline_demo() -> None:
-    """Compare sync vs async pipeline execution on a two-branch pipeline."""
-    print("=" * 60)
-    print("Part 1: Pipeline API — pipeline-level parallelism")
-    print("=" * 60)
-    print(f"  {NUM_PACKETS} packets x 2 branches, {SLEEP_SECONDS}s sleep each")
-    print(f"  Sync runs branches sequentially, async overlaps them\n")
-
-    # -- Sync: pipeline.run() --
-    sync_pipeline = build_pipeline_with_branches(use_async_fn=False)
+def run_case(label: str, use_async_fn: bool, use_async_executor: bool) -> float:
+    """Run a single combination and return elapsed time."""
+    pipeline = build_pipeline(use_async_fn=use_async_fn)
     t0 = time.perf_counter()
-    sync_pipeline.run()
-    sync_time = time.perf_counter() - t0
+    if use_async_executor:
+        pipeline.run(config=PipelineConfig(executor=ExecutorType.ASYNC_CHANNELS))
+    else:
+        pipeline.run()
+    elapsed = time.perf_counter() - t0
 
-    a = sync_pipeline.branch_a.get_all_records()
-    b = sync_pipeline.branch_b.get_all_records()
+    a = pipeline.branch_a.get_all_records()
+    b = pipeline.branch_b.get_all_records()
     assert a is not None and b is not None
-    print(f"  pipeline.run()              : {sync_time:.2f}s  ({a.num_rows + b.num_rows} rows)")
-
-    # -- Async: pipeline.run(ASYNC_CHANNELS) --
-    async_pipeline = build_pipeline_with_branches(use_async_fn=True)
-    t0 = time.perf_counter()
-    async_pipeline.run(config=PipelineConfig(executor=ExecutorType.ASYNC_CHANNELS))
-    async_time = time.perf_counter() - t0
-
-    a = async_pipeline.branch_a.get_all_records()
-    b = async_pipeline.branch_b.get_all_records()
-    assert a is not None and b is not None
-    print(f"  pipeline.run(ASYNC_CHANNELS): {async_time:.2f}s  ({a.num_rows + b.num_rows} rows)")
-    print(f"  Speedup: {sync_time / async_time:.1f}x")
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Part 2: FunctionPod + channels — packet-level concurrency
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-def run_sync_function_pod() -> list[dict]:
-    """Process packets sequentially using sync FunctionPod."""
-    pf = PythonPacketFunction(sync_slow_double, output_keys="result")
-    pod = FunctionPod(packet_function=pf)
-    stream = ArrowTableStream(SOURCE_TABLE, tag_columns=["id"])
-    output = pod.process(stream)
-    return [pkt.as_dict() for _, pkt in output.iter_packets()]
-
-
-async def run_async_function_pod() -> list[dict]:
-    """Process all packets concurrently using async FunctionPod + channels."""
-    pf = PythonPacketFunction(async_slow_double, output_keys="result")
-    pod = FunctionPod(
-        packet_function=pf,
-        node_config=NodeConfig(max_concurrency=NUM_PACKETS),
-    )
-    stream = ArrowTableStream(SOURCE_TABLE, tag_columns=["id"])
-
-    buf = NUM_PACKETS + 2
-    input_ch = Channel(buffer_size=buf)
-    output_ch = Channel(buffer_size=buf)
-
-    async def feed():
-        for tag, packet in stream.iter_packets():
-            await input_ch.writer.send((tag, packet))
-        await input_ch.writer.close()
-
-    async with asyncio.TaskGroup() as tg:
-        tg.create_task(feed())
-        tg.create_task(pod.async_execute([input_ch.reader], output_ch.writer))
-
-    items = await output_ch.reader.collect()
-    return [pkt.as_dict() for _, pkt in items]
-
-
-def run_function_pod_demo() -> None:
-    """Compare sync vs async FunctionPod on single-stage packet processing."""
-    print("=" * 60)
-    print("Part 2: FunctionPod — packet-level concurrency")
-    print("=" * 60)
-    print(f"  {NUM_PACKETS} packets, {SLEEP_SECONDS}s sleep each")
-    print(f"  Sync processes one at a time, async overlaps all\n")
-
-    # Sync
-    t0 = time.perf_counter()
-    sync_results = run_sync_function_pod()
-    sync_time = time.perf_counter() - t0
-    print(f"  Sync  FunctionPod: {sync_time:.2f}s  results={[r['result'] for r in sync_results]}")
-
-    # Async
-    t0 = time.perf_counter()
-    async_results = asyncio.run(run_async_function_pod())
-    async_time = time.perf_counter() - t0
-    print(f"  Async FunctionPod: {async_time:.2f}s  results={sorted(r['result'] for r in async_results)}")
-    print(f"  Speedup: {sync_time / async_time:.1f}x")
-
-    # Verify correctness
-    assert sorted(r["result"] for r in sync_results) == sorted(
-        r["result"] for r in async_results
-    )
-    print("  Correctness verified.")
+    total_rows = a.num_rows + b.num_rows
+    print(f"  {label:44s} {elapsed:5.2f}s  ({total_rows} rows)")
+    return elapsed
 
 
 # ---------------------------------------------------------------------------
@@ -201,9 +131,37 @@ def run_function_pod_demo() -> None:
 
 
 def main() -> None:
-    run_pipeline_demo()
+    total = NUM_PACKETS * 2  # packets per branch * 2 branches
+    seq_time = SLEEP_SECONDS * total
+
+    print("=" * 64)
+    print("Pipeline execution: 2x2 comparison matrix")
+    print("=" * 64)
+    print(f"  {NUM_PACKETS} packets x 2 branches, {SLEEP_SECONDS}s sleep each")
+    print(f"  Sequential baseline: {seq_time:.1f}s\n")
+
+    print("  Pipeline topology:")
+    print("    source ──┬── slow_double (branch_a)")
+    print("             └── slow_double (branch_b)\n")
+
+    t1 = run_case("sync executor  + sync function :", False, False)
+    t2 = run_case("sync executor  + async function:", True, False)
+    t3 = run_case("async executor + sync function :", False, True)
+    t4 = run_case("async executor + async function:", True, True)
+
     print()
-    run_function_pod_demo()
+    print("  Analysis:")
+    print(f"    sync+sync   {t1:.2f}s  — fully sequential ({NUM_PACKETS}x2 x {SLEEP_SECONDS}s)")
+    print(f"    sync+async  {t2:.2f}s  — still sequential (sync executor runs nodes one by one)")
+    print(f"    async+sync  {t3:.2f}s  — branches overlap; sync fn runs in thread pool,")
+    print(f"                          so packets also overlap via threads")
+    print(f"    async+async {t4:.2f}s  — branches overlap; packets overlap via native await")
+    print()
+    print(f"  Note: async+sync ≈ async+async for I/O-bound work because")
+    print(f"  run_in_executor (thread pool) overlaps blocking I/O similarly.")
+    print(f"  Native async wins at scale (coroutines are lighter than threads).")
+    print()
+    print(f"  Speedup (sync+sync vs async+async): {t1 / t4:.1f}x")
 
 
 if __name__ == "__main__":
