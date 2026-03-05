@@ -7,6 +7,8 @@ from pathlib import Path
 
 import xxhash
 
+from orcapod.types import ContentHash
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,18 +43,18 @@ def combine_hashes(
     return combined_hash
 
 
-def hash_file(file_path, algorithm="sha256", buffer_size=65536) -> bytes:
-    """
-    Calculate the hash of a file using the specified algorithm.
+def hash_file(file_path, algorithm="sha256", buffer_size=65536) -> ContentHash:
+    """Calculate the hash of a file using the specified algorithm.
 
-    Parameters:
-        file_path (str): Path to the file to hash
-        algorithm (str): Hash algorithm to use - options include:
-                         'md5', 'sha1', 'sha256', 'sha512', 'xxh64', 'crc32', 'hash_path'
-        buffer_size (int): Size of chunks to read from the file at a time
+    Args:
+        file_path: Path to the file to hash.
+        algorithm: Hash algorithm to use — options include:
+            'md5', 'sha1', 'sha256', 'sha512', 'xxh64', 'crc32', 'hash_path'.
+        buffer_size: Size of chunks to read from the file at a time.
 
     Returns:
-        bytes: Raw digest bytes of the hash
+        A ContentHash with method set to the algorithm name and digest
+        containing the raw hash bytes.
     """
     if not Path(file_path).is_file():
         raise FileNotFoundError(f"The file {file_path} does not exist")
@@ -61,7 +63,7 @@ def hash_file(file_path, algorithm="sha256", buffer_size=65536) -> bytes:
     if algorithm == "hash_path":
         hasher = hashlib.sha256()
         hasher.update(file_path.encode("utf-8"))
-        return hasher.digest()
+        return ContentHash(method=algorithm, digest=hasher.digest())
 
     if algorithm == "xxh64":
         hasher = xxhash.xxh64()
@@ -71,7 +73,7 @@ def hash_file(file_path, algorithm="sha256", buffer_size=65536) -> bytes:
                 if not data:
                     break
                 hasher.update(data)
-        return hasher.digest()
+        return ContentHash(method=algorithm, digest=hasher.digest())
 
     if algorithm == "crc32":
         crc = 0
@@ -81,7 +83,10 @@ def hash_file(file_path, algorithm="sha256", buffer_size=65536) -> bytes:
                 if not data:
                     break
                 crc = zlib.crc32(data, crc)
-        return (crc & 0xFFFFFFFF).to_bytes(4, byteorder="big")
+        return ContentHash(
+            method=algorithm,
+            digest=(crc & 0xFFFFFFFF).to_bytes(4, byteorder="big"),
+        )
 
     try:
         hasher = hashlib.new(algorithm)
@@ -98,7 +103,7 @@ def hash_file(file_path, algorithm="sha256", buffer_size=65536) -> bytes:
                 break
             hasher.update(data)
 
-    return hasher.digest()
+    return ContentHash(method=algorithm, digest=hasher.digest())
 
 
 def _is_in_string(line: str, pos: int) -> bool:
