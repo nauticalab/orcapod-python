@@ -274,6 +274,7 @@ class PythonPacketFunction(PacketFunctionBase):
         **kwargs,
     ) -> None:
         self._function = function
+        self._is_async = inspect.iscoroutinefunction(function)
 
         # Reject functions with variadic parameters -- PythonPacketFunction maps
         # packet keys to named parameters, so the full parameter set must be fixed.
@@ -380,10 +381,20 @@ class PythonPacketFunction(PacketFunctionBase):
         """Set the active state. If False, ``call`` returns None for every packet."""
         self._active = active
 
-    def direct_call(self, packet: PacketProtocol) -> PacketProtocol | None:
-        if not self._active:
-            return None
-        values = self._function(**packet.as_dict())
+    @property
+    def is_async(self) -> bool:
+        """Return whether the wrapped function is an async coroutine function."""
+        return self._is_async
+
+    def _build_output_packet(self, values: Any) -> PacketProtocol:
+        """Build an output Packet from raw function return values.
+
+        Args:
+            values: Raw return value from the wrapped function.
+
+        Returns:
+            A Packet containing the parsed outputs with source info.
+        """
         output_data = parse_function_outputs(self._output_keys, values)
 
         def combine(*components: tuple[str, ...]) -> str:
@@ -391,7 +402,6 @@ class PythonPacketFunction(PacketFunctionBase):
             return "::".join(inner_parsed)
 
         record_id = str(uuid7())
-
         source_info = {k: combine(self.uri, (record_id,), (k,)) for k in output_data}
 
         return Packet(
@@ -402,12 +412,64 @@ class PythonPacketFunction(PacketFunctionBase):
             data_context=self.data_context,
         )
 
-    async def direct_async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
-        """Run the synchronous ``direct_call`` in a thread pool via ``run_in_executor``."""
+    def _call_async_function_sync(self, packet: PacketProtocol) -> Any:
+        """Run the wrapped async function synchronously.
+
+        Uses ``asyncio.run()`` when no event loop is running. When called
+        from within a running loop, offloads to a new thread to avoid
+        nested event loop errors.
+
+        Args:
+            packet: The input packet whose dict form is passed to the function.
+
+        Returns:
+            The raw return value of the async function.
+        """
         import asyncio
 
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self.direct_call, packet)
+        coro = self._function(**packet.as_dict())
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop — safe to use asyncio.run()
+            return asyncio.run(coro)
+        else:
+            # Already in a loop — run in a separate thread with its own loop
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(1) as pool:
+                return pool.submit(asyncio.run, coro).result()
+
+    def direct_call(self, packet: PacketProtocol) -> PacketProtocol | None:
+        """Execute the function on *packet* synchronously.
+
+        For async functions, the coroutine is driven to completion via
+        ``asyncio.run()`` (or a helper thread when already inside an event loop).
+        """
+        if not self._active:
+            return None
+        if self._is_async:
+            values = self._call_async_function_sync(packet)
+        else:
+            values = self._function(**packet.as_dict())
+        return self._build_output_packet(values)
+
+    async def direct_async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
+        """Execute the function on *packet* asynchronously.
+
+        Async functions are ``await``-ed directly. Sync functions are
+        offloaded to a thread pool via ``run_in_executor``.
+        """
+        if not self._active:
+            return None
+        if self._is_async:
+            values = await self._function(**packet.as_dict())
+            return self._build_output_packet(values)
+        else:
+            import asyncio
+
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, self.direct_call, packet)
 
 
 class PacketFunctionWrapper(PacketFunctionBase):

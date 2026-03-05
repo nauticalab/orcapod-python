@@ -209,7 +209,7 @@ def get_function_components(
         if not include_declaration:
             lines = source.split("\n")
             for i, line in enumerate(lines):
-                if line.strip().startswith("def "):
+                if line.strip().startswith(("def ", "async def ")):
                     lines.pop(i)
                     break
             source = "\n".join(lines)
