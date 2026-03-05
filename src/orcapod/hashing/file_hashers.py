@@ -38,8 +38,8 @@ class CachedFileHasher:
         cache_key = f"file:{file_path}"
         cached_value = self.string_cacher.get_cached(cache_key)
         if cached_value is not None:
-            return bytes.fromhex(cached_value)
+            return ContentHash(method="cached", digest=bytes.fromhex(cached_value))
 
-        value = self.file_hasher.hash_file(file_path)
-        self.string_cacher.set_cached(cache_key, value.hex())
-        return value
+        result = self.file_hasher.hash_file(file_path)
+        self.string_cacher.set_cached(cache_key, result.digest.hex())
+        return result
