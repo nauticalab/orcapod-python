@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import TYPE_CHECKING, Any
 
 from orcapod import contexts
+from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.config import Config
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.tracker import SourceNode
@@ -143,6 +144,20 @@ class PersistentSourceNode(SourceNode):
         self._ensure_stream()
         assert self._cached_stream is not None
         return self._cached_stream.as_table(columns=columns, all_info=all_info)
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    ) -> None:
+        """Materialize to cache DB, then push cached rows to the output channel."""
+        try:
+            self._ensure_stream()
+            assert self._cached_stream is not None
+            for tag, packet in self._cached_stream.iter_packets():
+                await output.send((tag, packet))
+        finally:
+            await output.close()
 
     def get_all_records(self) -> "pa.Table | None":
         """Retrieve all stored records from the cache database."""

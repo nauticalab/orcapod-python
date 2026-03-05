@@ -6,7 +6,8 @@ Shows the recommended workflow in a single, linear example:
 1. Define domain functions with ``@function_pod``.
 2. Build a pipeline with the ``Pipeline`` context manager.
 3. Run the pipeline asynchronously via ``AsyncPipelineOrchestrator``.
-4. Retrieve persisted results synchronously from the pipeline database.
+4. Retrieve persisted results synchronously from the pipeline's
+   persistent nodes (``pipeline.<label>.get_all_records()``).
 
 Pipeline::
 
@@ -78,7 +79,7 @@ EXPECTED = {
 }
 
 
-# ── 3. Build, run async, retrieve sync ───────────────────────────────────
+# ── 3. Build pipeline ───────────────────────────────────────────────────
 
 
 def _build_pipeline() -> Pipeline:
@@ -100,14 +101,6 @@ def _build_pipeline() -> Pipeline:
     return pipeline
 
 
-def _grades_from_stream(stream) -> dict[str, str]:
-    """Extract {student_id: letter_grade} from any iterable stream."""
-    return {
-        tag.as_dict()["student_id"]: packet.as_dict()["letter_grade"]
-        for tag, packet in stream.iter_packets()
-    }
-
-
 def _grades_from_table(table: pa.Table) -> dict[str, str]:
     """Extract {student_id: letter_grade} from a PyArrow table."""
     return {
@@ -120,24 +113,33 @@ def _grades_from_table(table: pa.Table) -> dict[str, str]:
 
 
 class TestAsyncPipelineIntegration:
-    """Single narrative: build → run async → retrieve sync → verify."""
+    """Build → run async → retrieve from persistent nodes → verify."""
 
-    def test_orchestrator_produces_correct_streamed_output(self):
-        """AsyncPipelineOrchestrator returns a stream with expected grades."""
+    def test_orchestrator_then_db_retrieval(self):
+        """Run via orchestrator, then retrieve results from the persistent node."""
         pipeline = _build_pipeline()
 
-        # Run asynchronously — returns an ArrowTableStream
+        # Run asynchronously — persistent nodes write to the pipeline DB
         orchestrator = AsyncPipelineOrchestrator()
-        result_stream = orchestrator.run(pipeline)
+        orchestrator.run(pipeline)
 
-        assert _grades_from_stream(result_stream) == EXPECTED
+        # Retrieve results synchronously via the persistent node
+        records = pipeline.letter_grade.get_all_records()
+        assert records is not None
+        assert records.num_rows == 5
+        assert _grades_from_table(records) == EXPECTED
 
     def test_pipeline_run_with_async_executor(self):
-        """Pipeline.run() with ASYNC_CHANNELS delegates to the orchestrator."""
+        """Pipeline.run(ASYNC_CHANNELS) delegates to the orchestrator."""
         pipeline = _build_pipeline()
 
         config = PipelineConfig(executor=ExecutorType.ASYNC_CHANNELS)
         pipeline.run(config=config)
+
+        records = pipeline.letter_grade.get_all_records()
+        assert records is not None
+        assert records.num_rows == 5
+        assert _grades_from_table(records) == EXPECTED
 
     @pytest.mark.asyncio
     async def test_orchestrator_run_async_from_event_loop(self):
@@ -145,9 +147,12 @@ class TestAsyncPipelineIntegration:
         pipeline = _build_pipeline()
 
         orchestrator = AsyncPipelineOrchestrator()
-        result_stream = await orchestrator.run_async(pipeline)
+        await orchestrator.run_async(pipeline)
 
-        assert _grades_from_stream(result_stream) == EXPECTED
+        records = pipeline.letter_grade.get_all_records()
+        assert records is not None
+        assert records.num_rows == 5
+        assert _grades_from_table(records) == EXPECTED
 
     def test_sync_run_then_db_retrieval(self):
         """Baseline: sync run() populates the DB for later retrieval."""
@@ -161,17 +166,19 @@ class TestAsyncPipelineIntegration:
 
     def test_sync_and_async_produce_identical_results(self):
         """Sync and async execution paths yield the same grades."""
-        # Sync path — results come from the pipeline database
+        # Sync path
         sync_pipeline = _build_pipeline()
         sync_pipeline.run()
         sync_records = sync_pipeline.letter_grade.get_all_records()
         assert sync_records is not None
         sync_grades = _grades_from_table(sync_records)
 
-        # Async path — results come from the returned stream
+        # Async path
         async_pipeline = _build_pipeline()
         orchestrator = AsyncPipelineOrchestrator()
-        async_stream = orchestrator.run(async_pipeline)
-        async_grades = _grades_from_stream(async_stream)
+        orchestrator.run(async_pipeline)
+        async_records = async_pipeline.letter_grade.get_all_records()
+        assert async_records is not None
+        async_grades = _grades_from_table(async_records)
 
         assert sync_grades == async_grades == EXPECTED

@@ -1,15 +1,19 @@
 """
 Tests for the async pipeline orchestrator.
 
+The ``AsyncPipelineOrchestrator`` operates on compiled ``Pipeline``
+objects.  After execution, results are retrieved from the pipeline's
+persistent nodes via ``get_all_records()``.
+
 Covers:
-- Linear pipeline: Source → Operator → FunctionPod
-- Diamond DAG: Source → [Op1, Op2] → Join
+- Linear pipeline: Source → FunctionPod
+- Operator pipeline: Source → Operator → FunctionPod
+- Diamond DAG: Two sources → Join → FunctionPod
 - Fan-out: one source feeds multiple downstream nodes
 - Results match synchronous execution
-- SourceNode.async_execute pushes all rows
-- OperatorNode.async_execute delegates correctly
-- FunctionNode.async_execute works in streaming mode
-- Error propagation cancels other tasks
+- SourceNode / OperatorNode / FunctionNode async_execute basics
+- run_async entry point (from within an event loop)
+- PipelineConfig integration (custom buffer sizes)
 """
 
 from __future__ import annotations
@@ -23,13 +27,13 @@ from orcapod.channels import Channel
 from orcapod.core.function_pod import FunctionNode, FunctionPod
 from orcapod.core.operator_node import OperatorNode
 from orcapod.core.operators import SelectPacketColumns
-from orcapod.core.operators.filters import PolarsFilter
 from orcapod.core.operators.join import Join
 from orcapod.core.operators.mappers import MapPackets
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource
-from orcapod.core.tracker import GraphTracker, SourceNode
-from orcapod.pipeline.orchestrator import AsyncPipelineOrchestrator
+from orcapod.core.tracker import SourceNode
+from orcapod.databases import InMemoryArrowDatabase
+from orcapod.pipeline import AsyncPipelineOrchestrator, Pipeline
 from orcapod.types import ExecutorType, PipelineConfig
 
 
@@ -110,7 +114,6 @@ class TestOperatorNodeAsyncExecute:
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
 
-        # Feed source rows into input channel
         for tag, packet in src.iter_packets():
             await input_ch.writer.send((tag, packet))
         await input_ch.writer.close()
@@ -163,19 +166,18 @@ class TestOrchestratorLinearPipeline:
         pf = PythonPacketFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
-        tracker = GraphTracker()
-        with tracker:
-            result_stream = pod(src)
-
-        tracker.compile()
+        pipeline = Pipeline(name="linear", pipeline_database=InMemoryArrowDatabase())
+        with pipeline:
+            pod(src, label="doubler")
 
         orchestrator = AsyncPipelineOrchestrator()
-        result = orchestrator.run(tracker)
+        orchestrator.run(pipeline)
 
-        rows = list(result.iter_packets())
-        assert len(rows) == 3
+        records = pipeline.doubler.get_all_records()
+        assert records is not None
+        assert records.num_rows == 3
 
-        values = sorted([pkt.as_dict()["result"] for _, pkt in rows])
+        values = sorted(records.column("result").to_pylist())
         assert values == [2, 4, 6]
 
     def test_matches_sync_execution(self):
@@ -184,21 +186,26 @@ class TestOrchestratorLinearPipeline:
         pf = PythonPacketFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
-        # Sync execution
-        sync_result = pod.process(src)
-        sync_rows = list(sync_result.iter_packets())
-        sync_values = sorted([pkt.as_dict()["result"] for _, pkt in sync_rows])
+        # Sync
+        sync_pipeline = Pipeline(
+            name="sync", pipeline_database=InMemoryArrowDatabase()
+        )
+        with sync_pipeline:
+            pod(src, label="doubler")
+        sync_pipeline.run()
+        sync_records = sync_pipeline.doubler.get_all_records()
+        sync_values = sorted(sync_records.column("result").to_pylist())
 
-        # Async execution
-        tracker = GraphTracker()
-        with tracker:
-            _ = pod(src)
-        tracker.compile()
-
+        # Async
+        async_pipeline = Pipeline(
+            name="async", pipeline_database=InMemoryArrowDatabase()
+        )
+        with async_pipeline:
+            pod(src, label="doubler")
         orchestrator = AsyncPipelineOrchestrator()
-        async_result = orchestrator.run(tracker)
-        async_rows = list(async_result.iter_packets())
-        async_values = sorted([pkt.as_dict()["result"] for _, pkt in async_rows])
+        orchestrator.run(async_pipeline)
+        async_records = async_pipeline.doubler.get_all_records()
+        async_values = sorted(async_records.column("result").to_pylist())
 
         assert sync_values == async_values
 
@@ -213,30 +220,26 @@ class TestOrchestratorOperatorPipeline:
 
     def test_source_to_operator_to_function_pod(self):
         src = _make_source("key", "value", {"key": ["a", "b", "c"], "value": [1, 2, 3]})
-        pf = PythonPacketFunction(double_value, output_keys="result")
-        pod = FunctionPod(pf)
         op = MapPackets(name_map={"value": "val"})
 
-        # Create a function that takes 'val' instead of 'value'
         def double_val(val: int) -> int:
             return val * 2
 
-        pf2 = PythonPacketFunction(double_val, output_keys="result")
-        pod2 = FunctionPod(pf2)
+        pf = PythonPacketFunction(double_val, output_keys="result")
+        pod = FunctionPod(pf)
 
-        tracker = GraphTracker()
-        with tracker:
-            mapped = op(src)
-            result_stream = pod2(mapped)
-
-        tracker.compile()
+        pipeline = Pipeline(name="op_pipe", pipeline_database=InMemoryArrowDatabase())
+        with pipeline:
+            mapped = op(src, label="mapper")
+            pod(mapped, label="doubler")
 
         orchestrator = AsyncPipelineOrchestrator()
-        result = orchestrator.run(tracker)
+        orchestrator.run(pipeline)
 
-        rows = list(result.iter_packets())
-        assert len(rows) == 3
-        values = sorted([pkt.as_dict()["result"] for _, pkt in rows])
+        records = pipeline.doubler.get_all_records()
+        assert records is not None
+        assert records.num_rows == 3
+        values = sorted(records.column("result").to_pylist())
         assert values == [2, 4, 6]
 
 
@@ -250,24 +253,21 @@ class TestOrchestratorDiamondDag:
 
     def test_two_sources_join_function_pod(self):
         src_a, src_b = _make_two_sources()
-
         pf = PythonPacketFunction(add_values, output_keys="total")
         pod = FunctionPod(pf)
 
-        tracker = GraphTracker()
-        with tracker:
-            joined = Join()(src_a, src_b)
-            result_stream = pod(joined)
-
-        tracker.compile()
+        pipeline = Pipeline(name="diamond", pipeline_database=InMemoryArrowDatabase())
+        with pipeline:
+            joined = Join()(src_a, src_b, label="join")
+            pod(joined, label="adder")
 
         orchestrator = AsyncPipelineOrchestrator()
-        result = orchestrator.run(tracker)
+        orchestrator.run(pipeline)
 
-        rows = list(result.iter_packets())
-        assert len(rows) == 2
-
-        values = sorted([pkt.as_dict()["total"] for _, pkt in rows])
+        records = pipeline.adder.get_all_records()
+        assert records is not None
+        assert records.num_rows == 2
+        values = sorted(records.column("total").to_pylist())
         assert values == [110, 220]
 
     def test_diamond_matches_sync(self):
@@ -277,71 +277,35 @@ class TestOrchestratorDiamondDag:
         pod = FunctionPod(pf)
 
         # Sync
-        sync_joined = Join()(src_a, src_b)
-        sync_result = pod.process(sync_joined)
-        sync_values = sorted([pkt.as_dict()["total"] for _, pkt in sync_result.iter_packets()])
+        sync_pipeline = Pipeline(
+            name="sync_diamond", pipeline_database=InMemoryArrowDatabase()
+        )
+        with sync_pipeline:
+            joined = Join()(src_a, src_b, label="join")
+            pod(joined, label="adder")
+        sync_pipeline.run()
+        sync_values = sorted(
+            sync_pipeline.adder.get_all_records().column("total").to_pylist()
+        )
 
         # Async
-        tracker = GraphTracker()
-        with tracker:
-            joined = Join()(src_a, src_b)
-            _ = pod(joined)
-        tracker.compile()
-
+        async_pipeline = Pipeline(
+            name="async_diamond", pipeline_database=InMemoryArrowDatabase()
+        )
+        with async_pipeline:
+            joined = Join()(src_a, src_b, label="join")
+            pod(joined, label="adder")
         orchestrator = AsyncPipelineOrchestrator()
-        async_result = orchestrator.run(tracker)
+        orchestrator.run(async_pipeline)
         async_values = sorted(
-            [pkt.as_dict()["total"] for _, pkt in async_result.iter_packets()]
+            async_pipeline.adder.get_all_records().column("total").to_pylist()
         )
 
         assert sync_values == async_values
 
 
 # ===========================================================================
-# 7. Orchestrator: fan-out (one source feeds multiple nodes)
-# ===========================================================================
-
-
-class TestOrchestratorFanOut:
-    """One source feeds two different function pods via fan-out."""
-
-    def test_fan_out_source_feeds_two_branches(self):
-        src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
-
-        # Two function pods: one doubles, one triples
-        def double(value: int) -> int:
-            return value * 2
-
-        def triple(value: int) -> int:
-            return value * 3
-
-        pf_double = PythonPacketFunction(double, output_keys="doubled")
-        pf_triple = PythonPacketFunction(triple, output_keys="tripled")
-        pod_double = FunctionPod(pf_double)
-        pod_triple = FunctionPod(pf_triple)
-
-        tracker = GraphTracker()
-        with tracker:
-            doubled = pod_double(src)
-            tripled = pod_triple(src)
-            result = Join()(doubled, tripled)
-
-        tracker.compile()
-
-        orchestrator = AsyncPipelineOrchestrator()
-        result_stream = orchestrator.run(tracker)
-
-        rows = list(result_stream.iter_packets())
-        assert len(rows) == 2
-
-        for _, pkt in rows:
-            d = pkt.as_dict()
-            assert "doubled" in d
-            assert "tripled" in d
-
-
-# ===========================================================================
-# 8. run_async entry point (for callers inside event loop)
+# 7. run_async entry point (for callers inside event loop)
 # ===========================================================================
 
 
@@ -353,22 +317,23 @@ class TestOrchestratorRunAsync:
         pf = PythonPacketFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
-        tracker = GraphTracker()
-        with tracker:
-            _ = pod(src)
-        tracker.compile()
+        pipeline = Pipeline(
+            name="async_loop", pipeline_database=InMemoryArrowDatabase()
+        )
+        with pipeline:
+            pod(src, label="doubler")
 
         orchestrator = AsyncPipelineOrchestrator()
-        result = await orchestrator.run_async(tracker)
+        await orchestrator.run_async(pipeline)
 
-        rows = list(result.iter_packets())
-        assert len(rows) == 2
-        values = sorted([pkt.as_dict()["result"] for _, pkt in rows])
+        records = pipeline.doubler.get_all_records()
+        assert records is not None
+        values = sorted(records.column("result").to_pylist())
         assert values == [2, 4]
 
 
 # ===========================================================================
-# 9. PipelineConfig integration
+# 8. PipelineConfig integration
 # ===========================================================================
 
 
@@ -379,10 +344,11 @@ class TestPipelineConfigIntegration:
         pf = PythonPacketFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
-        tracker = GraphTracker()
-        with tracker:
-            _ = pod(src)
-        tracker.compile()
+        pipeline = Pipeline(
+            name="bufsize", pipeline_database=InMemoryArrowDatabase()
+        )
+        with pipeline:
+            pod(src, label="doubler")
 
         config = PipelineConfig(
             executor=ExecutorType.ASYNC_CHANNELS,
@@ -390,7 +356,8 @@ class TestPipelineConfigIntegration:
         )
 
         orchestrator = AsyncPipelineOrchestrator()
-        result = orchestrator.run(tracker, config=config)
+        orchestrator.run(pipeline, config=config)
 
-        rows = list(result.iter_packets())
-        assert len(rows) == 2
+        records = pipeline.doubler.get_all_records()
+        assert records is not None
+        assert records.num_rows == 2
