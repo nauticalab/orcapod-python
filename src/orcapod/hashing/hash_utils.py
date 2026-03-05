@@ -62,7 +62,7 @@ def hash_file(file_path, algorithm="sha256", buffer_size=65536) -> ContentHash:
     # Hash the path string itself rather than file content
     if algorithm == "hash_path":
         hasher = hashlib.sha256()
-        hasher.update(file_path.encode("utf-8"))
+        hasher.update(str(file_path).encode("utf-8"))
         return ContentHash(method=algorithm, digest=hasher.digest())
 
     if algorithm == "xxh64":
