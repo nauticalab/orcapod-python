@@ -17,7 +17,7 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from orcapod.core.operator_node import PersistentOperatorNode
+from orcapod.core.nodes import PersistentOperatorNode
 from orcapod.core.operators import (
     DropPacketColumns,
     Join,

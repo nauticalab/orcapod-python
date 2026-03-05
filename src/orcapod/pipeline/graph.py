@@ -5,10 +5,12 @@ import os
 import tempfile
 from typing import TYPE_CHECKING, Any
 
-from orcapod.core.tracker import GraphTracker, GraphNode as GraphNodeType
+from orcapod.core.nodes import GraphNode
+from orcapod.core.tracker import GraphTracker
 from orcapod.pipeline.nodes import PersistentSourceNode
 from orcapod.protocols import core_protocols as cp
 from orcapod.protocols import database_protocols as dbp
+from orcapod.types import PipelineConfig
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -24,7 +26,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class GraphNode:
+class VizGraphNode:
     def __init__(self, label: str, id: int, kernel_type: str):
         self.label = label
         self.id = id
@@ -34,7 +36,7 @@ class GraphNode:
         return hash((self.id, self.kernel_type))
 
     def __eq__(self, other):
-        if not isinstance(other, GraphNode):
+        if not isinstance(other, VizGraphNode):
             return NotImplemented
         return (self.id, self.kernel_type) == (
             other.id,
@@ -91,8 +93,8 @@ class Pipeline(GraphTracker):
         self._pipeline_database = pipeline_database
         self._function_database = function_database
         self._pipeline_path_prefix = self._name
-        self._nodes: dict[str, GraphNodeType] = {}
-        self._persistent_node_map: dict[str, GraphNodeType] = {}
+        self._nodes: dict[str, GraphNode] = {}
+        self._persistent_node_map: dict[str, GraphNode] = {}
         self._node_graph: "nx.DiGraph | None" = None
         self._auto_compile = auto_compile
         self._compiled = False
@@ -114,7 +116,7 @@ class Pipeline(GraphTracker):
         return self._function_database
 
     @property
-    def compiled_nodes(self) -> dict[str, GraphNodeType]:
+    def compiled_nodes(self) -> dict[str, GraphNode]:
         """Return a copy of the compiled nodes dict."""
         return self._nodes.copy()
 
@@ -144,16 +146,20 @@ class Pipeline(GraphTracker):
         After compile, nodes are accessible by label as attributes on the
         pipeline instance.
         """
-        from orcapod.core.function_pod import FunctionNode, PersistentFunctionNode
-        from orcapod.core.operator_node import OperatorNode, PersistentOperatorNode
+        from orcapod.core.nodes import (
+            FunctionNode,
+            OperatorNode,
+            PersistentFunctionNode,
+            PersistentOperatorNode,
+        )
 
         G = nx.DiGraph()
         for edge in self._graph_edges:
             G.add_edge(*edge)
 
         # Seed from existing persistent nodes (incremental compile)
-        persistent_node_map: dict[str, GraphNodeType] = dict(self._persistent_node_map)
-        name_candidates: dict[str, list[GraphNodeType]] = {}
+        persistent_node_map: dict[str, GraphNode] = dict(self._persistent_node_map)
+        name_candidates: dict[str, list[GraphNode]] = {}
 
         for node_hash in nx.topological_sort(G):
             if node_hash in persistent_node_map:
@@ -248,6 +254,27 @@ class Pipeline(GraphTracker):
             if node not in self._node_graph:
                 self._node_graph.add_node(node)
 
+        # Enrich hash graph with compiled node metadata (label, pipeline_hash, node_type)
+        for node_hash, node in persistent_node_map.items():
+            if node_hash not in self._hash_graph:
+                continue
+            attrs = self._hash_graph.nodes[node_hash]
+            if not attrs.get("node_type"):
+                if isinstance(node, PersistentSourceNode):
+                    attrs["node_type"] = "source"
+                elif isinstance(node, PersistentFunctionNode):
+                    attrs["node_type"] = "function"
+                elif isinstance(node, PersistentOperatorNode):
+                    attrs["node_type"] = "operator"
+            if not attrs.get("label"):
+                computed = node.label or (
+                    node.computed_label() if hasattr(node, "computed_label") else None
+                )
+                if computed:
+                    attrs["label"] = computed
+            if not attrs.get("pipeline_hash"):
+                attrs["pipeline_hash"] = node.pipeline_hash().to_string()
+
         # Assign labels, disambiguating collisions by content hash
         self._nodes.clear()
         for label, nodes in name_candidates.items():
@@ -267,7 +294,7 @@ class Pipeline(GraphTracker):
     # Execution
     # ------------------------------------------------------------------
 
-    def run(self, config: "PipelineConfig | None" = None) -> None:
+    def run(self, config: PipelineConfig | None = None) -> None:
         """Execute all compiled nodes.
 
         Args:
@@ -292,7 +319,7 @@ class Pipeline(GraphTracker):
 
         self.flush()
 
-    def _run_async(self, config: "PipelineConfig") -> None:
+    def _run_async(self, config: PipelineConfig) -> None:
         """Run the pipeline asynchronously using the orchestrator."""
         from orcapod.pipeline.orchestrator import AsyncPipelineOrchestrator
 

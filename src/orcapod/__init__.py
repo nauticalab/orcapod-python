@@ -2,10 +2,12 @@
 # from .core import DEFAULT_TRACKER_MANAGER
 # from .core.packet_function import PythonPacketFunction
 from .core.function_pod import (
-    FunctionNode,
     FunctionPod,
-    PersistentFunctionNode,
     function_pod,
+)
+from .core.nodes import (
+    FunctionNode,
+    PersistentFunctionNode,
 )
 from .core.sources import (
     ArrowTableSource,

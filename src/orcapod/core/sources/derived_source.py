@@ -10,8 +10,7 @@ from orcapod.utils.lazy_module import LazyModule
 if TYPE_CHECKING:
     import pyarrow as pa
 
-    from orcapod.core.function_pod import PersistentFunctionNode
-    from orcapod.core.operator_node import PersistentOperatorNode
+    from orcapod.core.nodes import PersistentFunctionNode, PersistentOperatorNode
 else:
     pa = LazyModule("pyarrow")
 

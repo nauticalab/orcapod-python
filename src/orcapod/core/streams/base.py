@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from abc import abstractmethod
-from collections.abc import Collection, Iterator, Mapping
+from collections.abc import AsyncIterator, Collection, Iterator, Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -238,6 +238,19 @@ class StreamBase(TraceableBase):
     def iter_packets(
         self,
     ) -> Iterator[tuple[TagProtocol, PacketProtocol]]: ...
+
+    async def async_iter_packets(
+        self,
+    ) -> AsyncIterator[tuple[TagProtocol, PacketProtocol]]:
+        """Async iterator over (tag, packet) pairs.
+
+        Subclasses should override this to provide true async iteration.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement async_iter_packets"
+        )
+        # Make this an async generator so the return type is correct
+        yield  # pragma: no cover
 
     @abstractmethod
     def as_table(

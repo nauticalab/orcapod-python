@@ -22,3 +22,7 @@ class FunctionPodProtocol(PodProtocol, PipelineElementProtocol, Protocol):
     def process_packet(
         self, tag: TagProtocol, packet: PacketProtocol
     ) -> tuple[TagProtocol, PacketProtocol | None]: ...
+
+    async def async_process_packet(
+        self, tag: TagProtocol, packet: PacketProtocol
+    ) -> tuple[TagProtocol, PacketProtocol | None]: ...

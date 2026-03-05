@@ -20,8 +20,13 @@ import pytest
 
 from orcapod.channels import Channel
 from orcapod.core.datagrams import Packet
-from orcapod.core.function_pod import FunctionNode, FunctionPod, PersistentFunctionNode
-from orcapod.core.operator_node import OperatorNode, PersistentOperatorNode
+from orcapod.core.function_pod import FunctionPod
+from orcapod.core.nodes import (
+    FunctionNode,
+    OperatorNode,
+    PersistentFunctionNode,
+    PersistentOperatorNode,
+)
 from orcapod.core.operators import SelectPacketColumns
 from orcapod.core.operators.join import Join
 from orcapod.core.operators.semijoin import SemiJoin
@@ -703,6 +708,7 @@ class TestAsyncPipelineThenSyncRetrieval:
     @pytest.mark.asyncio
     async def test_persistent_function_node_async_then_sync_db_retrieval(self):
         """PersistentFunctionNode: async execute → sync get_all_records."""
+
         # --- Setup ---
         def double(x: int) -> int:
             return x * 2
@@ -804,6 +810,7 @@ class TestAsyncPipelineThenSyncRetrieval:
         Both nodes are persistent. After async execution, results from each
         stage can be retrieved synchronously from the database.
         """
+
         # --- Setup stage 1: double(x) ---
         def double(x: int) -> int:
             return x * 2
@@ -843,12 +850,8 @@ class TestAsyncPipelineThenSyncRetrieval:
 
         async with asyncio.TaskGroup() as tg:
             tg.create_task(source_producer())
-            tg.create_task(
-                fn_node.async_execute([ch_source.reader], ch_mid.writer)
-            )
-            tg.create_task(
-                op_node.async_execute([ch_mid.reader], ch_out.writer)
-            )
+            tg.create_task(fn_node.async_execute([ch_source.reader], ch_mid.writer))
+            tg.create_task(op_node.async_execute([ch_mid.reader], ch_out.writer))
 
         final_results = await ch_out.reader.collect()
         assert len(final_results) == 3

@@ -5,7 +5,8 @@ from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
-class ExecutionEngine(Protocol):
+class ExecutionEngineProtocol(Protocol):
+    # canonical name for the execution engine -- used to label the execution information when saving
     @property
     def name(self) -> str: ...
 

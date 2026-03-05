@@ -1,4 +1,4 @@
-from collections.abc import Collection, Iterator, Mapping
+from collections.abc import AsyncIterator, Collection, Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from orcapod.protocols.core_protocols.datagrams import PacketProtocol, TagProtocol
@@ -117,6 +117,19 @@ class StreamProtocol(TraceableProtocol, PipelineElementProtocol, Protocol):
 
         Yields:
             tuple[TagProtocol, PacketProtocol]: Sequential (tag, packet) pairs
+        """
+        ...
+
+    def async_iter_packets(self) -> AsyncIterator[tuple[TagProtocol, PacketProtocol]]:
+        """
+        Generates asynchronous iterator over (tag, packet) pairs in the stream.
+
+        Note that multiple invocation of `async_iter_packets` may not always
+        return an identical iterator.
+
+        Yields:
+            tuple[tagProtocol, PacketProtcol]: Asynchrnous sequential (tag, packet) pairs
+
         """
         ...
 

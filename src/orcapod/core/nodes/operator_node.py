@@ -1,3 +1,5 @@
+"""OperatorNode and PersistentOperatorNode — stream nodes for operator invocations."""
+
 from __future__ import annotations
 
 import asyncio
@@ -8,7 +10,8 @@ from typing import TYPE_CHECKING, Any
 from orcapod import contexts
 from orcapod.channels import Channel, ReadableChannel, WritableChannel
 from orcapod.config import Config
-from orcapod.core.static_output_pod import StaticOutputPod
+from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
+from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
@@ -32,8 +35,7 @@ else:
 
 
 class OperatorNode(StreamBase):
-    """
-    Non-persistent stream node representing an operator invocation.
+    """Non-persistent stream node representing an operator invocation.
 
     Provides the core stream interface (identity, schema, iteration) without
     any database persistence. Subclass ``PersistentOperatorNode`` adds DB-backed
@@ -175,9 +177,7 @@ class OperatorNode(StreamBase):
         column names without storing state during validation.
         """
         hashes = [s.pipeline_hash() for s in self._input_streams]
-        await self._operator.async_execute(
-            inputs, output, input_pipeline_hashes=hashes
-        )
+        await self._operator.async_execute(inputs, output, input_pipeline_hashes=hashes)
 
     def __repr__(self) -> str:
         return (
@@ -187,8 +187,7 @@ class OperatorNode(StreamBase):
 
 
 class PersistentOperatorNode(OperatorNode):
-    """
-    DB-backed stream node that applies an operator to input streams.
+    """DB-backed stream node that applies an operator to input streams.
 
     Extends ``OperatorNode`` with:
 
@@ -305,8 +304,6 @@ class PersistentOperatorNode(OperatorNode):
         If no cached records exist yet, produces an empty stream with
         the correct schema (zero rows, correct columns).
         """
-        from orcapod.core.streams.arrow_table_stream import ArrowTableStream
-
         records = self._pipeline_database.get_all_records(self.pipeline_path)
         if records is None:
             # Build an empty table with the correct schema
@@ -323,8 +320,7 @@ class PersistentOperatorNode(OperatorNode):
         self._update_modified_time()
 
     def run(self) -> None:
-        """
-        Execute the operator according to the current cache mode.
+        """Execute the operator according to the current cache mode.
 
         - **OFF**: always compute, no DB writes.
         - **LOG**: always compute, write results to DB.
@@ -350,8 +346,7 @@ class PersistentOperatorNode(OperatorNode):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> "pa.Table | None":
-        """
-        Retrieve all stored records from the pipeline database.
+        """Retrieve all stored records from the pipeline database.
 
         Returns the stored output table with column filtering applied
         per ``ColumnConfig`` conventions.
@@ -431,7 +426,7 @@ class PersistentOperatorNode(OperatorNode):
 
             # TaskGroup has completed — store if LOG mode (sync DB write, post-hoc)
             if should_collect and collected:
-                stream = StaticOutputPod._materialize_to_stream(collected)
+                stream = StaticOutputOperatorPod._materialize_to_stream(collected)
                 self._cached_output_stream = stream
                 self._store_output_stream(stream)
 

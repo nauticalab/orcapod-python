@@ -17,6 +17,8 @@ Principles
   primary data was provided; the Arrow meta table is built lazily.
 """
 
+from __future__ import annotations
+
 import logging
 from collections.abc import Collection, Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Self, cast
@@ -24,6 +26,7 @@ from typing import TYPE_CHECKING, Any, Self, cast
 from uuid_utils import uuid7
 
 from orcapod import contexts
+from orcapod.config import Config
 from orcapod.core.base import ContentIdentifiableBase
 from orcapod.protocols.semantic_types_protocols import TypeConverterProtocol
 from orcapod.semantic_types import infer_python_schema_from_pylist_data
@@ -60,33 +63,30 @@ class Datagram(ContentIdentifiableBase):
 
     def __init__(
         self,
-        data: "Mapping[str, DataValue] | pa.Table | pa.RecordBatch",
+        data: Mapping[str, DataValue] | pa.Table | pa.RecordBatch,
         python_schema: SchemaLike | None = None,
         meta_info: Mapping[str, DataValue] | None = None,
-        data_context: "str | contexts.DataContext | None" = None,
         record_id: str | None = None,
-        **kwargs,
+        data_context: str | contexts.DataContext | None = None,
+        config: Config | None = None,
     ) -> None:
-        import pyarrow as _pa
+        if isinstance(data, pa.RecordBatch):
+            data = pa.Table.from_batches([data])
 
-        if isinstance(data, _pa.RecordBatch):
-            data = _pa.Table.from_batches([data])
-
-        if isinstance(data, _pa.Table):
-            self._init_from_table(data, meta_info, data_context, record_id, **kwargs)
+        if isinstance(data, pa.Table):
+            self._init_from_table(data, meta_info, data_context, record_id)
         else:
             self._init_from_dict(
-                data, python_schema, meta_info, data_context, record_id, **kwargs
+                data, python_schema, meta_info, data_context, record_id
             )
 
     def _init_from_dict(
         self,
-        data: "Mapping[str, DataValue]",
+        data: Mapping[str, DataValue],
         python_schema: SchemaLike | None,
-        meta_info: "Mapping[str, DataValue] | None",
-        data_context: "str | contexts.DataContext | None",
-        record_id: "str | None",
-        **kwargs,
+        meta_info: Mapping[str, DataValue] | None,
+        data_context: str | contexts.DataContext | None,
+        record_id: str | None,
     ) -> None:
         data_columns: dict[str, DataValue] = {}
         meta_columns: dict[str, DataValue] = {}
@@ -104,8 +104,8 @@ class Datagram(ContentIdentifiableBase):
         super().__init__(data_context=data_context or extracted_context)
         self._datagram_id = record_id
 
-        self._data_dict: "dict[str, DataValue] | None" = data_columns
-        self._data_table: "pa.Table | None" = None
+        self._data_dict: dict[str, DataValue] | None = data_columns
+        self._data_table: pa.Table | None = None
 
         inferred = infer_python_schema_from_pylist_data(
             [data_columns], default_type=str
@@ -113,12 +113,12 @@ class Datagram(ContentIdentifiableBase):
         inferred = infer_python_schema_from_pylist_data(
             [data_columns], default_type=str
         )
-        self._data_python_schema: "Schema | None" = (
+        self._data_python_schema: Schema | None = (
             Schema({k: python_schema.get(k, v) for k, v in inferred.items()})
             if python_schema
             else inferred
         )
-        self._data_arrow_schema: "pa.Schema | None" = None
+        self._data_arrow_schema: pa.Schema | None = None
 
         if meta_info is not None:
             meta_columns.update(meta_info)
@@ -126,16 +126,15 @@ class Datagram(ContentIdentifiableBase):
         self._meta_python_schema: Schema = infer_python_schema_from_pylist_data(
             [meta_columns], default_type=str
         )
-        self._meta_table: "pa.Table | None" = None
-        self._context_table: "pa.Table | None" = None
+        self._meta_table: pa.Table | None = None
+        self._context_table: pa.Table | None = None
 
     def _init_from_table(
         self,
-        table: "pa.Table",
-        meta_info: "Mapping[str, DataValue] | None",
-        data_context: "str | contexts.DataContext | None",
-        record_id: "str | None",
-        **kwargs,
+        table: pa.Table,
+        meta_info: Mapping[str, DataValue] | None,
+        data_context: str | contexts.DataContext | None,
+        record_id: str | None,
     ) -> None:
         if len(table) != 1:
             raise ValueError(
@@ -175,9 +174,7 @@ class Datagram(ContentIdentifiableBase):
                 else f"{constants.META_PREFIX}{k}": v
                 for k, v in meta_info.items()
             }
-            new_meta = self._data_context.type_converter.python_dicts_to_arrow_table(
-                [normalized_meta]
-            )
+            new_meta = self.converter.python_dicts_to_arrow_table([normalized_meta])
             if meta_table is None:
                 meta_table = new_meta
             else:
@@ -207,50 +204,57 @@ class Datagram(ContentIdentifiableBase):
     # Internal helpers (lazy loading)
     # ------------------------------------------------------------------
 
-    def _ensure_data_dict(self) -> "dict[str, DataValue]":
+    def _ensure_data_dict(self) -> dict[str, DataValue]:
+        """
+        Ensure that dictionary representation is materialized and then returned
+        """
         if self._data_dict is None:
             assert self._data_table is not None
-            self._data_dict = (
-                self._data_context.type_converter.arrow_table_to_python_dicts(
-                    self._data_table
-                )[0]
-            )
+            self._data_dict = self.converter.arrow_table_to_python_dicts(
+                self._data_table
+            )[0]
         return self._data_dict
 
-    def _ensure_data_table(self) -> "pa.Table":
+    def _ensure_data_table(self) -> pa.Table:
+        """
+        Ensure that Arrow table representation is materialized and then returned
+        """
         if self._data_table is None:
             assert self._data_dict is not None
-            self._data_table = (
-                self._data_context.type_converter.python_dicts_to_arrow_table(
-                    [self._data_dict],
-                    self._data_python_schema,
-                )
+            self._data_table = self.converter.python_dicts_to_arrow_table(
+                [self._data_dict],
+                self._data_python_schema,
             )
         return self._data_table
 
     def _ensure_python_schema(self) -> Schema:
+        """
+        Ensure that Python schema is materialized and then returned
+        """
         if self._data_python_schema is None:
             assert self._data_table is not None
-            self._data_python_schema = (
-                self._data_context.type_converter.arrow_schema_to_python_schema(
-                    self._data_table.schema
-                )
+            self._data_python_schema = self.converter.arrow_schema_to_python_schema(
+                self._data_table.schema
             )
         return self._data_python_schema
 
-    def _ensure_arrow_schema(self) -> "pa.Schema":
+    def _ensure_arrow_schema(self) -> pa.Schema:
+        """
+        Ensure that Arrow schema is materialized and then returned
+        """
         if self._data_arrow_schema is None:
             if self._data_table is not None:
                 self._data_arrow_schema = self._data_table.schema
             else:
-                self._data_arrow_schema = (
-                    self._data_context.type_converter.python_schema_to_arrow_schema(
-                        self._ensure_python_schema()
-                    )
+                self._data_arrow_schema = self.converter.python_schema_to_arrow_schema(
+                    self._ensure_python_schema()
                 )
         return self._data_arrow_schema
 
-    def _ensure_context_table(self) -> "pa.Table":
+    def _ensure_context_table(self) -> pa.Table:
+        """
+        Ensure context table is materialized and then returned (relevant for Arrow representation)
+        """
         if self._context_table is None:
             import pyarrow as _pa
 
@@ -261,14 +265,15 @@ class Datagram(ContentIdentifiableBase):
             )
         return self._context_table
 
-    def _ensure_meta_table(self) -> "pa.Table | None":
+    def _ensure_meta_table(self) -> pa.Table | None:
+        """
+        Ensure meta table is materialized and returned (relevant for Arrow representation)
+        """
         if not self._meta:
             return None
         if self._meta_table is None:
-            self._meta_table = (
-                self._data_context.type_converter.python_dicts_to_arrow_table(
-                    [self._meta], python_schema=self._meta_python_schema
-                )
+            self._meta_table = self.converter.python_dicts_to_arrow_table(
+                [self._meta], python_schema=self._meta_python_schema
             )
         return self._meta_table
 
@@ -432,9 +437,9 @@ class Datagram(ContentIdentifiableBase):
     def as_dict(
         self,
         *,
-        columns: "ColumnConfig | dict[str, Any] | None" = None,
+        columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> "dict[str, DataValue]":
+    ) -> dict[str, DataValue]:
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
         result = dict(self._ensure_data_dict())
 
@@ -459,9 +464,9 @@ class Datagram(ContentIdentifiableBase):
     def as_table(
         self,
         *,
-        columns: "ColumnConfig | dict[str, Any] | None" = None,
+        columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> "pa.Table":
+    ) -> pa.Table:
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
         all_tables = [self._ensure_data_table()]
 
@@ -495,9 +500,9 @@ class Datagram(ContentIdentifiableBase):
     def as_arrow_compatible_dict(
         self,
         *,
-        columns: "ColumnConfig | dict[str, Any] | None" = None,
+        columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> "dict[str, DataValue]":
+    ) -> dict[str, DataValue]:
         return self.as_table(columns=columns, all_info=all_info).to_pylist()[0]
 
     # ------------------------------------------------------------------
@@ -509,7 +514,7 @@ class Datagram(ContentIdentifiableBase):
             key = constants.META_PREFIX + key
         return self._meta.get(key, default)
 
-    def get_meta_info(self) -> "dict[str, DataValue]":
+    def get_meta_info(self) -> dict[str, DataValue]:
         return dict(self._meta)
 
     def with_meta_columns(self, **meta_updates: DataValue) -> Self:
@@ -608,7 +613,7 @@ class Datagram(ContentIdentifiableBase):
             )
             return new_d
 
-    def rename(self, column_mapping: "Mapping[str, str]") -> Self:
+    def rename(self, column_mapping: Mapping[str, str]) -> Self:
         if not column_mapping:
             return self
         if self._data_table is not None:
@@ -654,10 +659,8 @@ class Datagram(ContentIdentifiableBase):
             sub_schema = arrow_utils.schema_select(
                 self._data_table.schema, list(updates.keys())
             )
-            update_table = (
-                self._data_context.type_converter.python_dicts_to_arrow_table(
-                    [updates], arrow_schema=sub_schema
-                )
+            update_table = self.converter.python_dicts_to_arrow_table(
+                [updates], arrow_schema=sub_schema
             )
             new_d = self.copy(include_cache=False)
             new_d._data_table = arrow_utils.hstack_tables(
@@ -695,11 +698,9 @@ class Datagram(ContentIdentifiableBase):
             )
 
         if self._data_table is not None and self._data_dict is None:
-            new_data_table = (
-                self._data_context.type_converter.python_dicts_to_arrow_table(
-                    [updates],
-                    python_schema=dict(column_types) if column_types else None,
-                )
+            new_data_table = self.converter.python_dicts_to_arrow_table(
+                [updates],
+                python_schema=dict(column_types) if column_types else None,
             )
             new_d = self.copy(include_cache=False)
             new_d._data_table = arrow_utils.hstack_tables(

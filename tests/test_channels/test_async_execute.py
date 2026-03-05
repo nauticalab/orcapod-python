@@ -18,13 +18,13 @@ Covers:
 from __future__ import annotations
 
 import asyncio
-import time
+from typing import cast
 
 import pyarrow as pa
 import pytest
 
 from orcapod.channels import Channel
-from orcapod.core.datagrams import Packet, Tag
+from orcapod.core.datagrams import Packet
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import (
     Batch,
@@ -39,12 +39,11 @@ from orcapod.core.operators import (
     SelectTagColumns,
     SemiJoin,
 )
+from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
 from orcapod.core.packet_function import PythonPacketFunction
-from orcapod.core.static_output_pod import StaticOutputPod
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.protocols.core_protocols import AsyncExecutableProtocol
 from orcapod.types import NodeConfig, PipelineConfig
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -85,9 +84,7 @@ def make_name_stream() -> ArrowTableStream:
     return ArrowTableStream(table, tag_columns=["id"])
 
 
-async def feed_stream_to_channel(
-    stream: ArrowTableStream, ch: Channel
-) -> None:
+async def feed_stream_to_channel(stream: ArrowTableStream, ch: Channel) -> None:
     """Push all (tag, packet) pairs from a stream into a channel, then close."""
     for tag, packet in stream.iter_packets():
         await ch.writer.send((tag, packet))
@@ -132,18 +129,24 @@ class TestMaterializeToStream:
     def test_round_trip_preserves_data(self):
         stream = make_stream(5)
         rows = list(stream.iter_packets())
-        rebuilt = StaticOutputPod._materialize_to_stream(rows)
+        rebuilt = StaticOutputOperatorPod._materialize_to_stream(rows)
 
         original_table = stream.as_table()
         rebuilt_table = rebuilt.as_table()
 
-        assert original_table.column("id").to_pylist() == rebuilt_table.column("id").to_pylist()
-        assert original_table.column("x").to_pylist() == rebuilt_table.column("x").to_pylist()
+        assert (
+            original_table.column("id").to_pylist()
+            == rebuilt_table.column("id").to_pylist()
+        )
+        assert (
+            original_table.column("x").to_pylist()
+            == rebuilt_table.column("x").to_pylist()
+        )
 
     def test_round_trip_preserves_schema(self):
         stream = make_stream(3)
         rows = list(stream.iter_packets())
-        rebuilt = StaticOutputPod._materialize_to_stream(rows)
+        rebuilt = StaticOutputOperatorPod._materialize_to_stream(rows)
 
         orig_tag, orig_pkt = stream.output_schema()
         rebuilt_tag, rebuilt_pkt = rebuilt.output_schema()
@@ -152,12 +155,12 @@ class TestMaterializeToStream:
 
     def test_empty_rows_raises(self):
         with pytest.raises(ValueError, match="empty"):
-            StaticOutputPod._materialize_to_stream([])
+            StaticOutputOperatorPod._materialize_to_stream([])
 
     def test_round_trip_two_col_stream(self):
         stream = make_two_col_stream(4)
         rows = list(stream.iter_packets())
-        rebuilt = StaticOutputPod._materialize_to_stream(rows)
+        rebuilt = StaticOutputOperatorPod._materialize_to_stream(rows)
 
         original = stream.as_table()
         rebuilt_t = rebuilt.as_table()
@@ -193,7 +196,8 @@ class TestDirectAsyncCall:
             pf.async_call(Packet({"x": 2})),
             pf.async_call(Packet({"x": 3})),
         )
-        values = [r.as_dict()["result"] for r in results]
+        assert all(r is not None for r in results)
+        values = [r.as_dict()["result"] for r in results if r is not None]
         assert values == [2, 4, 6]
 
     @pytest.mark.asyncio
@@ -333,8 +337,6 @@ class TestUnaryOperatorAsyncExecute:
 
     @pytest.mark.asyncio
     async def test_polars_filter(self):
-        import polars as pl
-
         stream = make_stream(5)
         op = PolarsFilter(constraints={"id": 2})
 
@@ -660,9 +662,7 @@ class TestEndToEndPipeline:
         def triple(x: int) -> int:
             return x * 3
 
-        func_pod = FunctionPod(
-            PythonPacketFunction(triple, output_keys="result")
-        )
+        func_pod = FunctionPod(PythonPacketFunction(triple, output_keys="result"))
 
         # Channels
         ch1 = Channel(buffer_size=16)
@@ -684,8 +684,7 @@ class TestEndToEndPipeline:
         assert len(results) == 4
 
         result_map = {
-            tag.as_dict()["id"]: pkt.as_dict()["result"]
-            for tag, pkt in results
+            tag.as_dict()["id"]: pkt.as_dict()["result"] for tag, pkt in results
         }
         assert result_map[1] == 3
         assert result_map[3] == 9
@@ -714,9 +713,7 @@ class TestEndToEndPipeline:
             return x + y
 
         join_op = Join()
-        func_pod = FunctionPod(
-            PythonPacketFunction(add, output_keys="result")
-        )
+        func_pod = FunctionPod(PythonPacketFunction(add, output_keys="result"))
 
         ch_left = Channel(buffer_size=16)
         ch_right = Channel(buffer_size=16)
@@ -736,20 +733,17 @@ class TestEndToEndPipeline:
                     [ch_left.reader, ch_right.reader], ch_joined.writer
                 )
             )
-            tg.create_task(
-                func_pod.async_execute([ch_joined.reader], ch_out.writer)
-            )
+            tg.create_task(func_pod.async_execute([ch_joined.reader], ch_out.writer))
 
         results = await ch_out.reader.collect()
         assert len(results) == 3
 
         result_map = {
-            tag.as_dict()["id"]: pkt.as_dict()["result"]
-            for tag, pkt in results
+            tag.as_dict()["id"]: pkt.as_dict()["result"] for tag, pkt in results
         }
-        assert result_map[0] == 11   # 10 + 1
-        assert result_map[1] == 22   # 20 + 2
-        assert result_map[2] == 33   # 30 + 3
+        assert result_map[0] == 11  # 10 + 1
+        assert result_map[1] == 22  # 20 + 2
+        assert result_map[2] == 33  # 30 + 3
 
 
 # ---------------------------------------------------------------------------
@@ -813,7 +807,7 @@ class TestSyncBehaviorUnchanged:
         op = PolarsFilter(predicates=(pl.col("id").is_in([1, 3]),))
         output = op.process(stream)
         results = list(output.iter_packets())
-        ids = sorted(tag.as_dict()["id"] for tag, _ in results)
+        ids = sorted(cast(int, tag.as_dict()["id"]) for tag, _ in results)
         assert ids == [1, 3]
 
     def test_join_sync_process_still_works(self):
@@ -850,5 +844,5 @@ class TestSyncBehaviorUnchanged:
         output = pod.process(stream)
         results = list(output.iter_packets())
         assert len(results) == 3
-        values = sorted(pkt.as_dict()["result"] for _, pkt in results)
+        values = sorted(cast(int, pkt.as_dict()["result"]) for _, pkt in results)
         assert values == [0, 11, 22]

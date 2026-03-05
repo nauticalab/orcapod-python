@@ -36,17 +36,17 @@ class Join(NonZeroInputOperator):
 
     def validate_nonzero_inputs(self, *streams: StreamProtocol) -> None:
         """Validate that input streams are compatible for joining."""
+        # TODO: add more helpful validation
         try:
             self.output_schema(*streams)
         except Exception as e:
-            # raise InputValidationError(f"Input streams are not compatible: {e}") from e
-            raise e
+            raise InputValidationError(f"Input streams are not compatible: {e}") from e
 
     def order_input_streams(self, *streams: StreamProtocol) -> list[StreamProtocol]:
         # Canonically order by pipeline_hash for deterministic operation.
         # pipeline_hash is structure-only, so streams with the same schema+topology
         # get the same ordering regardless of data content.
-        return sorted(streams, key=lambda s: s.pipeline_hash().to_hex())
+        return sorted(streams, key=lambda s: s.pipeline_hash().to_string())
 
     def argument_symmetry(self, streams: Collection) -> ArgumentGroup:
         return frozenset(streams)
@@ -60,6 +60,7 @@ class Join(NonZeroInputOperator):
         columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
 
         if len(streams) == 1:
+            # if single stream, simply return the output schema of the single input stream
             return streams[0].output_schema(columns=columns, all_info=all_info)
 
         # Always get input schemas WITHOUT system tags for the base computation.
@@ -242,15 +243,14 @@ class Join(NonZeroInputOperator):
                     await output.send((tag, packet))
                 return
 
+            # TODO: carefully revisit the logic behind system tag handling
             if len(inputs) == 2:
                 suffixes = (
                     self._compute_system_tag_suffixes(input_pipeline_hashes)
                     if input_pipeline_hashes is not None
                     else ["0", "1"]
                 )
-                await self._symmetric_hash_join(
-                    inputs[0], inputs[1], output, suffixes
-                )
+                await self._symmetric_hash_join(inputs[0], inputs[1], output, suffixes)
                 return
 
             # N > 2: concurrent collection + static_process
@@ -370,9 +370,7 @@ class Join(NonZeroInputOperator):
 
                 # Index the new row
                 td = tag.as_dict()
-                key = (
-                    tuple(td[sk] for sk in shared_keys) if shared_keys else (0,)
-                )
+                key = tuple(td[sk] for sk in shared_keys) if shared_keys else (0,)
                 row_idx = len(buffers[side])
                 buffers[side].append((tag, pkt))
                 indexes[side].setdefault(key, []).append(row_idx)
@@ -383,13 +381,21 @@ class Join(NonZeroInputOperator):
                     other_tag, other_pkt = buffers[other][mi]
                     if side == 0:
                         merged = self._merge_row_pair(
-                            tag, pkt, other_tag, other_pkt,
-                            suffixes, block_sep,
+                            tag,
+                            pkt,
+                            other_tag,
+                            other_pkt,
+                            suffixes,
+                            block_sep,
                         )
                     else:
                         merged = self._merge_row_pair(
-                            other_tag, other_pkt, tag, pkt,
-                            suffixes, block_sep,
+                            other_tag,
+                            other_pkt,
+                            tag,
+                            pkt,
+                            suffixes,
+                            block_sep,
                         )
                     await output.send(merged)
 
@@ -423,18 +429,10 @@ class Join(NonZeroInputOperator):
         # Rename and merge system tags with canonical suffixes
         merged_sys: dict = {}
         for k, v in left_tag.system_tags().items():
-            new_key = (
-                f"{k}{block_sep}{suffixes[0]}"
-                if k.startswith(sys_prefix)
-                else k
-            )
+            new_key = f"{k}{block_sep}{suffixes[0]}" if k.startswith(sys_prefix) else k
             merged_sys[new_key] = v
         for k, v in right_tag.system_tags().items():
-            new_key = (
-                f"{k}{block_sep}{suffixes[1]}"
-                if k.startswith(sys_prefix)
-                else k
-            )
+            new_key = f"{k}{block_sep}{suffixes[1]}" if k.startswith(sys_prefix) else k
             merged_sys[new_key] = v
 
         merged_tag = Tag(merged_tag_d, system_tags=merged_sys)

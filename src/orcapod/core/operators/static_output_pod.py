@@ -32,7 +32,7 @@ else:
     pa = LazyModule("pyarrow")
 
 
-class StaticOutputPod(TraceableBase):
+class StaticOutputOperatorPod(TraceableBase):
     """Abstract base class for pods whose core logic yields a static output stream.
 
     The static output stream is wrapped in ``DynamicPodStream`` which re-executes
@@ -166,7 +166,7 @@ class StaticOutputPod(TraceableBase):
 
     @staticmethod
     def _materialize_to_stream(
-        rows: list[tuple[TagProtocol, PacketProtocol]],
+        rows: Sequence[tuple[TagProtocol, PacketProtocol]],
     ) -> StreamProtocol:
         """Materialize a list of (Tag, Packet) pairs into an ArrowTableStream.
 
@@ -234,11 +234,11 @@ class StaticOutputPod(TraceableBase):
 
 
 class DynamicPodStream(StreamBase):
-    """Recomputable stream wrapping a ``StaticOutputPod`` invocation."""
+    """Recomputable stream wrapping a ``StaticOutputOperatorPod`` invocation."""
 
     def __init__(
         self,
-        pod: StaticOutputPod,
+        pod: StaticOutputOperatorPod,
         upstreams: tuple[StreamProtocol, ...] = (),
         label: str | None = None,
         data_context: DataContext | None = None,

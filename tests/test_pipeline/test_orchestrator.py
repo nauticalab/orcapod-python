@@ -24,18 +24,16 @@ import pyarrow as pa
 import pytest
 
 from orcapod.channels import Channel
-from orcapod.core.function_pod import FunctionNode, FunctionPod
-from orcapod.core.operator_node import OperatorNode
+from orcapod.core.function_pod import FunctionPod
+from orcapod.core.nodes import FunctionNode, OperatorNode, SourceNode
 from orcapod.core.operators import SelectPacketColumns
 from orcapod.core.operators.join import Join
 from orcapod.core.operators.mappers import MapPackets
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource
-from orcapod.core.tracker import SourceNode
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import AsyncPipelineOrchestrator, Pipeline
 from orcapod.types import ExecutorType, PipelineConfig
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -187,9 +185,7 @@ class TestOrchestratorLinearPipeline:
         pod = FunctionPod(pf)
 
         # Sync
-        sync_pipeline = Pipeline(
-            name="sync", pipeline_database=InMemoryArrowDatabase()
-        )
+        sync_pipeline = Pipeline(name="sync", pipeline_database=InMemoryArrowDatabase())
         with sync_pipeline:
             pod(src, label="doubler")
         sync_pipeline.run()
@@ -344,9 +340,7 @@ class TestPipelineConfigIntegration:
         pf = PythonPacketFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(
-            name="bufsize", pipeline_database=InMemoryArrowDatabase()
-        )
+        pipeline = Pipeline(name="bufsize", pipeline_database=InMemoryArrowDatabase())
         with pipeline:
             pod(src, label="doubler")
 

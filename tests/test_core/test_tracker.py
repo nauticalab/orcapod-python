@@ -19,8 +19,8 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from orcapod.core.function_pod import FunctionNode, FunctionPod, function_pod
-from orcapod.core.operator_node import OperatorNode
+from orcapod.core.function_pod import FunctionPod, function_pod
+from orcapod.core.nodes import FunctionNode, OperatorNode, SourceNode
 from orcapod.core.operators import Join, SelectTagColumns
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
@@ -28,7 +28,6 @@ from orcapod.core.streams import ArrowTableStream
 from orcapod.core.tracker import (
     BasicTrackerManager,
     GraphTracker,
-    SourceNode,
 )
 
 # ---------------------------------------------------------------------------

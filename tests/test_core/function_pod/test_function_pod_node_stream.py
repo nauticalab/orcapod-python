@@ -19,7 +19,8 @@ import pytest
 
 from collections.abc import Mapping
 
-from orcapod.core.function_pod import PersistentFunctionNode, FunctionPod
+from orcapod.core.function_pod import FunctionPod
+from orcapod.core.nodes import PersistentFunctionNode
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase

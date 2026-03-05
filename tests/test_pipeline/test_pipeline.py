@@ -15,8 +15,8 @@ from typing import cast
 import pyarrow as pa
 import pytest
 
-from orcapod.core.function_pod import FunctionPod, PersistentFunctionNode
-from orcapod.core.operator_node import PersistentOperatorNode
+from orcapod.core.function_pod import FunctionPod
+from orcapod.core.nodes import PersistentFunctionNode, PersistentOperatorNode
 from orcapod.core.operators import Join, MapPackets
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource
@@ -858,6 +858,122 @@ class TestHashChainDetaching:
 
 
 # ---------------------------------------------------------------------------
+# Tests: hash graph
+# ---------------------------------------------------------------------------
+
+
+class TestHashGraph:
+    def test_graph_empty_before_context(self, pipeline_db):
+        """pipeline.graph is an empty DiGraph before any with block."""
+        import networkx as nx
+
+        pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
+        assert isinstance(pipeline.graph, nx.DiGraph)
+        assert len(pipeline.graph.nodes) == 0
+        assert len(pipeline.graph.edges) == 0
+
+    def test_graph_has_edges_after_compile(self, pipeline_db):
+        """After a with block + compile, graph contains the right edges."""
+        src_a, src_b = _make_two_sources()
+        pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
+
+        with pipeline:
+            Join()(src_a, src_b, label="joiner")
+
+        g = pipeline.graph
+        assert len(g.edges) > 0
+        # joiner node hash should be in the graph
+        joiner_hash = pipeline.joiner.content_hash().to_string()
+        assert joiner_hash in g.nodes
+
+    def test_graph_accumulates_across_with_blocks(self, pipeline_db):
+        """Edges from a second with block are added to those from the first."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(name="acc", pipeline_database=pipeline_db)
+
+        with pipeline:
+            joined = src_a.join(src_b, label="joiner")
+
+        edges_after_first = set(pipeline.graph.edges)
+        assert len(edges_after_first) > 0
+
+        with pipeline:
+            pod(joined, label="adder")
+
+        edges_after_second = set(pipeline.graph.edges)
+        # Second block adds more edges; first block's edges are preserved
+        assert edges_after_first.issubset(edges_after_second)
+        assert len(edges_after_second) > len(edges_after_first)
+
+    def test_graph_node_type_source(self, pipeline_db):
+        """Source nodes have node_type='source' after compile."""
+        src_a, src_b = _make_two_sources()
+        pipeline = Pipeline(name="types", pipeline_database=pipeline_db)
+
+        with pipeline:
+            Join()(src_a, src_b, label="joiner")
+
+        g = pipeline.graph
+        joiner_hash = pipeline.joiner.content_hash().to_string()
+        # Predecessors of joiner are source nodes
+        for src_hash in g.predecessors(joiner_hash):
+            assert g.nodes[src_hash].get("node_type") == "source"
+
+    def test_graph_node_type_operator(self, pipeline_db):
+        """Operator nodes have node_type='operator' after compile."""
+        src_a, src_b = _make_two_sources()
+        pipeline = Pipeline(name="types", pipeline_database=pipeline_db)
+
+        with pipeline:
+            Join()(src_a, src_b, label="joiner")
+
+        joiner_hash = pipeline.joiner.content_hash().to_string()
+        assert pipeline.graph.nodes[joiner_hash].get("node_type") == "operator"
+
+    def test_graph_node_type_function(self, pipeline_db):
+        """Function nodes have node_type='function' after compile."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(name="types_fn", pipeline_database=pipeline_db)
+
+        with pipeline:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        adder_hash = pipeline.adder.content_hash().to_string()
+        assert pipeline.graph.nodes[adder_hash].get("node_type") == "function"
+
+    def test_graph_label_attribute(self, pipeline_db):
+        """Labeled nodes carry their label in graph node attributes after compile."""
+        src_a, src_b = _make_two_sources()
+        pipeline = Pipeline(name="labels", pipeline_database=pipeline_db)
+
+        with pipeline:
+            Join()(src_a, src_b, label="my_join")
+
+        joiner_hash = pipeline.my_join.content_hash().to_string()
+        assert pipeline.graph.nodes[joiner_hash].get("label") == "my_join"
+
+    def test_graph_pipeline_hash_attribute(self, pipeline_db):
+        """Compiled nodes have pipeline_hash attribute set in the graph."""
+        src_a, src_b = _make_two_sources()
+        pipeline = Pipeline(name="phash", pipeline_database=pipeline_db)
+
+        with pipeline:
+            Join()(src_a, src_b, label="joiner")
+
+        joiner_hash = pipeline.joiner.content_hash().to_string()
+        stored_ph = pipeline.graph.nodes[joiner_hash].get("pipeline_hash")
+        assert stored_ph is not None
+        assert stored_ph == pipeline.joiner.pipeline_hash().to_string()
+
+
+# ---------------------------------------------------------------------------
 # Tests: incremental compile preserves existing nodes
 # ---------------------------------------------------------------------------
 
@@ -946,3 +1062,47 @@ class TestIncrementalCompile:
             110,
             220,
         ]
+
+
+# ---------------------------------------------------------------------------
+# Tests: compile() does not eagerly trigger upstream execution
+# ---------------------------------------------------------------------------
+
+
+class TestCompileDoesNotTriggerExecution:
+    """Verify that Pipeline.compile() constructs persistent nodes without
+    triggering upstream iter_packets / run / as_table materialisation."""
+
+    def test_compile_does_not_trigger_source_materialization(self, pipeline_db):
+        """Operators followed by a function pod: compile should not execute anything."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(pf)
+
+        pipeline = Pipeline(name="lazy_test", pipeline_database=pipeline_db)
+        with pipeline:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        # After compile, persistent source nodes should NOT have materialised
+        # their cache yet (i.e. _cached_stream is still None).
+        assert pipeline._node_graph is not None
+        source_nodes = [
+            n
+            for n in pipeline._node_graph.nodes()
+            if isinstance(n, PersistentSourceNode)
+        ]
+        for sn in source_nodes:
+            assert sn._cached_stream is None, (
+                "PersistentSourceNode should not have materialised during compile()"
+            )
+
+        # The pipeline and function databases should be empty — nothing has
+        # been written yet because no upstream was triggered.
+        assert pipeline_db.get_all_records(source_nodes[0].cache_path) is None
+        assert pipeline_db.get_all_records(source_nodes[1].cache_path) is None
+
+        # Running the pipeline should still work correctly after lazy compile.
+        pipeline.run()
+        table = pipeline.adder.as_table()
+        assert table.num_rows == 2

@@ -6,7 +6,7 @@ from collections.abc import Collection, Sequence
 from typing import Any
 
 from orcapod.channels import ReadableChannel, WritableChannel
-from orcapod.core.static_output_pod import StaticOutputPod
+from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
 from orcapod.protocols.core_protocols import (
     ArgumentGroup,
     PacketProtocol,
@@ -16,7 +16,7 @@ from orcapod.protocols.core_protocols import (
 from orcapod.types import ColumnConfig, ContentHash, Schema
 
 
-class UnaryOperator(StaticOutputPod):
+class UnaryOperator(StaticOutputOperatorPod):
     """Base class for all unary operators."""
 
     @abstractmethod
@@ -86,7 +86,7 @@ class UnaryOperator(StaticOutputPod):
             await output.close()
 
 
-class BinaryOperator(StaticOutputPod):
+class BinaryOperator(StaticOutputOperatorPod):
     """Base class for all binary operators."""
 
     @abstractmethod
@@ -173,7 +173,7 @@ class BinaryOperator(StaticOutputPod):
             await output.close()
 
 
-class NonZeroInputOperator(StaticOutputPod):
+class NonZeroInputOperator(StaticOutputOperatorPod):
     """Base class for operators that require at least one input stream.
 
     Useful for operators that accept a variable number of input streams,

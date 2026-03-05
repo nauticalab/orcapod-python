@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pyarrow as pa
 
-from orcapod.core.function_pod import FunctionPod, PersistentFunctionNode
-from orcapod.core.operator_node import PersistentOperatorNode
+from orcapod.core.function_pod import FunctionPod
+from orcapod.core.nodes import PersistentFunctionNode, PersistentOperatorNode
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import DeltaTableDatabase, InMemoryArrowDatabase

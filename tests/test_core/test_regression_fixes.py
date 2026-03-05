@@ -26,12 +26,12 @@ from orcapod.core.executors import LocalExecutor, PacketFunctionExecutorBase
 from orcapod.core.function_pod import FunctionPod, FunctionPodStream
 from orcapod.core.operators import SelectPacketColumns
 from orcapod.core.operators.join import Join
+from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
 from orcapod.core.packet_function import (
     PacketFunctionWrapper,
     PythonPacketFunction,
 )
 from orcapod.core.sources.dict_source import DictSource
-from orcapod.core.static_output_pod import StaticOutputPod
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.protocols.core_protocols import (
     PacketFunctionExecutorProtocol,
@@ -39,7 +39,6 @@ from orcapod.protocols.core_protocols import (
     PacketProtocol,
 )
 from orcapod.types import NodeConfig
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -174,7 +173,9 @@ class TestWrapperDirectCallBypassesExecutor:
     re-entered executor routing."""
 
     @staticmethod
-    def _make_add_pf_with_spy() -> tuple[PythonPacketFunction, SpyExecutor, PacketFunctionWrapper]:
+    def _make_add_pf_with_spy() -> tuple[
+        PythonPacketFunction, SpyExecutor, PacketFunctionWrapper
+    ]:
         def add(x: int, y: int) -> int:
             return x + y
 
@@ -351,7 +352,7 @@ class TestMaterializePreservesSourceInfo:
         )
 
         rows = list(source.iter_packets())
-        rebuilt = StaticOutputPod._materialize_to_stream(rows)
+        rebuilt = StaticOutputOperatorPod._materialize_to_stream(rows)
 
         # The original packets should have non-None source_info
         original_source_info = rows[0][1].source_info()
@@ -380,16 +381,14 @@ class TestMaterializePreservesSourceInfo:
         )
         rows = list(source.iter_packets())
 
-        rebuilt = StaticOutputPod._materialize_to_stream(rows)
+        rebuilt = StaticOutputOperatorPod._materialize_to_stream(rows)
         rebuilt_table = rebuilt.as_table(all_info=True)
 
         # Should have source info columns in the table
         source_cols = [
             c for c in rebuilt_table.column_names if c.startswith("_source_")
         ]
-        assert len(source_cols) > 0, (
-            "Rebuilt stream should contain _source_ columns"
-        )
+        assert len(source_cols) > 0, "Rebuilt stream should contain _source_ columns"
 
 
 # ===========================================================================
@@ -417,9 +416,7 @@ class TestRayExecutorInitialization:
 
             executor._ensure_ray_initialized()
 
-            mock_ray.init.assert_called_once_with(
-                address="ray://my-cluster:10001"
-            )
+            mock_ray.init.assert_called_once_with(address="ray://my-cluster:10001")
 
     def test_ensure_ray_initialized_auto_when_no_address(self):
         """When ray_address is None, ray.init() is called without args."""
@@ -468,9 +465,7 @@ class TestRayExecutorInitialization:
         assert "ref.future()" in source, (
             "async_execute should use ref.future() for asyncio compatibility"
         )
-        assert "wrap_future" in source, (
-            "async_execute should use asyncio.wrap_future"
-        )
+        assert "wrap_future" in source, "async_execute should use asyncio.wrap_future"
         # Should NOT do bare 'await ref'
         assert "return await ref\n" not in source, (
             "async_execute should not use bare 'await ref'"

@@ -18,10 +18,8 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.datagrams import Packet, Tag
-from orcapod.core.function_pod import (
-    PersistentFunctionNode,
-    FunctionPod,
-)
+from orcapod.core.function_pod import FunctionPod
+from orcapod.core.nodes import PersistentFunctionNode
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
@@ -30,7 +28,6 @@ from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 from orcapod.system_constants import constants
 
 from ..conftest import double, make_int_stream
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -102,6 +99,14 @@ class TestFunctionNodeConstruction:
         path = node.pipeline_path
         assert isinstance(path, tuple)
         assert all(isinstance(p, str) for p in path)
+
+    def test_node_hash_is_equal_to_wrapped_function_pod_output_stream(
+        self, node: PersistentFunctionNode
+    ) -> None:
+        output_stream = node._function_pod.process(node._input_stream)
+        node_hash = node.content_hash().to_string()
+        stream_hash = output_stream.content_hash().to_string()
+        assert node_hash == stream_hash
 
     def test_pipeline_path_ends_with_node_hash(self, node):
         path = node.pipeline_path

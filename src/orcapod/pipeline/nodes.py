@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Any
 from orcapod import contexts
 from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.config import Config
+from orcapod.core.nodes import SourceNode
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
-from orcapod.core.tracker import SourceNode
 from orcapod.protocols.core_protocols import PacketProtocol, StreamProtocol, TagProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.types import ColumnConfig

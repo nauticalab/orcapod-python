@@ -29,9 +29,6 @@ class PodProtocol(TraceableProtocol, Protocol):
     - Composable: Pods can be chained and combined
     - Type-safe: Strong typing and validation throughout
 
-    Execution modes:
-    - __call__(): Full-featured execution with tracking, returns LiveStream
-    - forward(): Pure computation without side effects, returns StreamProtocol
 
     The distinction between these modes enables both production use (with
     full tracking) and testing/debugging (without side effects).

@@ -1,23 +1,19 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Generator, Iterator, Sequence
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any
 
-from orcapod.channels import ReadableChannel, WritableChannel
-
-from orcapod import contexts
-from orcapod.config import Config
-from orcapod.core.streams import StreamBase
 from orcapod.protocols import core_protocols as cp
-from orcapod.types import ColumnConfig, Schema
+from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
-    import pyarrow as pa
+    import networkx as nx
 
-    from orcapod.core.function_pod import FunctionNode
-    from orcapod.core.operator_node import OperatorNode
+    from orcapod.core.nodes import GraphNode
+else:
+    nx = LazyModule("networkx")
 
 
 class BasicTrackerManager:
@@ -26,37 +22,23 @@ class BasicTrackerManager:
         self._active = True
 
     def set_active(self, active: bool = True) -> None:
-        """
-        Set the active state of the tracker manager.
-        This is used to enable or disable the tracker manager.
-        """
+        """Set the active state of the tracker manager."""
         self._active = active
 
     def register_tracker(self, tracker: cp.TrackerProtocol) -> None:
-        """
-        Register a new tracker in the system.
-        This is used to add a new tracker to the list of active trackers.
-        """
+        """Register a new tracker in the system."""
         if tracker not in self._active_trackers:
             self._active_trackers.append(tracker)
 
     def deregister_tracker(self, tracker: cp.TrackerProtocol) -> None:
-        """
-        Remove a tracker from the system.
-        This is used to deactivate a tracker and remove it from the list of active trackers.
-        """
+        """Remove a tracker from the system."""
         if tracker in self._active_trackers:
             self._active_trackers.remove(tracker)
 
     def get_active_trackers(self) -> list[cp.TrackerProtocol]:
-        """
-        Get the list of active trackers.
-        This is used to retrieve the currently active trackers in the system.
-        """
+        """Get the list of active trackers."""
         if not self._active:
             return []
-        # Filter out inactive trackers
-        # This is to ensure that we only return trackers that are currently active
         return [t for t in self._active_trackers if t.is_active()]
 
     def record_operator_pod_invocation(
@@ -65,9 +47,7 @@ class BasicTrackerManager:
         upstreams: tuple[cp.StreamProtocol, ...] = (),
         label: str | None = None,
     ) -> None:
-        """
-        Record the invocation of a pod in the tracker.
-        """
+        """Record the invocation of a pod in the tracker."""
         for tracker in self.get_active_trackers():
             tracker.record_operator_pod_invocation(pod, upstreams, label=label)
 
@@ -77,9 +57,7 @@ class BasicTrackerManager:
         input_stream: cp.StreamProtocol,
         label: str | None = None,
     ) -> None:
-        """
-        Record the invocation of a packet function to the tracker.
-        """
+        """Record the invocation of a packet function to the tracker."""
         for tracker in self.get_active_trackers():
             tracker.record_function_pod_invocation(pod, input_stream, label=label)
 
@@ -135,112 +113,12 @@ class AutoRegisteringContextBasedTracker(ABC):
 
 
 # ---------------------------------------------------------------------------
-# SourceNode
-# ---------------------------------------------------------------------------
-
-
-class SourceNode(StreamBase):
-    """Represents a root source stream in the computation graph."""
-
-    node_type = "source"
-
-    def __init__(
-        self,
-        stream: cp.StreamProtocol,
-        label: str | None = None,
-        data_context: str | contexts.DataContext | None = None,
-        config: Config | None = None,
-    ):
-        super().__init__(
-            label=label,
-            data_context=data_context,
-            config=config,
-        )
-        self.stream = stream
-
-    def computed_label(self) -> str | None:
-        return self.stream.label
-
-    def identity_structure(self) -> Any:
-        # TODO: revisit this logic for case where stream is not a root source
-        return self.stream.identity_structure()
-
-    def pipeline_identity_structure(self) -> Any:
-        return self.stream.pipeline_identity_structure()
-
-    def keys(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        return self.stream.keys(columns=columns, all_info=all_info)
-
-    def output_schema(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> tuple[Schema, Schema]:
-        return self.stream.output_schema(columns=columns, all_info=all_info)
-
-    @property
-    def producer(self) -> None:
-        return None
-
-    @property
-    def upstreams(self) -> tuple[cp.StreamProtocol, ...]:
-        return ()
-
-    @upstreams.setter
-    def upstreams(self, value: tuple[cp.StreamProtocol, ...]) -> None:
-        if len(value) != 0:
-            raise ValueError("SourceNode upstreams must be empty")
-
-    def __repr__(self) -> str:
-        return f"SourceNode(stream={self.stream!r}, label={self.label!r})"
-
-    def as_table(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> "pa.Table":
-        return self.stream.as_table(columns=columns, all_info=all_info)
-
-    def iter_packets(self) -> Iterator[tuple[cp.TagProtocol, cp.PacketProtocol]]:
-        return self.stream.iter_packets()
-
-    def run(self) -> None:
-        """No-op for source nodes — data is already available."""
-
-    async def async_execute(
-        self,
-        inputs: Sequence[ReadableChannel[tuple[cp.TagProtocol, cp.PacketProtocol]]],
-        output: WritableChannel[tuple[cp.TagProtocol, cp.PacketProtocol]],
-    ) -> None:
-        """Push all (tag, packet) pairs from the wrapped stream to the output channel."""
-        try:
-            for tag, packet in self.stream.iter_packets():
-                await output.send((tag, packet))
-        finally:
-            await output.close()
-
-
-GraphNode: TypeAlias = "SourceNode | FunctionNode | OperatorNode"
-# Full type once FunctionNode/OperatorNode are imported:
-#   GraphNode = SourceNode | FunctionNode | OperatorNode
-# Kept as Union[SourceNode, Any] to avoid circular imports.
-
-
-# ---------------------------------------------------------------------------
 # GraphTracker
 # ---------------------------------------------------------------------------
 
 
 class GraphTracker(AutoRegisteringContextBasedTracker):
-    """
-    A tracker that records invocations and builds a directed graph of
+    """A tracker that records invocations and builds a directed graph of
     typed graph nodes (FunctionNode, OperatorNode, SourceNode) connected
     by their upstream dependencies.
 
@@ -257,13 +135,10 @@ class GraphTracker(AutoRegisteringContextBasedTracker):
         **kwargs,
     ) -> None:
         super().__init__(tracker_manager=tracker_manager, **kwargs)
-        # hash(producer) → node  (Python object identity; safe within the tracker's lifetime)
-        # ordered list of all recorded nodes
-        self._node_lut: dict[str, GraphNode] = {}
+        self._node_lut: dict[str, "GraphNode"] = {}
         self._upstreams: dict[str, cp.StreamProtocol] = {}
-
-        # a list to keep track of all graph edges, from upstream content hash, downstream content hash
         self._graph_edges: list[tuple[str, str]] = []
+        self._hash_graph: "nx.DiGraph" = nx.DiGraph()
 
     def record_function_pod_invocation(
         self,
@@ -271,7 +146,7 @@ class GraphTracker(AutoRegisteringContextBasedTracker):
         input_stream: cp.StreamProtocol,
         label: str | None = None,
     ) -> None:
-        from orcapod.core.function_pod import FunctionNode
+        from orcapod.core.nodes import FunctionNode
 
         input_stream_hash = input_stream.content_hash().to_string()
         function_node = FunctionNode(
@@ -283,6 +158,9 @@ class GraphTracker(AutoRegisteringContextBasedTracker):
         self._node_lut[function_node_hash] = function_node
         self._upstreams[input_stream_hash] = input_stream
         self._graph_edges.append((input_stream_hash, function_node_hash))
+        self._hash_graph.add_edge(input_stream_hash, function_node_hash)
+        if not self._hash_graph.nodes[function_node_hash].get("node_type"):
+            self._hash_graph.nodes[function_node_hash]["node_type"] = "function"
 
     def record_operator_pod_invocation(
         self,
@@ -290,7 +168,7 @@ class GraphTracker(AutoRegisteringContextBasedTracker):
         upstreams: tuple[cp.StreamProtocol, ...] = (),
         label: str | None = None,
     ) -> None:
-        from orcapod.core.operator_node import OperatorNode
+        from orcapod.core.nodes import OperatorNode
 
         operator_node = OperatorNode(
             operator=pod,
@@ -303,13 +181,32 @@ class GraphTracker(AutoRegisteringContextBasedTracker):
         for upstream_hash, upstream in zip(upstream_hashes, upstreams):
             self._upstreams[upstream_hash] = upstream
             self._graph_edges.append((upstream_hash, operator_node_hash))
+            self._hash_graph.add_edge(upstream_hash, operator_node_hash)
+        if not self._hash_graph.nodes[operator_node_hash].get("node_type"):
+            self._hash_graph.nodes[operator_node_hash]["node_type"] = "operator"
 
     @property
-    def nodes(self) -> list[GraphNode]:
+    def nodes(self) -> list["GraphNode"]:
         return list(self._node_lut.values())
 
+    @property
+    def graph(self) -> "nx.DiGraph":
+        """Directed graph of content-hash strings representing the accumulated
+        pipeline structure.  Vertices are ``content_hash`` strings; node
+        attributes include ``node_type`` ("source" / "function" / "operator")
+        and, after ``compile()``, ``label`` and ``pipeline_hash``.
+
+        The graph accumulates across multiple ``with`` blocks and is never
+        cleared by ``reset()``.
+        """
+        return self._hash_graph
+
     def reset(self) -> None:
-        """Clear all recorded state."""
+        """Clear session-scoped recorded state (node LUT, upstreams, edge list).
+
+        Note: ``_hash_graph`` is intentionally *not* cleared — it accumulates
+        the pipeline structure across ``with`` blocks.
+        """
         self._node_lut.clear()
         self._upstreams.clear()
         self._graph_edges.clear()
@@ -317,10 +214,8 @@ class GraphTracker(AutoRegisteringContextBasedTracker):
     def compile(self):
         import networkx as nx
 
-        # create graph from graph_edges
-        # topologically sort and visit hash str in the graph
-        #
-        #
+        from orcapod.core.nodes import SourceNode
+
         G = nx.DiGraph()
         for edge in self._graph_edges:
             G.add_edge(*edge)
@@ -329,8 +224,11 @@ class GraphTracker(AutoRegisteringContextBasedTracker):
                 stream = self._upstreams[node_hash]
                 source_node = SourceNode(stream)
                 self._node_lut[source_node.content_hash().to_string()] = source_node
+                if node_hash in self._hash_graph and not self._hash_graph.nodes[
+                    node_hash
+                ].get("node_type"):
+                    self._hash_graph.nodes[node_hash]["node_type"] = "source"
             else:
-                # make sure all upstreams of a node is another node
                 node = self._node_lut[node_hash]
                 upstream_as_nodes = [
                     self._node_lut[upstream.content_hash().to_string()]

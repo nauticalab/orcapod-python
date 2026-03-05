@@ -163,7 +163,10 @@ class TestLocalExecutor:
         assert local_executor.supports("anything.v99")
 
     def test_execute_delegates_to_direct_call(
-        self, local_executor: LocalExecutor, add_pf: PythonPacketFunction, add_packet: Packet
+        self,
+        local_executor: LocalExecutor,
+        add_pf: PythonPacketFunction,
+        add_packet: Packet,
     ):
         result = local_executor.execute(add_pf, add_packet)
         assert result is not None
@@ -183,11 +186,15 @@ class TestExecutorProperty:
     def test_default_executor_is_none(self, add_pf: PythonPacketFunction):
         assert add_pf.executor is None
 
-    def test_set_executor(self, add_pf: PythonPacketFunction, spy_executor: SpyExecutor):
+    def test_set_executor(
+        self, add_pf: PythonPacketFunction, spy_executor: SpyExecutor
+    ):
         add_pf.executor = spy_executor
         assert add_pf.executor is spy_executor
 
-    def test_unset_executor(self, add_pf: PythonPacketFunction, spy_executor: SpyExecutor):
+    def test_unset_executor(
+        self, add_pf: PythonPacketFunction, spy_executor: SpyExecutor
+    ):
         add_pf.executor = spy_executor
         add_pf.executor = None
         assert add_pf.executor is None
@@ -222,7 +229,10 @@ class TestExecutorRouting:
         assert result.as_dict()["result"] == 3
 
     def test_call_with_executor_routes_through_executor(
-        self, add_pf: PythonPacketFunction, add_packet: Packet, spy_executor: SpyExecutor
+        self,
+        add_pf: PythonPacketFunction,
+        add_packet: Packet,
+        spy_executor: SpyExecutor,
     ):
         add_pf.executor = spy_executor
         result = add_pf.call(add_packet)
@@ -232,7 +242,10 @@ class TestExecutorRouting:
         assert spy_executor.calls[0][0] is add_pf
 
     def test_direct_call_bypasses_executor(
-        self, add_pf: PythonPacketFunction, add_packet: Packet, spy_executor: SpyExecutor
+        self,
+        add_pf: PythonPacketFunction,
+        add_packet: Packet,
+        spy_executor: SpyExecutor,
     ):
         add_pf.executor = spy_executor
         result = add_pf.direct_call(add_packet)
@@ -258,7 +271,10 @@ class TestExecutorRouting:
         assert len(spy2.calls) == 1
 
     def test_unsetting_executor_reverts_to_direct(
-        self, add_pf: PythonPacketFunction, add_packet: Packet, spy_executor: SpyExecutor
+        self,
+        add_pf: PythonPacketFunction,
+        add_packet: Packet,
+        spy_executor: SpyExecutor,
     ):
         add_pf.executor = spy_executor
         add_pf.call(add_packet)
@@ -424,7 +440,8 @@ class TestFunctionPodStreamExecutorAccess:
 
 class TestFunctionNodeExecutorAccess:
     def test_node_executor_reads_from_packet_function(self):
-        from orcapod.core.function_pod import FunctionNode, FunctionPod
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.nodes import FunctionNode
 
         spy = SpyExecutor()
         pf = PythonPacketFunction(add, output_keys="result")
@@ -435,7 +452,8 @@ class TestFunctionNodeExecutorAccess:
         assert node.executor is spy
 
     def test_node_executor_set_targets_packet_function(self):
-        from orcapod.core.function_pod import FunctionNode, FunctionPod
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.nodes import FunctionNode
 
         spy = SpyExecutor()
         pf = PythonPacketFunction(add, output_keys="result")
@@ -446,7 +464,8 @@ class TestFunctionNodeExecutorAccess:
         assert pf.executor is spy
 
     def test_node_iter_uses_executor(self):
-        from orcapod.core.function_pod import FunctionNode, FunctionPod
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.nodes import FunctionNode
 
         spy = SpyExecutor()
         pf = PythonPacketFunction(add, output_keys="result")
@@ -592,7 +611,8 @@ class TestConcurrentIteration:
         assert len(spy.sync_calls) == 0
 
     def test_function_node_uses_async_path(self):
-        from orcapod.core.function_pod import FunctionNode, FunctionPod
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.nodes import FunctionNode
 
         spy = ConcurrentSpyExecutor()
         pf = PythonPacketFunction(add, output_keys="result", executor=spy)
@@ -609,7 +629,8 @@ class TestConcurrentIteration:
 
     def test_non_concurrent_executor_uses_sync_path(self):
         """SpyExecutor has supports_concurrent_execution=False (default)."""
-        from orcapod.core.function_pod import FunctionNode, FunctionPod
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.nodes import FunctionNode
 
         spy = SpyExecutor()
         pf = PythonPacketFunction(add, output_keys="result", executor=spy)
@@ -623,7 +644,8 @@ class TestConcurrentIteration:
         assert len(spy.calls) == 2
 
     def test_no_executor_uses_sync_path(self):
-        from orcapod.core.function_pod import FunctionNode, FunctionPod
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.nodes import FunctionNode
 
         pf = PythonPacketFunction(add, output_keys="result")
         pod = FunctionPod(pf)
@@ -642,10 +664,7 @@ class TestConcurrentIteration:
         pf = PythonPacketFunction(add, output_keys="result", executor=spy)
         pod = FunctionPod(pf)
 
-        rows = [
-            {"id": i, "x": i, "y": i * 10}
-            for i in range(5)
-        ]
+        rows = [{"id": i, "x": i, "y": i * 10} for i in range(5)]
         stream = _make_add_stream(rows)
         output = pod.process(stream)
         results = [tag_pkt[1].as_dict()["result"] for tag_pkt in output.iter_packets()]

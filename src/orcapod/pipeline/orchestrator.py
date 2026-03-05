@@ -83,7 +83,7 @@ class AsyncPipelineOrchestrator:
         if not pipeline._compiled:
             pipeline.compile()
 
-        G: nx.DiGraph = pipeline._node_graph
+        G: nx.DiGraph | None = pipeline._node_graph
         assert G is not None, "Pipeline must be compiled before async execution"
 
         topo_order = list(nx.topological_sort(G))

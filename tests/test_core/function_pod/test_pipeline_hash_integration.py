@@ -36,7 +36,8 @@ from typing import cast
 
 import pyarrow as pa
 
-from orcapod.core.function_pod import FunctionPod, PersistentFunctionNode
+from orcapod.core.function_pod import FunctionPod
+from orcapod.core.nodes import PersistentFunctionNode
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource, DictSource
 from orcapod.core.streams import ArrowTableStream

@@ -1,3 +1,5 @@
+# NFS cache files
+.nfs*
 # Ignore data files in notebooks folder
 notebooks/**/*.json
 notebooks/**/*.yaml
@@ -13,7 +15,7 @@ notebooks/**/*.db
 # skip any computation results
 **/results
 
-# Ignore common data types by default 
+# Ignore common data types by default
 *.csv
 *.parquet
 *.xls
