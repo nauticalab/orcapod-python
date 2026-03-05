@@ -77,66 +77,112 @@ Examples:
 
 ```
 src/orcapod/
-├── types.py                    # Schema, ColumnConfig, ContentHash
+├── types.py                    # Schema, ColumnConfig, ContentHash, PipelineConfig,
+│                               # NodeConfig, ExecutorType, CacheMode
 ├── system_constants.py         # Column prefixes and separators
 ├── errors.py                   # InputValidationError, DuplicateTagError, FieldNotResolvableError
 ├── config.py                   # Config dataclass
+├── channels.py                 # Async channel primitives (Channel, BroadcastChannel,
+│                               # ReadableChannel, WritableChannel, ChannelClosed)
 ├── contexts/                   # DataContext (semantic_hasher, arrow_hasher, type_converter)
 ├── protocols/
 │   ├── hashing_protocols.py    # PipelineElementProtocol, ContentIdentifiableProtocol
+│   ├── database_protocols.py   # ArrowDatabaseProtocol
+│   ├── pipeline_protocols.py   # Pipeline-level protocols
+│   ├── semantic_types_protocols.py  # TypeConverterProtocol
 │   └── core_protocols/         # StreamProtocol, PodProtocol, SourceProtocol,
 │                               # PacketFunctionProtocol, DatagramProtocol, TagProtocol,
-│                               # PacketProtocol, TrackerProtocol
+│                               # PacketProtocol, TrackerProtocol, AsyncExecutableProtocol,
+│                               # PacketFunctionExecutorProtocol, OperatorPodProtocol,
+│                               # LabelableProtocol, TemporalProtocol, TraceableProtocol
 ├── core/
-│   ├── base.py                 # ContentIdentifiableBase, PipelineElementBase, TraceableBase
-│   ├── static_output_pod.py    # StaticOutputPod (operator base), DynamicPodStream
-│   ├── function_pod.py         # FunctionPod, FunctionPodStream, FunctionNode
+│   ├── base.py                 # LabelableMixin, DataContextMixin, TraceableBase
+│   ├── function_pod.py         # FunctionPod, FunctionPodStream, @function_pod decorator
 │   ├── packet_function.py      # PacketFunctionBase, PythonPacketFunction, CachedPacketFunction
-│   ├── operator_node.py        # OperatorNode (DB-backed operator execution)
-│   ├── tracker.py              # Invocation tracking
+│   ├── tracker.py              # BasicTrackerManager, GraphTracker
 │   ├── datagrams/
 │   │   ├── datagram.py         # Datagram (unified dict/Arrow backing, lazy conversion)
 │   │   └── tag_packet.py       # Tag (+ system tags), Packet (+ source info)
 │   ├── sources/
 │   │   ├── base.py             # RootSource (abstract, no upstream)
 │   │   ├── arrow_table_source.py  # Core source — all other sources delegate to it
-│   │   ├── derived_source.py   # DerivedSource (backed by FunctionNode/OperatorNode DB)
+│   │   ├── persistent_source.py   # PersistentSource (DB-backed caching wrapper)
+│   │   ├── derived_source.py   # DerivedSource (backed by node DB records)
 │   │   ├── csv_source.py, dict_source.py, list_source.py,
 │   │   │   data_frame_source.py, delta_table_source.py  # Delegating wrappers
 │   │   └── source_registry.py  # SourceRegistry for provenance resolution
 │   ├── streams/
 │   │   ├── base.py             # StreamBase (abstract)
 │   │   └── arrow_table_stream.py  # ArrowTableStream (concrete, immutable)
-│   └── operators/
-│       ├── base.py             # UnaryOperator, BinaryOperator, NonZeroInputOperator
-│       ├── join.py             # Join (N-ary inner join, commutative)
-│       ├── merge_join.py       # MergeJoin (binary, colliding cols → sorted list[T])
-│       ├── semijoin.py         # SemiJoin (binary, non-commutative)
-│       ├── batch.py            # Batch (group rows, types become list[T])
-│       ├── column_selection.py # Select/Drop Tag/Packet columns
-│       ├── mappers.py          # MapTags, MapPackets (rename columns)
-│       └── filters.py          # PolarsFilter
+│   ├── nodes/
+│   │   ├── function_node.py    # FunctionNode, PersistentFunctionNode
+│   │   ├── operator_node.py    # OperatorNode, PersistentOperatorNode
+│   │   └── source_node.py      # SourceNode (leaf stream in graph)
+│   ├── operators/
+│   │   ├── static_output_pod.py  # StaticOutputOperatorPod, DynamicPodStream
+│   │   ├── base.py             # UnaryOperator, BinaryOperator, NonZeroInputOperator
+│   │   ├── join.py             # Join (N-ary inner join, commutative)
+│   │   ├── merge_join.py       # MergeJoin (binary, colliding cols → sorted list[T])
+│   │   ├── semijoin.py         # SemiJoin (binary, non-commutative)
+│   │   ├── batch.py            # Batch (group rows, types become list[T])
+│   │   ├── column_selection.py # Select/Drop Tag/Packet columns
+│   │   ├── mappers.py          # MapTags, MapPackets (rename columns)
+│   │   └── filters.py          # PolarsFilter
+│   └── executors/
+│       ├── base.py             # PacketFunctionExecutorBase (ABC)
+│       ├── local.py            # LocalExecutor (default in-process)
+│       └── ray.py              # RayExecutor (dispatch to Ray cluster)
+├── pipeline/
+│   ├── graph.py                # Pipeline (extends GraphTracker, compiles to persistent nodes)
+│   ├── nodes.py                # PersistentSourceNode (DB-backed leaf wrapper)
+│   └── orchestrator.py         # AsyncPipelineOrchestrator (channel-based concurrent execution)
 ├── hashing/
-│   └── semantic_hashing/       # BaseSemanticHasher, type handlers
-├── semantic_types/             # Type conversion (Python ↔ Arrow)
-├── databases/                  # ArrowDatabaseProtocol implementations (Delta Lake, in-memory)
+│   ├── file_hashers.py         # BasicFileHasher, CachedFileHasher
+│   ├── arrow_hashers.py        # Arrow-specific hashing
+│   ├── arrow_serialization.py  # Arrow serialization utilities
+│   ├── arrow_utils.py          # Arrow manipulation for hashing
+│   ├── defaults.py             # Factory functions for default hashers
+│   ├── hash_utils.py           # hash_file(), get_function_components()
+│   ├── string_cachers.py       # String caching strategies
+│   ├── versioned_hashers.py    # Versioned hasher support
+│   ├── visitors.py             # Visitor pattern for hashing
+│   └── semantic_hashing/       # BaseSemanticHasher, type handlers, TypeHandlerRegistry
+├── semantic_types/             # Type conversion (Python ↔ Arrow), UniversalTypeConverter,
+│                               # SemanticTypeRegistry, type inference
+├── databases/                  # ArrowDatabaseProtocol implementations
+│   ├── delta_lake_databases.py # DeltaTableDatabase
+│   ├── in_memory_databases.py  # InMemoryArrowDatabase
+│   ├── noop_database.py        # NoOpArrowDatabase
+│   └── file_utils.py           # File utilities for database operations
+├── execution_engines/
+│   └── ray_execution_engine.py # RayEngine (execution on Ray clusters)
 └── utils/
     ├── arrow_data_utils.py     # System tag manipulation, source info, column helpers
     ├── arrow_utils.py          # Arrow table utilities
     ├── schema_utils.py         # Schema extraction, union, intersection, compatibility
-    └── lazy_module.py          # LazyModule for deferred heavy imports
+    ├── lazy_module.py          # LazyModule for deferred heavy imports
+    ├── function_info.py        # Function introspection utilities
+    ├── git_utils.py            # Git metadata extraction
+    ├── name.py                 # Name utilities
+    ├── object_spec.py          # Object specification/serialization
+    └── polars_data_utils.py    # Polars-specific utilities
 
 tests/
 ├── test_core/
 │   ├── datagrams/              # Lazy conversion, dict/Arrow round-trip
-│   ├── sources/                # Source construction, protocol conformance, DerivedSource
-│   ├── streams/                # ArrowTableStream behavior
-│   ├── function_pod/           # FunctionPod, FunctionNode, pipeline hash integration
+│   ├── sources/                # Source construction, protocol conformance, DerivedSource,
+│   │                           # PersistentSource
+│   ├── streams/                # ArrowTableStream behavior, convenience methods
+│   ├── function_pod/           # FunctionPod, FunctionNode, pipeline hash integration,
+│   │                           # @function_pod decorator
 │   ├── operators/              # All operators, OperatorNode, MergeJoin
-│   └── packet_function/        # PacketFunction, CachedPacketFunction
-├── test_hashing/               # Semantic hasher, hash stability
+│   └── packet_function/        # PacketFunction, CachedPacketFunction, executor
+├── test_channels/              # Async channels, async_execute for operators/nodes/pods,
+│                               # native async operators, pipeline integration
+├── test_pipeline/              # Pipeline compilation, AsyncPipelineOrchestrator
+├── test_hashing/               # Semantic hasher, hash stability, file hashers, string cachers
 ├── test_databases/             # Delta Lake, in-memory, no-op databases
-└── test_semantic_types/        # Type converter tests
+└── test_semantic_types/        # Type converter, semantic registry, struct converters
 ```
 
 ---
@@ -147,8 +193,14 @@ See `orcapod-design.md` at the project root for the full design specification.
 
 ### Core data flow
 
+**Pull-based (synchronous):**
 ```
 RootSource → ArrowTableStream → [Operator / FunctionPod] → ArrowTableStream → ...
+```
+
+**Push-based (async pipeline):**
+```
+Pipeline.compile() → AsyncPipelineOrchestrator.run() → channels → persistent nodes → DB
 ```
 
 Every stream is an immutable sequence of (Tag, Packet) pairs backed by a PyArrow Table.
@@ -166,22 +218,59 @@ Key methods: `output_schema()`, `keys()`, `iter_packets()`, `as_table()`.
 
 **Source** (`core/sources/`) — produces a stream from external data. `ArrowTableSource` is the
 core implementation; CSV/Delta/DataFrame/Dict/List sources all delegate to it internally. Each
-source adds source-info columns and a system tag column. `DerivedSource` wraps a
-FunctionNode/OperatorNode's DB records as a new source.
+source adds source-info columns and a system tag column. `DerivedSource` wraps a node's DB
+records as a new source. `PersistentSource` wraps any `RootSource` with DB-backed caching
+(deduped by per-row content hash).
 
 **Function Pod** (`core/function_pod.py`) — wraps a `PacketFunction` that transforms individual
-packets. Never inspects tags. Two execution models:
-- `FunctionPod` → `FunctionPodStream`: lazy, in-memory
-- `FunctionNode`: DB-backed, two-phase (yield cached results first, then compute missing)
+packets. Never inspects tags. Supports async functions via `PythonPacketFunction`. The
+`@function_pod` decorator creates `FunctionPod` instances directly from Python functions.
+
+**Node** (`core/nodes/`) — graph-aware wrappers that participate in the computation DAG:
+- `SourceNode` — leaf stream in the graph (wraps a `StreamProtocol`)
+- `FunctionNode` / `PersistentFunctionNode` — packet function invocations (persistent variant
+  is DB-backed with two-phase execution: yield cached, then compute missing)
+- `OperatorNode` / `PersistentOperatorNode` — operator invocations (persistent variant
+  is DB-backed with deduplication)
 
 **Operator** (`core/operators/`) — structural pod transforming streams without synthesizing new
-packet values. All subclass `StaticOutputPod`:
+packet values. All subclass `StaticOutputOperatorPod`. Each operator also implements
+`AsyncExecutableProtocol` for push-based channel execution:
 - `UnaryOperator` — 1 input (Batch, Select/Drop columns, Map, Filter)
 - `BinaryOperator` — 2 inputs (MergeJoin, SemiJoin)
 - `NonZeroInputOperator` — 1+ inputs (Join)
 
-**OperatorNode** (`core/operator_node.py`) — DB-backed operator execution, analogous to
-FunctionNode.
+**Executor** (`core/executors/`) — pluggable execution backends for packet functions:
+- `LocalExecutor` — default in-process execution
+- `RayExecutor` — dispatches to a Ray cluster
+
+**Channel** (`channels.py`) — async primitives for push-based pipeline execution:
+- `Channel[T]` — bounded async channel with backpressure and close signaling
+- `BroadcastChannel[T]` — fan-out channel for multiple consumers
+- `ReadableChannel[T]` / `WritableChannel[T]` — consumer/producer protocols
+
+**Pipeline** (`pipeline/`) — persistent, async-capable pipeline infrastructure:
+- `Pipeline` — extends `GraphTracker`; records operator/function pod invocations during a
+  `with` block, then `compile()` replaces every node with its persistent variant
+  (leaf streams → `PersistentSourceNode`, function nodes → `PersistentFunctionNode`,
+  operator nodes → `PersistentOperatorNode`)
+- `AsyncPipelineOrchestrator` — executes a compiled pipeline using channels; walks the
+  persistent node graph in topological order, creates bounded channels between nodes,
+  launches all nodes concurrently via `asyncio.TaskGroup`
+
+### Async execution model
+
+All pipeline nodes implement `AsyncExecutableProtocol`:
+```python
+async def async_execute(
+    inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+    output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+) -> None
+```
+
+The orchestrator wires channels between nodes and launches tasks without knowing node types.
+`PipelineConfig` controls buffer sizes (`channel_buffer_size`) and concurrency limits
+(`default_max_concurrency`). Per-node overrides are set via `NodeConfig`.
 
 ### Strict operator / function pod boundary
 
@@ -246,18 +335,24 @@ and `as_table()` methods. `all_info=True` sets everything to True.
   `if TYPE_CHECKING:` / `else:` blocks at module level.
 - **Argument symmetry** — each operator declares `argument_symmetry(streams)` returning
   `frozenset` (commutative) or `tuple` (ordered). Determines how upstream hashes combine.
-- **`StaticOutputPod.process()` → `DynamicPodStream`** — wraps `static_process()` output
-  with timestamp-based staleness detection and automatic recomputation.
+- **`StaticOutputOperatorPod.process()` → `DynamicPodStream`** — wraps `static_process()`
+  output with timestamp-based staleness detection and automatic recomputation.
 - **Source delegation** — CSVSource, DictSource, etc. all create an internal
   `ArrowTableSource` and delegate every method to it.
+- **`Pipeline` context manager** — records non-persistent nodes during `with` block, then
+  `compile()` promotes them to persistent variants with DB backing.
+- **`AsyncExecutableProtocol`** — unified interface for all pipeline nodes. The orchestrator
+  wires channels and launches tasks without knowing node types.
+- **`GraphTracker`** — tracks operator/function pod invocations in a NetworkX DAG; `Pipeline`
+  extends it to add compilation and persistence.
 
 ### Important implementation details
 
 - `ArrowTableSource.__init__` raises `ValueError` if any `tag_columns` are not in the table.
 - `ArrowTableStream` requires at least one packet column; raises `ValueError` otherwise.
-- `FunctionNode.iter_packets()` Phase 1 returns ALL records in the shared `pipeline_path`
-  DB table (not filtered to current inputs). Phase 2 skips inputs whose hash is already
-  in the DB.
+- `PersistentFunctionNode.iter_packets()` Phase 1 returns ALL records in the shared
+  `pipeline_path` DB table (not filtered to current inputs). Phase 2 skips inputs whose hash
+  is already in the DB.
 - Empty data → `ArrowTableSource` raises `ValueError("Table is empty")`.
 - `DerivedSource` before `run()` → raises `ValueError` (no computed records).
 - Join requires non-overlapping packet columns; raises `InputValidationError` on collision.
@@ -265,3 +360,7 @@ and `as_table()` methods. `all_info=True` sets everything to True.
   `list[T]` with source columns reordered to match.
 - Operators predict their output schema (including system tag column names) without
   performing the actual computation.
+- `CachedFileHasher` uses mtime+size cache busting to detect file changes without re-hashing.
+- `PersistentSource` cache is always on; returns the union of all cached data across runs.
+- `AsyncPipelineOrchestrator` uses `BroadcastChannel` for fan-out (one node feeding multiple
+  downstream consumers).
