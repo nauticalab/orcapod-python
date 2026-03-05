@@ -16,6 +16,9 @@ from orcapod.core.streams import ArrowTableStream
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig
 
+# Use the actual system tag prefix from constants
+_SYS_TAG_KEY = f"{constants.SYSTEM_TAG_PREFIX}source:abc"
+
 
 # ===================================================================
 # Datagram ColumnConfig
@@ -64,33 +67,33 @@ class TestDatagramColumnConfig:
 
 
 class TestTagColumnConfig:
-    """Per design, system_tags=True includes _tag:: columns in Tag."""
+    """Per design, system_tags=True includes _tag_ columns in Tag."""
 
     def test_system_tags_excluded_by_default(self):
         t = Tag(
             {"id": 1},
-            system_tags={"_tag::source:abc": "rec1"},
+            system_tags={_SYS_TAG_KEY: "rec1"},
         )
         keys = t.keys()
-        assert "_tag::source:abc" not in keys
+        assert _SYS_TAG_KEY not in keys
 
     def test_system_tags_included_with_config(self):
         t = Tag(
             {"id": 1},
-            system_tags={"_tag::source:abc": "rec1"},
+            system_tags={_SYS_TAG_KEY: "rec1"},
         )
         keys_default = t.keys()
         keys_with_tags = t.keys(columns=ColumnConfig(system_tags=True))
         assert len(keys_with_tags) > len(keys_default)
-        assert "_tag::source:abc" in keys_with_tags
+        assert _SYS_TAG_KEY in keys_with_tags
 
     def test_all_info_includes_system_tags(self):
         t = Tag(
             {"id": 1},
-            system_tags={"_tag::source:abc": "rec1"},
+            system_tags={_SYS_TAG_KEY: "rec1"},
         )
         keys = t.keys(all_info=True)
-        assert "_tag::source:abc" in keys
+        assert _SYS_TAG_KEY in keys
 
 
 # ===================================================================

@@ -374,7 +374,7 @@ class TestColumnConfigFiltering:
             table, tag_columns=["id"], system_tag_columns=["stag"]
         )
         tag_keys, _ = stream.keys()
-        # System tag columns are prefixed with _tag:: internally
+        # System tag columns are prefixed with _tag_ internally
         assert all(not k.startswith("_tag_") for k in tag_keys)
 
     def test_all_info_includes_everything(self):
