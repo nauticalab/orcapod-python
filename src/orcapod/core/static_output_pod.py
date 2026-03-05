@@ -21,7 +21,7 @@ from orcapod.protocols.core_protocols import (
     TagProtocol,
     TrackerManagerProtocol,
 )
-from orcapod.types import ColumnConfig, Schema
+from orcapod.types import ColumnConfig, ContentHash, Schema
 from orcapod.utils.lazy_module import LazyModule
 
 logger = logging.getLogger(__name__)
@@ -207,11 +207,21 @@ class StaticOutputPod(TraceableBase):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        *,
+        input_pipeline_hashes: Sequence[ContentHash] | None = None,
     ) -> None:
         """Default barrier-mode async execution.
 
         Collects all inputs, runs ``static_process``, emits results.
         Subclasses override for streaming or incremental strategies.
+
+        Args:
+            inputs: Readable channels, one per upstream node.
+            output: Writable channel for downstream consumption.
+            input_pipeline_hashes: Pipeline hash for each input stream,
+                positionally matching ``inputs``.  Multi-input operators
+                (e.g. Join) use these to compute canonical system-tag
+                column names.  Ignored by single-input operators.
         """
         try:
             all_rows = await asyncio.gather(*(ch.collect() for ch in inputs))

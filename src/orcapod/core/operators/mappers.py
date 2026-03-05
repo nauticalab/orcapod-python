@@ -115,6 +115,7 @@ class MapPackets(UnaryOperator):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        **kwargs: Any,
     ) -> None:
         """Streaming: rename packet columns per row without materializing."""
         try:
@@ -240,6 +241,7 @@ class MapTags(UnaryOperator):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        **kwargs: Any,
     ) -> None:
         """Streaming: rename tag columns per row without materializing."""
         try:

@@ -97,6 +97,7 @@ class Batch(UnaryOperator):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        **kwargs: Any,
     ) -> None:
         """Streaming batch: emit full batches as they accumulate.
 

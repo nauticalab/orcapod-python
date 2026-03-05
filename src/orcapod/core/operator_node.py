@@ -418,9 +418,14 @@ class PersistentOperatorNode(OperatorNode):
                         collected.append(item)
                     await output.send(item)
 
+            hashes = [s.pipeline_hash() for s in self._input_streams]
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(
-                    self._operator.async_execute(inputs, intermediate.writer)
+                    self._operator.async_execute(
+                        inputs,
+                        intermediate.writer,
+                        input_pipeline_hashes=hashes,
+                    )
                 )
                 tg.create_task(forward())
 

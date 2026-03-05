@@ -87,6 +87,7 @@ class SelectTagColumns(UnaryOperator):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        **kwargs: Any,
     ) -> None:
         """Streaming: select tag columns per row without materializing."""
         try:
@@ -195,6 +196,7 @@ class SelectPacketColumns(UnaryOperator):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        **kwargs: Any,
     ) -> None:
         """Streaming: select packet columns per row without materializing."""
         try:
@@ -296,6 +298,7 @@ class DropTagColumns(UnaryOperator):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        **kwargs: Any,
     ) -> None:
         """Streaming: drop tag columns per row without materializing."""
         try:
@@ -404,6 +407,7 @@ class DropPacketColumns(UnaryOperator):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        **kwargs: Any,
     ) -> None:
         """Streaming: drop packet columns per row without materializing."""
         try:
