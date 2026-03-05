@@ -315,6 +315,27 @@ which column groups (meta, source, system_tags) are returned.
 
 ---
 
+## `src/orcapod/core/nodes/function_node.py`
+
+### FN1 — `PersistentFunctionNode.async_execute` Phase 2 was fully sequential
+**Status:** resolved
+**Severity:** high
+
+`PersistentFunctionNode.async_execute` overrode the parent `FunctionNode.async_execute` with a
+fully sequential Phase 2 — each packet was awaited one at a time in a simple `async for` loop.
+This meant async packet functions (which can overlap I/O via `await`) got no concurrency benefit
+when run through the Pipeline API, since `Pipeline.compile()` wraps all function pods in
+`PersistentFunctionNode`.
+
+The parent `FunctionNode.async_execute` already had the correct concurrent pattern using
+`asyncio.Semaphore + TaskGroup`, but the persistent override did not replicate it.
+
+**Fix:** Rewrote Phase 2 to use the same `Semaphore + TaskGroup` pattern as the parent class.
+Phase 1 (replay cached results from DB) remains unchanged. Concurrency is controlled via
+`NodeConfig.max_concurrency` and `PipelineConfig`, resolved through `resolve_concurrency()`.
+
+---
+
 ## `src/orcapod/core/sources/`
 
 ### S1 — `source_name` and `source_id` are redundant and inconsistent

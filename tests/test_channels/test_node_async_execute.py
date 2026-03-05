@@ -34,7 +34,7 @@ from orcapod.core.packet_function import CachedPacketFunction, PythonPacketFunct
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.protocols.core_protocols import AsyncExecutableProtocol
-from orcapod.types import CacheMode
+from orcapod.types import CacheMode, NodeConfig
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +334,39 @@ class TestPersistentFunctionNodeAsyncExecute:
         values = sorted(pkt.as_dict()["result"] for _, pkt in results)
         # 3 from cache + 2 new = 5 total
         assert values == [0, 2, 4, 6, 8]
+
+    @pytest.mark.asyncio
+    async def test_concurrent_execution_with_async_function(self):
+        """Async packets should run concurrently when max_concurrency > 1."""
+        import time
+
+        async def slow_double(x: int) -> int:
+            await asyncio.sleep(0.2)
+            return x * 2
+
+        pf = PythonPacketFunction(slow_double, output_keys="result")
+        pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=5))
+        db = InMemoryArrowDatabase()
+        stream = make_stream(5)
+        node = PersistentFunctionNode(pod, stream, pipeline_database=db)
+
+        input_ch = Channel(buffer_size=16)
+        output_ch = Channel(buffer_size=16)
+
+        await feed_stream_to_channel(make_stream(5), input_ch)
+
+        t0 = time.perf_counter()
+        await node.async_execute([input_ch.reader], output_ch.writer)
+        elapsed = time.perf_counter() - t0
+
+        results = await output_ch.reader.collect()
+        assert len(results) == 5
+        values = sorted(pkt.as_dict()["result"] for _, pkt in results)
+        assert values == [0, 2, 4, 6, 8]
+
+        # With 5 packets at 0.2s each and max_concurrency=5,
+        # concurrent execution should complete in ~0.2s, not ~1.0s
+        assert elapsed < 0.6, f"Expected concurrent execution but took {elapsed:.2f}s"
 
     @pytest.mark.asyncio
     async def test_db_records_created(self):

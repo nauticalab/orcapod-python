@@ -710,8 +710,12 @@ class PersistentFunctionNode(FunctionNode):
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
         pipeline_config: PipelineConfig | None = None,
     ) -> None:
-        """Two-phase async execution: replay cached, then compute missing."""
+        """Two-phase async execution: replay cached, then compute missing concurrently."""
         try:
+            pipeline_config = pipeline_config or PipelineConfig()
+            node_config = getattr(self._function_pod, "node_config", NodeConfig())
+            max_concurrency = resolve_concurrency(node_config, pipeline_config)
+
             # Phase 1: emit existing results from DB
             existing = self.get_all_records(columns={"meta": True})
             computed_hashes: set[str] = set()
@@ -726,14 +730,34 @@ class PersistentFunctionNode(FunctionNode):
                 for tag, packet in existing_stream.iter_packets():
                     await output.send((tag, packet))
 
-            # Phase 2: process packets not already in the DB
-            async for tag, packet in inputs[0]:
-                input_hash = packet.content_hash().to_string()
-                if input_hash in computed_hashes:
-                    continue
-                tag, output_packet = await self.async_process_packet(tag, packet)
-                if output_packet is not None:
-                    await output.send((tag, output_packet))
+            # Phase 2: process new packets concurrently
+            sem = (
+                asyncio.Semaphore(max_concurrency)
+                if max_concurrency is not None
+                else None
+            )
+
+            async def process_one(
+                tag: TagProtocol, packet: PacketProtocol
+            ) -> None:
+                try:
+                    tag_out, result_packet = await self.async_process_packet(
+                        tag, packet
+                    )
+                    if result_packet is not None:
+                        await output.send((tag_out, result_packet))
+                finally:
+                    if sem is not None:
+                        sem.release()
+
+            async with asyncio.TaskGroup() as tg:
+                async for tag, packet in inputs[0]:
+                    input_hash = packet.content_hash().to_string()
+                    if input_hash in computed_hashes:
+                        continue
+                    if sem is not None:
+                        await sem.acquire()
+                    tg.create_task(process_one(tag, packet))
         finally:
             await output.close()
 
