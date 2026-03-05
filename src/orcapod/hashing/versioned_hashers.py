@@ -124,6 +124,7 @@ def get_versioned_semantic_arrow_hasher(
         A fully configured SemanticArrowHasher instance.
     """
     from orcapod.hashing.arrow_hashers import SemanticArrowHasher
+    from orcapod.hashing.file_hashers import BasicFileHasher
     from orcapod.semantic_types.semantic_registry import SemanticTypeRegistry
     from orcapod.semantic_types.semantic_struct_converters import PathStructConverter
 
@@ -132,7 +133,8 @@ def get_versioned_semantic_arrow_hasher(
     # that arise from the protocol definition of SemanticStructConverterProtocol having
     # a slightly different hash_struct_dict signature than the concrete class.
     registry: Any = SemanticTypeRegistry()
-    path_converter: Any = PathStructConverter()
+    file_hasher = BasicFileHasher(algorithm="sha256")
+    path_converter: Any = PathStructConverter(file_hasher=file_hasher)
     registry.register_converter("path", path_converter)
 
     logger.debug(

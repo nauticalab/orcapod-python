@@ -2,13 +2,21 @@
     "context_key": "std:v0.1:default",
     "version": "v0.1",
     "description": "Initial stable release with basic Path semantic type support",
+    "file_hasher": {
+        "_class": "orcapod.hashing.file_hashers.BasicFileHasher",
+        "_config": {
+            "algorithm": "sha256"
+        }
+    },
     "semantic_registry": {
         "_class": "orcapod.semantic_types.semantic_registry.SemanticTypeRegistry",
         "_config": {
             "converters": {
                 "path": {
                     "_class": "orcapod.semantic_types.semantic_struct_converters.PathStructConverter",
-                    "_config": {}
+                    "_config": {
+                        "file_hasher": {"_ref": "file_hasher"}
+                    }
                 }
             }
         }
@@ -31,12 +39,6 @@
             "semantic_registry": {
                 "_ref": "semantic_registry"
             }
-        }
-    },
-    "file_hasher": {
-        "_class": "orcapod.hashing.file_hashers.BasicFileHasher",
-        "_config": {
-            "algorithm": "sha256"
         }
     },
     "function_info_extractor": {

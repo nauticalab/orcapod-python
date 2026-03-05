@@ -13,6 +13,8 @@ from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import pyarrow as pa
+
+    from orcapod.protocols.hashing_protocols import FileContentHasherProtocol
 else:
     pa = LazyModule("pyarrow")
 
@@ -76,9 +78,10 @@ class SemanticStructConverterBase:
 class PathStructConverter(SemanticStructConverterBase):
     """Converter for pathlib.Path objects to/from semantic structs of form { path: "/value/of/path"}"""
 
-    def __init__(self):
+    def __init__(self, file_hasher: "FileContentHasherProtocol"):
         super().__init__("path")
         self._python_type = Path
+        self._file_hasher = file_hasher
 
         # Define the Arrow struct type for paths
         self._arrow_struct_type = pa.struct(
@@ -134,3 +137,32 @@ class PathStructConverter(SemanticStructConverterBase):
         return set(struct_dict.keys()) == {"path"} and isinstance(
             struct_dict["path"], str
         )
+
+    def hash_struct_dict(
+        self, struct_dict: dict[str, Any], add_prefix: bool = False
+    ) -> str:
+        """Compute hash of a path semantic type by hashing the file content.
+
+        Args:
+            struct_dict: Dict with a "path" key containing a file path string.
+            add_prefix: If True, prefix with "path:sha256:...".
+
+        Returns:
+            Hash string of the file content.
+
+        Raises:
+            FileNotFoundError: If the path does not exist.
+            IsADirectoryError: If the path is a directory.
+        """
+        path_str = struct_dict.get("path")
+        if path_str is None:
+            raise ValueError("Missing 'path' field in struct dict")
+
+        path = Path(path_str)
+        if not path.exists():
+            raise FileNotFoundError(f"Path does not exist: {path}")
+        if path.is_dir():
+            raise IsADirectoryError(f"Path is a directory: {path}")
+
+        content_hash = self._file_hasher.hash_file(path)
+        return self._format_hash_string(content_hash.digest, add_prefix=add_prefix)
