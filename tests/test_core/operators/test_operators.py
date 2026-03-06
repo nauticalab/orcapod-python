@@ -471,6 +471,50 @@ class TestJoinBehavior:
         assert isinstance(sym, frozenset)
 
 
+class TestJoinMetaColumnCollision:
+    """Verify that a 3-way join with identical meta columns on all inputs does not
+    raise a DuplicateError.  Instead, colliding meta columns should be renamed
+    with stream-index-based suffixes (e.g. ``__computed_1``, ``__computed_2``)."""
+
+    def _make_stream(self, id_vals, pkt_col, pkt_vals, meta_val):
+        """Helper: stream with shared tag 'id', one packet column, and ``__computed``."""
+        table = pa.table(
+            {
+                "id": pa.array(id_vals, type=pa.int64()),
+                pkt_col: pa.array(pkt_vals, type=pa.int64()),
+                "__computed": pa.array([meta_val] * len(id_vals), type=pa.bool_()),
+            }
+        )
+        return ArrowTableStream(table, tag_columns=["id"])
+
+    def test_three_way_join_with_shared_meta_column_succeeds(self):
+        """Three streams each carrying ``__computed`` should join without DuplicateError."""
+        s1 = self._make_stream([1, 2], "alpha", [10, 20], True)
+        s2 = self._make_stream([1, 2], "beta", [100, 200], True)
+        s3 = self._make_stream([1, 2], "gamma", [1000, 2000], True)
+
+        result = Join().static_process(s1, s2, s3)
+        table = result.as_table()
+
+        assert len(table) == 2
+        assert {"id", "alpha", "beta", "gamma"}.issubset(set(table.column_names))
+
+    def test_three_way_join_meta_columns_renamed_with_index_suffix(self):
+        """Colliding meta columns from streams 2+ get an index-based suffix."""
+        s1 = self._make_stream([1, 2], "alpha", [10, 20], True)
+        s2 = self._make_stream([1, 2], "beta", [100, 200], False)
+        s3 = self._make_stream([1, 2], "gamma", [1000, 2000], True)
+
+        result = Join().static_process(s1, s2, s3)
+        table = result.as_table()
+        col_names = set(table.column_names)
+
+        # Original meta column preserved; colliding ones renamed with suffix
+        assert "__computed" in col_names
+        assert "__computed_1" in col_names
+        assert "__computed_2" in col_names
+
+
 class TestJoinOutputSchemaSystemTags:
     """Verify that Join.output_schema correctly predicts system tag columns."""
 

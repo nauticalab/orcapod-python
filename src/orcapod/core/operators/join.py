@@ -151,6 +151,31 @@ class Join(NonZeroInputOperator):
             next_table = next_table.add_column(
                 0, COMMON_JOIN_KEY, pa.array([0] * len(next_table))
             )
+
+            # Rename any non-key columns in next_table that would collide with
+            # the accumulated table, using stream-index-based suffixes instead of
+            # Polars' default ``_right`` suffix which causes cascading collisions
+            # on 3+ stream joins.  The only legitimately shared column names are
+            # the tag join keys; everything else (meta columns, their derived
+            # source-info columns, etc.) must be unique.
+            join_key_set = tag_keys.intersection(next_tag_keys) | {COMMON_JOIN_KEY}
+            existing_names = set(table.column_names)
+            rename_map = {}
+            for col in next_table.column_names:
+                if col not in join_key_set and col in existing_names:
+                    new_name = f"{col}_{idx}"
+                    counter = idx
+                    while new_name in existing_names or new_name in rename_map.values():
+                        counter += 1
+                        new_name = f"{col}_{counter}"
+                    rename_map[col] = new_name
+            if rename_map:
+                next_table = (
+                    pl.DataFrame(next_table)
+                    .rename(rename_map)
+                    .to_arrow()
+                )
+
             common_tag_keys = tag_keys.intersection(next_tag_keys)
             common_tag_keys.add(COMMON_JOIN_KEY)
 
