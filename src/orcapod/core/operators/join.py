@@ -129,7 +129,7 @@ class Join(NonZeroInputOperator):
         stream = ordered_streams[0]
 
         tag_keys, _ = [set(k) for k in stream.keys()]
-        table = stream.as_table(columns={"source": True, "system_tags": True})
+        table = stream.as_table(all_info=True)
         # trick to get cartesian product
         table = table.add_column(0, COMMON_JOIN_KEY, pa.array([0] * len(table)))
         table = arrow_data_utils.append_to_system_tags(
@@ -139,9 +139,7 @@ class Join(NonZeroInputOperator):
 
         for idx, next_stream in enumerate(ordered_streams[1:], start=1):
             next_tag_keys, _ = next_stream.keys()
-            next_table = next_stream.as_table(
-                columns={"source": True, "system_tags": True}
-            )
+            next_table = next_stream.as_table(all_info=True)
             next_table = arrow_data_utils.append_to_system_tags(
                 next_table,
                 f"{next_stream.pipeline_hash().to_hex(n_char)}:{idx}",
