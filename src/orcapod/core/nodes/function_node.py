@@ -309,6 +309,20 @@ class FunctionNode(StreamBase):
             drop_columns.extend(f"{constants.SOURCE_PREFIX}{c}" for c in self.keys()[1])
         if not column_config.context:
             drop_columns.append(constants.CONTEXT_KEY)
+        if not column_config.meta:
+            drop_columns.extend(
+                c
+                for c in self._cached_output_table.column_names
+                if c.startswith(constants.META_PREFIX)
+            )
+        elif not isinstance(column_config.meta, bool):
+            # Collection[str]: keep only meta columns matching the specified prefixes
+            drop_columns.extend(
+                c
+                for c in self._cached_output_table.column_names
+                if c.startswith(constants.META_PREFIX)
+                and not any(c.startswith(p) for p in column_config.meta)
+            )
         output_table = self._cached_output_table.drop(
             [c for c in drop_columns if c in self._cached_output_table.column_names]
         )
