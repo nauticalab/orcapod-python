@@ -309,21 +309,6 @@ class FunctionNode(StreamBase):
             drop_columns.extend(f"{constants.SOURCE_PREFIX}{c}" for c in self.keys()[1])
         if not column_config.context:
             drop_columns.append(constants.CONTEXT_KEY)
-        if not column_config.meta:
-            drop_columns.extend(
-                c
-                for c in self._cached_output_table.column_names
-                if c.startswith(constants.META_PREFIX)
-            )
-        elif not isinstance(column_config.meta, bool):
-            # Collection[str]: keep only meta columns matching the specified prefixes
-            drop_columns.extend(
-                c
-                for c in self._cached_output_table.column_names
-                if c.startswith(constants.META_PREFIX)
-                and not any(c.startswith(p) for p in column_config.meta)
-            )
-
         output_table = self._cached_output_table.drop(
             [c for c in drop_columns if c in self._cached_output_table.column_names]
         )
@@ -678,13 +663,12 @@ class PersistentFunctionNode(FunctionNode):
             computed_hashes: set[str] = set()
             if existing is not None and existing.num_rows > 0:
                 tag_keys = self._input_stream.keys()[0]
-                # Strip all meta columns before handing to ArrowTableStream so it only
+                # Strip the meta column before handing to ArrowTableStream so it only
                 # sees tag + output-packet columns.
                 hash_col = constants.INPUT_PACKET_HASH_COL
                 hash_values = cast(list[str], existing.column(hash_col).to_pylist())
                 computed_hashes = set(hash_values)
-                meta_cols = [c for c in existing.column_names if c.startswith(constants.META_PREFIX)]
-                data_table = existing.drop(meta_cols)
+                data_table = existing.drop([hash_col])
                 existing_stream = ArrowTableStream(data_table, tag_columns=tag_keys)
                 for i, (tag, packet) in enumerate(existing_stream.iter_packets()):
                     self._cached_output_packets[i] = (tag, packet)
@@ -740,8 +724,7 @@ class PersistentFunctionNode(FunctionNode):
                 computed_hashes = set(
                     cast(list[str], existing.column(hash_col).to_pylist())
                 )
-                meta_cols = [c for c in existing.column_names if c.startswith(constants.META_PREFIX)]
-                data_table = existing.drop(meta_cols)
+                data_table = existing.drop([hash_col])
                 existing_stream = ArrowTableStream(data_table, tag_columns=tag_keys)
                 for tag, packet in existing_stream.iter_packets():
                     await output.send((tag, packet))
