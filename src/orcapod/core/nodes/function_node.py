@@ -98,6 +98,11 @@ class FunctionNode(StreamBase):
 
         self._input_stream = input_stream
 
+        # Per-node Ray (or other engine) resource overrides.  When a pipeline
+        # is run with an execution_engine, these opts are merged on top of the
+        # pipeline-level execution_engine_opts for this node only.
+        self.execution_engine_opts: dict[str, Any] | None = None
+
         # stream-level caching state (iterator acquired lazily on first use)
         self._cached_input_iterator: (
             Iterator[tuple[TagProtocol, PacketProtocol]] | None

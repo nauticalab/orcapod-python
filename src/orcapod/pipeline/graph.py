@@ -294,7 +294,12 @@ class Pipeline(GraphTracker):
     # Execution
     # ------------------------------------------------------------------
 
-    def run(self, config: PipelineConfig | None = None) -> None:
+    def run(
+        self,
+        config: PipelineConfig | None = None,
+        execution_engine: Any = None,
+        execution_engine_opts: "dict[str, Any] | None" = None,
+    ) -> None:
         """Execute all compiled nodes.
 
         Args:
@@ -302,13 +307,32 @@ class Pipeline(GraphTracker):
                 ``ExecutorType.ASYNC_CHANNELS``, the pipeline runs
                 asynchronously via the orchestrator.  Otherwise nodes are
                 executed synchronously in topological order.
+            execution_engine: Optional packet-function executor applied to
+                every function node before execution (e.g. a ``RayExecutor``).
+                Overrides ``config.execution_engine`` when both are provided.
+            execution_engine_opts: Default resource/options dict forwarded to
+                the engine for every node (e.g. ``{"num_cpus": 4}``).
+                Individual nodes may override via their
+                ``execution_engine_opts`` attribute.  Overrides
+                ``config.execution_engine_opts`` when both are provided.
         """
         from orcapod.types import ExecutorType, PipelineConfig
 
         config = config or PipelineConfig()
 
+        # Explicit kwargs take precedence over values baked into config.
+        effective_engine = execution_engine or config.execution_engine
+        effective_opts = (
+            execution_engine_opts
+            if execution_engine_opts is not None
+            else config.execution_engine_opts
+        )
+
         if not self._compiled:
             self.compile()
+
+        if effective_engine is not None:
+            self._apply_execution_engine(effective_engine, effective_opts)
 
         if config.executor == ExecutorType.ASYNC_CHANNELS:
             self._run_async(config)
@@ -318,6 +342,49 @@ class Pipeline(GraphTracker):
                 node.run()
 
         self.flush()
+
+    def _apply_execution_engine(
+        self,
+        execution_engine: Any,
+        execution_engine_opts: "dict[str, Any] | None",
+    ) -> None:
+        """Apply *execution_engine* to every ``PersistentFunctionNode`` in the pipeline.
+
+        For each function node, the pipeline-level *execution_engine_opts* are
+        merged with any per-node ``execution_engine_opts`` override (node opts
+        win).  If the merged opts dict is non-empty, ``engine.with_options``
+        is called to produce a node-specific executor; otherwise the engine
+        instance is used directly.
+
+        Args:
+            execution_engine: Executor to apply (must implement
+                ``PacketFunctionExecutorBase`` or at minimum expose
+                ``with_options``).
+            execution_engine_opts: Pipeline-level default options dict, or
+                ``None`` for no defaults.
+        """
+        from orcapod.core.nodes import PersistentFunctionNode
+
+        assert self._node_graph is not None, (
+            "_apply_execution_engine called before compile()"
+        )
+
+        pipeline_opts = execution_engine_opts or {}
+
+        for node in self._node_graph.nodes:
+            if not isinstance(node, PersistentFunctionNode):
+                continue
+            node_opts = node.execution_engine_opts or {}
+            merged = {**pipeline_opts, **node_opts}
+            node.executor = (
+                execution_engine.with_options(**merged) if merged else execution_engine
+            )
+            logger.debug(
+                "Applied execution engine %r to node %r (opts=%r)",
+                type(execution_engine).__name__,
+                node.label,
+                merged or None,
+            )
 
     def _run_async(self, config: PipelineConfig) -> None:
         """Run the pipeline asynchronously using the orchestrator."""

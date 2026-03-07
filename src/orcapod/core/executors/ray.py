@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import types
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.executors.base import PacketFunctionExecutorBase
@@ -33,6 +34,7 @@ class RayExecutor(PacketFunctionExecutorBase):
         num_cpus: int | None = None,
         num_gpus: int | None = None,
         resources: dict[str, float] | None = None,
+        **ray_remote_opts: Any,
     ) -> None:
         try:
             import ray  # noqa: F401
@@ -43,9 +45,18 @@ class RayExecutor(PacketFunctionExecutorBase):
             ) from exc
 
         self._ray_address = ray_address
-        self._num_cpus = num_cpus
-        self._num_gpus = num_gpus
-        self._resources = resources
+
+        # Collect all remote opts into a single dict so that arbitrary Ray
+        # options (memory, max_calls, accelerator_type, label_selector, …)
+        # can be passed through without hardcoding each one.
+        self._remote_opts: dict[str, Any] = {}
+        if num_cpus is not None:
+            self._remote_opts["num_cpus"] = num_cpus
+        if num_gpus is not None:
+            self._remote_opts["num_gpus"] = num_gpus
+        if resources is not None:
+            self._remote_opts["resources"] = resources
+        self._remote_opts.update(ray_remote_opts)
 
     def _ensure_ray_initialized(self) -> None:
         """Initialize Ray if it has not been initialized yet."""
@@ -69,15 +80,40 @@ class RayExecutor(PacketFunctionExecutorBase):
         return True
 
     def _build_remote_opts(self) -> dict[str, Any]:
-        """Build the Ray remote options dict from instance config."""
-        opts: dict[str, Any] = {}
-        if self._num_cpus is not None:
-            opts["num_cpus"] = self._num_cpus
-        if self._num_gpus is not None:
-            opts["num_gpus"] = self._num_gpus
-        if self._resources is not None:
-            opts["resources"] = self._resources
-        return opts
+        """Return the Ray remote options dict."""
+        return self._remote_opts
+
+    @staticmethod
+    def _clean_fn(fn: Any) -> Any:
+        """Return a copy of *fn* with an empty ``__dict__``.
+
+        ``function_pod`` attaches a ``FunctionPod`` instance to the decorated
+        function via ``setattr(func, "pod", pod)``.  ``FunctionPod`` holds
+        threading locks that cloudpickle cannot serialize when the function is
+        sent to Ray workers.  Stripping ``__dict__`` removes the attachment
+        while preserving the callable's code, globals, defaults, and closure.
+        """
+        clean = types.FunctionType(
+            fn.__code__,
+            fn.__globals__,
+            fn.__name__,
+            fn.__defaults__,
+            fn.__closure__,
+        )
+        clean.__kwdefaults__ = fn.__kwdefaults__
+        return clean
+
+    def _make_run_fn(self) -> Any:
+        """Return a Ray worker function serialized by value via cloudpickle."""
+        def _run(fn: Any, kwargs: dict[str, Any]) -> Any:
+            import inspect
+            result = fn(**kwargs)
+            if inspect.isawaitable(result):
+                import asyncio as _asyncio
+                return _asyncio.run(result)
+            return result
+
+        return _run
 
     def execute(
         self,
@@ -88,12 +124,13 @@ class RayExecutor(PacketFunctionExecutorBase):
 
         self._ensure_ray_initialized()
 
-        @ray.remote(**self._build_remote_opts())
-        def _run(pf: Any, pkt: Any) -> Any:
-            return pf.direct_call(pkt)
+        fn = self._clean_fn(packet_function._function)  # type: ignore[attr-defined]
+        kwargs = packet.as_dict()
 
-        ref = _run.remote(packet_function, packet)
-        return ray.get(ref)
+        remote_fn = ray.remote(**self._build_remote_opts())(self._make_run_fn())
+        ref = remote_fn.remote(fn, kwargs)
+        raw_result = ray.get(ref)
+        return packet_function._build_output_packet(raw_result)  # type: ignore[attr-defined]
 
     async def async_execute(
         self,
@@ -104,21 +141,30 @@ class RayExecutor(PacketFunctionExecutorBase):
 
         self._ensure_ray_initialized()
 
-        @ray.remote(**self._build_remote_opts())
-        def _run(pf: Any, pkt: Any) -> Any:
-            return pf.direct_call(pkt)
+        fn = self._clean_fn(packet_function._function)  # type: ignore[attr-defined]
+        kwargs = packet.as_dict()
 
-        ref = _run.remote(packet_function, packet)
-        future = ref.future()
-        return await asyncio.wrap_future(future)
+        remote_fn = ray.remote(**self._build_remote_opts())(self._make_run_fn())
+        ref = remote_fn.remote(fn, kwargs)
+        raw_result = await asyncio.wrap_future(ref.future())
+        return packet_function._build_output_packet(raw_result)  # type: ignore[attr-defined]
+
+    def with_options(self, **opts: Any) -> "RayExecutor":
+        """Return a new ``RayExecutor`` with the given options merged in.
+
+        The returned executor shares the same ``ray_address``.  All opts are
+        passed through to ``ray.remote()``/``.options()`` as-is — no keys are
+        hardcoded, so any option Ray supports (``num_cpus``, ``num_gpus``,
+        ``memory``, ``max_calls``, ``accelerator_type``, ``label_selector``,
+        ``runtime_env``, …) can be used.  Node-level opts override
+        pipeline-level defaults.
+        """
+        merged = {**self._remote_opts, **opts}
+        return RayExecutor(ray_address=self._ray_address, **merged)
 
     def get_execution_data(self) -> dict[str, Any]:
-        data: dict[str, Any] = {
+        return {
             "executor_type": self.executor_type_id,
             "ray_address": self._ray_address or "auto",
+            **self._remote_opts,
         }
-        if self._num_cpus is not None:
-            data["num_cpus"] = self._num_cpus
-        if self._num_gpus is not None:
-            data["num_gpus"] = self._num_gpus
-        return data
