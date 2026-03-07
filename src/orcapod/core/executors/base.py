@@ -76,6 +76,15 @@ class PacketFunctionExecutorBase(ABC):
         """
         return False
 
+    def with_options(self, **opts: Any) -> "PacketFunctionExecutorBase":
+        """Return an executor configured with the given per-node options.
+
+        The default implementation ignores *opts* and returns *self*.
+        Subclasses that support resource options (e.g. ``RayExecutor``)
+        should override to return a new instance with the merged options.
+        """
+        return self
+
     def get_execution_data(self) -> dict[str, Any]:
         """Return metadata describing the execution environment.
 

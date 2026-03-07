@@ -269,11 +269,19 @@ class PipelineConfig:
         channel_buffer_size: Max items buffered per channel edge.
         default_max_concurrency: Pipeline-wide default for per-node
             concurrency.  ``None`` means unlimited.
+        execution_engine: Optional packet-function executor applied to all
+            function nodes (e.g. ``RayExecutor``).  ``None`` means in-process
+            execution.
+        execution_engine_opts: Default resource/options dict forwarded to the
+            engine for every node (e.g. ``{"num_cpus": 4}``).  Individual
+            nodes may override via their ``execution_engine_opts`` attribute.
     """
 
     executor: ExecutorType = ExecutorType.SYNCHRONOUS
     channel_buffer_size: int = 64
     default_max_concurrency: int | None = None
+    execution_engine: Any = None
+    execution_engine_opts: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
