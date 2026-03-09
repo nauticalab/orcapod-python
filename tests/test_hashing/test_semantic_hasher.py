@@ -521,7 +521,80 @@ class TestTypeObjectHandler:
 
 
 # ---------------------------------------------------------------------------
-# 12. ContentIdentifiableProtocol: independent hashing and composability
+# 12. GenericAliasHandler
+# ---------------------------------------------------------------------------
+
+
+class TestGenericAliasHandler:
+    def test_builtin_generic_alias_hashed(self, hasher):
+        """types.GenericAlias (e.g. dict[str, int]) produces a ContentHash."""
+        assert isinstance(hasher.hash_object(dict[str, int]), ContentHash)
+
+    def test_typing_generic_alias_hashed(self, hasher):
+        """typing generics (e.g. Dict[str, int]) produce a ContentHash."""
+        import typing
+
+        assert isinstance(hasher.hash_object(typing.Dict[str, int]), ContentHash)
+
+    def test_optional_hashed(self, hasher):
+        """Optional[int] (a typing._GenericAlias) produces a ContentHash."""
+        import typing
+
+        assert isinstance(hasher.hash_object(typing.Optional[int]), ContentHash)
+
+    def test_same_annotation_same_hash(self, hasher):
+        """Identical annotations produce the same hash."""
+        assert hasher.hash_object(list[int]) == hasher.hash_object(list[int])
+
+    def test_different_annotations_differ(self, hasher):
+        """dict[str, int] and dict[int, str] are structurally different."""
+        assert hasher.hash_object(dict[str, int]) != hasher.hash_object(dict[int, str])
+
+    def test_different_containers_differ(self, hasher):
+        """list[int] and tuple[int] differ even with the same argument."""
+        assert hasher.hash_object(list[int]) != hasher.hash_object(tuple[int])
+
+    def test_nested_generic_hashed(self, hasher):
+        """Nested generics like dict[str, list[int]] produce a ContentHash."""
+        assert isinstance(hasher.hash_object(dict[str, list[int]]), ContentHash)
+
+    def test_nested_generic_discrimination(self, hasher):
+        """dict[str, list[int]] and dict[str, list[str]] produce different hashes."""
+        assert hasher.hash_object(dict[str, list[int]]) != hasher.hash_object(
+            dict[str, list[str]]
+        )
+
+    def test_builtin_and_typing_equivalent(self, hasher):
+        """dict[str, int] and Dict[str, int] should hash to the same value."""
+        import typing
+
+        assert hasher.hash_object(dict[str, int]) == hasher.hash_object(
+            typing.Dict[str, int]
+        )
+
+    def test_optional_equals_union_with_none(self, hasher):
+        """Optional[int] and Union[int, None] are the same Python object and must hash identically."""
+        import typing
+
+        assert hasher.hash_object(typing.Optional[int]) == hasher.hash_object(
+            typing.Union[int, None]
+        )
+
+    def test_union_arg_order_matters(self, hasher):
+        """Union[int, str] and Union[str, int] hash differently.
+
+        Python's type system considers them equivalent, but orcapod hashes
+        args in declaration order — users should be consistent.
+        """
+        import typing
+
+        assert hasher.hash_object(typing.Union[int, str]) != hasher.hash_object(
+            typing.Union[str, int]
+        )
+
+
+# ---------------------------------------------------------------------------
+# 13. ContentIdentifiableProtocol: independent hashing and composability
 # ---------------------------------------------------------------------------
 
 
@@ -949,6 +1022,8 @@ class TestGlobalSingletons:
     def test_default_registry_has_builtin_handlers(self):
         import types as _types
 
+        import typing as _typing
+
         reg = get_default_type_handler_registry()
         assert reg.has_handler(bytes)
         assert reg.has_handler(bytearray)
@@ -956,6 +1031,9 @@ class TestGlobalSingletons:
         assert reg.has_handler(Path)
         assert reg.has_handler(_types.FunctionType)
         assert reg.has_handler(type)
+        assert reg.has_handler(_types.GenericAlias)
+        assert reg.has_handler(_typing._GenericAlias)  # type: ignore[attr-defined]
+        assert reg.has_handler(_typing._SpecialForm)  # type: ignore[attr-defined]
 
     def test_default_registry_has_no_content_hash_handler(self):
         """ContentHash is handled as a terminal -- no registry entry needed."""

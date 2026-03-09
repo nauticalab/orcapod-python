@@ -172,6 +172,23 @@ class TypeObjectHandler:
         return f"type:{module}.{qualname}"
 
 
+class SpecialFormHandler:
+    """
+    Handler for ``typing._SpecialForm`` objects such as ``typing.Union`` and
+    ``typing.ClassVar``.
+
+    These appear as the ``__origin__`` of typing generics — for example,
+    ``Optional[int]`` is ``Union[int, None]``, whose ``__origin__`` is
+    ``typing.Union``.  Returns a stable string of the form
+    ``"special_form:typing.<name>"`` so they can be safely embedded as the
+    origin component inside a ``GenericAliasHandler`` result.
+    """
+
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
+        name = getattr(obj, "_name", None) or repr(obj)
+        return f"special_form:typing.{name}"
+
+
 class GenericAliasHandler:
     """
     Handler for generic alias type annotations such as ``dict[int, list[int]]``
@@ -344,15 +361,17 @@ def register_builtin_handlers(
     registry.register(type, TypeObjectHandler())
 
     # generic alias type annotations: dict[int, str], list[str], etc.
-    import types as _types
-
     generic_alias_handler = GenericAliasHandler()
     registry.register(_types.GenericAlias, generic_alias_handler)
     # typing._GenericAlias covers Optional[X], Union[X, Y], Dict[K, V], etc.
+    # typing._SpecialForm covers typing.Union, typing.ClassVar, etc. which
+    # appear as __origin__ on those generics (e.g. Optional[int].__origin__
+    # is typing.Union, a _SpecialForm).
     try:
         import typing as _typing
 
         registry.register(_typing._GenericAlias, generic_alias_handler)  # type: ignore[attr-defined]
+        registry.register(_typing._SpecialForm, SpecialFormHandler())  # type: ignore[attr-defined]
     except AttributeError:
         pass
 
