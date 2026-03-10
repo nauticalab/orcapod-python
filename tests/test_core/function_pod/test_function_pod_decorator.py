@@ -27,6 +27,12 @@ def triple(x: int) -> int:
     return x * 3
 
 
+@function_pod(output_keys="result")
+def documented(x: int) -> int:
+    """Multiply x by two."""
+    return x * 2
+
+
 @function_pod(output_keys=["total", "diff"], version="v1.0")
 def stats(a: int, b: int) -> tuple[int, int]:
     return a + b, a - b
@@ -195,3 +201,10 @@ class TestFunctionPodDecoratorWrapperImplementation:
 
     def test_wraps_preserves_module(self):
         assert triple.__module__ == triple.__wrapped__.__module__
+
+    def test_wraps_preserves_annotations(self):
+        assert documented.__annotations__ == documented.__wrapped__.__annotations__
+
+    def test_wraps_preserves_docstring(self):
+        assert documented.__doc__ == "Multiply x by two."
+        assert documented.__doc__ == documented.__wrapped__.__doc__

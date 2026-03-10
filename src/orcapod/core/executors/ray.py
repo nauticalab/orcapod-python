@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.executors.base import PacketFunctionExecutorBase
 
 if TYPE_CHECKING:
+    from orcapod.core.packet_function import PythonPacketFunction
     from orcapod.protocols.core_protocols import PacketFunctionProtocol, PacketProtocol
 
 
@@ -35,6 +36,23 @@ class RayExecutor(PacketFunctionExecutorBase):
         resources: dict[str, float] | None = None,
         **ray_remote_opts: Any,
     ) -> None:
+        """Create a RayExecutor.
+
+        Args:
+            ray_address: Address of the Ray cluster to connect to (e.g.
+                ``"ray://host:10001"``).  If ``None`` and Ray is not yet
+                initialised, ``ray.init()`` is called without an address,
+                which starts a local cluster.
+            num_cpus: Number of CPUs to request per remote task.  Passed
+                directly to ``ray.remote(num_cpus=...)``.
+            num_gpus: Number of GPUs to request per remote task.  Passed
+                directly to ``ray.remote(num_gpus=...)``.
+            resources: Custom resource requirements dict forwarded to
+                ``ray.remote(resources=...)``.
+            **ray_remote_opts: Any additional keyword arguments accepted by
+                ``ray.remote()`` (e.g. ``memory``, ``max_calls``,
+                ``runtime_env``, ``accelerator_type``).
+        """
         try:
             import ray  # noqa: F401
         except ImportError as exc:
@@ -79,8 +97,27 @@ class RayExecutor(PacketFunctionExecutorBase):
         return True
 
     def _build_remote_opts(self) -> dict[str, Any]:
-        """Return the Ray remote options dict."""
-        return self._remote_opts
+        """Return a copy of the Ray remote options dict."""
+        return dict(self._remote_opts)
+
+    def _as_python_packet_function(
+        self, packet_function: PacketFunctionProtocol
+    ) -> "PythonPacketFunction":
+        """Return *packet_function* cast to ``PythonPacketFunction``, or raise.
+
+        Raises:
+            TypeError: If *packet_function* is not a ``PythonPacketFunction``
+                instance and therefore does not expose the attributes required
+                for remote execution.
+        """
+        from orcapod.core.packet_function import PythonPacketFunction
+
+        if not isinstance(packet_function, PythonPacketFunction):
+            raise TypeError(
+                f"RayExecutor only supports PythonPacketFunction, "
+                f"got {type(packet_function).__name__}"
+            )
+        return packet_function
 
     def execute(
         self,
@@ -89,15 +126,17 @@ class RayExecutor(PacketFunctionExecutorBase):
     ) -> PacketProtocol | None:
         import ray
 
+        pf = self._as_python_packet_function(packet_function)
+        if not pf.is_active():
+            return None
+
         self._ensure_ray_initialized()
 
-        fn = packet_function._function  # type: ignore[attr-defined]
         kwargs = packet.as_dict()
-
-        remote_fn = ray.remote(**self._build_remote_opts())(fn)
+        remote_fn = ray.remote(**self._build_remote_opts())(pf._function)
         ref = remote_fn.remote(**kwargs)
         raw_result = ray.get(ref)
-        return packet_function._build_output_packet(raw_result)  # type: ignore[attr-defined]
+        return pf._build_output_packet(raw_result)
 
     async def async_execute(
         self,
@@ -106,15 +145,17 @@ class RayExecutor(PacketFunctionExecutorBase):
     ) -> PacketProtocol | None:
         import ray
 
+        pf = self._as_python_packet_function(packet_function)
+        if not pf.is_active():
+            return None
+
         self._ensure_ray_initialized()
 
-        fn = packet_function._function  # type: ignore[attr-defined]
         kwargs = packet.as_dict()
-
-        remote_fn = ray.remote(**self._build_remote_opts())(fn)
+        remote_fn = ray.remote(**self._build_remote_opts())(pf._function)
         ref = remote_fn.remote(**kwargs)
         raw_result = await asyncio.wrap_future(ref.future())
-        return packet_function._build_output_packet(raw_result)  # type: ignore[attr-defined]
+        return pf._build_output_packet(raw_result)
 
     def with_options(self, **opts: Any) -> "RayExecutor":
         """Return a new ``RayExecutor`` with the given options merged in.
