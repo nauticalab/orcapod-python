@@ -10,11 +10,12 @@ as persistent variants during compile():
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 import pyarrow as pa
 import pytest
 
+from orcapod.core.executors import PacketFunctionExecutorBase
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import PersistentFunctionNode, PersistentOperatorNode
 from orcapod.core.operators import Join, MapPackets
@@ -22,6 +23,7 @@ from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import PersistentSourceNode, Pipeline
+from orcapod.protocols.core_protocols import PacketFunctionProtocol, PacketProtocol
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1106,3 +1108,130 @@ class TestCompileDoesNotTriggerExecution:
         pipeline.run()
         table = pipeline.adder.as_table()
         assert table.num_rows == 2
+
+
+# ---------------------------------------------------------------------------
+# Tests: Pipeline.run() execution engine and async default
+# ---------------------------------------------------------------------------
+
+
+class _MockExecutor(PacketFunctionExecutorBase):
+    """In-process executor that records sync vs async calls.
+
+    Supports concurrent execution so the async pipeline orchestrator
+    routes through async_execute.  with_options() returns a new instance
+    so per-node opts can be inspected via .opts.
+    """
+
+    def __init__(self, opts: dict[str, Any] | None = None) -> None:
+        self.opts: dict[str, Any] = opts or {}
+        self.sync_calls: list[PacketProtocol] = []
+        self.async_calls: list[PacketProtocol] = []
+
+    @property
+    def executor_type_id(self) -> str:
+        return "mock"
+
+    def supported_function_type_ids(self) -> frozenset[str]:
+        return frozenset()  # empty frozenset = supports all types
+
+    @property
+    def supports_concurrent_execution(self) -> bool:
+        return True
+
+    def execute(
+        self,
+        packet_function: PacketFunctionProtocol,
+        packet: PacketProtocol,
+    ) -> PacketProtocol | None:
+        self.sync_calls.append(packet)
+        return packet_function.direct_call(packet)
+
+    async def async_execute(
+        self,
+        packet_function: PacketFunctionProtocol,
+        packet: PacketProtocol,
+    ) -> PacketProtocol | None:
+        self.async_calls.append(packet)
+        return packet_function.direct_call(packet)
+
+    def with_options(self, **opts: Any) -> "_MockExecutor":
+        return _MockExecutor(opts={**self.opts, **opts})
+
+    def get_execution_data(self) -> dict[str, Any]:
+        return {"executor_type": self.executor_type_id, **self.opts}
+
+
+class TestRunExecutionEngine:
+    def test_engine_is_applied_to_all_function_nodes(self, pipeline_db):
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
+        mock = _MockExecutor()
+
+        pipeline = Pipeline(name="test_engine", pipeline_database=pipeline_db)
+        with pipeline:
+            pod(src, label="doubler")
+
+        pipeline.run(execution_engine=mock)
+
+        assert pipeline.doubler.executor is mock
+
+    def test_engine_without_config_triggers_async_mode(self, pipeline_db):
+        """No config + execution_engine → async channels mode by default."""
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
+        mock = _MockExecutor()
+
+        pipeline = Pipeline(name="test_async_default", pipeline_database=pipeline_db)
+        with pipeline:
+            pod(src, label="doubler")
+
+        pipeline.run(execution_engine=mock)
+
+        assert len(mock.async_calls) > 0
+        assert len(mock.sync_calls) == 0
+
+    def test_explicit_sync_config_overrides_async_default(self, pipeline_db):
+        """Explicit config=PipelineConfig(executor=SYNCHRONOUS) takes priority
+        over the async default, even when an execution_engine is provided."""
+        from orcapod.types import ExecutorType, PipelineConfig
+
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
+        mock = _MockExecutor()
+
+        pipeline = Pipeline(name="test_sync_override", pipeline_database=pipeline_db)
+        with pipeline:
+            pod(src, label="doubler")
+
+        pipeline.run(
+            execution_engine=mock,
+            config=PipelineConfig(executor=ExecutorType.SYNCHRONOUS),
+        )
+
+        assert len(mock.sync_calls) > 0
+        assert len(mock.async_calls) == 0
+
+    def test_per_node_opts_override_pipeline_opts(self, pipeline_db):
+        """Node-level execution_engine_opts win over pipeline-level defaults."""
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
+        mock = _MockExecutor()
+
+        pipeline = Pipeline(name="test_node_opts", pipeline_database=pipeline_db)
+        with pipeline:
+            pod(src, label="doubler")
+
+        pipeline.doubler.execution_engine_opts = {"num_cpus": 2}
+
+        pipeline.run(
+            execution_engine=mock,
+            execution_engine_opts={"num_cpus": 1},
+        )
+
+        # Node opts win: executor should have been created with num_cpus=2
+        assert pipeline.doubler.executor.opts.get("num_cpus") == 2
