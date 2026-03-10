@@ -148,3 +148,50 @@ class TestFunctionPodDecoratorEndToEnd:
         table = triple.pod.process(make_int_stream(n=3)).as_table()
         assert "id" in table.column_names
         assert "result" in table.column_names
+
+
+# ---------------------------------------------------------------------------
+# 5. Wrapper implementation — original function is preserved untouched
+# ---------------------------------------------------------------------------
+
+
+class TestFunctionPodDecoratorWrapperImplementation:
+    def test_decorated_function_is_not_original(self):
+        """The decorator returns a wrapper, not the original function object."""
+        assert triple is not triple.__wrapped__
+
+    def test_dunder_wrapped_points_to_original(self):
+        """@wraps sets __wrapped__ to the original function."""
+        assert hasattr(triple, "__wrapped__")
+        assert callable(triple.__wrapped__)
+
+    def test_original_function_dict_has_no_pod(self):
+        """The original function's __dict__ must be clean — no orcapod mutations.
+
+        This is the core property that allows clean serialisation to remote
+        executors (e.g. Ray workers) without requiring orcapod to be installed
+        on the worker.
+        """
+        assert "pod" not in triple.__wrapped__.__dict__
+
+    def test_original_function_dict_is_empty(self):
+        """The original function should have no extra attributes attached."""
+        assert triple.__wrapped__.__dict__ == {}
+
+    def test_packet_function_holds_original_function(self):
+        """packet_function._function must be the original undecorated function.
+
+        RayExecutor (and other remote executors) access this attribute
+        directly to obtain a clean, serialisable callable.
+        """
+        assert triple.pod._packet_function._function is triple.__wrapped__
+
+    def test_packet_function_does_not_hold_wrapper(self):
+        """packet_function._function must not be the wrapper itself."""
+        assert triple.pod._packet_function._function is not triple
+
+    def test_wraps_preserves_name(self):
+        assert triple.__name__ == "triple"
+
+    def test_wraps_preserves_module(self):
+        assert triple.__module__ == triple.__wrapped__.__module__
