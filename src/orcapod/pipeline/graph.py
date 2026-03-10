@@ -304,7 +304,8 @@ class Pipeline(GraphTracker):
 
         Args:
             config: Pipeline configuration.  When ``config.executor`` is
-                ``ExecutorType.ASYNC_CHANNELS``, the pipeline runs
+                ``ExecutorType.ASYNC_CHANNELS``, or when an
+                ``execution_engine`` is provided, the pipeline runs
                 asynchronously via the orchestrator.  Otherwise nodes are
                 executed synchronously in topological order.
             execution_engine: Optional packet-function executor applied to
@@ -334,7 +335,7 @@ class Pipeline(GraphTracker):
         if effective_engine is not None:
             self._apply_execution_engine(effective_engine, effective_opts)
 
-        if config.executor == ExecutorType.ASYNC_CHANNELS:
+        if config.executor == ExecutorType.ASYNC_CHANNELS or effective_engine is not None:
             self._run_async(config)
         else:
             assert self._node_graph is not None

@@ -4,6 +4,7 @@ import asyncio
 import logging
 from abc import abstractmethod
 from collections.abc import Callable, Collection, Iterator, Sequence
+from functools import wraps
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from orcapod import contexts
@@ -627,9 +628,6 @@ def function_pod(
         if func.__name__ == "<lambda>":
             raise ValueError("Lambda functions cannot be used with function_pod")
 
-        # Store the original function in the module for pickling purposes
-        # and make sure to change the name of the function
-
         packet_function = PythonPacketFunction(
             func,
             output_keys=output_keys,
@@ -651,8 +649,13 @@ def function_pod(
         pod = FunctionPod(
             packet_function=packet_function,
         )
-        setattr(func, "pod", pod)
-        return cast(CallableWithPod, func)
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+
+        setattr(wrapper, "pod", pod)
+        return cast(CallableWithPod, wrapper)
 
     return decorator
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import types
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.executors.base import PacketFunctionExecutorBase
@@ -83,38 +82,6 @@ class RayExecutor(PacketFunctionExecutorBase):
         """Return the Ray remote options dict."""
         return self._remote_opts
 
-    @staticmethod
-    def _clean_fn(fn: Any) -> Any:
-        """Return a copy of *fn* with an empty ``__dict__``.
-
-        ``function_pod`` attaches a ``FunctionPod`` instance to the decorated
-        function via ``setattr(func, "pod", pod)``.  ``FunctionPod`` holds
-        threading locks that cloudpickle cannot serialize when the function is
-        sent to Ray workers.  Stripping ``__dict__`` removes the attachment
-        while preserving the callable's code, globals, defaults, and closure.
-        """
-        clean = types.FunctionType(
-            fn.__code__,
-            fn.__globals__,
-            fn.__name__,
-            fn.__defaults__,
-            fn.__closure__,
-        )
-        clean.__kwdefaults__ = fn.__kwdefaults__
-        return clean
-
-    def _make_run_fn(self) -> Any:
-        """Return a Ray worker function serialized by value via cloudpickle."""
-        def _run(fn: Any, kwargs: dict[str, Any]) -> Any:
-            import inspect
-            result = fn(**kwargs)
-            if inspect.isawaitable(result):
-                import asyncio as _asyncio
-                return _asyncio.run(result)
-            return result
-
-        return _run
-
     def execute(
         self,
         packet_function: PacketFunctionProtocol,
@@ -124,11 +91,11 @@ class RayExecutor(PacketFunctionExecutorBase):
 
         self._ensure_ray_initialized()
 
-        fn = self._clean_fn(packet_function._function)  # type: ignore[attr-defined]
+        fn = packet_function._function  # type: ignore[attr-defined]
         kwargs = packet.as_dict()
 
-        remote_fn = ray.remote(**self._build_remote_opts())(self._make_run_fn())
-        ref = remote_fn.remote(fn, kwargs)
+        remote_fn = ray.remote(**self._build_remote_opts())(fn)
+        ref = remote_fn.remote(**kwargs)
         raw_result = ray.get(ref)
         return packet_function._build_output_packet(raw_result)  # type: ignore[attr-defined]
 
@@ -141,11 +108,11 @@ class RayExecutor(PacketFunctionExecutorBase):
 
         self._ensure_ray_initialized()
 
-        fn = self._clean_fn(packet_function._function)  # type: ignore[attr-defined]
+        fn = packet_function._function  # type: ignore[attr-defined]
         kwargs = packet.as_dict()
 
-        remote_fn = ray.remote(**self._build_remote_opts())(self._make_run_fn())
-        ref = remote_fn.remote(fn, kwargs)
+        remote_fn = ray.remote(**self._build_remote_opts())(fn)
+        ref = remote_fn.remote(**kwargs)
         raw_result = await asyncio.wrap_future(ref.future())
         return packet_function._build_output_packet(raw_result)  # type: ignore[attr-defined]
 
