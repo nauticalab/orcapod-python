@@ -18,7 +18,10 @@ from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from types import UnionType
-from typing import Any, Self, TypeAlias
+from typing import TYPE_CHECKING, Any, Self, TypeAlias
+
+if TYPE_CHECKING:
+    from orcapod.protocols.core_protocols import PacketFunctionExecutorProtocol
 
 import pyarrow as pa
 
@@ -280,7 +283,7 @@ class PipelineConfig:
     executor: ExecutorType = ExecutorType.SYNCHRONOUS
     channel_buffer_size: int = 64
     default_max_concurrency: int | None = None
-    execution_engine: Any = None
+    execution_engine: PacketFunctionExecutorProtocol | None = None
     execution_engine_opts: dict[str, Any] | None = None
 
 

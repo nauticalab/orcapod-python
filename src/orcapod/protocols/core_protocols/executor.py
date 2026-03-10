@@ -62,6 +62,15 @@ class PacketFunctionExecutorProtocol(Protocol):
         """
         ...
 
+    def with_options(self, **opts: Any) -> "PacketFunctionExecutorProtocol":
+        """Return an executor configured with the given per-node options.
+
+        Used by the pipeline to produce node-specific executor instances
+        (e.g. with different CPU/GPU allocations) from a shared base executor.
+        Implementations that do not support options may return *self*.
+        """
+        ...
+
     def get_execution_data(self) -> dict[str, Any]:
         """Return metadata describing the execution environment.
 

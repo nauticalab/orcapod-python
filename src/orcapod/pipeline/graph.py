@@ -297,17 +297,19 @@ class Pipeline(GraphTracker):
     def run(
         self,
         config: PipelineConfig | None = None,
-        execution_engine: Any = None,
+        execution_engine: cp.PacketFunctionExecutorProtocol | None = None,
         execution_engine_opts: "dict[str, Any] | None" = None,
     ) -> None:
         """Execute all compiled nodes.
 
         Args:
             config: Pipeline configuration.  When ``config.executor`` is
-                ``ExecutorType.ASYNC_CHANNELS``, or when an
-                ``execution_engine`` is provided, the pipeline runs
-                asynchronously via the orchestrator.  Otherwise nodes are
-                executed synchronously in topological order.
+                ``ExecutorType.ASYNC_CHANNELS``, the pipeline runs
+                asynchronously via the orchestrator.  When ``config`` is
+                omitted and an ``execution_engine`` is provided, async mode
+                is used by default.  Passing an explicit ``config`` always
+                takes priority — supply ``ExecutorType.SYNCHRONOUS`` to force
+                synchronous execution even when an engine is present.
             execution_engine: Optional packet-function executor applied to
                 every function node before execution (e.g. a ``RayExecutor``).
                 Overrides ``config.execution_engine`` when both are provided.
@@ -323,7 +325,9 @@ class Pipeline(GraphTracker):
         config = config or PipelineConfig()
 
         # Explicit kwargs take precedence over values baked into config.
-        effective_engine = execution_engine or config.execution_engine
+        effective_engine = (
+            execution_engine if execution_engine is not None else config.execution_engine
+        )
         effective_opts = (
             execution_engine_opts
             if execution_engine_opts is not None
@@ -353,8 +357,8 @@ class Pipeline(GraphTracker):
 
     def _apply_execution_engine(
         self,
-        execution_engine: Any,
-        execution_engine_opts: "dict[str, Any] | None",
+        execution_engine: cp.PacketFunctionExecutorProtocol,
+        execution_engine_opts: dict[str, Any] | None,
     ) -> None:
         """Apply *execution_engine* to every ``PersistentFunctionNode`` in the pipeline.
 
