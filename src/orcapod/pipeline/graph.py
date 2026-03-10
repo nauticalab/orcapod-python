@@ -319,6 +319,7 @@ class Pipeline(GraphTracker):
         """
         from orcapod.types import ExecutorType, PipelineConfig
 
+        explicit_config = config is not None
         config = config or PipelineConfig()
 
         # Explicit kwargs take precedence over values baked into config.
@@ -335,7 +336,13 @@ class Pipeline(GraphTracker):
         if effective_engine is not None:
             self._apply_execution_engine(effective_engine, effective_opts)
 
-        if config.executor == ExecutorType.ASYNC_CHANNELS or effective_engine is not None:
+        # Default to async when an execution engine is provided, unless the
+        # caller explicitly supplied a config — in which case config.executor
+        # is authoritative and takes priority.
+        use_async = config.executor == ExecutorType.ASYNC_CHANNELS or (
+            effective_engine is not None and not explicit_config
+        )
+        if use_async:
             self._run_async(config)
         else:
             assert self._node_graph is not None
