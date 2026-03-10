@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, Self, runtime_checkable
 
 from orcapod.protocols.core_protocols.datagrams import PacketProtocol
 
@@ -62,7 +62,7 @@ class PacketFunctionExecutorProtocol(Protocol):
         """
         ...
 
-    def with_options(self, **opts: Any) -> "PacketFunctionExecutorProtocol":
+    def with_options(self, **opts: Any) -> Self:
         """Return an executor configured with the given per-node options.
 
         Used by the pipeline to produce node-specific executor instances
