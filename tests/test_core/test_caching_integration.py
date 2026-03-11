@@ -2,7 +2,7 @@
 Integration tests: all three pod caching strategies working end-to-end.
 
 Covers:
-1. PersistentSource — always-on cache scoped to content_hash()
+1. CachedSource — always-on cache scoped to content_hash()
    - DeltaTableSource with canonical source_id (defaults to dir name)
    - Named sources: same name + same schema = same identity (data-independent)
    - Unnamed sources: identity determined by table hash (data-dependent)
@@ -24,7 +24,7 @@ from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import PersistentFunctionNode, PersistentOperatorNode
 from orcapod.core.operators import Join
 from orcapod.core.packet_function import PythonPacketFunction
-from orcapod.core.sources import ArrowTableSource, DeltaTableSource, PersistentSource
+from orcapod.core.sources import ArrowTableSource, DeltaTableSource, CachedSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.types import CacheMode
 
@@ -121,7 +121,7 @@ def pod():
 
 
 # ---------------------------------------------------------------------------
-# 1. PersistentSource — source pod caching
+# 1. CachedSource — source pod caching
 # ---------------------------------------------------------------------------
 
 
@@ -135,11 +135,11 @@ class TestSourcePodCaching:
 
     def test_different_sources_get_different_cache_paths(self, clinic_a, source_db):
         patients_path, labs_path = clinic_a
-        patients = PersistentSource(
+        patients = CachedSource(
             DeltaTableSource(patients_path, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
-        labs = PersistentSource(
+        labs = CachedSource(
             DeltaTableSource(labs_path, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
@@ -147,7 +147,7 @@ class TestSourcePodCaching:
 
     def test_cache_populates_on_run(self, clinic_a, source_db):
         patients_path, _ = clinic_a
-        ps = PersistentSource(
+        ps = CachedSource(
             DeltaTableSource(patients_path, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
@@ -158,12 +158,12 @@ class TestSourcePodCaching:
 
     def test_dedup_on_rerun(self, clinic_a, source_db):
         patients_path, _ = clinic_a
-        ps1 = PersistentSource(
+        ps1 = CachedSource(
             DeltaTableSource(patients_path, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
         ps1.run()
-        ps2 = PersistentSource(
+        ps2 = CachedSource(
             DeltaTableSource(patients_path, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
@@ -176,7 +176,7 @@ class TestSourcePodCaching:
         """Same dir name + same schema = same content_hash regardless of data."""
         patients_path, _ = clinic_a
         src1 = DeltaTableSource(patients_path, tag_columns=["patient_id"])
-        ps1 = PersistentSource(src1, cache_database=source_db)
+        ps1 = CachedSource(src1, cache_database=source_db)
 
         # Overwrite with different data, same schema
         _write_delta(
@@ -192,7 +192,7 @@ class TestSourcePodCaching:
             mode="overwrite",
         )
         src2 = DeltaTableSource(patients_path, tag_columns=["patient_id"])
-        ps2 = PersistentSource(src2, cache_database=source_db)
+        ps2 = CachedSource(src2, cache_database=source_db)
 
         assert src1.source_id == src2.source_id
         assert ps1.content_hash() == ps2.content_hash()
@@ -201,7 +201,7 @@ class TestSourcePodCaching:
     def test_cumulative_caching_across_data_updates(self, clinic_a, source_db):
         """New rows from updated data accumulate in the same cache table."""
         patients_path, _ = clinic_a
-        ps1 = PersistentSource(
+        ps1 = CachedSource(
             DeltaTableSource(patients_path, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
@@ -221,7 +221,7 @@ class TestSourcePodCaching:
             ),
             mode="overwrite",
         )
-        ps2 = PersistentSource(
+        ps2 = CachedSource(
             DeltaTableSource(patients_path, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
@@ -270,11 +270,11 @@ class TestFunctionPodCaching:
         self, clinic_a, source_db, pipeline_db, result_db, pod
     ):
         patients_path, labs_path = clinic_a
-        patients = PersistentSource(
+        patients = CachedSource(
             DeltaTableSource(patients_path, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
-        labs = PersistentSource(
+        labs = CachedSource(
             DeltaTableSource(labs_path, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
@@ -300,11 +300,11 @@ class TestFunctionPodCaching:
         patients_b, labs_b = clinic_b
 
         # Pipeline A
-        pa_src = PersistentSource(
+        pa_src = CachedSource(
             DeltaTableSource(patients_a, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
-        la_src = PersistentSource(
+        la_src = CachedSource(
             DeltaTableSource(labs_a, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
@@ -316,11 +316,11 @@ class TestFunctionPodCaching:
         )
 
         # Pipeline B
-        pb_src = PersistentSource(
+        pb_src = CachedSource(
             DeltaTableSource(patients_b, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
-        lb_src = PersistentSource(
+        lb_src = CachedSource(
             DeltaTableSource(labs_b, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
@@ -344,11 +344,11 @@ class TestFunctionPodCaching:
         fn_a = PersistentFunctionNode(
             function_pod=pod,
             input_stream=Join()(
-                PersistentSource(
+                CachedSource(
                     DeltaTableSource(patients_a, tag_columns=["patient_id"]),
                     cache_database=source_db,
                 ),
-                PersistentSource(
+                CachedSource(
                     DeltaTableSource(labs_a, tag_columns=["patient_id"]),
                     cache_database=source_db,
                 ),
@@ -363,11 +363,11 @@ class TestFunctionPodCaching:
         fn_b = PersistentFunctionNode(
             function_pod=pod,
             input_stream=Join()(
-                PersistentSource(
+                CachedSource(
                     DeltaTableSource(patients_b, tag_columns=["patient_id"]),
                     cache_database=source_db,
                 ),
-                PersistentSource(
+                CachedSource(
                     DeltaTableSource(labs_b, tag_columns=["patient_id"]),
                     cache_database=source_db,
                 ),
@@ -388,11 +388,11 @@ class TestFunctionPodCaching:
 class TestOperatorPodCaching:
     def _make_joined_streams(self, clinic_a, source_db):
         patients_path, labs_path = clinic_a
-        patients = PersistentSource(
+        patients = CachedSource(
             DeltaTableSource(patients_path, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
-        labs = PersistentSource(
+        labs = CachedSource(
             DeltaTableSource(labs_path, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
@@ -469,19 +469,19 @@ class TestOperatorPodCaching:
         patients_a, labs_a = clinic_a
         patients_b, labs_b = clinic_b
 
-        pa_src = PersistentSource(
+        pa_src = CachedSource(
             DeltaTableSource(patients_a, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
-        la_src = PersistentSource(
+        la_src = CachedSource(
             DeltaTableSource(labs_a, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
-        pb_src = PersistentSource(
+        pb_src = CachedSource(
             DeltaTableSource(patients_b, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
-        lb_src = PersistentSource(
+        lb_src = CachedSource(
             DeltaTableSource(labs_b, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
@@ -511,17 +511,17 @@ class TestEndToEndPipeline:
         self, clinic_a, clinic_b, source_db, pipeline_db, result_db, operator_db, pod
     ):
         """
-        Full pipeline: DeltaTableSource → PersistentSource → Join →
+        Full pipeline: DeltaTableSource → CachedSource → Join →
         PersistentFunctionNode → PersistentOperatorNode (LOG + REPLAY).
         """
         patients_a, labs_a = clinic_a
 
-        # Step 1: PersistentSource
-        patients = PersistentSource(
+        # Step 1: CachedSource
+        patients = CachedSource(
             DeltaTableSource(patients_a, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
-        labs = PersistentSource(
+        labs = CachedSource(
             DeltaTableSource(labs_a, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
@@ -563,11 +563,11 @@ class TestEndToEndPipeline:
         fn_node_b = PersistentFunctionNode(
             function_pod=pod,
             input_stream=Join()(
-                PersistentSource(
+                CachedSource(
                     DeltaTableSource(patients_b, tag_columns=["patient_id"]),
                     cache_database=source_db,
                 ),
-                PersistentSource(
+                CachedSource(
                     DeltaTableSource(labs_b, tag_columns=["patient_id"]),
                     cache_database=source_db,
                 ),

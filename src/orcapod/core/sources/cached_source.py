@@ -21,25 +21,29 @@ else:
 logger = logging.getLogger(__name__)
 
 
-class PersistentSource(RootSource):
-    """
-    DB-backed wrapper around a RootSource that caches every packet.
+class CachedSource(RootSource):
+    """DB-backed wrapper around a ``RootSource`` that caches every packet.
 
-    Implements StreamProtocol transparently so downstream consumers
+    Implements ``StreamProtocol`` transparently so downstream consumers
     are unaware of caching.  Cache table is scoped to the source's
     ``content_hash()`` — each unique source gets its own table.
 
-    Behavior
-    --------
-    - Cache is **always on**.
-    - On first access, live source data is stored in the cache table
-      (deduped by per-row content hash).
-    - Returns the union of all cached data (cumulative across runs).
+    Behavior:
+        - Cache is **always on**.
+        - On first access, live source data is stored in the cache table
+          (deduped by per-row content hash).
+        - Returns the union of all cached data (cumulative across runs).
 
-    Semantic guarantee
-    ------------------
-    The cache is a correct cumulative record.  The union of cache + live
-    packets is the full set of data ever available from that source.
+    Semantic guarantee:
+        The cache is a correct cumulative record.  The union of cache + live
+        packets is the full set of data ever available from that source.
+
+    Example::
+
+        source = ArrowTableSource(table, tag_columns=["id"])
+        cached = CachedSource(source, cache_database=db)
+        # or equivalently:
+        cached = source.cached(cache_database=db)
     """
 
     HASH_COLUMN_NAME = "_record_hash"

@@ -2,8 +2,8 @@
 Tests for the Pipeline class.
 
 Verifies that Pipeline (a GraphTracker subclass) correctly wraps all nodes
-as persistent variants during compile():
-- Leaf streams → PersistentSourceNode
+during compile():
+- Leaf streams → SourceNode
 - Function pod invocations → PersistentFunctionNode
 - Operator invocations → PersistentOperatorNode
 """
@@ -17,14 +17,17 @@ import pytest
 
 from orcapod.core.executors import PacketFunctionExecutorBase
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes import PersistentFunctionNode, PersistentOperatorNode
+from orcapod.core.nodes import (
+    PersistentFunctionNode,
+    PersistentOperatorNode,
+    SourceNode,
+)
 from orcapod.core.operators import Join, MapPackets
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.pipeline import PersistentSourceNode, Pipeline
+from orcapod.pipeline import Pipeline
 from orcapod.protocols.core_protocols import PacketFunctionProtocol, PacketProtocol
-from orcapod.types import SourceCacheMode
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -71,7 +74,7 @@ def function_db():
 
 
 # ---------------------------------------------------------------------------
-# Tests: compile wraps leaf streams as PersistentSourceNode
+# Tests: compile wraps leaf streams as SourceNode
 # ---------------------------------------------------------------------------
 
 
@@ -89,36 +92,13 @@ class TestCompileSourceWrapping:
         assert len(pipeline.compiled_nodes) > 0
 
         assert pipeline._node_graph is not None
-        # The node graph should contain PersistentSourceNode instances
+        # The node graph should contain SourceNode instances
         source_nodes = [
             n
             for n in pipeline._node_graph.nodes()
-            if isinstance(n, PersistentSourceNode)
+            if isinstance(n, SourceNode)
         ]
         assert len(source_nodes) == 2
-
-    def test_persistent_source_node_cache_path_prefix(self, pipeline_db):
-        src_a, _ = _make_two_sources()
-        pipeline = Pipeline(name="my_pipeline", pipeline_database=pipeline_db)
-
-        with pipeline:
-            # Use a simple unary operator to trigger a recording
-            MapPackets({"value": "val"})(src_a, label="mapper")
-
-        # Find the PersistentSourceNode
-        assert pipeline._node_graph is not None
-        source_nodes = [
-            n
-            for n in pipeline._node_graph.nodes()
-            if isinstance(n, PersistentSourceNode)
-        ]
-        assert len(source_nodes) == 1
-        sn = source_nodes[0]
-
-        # cache_path should start with pipeline name prefix
-        assert sn.cache_path[:1] == ("my_pipeline",)
-        assert sn.cache_path[1] == "source"
-        assert sn.cache_path[2].startswith("node:")
 
 
 # ---------------------------------------------------------------------------
@@ -361,11 +341,6 @@ class TestAutoCompileAndRun:
         # Check function node
         adder = pipeline.adder
         assert adder.pipeline_path[0] == "scoped"
-        assert pipeline._node_graph is not None
-        # Check source nodes
-        for n in pipeline._node_graph.nodes():
-            if isinstance(n, PersistentSourceNode):
-                assert n.cache_path[0] == "scoped"
 
 
 # ---------------------------------------------------------------------------
@@ -411,14 +386,6 @@ class TestEndToEnd:
 
         # Run the pipeline
         pipeline.run()
-
-        assert pipeline._node_graph is not None
-        # Source nodes should have cached data
-        for n in pipeline._node_graph.nodes():
-            if isinstance(n, PersistentSourceNode):
-                records = n.get_all_records()
-                assert records is not None
-                assert records.num_rows == 2
 
         # Function node should have results
         fn_records = pipeline.adder.get_all_records()
@@ -549,10 +516,10 @@ class TestPipelineExtension:
             220,
         ]
 
-        # pipe_b's source nodes wrap pipe_a.adder as a PersistentSourceNode
+        # pipe_b's source nodes wrap pipe_a.adder as a SourceNode
         assert pipe_b._node_graph is not None
         source_nodes = [
-            n for n in pipe_b._node_graph.nodes() if isinstance(n, PersistentSourceNode)
+            n for n in pipe_b._node_graph.nodes() if isinstance(n, SourceNode)
         ]
         assert len(source_nodes) == 1
 
@@ -1010,7 +977,7 @@ class TestIncrementalCompile:
         assert "renamer" in pipeline.compiled_nodes
 
     def test_recompile_preserves_existing_source_nodes(self, pipeline_db):
-        """PersistentSourceNode objects from first compile survive second compile."""
+        """SourceNode objects from first compile survive second compile."""
         src_a, src_b = _make_two_sources()
 
         pipeline = Pipeline(name="incr_src", pipeline_database=pipeline_db)
@@ -1022,7 +989,7 @@ class TestIncrementalCompile:
         first_source_nodes = {
             id(n)
             for n in pipeline._node_graph.nodes()
-            if isinstance(n, PersistentSourceNode)
+            if isinstance(n, SourceNode)
         }
 
         # Extend with another operation
@@ -1032,7 +999,7 @@ class TestIncrementalCompile:
         second_source_nodes = {
             id(n)
             for n in pipeline._node_graph.nodes()
-            if isinstance(n, PersistentSourceNode)
+            if isinstance(n, SourceNode)
         }
 
         # All original source nodes should be preserved (same object ids)
@@ -1077,7 +1044,7 @@ class TestCompileDoesNotTriggerExecution:
     triggering upstream iter_packets / run / as_table materialisation."""
 
     def test_compile_does_not_trigger_source_materialization(self, pipeline_db):
-        """Operators followed by a function pod: compile should not execute anything."""
+        """Compile should not trigger any computation or database writes."""
         src_a, src_b = _make_two_sources()
         pf = PythonPacketFunction(add_values, output_keys="total")
         pod = FunctionPod(pf)
@@ -1087,23 +1054,9 @@ class TestCompileDoesNotTriggerExecution:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
 
-        # After compile, persistent source nodes should NOT have materialised
-        # their cache yet (i.e. _cached_stream is still None).
-        assert pipeline._node_graph is not None
-        source_nodes = [
-            n
-            for n in pipeline._node_graph.nodes()
-            if isinstance(n, PersistentSourceNode)
-        ]
-        for sn in source_nodes:
-            assert sn._cached_stream is None, (
-                "PersistentSourceNode should not have materialised during compile()"
-            )
-
-        # The pipeline and function databases should be empty — nothing has
-        # been written yet because no upstream was triggered.
-        assert pipeline_db.get_all_records(source_nodes[0].cache_path) is None
-        assert pipeline_db.get_all_records(source_nodes[1].cache_path) is None
+        # After compile, the pipeline database should be empty — compile()
+        # only builds the graph, it doesn't execute any nodes.
+        assert pipeline.adder.get_all_records() is None
 
         # Running the pipeline should still work correctly after lazy compile.
         pipeline.run()
@@ -1238,107 +1191,34 @@ class TestRunExecutionEngine:
         assert pipeline.doubler.executor.opts.get("num_cpus") == 2
 
 
-# ---------------------------------------------------------------------------
-# Tests: SourceCacheMode
-# ---------------------------------------------------------------------------
+class TestSourceNodeNoCaching:
+    """Verify that SourceNode does not cache — caching is a source-level concern."""
 
-
-class TestSourceCacheModeOff:
-    """Verify that source_cache_mode=OFF bypasses database interaction."""
-
-    def test_compile_passes_cache_mode_to_source_nodes(self, pipeline_db):
-        src_a, src_b = _make_two_sources()
-        pipeline = Pipeline(
-            name="test_pipe",
-            pipeline_database=pipeline_db,
-            source_cache_mode=SourceCacheMode.OFF,
-        )
-        with pipeline:
-            _ = Join()(src_a, src_b)
-
-        source_nodes = [
-            n
-            for n in pipeline._node_graph.nodes()
-            if isinstance(n, PersistentSourceNode)
-        ]
-        assert len(source_nodes) == 2
-        for sn in source_nodes:
-            assert sn.source_cache_mode == SourceCacheMode.OFF
-
-    def test_off_mode_no_db_writes(self, pipeline_db):
-        """In OFF mode, run() should not write anything to the cache DB."""
-        src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
-        pipeline = Pipeline(
-            name="test_pipe",
-            pipeline_database=pipeline_db,
-            source_cache_mode=SourceCacheMode.OFF,
-        )
-        with pipeline:
-            MapPackets({"value": "val"})(src, label="mapper")
-
-        pipeline.run()
-
-        # Find the PersistentSourceNode
-        source_nodes = [
-            n
-            for n in pipeline._node_graph.nodes()
-            if isinstance(n, PersistentSourceNode)
-        ]
-        assert len(source_nodes) == 1
-        sn = source_nodes[0]
-
-        # No records should be in the DB
-        assert sn.get_all_records() is None
-
-    def test_off_mode_data_flows_through(self, pipeline_db):
-        """In OFF mode, downstream nodes should still receive data."""
+    def test_source_nodes_do_not_write_to_db(self, pipeline_db):
+        """Source nodes should not write anything to the pipeline DB."""
         src_a, src_b = _make_two_sources()
         pf = PythonPacketFunction(add_values, output_keys="total")
         pod = FunctionPod(packet_function=pf)
 
-        pipeline = Pipeline(
-            name="test_pipe",
-            pipeline_database=pipeline_db,
-            source_cache_mode=SourceCacheMode.OFF,
-        )
+        pipeline = Pipeline(name="test_pipe", pipeline_database=pipeline_db)
         with pipeline:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
 
         pipeline.run()
 
-        # Function node should have computed results
+        # Function node should have computed results (pipeline works)
         records = pipeline.adder.get_all_records()
         assert records is not None
         assert records.num_rows == 2
 
-    def test_full_mode_writes_to_db(self, pipeline_db):
-        """Sanity check: FULL mode (default) does write to DB."""
-        src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
-        pipeline = Pipeline(
-            name="test_pipe",
-            pipeline_database=pipeline_db,
-            source_cache_mode=SourceCacheMode.FULL,
-        )
-        with pipeline:
-            MapPackets({"value": "val"})(src, label="mapper")
-
-        pipeline.run()
-
+        # Source nodes are plain SourceNode — no caching, no DB writes
         source_nodes = [
             n
             for n in pipeline._node_graph.nodes()
-            if isinstance(n, PersistentSourceNode)
+            if isinstance(n, SourceNode)
         ]
-        assert len(source_nodes) == 1
-        sn = source_nodes[0]
-
-        # Records should be in the DB
-        records = sn.get_all_records()
-        assert records is not None
-        assert records.num_rows == 2
-
-    def test_default_is_full(self, pipeline_db):
-        """Pipeline defaults to FULL source cache mode."""
-        pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
-        assert pipeline._source_cache_mode == SourceCacheMode.FULL
+        assert len(source_nodes) == 2
+        for sn in source_nodes:
+            assert not hasattr(sn, "cache_path")
+            assert not hasattr(sn, "get_all_records")
