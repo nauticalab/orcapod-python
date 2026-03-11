@@ -339,6 +339,21 @@ class CacheMode(Enum):
     REPLAY = "replay"
 
 
+class SourceCacheMode(Enum):
+    """Controls source node caching behaviour in a compiled pipeline.
+
+    Attributes:
+        FULL: Materialize the entire stream (tags + packets + source info)
+            into the cache database.  Supports deduplication and append-only
+            accumulation across runs.  Default.
+        OFF: No cache writes.  The source streams data directly to
+            downstream nodes without any database interaction.
+    """
+
+    FULL = "full"
+    OFF = "off"
+
+
 @dataclass(frozen=True, slots=True)
 class ColumnConfig:
     """

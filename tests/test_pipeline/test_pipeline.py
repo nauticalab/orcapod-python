@@ -24,6 +24,7 @@ from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import PersistentSourceNode, Pipeline
 from orcapod.protocols.core_protocols import PacketFunctionProtocol, PacketProtocol
+from orcapod.types import SourceCacheMode
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1235,3 +1236,109 @@ class TestRunExecutionEngine:
 
         # Node opts win: executor should have been created with num_cpus=2
         assert pipeline.doubler.executor.opts.get("num_cpus") == 2
+
+
+# ---------------------------------------------------------------------------
+# Tests: SourceCacheMode
+# ---------------------------------------------------------------------------
+
+
+class TestSourceCacheModeOff:
+    """Verify that source_cache_mode=OFF bypasses database interaction."""
+
+    def test_compile_passes_cache_mode_to_source_nodes(self, pipeline_db):
+        src_a, src_b = _make_two_sources()
+        pipeline = Pipeline(
+            name="test_pipe",
+            pipeline_database=pipeline_db,
+            source_cache_mode=SourceCacheMode.OFF,
+        )
+        with pipeline:
+            _ = Join()(src_a, src_b)
+
+        source_nodes = [
+            n
+            for n in pipeline._node_graph.nodes()
+            if isinstance(n, PersistentSourceNode)
+        ]
+        assert len(source_nodes) == 2
+        for sn in source_nodes:
+            assert sn.source_cache_mode == SourceCacheMode.OFF
+
+    def test_off_mode_no_db_writes(self, pipeline_db):
+        """In OFF mode, run() should not write anything to the cache DB."""
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
+        pipeline = Pipeline(
+            name="test_pipe",
+            pipeline_database=pipeline_db,
+            source_cache_mode=SourceCacheMode.OFF,
+        )
+        with pipeline:
+            MapPackets({"value": "val"})(src, label="mapper")
+
+        pipeline.run()
+
+        # Find the PersistentSourceNode
+        source_nodes = [
+            n
+            for n in pipeline._node_graph.nodes()
+            if isinstance(n, PersistentSourceNode)
+        ]
+        assert len(source_nodes) == 1
+        sn = source_nodes[0]
+
+        # No records should be in the DB
+        assert sn.get_all_records() is None
+
+    def test_off_mode_data_flows_through(self, pipeline_db):
+        """In OFF mode, downstream nodes should still receive data."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(
+            name="test_pipe",
+            pipeline_database=pipeline_db,
+            source_cache_mode=SourceCacheMode.OFF,
+        )
+        with pipeline:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        pipeline.run()
+
+        # Function node should have computed results
+        records = pipeline.adder.get_all_records()
+        assert records is not None
+        assert records.num_rows == 2
+
+    def test_full_mode_writes_to_db(self, pipeline_db):
+        """Sanity check: FULL mode (default) does write to DB."""
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
+        pipeline = Pipeline(
+            name="test_pipe",
+            pipeline_database=pipeline_db,
+            source_cache_mode=SourceCacheMode.FULL,
+        )
+        with pipeline:
+            MapPackets({"value": "val"})(src, label="mapper")
+
+        pipeline.run()
+
+        source_nodes = [
+            n
+            for n in pipeline._node_graph.nodes()
+            if isinstance(n, PersistentSourceNode)
+        ]
+        assert len(source_nodes) == 1
+        sn = source_nodes[0]
+
+        # Records should be in the DB
+        records = sn.get_all_records()
+        assert records is not None
+        assert records.num_rows == 2
+
+    def test_default_is_full(self, pipeline_db):
+        """Pipeline defaults to FULL source cache mode."""
+        pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
+        assert pipeline._source_cache_mode == SourceCacheMode.FULL

@@ -10,7 +10,7 @@ from orcapod.core.tracker import GraphTracker
 from orcapod.pipeline.nodes import PersistentSourceNode
 from orcapod.protocols import core_protocols as cp
 from orcapod.protocols import database_protocols as dbp
-from orcapod.types import PipelineConfig
+from orcapod.types import PipelineConfig, SourceCacheMode
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -87,12 +87,14 @@ class Pipeline(GraphTracker):
         function_database: dbp.ArrowDatabaseProtocol | None = None,
         tracker_manager: cp.TrackerManagerProtocol | None = None,
         auto_compile: bool = True,
+        source_cache_mode: SourceCacheMode = SourceCacheMode.FULL,
     ) -> None:
         super().__init__(tracker_manager=tracker_manager)
         self._name = (name,) if isinstance(name, str) else tuple(name)
         self._pipeline_database = pipeline_database
         self._function_database = function_database
         self._pipeline_path_prefix = self._name
+        self._source_cache_mode = source_cache_mode
         self._nodes: dict[str, GraphNode] = {}
         self._persistent_node_map: dict[str, GraphNode] = {}
         self._node_graph: "nx.DiGraph | None" = None
@@ -181,6 +183,7 @@ class Pipeline(GraphTracker):
                     stream=stream,
                     cache_database=self._pipeline_database,
                     cache_path_prefix=self._pipeline_path_prefix,
+                    source_cache_mode=self._source_cache_mode,
                 )
                 persistent_node_map[node_hash] = persistent_node
             else:
