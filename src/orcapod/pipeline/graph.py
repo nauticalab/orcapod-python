@@ -5,12 +5,11 @@ import os
 import tempfile
 from typing import TYPE_CHECKING, Any
 
-from orcapod.core.nodes import GraphNode
+from orcapod.core.nodes import GraphNode, SourceNode
 from orcapod.core.tracker import GraphTracker
-from orcapod.pipeline.nodes import PersistentSourceNode
 from orcapod.protocols import core_protocols as cp
 from orcapod.protocols import database_protocols as dbp
-from orcapod.types import PipelineConfig, SourceCacheMode
+from orcapod.types import PipelineConfig
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -57,9 +56,13 @@ class Pipeline(GraphTracker):
     recorded as non-persistent nodes (same as ``GraphTracker``).  On context
     exit, ``compile()`` replaces every node with its persistent variant:
 
-    - Leaf streams → ``PersistentSourceNode``
+    - Leaf streams → ``SourceNode`` (thin wrapper for graph vertex)
     - Function pod invocations → ``PersistentFunctionNode``
     - Operator invocations → ``PersistentOperatorNode``
+
+    Source caching is not a pipeline concern — sources that need caching
+    should be wrapped in a ``CachedSource`` before being used in the
+    pipeline.
 
     All persistent nodes share the same ``pipeline_database`` and use
     ``pipeline_name`` as path prefix, scoping their cache tables.
@@ -87,14 +90,12 @@ class Pipeline(GraphTracker):
         function_database: dbp.ArrowDatabaseProtocol | None = None,
         tracker_manager: cp.TrackerManagerProtocol | None = None,
         auto_compile: bool = True,
-        source_cache_mode: SourceCacheMode = SourceCacheMode.FULL,
     ) -> None:
         super().__init__(tracker_manager=tracker_manager)
         self._name = (name,) if isinstance(name, str) else tuple(name)
         self._pipeline_database = pipeline_database
         self._function_database = function_database
         self._pipeline_path_prefix = self._name
-        self._source_cache_mode = source_cache_mode
         self._nodes: dict[str, GraphNode] = {}
         self._persistent_node_map: dict[str, GraphNode] = {}
         self._node_graph: "nx.DiGraph | None" = None
@@ -141,7 +142,7 @@ class Pipeline(GraphTracker):
 
         Walks the graph in topological order and creates:
 
-        - ``PersistentSourceNode`` for every leaf stream
+        - ``SourceNode`` for every leaf stream
         - ``PersistentFunctionNode`` for every function pod invocation
         - ``PersistentOperatorNode`` for every operator invocation
 
@@ -177,14 +178,9 @@ class Pipeline(GraphTracker):
                 continue
 
             if node_hash not in self._node_lut:
-                # -- Leaf stream: wrap in PersistentSourceNode --
+                # -- Leaf stream: wrap in SourceNode --
                 stream = self._upstreams[node_hash]
-                persistent_node = PersistentSourceNode(
-                    stream=stream,
-                    cache_database=self._pipeline_database,
-                    cache_path_prefix=self._pipeline_path_prefix,
-                    source_cache_mode=self._source_cache_mode,
-                )
+                persistent_node = SourceNode(stream=stream)
                 persistent_node_map[node_hash] = persistent_node
             else:
                 node = self._node_lut[node_hash]
@@ -263,7 +259,7 @@ class Pipeline(GraphTracker):
                 continue
             attrs = self._hash_graph.nodes[node_hash]
             if not attrs.get("node_type"):
-                if isinstance(node, PersistentSourceNode):
+                if isinstance(node, SourceNode):
                     attrs["node_type"] = "source"
                 elif isinstance(node, PersistentFunctionNode):
                     attrs["node_type"] = "function"

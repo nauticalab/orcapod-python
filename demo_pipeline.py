@@ -23,7 +23,8 @@ from orcapod.core.nodes import PersistentFunctionNode, PersistentOperatorNode
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import DeltaTableDatabase, InMemoryArrowDatabase
-from orcapod.pipeline import Pipeline, PersistentSourceNode
+from orcapod.core.nodes import SourceNode
+from orcapod.pipeline import Pipeline
 
 
 # ---------------------------------------------------------------------------
@@ -96,10 +97,10 @@ print("\n  Compiled nodes:")
 for name, node in pipeline.compiled_nodes.items():
     print(f"    {name}: {type(node).__name__}")
 
-print("\n  Source nodes (PersistentSourceNode):")
+print("\n  Source nodes (SourceNode):")
 for n in pipeline._node_graph.nodes():
-    if isinstance(n, PersistentSourceNode):
-        print(f"    cache_path: {n.cache_path}")
+    if isinstance(n, SourceNode):
+        print(f"    label: {n.label}, stream: {type(n.stream).__name__}")
 
 # --- Access nodes by label ---
 print(f"\n  pipeline.join_data       -> {type(pipeline.join_data).__name__}")
@@ -127,12 +128,6 @@ print(f"\n  Categories:")
 print(f"    {cat_table.to_pandas()[['patient_id', 'category']].to_string(index=False)}")
 
 # --- Show what's in the database ---
-print(f"\n  Source records in DB:")
-for n in pipeline._node_graph.nodes():
-    if isinstance(n, PersistentSourceNode):
-        records = n.get_all_records()
-        print(f"    {n.cache_path[-1]}: {records.num_rows} rows")
-
 fn_records = pipeline.compute_risk.get_all_records()
 print(f"  Function records (compute_risk): {fn_records.num_rows} rows")
 
@@ -320,7 +315,7 @@ print("SUMMARY")
 print("=" * 70)
 print("""
   Pipeline wraps ALL nodes as persistent variants automatically:
-    - Leaf streams       -> PersistentSourceNode  (DB-backed cache)
+    - Leaf streams       -> SourceNode  (graph vertex wrapper, no caching)
     - Operator calls     -> PersistentOperatorNode (DB-backed cache)
     - Function pod calls -> PersistentFunctionNode (DB-backed cache)
 

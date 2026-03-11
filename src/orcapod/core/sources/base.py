@@ -137,3 +137,32 @@ class RootSource(StreamBase):
     def upstreams(self) -> tuple[StreamProtocol, ...]:
         """Sources have no upstream dependencies."""
         return ()
+
+    # -------------------------------------------------------------------------
+    # Convenience — caching
+    # -------------------------------------------------------------------------
+
+    def cached(
+        self,
+        cache_database: Any,
+        cache_path_prefix: tuple[str, ...] = (),
+        **kwargs: Any,
+    ) -> "RootSource":
+        """Return a ``CachedSource`` wrapping this source.
+
+        Args:
+            cache_database: Database to store cached records in.
+            cache_path_prefix: Path prefix for the cache table.
+            **kwargs: Additional keyword arguments passed to ``CachedSource``.
+
+        Returns:
+            A ``CachedSource`` that caches this source's output.
+        """
+        from orcapod.core.sources.cached_source import CachedSource
+
+        return CachedSource(
+            source=self,
+            cache_database=cache_database,
+            cache_path_prefix=cache_path_prefix,
+            **kwargs,
+        )

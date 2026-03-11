@@ -1,5 +1,5 @@
 """
-Tests for PersistentSource covering:
+Tests for CachedSource covering:
 - Construction and transparent StreamProtocol implementation
 - Cache path scoped to source's content_hash
 - Cumulative caching: data from prior runs is preserved
@@ -17,7 +17,7 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from orcapod.core.sources import ArrowTableSource, PersistentSource
+from orcapod.core.sources import ArrowTableSource, CachedSource
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.protocols.core_protocols import StreamProtocol
@@ -55,29 +55,29 @@ def db():
 # ---------------------------------------------------------------------------
 
 
-class TestPersistentSourceConstruction:
+class TestCachedSourceConstruction:
     def test_source_id_delegated(self, simple_source, db):
-        ps = PersistentSource(simple_source, cache_database=db)
+        ps = CachedSource(simple_source, cache_database=db)
         assert ps.source_id == simple_source.source_id
 
     def test_stream_protocol_conformance(self, simple_source, db):
-        ps = PersistentSource(simple_source, cache_database=db)
+        ps = CachedSource(simple_source, cache_database=db)
         assert isinstance(ps, StreamProtocol)
 
     def test_pipeline_element_conformance(self, simple_source, db):
-        ps = PersistentSource(simple_source, cache_database=db)
+        ps = CachedSource(simple_source, cache_database=db)
         assert isinstance(ps, PipelineElementProtocol)
 
     def test_identity_delegated(self, simple_source, db):
-        ps = PersistentSource(simple_source, cache_database=db)
+        ps = CachedSource(simple_source, cache_database=db)
         assert ps.identity_structure() == simple_source.identity_structure()
 
     def test_content_hash_matches_source(self, simple_source, db):
-        ps = PersistentSource(simple_source, cache_database=db)
+        ps = CachedSource(simple_source, cache_database=db)
         assert ps.content_hash() == simple_source.content_hash()
 
     def test_pipeline_hash_matches_source(self, simple_source, db):
-        ps = PersistentSource(simple_source, cache_database=db)
+        ps = CachedSource(simple_source, cache_database=db)
         assert ps.pipeline_hash() == simple_source.pipeline_hash()
 
 
@@ -86,16 +86,16 @@ class TestPersistentSourceConstruction:
 # ---------------------------------------------------------------------------
 
 
-class TestPersistentSourceCachePath:
+class TestCachedSourceCachePath:
     def test_cache_path_contains_content_hash(self, simple_source, db):
-        ps = PersistentSource(simple_source, cache_database=db)
+        ps = CachedSource(simple_source, cache_database=db)
         path = ps.cache_path
         content_hash_str = simple_source.content_hash().to_string()
         assert any(content_hash_str in segment for segment in path)
 
     def test_cache_path_prefix(self, simple_source, db):
         prefix = ("my_project", "v1")
-        ps = PersistentSource(
+        ps = CachedSource(
             simple_source, cache_database=db, cache_path_prefix=prefix
         )
         assert ps.cache_path[:2] == prefix
@@ -104,8 +104,8 @@ class TestPersistentSourceCachePath:
         """Identical sources produce the same cache path."""
         s1 = ArrowTableSource(simple_table, tag_columns=["name"], source_id="src")
         s2 = ArrowTableSource(simple_table, tag_columns=["name"], source_id="src")
-        ps1 = PersistentSource(s1, cache_database=db)
-        ps2 = PersistentSource(s2, cache_database=db)
+        ps1 = CachedSource(s1, cache_database=db)
+        ps2 = CachedSource(s2, cache_database=db)
         assert ps1.cache_path == ps2.cache_path
 
     def test_same_name_same_schema_same_cache_path(self, db):
@@ -114,8 +114,8 @@ class TestPersistentSourceCachePath:
         t2 = pa.table({"k": ["b"], "v": [2]})
         s1 = ArrowTableSource(t1, tag_columns=["k"], source_id="s")
         s2 = ArrowTableSource(t2, tag_columns=["k"], source_id="s")
-        ps1 = PersistentSource(s1, cache_database=db)
-        ps2 = PersistentSource(s2, cache_database=db)
+        ps1 = CachedSource(s1, cache_database=db)
+        ps2 = CachedSource(s2, cache_database=db)
         assert ps1.cache_path == ps2.cache_path
 
     def test_different_name_different_cache_path(self, db):
@@ -123,8 +123,8 @@ class TestPersistentSourceCachePath:
         t1 = pa.table({"k": ["a"], "v": [1]})
         s1 = ArrowTableSource(t1, tag_columns=["k"], source_id="src_a")
         s2 = ArrowTableSource(t1, tag_columns=["k"], source_id="src_b")
-        ps1 = PersistentSource(s1, cache_database=db)
-        ps2 = PersistentSource(s2, cache_database=db)
+        ps1 = CachedSource(s1, cache_database=db)
+        ps2 = CachedSource(s2, cache_database=db)
         assert ps1.cache_path != ps2.cache_path
 
     def test_unnamed_different_data_different_cache_path(self, db):
@@ -133,8 +133,8 @@ class TestPersistentSourceCachePath:
         t2 = pa.table({"k": ["b"], "v": [2]})
         s1 = ArrowTableSource(t1, tag_columns=["k"])
         s2 = ArrowTableSource(t2, tag_columns=["k"])
-        ps1 = PersistentSource(s1, cache_database=db)
-        ps2 = PersistentSource(s2, cache_database=db)
+        ps1 = CachedSource(s1, cache_database=db)
+        ps2 = CachedSource(s2, cache_database=db)
         assert ps1.cache_path != ps2.cache_path
 
 
@@ -143,19 +143,19 @@ class TestPersistentSourceCachePath:
 # ---------------------------------------------------------------------------
 
 
-class TestPersistentSourceSchema:
+class TestCachedSourceSchema:
     def test_output_schema_matches_source(self, simple_source, db):
-        ps = PersistentSource(simple_source, cache_database=db)
+        ps = CachedSource(simple_source, cache_database=db)
         assert ps.output_schema() == simple_source.output_schema()
 
     def test_output_schema_with_system_tags(self, simple_source, db):
-        ps = PersistentSource(simple_source, cache_database=db)
+        ps = CachedSource(simple_source, cache_database=db)
         assert ps.output_schema(
             columns={"system_tags": True}
         ) == simple_source.output_schema(columns={"system_tags": True})
 
     def test_keys_match_source(self, simple_source, db):
-        ps = PersistentSource(simple_source, cache_database=db)
+        ps = CachedSource(simple_source, cache_database=db)
         assert ps.keys() == simple_source.keys()
 
 
@@ -164,28 +164,28 @@ class TestPersistentSourceSchema:
 # ---------------------------------------------------------------------------
 
 
-class TestPersistentSourceStreaming:
+class TestCachedSourceStreaming:
     def test_as_table_matches_source(self, simple_source, db):
-        ps = PersistentSource(simple_source, cache_database=db)
+        ps = CachedSource(simple_source, cache_database=db)
         ps_table = ps.as_table()
         src_table = simple_source.as_table()
         assert ps_table.num_rows == src_table.num_rows
         assert set(ps_table.column_names) == set(src_table.column_names)
 
     def test_iter_packets_count(self, simple_source, db):
-        ps = PersistentSource(simple_source, cache_database=db)
+        ps = CachedSource(simple_source, cache_database=db)
         packets = list(ps.iter_packets())
         assert len(packets) == 3
 
     def test_iter_packets_tags_and_packets(self, simple_source, db):
-        ps = PersistentSource(simple_source, cache_database=db)
+        ps = CachedSource(simple_source, cache_database=db)
         for tag, packet in ps.iter_packets():
             assert "name" in tag.keys()
             assert "age" in packet.keys()
 
     def test_system_tags_preserved(self, simple_source, db):
         """System tags flow through the cache correctly."""
-        ps = PersistentSource(simple_source, cache_database=db)
+        ps = CachedSource(simple_source, cache_database=db)
         table = ps.as_table(columns={"system_tags": True})
         sys_tag_cols = [
             c for c in table.column_names if c.startswith(constants.SYSTEM_TAG_PREFIX)
@@ -206,7 +206,7 @@ class TestPersistentSourceStreaming:
 
     def test_source_info_preserved(self, simple_source, db):
         """Source info columns flow through the cache correctly."""
-        ps = PersistentSource(simple_source, cache_database=db)
+        ps = CachedSource(simple_source, cache_database=db)
         table = ps.as_table(columns={"source": True})
         source_cols = [
             c for c in table.column_names if c.startswith(constants.SOURCE_PREFIX)
@@ -219,19 +219,19 @@ class TestPersistentSourceStreaming:
 # ---------------------------------------------------------------------------
 
 
-class TestPersistentSourceCumulative:
+class TestCachedSourceCumulative:
     def test_dedup_on_same_data(self, simple_source, db):
         """Running twice with the same data produces no duplicates."""
-        ps1 = PersistentSource(simple_source, cache_database=db)
+        ps1 = CachedSource(simple_source, cache_database=db)
         ps1.run()
-        ps2 = PersistentSource(simple_source, cache_database=db)
+        ps2 = CachedSource(simple_source, cache_database=db)
         ps2.run()
         table = ps2.as_table()
         assert table.num_rows == 3  # no duplicates
 
     def test_clear_cache_rebuilds(self, simple_source, db):
         """clear_cache forces a fresh merge from DB on next access."""
-        ps = PersistentSource(simple_source, cache_database=db)
+        ps = CachedSource(simple_source, cache_database=db)
         t1 = ps.as_table()
         ps.clear_cache()
         t2 = ps.as_table()
@@ -248,18 +248,18 @@ class TestPersistentSourceCumulative:
 
         # Different data → different content_hash → different cache_paths
         # So cumulative within the SAME cache_path requires same content_hash
-        ps1 = PersistentSource(s1, cache_database=db)
+        ps1 = CachedSource(s1, cache_database=db)
         ps1.run()
         assert ps1.as_table().num_rows == 2
 
         # Same data source: should dedup
         s1_again = ArrowTableSource(t1, tag_columns=["k"], source_id="shared")
-        ps1_again = PersistentSource(s1_again, cache_database=db)
+        ps1_again = CachedSource(s1_again, cache_database=db)
         ps1_again.run()
         assert ps1_again.as_table().num_rows == 2
 
         # Different source (s2) has different cache_path
-        ps2 = PersistentSource(s2, cache_database=db)
+        ps2 = CachedSource(s2, cache_database=db)
         ps2.run()
         assert ps2.as_table().num_rows == 3
 
@@ -269,9 +269,9 @@ class TestPersistentSourceCumulative:
 # ---------------------------------------------------------------------------
 
 
-class TestPersistentSourceFieldResolution:
+class TestCachedSourceFieldResolution:
     def test_resolve_field_delegates(self, simple_source, db):
-        ps = PersistentSource(simple_source, cache_database=db)
+        ps = CachedSource(simple_source, cache_database=db)
         value = ps.resolve_field("row_0", "age")
         expected = simple_source.resolve_field("row_0", "age")
         assert value == expected
@@ -286,7 +286,7 @@ class TestPersistentSourceFieldResolution:
         source = ArrowTableSource(
             table, tag_columns=["user_id"], record_id_column="user_id", source_id="test"
         )
-        ps = PersistentSource(source, cache_database=db)
+        ps = CachedSource(source, cache_database=db)
         assert ps.resolve_field("user_id=u1", "score") == 100
 
 
@@ -295,9 +295,9 @@ class TestPersistentSourceFieldResolution:
 # ---------------------------------------------------------------------------
 
 
-class TestPersistentSourceIntegration:
-    def test_join_with_persistent_source(self, db):
-        """PersistentSource can be joined with another stream."""
+class TestCachedSourceIntegration:
+    def test_join_with_cached_source(self, db):
+        """CachedSource can be joined with another stream."""
         from orcapod.core.operators import Join
 
         t1 = pa.table({"id": [1, 2, 3], "val_a": [10, 20, 30]})
@@ -305,8 +305,8 @@ class TestPersistentSourceIntegration:
         s1 = ArrowTableSource(t1, tag_columns=["id"], source_id="a")
         s2 = ArrowTableSource(t2, tag_columns=["id"], source_id="b")
 
-        ps1 = PersistentSource(s1, cache_database=db)
-        ps2 = PersistentSource(s2, cache_database=db)
+        ps1 = CachedSource(s1, cache_database=db)
+        ps2 = CachedSource(s2, cache_database=db)
 
         joined = Join()(ps1, ps2)
         table = joined.as_table()
@@ -314,8 +314,8 @@ class TestPersistentSourceIntegration:
         assert "val_a" in table.column_names
         assert "val_b" in table.column_names
 
-    def test_function_pod_with_persistent_source(self, db):
-        """PersistentSource works as input to a FunctionPod."""
+    def test_function_pod_with_cached_source(self, db):
+        """CachedSource works as input to a FunctionPod."""
         from orcapod.core.function_pod import FunctionPod
         from orcapod.core.packet_function import PythonPacketFunction
 
@@ -327,10 +327,34 @@ class TestPersistentSourceIntegration:
 
         table = pa.table({"name": ["Alice", "Bob"], "age": [30, 25]})
         source = ArrowTableSource(table, tag_columns=["name"], source_id="test")
-        ps = PersistentSource(source, cache_database=db)
+        ps = CachedSource(source, cache_database=db)
 
         result = pod(ps)
         packets = list(result.iter_packets())
         assert len(packets) == 2
         ages = [p.as_dict()["doubled_age"] for _, p in packets]
         assert sorted(ages) == [50, 60]
+
+
+class TestCachedConvenienceMethod:
+    """Test the ``RootSource.cached()`` convenience method."""
+
+    def test_cached_returns_cached_source(self, simple_source, db):
+        cached = simple_source.cached(cache_database=db)
+        assert isinstance(cached, CachedSource)
+
+    def test_cached_with_path_prefix(self, simple_source, db):
+        cached = simple_source.cached(
+            cache_database=db,
+            cache_path_prefix=("my", "prefix"),
+        )
+        assert cached.cache_path[:2] == ("my", "prefix")
+
+    def test_cached_data_matches_source(self, simple_source, db):
+        cached = simple_source.cached(cache_database=db)
+        original_table = simple_source.as_table()
+        cached_table = cached.as_table()
+
+        # Same column names and row count
+        assert set(original_table.column_names) == set(cached_table.column_names)
+        assert original_table.num_rows == cached_table.num_rows
