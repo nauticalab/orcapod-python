@@ -11,7 +11,7 @@ from orcapod.core.nodes import SourceNode
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.protocols.core_protocols import PacketProtocol, StreamProtocol, TagProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
-from orcapod.types import ColumnConfig
+from orcapod.types import ColumnConfig, SourceCacheMode
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -23,8 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class PersistentSourceNode(SourceNode):
-    """
-    DB-backed wrapper around any stream, used by ``Pipeline.compile()``
+    """DB-backed wrapper around any stream, used by ``Pipeline.compile()``
     to cache leaf stream data.
 
     Extends ``SourceNode`` (which delegates identity/schema to the wrapped
@@ -37,6 +36,9 @@ class PersistentSourceNode(SourceNode):
     Cache path structure::
 
         cache_path_prefix / source / node:{content_hash}
+
+    When ``source_cache_mode`` is ``OFF``, the node delegates directly to
+    the wrapped stream without any database interaction.
     """
 
     HASH_COLUMN_NAME = "_record_hash"
@@ -49,6 +51,7 @@ class PersistentSourceNode(SourceNode):
         label: str | None = None,
         data_context: str | contexts.DataContext | None = None,
         config: Config | None = None,
+        source_cache_mode: SourceCacheMode = SourceCacheMode.FULL,
     ) -> None:
         super().__init__(
             stream=stream,
@@ -58,7 +61,12 @@ class PersistentSourceNode(SourceNode):
         )
         self._cache_database = cache_database
         self._cache_path_prefix = cache_path_prefix
+        self._source_cache_mode = source_cache_mode
         self._cached_stream: ArrowTableStream | None = None
+
+    @property
+    def source_cache_mode(self) -> SourceCacheMode:
+        return self._source_cache_mode
 
     # -------------------------------------------------------------------------
     # Cache path
@@ -77,8 +85,7 @@ class PersistentSourceNode(SourceNode):
     # -------------------------------------------------------------------------
 
     def _build_cached_stream(self) -> ArrowTableStream:
-        """
-        Materialize the wrapped stream, store rows in the cache DB
+        """Materialize the wrapped stream, store rows in the cache DB
         (deduped by per-row hash), and return the cached table as an
         ``ArrowTableStream``.
         """
@@ -117,7 +124,9 @@ class PersistentSourceNode(SourceNode):
         return ArrowTableStream(all_records, tag_columns=tag_keys)
 
     def _ensure_stream(self) -> None:
-        """Build the cached stream on first access."""
+        """Build the cached stream on first access (FULL mode only)."""
+        if self._source_cache_mode == SourceCacheMode.OFF:
+            return
         if self._cached_stream is None:
             self._cached_stream = self._build_cached_stream()
             self._update_modified_time()
@@ -127,10 +136,15 @@ class PersistentSourceNode(SourceNode):
     # -------------------------------------------------------------------------
 
     def run(self) -> None:
-        """Eagerly populate the cache with live stream data."""
+        """Eagerly populate the cache with live stream data.
+
+        In ``OFF`` mode this is a no-op — data flows through without caching.
+        """
         self._ensure_stream()
 
     def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
+        if self._source_cache_mode == SourceCacheMode.OFF:
+            return self.stream.iter_packets()
         self._ensure_stream()
         assert self._cached_stream is not None
         return self._cached_stream.iter_packets()
@@ -141,6 +155,8 @@ class PersistentSourceNode(SourceNode):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> "pa.Table":
+        if self._source_cache_mode == SourceCacheMode.OFF:
+            return self.stream.as_table(columns=columns, all_info=all_info)
         self._ensure_stream()
         assert self._cached_stream is not None
         return self._cached_stream.as_table(columns=columns, all_info=all_info)
@@ -150,15 +166,27 @@ class PersistentSourceNode(SourceNode):
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
     ) -> None:
-        """Materialize to cache DB, then push cached rows to the output channel."""
+        """Materialize to cache DB, then push cached rows to the output channel.
+
+        In ``OFF`` mode, pushes live stream rows directly.
+        """
         try:
-            self._ensure_stream()
-            assert self._cached_stream is not None
-            for tag, packet in self._cached_stream.iter_packets():
-                await output.send((tag, packet))
+            if self._source_cache_mode == SourceCacheMode.OFF:
+                for tag, packet in self.stream.iter_packets():
+                    await output.send((tag, packet))
+            else:
+                self._ensure_stream()
+                assert self._cached_stream is not None
+                for tag, packet in self._cached_stream.iter_packets():
+                    await output.send((tag, packet))
         finally:
             await output.close()
 
     def get_all_records(self) -> "pa.Table | None":
-        """Retrieve all stored records from the cache database."""
+        """Retrieve all stored records from the cache database.
+
+        Returns ``None`` in ``OFF`` mode (no records are stored).
+        """
+        if self._source_cache_mode == SourceCacheMode.OFF:
+            return None
         return self._cache_database.get_all_records(self.cache_path)
