@@ -125,3 +125,14 @@ class PacketFunctionProtocol(
     ) -> PacketProtocol | None:
         """Asynchronous counterpart of ``direct_call``."""
         ...
+
+    # ==================== Serialization ====================
+
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this packet function to a JSON-compatible config dict."""
+        ...
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "PacketFunctionProtocol":
+        """Reconstruct a packet function from a config dict."""
+        ...
