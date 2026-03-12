@@ -237,12 +237,18 @@ def extract_function_schemas(
             )
     # Reject bare container types (must have type parameters)
     _BARE_CONTAINER_TYPES = {dict, list, set, tuple}
+    _BARE_CONTAINER_EXAMPLES = {
+        dict: "dict[str, int]",
+        list: "list[int]",
+        set: "set[int]",
+        tuple: "tuple[int, ...]",
+    }
     for name, type_annot in {**param_info, **inferred_output_types}.items():
         if type_annot in _BARE_CONTAINER_TYPES:
+            example = _BARE_CONTAINER_EXAMPLES[type_annot]
             raise ValueError(
                 f"Type annotation for '{name}' is bare {type_annot.__name__} "
-                f"without type parameters. Use e.g. {type_annot.__name__}[str, int] "
-                f"or {type_annot.__name__}[int] instead."
+                f"without type parameters. Use e.g. {example} instead."
             )
 
     return Schema(param_info, optional_fields=optional_params), Schema(
