@@ -237,6 +237,22 @@ class TestCachedSourceCumulative:
         t2 = ps.as_table()
         assert t1.num_rows == t2.num_rows
 
+    def test_source_modified_time_triggers_rebuild(self, simple_source, db):
+        """Updating the wrapped source's modified time triggers a cache rebuild."""
+        ps = CachedSource(simple_source, cache_database=db)
+        # First access: build and cache
+        t1 = ps.as_table()
+        assert t1.num_rows == 3
+
+        # Simulate the source being updated (e.g. new data loaded)
+        simple_source._update_modified_time()
+
+        # Next access should detect staleness and rebuild
+        t2 = ps.as_table()
+        assert t2.num_rows == 3
+        # Verify CachedSource's own modified time was updated past the source's
+        assert not ps._is_source_stale()
+
     def test_cumulative_across_runs(self, db):
         """Data from different runs accumulates in the cache."""
         # Use a single source_id to make them share the same canonical identity
