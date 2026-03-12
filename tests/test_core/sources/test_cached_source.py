@@ -251,7 +251,7 @@ class TestCachedSourceCumulative:
         t2 = ps.as_table()
         assert t2.num_rows == 3
         # Verify CachedSource's own modified time was updated past the source's
-        assert not ps._is_source_stale()
+        assert not ps.is_stale
 
     def test_cumulative_across_runs(self, db):
         """Data from different runs accumulates in the cache."""
