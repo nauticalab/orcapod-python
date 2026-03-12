@@ -473,8 +473,202 @@ class PersistentFunctionNode(FunctionNode):
             self._packet_function.output_packet_schema
         ).to_string()
 
+    # ------------------------------------------------------------------
+    # from_descriptor — reconstruct from a serialized pipeline descriptor
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_descriptor(
+        cls,
+        descriptor: dict[str, Any],
+        function_pod: FunctionPodProtocol | None,
+        input_stream: StreamProtocol | None,
+        databases: dict[str, Any],
+    ) -> "PersistentFunctionNode":
+        """Construct a PersistentFunctionNode from a serialized descriptor.
+
+        When *function_pod* and *input_stream* are both provided the node
+        operates in full mode — constructed normally via ``__init__``.
+        When *function_pod* is ``None`` the node is created in read-only
+        mode with metadata from the descriptor; computation methods will
+        raise ``RuntimeError``.
+
+        Args:
+            descriptor: The serialized node descriptor dict.
+            function_pod: An optional live function pod.  ``None`` for
+                read-only mode.
+            input_stream: An optional live input stream.  ``None`` for
+                read-only mode.
+            databases: Mapping of database role names (``"pipeline"``,
+                ``"result"``) to database instances.
+
+        Returns:
+            A new ``PersistentFunctionNode`` instance.
+        """
+        from orcapod.pipeline.serialization import LoadStatus
+
+        pipeline_db = databases.get("pipeline")
+        result_db = databases.get("result", pipeline_db)
+
+        if function_pod is not None and input_stream is not None:
+            # Full mode: construct normally
+            pipeline_path = tuple(descriptor.get("pipeline_path", ()))
+            # Derive pipeline_path_prefix by stripping the suffix that
+            # __init__ appends (packet_function.uri + node hash element).
+            # We pass the full pipeline_path_prefix from the descriptor.
+            # The descriptor stores the complete pipeline_path; we need
+            # to reconstruct the prefix that was originally passed to
+            # __init__. The suffix added is: pf.uri + (f"node:{hash}",).
+            # Instead of reverse-engineering, use the descriptor's path
+            # minus what __init__ will add.  For full mode we let __init__
+            # recompute pipeline_path from the prefix.
+            pf_uri_len = len(function_pod.packet_function.uri) + 1  # +1 for node:hash
+            prefix = (
+                pipeline_path[:-pf_uri_len] if len(pipeline_path) > pf_uri_len else ()
+            )
+
+            node = cls(
+                function_pod=function_pod,
+                input_stream=input_stream,
+                pipeline_database=pipeline_db,
+                result_database=result_db,
+                pipeline_path_prefix=prefix,
+                label=descriptor.get("label"),
+            )
+            node._descriptor = descriptor
+            node._load_status = LoadStatus.FULL
+            return node
+
+        # Read-only mode: bypass __init__, set minimum required state
+        node = cls.__new__(cls)
+
+        # From LabelableMixin
+        node._label = descriptor.get("label")
+
+        # From DataContextMixin
+        node._data_context = contexts.resolve_context(
+            descriptor.get("data_context_key")
+        )
+        from orcapod.config import DEFAULT_CONFIG
+
+        node._orcapod_config = DEFAULT_CONFIG
+
+        # From ContentIdentifiableBase
+        node._content_hash_cache = {}
+        node._cached_int_hash = None
+
+        # From PipelineElementBase
+        node._pipeline_hash_cache = {}
+
+        # From TemporalMixin
+        node._modified_time = None
+
+        # From FunctionNode
+        node._function_pod = None
+        node._packet_function = None
+        node._input_stream = None
+        node.tracker_manager = DEFAULT_TRACKER_MANAGER
+        node.execution_engine_opts = descriptor.get("execution_engine_opts")
+        node._cached_input_iterator = None
+        node._needs_iterator = True
+        node._cached_output_packets = {}
+        node._cached_output_table = None
+        node._cached_content_hash_column = None
+
+        # From PersistentFunctionNode
+        node._pipeline_database = pipeline_db
+        node._pipeline_path_prefix = ()
+        node._pipeline_node_hash = None
+        node._output_schema_hash = None
+
+        # Descriptor metadata for read-only access
+        node._descriptor = descriptor
+        node._stored_schema = descriptor.get("output_schema", {})
+        node._stored_content_hash = descriptor.get("content_hash")
+        node._stored_pipeline_hash = descriptor.get("pipeline_hash")
+        node._stored_pipeline_path = tuple(descriptor.get("pipeline_path", ()))
+        node._stored_result_record_path = tuple(
+            descriptor.get("result_record_path", ())
+        )
+
+        # Determine load status based on DB availability
+        node._load_status = LoadStatus.UNAVAILABLE
+        if pipeline_db is not None:
+            node._load_status = LoadStatus.READ_ONLY
+
+        return node
+
+    # ------------------------------------------------------------------
+    # load_status
+    # ------------------------------------------------------------------
+
+    @property
+    def load_status(self) -> Any:
+        """Return the load status of this node.
+
+        Returns:
+            The ``LoadStatus`` enum value indicating how this node was
+            loaded.  Defaults to ``FULL`` for nodes created via
+            ``__init__``.
+        """
+        from orcapod.pipeline.serialization import LoadStatus
+
+        return getattr(self, "_load_status", LoadStatus.FULL)
+
+    # ------------------------------------------------------------------
+    # Read-only overrides
+    # ------------------------------------------------------------------
+
+    def content_hash(self, hasher=None) -> "ContentHash":
+        """Return the content hash, using stored value in read-only mode."""
+        stored = getattr(self, "_stored_content_hash", None)
+        if self._function_pod is None and stored is not None:
+            from orcapod.types import ContentHash as CH
+
+            return CH.from_string(stored)
+        return super().content_hash(hasher)
+
+    def pipeline_hash(self, hasher=None) -> "ContentHash":
+        """Return the pipeline hash, using stored value in read-only mode."""
+        stored = getattr(self, "_stored_pipeline_hash", None)
+        if self._function_pod is None and stored is not None:
+            from orcapod.types import ContentHash as CH
+
+            return CH.from_string(stored)
+        return super().pipeline_hash(hasher)
+
+    def output_schema(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]:
+        """Return output schema, using stored value in read-only mode."""
+        if self._function_pod is None:
+            stored = getattr(self, "_stored_schema", {})
+            tag = Schema(stored.get("tag", {}))
+            packet = Schema(stored.get("packet", {}))
+            return tag, packet
+        return super().output_schema(columns=columns, all_info=all_info)
+
+    def keys(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        if self._function_pod is None:
+            stored = getattr(self, "_stored_schema", {})
+            tag_keys = tuple(stored.get("tag", {}).keys())
+            packet_keys = tuple(stored.get("packet", {}).keys())
+            return tag_keys, packet_keys
+        return super().keys(columns=columns, all_info=all_info)
+
     @property
     def pipeline_path(self) -> tuple[str, ...]:
+        stored = getattr(self, "_stored_pipeline_path", None)
+        if self._packet_function is None and stored is not None:
+            return stored
         return (
             self._pipeline_path_prefix
             + self._packet_function.uri
@@ -756,9 +950,7 @@ class PersistentFunctionNode(FunctionNode):
                 else None
             )
 
-            async def process_one(
-                tag: TagProtocol, packet: PacketProtocol
-            ) -> None:
+            async def process_one(tag: TagProtocol, packet: PacketProtocol) -> None:
                 try:
                     tag_out, result_packet = await self.async_process_packet(
                         tag, packet
