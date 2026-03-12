@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import tempfile
@@ -325,7 +326,9 @@ class Pipeline(GraphTracker):
 
         # Explicit kwargs take precedence over values baked into config.
         effective_engine = (
-            execution_engine if execution_engine is not None else config.execution_engine
+            execution_engine
+            if execution_engine is not None
+            else config.execution_engine
         )
         effective_opts = (
             execution_engine_opts
@@ -409,6 +412,156 @@ class Pipeline(GraphTracker):
         self._pipeline_database.flush()
         if self._function_database is not None:
             self._function_database.flush()
+
+    # ------------------------------------------------------------------
+    # Serialization
+    # ------------------------------------------------------------------
+
+    def save(self, path: str) -> None:
+        """Serialize the compiled pipeline to a JSON file.
+
+        Args:
+            path: File path to write the JSON output to.
+
+        Raises:
+            ValueError: If the pipeline has not been compiled.
+        """
+        if not self._compiled:
+            raise ValueError(
+                "Pipeline is not compiled. Call compile() or use "
+                "auto_compile=True before saving."
+            )
+
+        from orcapod.core.nodes import (
+            PersistentFunctionNode,
+            PersistentOperatorNode,
+        )
+        from orcapod.pipeline.serialization import (
+            PIPELINE_FORMAT_VERSION,
+            serialize_schema,
+        )
+
+        # -- Pipeline metadata --
+        pipeline_meta: dict[str, Any] = {
+            "name": list(self._name),
+            "databases": {
+                "pipeline_database": self._pipeline_database.to_config(),
+                "function_database": (
+                    self._function_database.to_config()
+                    if self._function_database is not None
+                    else None
+                ),
+            },
+        }
+
+        # -- Build node descriptors --
+        nodes: dict[str, dict[str, Any]] = {}
+        for content_hash_str, node in self._persistent_node_map.items():
+            tag_schema, packet_schema = node.output_schema()
+            descriptor: dict[str, Any] = {
+                "node_type": node.node_type,
+                "label": node.label,
+                "content_hash": node.content_hash().to_string(),
+                "pipeline_hash": node.pipeline_hash().to_string(),
+                "data_context_key": node.data_context_key,
+                "output_schema": {
+                    "tag": serialize_schema(tag_schema),
+                    "packet": serialize_schema(packet_schema),
+                },
+            }
+
+            if isinstance(node, SourceNode):
+                descriptor.update(self._build_source_descriptor(node))
+            elif isinstance(node, PersistentFunctionNode):
+                descriptor.update(self._build_function_descriptor(node))
+            elif isinstance(node, PersistentOperatorNode):
+                descriptor.update(self._build_operator_descriptor(node))
+
+            nodes[content_hash_str] = descriptor
+
+        # -- Edges --
+        edges = [list(edge) for edge in self._graph_edges]
+
+        # -- Assemble top-level structure --
+        output = {
+            "orcapod_pipeline_version": PIPELINE_FORMAT_VERSION,
+            "pipeline": pipeline_meta,
+            "nodes": nodes,
+            "edges": edges,
+        }
+
+        with open(path, "w") as f:
+            json.dump(output, f, indent=2)
+
+    # Reconstructable source types: file-backed sources that can be
+    # rebuilt from config alone.
+    _RECONSTRUCTABLE_SOURCE_TYPES = frozenset({"csv", "delta_table", "cached"})
+
+    def _build_source_descriptor(self, node: SourceNode) -> dict[str, Any]:
+        """Build source-specific descriptor fields for a SourceNode.
+
+        Args:
+            node: The SourceNode to describe.
+
+        Returns:
+            Dict with source-specific fields.
+        """
+        stream = node.stream
+
+        # Determine stream_type, source_config, and reconstructable
+        if hasattr(stream, "to_config"):
+            config = stream.to_config()
+            stream_type = config.get("source_type", "stream")
+            source_config = config
+            reconstructable = stream_type in self._RECONSTRUCTABLE_SOURCE_TYPES
+        else:
+            stream_type = "stream"
+            source_config = None
+            reconstructable = False
+
+        source_id = getattr(stream, "source_id", None)
+
+        return {
+            "stream_type": stream_type,
+            "source_id": source_id,
+            "reconstructable": reconstructable,
+            "source_config": source_config,
+        }
+
+    def _build_function_descriptor(
+        self, node: "PersistentFunctionNode"
+    ) -> dict[str, Any]:
+        """Build function-specific descriptor fields for a PersistentFunctionNode.
+
+        Args:
+            node: The PersistentFunctionNode to describe.
+
+        Returns:
+            Dict with function-specific fields.
+        """
+        return {
+            "function_pod": node._function_pod.to_config(),
+            "pipeline_path": list(node.pipeline_path),
+            "result_record_path": list(node._packet_function.record_path),
+            "execution_engine_opts": node.execution_engine_opts,
+        }
+
+    def _build_operator_descriptor(
+        self, node: "PersistentOperatorNode"
+    ) -> dict[str, Any]:
+        """Build operator-specific descriptor fields for a PersistentOperatorNode.
+
+        Args:
+            node: The PersistentOperatorNode to describe.
+
+        Returns:
+            Dict with operator-specific fields.
+        """
+        return {
+            "operator": node._operator.to_config(),
+            "cache_mode": node._cache_mode.name,
+            "pipeline_path": list(node.pipeline_path),
+        }
 
     # ------------------------------------------------------------------
     # Node access by label
