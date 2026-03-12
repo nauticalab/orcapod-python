@@ -137,9 +137,9 @@ concrete type and extract the appropriate config:
 {
   "node_type": "function",
   "function_pod": {
-    "uri": ["my_module.transform", "schema_hash", "v0", "python"],
+    "uri": ["my_module.transform", "schema_hash", "v0", "python.function.v0"],
     "packet_function": {
-      "packet_function_type_id": "python",
+      "packet_function_type_id": "python.function.v0",
       "config": {
         "module_path": "my_module",
         "callable_name": "transform",
@@ -363,7 +363,7 @@ concrete class:
 
 ```python
 PACKET_FUNCTION_REGISTRY: dict[str, type] = {
-    "python": PythonPacketFunction,
+    "python.function.v0": PythonPacketFunction,
 }
 ```
 
