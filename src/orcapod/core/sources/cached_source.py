@@ -157,8 +157,18 @@ class CachedSource(RootSource):
         tag_keys = self._source.keys()[0]
         return ArrowTableStream(all_records, tag_columns=tag_keys)
 
+    def _is_source_stale(self) -> bool:
+        """True if the wrapped source has been modified since the last build."""
+        own_time = self.last_modified
+        if own_time is None:
+            return True
+        src_time = self._source.last_modified
+        return src_time is None or src_time > own_time
+
     def _ensure_stream(self) -> None:
-        """Build the merged stream on first access."""
+        """Build the merged stream on first access, or rebuild if source is stale."""
+        if self._cached_stream is not None and self._is_source_stale():
+            self._cached_stream = None
         if self._cached_stream is None:
             self._cached_stream = self._build_merged_stream()
             self._update_modified_time()
