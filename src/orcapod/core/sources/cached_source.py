@@ -167,10 +167,6 @@ class CachedSource(RootSource):
         """Discard in-memory cached stream (forces rebuild on next access)."""
         self._cached_stream = None
 
-    def run(self) -> None:
-        """Eagerly populate the cache with live source data."""
-        self._ensure_stream()
-
     def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
         self._ensure_stream()
         assert self._cached_stream is not None
