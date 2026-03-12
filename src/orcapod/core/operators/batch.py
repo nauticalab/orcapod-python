@@ -136,5 +136,19 @@ class Batch(UnaryOperator):
         finally:
             await output.close()
 
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this Batch operator to a config dict.
+
+        Returns:
+            A dict with ``class_name``, ``module_path``, and ``config`` keys,
+            where ``config`` contains ``batch_size`` and ``drop_partial_batch``.
+        """
+        config = super().to_config()
+        config["config"] = {
+            "batch_size": self.batch_size,
+            "drop_partial_batch": self.drop_partial_batch,
+        }
+        return config
+
     def identity_structure(self) -> Any:
         return (self.__class__.__name__, self.batch_size, self.drop_partial_batch)

@@ -80,6 +80,68 @@ class PolarsFilter(UnaryOperator):
         # data types are not modified
         return stream.output_schema(columns=columns, all_info=all_info)
 
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this PolarsFilter operator to a config dict.
+
+        Polars ``Expr`` predicates are serialized to JSON strings when possible.
+        If any predicate cannot be serialized, ``reconstructable`` is set to
+        ``False`` and ``predicates`` is set to ``None``.
+
+        Returns:
+            A dict with ``class_name``, ``module_path``, and ``config`` keys.
+        """
+        config = super().to_config()
+        serialized_predicates = []
+        reconstructable = True
+        for pred in self.predicates:
+            if hasattr(pred, "meta") and hasattr(pred.meta, "serialize"):
+                serialized = pred.meta.serialize(format="json")
+                # serialize() returns bytes in some Polars versions, str in others
+                if isinstance(serialized, bytes):
+                    serialized = serialized.decode()
+                serialized_predicates.append(serialized)
+            else:
+                reconstructable = False
+                break
+        config["config"] = {
+            "constraints": dict(self.constraints) if self.constraints else None,
+            "predicates": serialized_predicates if reconstructable else None,
+            "reconstructable": reconstructable,
+        }
+        return config
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "PolarsFilter":
+        """Reconstruct a PolarsFilter from a config dict.
+
+        Args:
+            config: Dict as returned by ``to_config()``.
+
+        Returns:
+            A new ``PolarsFilter`` instance.
+
+        Raises:
+            NotImplementedError: If ``reconstructable`` is ``False``.
+        """
+        inner = config.get("config", {})
+        if not inner.get("reconstructable", True):
+            raise NotImplementedError(
+                "PolarsFilter with non-serializable predicates cannot be reconstructed"
+            )
+        predicates = []
+        if inner.get("predicates"):
+            import polars as pl
+
+            predicates = []
+            for p in inner["predicates"]:
+                # deserialize() accepts bytes in some Polars versions, str in others
+                try:
+                    predicates.append(pl.Expr.deserialize(p.encode(), format="json"))
+                except TypeError:
+                    predicates.append(pl.Expr.deserialize(p, format="json"))
+        constraints = inner.get("constraints")
+        return cls(predicates=predicates, constraints=constraints)
+
     def identity_structure(self) -> Any:
         return (
             self.__class__.__name__,

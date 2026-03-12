@@ -154,6 +154,33 @@ class StaticOutputOperatorPod(TraceableBase):
         )
         return output_stream
 
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this operator to a JSON-compatible config dict.
+
+        Subclasses with constructor parameters should override this to include
+        their specific config in the ``"config"`` key.
+
+        Returns:
+            A dict with ``class_name``, ``module_path``, and ``config`` keys.
+        """
+        return {
+            "class_name": self.__class__.__name__,
+            "module_path": self.__class__.__module__,
+            "config": {},
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "StaticOutputOperatorPod":
+        """Reconstruct an operator from a config dict.
+
+        Args:
+            config: Dict as returned by ``to_config()``.
+
+        Returns:
+            A new instance of this operator class.
+        """
+        return cls(**config.get("config", {}))
+
     def __call__(self, *streams: StreamProtocol, **kwargs) -> DynamicPodStream:
         """Convenience alias for ``process``."""
         logger.debug(f"Invoking pod {self} on streams through __call__: {streams}")
