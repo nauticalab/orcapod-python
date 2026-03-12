@@ -64,12 +64,12 @@ def multi_source_pipeline(tmp_path):
     src_a = ArrowTableSource(table_a, tag_columns=["key"], source_id="src_a")
     src_b = ArrowTableSource(table_b, tag_columns=["key"], source_id="src_b")
 
-    def add_values(value: int, score: int) -> int:
-        return value + score
+    def add_values(value: int, score: int) -> dict[str, int]:
+        return {"total": value + score}
 
     pf = PythonPacketFunction(
         function=add_values,
-        output_keys="total",
+        output_keys=["total"],
         function_name="add_values",
     )
     pod = FunctionPod(packet_function=pf)
