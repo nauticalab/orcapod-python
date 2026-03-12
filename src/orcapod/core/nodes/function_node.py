@@ -69,7 +69,6 @@ class FunctionNode(StreamBase):
         input_stream: StreamProtocol,
         tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
-        data_context: str | contexts.DataContext | None = None,
         config: Config | None = None,
     ):
         if tracker_manager is None:
@@ -79,11 +78,7 @@ class FunctionNode(StreamBase):
 
         # FunctionPod used for the `producer` property and pipeline identity
         self._function_pod = function_pod
-        super().__init__(
-            label=label,
-            data_context=data_context,
-            config=config,
-        )
+        super().__init__(label=label, config=config)
 
         # validate the input stream
         _, incoming_packet_types = input_stream.output_schema()
@@ -117,6 +112,14 @@ class FunctionNode(StreamBase):
     @property
     def producer(self) -> FunctionPodProtocol:
         return self._function_pod
+
+    @property
+    def data_context(self) -> contexts.DataContext:
+        return contexts.resolve_context(self._function_pod.data_context_key)
+
+    @property
+    def data_context_key(self) -> str:
+        return self._function_pod.data_context_key
 
     @property
     def executor(self) -> PacketFunctionExecutorProtocol | None:
@@ -432,7 +435,6 @@ class PersistentFunctionNode(FunctionNode):
         pipeline_path_prefix: tuple[str, ...] = (),
         tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
-        data_context: str | contexts.DataContext | None = None,
         config: Config | None = None,
     ):
         super().__init__(
@@ -440,7 +442,6 @@ class PersistentFunctionNode(FunctionNode):
             input_stream=input_stream,
             tracker_manager=tracker_manager,
             label=label,
-            data_context=data_context,
             config=config,
         )
 

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from orcapod.core.streams.base import StreamBase
 from orcapod.errors import FieldNotResolvableError
 from orcapod.protocols.core_protocols import StreamProtocol
+
+if TYPE_CHECKING:
+    from orcapod.core.sources.cached_source import CachedSource
+    from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 
 
 class RootSource(StreamBase):
@@ -144,10 +148,10 @@ class RootSource(StreamBase):
 
     def cached(
         self,
-        cache_database: Any,
+        cache_database: ArrowDatabaseProtocol,
         cache_path_prefix: tuple[str, ...] = (),
         **kwargs: Any,
-    ) -> "RootSource":
+    ) -> CachedSource:
         """Return a ``CachedSource`` wrapping this source.
 
         Args:

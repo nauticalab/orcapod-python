@@ -165,6 +165,62 @@ class TestSourceNode:
         # Data is still accessible after run()
         assert node.as_table().num_rows == stream.as_table().num_rows
 
+    def test_delegates_data_context_key(self):
+        stream = _make_stream()
+        node = SourceNode(stream=stream)
+        assert node.data_context_key == stream.data_context_key
+
+    def test_delegates_data_context(self):
+        stream = _make_stream()
+        node = SourceNode(stream=stream)
+        assert node.data_context.context_key == stream.data_context_key
+
+
+# ---------------------------------------------------------------------------
+# Node context delegation
+# ---------------------------------------------------------------------------
+
+
+class TestNodeContextDelegation:
+    """All node types delegate data_context to their wrapped entity."""
+
+    def test_source_node_context_matches_stream(self):
+        stream = _make_stream()
+        node = SourceNode(stream=stream)
+        assert node.data_context_key == stream.data_context_key
+        assert node.data_context.context_key == stream.data_context_key
+
+    def test_function_node_context_matches_pod(self):
+        stream = _make_stream()
+        pf = PythonPacketFunction(_double, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
+        node = FunctionNode(function_pod=pod, input_stream=stream)
+        assert node.data_context_key == pod.data_context_key
+        assert node.data_context.context_key == pod.data_context_key
+
+    def test_operator_node_context_matches_operator(self):
+        stream = _make_two_col_stream()
+        op = SelectTagColumns("id")
+        node = OperatorNode(operator=op, input_streams=[stream])
+        assert node.data_context_key == op.data_context_key
+        assert node.data_context.context_key == op.data_context_key
+
+    def test_source_node_hash_consistent_with_stream(self):
+        stream = _make_stream()
+        node = SourceNode(stream=stream)
+        # Both should use the same hasher (from the same data context)
+        assert node.content_hash() == stream.content_hash()
+        assert node.pipeline_hash() == stream.pipeline_hash()
+
+    def test_function_node_hash_uses_pod_context(self):
+        stream = _make_stream()
+        pf = PythonPacketFunction(_double, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
+        node = FunctionNode(function_pod=pod, input_stream=stream)
+        # Node should produce stable hashes without error
+        assert node.content_hash() is not None
+        assert node.pipeline_hash() is not None
+
 
 # ---------------------------------------------------------------------------
 # BasicTrackerManager

@@ -50,7 +50,6 @@ class OperatorNode(StreamBase):
         input_streams: tuple[StreamProtocol, ...] | list[StreamProtocol],
         tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
-        data_context: str | contexts.DataContext | None = None,
         config: Config | None = None,
     ):
         if tracker_manager is None:
@@ -60,11 +59,7 @@ class OperatorNode(StreamBase):
         self._operator = operator
         self._input_streams = tuple(input_streams)
 
-        super().__init__(
-            label=label,
-            data_context=data_context,
-            config=config,
-        )
+        super().__init__(label=label, config=config)
 
         # Validate inputs eagerly
         self._operator.validate_inputs(*self._input_streams)
@@ -91,6 +86,14 @@ class OperatorNode(StreamBase):
     @property
     def producer(self) -> OperatorPodProtocol:
         return self._operator
+
+    @property
+    def data_context(self) -> contexts.DataContext:
+        return contexts.resolve_context(self._operator.data_context_key)
+
+    @property
+    def data_context_key(self) -> str:
+        return self._operator.data_context_key
 
     @property
     def upstreams(self) -> tuple[StreamProtocol, ...]:
@@ -222,7 +225,6 @@ class PersistentOperatorNode(OperatorNode):
         pipeline_path_prefix: tuple[str, ...] = (),
         tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
-        data_context: str | contexts.DataContext | None = None,
         config: Config | None = None,
     ):
         super().__init__(
@@ -230,7 +232,6 @@ class PersistentOperatorNode(OperatorNode):
             input_streams=input_streams,
             tracker_manager=tracker_manager,
             label=label,
-            data_context=data_context,
             config=config,
         )
 

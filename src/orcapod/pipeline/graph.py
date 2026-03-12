@@ -54,7 +54,7 @@ class Pipeline(GraphTracker):
 
     During the ``with`` block, operator and function pod invocations are
     recorded as non-persistent nodes (same as ``GraphTracker``).  On context
-    exit, ``compile()`` replaces every node with its persistent variant:
+    exit, ``compile()`` rewires the graph into execution-ready nodes:
 
     - Leaf streams → ``SourceNode`` (thin wrapper for graph vertex)
     - Function pod invocations → ``PersistentFunctionNode``
