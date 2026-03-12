@@ -26,6 +26,25 @@ from ..conftest import make_int_stream
 # ---------------------------------------------------------------------------
 
 
+class TestFunctionPodLabel:
+    def test_label_defaults_to_function_name(self, double_pod):
+        """FunctionPod.label should be the wrapped function's name by default."""
+        assert double_pod.label == "double"
+
+    def test_explicit_label_overrides_function_name(self):
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.packet_function import PythonPacketFunction
+
+        def my_func(x: int) -> int:
+            return x
+
+        pod = FunctionPod(
+            packet_function=PythonPacketFunction(my_func, output_keys="result"),
+            label="custom_label",
+        )
+        assert pod.label == "custom_label"
+
+
 class TestFunctionPodStreamProtocolConformance:
     def test_satisfies_stream_protocol(self, double_pod):
         assert isinstance(double_pod.process(make_int_stream()), StreamProtocol)
