@@ -61,6 +61,19 @@ class ArrowDatabaseProtocol(Protocol):
         """Flush any buffered writes to the underlying storage."""
         ...
 
+    def to_config(self) -> "dict[str, Any]":
+        """Serialize database configuration to a JSON-compatible dict.
+
+        The returned dict must include a ``"type"`` key identifying the
+        database implementation (e.g., ``"delta_table"``, ``"in_memory"``).
+        """
+        ...
+
+    @classmethod
+    def from_config(cls, config: "dict[str, Any]") -> "ArrowDatabaseProtocol":
+        """Reconstruct a database instance from a config dict."""
+        ...
+
 
 class MetadataCapableProtocol(Protocol):
     def set_metadata(

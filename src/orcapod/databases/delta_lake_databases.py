@@ -822,6 +822,27 @@ class DeltaTableDatabase:
             except Exception as e:
                 logger.error(f"Error flushing batch for {record_key}: {e}")
 
+    def to_config(self) -> dict[str, Any]:
+        """Serialize database configuration to a JSON-compatible dict."""
+        return {
+            "type": "delta_table",
+            "base_path": str(self.base_path),
+            "batch_size": self.batch_size,
+            "max_hierarchy_depth": self.max_hierarchy_depth,
+            "allow_schema_evolution": self.allow_schema_evolution,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "DeltaTableDatabase":
+        """Reconstruct a DeltaTableDatabase from a config dict."""
+        return cls(
+            base_path=config["base_path"],
+            create_base_path=True,
+            batch_size=config.get("batch_size", 1000),
+            max_hierarchy_depth=config.get("max_hierarchy_depth", 10),
+            allow_schema_evolution=config.get("allow_schema_evolution", True),
+        )
+
     def flush_batch(self, record_path: tuple[str, ...]) -> None:
         """
         Flush pending batch for a specific source path.

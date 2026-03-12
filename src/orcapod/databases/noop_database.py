@@ -78,3 +78,12 @@ class NoOpArrowDatabase:
 
     def flush(self) -> None:
         pass
+
+    def to_config(self) -> dict[str, Any]:
+        """Serialize database configuration to a JSON-compatible dict."""
+        return {"type": "noop"}
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "NoOpArrowDatabase":
+        """Reconstruct a NoOpArrowDatabase from a config dict."""
+        return cls()
