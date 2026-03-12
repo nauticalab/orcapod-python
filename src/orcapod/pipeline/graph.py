@@ -725,13 +725,14 @@ class Pipeline(GraphTracker):
         # Populate persistent node map
         pipeline._persistent_node_map = dict(reconstructed)
 
-        # Populate _nodes (label -> node) for labeled non-source nodes.
-        # This matches compile() behavior where freshly-created source
-        # nodes are not added to the named-node dictionary.
+        # Populate _nodes (label -> node) for all labeled nodes.
+        # Unlike compile() which excludes source nodes from _nodes,
+        # loaded pipelines include them so users can inspect load_status
+        # and metadata for all nodes via attribute access.
         pipeline._nodes = {}
         for node_hash, node in reconstructed.items():
             label = node.label
-            if label and node.node_type != "source":
+            if label:
                 pipeline._nodes[label] = node
 
         # Build node graph
