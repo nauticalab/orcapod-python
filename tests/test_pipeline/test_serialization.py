@@ -1,19 +1,21 @@
 """End-to-end tests for Pipeline.save() and Pipeline.load()."""
 
+import csv
 import json
 
 import pyarrow as pa
 import pytest
 
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.operators import Join
+from orcapod.core.operators import Batch, Join
 from orcapod.core.packet_function import PythonPacketFunction
-from orcapod.core.sources import ArrowTableSource
+from orcapod.core.sources import ArrowTableSource, CSVSource
 from orcapod.core.sources.dict_source import DictSource
 from orcapod.databases.delta_lake_databases import DeltaTableDatabase
 from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
 from orcapod.pipeline import Pipeline
 from orcapod.pipeline.serialization import PIPELINE_FORMAT_VERSION, LoadStatus
+from orcapod.types import Schema
 
 
 def transform_func(y: int) -> int:
@@ -62,12 +64,12 @@ def multi_source_pipeline(tmp_path):
     src_a = ArrowTableSource(table_a, tag_columns=["key"], source_id="src_a")
     src_b = ArrowTableSource(table_b, tag_columns=["key"], source_id="src_b")
 
-    def add_values(value: int, score: int) -> dict:
-        return {"total": value + score}
+    def add_values(value: int, score: int) -> int:
+        return value + score
 
     pf = PythonPacketFunction(
         function=add_values,
-        output_keys=["total"],
+        output_keys="total",
         function_name="add_values",
     )
     pod = FunctionPod(packet_function=pf)
@@ -421,3 +423,534 @@ class TestPipelineSaveLoadIntegration:
         loaded = Pipeline.load(str(path), mode="full")
 
         assert "my_join" in loaded.compiled_nodes
+
+
+# ---------------------------------------------------------------------------
+# Helper: write a CSV file for reconstructable source tests
+# ---------------------------------------------------------------------------
+
+
+def _write_csv(path, rows):
+    """Write a list of dicts as a CSV file."""
+    fieldnames = list(rows[0].keys())
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _make_csv_pipeline(tmp_path):
+    """Build and return (pipeline, csv_path, json_path, db) using a CSVSource.
+
+    The source is reconstructable, so full-mode load can rebuild it.
+    """
+    csv_path = str(tmp_path / "data.csv")
+    _write_csv(csv_path, [{"x": "1", "y": "2"}, {"x": "3", "y": "4"}])
+
+    db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
+    source = CSVSource(
+        file_path=csv_path,
+        tag_columns=["x"],
+        source_id="csv_source",
+    )
+    pf = PythonPacketFunction(
+        function=transform_func,
+        output_keys=["result"],
+        function_name="transform_func",
+    )
+    pod = FunctionPod(packet_function=pf)
+    pipeline = Pipeline(name="csv_test", pipeline_database=db)
+    with pipeline:
+        pod.process(source, label="transform")
+    pipeline.run()
+    db.flush()
+
+    json_path = str(tmp_path / "pipeline.json")
+    pipeline.save(json_path)
+    return pipeline, csv_path, json_path, db
+
+
+# ---------------------------------------------------------------------------
+# Thorough read-only mode tests
+# ---------------------------------------------------------------------------
+
+
+class TestReadOnlyMode:
+    """Verify behavior of pipelines loaded in read_only mode."""
+
+    def test_all_nodes_have_load_status(self, simple_pipeline):
+        """Every node in a read-only pipeline exposes a load_status."""
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        pipeline.flush()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="read_only")
+
+        for node_hash, node in loaded._persistent_node_map.items():
+            assert hasattr(node, "load_status"), (
+                f"Node {node_hash} ({node.node_type}) has no load_status"
+            )
+
+    def test_function_node_is_read_only(self, simple_pipeline):
+        """Function nodes are always READ_ONLY in read_only mode."""
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        pipeline.flush()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="read_only")
+
+        fn = loaded.compiled_nodes["transform"]
+        assert fn.load_status == LoadStatus.READ_ONLY
+
+    def test_source_node_status_for_non_reconstructable(self, simple_pipeline):
+        """DictSource (non-reconstructable) source nodes are UNAVAILABLE in read_only."""
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        pipeline.flush()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="read_only")
+
+        source_nodes = [
+            n for n in loaded._persistent_node_map.values() if n.node_type == "source"
+        ]
+        assert len(source_nodes) == 1
+        assert source_nodes[0].load_status == LoadStatus.UNAVAILABLE
+
+    def test_read_only_source_returns_stored_schema(self, simple_pipeline):
+        """Read-only source nodes return schema from the stored descriptor."""
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        pipeline.flush()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="read_only")
+
+        source_node = [
+            n for n in loaded._persistent_node_map.values() if n.node_type == "source"
+        ][0]
+        tag_schema, packet_schema = source_node.output_schema()
+        assert isinstance(tag_schema, Schema)
+        assert isinstance(packet_schema, Schema)
+        # The original source has tag=["x"], packet=["y"]
+        assert "x" in tag_schema
+        assert "y" in packet_schema
+
+    def test_read_only_source_returns_stored_keys(self, simple_pipeline):
+        """Read-only source nodes return keys from the stored descriptor."""
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        pipeline.flush()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="read_only")
+
+        source_node = [
+            n for n in loaded._persistent_node_map.values() if n.node_type == "source"
+        ][0]
+        tag_keys, packet_keys = source_node.keys()
+        assert "x" in tag_keys
+        assert "y" in packet_keys
+
+    def test_read_only_source_iter_packets_raises(self, simple_pipeline):
+        """Read-only source nodes raise RuntimeError on iter_packets."""
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        pipeline.flush()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="read_only")
+
+        source_node = [
+            n for n in loaded._persistent_node_map.values() if n.node_type == "source"
+        ][0]
+        with pytest.raises(RuntimeError, match="read-only"):
+            list(source_node.iter_packets())
+
+    def test_read_only_source_as_table_raises(self, simple_pipeline):
+        """Read-only source nodes raise RuntimeError on as_table."""
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        pipeline.flush()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="read_only")
+
+        source_node = [
+            n for n in loaded._persistent_node_map.values() if n.node_type == "source"
+        ][0]
+        with pytest.raises(RuntimeError, match="read-only"):
+            source_node.as_table()
+
+    def test_read_only_function_returns_stored_schema(self, simple_pipeline):
+        """Read-only function nodes return schema from the stored descriptor."""
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        pipeline.flush()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="read_only")
+
+        fn = loaded.compiled_nodes["transform"]
+        tag_schema, packet_schema = fn.output_schema()
+        assert isinstance(tag_schema, Schema)
+        assert isinstance(packet_schema, Schema)
+        assert "x" in tag_schema
+        assert "result" in packet_schema
+
+    def test_read_only_function_returns_stored_keys(self, simple_pipeline):
+        """Read-only function nodes return keys from the stored descriptor."""
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        pipeline.flush()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="read_only")
+
+        fn = loaded.compiled_nodes["transform"]
+        tag_keys, packet_keys = fn.keys()
+        assert "x" in tag_keys
+        assert "result" in packet_keys
+
+    def test_read_only_function_returns_stored_hashes(self, simple_pipeline):
+        """Read-only function nodes return stored content_hash and pipeline_hash."""
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        pipeline.flush()
+        # Capture original hashes before save
+        orig_fn = pipeline.compiled_nodes["transform"]
+        orig_content = orig_fn.content_hash().to_string()
+        orig_pipeline = orig_fn.pipeline_hash().to_string()
+
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="read_only")
+
+        fn = loaded.compiled_nodes["transform"]
+        assert fn.content_hash().to_string() == orig_content
+        assert fn.pipeline_hash().to_string() == orig_pipeline
+
+    def test_read_only_operator_with_join(self, tmp_path):
+        """Read-only mode preserves operator node metadata for multi-input operators."""
+        db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
+        source1 = DictSource(
+            data=[{"a": 1, "b": 10}], tag_columns=["a"], source_id="s1"
+        )
+        source2 = DictSource(
+            data=[{"a": 1, "c": 20}], tag_columns=["a"], source_id="s2"
+        )
+        pipeline = Pipeline(name="test", pipeline_database=db)
+        with pipeline:
+            joined = Join().process(source1, source2, label="my_join")
+        pipeline.run()
+        db.flush()
+
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="read_only")
+
+        op_node = loaded.compiled_nodes["my_join"]
+        assert op_node.load_status == LoadStatus.READ_ONLY
+
+        # Metadata should be accessible
+        tag_schema, packet_schema = op_node.output_schema()
+        assert isinstance(tag_schema, Schema)
+        assert isinstance(packet_schema, Schema)
+        assert "a" in tag_schema
+
+    def test_read_only_pipeline_is_compiled(self, simple_pipeline):
+        """A read-only loaded pipeline reports as compiled."""
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        pipeline.flush()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="read_only")
+
+        assert loaded._compiled is True
+
+    def test_read_only_csv_source_is_still_unavailable(self, tmp_path):
+        """Even a reconstructable CSV source is UNAVAILABLE in read_only mode."""
+        _, _, json_path, _ = _make_csv_pipeline(tmp_path)
+        loaded = Pipeline.load(json_path, mode="read_only")
+
+        source_nodes = [
+            n for n in loaded._persistent_node_map.values() if n.node_type == "source"
+        ]
+        assert len(source_nodes) == 1
+        # read_only mode skips source reconstruction
+        assert source_nodes[0].load_status == LoadStatus.UNAVAILABLE
+
+
+# ---------------------------------------------------------------------------
+# Thorough full mode tests
+# ---------------------------------------------------------------------------
+
+
+class TestFullMode:
+    """Verify behavior of pipelines loaded in full mode."""
+
+    def test_full_mode_with_csv_source_reconstructs(self, tmp_path):
+        """CSVSource (reconstructable) loads in FULL mode with a live stream."""
+        _, _, json_path, _ = _make_csv_pipeline(tmp_path)
+        loaded = Pipeline.load(json_path, mode="full")
+
+        source_nodes = [
+            n for n in loaded._persistent_node_map.values() if n.node_type == "source"
+        ]
+        assert len(source_nodes) == 1
+        assert source_nodes[0].load_status == LoadStatus.FULL
+        # Should be able to iterate the live source
+        packets = list(source_nodes[0].iter_packets())
+        assert len(packets) == 2
+
+    def test_full_mode_csv_source_as_table(self, tmp_path):
+        """A fully loaded CSV source can produce an Arrow table."""
+        _, _, json_path, _ = _make_csv_pipeline(tmp_path)
+        loaded = Pipeline.load(json_path, mode="full")
+
+        source_node = [
+            n for n in loaded._persistent_node_map.values() if n.node_type == "source"
+        ][0]
+        table = source_node.as_table()
+        assert table.num_rows == 2
+
+    def test_full_mode_csv_function_node_is_full(self, tmp_path):
+        """When the source is reconstructable, the downstream function node is FULL."""
+        _, _, json_path, _ = _make_csv_pipeline(tmp_path)
+        loaded = Pipeline.load(json_path, mode="full")
+
+        fn = loaded.compiled_nodes["transform"]
+        assert fn.load_status == LoadStatus.FULL
+
+    def test_full_mode_csv_pipeline_can_rerun(self, tmp_path):
+        """A fully loaded CSV pipeline can be re-run without error."""
+        _, _, json_path, _ = _make_csv_pipeline(tmp_path)
+        loaded = Pipeline.load(json_path, mode="full")
+
+        # Re-running should not raise
+        loaded.run()
+
+    def test_full_mode_dict_source_degrades_gracefully(self, simple_pipeline):
+        """DictSource (non-reconstructable) degrades to UNAVAILABLE in full mode."""
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        pipeline.flush()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="full")
+
+        source_nodes = [
+            n for n in loaded._persistent_node_map.values() if n.node_type == "source"
+        ]
+        assert len(source_nodes) == 1
+        assert source_nodes[0].load_status == LoadStatus.UNAVAILABLE
+
+    def test_full_mode_function_degrades_when_source_unavailable(self, simple_pipeline):
+        """Function node degrades to READ_ONLY when its source is UNAVAILABLE."""
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        pipeline.flush()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="full")
+
+        fn = loaded.compiled_nodes["transform"]
+        # Source is DictSource (UNAVAILABLE), so function node can't have
+        # a live input stream and should degrade
+        assert fn.load_status == LoadStatus.READ_ONLY
+
+    def test_full_mode_operator_degrades_when_sources_unavailable(self, tmp_path):
+        """Operator degrades to READ_ONLY when upstream sources are UNAVAILABLE."""
+        db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
+        source1 = DictSource(
+            data=[{"a": 1, "b": 10}], tag_columns=["a"], source_id="s1"
+        )
+        source2 = DictSource(
+            data=[{"a": 1, "c": 20}], tag_columns=["a"], source_id="s2"
+        )
+        pipeline = Pipeline(name="test", pipeline_database=db)
+        with pipeline:
+            joined = Join().process(source1, source2, label="my_join")
+        pipeline.run()
+        db.flush()
+
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="full")
+
+        op_node = loaded.compiled_nodes["my_join"]
+        # Both sources are DictSource (UNAVAILABLE), so operator degrades
+        assert op_node.load_status == LoadStatus.READ_ONLY
+
+    def test_full_mode_preserves_pipeline_name(self, simple_pipeline):
+        """Full mode preserves the pipeline name."""
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="full")
+
+        assert loaded.name == ("test",)
+
+    def test_full_mode_preserves_database_type(self, simple_pipeline):
+        """Full mode reconstructs the same database type."""
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="full")
+
+        assert type(loaded.pipeline_database) is DeltaTableDatabase
+
+    def test_full_mode_node_access_by_attribute(self, simple_pipeline):
+        """Loaded pipeline supports node access via __getattr__."""
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="full")
+
+        # Attribute access for labeled nodes
+        assert loaded.transform is not None
+        assert loaded.transform.node_type == "function"
+
+    def test_full_mode_csv_function_iter_packets(self, tmp_path):
+        """A fully loaded function node with CSV source can iterate packets."""
+        _, _, json_path, _ = _make_csv_pipeline(tmp_path)
+        loaded = Pipeline.load(json_path, mode="full")
+
+        fn = loaded.compiled_nodes["transform"]
+        packets = list(fn.iter_packets())
+        # 2 rows in the CSV
+        assert len(packets) == 2
+        # Each packet should have a "result" key
+        for tag, packet in packets:
+            assert "result" in packet.keys()
+
+    def test_full_mode_csv_function_as_table(self, tmp_path):
+        """A fully loaded function node with CSV source produces a table."""
+        _, _, json_path, _ = _make_csv_pipeline(tmp_path)
+        loaded = Pipeline.load(json_path, mode="full")
+
+        fn = loaded.compiled_nodes["transform"]
+        table = fn.as_table()
+        assert table.num_rows == 2
+        assert "result" in table.column_names
+
+
+# ---------------------------------------------------------------------------
+# Edge cases and cross-mode comparisons
+# ---------------------------------------------------------------------------
+
+
+class TestLoadEdgeCases:
+    """Edge cases for Pipeline.load()."""
+
+    def test_load_default_mode_is_full(self, simple_pipeline):
+        """Pipeline.load() defaults to full mode."""
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path))
+        # Default is full, so with DictSource the function degrades
+        fn = loaded.compiled_nodes["transform"]
+        assert fn.load_status in (LoadStatus.FULL, LoadStatus.READ_ONLY)
+
+    def test_load_multi_source_operator_pipeline_read_only(self, tmp_path):
+        """Multi-source pipeline with operator loads in read_only with correct status."""
+        db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
+        src1 = DictSource(data=[{"k": 1, "v1": 10}], tag_columns=["k"], source_id="s1")
+        src2 = DictSource(data=[{"k": 1, "v2": 20}], tag_columns=["k"], source_id="s2")
+        pipeline = Pipeline(name="multi", pipeline_database=db)
+        with pipeline:
+            joined = Join().process(src1, src2, label="join_node")
+        pipeline.run()
+        db.flush()
+
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="read_only")
+
+        # All nodes should have load_status
+        for node in loaded._persistent_node_map.values():
+            assert hasattr(node, "load_status")
+
+        # Sources are UNAVAILABLE, operator is READ_ONLY
+        sources = [
+            n for n in loaded._persistent_node_map.values() if n.node_type == "source"
+        ]
+        assert all(s.load_status == LoadStatus.UNAVAILABLE for s in sources)
+
+        op = loaded.compiled_nodes["join_node"]
+        assert op.load_status == LoadStatus.READ_ONLY
+
+    def test_load_preserves_all_edge_pairs(self, multi_source_pipeline):
+        """Loaded pipeline has the same edge pairs as the original."""
+        pipeline, tmp_path = multi_source_pipeline
+        pipeline.run()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="full")
+
+        orig_edges = set(tuple(e) for e in pipeline._graph_edges)
+        loaded_edges = set(tuple(e) for e in loaded._graph_edges)
+        assert orig_edges == loaded_edges
+
+    def test_load_hash_graph_has_node_types(self, simple_pipeline):
+        """The _hash_graph on a loaded pipeline has node_type attributes."""
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="full")
+
+        for node_hash in loaded._hash_graph.nodes:
+            attrs = loaded._hash_graph.nodes[node_hash]
+            assert "node_type" in attrs, (
+                f"Node {node_hash} missing node_type in _hash_graph"
+            )
+
+    def test_read_only_then_full_gives_different_status(self, tmp_path):
+        """Loading the same JSON in different modes gives different statuses."""
+        _, _, json_path, _ = _make_csv_pipeline(tmp_path)
+
+        ro = Pipeline.load(json_path, mode="read_only")
+        full = Pipeline.load(json_path, mode="full")
+
+        ro_fn = ro.compiled_nodes["transform"]
+        full_fn = full.compiled_nodes["transform"]
+
+        assert ro_fn.load_status == LoadStatus.READ_ONLY
+        assert full_fn.load_status == LoadStatus.FULL
+
+    def test_function_database_round_trip(self, tmp_path):
+        """Pipeline with separate function_database round-trips correctly."""
+        pipeline_db = DeltaTableDatabase(base_path=str(tmp_path / "pdb"))
+        function_db = DeltaTableDatabase(base_path=str(tmp_path / "fdb"))
+        source = DictSource(data=[{"x": 1, "y": 2}], tag_columns=["x"], source_id="s")
+        pf = PythonPacketFunction(
+            function=transform_func,
+            output_keys=["result"],
+            function_name="transform_func",
+        )
+        pod = FunctionPod(packet_function=pf)
+        pipeline = Pipeline(
+            name="test",
+            pipeline_database=pipeline_db,
+            function_database=function_db,
+        )
+        with pipeline:
+            pod.process(source, label="transform")
+        pipeline.run()
+        pipeline.flush()
+
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="full")
+
+        assert loaded.function_database is not None
+        assert type(loaded.function_database) is DeltaTableDatabase
