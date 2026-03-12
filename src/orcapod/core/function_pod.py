@@ -269,6 +269,48 @@ class FunctionPod(_FunctionPodBase):
         # perform input stream validation
         return self.process(*streams, label=label)
 
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this function pod to a JSON-compatible config dict.
+
+        Returns:
+            A JSON-serializable dict containing the URI, packet function config,
+            and node config for this function pod.
+        """
+        config: dict[str, Any] = {
+            "uri": list(self.uri),
+            "packet_function": self.packet_function.to_config(),
+            "node_config": None,
+        }
+        if (
+            self._node_config is not None
+            and self._node_config.max_concurrency is not None
+        ):
+            config["node_config"] = {
+                "max_concurrency": self._node_config.max_concurrency,
+            }
+        return config
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "FunctionPod":
+        """Reconstruct a FunctionPod from a config dict.
+
+        Args:
+            config: A dict as produced by :meth:`to_config`.
+
+        Returns:
+            A new ``FunctionPod`` instance.
+        """
+        from orcapod.pipeline.serialization import resolve_packet_function_from_config
+
+        pf_config = config["packet_function"]
+        packet_function = resolve_packet_function_from_config(pf_config)
+
+        node_config = None
+        if config.get("node_config") is not None:
+            node_config = NodeConfig(**config["node_config"])
+
+        return cls(packet_function=packet_function, node_config=node_config)
+
     # ------------------------------------------------------------------
     # Async channel execution (streaming mode)
     # ------------------------------------------------------------------
