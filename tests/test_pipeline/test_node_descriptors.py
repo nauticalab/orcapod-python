@@ -184,3 +184,71 @@ class TestPersistentFunctionNodeFromDescriptor:
             databases={"pipeline": db, "result": db},
         )
         assert loaded.load_status in (LoadStatus.READ_ONLY, LoadStatus.UNAVAILABLE)
+
+
+from orcapod.core.nodes.operator_node import PersistentOperatorNode
+from orcapod.core.operators import Join
+
+
+class TestPersistentOperatorNodeFromDescriptor:
+    def test_from_descriptor_read_only(self):
+        db = InMemoryArrowDatabase()
+        descriptor = {
+            "node_type": "operator",
+            "label": "my_join",
+            "content_hash": "fake_hash",
+            "pipeline_hash": "fake_pipeline_hash",
+            "data_context_key": "std:v0.1:default",
+            "output_schema": {
+                "tag": {"a": "int64"},
+                "packet": {"b": "int64", "c": "int64"},
+            },
+            "operator": {
+                "class_name": "Join",
+                "module_path": "orcapod.core.operators.join",
+                "config": {},
+            },
+            "cache_mode": "OFF",
+            "pipeline_path": ["test", "Join", "hash", "node:abc"],
+        }
+        loaded = PersistentOperatorNode.from_descriptor(
+            descriptor=descriptor,
+            operator=None,
+            input_streams=(),
+            databases={"pipeline": db},
+        )
+        assert loaded.load_status in (LoadStatus.READ_ONLY, LoadStatus.UNAVAILABLE)
+        assert loaded.label == "my_join"
+
+    def test_from_descriptor_full_mode(self):
+        db = InMemoryArrowDatabase()
+        source1 = DictSource(data=[{"a": 1, "b": 2}], tag_columns=["a"], source_id="s1")
+        source2 = DictSource(data=[{"a": 1, "c": 3}], tag_columns=["a"], source_id="s2")
+        op = Join()
+        node = PersistentOperatorNode(
+            operator=op,
+            input_streams=(source1, source2),
+            pipeline_database=db,
+            pipeline_path_prefix=("test",),
+        )
+        descriptor = {
+            "node_type": "operator",
+            "label": None,
+            "content_hash": node.content_hash().to_string(),
+            "pipeline_hash": node.pipeline_hash().to_string(),
+            "data_context_key": node.data_context_key,
+            "output_schema": {
+                "tag": {"a": "int64"},
+                "packet": {"b": "int64", "c": "int64"},
+            },
+            "operator": op.to_config(),
+            "cache_mode": "OFF",
+            "pipeline_path": list(node.pipeline_path),
+        }
+        loaded = PersistentOperatorNode.from_descriptor(
+            descriptor=descriptor,
+            operator=op,
+            input_streams=(source1, source2),
+            databases={"pipeline": db},
+        )
+        assert loaded.load_status == LoadStatus.FULL
