@@ -23,7 +23,7 @@ from orcapod.protocols.core_protocols import (
 from orcapod.protocols.core_protocols.operator_pod import OperatorPodProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.system_constants import constants
-from orcapod.types import CacheMode, ColumnConfig, Schema
+from orcapod.types import CacheMode, ColumnConfig, ContentHash, Schema
 from orcapod.utils.lazy_module import LazyModule
 
 logger = logging.getLogger(__name__)
@@ -243,12 +243,187 @@ class PersistentOperatorNode(OperatorNode):
         # gets its own cache table.
         self._pipeline_node_hash = self.content_hash().to_string()
 
+    # ------------------------------------------------------------------
+    # from_descriptor — reconstruct from a serialized pipeline descriptor
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_descriptor(
+        cls,
+        descriptor: dict[str, Any],
+        operator: OperatorPodProtocol | None,
+        input_streams: tuple[StreamProtocol, ...] | list[StreamProtocol],
+        databases: dict[str, Any],
+    ) -> "PersistentOperatorNode":
+        """Construct a PersistentOperatorNode from a serialized descriptor.
+
+        When *operator* and *input_streams* are provided the node operates
+        in full mode — constructed normally via ``__init__``.  When
+        *operator* is ``None`` the node is created in read-only mode with
+        metadata from the descriptor; computation methods will raise
+        ``RuntimeError``.
+
+        Args:
+            descriptor: The serialized node descriptor dict.
+            operator: An optional live operator instance.  ``None`` for
+                read-only mode.
+            input_streams: Input streams for the operator.  Empty tuple
+                for read-only mode.
+            databases: Mapping of database role names (``"pipeline"``)
+                to database instances.
+
+        Returns:
+            A new ``PersistentOperatorNode`` instance.
+        """
+        from orcapod.pipeline.serialization import LoadStatus
+
+        pipeline_db = databases.get("pipeline")
+        cache_mode_str = descriptor.get("cache_mode", "OFF")
+        cache_mode = (
+            CacheMode[cache_mode_str]
+            if isinstance(cache_mode_str, str)
+            else CacheMode.OFF
+        )
+
+        if operator is not None and input_streams:
+            # Full mode: construct normally
+            pipeline_path = tuple(descriptor.get("pipeline_path", ()))
+            # Derive pipeline_path_prefix by stripping the suffix that
+            # __init__ appends: operator.uri (2 elements) + node:{hash} (1 element).
+            uri_len = len(operator.uri) + 1  # +1 for node:{hash}
+            prefix = pipeline_path[:-uri_len] if len(pipeline_path) > uri_len else ()
+
+            node = cls(
+                operator=operator,
+                input_streams=input_streams,
+                pipeline_database=pipeline_db,
+                cache_mode=cache_mode,
+                pipeline_path_prefix=prefix,
+                label=descriptor.get("label"),
+            )
+            node._descriptor = descriptor
+            node._load_status = LoadStatus.FULL
+            return node
+
+        # Read-only mode: bypass __init__, set minimum required state
+        node = cls.__new__(cls)
+
+        # From LabelableMixin
+        node._label = descriptor.get("label")
+
+        # From DataContextMixin
+        from orcapod import contexts
+        from orcapod.config import DEFAULT_CONFIG
+
+        node._data_context = contexts.resolve_context(
+            descriptor.get("data_context_key")
+        )
+        node._orcapod_config = DEFAULT_CONFIG
+
+        # From ContentIdentifiableBase
+        node._content_hash_cache = {}
+        node._cached_int_hash = None
+
+        # From PipelineElementBase
+        node._pipeline_hash_cache = {}
+
+        # From TemporalMixin
+        node._modified_time = None
+
+        # From OperatorNode
+        node._operator = None
+        node._input_streams = ()
+        node.tracker_manager = DEFAULT_TRACKER_MANAGER
+        node._cached_output_stream = None
+        node._cached_output_table = None
+
+        # From PersistentOperatorNode
+        node._pipeline_database = pipeline_db
+        node._pipeline_path_prefix = ()
+        node._cache_mode = cache_mode
+        node._pipeline_node_hash = None
+
+        # Descriptor metadata for read-only access
+        node._descriptor = descriptor
+        node._stored_schema = descriptor.get("output_schema", {})
+        node._stored_content_hash = descriptor.get("content_hash")
+        node._stored_pipeline_hash = descriptor.get("pipeline_hash")
+        node._stored_pipeline_path = tuple(descriptor.get("pipeline_path", ()))
+
+        # Determine load status based on DB availability
+        node._load_status = LoadStatus.UNAVAILABLE
+        if pipeline_db is not None:
+            node._load_status = LoadStatus.READ_ONLY
+
+        return node
+
+    # ------------------------------------------------------------------
+    # load_status
+    # ------------------------------------------------------------------
+
     @property
-    def cache_mode(self) -> CacheMode:
-        return self._cache_mode
+    def load_status(self) -> Any:
+        """Return the load status of this node.
+
+        Returns:
+            The ``LoadStatus`` enum value indicating how this node was
+            loaded.  Defaults to ``FULL`` for nodes created via
+            ``__init__``.
+        """
+        from orcapod.pipeline.serialization import LoadStatus
+
+        return getattr(self, "_load_status", LoadStatus.FULL)
+
+    # ------------------------------------------------------------------
+    # Read-only overrides
+    # ------------------------------------------------------------------
+
+    def content_hash(self, hasher=None) -> "ContentHash":
+        """Return the content hash, using stored value in read-only mode."""
+        stored = getattr(self, "_stored_content_hash", None)
+        if self._operator is None and stored is not None:
+            return ContentHash.from_string(stored)
+        return super().content_hash(hasher)
+
+    def pipeline_hash(self, hasher=None) -> "ContentHash":
+        """Return the pipeline hash, using stored value in read-only mode."""
+        stored = getattr(self, "_stored_pipeline_hash", None)
+        if self._operator is None and stored is not None:
+            return ContentHash.from_string(stored)
+        return super().pipeline_hash(hasher)
+
+    def output_schema(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]:
+        """Return output schema, using stored value in read-only mode."""
+        if self._operator is None:
+            stored = getattr(self, "_stored_schema", {})
+            tag = Schema(stored.get("tag", {}))
+            packet = Schema(stored.get("packet", {}))
+            return tag, packet
+        return super().output_schema(columns=columns, all_info=all_info)
+
+    def keys(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        if self._operator is None:
+            stored = getattr(self, "_stored_schema", {})
+            tag_keys = tuple(stored.get("tag", {}).keys())
+            packet_keys = tuple(stored.get("packet", {}).keys())
+            return tag_keys, packet_keys
+        return super().keys(columns=columns, all_info=all_info)
 
     @property
     def pipeline_path(self) -> tuple[str, ...]:
+        stored = getattr(self, "_stored_pipeline_path", None)
+        if self._operator is None and stored is not None:
+            return stored
         return (
             self._pipeline_path_prefix
             + self._operator.uri
