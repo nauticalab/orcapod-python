@@ -25,15 +25,18 @@ class SourceNode(StreamBase):
         self,
         stream: cp.StreamProtocol,
         label: str | None = None,
-        data_context: str | contexts.DataContext | None = None,
         config: Config | None = None,
     ):
-        super().__init__(
-            label=label,
-            data_context=data_context,
-            config=config,
-        )
+        super().__init__(label=label, config=config)
         self.stream = stream
+
+    @property
+    def data_context(self) -> contexts.DataContext:
+        return contexts.resolve_context(self.stream.data_context_key)
+
+    @property
+    def data_context_key(self) -> str:
+        return self.stream.data_context_key
 
     def computed_label(self) -> str | None:
         return self.stream.label
