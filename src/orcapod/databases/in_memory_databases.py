@@ -334,6 +334,20 @@ class InMemoryArrowDatabase:
             return None
         return self._handle_record_id_column(filtered, record_id_column)
 
+    def to_config(self) -> dict[str, Any]:
+        """Serialize database configuration to a JSON-compatible dict."""
+        return {
+            "type": "in_memory",
+            "max_hierarchy_depth": self.max_hierarchy_depth,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "InMemoryArrowDatabase":
+        """Reconstruct an InMemoryArrowDatabase from a config dict."""
+        return cls(
+            max_hierarchy_depth=config.get("max_hierarchy_depth", 10),
+        )
+
     def get_records_with_column_value(
         self,
         record_path: tuple[str, ...],
