@@ -70,6 +70,40 @@ class CSVSource(RootSource):
             config=self.orcapod_config,
         )
 
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this source's configuration to a JSON-compatible dict.
+
+        Returns:
+            Dict containing all constructor arguments needed to reconstruct
+            this source (except the in-memory table data).
+        """
+        return {
+            "source_type": "csv",
+            "file_path": self._file_path,
+            "tag_columns": list(self._arrow_source._tag_columns),
+            "system_tag_columns": list(self._arrow_source._system_tag_columns),
+            "record_id_column": self._arrow_source._record_id_column,
+            "source_id": self.source_id,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "CSVSource":
+        """Reconstruct a CSVSource from a config dict.
+
+        Args:
+            config: Dict as produced by :meth:`to_config`.
+
+        Returns:
+            A new CSVSource constructed from the config.
+        """
+        return cls(
+            file_path=config["file_path"],
+            tag_columns=config.get("tag_columns", ()),
+            system_tag_columns=config.get("system_tag_columns", ()),
+            record_id_column=config.get("record_id_column"),
+            source_id=config.get("source_id"),
+        )
+
     def resolve_field(self, record_id: str, field_name: str) -> Any:
         return self._arrow_source.resolve_field(record_id, field_name)
 
