@@ -7,7 +7,12 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from orcapod.core.nodes import GraphNode, SourceNode
+from orcapod.core.nodes import (
+    GraphNode,
+    PersistentFunctionNode,
+    PersistentOperatorNode,
+    SourceNode,
+)
 from orcapod.core.tracker import GraphTracker
 from orcapod.protocols import core_protocols as cp
 from orcapod.protocols import database_protocols as dbp
@@ -510,8 +515,9 @@ class Pipeline(GraphTracker):
         """
         stream = node.stream
 
-        # Determine stream_type, source_config, and reconstructable
-        if hasattr(stream, "to_config"):
+        # Determine if stream implements SourceProtocol and build descriptor accordingly
+        # TODO: revisit this logic
+        if isinstance(stream, cp.SourceProtocol):
             config = stream.to_config()
             stream_type = config.get("source_type", "stream")
             source_config = config
@@ -549,7 +555,7 @@ class Pipeline(GraphTracker):
         }
 
     def _build_operator_descriptor(
-        self, node: "PersistentOperatorNode"
+        self, node: PersistentOperatorNode
     ) -> dict[str, Any]:
         """Build operator-specific descriptor fields for a PersistentOperatorNode.
 
@@ -589,13 +595,7 @@ class Pipeline(GraphTracker):
         Raises:
             ValueError: If the file's format version is unsupported.
         """
-        from orcapod.core.function_pod import FunctionPod
-        from orcapod.core.nodes import (
-            PersistentFunctionNode,
-            PersistentOperatorNode,
-            SourceNode,
-        )
-        from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
+
         from orcapod.pipeline.serialization import (
             SUPPORTED_FORMAT_VERSIONS,
             LoadStatus,
@@ -770,7 +770,7 @@ class Pipeline(GraphTracker):
         descriptor: dict[str, Any],
         mode: str,
         resolve_source_from_config: Any,
-    ) -> "SourceNode":
+    ) -> SourceNode:
         """Reconstruct a SourceNode from a descriptor.
 
         Args:
@@ -781,7 +781,6 @@ class Pipeline(GraphTracker):
         Returns:
             A ``SourceNode`` instance.
         """
-        from orcapod.core.nodes import SourceNode
 
         reconstructable = descriptor.get("reconstructable", False)
         source_config = descriptor.get("source_config")
@@ -806,7 +805,7 @@ class Pipeline(GraphTracker):
         upstream_node: Any | None,
         upstream_usable: bool,
         databases: dict[str, Any],
-    ) -> "PersistentFunctionNode":
+    ) -> PersistentFunctionNode:
         """Reconstruct a PersistentFunctionNode from a descriptor.
 
         Args:

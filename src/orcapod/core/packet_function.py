@@ -138,7 +138,7 @@ class PacketFunctionBase(TraceableBase):
             self.executor = executor
 
     def computed_label(self) -> str | None:
-        """Return the canonical function name as the label if none was set explicitly."""
+        """Return the canonical function name as the label if no explicit label is given."""
         return self.canonical_function_name
 
     @property

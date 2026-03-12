@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from orcapod import contexts
+from orcapod.config import Config
 from orcapod.core.streams.base import StreamBase
 from orcapod.errors import FieldNotResolvableError
 from orcapod.protocols.core_protocols import StreamProtocol
@@ -56,9 +58,15 @@ class RootSource(StreamBase):
     def __init__(
         self,
         source_id: str | None = None,
-        **kwargs: Any,
+        label: str | None = None,
+        data_context: str | contexts.DataContext | None = None,
+        config: Config | None = None,
     ) -> None:
-        super().__init__(**kwargs)
+        super().__init__(
+            label=label,
+            data_context=data_context,
+            config=config,
+        )
         self._source_id = source_id
 
     # -------------------------------------------------------------------------
@@ -69,14 +77,10 @@ class RootSource(StreamBase):
     def source_id(self) -> str:
         """
         Canonical name for this source used in the registry and provenance
-        strings.  Must be set by the end of ``__init__`` in concrete subclasses.
+        strings. If not set, raises ``ValueError``.
         """
         if self._source_id is None:
-            raise ValueError(
-                f"{self.__class__.__name__}._source_id was not set. "
-                "Concrete subclasses must ensure _source_id is populated "
-                "by the end of __init__."
-            )
+            raise ValueError("source_id is not set")
         return self._source_id
 
     # -------------------------------------------------------------------------
