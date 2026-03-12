@@ -113,3 +113,74 @@ class TestSourceNodeFromDescriptor:
         )
         assert loaded.content_hash().to_string() == descriptor["content_hash"]
         assert loaded.pipeline_hash().to_string() == descriptor["pipeline_hash"]
+
+
+from orcapod.core.nodes.function_node import PersistentFunctionNode
+from orcapod.core.function_pod import FunctionPod
+from orcapod.core.packet_function import PythonPacketFunction
+
+
+def _sample_func(b: int) -> dict:
+    return {"result": b * 2}
+
+
+class TestPersistentFunctionNodeFromDescriptor:
+    def _make_function_node_descriptor(self):
+        source = DictSource(
+            data=[{"a": 1, "b": 2}],
+            tag_columns=["a"],
+            source_id="test",
+        )
+        pf = PythonPacketFunction(function=_sample_func, output_keys=["result"])
+        pod = FunctionPod(packet_function=pf)
+        db = InMemoryArrowDatabase()
+        node = PersistentFunctionNode(
+            function_pod=pod,
+            input_stream=source,
+            pipeline_database=db,
+            pipeline_path_prefix=("test_pipeline",),
+        )
+        tag_schema, packet_schema = node.output_schema()
+        descriptor = {
+            "node_type": "function",
+            "label": None,
+            "content_hash": node.content_hash().to_string(),
+            "pipeline_hash": node.pipeline_hash().to_string(),
+            "data_context_key": node.data_context_key,
+            "output_schema": {
+                "tag": {k: str(v) for k, v in tag_schema.items()},
+                "packet": {k: str(v) for k, v in packet_schema.items()},
+            },
+            "function_pod": pod.to_config(),
+            "pipeline_path": list(node.pipeline_path),
+            "result_record_path": list(node._packet_function.record_path),
+            "execution_engine_opts": None,
+        }
+        return node, descriptor, db
+
+    def test_from_descriptor_full_mode(self):
+        original, descriptor, db = self._make_function_node_descriptor()
+        source = DictSource(
+            data=[{"a": 1, "b": 2}],
+            tag_columns=["a"],
+            source_id="test",
+        )
+        pf = PythonPacketFunction(function=_sample_func, output_keys=["result"])
+        pod = FunctionPod(packet_function=pf)
+        loaded = PersistentFunctionNode.from_descriptor(
+            descriptor=descriptor,
+            function_pod=pod,
+            input_stream=source,
+            databases={"pipeline": db, "result": db},
+        )
+        assert loaded.load_status == LoadStatus.FULL
+
+    def test_from_descriptor_read_only(self):
+        original, descriptor, db = self._make_function_node_descriptor()
+        loaded = PersistentFunctionNode.from_descriptor(
+            descriptor=descriptor,
+            function_pod=None,
+            input_stream=None,
+            databases={"pipeline": db, "result": db},
+        )
+        assert loaded.load_status in (LoadStatus.READ_ONLY, LoadStatus.UNAVAILABLE)
