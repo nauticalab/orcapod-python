@@ -1,4 +1,4 @@
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from orcapod.protocols.core_protocols.datagrams import PacketProtocol, TagProtocol
 from orcapod.protocols.core_protocols.packet_function import PacketFunctionProtocol
@@ -26,3 +26,12 @@ class FunctionPodProtocol(PodProtocol, PipelineElementProtocol, Protocol):
     async def async_process_packet(
         self, tag: TagProtocol, packet: PacketProtocol
     ) -> tuple[TagProtocol, PacketProtocol | None]: ...
+
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this function pod to a JSON-compatible config dict."""
+        ...
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "FunctionPodProtocol":
+        """Reconstruct a function pod from a config dict."""
+        ...
