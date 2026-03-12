@@ -73,6 +73,47 @@ class CachedSource(RootSource):
         self._cached_stream: ArrowTableStream | None = None
 
     # -------------------------------------------------------------------------
+    # Serialization
+    # -------------------------------------------------------------------------
+
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this CachedSource configuration to a JSON-compatible dict.
+
+        Returns:
+            Dict containing the inner source config, cache database config, and
+            cache path prefix.
+        """
+        return {
+            "source_type": "cached",
+            "inner_source": self._source.to_config(),
+            "cache_database": self._cache_database.to_config(),
+            "cache_path_prefix": list(self._cache_path_prefix),
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "CachedSource":
+        """Reconstruct a CachedSource from a config dict.
+
+        Args:
+            config: Dict as produced by :meth:`to_config`.
+
+        Returns:
+            A new CachedSource constructed from the config.
+        """
+        from orcapod.pipeline.serialization import (
+            resolve_database_from_config,
+            resolve_source_from_config,
+        )
+
+        inner_source = resolve_source_from_config(config["inner_source"])
+        cache_db = resolve_database_from_config(config["cache_database"])
+        return cls(
+            source=inner_source,
+            cache_database=cache_db,
+            cache_path_prefix=tuple(config.get("cache_path_prefix", ())),
+        )
+
+    # -------------------------------------------------------------------------
     # Identity — delegate to wrapped source
     # -------------------------------------------------------------------------
 

@@ -98,6 +98,35 @@ class ListSource(RootSource):
             config=self.orcapod_config,
         )
 
+    def to_config(self) -> dict[str, Any]:
+        """Serialize metadata-only config (data is not serializable).
+
+        Returns:
+            Dict with source metadata. Cannot be used to reconstruct the source
+            since the original list data is not preserved.
+        """
+        return {
+            "source_type": "list",
+            "name": self.name,
+            "source_id": self.source_id,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "ListSource":
+        """Not supported — ListSource data cannot be reconstructed from config.
+
+        Args:
+            config: Config dict (ignored).
+
+        Raises:
+            NotImplementedError: Always, because the original list data cannot
+                be recovered from config.
+        """
+        raise NotImplementedError(
+            "ListSource cannot be reconstructed from config — "
+            "original list data is not serializable."
+        )
+
     @property
     def source_id(self) -> str:
         return self._arrow_source.source_id

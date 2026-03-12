@@ -215,6 +215,35 @@ class ArrowTableSource(RootSource):
     # RootSource protocol
     # -------------------------------------------------------------------------
 
+    def to_config(self) -> dict[str, Any]:
+        """Serialize metadata-only config (in-memory table is not serializable).
+
+        Returns:
+            Dict with source metadata. Cannot be used to reconstruct the source
+            since the original Arrow table data is not preserved.
+        """
+        return {
+            "source_type": "arrow_table",
+            "tag_columns": list(self._tag_columns),
+            "source_id": self.source_id,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "ArrowTableSource":
+        """Not supported — ArrowTableSource cannot be reconstructed from config.
+
+        Args:
+            config: Config dict (ignored).
+
+        Raises:
+            NotImplementedError: Always, because the in-memory Arrow table
+                cannot be recovered from config.
+        """
+        raise NotImplementedError(
+            "ArrowTableSource cannot be reconstructed from config — "
+            "the in-memory Arrow table is not serializable."
+        )
+
     @property
     def table(self) -> "pa.Table":
         return self._table

@@ -73,6 +73,35 @@ class DataFrameSource(RootSource):
             config=self.orcapod_config,
         )
 
+    def to_config(self) -> dict[str, Any]:
+        """Serialize metadata-only config (DataFrame is not serializable).
+
+        Returns:
+            Dict with source metadata. Cannot be used to reconstruct the source
+            since the original DataFrame is not preserved.
+        """
+        return {
+            "source_type": "data_frame",
+            "tag_columns": list(self._arrow_source._tag_columns),
+            "source_id": self.source_id,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "DataFrameSource":
+        """Not supported — DataFrameSource cannot be reconstructed from config.
+
+        Args:
+            config: Config dict (ignored).
+
+        Raises:
+            NotImplementedError: Always, because the original DataFrame cannot
+                be recovered from config.
+        """
+        raise NotImplementedError(
+            "DataFrameSource cannot be reconstructed from config — "
+            "the original DataFrame is not serializable."
+        )
+
     @property
     def source_id(self) -> str:
         return self._arrow_source.source_id
