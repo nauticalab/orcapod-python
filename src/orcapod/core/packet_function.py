@@ -459,9 +459,9 @@ class PythonPacketFunction(PacketFunctionBase):
             # Already in a loop — run in a separate thread with its own loop.
             # The lambda ensures the coroutine is created inside the executor
             # thread, avoiding unawaited-coroutine warnings on submission failure.
-            return _get_sync_executor().submit(
-                lambda: asyncio.run(fn(**kwargs))
-            ).result()
+            return (
+                _get_sync_executor().submit(lambda: asyncio.run(fn(**kwargs))).result()
+            )
 
     def direct_call(self, packet: PacketProtocol) -> PacketProtocol | None:
         """Execute the function on *packet* synchronously.
@@ -493,6 +493,55 @@ class PythonPacketFunction(PacketFunctionBase):
 
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(None, self.direct_call, packet)
+
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this packet function to a JSON-compatible config dict.
+
+        Returns:
+            A dict with ``packet_function_type_id`` and a nested ``config``
+            containing enough information to reconstruct this instance via
+            :meth:`from_config`.
+        """
+        return {
+            "packet_function_type_id": self.packet_function_type_id,
+            "config": {
+                "module_path": self._function.__module__,
+                "callable_name": self._function_name,
+                "version": self._version,
+                "input_packet_schema": {
+                    k: str(v) for k, v in self.input_packet_schema.items()
+                },
+                "output_packet_schema": {
+                    k: str(v) for k, v in self.output_packet_schema.items()
+                },
+                "output_keys": list(self._output_keys) if self._output_keys else None,
+            },
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "PythonPacketFunction":
+        """Reconstruct a PythonPacketFunction by importing the callable.
+
+        Args:
+            config: A dict as produced by :meth:`to_config`.
+
+        Returns:
+            A new ``PythonPacketFunction`` wrapping the imported callable.
+
+        Raises:
+            ImportError: If the module specified in *config* cannot be imported.
+            AttributeError: If the callable name does not exist in the module.
+        """
+        import importlib
+
+        inner = config.get("config", config)
+        module = importlib.import_module(inner["module_path"])
+        func = getattr(module, inner["callable_name"])
+        return cls(
+            function=func,
+            output_keys=inner.get("output_keys"),
+            version=inner.get("version", "v0.0"),
+        )
 
 
 class PacketFunctionWrapper(PacketFunctionBase):
@@ -534,6 +583,43 @@ class PacketFunctionWrapper(PacketFunctionBase):
 
     def get_execution_data(self) -> dict[str, Any]:
         return self._packet_function.get_execution_data()
+
+    def to_config(self) -> dict[str, Any]:
+        """Delegate serialization to the wrapped packet function."""
+        return self._packet_function.to_config()
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "PacketFunctionWrapper":
+        """Reconstruct by delegating to the wrapped function type.
+
+        Args:
+            config: A dict as produced by :meth:`to_config`.
+
+        Returns:
+            A new instance reconstructed from *config*.
+        """
+        return cls._packet_function_class_for_config(config).from_config(config)
+
+    @staticmethod
+    def _packet_function_class_for_config(config: dict[str, Any]) -> type:
+        """Return the concrete class to use when reconstructing from *config*.
+
+        Currently only ``PythonPacketFunction`` is supported. Subclasses may
+        override this to handle additional types.
+
+        Args:
+            config: A config dict as produced by :meth:`to_config`.
+
+        Returns:
+            The class to call ``from_config`` on.
+
+        Raises:
+            ValueError: If the ``packet_function_type_id`` is not recognized.
+        """
+        type_id = config.get("packet_function_type_id")
+        if type_id == "python.function.v0":
+            return PythonPacketFunction
+        raise ValueError(f"Unrecognized packet_function_type_id: {type_id!r}")
 
     # -- Executor delegation: setting/getting the executor on a wrapper
     #    transparently targets the wrapped (leaf) packet function.
