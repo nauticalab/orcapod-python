@@ -1,7 +1,7 @@
 # Pipeline Serialization Design
 
 **Date**: 2026-03-12
-**Status**: Approved design, pending implementation
+**Status**: Approved design, implemented
 
 ## Overview
 
@@ -474,11 +474,12 @@ to recompute. Full hash validation is documented as future work.
 
 | Mode | Sources | Operators | Function Pods |
 |------|---------|-----------|---------------|
-| `"full"` | Reconstruct if possible, degrade gracefully | Reconstruct (usually succeeds) | Attempt import via `from_config()`, degrade to read-only on failure |
-| `"read_only"` | Reconstruct if possible, degrade gracefully | Reconstruct (usually succeeds) | Skip reconstruction, always read-only |
+| `"full"` | Reconstruct if possible, degrade gracefully | Reconstruct if upstreams are usable, degrade gracefully | Attempt import via `from_config()`, degrade to read-only on failure |
+| `"read_only"` | Skip reconstruction, always read-only | Skip reconstruction, always read-only | Skip reconstruction, always read-only |
 
-Both modes attempt source and operator reconstruction since these are typically file-backed
-or built-in. The key difference is whether function pod import is attempted.
+In `"full"` mode, the loader attempts to reconstruct all node types, falling back to
+read-only on failure. In `"read_only"` mode, all nodes are loaded as metadata-only —
+no sources, operators, or function pods are reconstructed.
 
 ---
 
