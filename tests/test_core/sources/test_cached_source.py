@@ -223,9 +223,9 @@ class TestCachedSourceCumulative:
     def test_dedup_on_same_data(self, simple_source, db):
         """Running twice with the same data produces no duplicates."""
         ps1 = CachedSource(simple_source, cache_database=db)
-        ps1.run()
+        ps1.flow()
         ps2 = CachedSource(simple_source, cache_database=db)
-        ps2.run()
+        ps2.flow()
         table = ps2.as_table()
         assert table.num_rows == 3  # no duplicates
 
@@ -249,18 +249,18 @@ class TestCachedSourceCumulative:
         # Different data → different content_hash → different cache_paths
         # So cumulative within the SAME cache_path requires same content_hash
         ps1 = CachedSource(s1, cache_database=db)
-        ps1.run()
+        ps1.flow()
         assert ps1.as_table().num_rows == 2
 
         # Same data source: should dedup
         s1_again = ArrowTableSource(t1, tag_columns=["k"], source_id="shared")
         ps1_again = CachedSource(s1_again, cache_database=db)
-        ps1_again.run()
+        ps1_again.flow()
         assert ps1_again.as_table().num_rows == 2
 
         # Different source (s2) has different cache_path
         ps2 = CachedSource(s2, cache_database=db)
-        ps2.run()
+        ps2.flow()
         assert ps2.as_table().num_rows == 3
 
 

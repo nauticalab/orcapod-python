@@ -145,13 +145,13 @@ class TestSourcePodCaching:
         )
         assert patients.cache_path != labs.cache_path
 
-    def test_cache_populates_on_run(self, clinic_a, source_db):
+    def test_cache_populates_on_flow(self, clinic_a, source_db):
         patients_path, _ = clinic_a
         ps = CachedSource(
             DeltaTableSource(patients_path, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
-        ps.run()
+        ps.flow()
         records = ps.get_all_records()
         assert records is not None
         assert records.num_rows == 3
@@ -162,12 +162,12 @@ class TestSourcePodCaching:
             DeltaTableSource(patients_path, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
-        ps1.run()
+        ps1.flow()
         ps2 = CachedSource(
             DeltaTableSource(patients_path, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
-        ps2.run()
+        ps2.flow()
         assert ps2.get_all_records().num_rows == 3
 
     def test_named_source_same_name_same_schema_same_identity(
@@ -205,7 +205,7 @@ class TestSourcePodCaching:
             DeltaTableSource(patients_path, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
-        ps1.run()
+        ps1.flow()
         assert ps1.get_all_records().num_rows == 3
 
         # Update Delta table: add p4
@@ -225,7 +225,7 @@ class TestSourcePodCaching:
             DeltaTableSource(patients_path, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
-        ps2.run()
+        ps2.flow()
         # 3 original + 1 new, existing rows deduped
         assert ps2.get_all_records().num_rows == 4
 
