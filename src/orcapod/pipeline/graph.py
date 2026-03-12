@@ -459,6 +459,7 @@ class Pipeline(GraphTracker):
         nodes: dict[str, dict[str, Any]] = {}
         for content_hash_str, node in self._persistent_node_map.items():
             tag_schema, packet_schema = node.output_schema()
+            type_converter = node.data_context.type_converter
             descriptor: dict[str, Any] = {
                 "node_type": node.node_type,
                 "label": node.label,
@@ -466,8 +467,8 @@ class Pipeline(GraphTracker):
                 "pipeline_hash": node.pipeline_hash().to_string(),
                 "data_context_key": node.data_context_key,
                 "output_schema": {
-                    "tag": serialize_schema(tag_schema),
-                    "packet": serialize_schema(packet_schema),
+                    "tag": serialize_schema(tag_schema, type_converter),
+                    "packet": serialize_schema(packet_schema, type_converter),
                 },
             }
 
@@ -820,20 +821,28 @@ class Pipeline(GraphTracker):
         from orcapod.core.function_pod import FunctionPod
         from orcapod.core.nodes import PersistentFunctionNode
 
-        if mode == "full" and upstream_usable:
-            try:
-                pod = FunctionPod.from_config(descriptor["function_pod"])
-                return PersistentFunctionNode.from_descriptor(
-                    descriptor,
-                    function_pod=pod,
-                    input_stream=upstream_node,
-                    databases=databases,
-                )
-            except Exception:
+        if mode == "full":
+            if not upstream_usable:
                 logger.warning(
-                    "Failed to reconstruct function node %r, falling back to read-only.",
+                    "Upstream for function node %r is not usable, "
+                    "falling back to read-only.",
                     descriptor.get("label"),
                 )
+            else:
+                try:
+                    pod = FunctionPod.from_config(descriptor["function_pod"])
+                    return PersistentFunctionNode.from_descriptor(
+                        descriptor,
+                        function_pod=pod,
+                        input_stream=upstream_node,
+                        databases=databases,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to reconstruct function node %r, "
+                        "falling back to read-only.",
+                        descriptor.get("label"),
+                    )
 
         return PersistentFunctionNode.from_descriptor(
             descriptor,
@@ -866,20 +875,28 @@ class Pipeline(GraphTracker):
         """
         from orcapod.core.nodes import PersistentOperatorNode
 
-        if all_upstreams_usable and mode != "read_only":
-            try:
-                op = resolve_operator_from_config(descriptor["operator"])
-                return PersistentOperatorNode.from_descriptor(
-                    descriptor,
-                    operator=op,
-                    input_streams=upstream_nodes,
-                    databases=databases,
-                )
-            except Exception:
+        if mode != "read_only":
+            if not all_upstreams_usable:
                 logger.warning(
-                    "Failed to reconstruct operator node %r, falling back to read-only.",
+                    "Upstream(s) for operator node %r are not usable, "
+                    "falling back to read-only.",
                     descriptor.get("label"),
                 )
+            else:
+                try:
+                    op = resolve_operator_from_config(descriptor["operator"])
+                    return PersistentOperatorNode.from_descriptor(
+                        descriptor,
+                        operator=op,
+                        input_streams=upstream_nodes,
+                        databases=databases,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to reconstruct operator node %r, "
+                        "falling back to read-only.",
+                        descriptor.get("label"),
+                    )
 
         return PersistentOperatorNode.from_descriptor(
             descriptor,

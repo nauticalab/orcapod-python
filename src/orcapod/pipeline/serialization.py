@@ -301,15 +301,28 @@ def register_packet_function(type_id: str, cls: type) -> None:
 # ---------------------------------------------------------------------------
 
 
-def serialize_schema(schema: Any) -> dict[str, str]:
+def serialize_schema(schema: Any, type_converter: Any | None = None) -> dict[str, str]:
     """Convert a Schema mapping to JSON-serializable Arrow type strings.
 
     Args:
         schema: A Schema-like mapping from field name to data type.
+        type_converter: Optional type converter for Python→Arrow conversion.
+            When provided, Python types (e.g. ``int``, ``str``) are converted
+            to Arrow type strings (e.g. ``"int64"``, ``"large_string"``).
+            When ``None``, values are stringified directly.
 
     Returns:
         A dict mapping field names to Arrow type string representations.
     """
+    if type_converter is not None:
+        result = {}
+        for k, v in schema.items():
+            try:
+                arrow_type = type_converter.python_type_to_arrow_type(v)
+                result[k] = str(arrow_type)
+            except Exception:
+                result[k] = str(v)
+        return result
     return {k: str(v) for k, v in schema.items()}
 
 

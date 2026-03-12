@@ -75,6 +75,10 @@ class _FunctionPodBase(TraceableBase):
         self._packet_function = packet_function
         self._output_schema_hash = None
 
+    def computed_label(self) -> str | None:
+        """Use the packet function's canonical name as the default label."""
+        return self._packet_function.canonical_function_name
+
     @property
     def packet_function(self) -> PacketFunctionProtocol:
         return self._packet_function
