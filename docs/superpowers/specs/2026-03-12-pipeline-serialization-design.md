@@ -250,39 +250,69 @@ loader to fall back to read-only mode for that node.
 `FunctionPod` also gets `to_config()` / `from_config()` that wraps the packet function's
 config with pod-level metadata (node_config, etc.).
 
-### Database classes
+### ArrowDatabaseProtocol
 
-Each database implementation gets:
-
-```python
-def to_config(self) -> dict[str, Any]:
-    """Serialize database configuration to a JSON-compatible dict."""
-    ...
-
-@classmethod
-def from_config(cls, config: dict[str, Any]) -> Self:
-    """Reconstruct a database from a config dict."""
-    ...
-```
-
-### Source classes
-
-Each source implementation gets:
+`to_config()` and `from_config()` become official methods on `ArrowDatabaseProtocol`:
 
 ```python
-def to_config(self) -> dict[str, Any]:
-    """Serialize source configuration to a JSON-compatible dict."""
-    ...
+@runtime_checkable
+class ArrowDatabaseProtocol(Protocol):
+    # ... existing methods (add_record, get_all_records, flush, etc.) ...
 
-@classmethod
-def from_config(cls, config: dict[str, Any]) -> Self:
-    """Reconstruct a source from a config dict."""
-    ...
+    def to_config(self) -> dict[str, Any]:
+        """Serialize database configuration to a JSON-compatible dict.
+
+        The returned dict must include a ``"type"`` key identifying the
+        database implementation (e.g., ``"delta_table"``, ``"in_memory"``).
+        """
+        ...
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> Self:
+        """Reconstruct a database instance from a config dict."""
+        ...
 ```
 
-For in-memory sources (DictSource, ListSource with raw data, etc.), `to_config()` captures
-metadata but not the data itself. `from_config()` raises for these types, which the loader
-catches and falls back to read-only.
+Every database implementation (`DeltaTableDatabase`, `InMemoryArrowDatabase`,
+`NoOpArrowDatabase`) implements these as concrete methods. The `"type"` key in the
+returned config dict is used by the `DATABASE_REGISTRY` during deserialization to
+dispatch to the correct class.
+
+### SourceProtocol
+
+`to_config()` and `from_config()` become official methods on `SourceProtocol`:
+
+```python
+@runtime_checkable
+class SourceProtocol(StreamProtocol, Protocol):
+    # ... existing methods (source_id, resolve_field) ...
+
+    def to_config(self) -> dict[str, Any]:
+        """Serialize source configuration to a JSON-compatible dict.
+
+        The returned dict must include a ``"source_type"`` key identifying
+        the source implementation (e.g., ``"csv"``, ``"delta_table"``).
+        For in-memory sources, ``to_config()`` captures metadata but not
+        the data itself.
+        """
+        ...
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> Self:
+        """Reconstruct a source instance from a config dict.
+
+        Raises ``NotImplementedError`` for in-memory source types that
+        cannot be reconstructed without the original data.
+        """
+        ...
+```
+
+Every source implementation (`CSVSource`, `DeltaTableSource`, `DictSource`, etc.)
+implements these as concrete methods. For in-memory sources (DictSource, ListSource,
+DataFrameSource, ArrowTableSource), `to_config()` captures metadata (tag_columns,
+source_id, etc.) but not the data itself. `from_config()` raises
+`NotImplementedError` for these types, which the loader catches and falls back to
+read-only.
 
 ---
 
