@@ -235,6 +235,16 @@ def extract_function_schemas(
             raise ValueError(
                 f"Type for return item '{key}' is not specified in output_types and has no type annotation in function signature."
             )
+    # Reject bare container types (must have type parameters)
+    _BARE_CONTAINER_TYPES = {dict, list, set, tuple}
+    for name, type_annot in {**param_info, **inferred_output_types}.items():
+        if type_annot in _BARE_CONTAINER_TYPES:
+            raise ValueError(
+                f"Type annotation for '{name}' is bare {type_annot.__name__} "
+                f"without type parameters. Use e.g. {type_annot.__name__}[str, int] "
+                f"or {type_annot.__name__}[int] instead."
+            )
+
     return Schema(param_info, optional_fields=optional_params), Schema(
         inferred_output_types
     )

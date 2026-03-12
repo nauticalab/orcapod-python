@@ -6,7 +6,7 @@ from orcapod.core.function_pod import FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
 
 
-def sample_transform(age: int) -> dict:
+def sample_transform(age: int) -> dict[str, int]:
     return {"age_plus_one": age + 1}
 
 

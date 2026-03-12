@@ -258,6 +258,96 @@ class TestPythonPacketFunctionConstruction:
         assert "x" in pf.input_packet_schema
         assert "y" in pf.input_packet_schema
 
+    def test_bare_dict_return_type_raises(self):
+        """Bare ``dict`` (no type params) is not a valid output type."""
+
+        def func(x: int) -> dict:
+            return {"result": x}
+
+        with pytest.raises(ValueError, match="dict"):
+            PythonPacketFunction(func, output_keys="result")
+
+    def test_bare_list_return_type_raises(self):
+        """Bare ``list`` (no type params) is not a valid output type."""
+
+        def func(x: int) -> list:
+            return [x]
+
+        with pytest.raises(ValueError, match="list"):
+            PythonPacketFunction(func, output_keys="result")
+
+    def test_bare_set_return_type_raises(self):
+        """Bare ``set`` (no type params) is not a valid output type."""
+
+        def func(x: int) -> set:
+            return {x}
+
+        with pytest.raises(ValueError, match="set"):
+            PythonPacketFunction(func, output_keys="result")
+
+    def test_bare_tuple_return_type_raises(self):
+        """Bare ``tuple`` (no type params) is not a valid output type."""
+
+        def func(x: int) -> tuple:
+            return (x,)
+
+        with pytest.raises(ValueError, match="tuple"):
+            PythonPacketFunction(func, output_keys="result")
+
+    def test_bare_dict_input_type_raises(self):
+        """Bare ``dict`` (no type params) is not a valid input type."""
+
+        def func(x: dict) -> int:
+            return 1
+
+        with pytest.raises(ValueError, match="dict"):
+            PythonPacketFunction(func, output_keys="result")
+
+    def test_bare_list_input_type_raises(self):
+        """Bare ``list`` (no type params) is not a valid input type."""
+
+        def func(x: list) -> int:
+            return 1
+
+        with pytest.raises(ValueError, match="list"):
+            PythonPacketFunction(func, output_keys="result")
+
+    def test_bare_set_input_type_raises(self):
+        """Bare ``set`` (no type params) is not a valid input type."""
+
+        def func(x: set) -> int:
+            return 1
+
+        with pytest.raises(ValueError, match="set"):
+            PythonPacketFunction(func, output_keys="result")
+
+    def test_bare_tuple_input_type_raises(self):
+        """Bare ``tuple`` (no type params) is not a valid input type."""
+
+        def func(x: tuple) -> int:
+            return 1
+
+        with pytest.raises(ValueError, match="tuple"):
+            PythonPacketFunction(func, output_keys="result")
+
+    def test_parameterized_dict_return_type_accepted(self):
+        """``dict[str, int]`` (with type params) is a valid output type."""
+
+        def func(x: int) -> dict[str, int]:
+            return {"result": x}
+
+        pf = PythonPacketFunction(func, output_keys="result")
+        assert "result" in pf.output_packet_schema
+
+    def test_parameterized_list_return_type_accepted(self):
+        """``list[int]`` (with type params) is a valid output type."""
+
+        def func(x: int) -> list[int]:
+            return [x]
+
+        pf = PythonPacketFunction(func, output_keys="result")
+        assert "result" in pf.output_packet_schema
+
 
 # ---------------------------------------------------------------------------
 # 5. get_function_variation_data

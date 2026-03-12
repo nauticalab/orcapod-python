@@ -5,7 +5,7 @@ import pytest
 from orcapod.core.packet_function import PythonPacketFunction
 
 
-def sample_transform(age: int, name: str) -> dict:
+def sample_transform(age: int, name: str) -> dict[str, int]:
     return {"age_plus_one": age + 1}
 
 

@@ -120,7 +120,7 @@ from orcapod.core.function_pod import FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
 
 
-def _sample_func(b: int) -> dict:
+def _sample_func(b: int) -> dict[str, int]:
     return {"result": b * 2}
 
 
