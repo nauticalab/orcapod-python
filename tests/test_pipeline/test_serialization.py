@@ -1,4 +1,4 @@
-"""End-to-end tests for Pipeline.save()."""
+"""End-to-end tests for Pipeline.save() and Pipeline.load()."""
 
 import json
 
@@ -13,12 +13,12 @@ from orcapod.core.sources.dict_source import DictSource
 from orcapod.databases.delta_lake_databases import DeltaTableDatabase
 from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
 from orcapod.pipeline import Pipeline
-from orcapod.pipeline.serialization import PIPELINE_FORMAT_VERSION
+from orcapod.pipeline.serialization import PIPELINE_FORMAT_VERSION, LoadStatus
 
 
-def transform_func(y: int) -> dict:
+def transform_func(y: int) -> int:
     """A simple transform function that doubles the value."""
-    return {"result": y * 2}
+    return y * 2
 
 
 @pytest.fixture
@@ -32,7 +32,7 @@ def simple_pipeline(tmp_path):
     )
     pf = PythonPacketFunction(
         function=transform_func,
-        output_keys=["result"],
+        output_keys="result",
         function_name="transform_func",
     )
     pod = FunctionPod(packet_function=pf)
@@ -288,3 +288,55 @@ class TestPipelineSave:
 
         for node_hash, descriptor in data["nodes"].items():
             assert descriptor["content_hash"] == node_hash
+
+
+class TestPipelineLoad:
+    def test_load_full_mode(self, simple_pipeline):
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="full")
+        assert loaded.name == pipeline.name
+        assert len(loaded.compiled_nodes) == len(pipeline.compiled_nodes)
+
+    def test_load_read_only_mode(self, simple_pipeline):
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="read_only")
+        assert loaded.name == pipeline.name
+        # Function nodes should be read-only
+        for name, node in loaded.compiled_nodes.items():
+            if hasattr(node, "load_status"):
+                if node.node_type == "function":
+                    assert node.load_status == LoadStatus.READ_ONLY
+
+    def test_load_version_mismatch_raises(self, simple_pipeline, tmp_path):
+        pipeline, _ = simple_pipeline
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        data = json.loads(path.read_text())
+        data["orcapod_pipeline_version"] = "99.0.0"
+        path.write_text(json.dumps(data))
+        with pytest.raises(ValueError, match="version"):
+            Pipeline.load(str(path))
+
+    def test_load_preserves_node_labels(self, simple_pipeline):
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="full")
+        original_labels = set(pipeline.compiled_nodes.keys())
+        loaded_labels = set(loaded.compiled_nodes.keys())
+        assert original_labels == loaded_labels
+
+    def test_load_preserves_graph_structure(self, simple_pipeline):
+        pipeline, tmp_path = simple_pipeline
+        pipeline.run()
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="full")
+        assert len(loaded._graph_edges) == len(pipeline._graph_edges)
