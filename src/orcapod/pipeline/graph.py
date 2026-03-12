@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.nodes import GraphNode, SourceNode
@@ -562,6 +563,330 @@ class Pipeline(GraphTracker):
             "cache_mode": node._cache_mode.name,
             "pipeline_path": list(node.pipeline_path),
         }
+
+    @classmethod
+    def load(cls, path: str | Path, mode: str = "full") -> "Pipeline":
+        """Deserialize a pipeline from a JSON file.
+
+        Reconstructs the pipeline graph from the serialized descriptor,
+        rebuilding nodes in topological order.  The *mode* parameter
+        controls how aggressively live objects are reconstructed:
+
+        - ``"full"``: attempt to reconstruct live sources, function pods,
+          and operators so the pipeline can be re-run.  Falls back to
+          read-only per-node when reconstruction fails.
+        - ``"read_only"``: load metadata only; no live sources or
+          function pods are reconstructed.
+
+        Args:
+            path: Path to the JSON file produced by :meth:`save`.
+            mode: ``"full"`` (default) or ``"read_only"``.
+
+        Returns:
+            A compiled ``Pipeline`` instance.
+
+        Raises:
+            ValueError: If the file's format version is unsupported.
+        """
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.nodes import (
+            PersistentFunctionNode,
+            PersistentOperatorNode,
+            SourceNode,
+        )
+        from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
+        from orcapod.pipeline.serialization import (
+            SUPPORTED_FORMAT_VERSIONS,
+            LoadStatus,
+            resolve_database_from_config,
+            resolve_operator_from_config,
+            resolve_source_from_config,
+        )
+
+        path = Path(path)
+        with open(path) as f:
+            data = json.load(f)
+
+        # 1. Validate version
+        version = data.get("orcapod_pipeline_version", "")
+        if version not in SUPPORTED_FORMAT_VERSIONS:
+            raise ValueError(
+                f"Unsupported pipeline format version {version!r}. "
+                f"Supported versions: {sorted(SUPPORTED_FORMAT_VERSIONS)}"
+            )
+
+        # 2. Reconstruct databases
+        pipeline_meta = data["pipeline"]
+        db_configs = pipeline_meta["databases"]
+
+        pipeline_db = resolve_database_from_config(db_configs["pipeline_database"])
+        function_db = (
+            resolve_database_from_config(db_configs["function_database"])
+            if db_configs.get("function_database") is not None
+            else None
+        )
+
+        # 3. Build edge graph and derive topological order
+        nodes_data = data["nodes"]
+        edges = data["edges"]
+
+        edge_graph: nx.DiGraph = nx.DiGraph()
+        for upstream_hash, downstream_hash in edges:
+            edge_graph.add_edge(upstream_hash, downstream_hash)
+        # Add isolated nodes (nodes with no edges)
+        for node_hash in nodes_data:
+            if node_hash not in edge_graph:
+                edge_graph.add_node(node_hash)
+
+        topo_order = list(nx.topological_sort(edge_graph))
+
+        # 4. Walk nodes in topological order, reconstruct each
+        reconstructed: dict[
+            str, SourceNode | PersistentFunctionNode | PersistentOperatorNode
+        ] = {}
+
+        # Build reverse edge map: downstream -> list of upstream hashes
+        upstream_map: dict[str, list[str]] = {}
+        for up_hash, down_hash in edges:
+            upstream_map.setdefault(down_hash, []).append(up_hash)
+
+        for node_hash in topo_order:
+            descriptor = nodes_data.get(node_hash)
+            if descriptor is None:
+                continue
+
+            node_type = descriptor.get("node_type")
+
+            if node_type == "source":
+                node = cls._load_source_node(
+                    descriptor, mode, resolve_source_from_config
+                )
+                reconstructed[node_hash] = node
+
+            elif node_type == "function":
+                # Determine upstream node
+                up_hashes = upstream_map.get(node_hash, [])
+                upstream_node = reconstructed.get(up_hashes[0]) if up_hashes else None
+
+                # Check if upstream is usable for full mode
+                upstream_usable = (
+                    upstream_node is not None
+                    and hasattr(upstream_node, "load_status")
+                    and upstream_node.load_status == LoadStatus.FULL
+                )
+
+                # Build databases dict
+                result_db = function_db if function_db is not None else pipeline_db
+                dbs = {"pipeline": pipeline_db, "result": result_db}
+
+                node = cls._load_function_node(
+                    descriptor, mode, upstream_node, upstream_usable, dbs
+                )
+                reconstructed[node_hash] = node
+
+            elif node_type == "operator":
+                up_hashes = upstream_map.get(node_hash, [])
+                upstream_nodes = tuple(
+                    reconstructed[h] for h in up_hashes if h in reconstructed
+                )
+
+                # Check if all upstreams are usable
+                all_upstreams_usable = (
+                    all(
+                        hasattr(n, "load_status") and n.load_status == LoadStatus.FULL
+                        for n in upstream_nodes
+                    )
+                    if upstream_nodes
+                    else False
+                )
+
+                dbs = {"pipeline": pipeline_db}
+
+                node = cls._load_operator_node(
+                    descriptor,
+                    mode,
+                    upstream_nodes,
+                    all_upstreams_usable,
+                    dbs,
+                    resolve_operator_from_config,
+                )
+                reconstructed[node_hash] = node
+
+        # 5. Build Pipeline instance
+        name = tuple(pipeline_meta["name"])
+        pipeline = cls(
+            name=name,
+            pipeline_database=pipeline_db,
+            function_database=function_db,
+            auto_compile=False,
+        )
+
+        # Populate persistent node map
+        pipeline._persistent_node_map = dict(reconstructed)
+
+        # Populate _nodes (label -> node) for labeled non-source nodes.
+        # This matches compile() behavior where freshly-created source
+        # nodes are not added to the named-node dictionary.
+        pipeline._nodes = {}
+        for node_hash, node in reconstructed.items():
+            label = node.label
+            if label and node.node_type != "source":
+                pipeline._nodes[label] = node
+
+        # Build node graph
+        pipeline._node_graph = nx.DiGraph()
+        for up_hash, down_hash in edges:
+            up_node = reconstructed.get(up_hash)
+            down_node = reconstructed.get(down_hash)
+            if up_node is not None and down_node is not None:
+                pipeline._node_graph.add_edge(up_node, down_node)
+        for node in reconstructed.values():
+            if node not in pipeline._node_graph:
+                pipeline._node_graph.add_node(node)
+
+        # Restore graph edges as content_hash string pairs
+        pipeline._graph_edges = [(up, down) for up, down in edges]
+
+        # Rebuild _hash_graph
+        pipeline._hash_graph = nx.DiGraph()
+        for up_hash, down_hash in edges:
+            pipeline._hash_graph.add_edge(up_hash, down_hash)
+        for node_hash, node in reconstructed.items():
+            if node_hash not in pipeline._hash_graph:
+                pipeline._hash_graph.add_node(node_hash)
+            attrs = pipeline._hash_graph.nodes[node_hash]
+            attrs["node_type"] = node.node_type
+            if node.label:
+                attrs["label"] = node.label
+
+        pipeline._compiled = True
+
+        return pipeline
+
+    @staticmethod
+    def _load_source_node(
+        descriptor: dict[str, Any],
+        mode: str,
+        resolve_source_from_config: Any,
+    ) -> "SourceNode":
+        """Reconstruct a SourceNode from a descriptor.
+
+        Args:
+            descriptor: The serialized node descriptor.
+            mode: Load mode (``"full"`` or ``"read_only"``).
+            resolve_source_from_config: Callable to reconstruct a source.
+
+        Returns:
+            A ``SourceNode`` instance.
+        """
+        from orcapod.core.nodes import SourceNode
+
+        reconstructable = descriptor.get("reconstructable", False)
+        source_config = descriptor.get("source_config")
+
+        stream = None
+        if reconstructable and mode != "read_only" and source_config is not None:
+            try:
+                stream = resolve_source_from_config(source_config)
+            except Exception:
+                logger.warning(
+                    "Failed to reconstruct source %r, falling back to read-only.",
+                    descriptor.get("label"),
+                )
+                stream = None
+
+        return SourceNode.from_descriptor(descriptor, stream=stream, databases={})
+
+    @staticmethod
+    def _load_function_node(
+        descriptor: dict[str, Any],
+        mode: str,
+        upstream_node: Any | None,
+        upstream_usable: bool,
+        databases: dict[str, Any],
+    ) -> "PersistentFunctionNode":
+        """Reconstruct a PersistentFunctionNode from a descriptor.
+
+        Args:
+            descriptor: The serialized node descriptor.
+            mode: Load mode.
+            upstream_node: The reconstructed upstream node, or ``None``.
+            upstream_usable: Whether the upstream is in FULL mode.
+            databases: Database role mapping.
+
+        Returns:
+            A ``PersistentFunctionNode`` instance.
+        """
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.nodes import PersistentFunctionNode
+
+        if mode == "full" and upstream_usable:
+            try:
+                pod = FunctionPod.from_config(descriptor["function_pod"])
+                return PersistentFunctionNode.from_descriptor(
+                    descriptor,
+                    function_pod=pod,
+                    input_stream=upstream_node,
+                    databases=databases,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to reconstruct function node %r, falling back to read-only.",
+                    descriptor.get("label"),
+                )
+
+        return PersistentFunctionNode.from_descriptor(
+            descriptor,
+            function_pod=None,
+            input_stream=None,
+            databases=databases,
+        )
+
+    @staticmethod
+    def _load_operator_node(
+        descriptor: dict[str, Any],
+        mode: str,
+        upstream_nodes: tuple,
+        all_upstreams_usable: bool,
+        databases: dict[str, Any],
+        resolve_operator_from_config: Any,
+    ) -> "PersistentOperatorNode":
+        """Reconstruct a PersistentOperatorNode from a descriptor.
+
+        Args:
+            descriptor: The serialized node descriptor.
+            mode: Load mode.
+            upstream_nodes: Tuple of reconstructed upstream nodes.
+            all_upstreams_usable: Whether all upstreams are in FULL mode.
+            databases: Database role mapping.
+            resolve_operator_from_config: Callable to reconstruct an operator.
+
+        Returns:
+            A ``PersistentOperatorNode`` instance.
+        """
+        from orcapod.core.nodes import PersistentOperatorNode
+
+        if all_upstreams_usable and mode != "read_only":
+            try:
+                op = resolve_operator_from_config(descriptor["operator"])
+                return PersistentOperatorNode.from_descriptor(
+                    descriptor,
+                    operator=op,
+                    input_streams=upstream_nodes,
+                    databases=databases,
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to reconstruct operator node %r, falling back to read-only.",
+                    descriptor.get("label"),
+                )
+
+        return PersistentOperatorNode.from_descriptor(
+            descriptor,
+            operator=None,
+            input_streams=(),
+            databases=databases,
+        )
 
     # ------------------------------------------------------------------
     # Node access by label
