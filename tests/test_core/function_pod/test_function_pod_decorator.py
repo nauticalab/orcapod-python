@@ -74,6 +74,12 @@ class TestFunctionPodDecoratorProperties:
     def test_canonical_name_matches_function_name(self):
         assert triple.pod.packet_function.canonical_function_name == "triple"
 
+    def test_pod_label_defaults_to_function_name(self):
+        assert triple.pod.label == "triple"
+
+    def test_pod_label_defaults_to_function_name_with_explicit_name(self):
+        assert renamed.pod.label == "custom_name"
+
     def test_explicit_function_name_overrides(self):
         assert renamed.pod.packet_function.canonical_function_name == "custom_name"
 
