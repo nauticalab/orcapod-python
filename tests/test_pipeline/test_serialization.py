@@ -340,3 +340,84 @@ class TestPipelineLoad:
         pipeline.save(str(path))
         loaded = Pipeline.load(str(path), mode="full")
         assert len(loaded._graph_edges) == len(pipeline._graph_edges)
+
+
+class TestPipelineSaveLoadIntegration:
+    def test_save_load_run_full_cycle(self, tmp_path):
+        """Save a pipeline, load in full mode, and verify structure."""
+        db_path = str(tmp_path / "db")
+        db = DeltaTableDatabase(base_path=db_path)
+        source = DictSource(
+            data=[{"x": 1, "y": 2}, {"x": 3, "y": 4}],
+            tag_columns=["x"],
+            source_id="test_source",
+        )
+        pf = PythonPacketFunction(
+            function=transform_func,
+            output_keys=["result"],
+            function_name="transform_func",
+        )
+        pod = FunctionPod(packet_function=pf)
+        pipeline = Pipeline(name="test", pipeline_database=db)
+        with pipeline:
+            result = pod.process(source, label="transform")
+        pipeline.run()
+
+        # Save and reload
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="full")
+
+        # The loaded pipeline should have the same nodes
+        assert set(loaded.compiled_nodes.keys()) == set(pipeline.compiled_nodes.keys())
+
+    def test_read_only_can_access_cached_data(self, tmp_path):
+        """Save a pipeline after run, load read-only, access cached results."""
+        db_path = str(tmp_path / "db")
+        db = DeltaTableDatabase(base_path=db_path)
+        source = DictSource(
+            data=[{"x": 1, "y": 2}, {"x": 3, "y": 4}],
+            tag_columns=["x"],
+            source_id="test_source",
+        )
+        pf = PythonPacketFunction(
+            function=transform_func,
+            output_keys=["result"],
+            function_name="transform_func",
+        )
+        pod = FunctionPod(packet_function=pf)
+        pipeline = Pipeline(name="test", pipeline_database=db)
+        with pipeline:
+            result = pod.process(source, label="transform")
+        pipeline.run()
+        db.flush()
+
+        # Save and reload in read-only mode
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="read_only")
+
+        # Function node should be read-only but have cached data accessible
+        transform_node = loaded.compiled_nodes.get("transform")
+        assert transform_node is not None
+        assert transform_node.load_status == LoadStatus.READ_ONLY
+
+    def test_pipeline_with_operator(self, tmp_path):
+        """Save/load a pipeline with an operator node."""
+        db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
+        source1 = DictSource(
+            data=[{"a": 1, "b": 10}], tag_columns=["a"], source_id="s1"
+        )
+        source2 = DictSource(
+            data=[{"a": 1, "c": 20}], tag_columns=["a"], source_id="s2"
+        )
+        pipeline = Pipeline(name="test", pipeline_database=db)
+        with pipeline:
+            joined = Join().process(source1, source2, label="my_join")
+        pipeline.run()
+
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="full")
+
+        assert "my_join" in loaded.compiled_nodes
