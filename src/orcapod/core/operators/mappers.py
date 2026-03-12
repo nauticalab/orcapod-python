@@ -30,6 +30,20 @@ class MapPackets(UnaryOperator):
         self.drop_unmapped = drop_unmapped
         super().__init__(**kwargs)
 
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this MapPackets operator to a config dict.
+
+        Returns:
+            A dict with ``class_name``, ``module_path``, and ``config`` keys,
+            where ``config`` contains ``name_map`` and ``drop_unmapped``.
+        """
+        config = super().to_config()
+        config["config"] = {
+            "name_map": dict(self.name_map),
+            "drop_unmapped": self.drop_unmapped,
+        }
+        return config
+
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         tag_columns, packet_columns = stream.keys()
         unmapped_columns = set(packet_columns) - set(self.name_map.keys())
@@ -160,6 +174,20 @@ class MapTags(UnaryOperator):
         self.name_map = dict(name_map)
         self.drop_unmapped = drop_unmapped
         super().__init__(**kwargs)
+
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this MapTags operator to a config dict.
+
+        Returns:
+            A dict with ``class_name``, ``module_path``, and ``config`` keys,
+            where ``config`` contains ``name_map`` and ``drop_unmapped``.
+        """
+        config = super().to_config()
+        config["config"] = {
+            "name_map": dict(self.name_map),
+            "drop_unmapped": self.drop_unmapped,
+        }
+        return config
 
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         tag_columns, packet_columns = stream.keys()

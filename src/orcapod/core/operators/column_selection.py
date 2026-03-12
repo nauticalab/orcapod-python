@@ -31,6 +31,20 @@ class SelectTagColumns(UnaryOperator):
         self.strict = strict
         super().__init__(**kwargs)
 
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this SelectTagColumns operator to a config dict.
+
+        Returns:
+            A dict with ``class_name``, ``module_path``, and ``config`` keys,
+            where ``config`` contains ``columns`` and ``strict``.
+        """
+        config = super().to_config()
+        config["config"] = {
+            "columns": list(self.columns),
+            "strict": self.strict,
+        }
+        return config
+
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         tag_columns, packet_columns = stream.keys()
         tags_to_drop = [c for c in tag_columns if c not in self.columns]
@@ -130,6 +144,20 @@ class SelectPacketColumns(UnaryOperator):
         self.columns = columns
         self.strict = strict
         super().__init__(**kwargs)
+
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this SelectPacketColumns operator to a config dict.
+
+        Returns:
+            A dict with ``class_name``, ``module_path``, and ``config`` keys,
+            where ``config`` contains ``columns`` and ``strict``.
+        """
+        config = super().to_config()
+        config["config"] = {
+            "columns": list(self.columns),
+            "strict": self.strict,
+        }
+        return config
 
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         tag_columns, packet_columns = stream.keys()
@@ -240,6 +268,20 @@ class DropTagColumns(UnaryOperator):
         self.strict = strict
         super().__init__(**kwargs)
 
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this DropTagColumns operator to a config dict.
+
+        Returns:
+            A dict with ``class_name``, ``module_path``, and ``config`` keys,
+            where ``config`` contains ``columns`` and ``strict``.
+        """
+        config = super().to_config()
+        config["config"] = {
+            "columns": list(self.columns),
+            "strict": self.strict,
+        }
+        return config
+
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         tag_columns, packet_columns = stream.keys()
         columns_to_drop = self.columns
@@ -345,6 +387,20 @@ class DropPacketColumns(UnaryOperator):
         self.columns = columns
         self.strict = strict
         super().__init__(**kwargs)
+
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this DropPacketColumns operator to a config dict.
+
+        Returns:
+            A dict with ``class_name``, ``module_path``, and ``config`` keys,
+            where ``config`` contains ``columns`` and ``strict``.
+        """
+        config = super().to_config()
+        config["config"] = {
+            "columns": list(self.columns),
+            "strict": self.strict,
+        }
+        return config
 
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         tag_columns, packet_columns = stream.keys()
