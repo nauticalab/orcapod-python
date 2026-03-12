@@ -1222,3 +1222,31 @@ class TestSourceNodeNoCaching:
         for sn in source_nodes:
             assert not hasattr(sn, "cache_path")
             assert not hasattr(sn, "get_all_records")
+
+    def test_pipeline_with_cached_source_input(self, pipeline_db):
+        """CachedSource as pipeline input: source caching + pipeline execution."""
+        from orcapod.core.sources import CachedSource
+
+        src_a, src_b = _make_two_sources()
+        source_db = InMemoryArrowDatabase()
+        cached_a = CachedSource(src_a, cache_database=source_db)
+        cached_b = CachedSource(src_b, cache_database=source_db)
+
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(name="cached_src", pipeline_database=pipeline_db)
+        with pipeline:
+            joined = Join()(cached_a, cached_b)
+            pod(joined, label="adder")
+
+        pipeline.run()
+
+        # Function node computed results
+        records = pipeline.adder.get_all_records()
+        assert records is not None
+        assert records.num_rows == 2
+
+        # Source data was cached in source_db (not pipeline_db)
+        assert cached_a.get_all_records() is not None
+        assert cached_b.get_all_records() is not None

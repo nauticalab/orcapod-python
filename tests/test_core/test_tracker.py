@@ -143,6 +143,28 @@ class TestSourceNode:
         node = SourceNode(stream=stream)
         assert node.keys() == stream.keys()
 
+    def test_delegates_as_table(self):
+        stream = _make_stream()
+        node = SourceNode(stream=stream)
+        node_table = node.as_table()
+        stream_table = stream.as_table()
+        assert node_table.equals(stream_table)
+
+    def test_delegates_iter_packets(self):
+        stream = _make_stream()
+        node = SourceNode(stream=stream)
+        node_packets = list(node.iter_packets())
+        stream_packets = list(stream.iter_packets())
+        assert len(node_packets) == len(stream_packets)
+
+    def test_run_is_noop(self):
+        stream = _make_stream()
+        node = SourceNode(stream=stream)
+        # run() should succeed without side effects
+        node.run()
+        # Data is still accessible after run()
+        assert node.as_table().num_rows == stream.as_table().num_rows
+
 
 # ---------------------------------------------------------------------------
 # BasicTrackerManager
