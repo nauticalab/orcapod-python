@@ -27,6 +27,7 @@ from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.system_constants import constants
 from orcapod.types import (
     ColumnConfig,
+    ContentHash,
     NodeConfig,
     PipelineConfig,
     Schema,
@@ -619,7 +620,7 @@ class PersistentFunctionNode(FunctionNode):
     # Read-only overrides
     # ------------------------------------------------------------------
 
-    def content_hash(self, hasher=None) -> "ContentHash":
+    def content_hash(self, hasher=None) -> ContentHash:
         """Return the content hash, using stored value in read-only mode."""
         stored = getattr(self, "_stored_content_hash", None)
         if self._function_pod is None and stored is not None:
@@ -628,7 +629,7 @@ class PersistentFunctionNode(FunctionNode):
             return CH.from_string(stored)
         return super().content_hash(hasher)
 
-    def pipeline_hash(self, hasher=None) -> "ContentHash":
+    def pipeline_hash(self, hasher=None) -> ContentHash:
         """Return the pipeline hash, using stored value in read-only mode."""
         stored = getattr(self, "_stored_pipeline_hash", None)
         if self._function_pod is None and stored is not None:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 from orcapod.core.sources.base import RootSource
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
@@ -59,7 +59,7 @@ class ArrowTableSource(RootSource):
 
     def __init__(
         self,
-        table: "pa.Table",
+        table: pa.Table,
         tag_columns: Collection[str] = (),
         system_tag_columns: Collection[str] = (),
         record_id_column: str | None = None,
@@ -229,7 +229,7 @@ class ArrowTableSource(RootSource):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "ArrowTableSource":
+    def from_config(cls, config: dict[str, Any]) -> Self:
         """Not supported — ArrowTableSource cannot be reconstructed from config.
 
         Args:
@@ -245,7 +245,7 @@ class ArrowTableSource(RootSource):
         )
 
     @property
-    def table(self) -> "pa.Table":
+    def table(self) -> pa.Table:
         return self._table
 
     def identity_structure(self) -> Any:

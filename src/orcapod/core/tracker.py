@@ -135,10 +135,10 @@ class GraphTracker(AutoRegisteringContextBasedTracker):
         **kwargs,
     ) -> None:
         super().__init__(tracker_manager=tracker_manager, **kwargs)
-        self._node_lut: dict[str, "GraphNode"] = {}
+        self._node_lut: dict[str, GraphNode] = {}
         self._upstreams: dict[str, cp.StreamProtocol] = {}
         self._graph_edges: list[tuple[str, str]] = []
-        self._hash_graph: "nx.DiGraph" = nx.DiGraph()
+        self._hash_graph: nx.DiGraph = nx.DiGraph()
 
     def record_function_pod_invocation(
         self,
