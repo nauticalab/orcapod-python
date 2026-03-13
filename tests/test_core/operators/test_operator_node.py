@@ -448,4 +448,4 @@ class TestOperatorNodeRepr:
         op = MapPackets({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
         r = repr(node)
-        assert "PersistentOperatorNode" in r
+        assert "OperatorNode" in r

@@ -1,4 +1,4 @@
-"""OperatorNode and PersistentOperatorNode — stream nodes for operator invocations."""
+"""OperatorNode — stream node for operator invocations with optional DB persistence."""
 
 from __future__ import annotations
 
@@ -35,14 +35,32 @@ else:
 
 
 class OperatorNode(StreamBase):
-    """Non-persistent stream node representing an operator invocation.
+    """Stream node representing an operator invocation with optional DB persistence.
 
-    Provides the core stream interface (identity, schema, iteration) without
-    any database persistence. Subclass ``PersistentOperatorNode`` adds DB-backed
-    storage and record deduplication.
+    When constructed without database parameters, provides the core stream
+    interface (identity, schema, iteration) without any persistence.  When
+    databases are provided (either at construction or via ``attach_databases``),
+    adds pipeline record storage with per-row deduplication, ``get_all_records()``
+    for retrieving stored results, ``as_source()`` for creating a
+    ``DerivedSource`` from DB records, and three-tier cache mode
+    (OFF / LOG / REPLAY).
+
+    Pipeline path structure::
+
+        pipeline_path_prefix / operator.uri / node:{content_hash}
+
+    Where ``content_hash`` is the data-inclusive hash that encodes both
+    pipeline structure and upstream source identities, ensuring each
+    unique source combination gets its own cache table.
+
+    Cache modes:
+        - **OFF** (default): compute, don't write to DB.
+        - **LOG**: compute AND write to DB (append-only historical record).
+        - **REPLAY**: skip computation, flow cached results downstream.
     """
 
     node_type = "operator"
+    HASH_COLUMN_NAME = "_record_hash"
 
     def __init__(
         self,
@@ -51,6 +69,10 @@ class OperatorNode(StreamBase):
         tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
         config: Config | None = None,
+        # Optional DB params for persistent mode:
+        pipeline_database: ArrowDatabaseProtocol | None = None,
+        cache_mode: CacheMode = CacheMode.OFF,
+        pipeline_path_prefix: tuple[str, ...] = (),
     ):
         if tracker_manager is None:
             tracker_manager = DEFAULT_TRACKER_MANAGER
@@ -69,178 +91,46 @@ class OperatorNode(StreamBase):
         self._cached_output_table: pa.Table | None = None
         self._set_modified_time(None)
 
+        # DB persistence state (initially None; set via __init__ params or attach_databases)
+        self._pipeline_database: ArrowDatabaseProtocol | None = None
+        self._pipeline_path_prefix: tuple[str, ...] = ()
+        self._cache_mode = CacheMode.OFF
+        self._pipeline_node_hash: str | None = None
+
+        if pipeline_database is not None:
+            self.attach_databases(
+                pipeline_database=pipeline_database,
+                cache_mode=cache_mode,
+                pipeline_path_prefix=pipeline_path_prefix,
+            )
+
     # ------------------------------------------------------------------
-    # Identity
+    # attach_databases
     # ------------------------------------------------------------------
 
-    def identity_structure(self) -> Any:
-        return (self._operator, self._operator.argument_symmetry(self._input_streams))
-
-    def pipeline_identity_structure(self) -> Any:
-        return (self._operator, self._operator.argument_symmetry(self._input_streams))
-
-    # ------------------------------------------------------------------
-    # Stream interface
-    # ------------------------------------------------------------------
-
-    @property
-    def producer(self) -> OperatorPodProtocol:
-        return self._operator
-
-    @property
-    def data_context(self) -> contexts.DataContext:
-        return contexts.resolve_context(self._operator.data_context_key)
-
-    @property
-    def data_context_key(self) -> str:
-        return self._operator.data_context_key
-
-    @property
-    def upstreams(self) -> tuple[StreamProtocol, ...]:
-        return self._input_streams
-
-    @upstreams.setter
-    def upstreams(self, value: tuple[StreamProtocol, ...]) -> None:
-        self._input_streams = value
-
-    def keys(
+    def attach_databases(
         self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        tag_schema, packet_schema = self.output_schema(
-            columns=columns, all_info=all_info
-        )
-        return tuple(tag_schema.keys()), tuple(packet_schema.keys())
-
-    def output_schema(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> tuple[Schema, Schema]:
-        return self._operator.output_schema(
-            *self._input_streams,
-            columns=columns,
-            all_info=all_info,
-        )
-
-    # ------------------------------------------------------------------
-    # Computation and caching
-    # ------------------------------------------------------------------
-
-    def clear_cache(self) -> None:
-        """Discard all in-memory cached state."""
-        self._cached_output_stream = None
-        self._cached_output_table = None
-        self._update_modified_time()
-
-    def run(self) -> None:
-        """Execute the operator if stale or not yet computed."""
-        if self.is_stale:
-            self.clear_cache()
-
-        if self._cached_output_stream is not None:
-            return
-
-        self._cached_output_stream = self._operator.process(
-            *self._input_streams,
-        )
-        self._update_modified_time()
-
-    def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
-        self.run()
-        assert self._cached_output_stream is not None
-        return self._cached_output_stream.iter_packets()
-
-    def as_table(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> "pa.Table":
-        self.run()
-        assert self._cached_output_stream is not None
-        return self._cached_output_stream.as_table(columns=columns, all_info=all_info)
-
-    # ------------------------------------------------------------------
-    # Async channel execution
-    # ------------------------------------------------------------------
-
-    async def async_execute(
-        self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
-    ) -> None:
-        """Delegate to the wrapped operator's async_execute.
-
-        Passes pipeline hashes from the input streams so that
-        multi-input operators can compute canonical system-tag
-        column names without storing state during validation.
-        """
-        hashes = [s.pipeline_hash() for s in self._input_streams]
-        await self._operator.async_execute(inputs, output, input_pipeline_hashes=hashes)
-
-    def __repr__(self) -> str:
-        return (
-            f"{type(self).__name__}(operator={self._operator!r}, "
-            f"upstreams={self._input_streams!r})"
-        )
-
-
-class PersistentOperatorNode(OperatorNode):
-    """DB-backed stream node that applies an operator to input streams.
-
-    Extends ``OperatorNode`` with:
-
-    - Pipeline record storage with per-row deduplication
-    - ``get_all_records()`` for retrieving stored results
-    - ``as_source()`` for creating a ``DerivedSource`` from DB records
-    - Three-tier cache mode: OFF / LOG / REPLAY
-
-    Pipeline path structure::
-
-        pipeline_path_prefix / operator.uri / node:{content_hash}
-
-    Where ``content_hash`` is the data-inclusive hash that encodes both
-    pipeline structure and upstream source identities, ensuring each
-    unique source combination gets its own cache table.
-
-    Cache modes
-    -----------
-    - **OFF** (default): compute, don't write to DB.
-    - **LOG**: compute AND write to DB (append-only historical record).
-    - **REPLAY**: skip computation, flow cached results downstream.
-    """
-
-    HASH_COLUMN_NAME = "_record_hash"
-
-    def __init__(
-        self,
-        operator: OperatorPodProtocol,
-        input_streams: tuple[StreamProtocol, ...] | list[StreamProtocol],
         pipeline_database: ArrowDatabaseProtocol,
         cache_mode: CacheMode = CacheMode.OFF,
         pipeline_path_prefix: tuple[str, ...] = (),
-        tracker_manager: TrackerManagerProtocol | None = None,
-        label: str | None = None,
-        config: Config | None = None,
-    ):
-        super().__init__(
-            operator=operator,
-            input_streams=input_streams,
-            tracker_manager=tracker_manager,
-            label=label,
-            config=config,
-        )
+    ) -> None:
+        """Attach a database for persistent caching and pipeline records.
 
+        Args:
+            pipeline_database: Database for pipeline records.
+            cache_mode: Caching behaviour (OFF, LOG, or REPLAY).
+            pipeline_path_prefix: Path prefix for pipeline records.
+        """
         self._pipeline_database = pipeline_database
         self._pipeline_path_prefix = pipeline_path_prefix
         self._cache_mode = cache_mode
 
-        # Use content_hash (data-inclusive) so each source combination
-        # gets its own cache table.
+        # Clear caches
+        self.clear_cache()
+        self._content_hash_cache.clear()
+        self._pipeline_hash_cache.clear()
+
+        # Use content_hash (data-inclusive) for pipeline node hash
         self._pipeline_node_hash = self.content_hash().to_string()
 
     # ------------------------------------------------------------------
@@ -254,8 +144,8 @@ class PersistentOperatorNode(OperatorNode):
         operator: OperatorPodProtocol | None,
         input_streams: tuple[StreamProtocol, ...] | list[StreamProtocol],
         databases: dict[str, Any],
-    ) -> "PersistentOperatorNode":
-        """Construct a PersistentOperatorNode from a serialized descriptor.
+    ) -> "OperatorNode":
+        """Construct an OperatorNode from a serialized descriptor.
 
         When *operator* and *input_streams* are provided the node operates
         in full mode — constructed normally via ``__init__``.  When
@@ -273,7 +163,7 @@ class PersistentOperatorNode(OperatorNode):
                 to database instances.
 
         Returns:
-            A new ``PersistentOperatorNode`` instance.
+            A new ``OperatorNode`` instance.
         """
         from orcapod.pipeline.serialization import LoadStatus
 
@@ -312,7 +202,6 @@ class PersistentOperatorNode(OperatorNode):
         node._label = descriptor.get("label")
 
         # From DataContextMixin
-        from orcapod import contexts
         from orcapod.config import DEFAULT_CONFIG
 
         node._data_context = contexts.resolve_context(
@@ -337,7 +226,7 @@ class PersistentOperatorNode(OperatorNode):
         node._cached_output_stream = None
         node._cached_output_table = None
 
-        # From PersistentOperatorNode
+        # DB persistence state
         node._pipeline_database = pipeline_db
         node._pipeline_path_prefix = ()
         node._cache_mode = cache_mode
@@ -375,7 +264,17 @@ class PersistentOperatorNode(OperatorNode):
         return getattr(self, "_load_status", LoadStatus.FULL)
 
     # ------------------------------------------------------------------
-    # Read-only overrides
+    # Identity
+    # ------------------------------------------------------------------
+
+    def identity_structure(self) -> Any:
+        return (self._operator, self._operator.argument_symmetry(self._input_streams))
+
+    def pipeline_identity_structure(self) -> Any:
+        return (self._operator, self._operator.argument_symmetry(self._input_streams))
+
+    # ------------------------------------------------------------------
+    # Read-only overrides (for deserialized nodes without live operator)
     # ------------------------------------------------------------------
 
     def content_hash(self, hasher=None) -> "ContentHash":
@@ -392,19 +291,29 @@ class PersistentOperatorNode(OperatorNode):
             return ContentHash.from_string(stored)
         return super().pipeline_hash(hasher)
 
-    def output_schema(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> tuple[Schema, Schema]:
-        """Return output schema, using stored value in read-only mode."""
-        if self._operator is None:
-            stored = getattr(self, "_stored_schema", {})
-            tag = Schema(stored.get("tag", {}))
-            packet = Schema(stored.get("packet", {}))
-            return tag, packet
-        return super().output_schema(columns=columns, all_info=all_info)
+    # ------------------------------------------------------------------
+    # Stream interface
+    # ------------------------------------------------------------------
+
+    @property
+    def producer(self) -> OperatorPodProtocol:
+        return self._operator
+
+    @property
+    def data_context(self) -> contexts.DataContext:
+        return contexts.resolve_context(self._operator.data_context_key)
+
+    @property
+    def data_context_key(self) -> str:
+        return self._operator.data_context_key
+
+    @property
+    def upstreams(self) -> tuple[StreamProtocol, ...]:
+        return self._input_streams
+
+    @upstreams.setter
+    def upstreams(self, value: tuple[StreamProtocol, ...]) -> None:
+        self._input_streams = value
 
     def keys(
         self,
@@ -417,18 +326,63 @@ class PersistentOperatorNode(OperatorNode):
             tag_keys = tuple(stored.get("tag", {}).keys())
             packet_keys = tuple(stored.get("packet", {}).keys())
             return tag_keys, packet_keys
-        return super().keys(columns=columns, all_info=all_info)
+        tag_schema, packet_schema = self.output_schema(
+            columns=columns, all_info=all_info
+        )
+        return tuple(tag_schema.keys()), tuple(packet_schema.keys())
+
+    def output_schema(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]:
+        """Return output schema, using stored value in read-only mode."""
+        if self._operator is None:
+            stored = getattr(self, "_stored_schema", {})
+            tag = Schema(stored.get("tag", {}))
+            packet = Schema(stored.get("packet", {}))
+            return tag, packet
+        return self._operator.output_schema(
+            *self._input_streams,
+            columns=columns,
+            all_info=all_info,
+        )
+
+    # ------------------------------------------------------------------
+    # Pipeline path
+    # ------------------------------------------------------------------
 
     @property
     def pipeline_path(self) -> tuple[str, ...]:
+        """Return the pipeline path for DB record scoping.
+
+        Raises:
+            RuntimeError: If no database is attached and this is not a
+                read-only deserialized node.
+        """
         stored = getattr(self, "_stored_pipeline_path", None)
         if self._operator is None and stored is not None:
             return stored
+        if self._pipeline_database is None:
+            raise RuntimeError(
+                "pipeline_path requires a database. Call attach_databases() first."
+            )
         return (
             self._pipeline_path_prefix
             + self._operator.uri
             + (f"node:{self._pipeline_node_hash}",)
         )
+
+    # ------------------------------------------------------------------
+    # Computation and caching
+    # ------------------------------------------------------------------
+
+    def clear_cache(self) -> None:
+        """Discard all in-memory cached state."""
+        self._cached_output_stream = None
+        self._cached_output_table = None
+        self._update_modified_time()
 
     def _store_output_stream(self, stream: StreamProtocol) -> None:
         """Materialize stream and store in the pipeline database with per-row dedup."""
@@ -498,9 +452,13 @@ class PersistentOperatorNode(OperatorNode):
     def run(self) -> None:
         """Execute the operator according to the current cache mode.
 
-        - **OFF**: always compute, no DB writes.
-        - **LOG**: always compute, write results to DB.
-        - **REPLAY**: skip computation, load from DB.
+        Without a database:
+            Always compute via the operator's ``process()`` method.
+
+        With a database:
+            - **OFF**: always compute, no DB writes.
+            - **LOG**: always compute, write results to DB.
+            - **REPLAY**: skip computation, load from DB.
         """
         if self.is_stale:
             self.clear_cache()
@@ -508,10 +466,31 @@ class PersistentOperatorNode(OperatorNode):
         if self._cached_output_stream is not None:
             return
 
-        if self._cache_mode == CacheMode.REPLAY:
-            self._replay_from_cache()
+        if self._pipeline_database is not None:
+            if self._cache_mode == CacheMode.REPLAY:
+                self._replay_from_cache()
+            else:
+                self._compute_and_store()
         else:
-            self._compute_and_store()
+            self._cached_output_stream = self._operator.process(
+                *self._input_streams,
+            )
+            self._update_modified_time()
+
+    def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
+        self.run()
+        assert self._cached_output_stream is not None
+        return self._cached_output_stream.iter_packets()
+
+    def as_table(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> "pa.Table":
+        self.run()
+        assert self._cached_output_stream is not None
+        return self._cached_output_stream.as_table(columns=columns, all_info=all_info)
 
     # ------------------------------------------------------------------
     # DB retrieval
@@ -525,8 +504,12 @@ class PersistentOperatorNode(OperatorNode):
         """Retrieve all stored records from the pipeline database.
 
         Returns the stored output table with column filtering applied
-        per ``ColumnConfig`` conventions.
+        per ``ColumnConfig`` conventions.  Returns ``None`` when no
+        database is attached or no records exist.
         """
+        if self._pipeline_database is None:
+            return None
+
         results = self._pipeline_database.get_all_records(self.pipeline_path)
         if results is None:
             return None
@@ -556,6 +539,31 @@ class PersistentOperatorNode(OperatorNode):
         return results if results.num_rows > 0 else None
 
     # ------------------------------------------------------------------
+    # DerivedSource
+    # ------------------------------------------------------------------
+
+    def as_source(self):
+        """Return a DerivedSource backed by the DB records of this node.
+
+        Raises:
+            RuntimeError: If no database is attached.
+        """
+        if self._pipeline_database is None:
+            raise RuntimeError("Cannot create a DerivedSource without a database")
+
+        from orcapod.core.sources.derived_source import DerivedSource
+
+        path_str = "/".join(self.pipeline_path)
+        content_frag = self.content_hash().to_string()[:16]
+        source_id = f"{path_str}:{content_frag}"
+        return DerivedSource(
+            origin=self,
+            source_id=source_id,
+            data_context=self.data_context_key,
+            config=self.orcapod_config,
+        )
+
+    # ------------------------------------------------------------------
     # Async channel execution
     # ------------------------------------------------------------------
 
@@ -564,12 +572,24 @@ class PersistentOperatorNode(OperatorNode):
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
     ) -> None:
-        """Async execution with cache mode handling.
+        """Async execution with cache mode handling when DB is attached.
 
-        REPLAY: emit from DB, close output.
-        OFF: delegate to operator, forward results.
-        LOG: delegate to operator, forward + collect results, then store in DB.
+        Without a database, delegates to the wrapped operator's
+        ``async_execute``.
+
+        With a database:
+            - REPLAY: emit from DB, close output.
+            - OFF: delegate to operator, forward results.
+            - LOG: delegate to operator, forward + collect results, then store in DB.
         """
+        if self._pipeline_database is None:
+            # Simple delegation without DB
+            hashes = [s.pipeline_hash() for s in self._input_streams]
+            await self._operator.async_execute(
+                inputs, output, input_pipeline_hashes=hashes
+            )
+            return
+
         try:
             if self._cache_mode == CacheMode.REPLAY:
                 self._replay_from_cache()
@@ -610,20 +630,12 @@ class PersistentOperatorNode(OperatorNode):
         finally:
             await output.close()
 
-    # ------------------------------------------------------------------
-    # DerivedSource
-    # ------------------------------------------------------------------
-
-    def as_source(self):
-        """Return a DerivedSource backed by the DB records of this node."""
-        from orcapod.core.sources.derived_source import DerivedSource
-
-        path_str = "/".join(self.pipeline_path)
-        content_frag = self.content_hash().to_string()[:16]
-        source_id = f"{path_str}:{content_frag}"
-        return DerivedSource(
-            origin=self,
-            source_id=source_id,
-            data_context=self.data_context_key,
-            config=self.orcapod_config,
+    def __repr__(self) -> str:
+        return (
+            f"{type(self).__name__}(operator={self._operator!r}, "
+            f"upstreams={self._input_streams!r})"
         )
+
+
+# Temporary alias for backward compatibility (removed in Task 10)
+PersistentOperatorNode = OperatorNode
