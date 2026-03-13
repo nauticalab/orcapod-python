@@ -120,9 +120,6 @@ class CachedSource(RootSource):
     def identity_structure(self) -> Any:
         return self._source.identity_structure()
 
-    def resolve_field(self, record_id: str, field_name: str) -> Any:
-        return self._source.resolve_field(record_id, field_name)
-
     # -------------------------------------------------------------------------
     # Cache path — scoped to source's content hash
     # -------------------------------------------------------------------------

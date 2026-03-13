@@ -106,10 +106,6 @@ class RootSource(StreamBase):
             f"Cannot resolve field {field_name!r} for record {record_id!r}."
         )
 
-    def computed_label(self) -> str | None:
-        """Return the source_id as the label."""
-        return self._source_id
-
     # -------------------------------------------------------------------------
     # PipelineElementProtocol — schema-only identity (base case of Merkle chain)
     # -------------------------------------------------------------------------
