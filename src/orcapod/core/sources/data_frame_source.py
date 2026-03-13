@@ -4,15 +4,13 @@ import logging
 from collections.abc import Collection
 from typing import TYPE_CHECKING, Any
 
-from orcapod.core.sources.arrow_table_source import ArrowTableSource
 from orcapod.core.sources.base import RootSource
-from orcapod.types import ColumnConfig, Schema
+from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.utils import polars_data_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import polars as pl
-    import pyarrow as pa
     from polars._typing import FrameInitTypes
 else:
     pl = LazyModule("polars")
@@ -21,13 +19,10 @@ logger = logging.getLogger(__name__)
 
 
 class DataFrameSource(RootSource):
-    """
-    A source backed by a Polars DataFrame (or any Polars-compatible data).
+    """A source backed by a Polars DataFrame (or any Polars-compatible data).
 
-    The DataFrame is converted to an Arrow table and then handled identically
-    to ``ArrowTableSource``, including source-info provenance annotation and
-    schema-hash system tags.  Because the data is immutable after construction
-    the same ``ArrowTableStream`` is returned from every ``process()`` call.
+    The DataFrame is converted to an Arrow table and enriched by
+    ``SourceStreamBuilder`` (source-info, schema-hash, system tags).
     """
 
     def __init__(
@@ -38,7 +33,7 @@ class DataFrameSource(RootSource):
         source_id: str | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(**kwargs)
+        super().__init__(source_id=source_id, **kwargs)
 
         df = pl.DataFrame(data)
 
@@ -63,26 +58,24 @@ class DataFrameSource(RootSource):
         if missing:
             raise ValueError(f"TagProtocol column(s) not found in data: {missing}")
 
-        # Delegate all enrichment logic to ArrowTableSource.
-        self._arrow_source = ArrowTableSource(
-            table=df.to_arrow(),
+        builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
+        result = builder.build(
+            df.to_arrow(),
             tag_columns=tag_columns,
+            source_id=self._source_id,
             system_tag_columns=system_tag_columns,
-            source_id=source_id,
-            data_context=self.data_context,
-            config=self.orcapod_config,
         )
 
-    def to_config(self) -> dict[str, Any]:
-        """Serialize metadata-only config (DataFrame is not serializable).
+        self._stream = result.stream
+        self._tag_columns = result.tag_columns
+        if self._source_id is None:
+            self._source_id = result.source_id
 
-        Returns:
-            Dict with source metadata. Cannot be used to reconstruct the source
-            since the original DataFrame is not preserved.
-        """
+    def to_config(self) -> dict[str, Any]:
+        """Serialize metadata-only config (DataFrame is not serializable)."""
         return {
             "source_type": "data_frame",
-            "tag_columns": list(self._arrow_source._tag_columns),
+            "tag_columns": list(self._tag_columns),
             "source_id": self.source_id,
         }
 
@@ -90,51 +83,10 @@ class DataFrameSource(RootSource):
     def from_config(cls, config: dict[str, Any]) -> "DataFrameSource":
         """Not supported — DataFrameSource cannot be reconstructed from config.
 
-        Args:
-            config: Config dict (ignored).
-
         Raises:
-            NotImplementedError: Always, because the original DataFrame cannot
-                be recovered from config.
+            NotImplementedError: Always.
         """
         raise NotImplementedError(
             "DataFrameSource cannot be reconstructed from config — "
             "the original DataFrame is not serializable."
         )
-
-    @property
-    def source_id(self) -> str:
-        return self._arrow_source.source_id
-
-    def computed_label(self) -> str | None:
-        return self._arrow_source.computed_label()
-
-    def identity_structure(self) -> Any:
-        return self._arrow_source.identity_structure()
-
-    def output_schema(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> tuple[Schema, Schema]:
-        return self._arrow_source.output_schema(columns=columns, all_info=all_info)
-
-    def keys(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        return self._arrow_source.keys(columns=columns, all_info=all_info)
-
-    def iter_packets(self):
-        return self._arrow_source.iter_packets()
-
-    def as_table(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> "pa.Table":
-        return self._arrow_source.as_table(columns=columns, all_info=all_info)
