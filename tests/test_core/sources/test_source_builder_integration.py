@@ -65,3 +65,75 @@ class TestDataFrameSourceBuilder:
         src = DataFrameSource(data={"id": [1], "x": [10]}, tag_columns=["id"])
         identity = src.identity_structure()
         assert identity[0] == "DataFrameSource"
+
+
+from orcapod.core.sources.csv_source import CSVSource
+from orcapod.core.sources.delta_table_source import DeltaTableSource
+
+
+class TestCSVSourceBuilder:
+    def test_no_arrow_source_attr(self, tmp_path):
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("id,x\n1,10\n2,20\n")
+        src = CSVSource(file_path=str(csv_file), tag_columns=["id"])
+        assert not hasattr(src, "_arrow_source")
+
+    def test_has_stream_attr(self, tmp_path):
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("id,x\n1,10\n2,20\n")
+        src = CSVSource(file_path=str(csv_file), tag_columns=["id"])
+        assert hasattr(src, "_stream")
+
+    def test_iter_packets(self, tmp_path):
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("id,x\n1,10\n2,20\n")
+        src = CSVSource(file_path=str(csv_file), tag_columns=["id"])
+        assert len(list(src.iter_packets())) == 2
+
+    def test_round_trip_config(self, tmp_path):
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("id,x\n1,10\n2,20\n")
+        src = CSVSource(
+            file_path=str(csv_file), tag_columns=["id"], record_id_column="id"
+        )
+        config = src.to_config()
+        assert config["source_type"] == "csv"
+        assert config["file_path"] == str(csv_file)
+        src2 = CSVSource.from_config(config)
+        assert src2.source_id == src.source_id
+
+    def test_identity_uses_class_name(self, tmp_path):
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("id,x\n1,10\n")
+        src = CSVSource(file_path=str(csv_file), tag_columns=["id"])
+        assert src.identity_structure()[0] == "CSVSource"
+
+
+class TestDeltaTableSourceBuilder:
+    @pytest.fixture
+    def delta_path(self, tmp_path):
+        from deltalake import write_deltalake
+
+        table = pa.table({"id": pa.array([1, 2]), "x": pa.array([10, 20])})
+        path = str(tmp_path / "delta_test")
+        write_deltalake(path, table)
+        return path
+
+    def test_no_arrow_source_attr(self, delta_path):
+        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
+        assert not hasattr(src, "_arrow_source")
+
+    def test_has_stream_attr(self, delta_path):
+        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
+        assert hasattr(src, "_stream")
+
+    def test_round_trip_config(self, delta_path):
+        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
+        config = src.to_config()
+        assert config["source_type"] == "delta_table"
+        src2 = DeltaTableSource.from_config(config)
+        assert src2.source_id == src.source_id
+
+    def test_identity_uses_class_name(self, delta_path):
+        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
+        assert src.identity_structure()[0] == "DeltaTableSource"
