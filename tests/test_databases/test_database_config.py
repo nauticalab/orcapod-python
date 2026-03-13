@@ -1,7 +1,5 @@
 """Tests for database to_config / from_config serialization."""
 
-import pytest
-
 from orcapod.databases.delta_lake_databases import DeltaTableDatabase
 from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
 from orcapod.databases.noop_database import NoOpArrowDatabase

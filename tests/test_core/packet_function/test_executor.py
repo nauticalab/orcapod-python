@@ -19,7 +19,6 @@ import pytest
 from orcapod.core.datagrams import Packet
 from orcapod.core.executors import LocalExecutor, PacketFunctionExecutorBase
 from orcapod.core.packet_function import (
-    CachedPacketFunction,
     PacketFunctionWrapper,
     PythonPacketFunction,
 )

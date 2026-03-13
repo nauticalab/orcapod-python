@@ -267,16 +267,12 @@ class TestInputValidation:
 
 class TestPolarsFilterBehavior:
     def test_no_predicates_returns_all_rows(self, simple_stream):
-        import polars as pl
-
         op = PolarsFilter()
         out = op.process(simple_stream)
         result = out.as_table()
         assert len(result) == 3
 
     def test_filter_reduces_rows(self, simple_stream):
-        import polars as pl
-
         op = PolarsFilter(constraints={"legs": 4})
         out = op.process(simple_stream)
         result = out.as_table()
@@ -284,8 +280,6 @@ class TestPolarsFilterBehavior:
         assert set(result.column("animal").to_pylist()) == {"cat", "dog"}
 
     def test_filter_preserves_schema(self, simple_stream):
-        import polars as pl
-
         op = PolarsFilter(constraints={"legs": 4})
         tag_schema, packet_schema = op.output_schema(simple_stream)
         orig_tag, orig_pkt = simple_stream.output_schema()

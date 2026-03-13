@@ -1,7 +1,5 @@
 """Tests for FunctionPod to_config / from_config serialization."""
 
-import pytest
-
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
 

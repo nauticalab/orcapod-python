@@ -7,7 +7,7 @@ and fan-out (broadcast) support.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Generic, Protocol, TypeVar, runtime_checkable
 
@@ -50,11 +50,9 @@ class ReadableChannel(Protocol[T_co]):
         """Receive next item. Raises ``ChannelClosed`` when done."""
         ...
 
-    def __aiter__(self) -> AsyncIterator[T_co]:
-        ...
+    def __aiter__(self) -> AsyncIterator[T_co]: ...
 
-    async def __anext__(self) -> T_co:
-        ...
+    async def __anext__(self) -> T_co: ...
 
     async def collect(self) -> list[T_co]:
         """Drain all remaining items into a list."""
@@ -177,9 +175,7 @@ class _BroadcastReader(Generic[T]):
     __slots__ = ("_queue",)
 
     def __init__(self, buffer_size: int) -> None:
-        self._queue: asyncio.Queue[T | _Sentinel] = asyncio.Queue(
-            maxsize=buffer_size
-        )
+        self._queue: asyncio.Queue[T | _Sentinel] = asyncio.Queue(maxsize=buffer_size)
 
     async def receive(self) -> T:
         item = await self._queue.get()

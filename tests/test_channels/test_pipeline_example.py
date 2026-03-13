@@ -30,10 +30,9 @@ import pytest
 
 from orcapod.channels import Channel
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.operators import Join, MapPackets, PolarsFilter, SelectPacketColumns
+from orcapod.core.operators import Join, PolarsFilter
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
-from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
 from orcapod.types import NodeConfig, PipelineConfig
 
 
@@ -164,11 +163,11 @@ class TestAsynchronousPipeline:
         )
 
         # --- Create channels for each edge in the DAG ---
-        ch_students = Channel(buffer_size=16)   # source → join
-        ch_grades = Channel(buffer_size=16)     # source → join
-        ch_joined = Channel(buffer_size=16)     # join → filter
-        ch_filtered = Channel(buffer_size=16)   # filter → function pod
-        ch_output = Channel(buffer_size=16)     # function pod → sink
+        ch_students = Channel(buffer_size=16)  # source → join
+        ch_grades = Channel(buffer_size=16)  # source → join
+        ch_joined = Channel(buffer_size=16)  # join → filter
+        ch_filtered = Channel(buffer_size=16)  # filter → function pod
+        ch_output = Channel(buffer_size=16)  # function pod → sink
 
         # --- Source tasks push data into channels ---
         async def push_source(stream: ArrowTableStream, ch: Channel):
@@ -313,16 +312,10 @@ class TestSyncAsyncEquivalence:
             tg.create_task(push(make_students(), ch_s))
             tg.create_task(push(make_grades(), ch_g))
             tg.create_task(
-                join_op.async_execute(
-                    [ch_s.reader, ch_g.reader], ch_j.writer
-                )
+                join_op.async_execute([ch_s.reader, ch_g.reader], ch_j.writer)
             )
-            tg.create_task(
-                filter_op.async_execute([ch_j.reader], ch_f.writer)
-            )
-            tg.create_task(
-                grade_pod.async_execute([ch_f.reader], ch_o.writer)
-            )
+            tg.create_task(filter_op.async_execute([ch_j.reader], ch_f.writer))
+            tg.create_task(grade_pod.async_execute([ch_f.reader], ch_o.writer))
 
         return {
             tag.as_dict()["student_id"]: packet.as_dict()["letter_grade"]

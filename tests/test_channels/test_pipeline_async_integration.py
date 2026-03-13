@@ -52,9 +52,7 @@ def compute_letter_grade(name: str, score: int) -> str:
 
 STUDENTS = pa.table(
     {
-        "student_id": pa.array(
-            ["s1", "s2", "s3", "s4", "s5"], type=pa.large_string()
-        ),
+        "student_id": pa.array(["s1", "s2", "s3", "s4", "s5"], type=pa.large_string()),
         "name": pa.array(
             ["Alice", "Bob", "Carol", "Dave", "Eve"], type=pa.large_string()
         ),
@@ -63,9 +61,7 @@ STUDENTS = pa.table(
 
 GRADES = pa.table(
     {
-        "student_id": pa.array(
-            ["s1", "s2", "s3", "s4", "s5"], type=pa.large_string()
-        ),
+        "student_id": pa.array(["s1", "s2", "s3", "s4", "s5"], type=pa.large_string()),
         "score": pa.array([95, 82, 67, 73, 55], type=pa.int64()),
     }
 )
@@ -193,8 +189,7 @@ class TestSyncAsyncSystemTagEquivalence:
         from orcapod.system_constants import constants
 
         return sorted(
-            c for c in table.column_names
-            if c.startswith(constants.SYSTEM_TAG_PREFIX)
+            c for c in table.column_names if c.startswith(constants.SYSTEM_TAG_PREFIX)
         )
 
     def _system_tag_data(self, table: pa.Table) -> dict[str, list]:
@@ -232,14 +227,11 @@ class TestSyncAsyncSystemTagEquivalence:
 
     def test_join_pipeline_system_tag_column_names_contain_pipeline_hash(self):
         """System-tag columns should follow the name-extending convention."""
-        from orcapod.system_constants import constants
 
         pipeline = _build_pipeline()
         orchestrator = AsyncPipelineOrchestrator()
         orchestrator.run(pipeline)
-        records = pipeline.letter_grade.get_all_records(
-            columns={"system_tags": True}
-        )
+        records = pipeline.letter_grade.get_all_records(columns={"system_tags": True})
         assert records is not None
 
         sys_cols = self._get_system_tag_columns(records)
@@ -282,6 +274,7 @@ class TestSyncAsyncSystemTagEquivalence:
         sync_sorted = sync_records.sort_by("student_id")
         async_sorted = async_records.sort_by("student_id")
         for col in sync_sys_cols:
-            assert sync_sorted.column(col).to_pylist() == async_sorted.column(col).to_pylist(), (
-                f"System-tag column {col!r} differs between sync and async"
-            )
+            assert (
+                sync_sorted.column(col).to_pylist()
+                == async_sorted.column(col).to_pylist()
+            ), f"System-tag column {col!r} differs between sync and async"

@@ -28,7 +28,6 @@ import pyarrow as pa
 import pytest
 
 from orcapod.channels import Channel
-from orcapod.core.datagrams import Tag
 from orcapod.core.operators import (
     Batch,
     DropPacketColumns,
@@ -36,7 +35,6 @@ from orcapod.core.operators import (
     Join,
     MapPackets,
     MapTags,
-    MergeJoin,
     SelectPacketColumns,
     SelectTagColumns,
     SemiJoin,
@@ -144,7 +142,9 @@ async def run_unary(op, stream: ArrowTableStream) -> list[tuple]:
     return await output_ch.reader.collect()
 
 
-async def run_binary(op, left: ArrowTableStream, right: ArrowTableStream) -> list[tuple]:
+async def run_binary(
+    op, left: ArrowTableStream, right: ArrowTableStream
+) -> list[tuple]:
     """Run a binary operator async and collect results."""
     left_ch = Channel(buffer_size=1024)
     right_ch = Channel(buffer_size=1024)
@@ -792,7 +792,7 @@ class TestBatchStreaming:
 class TestSemiJoinBuildProbe:
     @pytest.mark.asyncio
     async def test_filters_left_by_right(self):
-        left = make_left_stream()    # id=[1,2,3]
+        left = make_left_stream()  # id=[1,2,3]
         right = make_right_stream()  # id=[2,3,4]
         op = SemiJoin()
         results = await run_binary(op, left, right)
@@ -819,7 +819,9 @@ class TestSemiJoinBuildProbe:
         op = SemiJoin()
         results = await run_binary(op, left, right)
 
-        result_map = {tag.as_dict()["id"]: pkt.as_dict()["value_a"] for tag, pkt in results}
+        result_map = {
+            tag.as_dict()["id"]: pkt.as_dict()["value_a"] for tag, pkt in results
+        }
         assert result_map[2] == 20
         assert result_map[3] == 30
 
@@ -1004,9 +1006,7 @@ class TestJoinNativeAsync:
         results = await run_binary(op, left, right)
 
         assert len(results) == 3
-        result_map = {
-            tag.as_dict()["id"]: pkt.as_dict() for tag, pkt in results
-        }
+        result_map = {tag.as_dict()["id"]: pkt.as_dict() for tag, pkt in results}
         assert result_map[0] == {"x": 10, "y": 100}
         assert result_map[1] == {"x": 20, "y": 200}
         assert result_map[2] == {"x": 30, "y": 300}
@@ -1048,9 +1048,7 @@ class TestJoinNativeAsync:
         results = await out.reader.collect()
 
         assert len(results) == 2
-        result_map = {
-            tag.as_dict()["id"]: pkt.as_dict() for tag, pkt in results
-        }
+        result_map = {tag.as_dict()["id"]: pkt.as_dict() for tag, pkt in results}
         assert result_map[1] == {"a": 10, "b": 100, "c": 1000}
         assert result_map[2] == {"a": 20, "b": 200, "c": 2000}
 
@@ -1189,7 +1187,7 @@ class TestStreamingPipelineIntegration:
     @pytest.mark.asyncio
     async def test_semijoin_then_batch_chain(self):
         """SemiJoin → Batch in a streaming pipeline."""
-        left = make_left_stream()    # id=[1,2,3]
+        left = make_left_stream()  # id=[1,2,3]
         right = make_right_stream()  # id=[2,3,4]
 
         semi_op = SemiJoin()
@@ -1273,7 +1271,9 @@ def _make_source(tag_col: str, packet_col: str, data: dict) -> ArrowTableStream:
 
 
 async def run_binary_validated(
-    op, left: ArrowTableStream, right: ArrowTableStream,
+    op,
+    left: ArrowTableStream,
+    right: ArrowTableStream,
 ) -> list[tuple]:
     """Run a binary operator async with validation and pipeline hashes.
 
@@ -1345,8 +1345,12 @@ class TestJoinSystemTagEquivalence:
     @pytest.mark.asyncio
     async def test_two_way_system_tag_values_match(self):
         """System-tag values for each row must match between sync and async."""
-        left = _make_source("key", "value", {"key": ["a", "b", "c"], "value": [1, 2, 3]})
-        right = _make_source("key", "score", {"key": ["a", "b", "c"], "score": [10, 20, 30]})
+        left = _make_source(
+            "key", "value", {"key": ["a", "b", "c"], "value": [1, 2, 3]}
+        )
+        right = _make_source(
+            "key", "score", {"key": ["a", "b", "c"], "score": [10, 20, 30]}
+        )
         op = Join()
 
         sync_result = op.static_process(left, right)
@@ -1441,7 +1445,9 @@ class TestSemiJoinSystemTagEquivalence:
     async def test_system_tags_preserved_through_semijoin(self):
         """SemiJoin should preserve left-side system tags in both paths."""
         left = _make_source("id", "val", {"id": ["a", "b", "c"], "val": [1, 2, 3]})
-        right = _make_source("id", "score", {"id": ["b", "c", "d"], "score": [20, 30, 40]})
+        right = _make_source(
+            "id", "score", {"id": ["b", "c", "d"], "score": [20, 30, 40]}
+        )
         op = SemiJoin()
 
         # Sync

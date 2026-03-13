@@ -24,7 +24,6 @@ from orcapod.core.nodes import FunctionNode
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.protocols.core_protocols import StreamProtocol
 
 from ..conftest import make_int_stream
 

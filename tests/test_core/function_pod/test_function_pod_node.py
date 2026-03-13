@@ -27,7 +27,7 @@ from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 from orcapod.system_constants import constants
 
-from ..conftest import double, make_int_stream
+from ..conftest import make_int_stream
 
 # ---------------------------------------------------------------------------
 # Helpers

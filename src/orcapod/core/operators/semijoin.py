@@ -112,7 +112,9 @@ class SemiJoin(BinaryOperator):
             )
 
             # intersection_schemas will raise an error if types are incompatible
-            common = schema_utils.intersection_schemas(left_all_schema, right_all_schema)
+            common = schema_utils.intersection_schemas(
+                left_all_schema, right_all_schema
+            )
             self._validated_common_keys: tuple[str, ...] = tuple(common.keys())
 
         except Exception as e:

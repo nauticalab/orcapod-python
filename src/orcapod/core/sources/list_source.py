@@ -8,7 +8,7 @@ from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.protocols.core_protocols import TagProtocol
 
 if TYPE_CHECKING:
-    import pyarrow as pa
+    pass
 
 
 class ListSource(RootSource):

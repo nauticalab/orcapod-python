@@ -93,7 +93,9 @@ def create_sample_files():
                 "type": "binary",
             }
         )
-        print(f"Created binary file: {filename} ({size} KB), Hash: {file_hash.to_hex()}")
+        print(
+            f"Created binary file: {filename} ({size} KB), Hash: {file_hash.to_hex()}"
+        )
 
     # Create a structured file (JSON)
     json_filename = "sample_structured.json"
@@ -116,7 +118,9 @@ def create_sample_files():
     # Compute the hash
     json_hash = hash_file(json_filepath)
 
-    files_info.append({"file": str(rel_filepath), "hash": json_hash.to_hex(), "type": "json"})
+    files_info.append(
+        {"file": str(rel_filepath), "hash": json_hash.to_hex(), "type": "json"}
+    )
     print(f"Created JSON file: {json_filename}, Hash: {json_hash.to_hex()}")
 
     return files_info

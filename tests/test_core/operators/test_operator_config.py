@@ -1,7 +1,5 @@
 """Tests for operator to_config / from_config serialization."""
 
-import pytest
-
 from orcapod.core.operators import (
     Batch,
     DropPacketColumns,

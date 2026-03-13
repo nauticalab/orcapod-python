@@ -7,7 +7,7 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.operators import Batch, Join
+from orcapod.core.operators import Join
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource, CSVSource
 from orcapod.core.sources.dict_source import DictSource

@@ -18,7 +18,6 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.sources import ArrowTableSource, CachedSource
-from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.protocols.hashing_protocols import PipelineElementProtocol
