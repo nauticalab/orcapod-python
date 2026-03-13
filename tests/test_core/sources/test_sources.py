@@ -2,8 +2,8 @@
 Tests for the new sources package.
 
 Covers:
-- RootSource: source_id, resolve_field default raises FieldNotResolvableError
-- ArrowTableSource: row-index record IDs, column-value record IDs, resolve_field
+- RootSource: source_id, resolve_field default raises NotImplementedError
+- ArrowTableSource: resolve_field raises NotImplementedError (no longer supported)
 - DictSource / ListSource: inherit default resolve_field (not overridden)
 - SourceRegistry: register, get, replace, collision behaviour, list_ids
 - source_info provenance token format in produced tables
@@ -21,7 +21,6 @@ from orcapod.core.sources import (
     SourceRegistry,
     GLOBAL_SOURCE_REGISTRY,
 )
-from orcapod.errors import FieldNotResolvableError
 
 
 # ---------------------------------------------------------------------------
@@ -75,106 +74,53 @@ class TestSourceId:
 
 
 # ---------------------------------------------------------------------------
-# RootSource: default resolve_field raises FieldNotResolvableError
+# RootSource: default resolve_field raises NotImplementedError
 # ---------------------------------------------------------------------------
 
 
 class TestDefaultResolveField:
-    def test_dict_source_raises_field_not_resolvable(self):
+    def test_dict_source_raises_not_implemented(self):
         src = DictSource(
             data=[{"id": 1, "val": "a"}, {"id": 2, "val": "b"}],
             tag_columns=["id"],
         )
-        with pytest.raises(FieldNotResolvableError):
+        with pytest.raises(NotImplementedError):
             src.resolve_field("row_0", "val")
 
-    def test_list_source_raises_field_not_resolvable(self):
+    def test_list_source_raises_not_implemented(self):
         src = ListSource(name="item", data=["x", "y", "z"])
-        with pytest.raises(FieldNotResolvableError):
+        with pytest.raises(NotImplementedError):
             src.resolve_field("row_0", "item")
 
-    def test_error_message_contains_source_id_and_field(self):
+    def test_error_message_contains_class_name_and_field(self):
         src = DictSource(
             data=[{"id": 1, "val": "a"}],
             tag_columns=["id"],
             source_id="test_source",
         )
-        with pytest.raises(FieldNotResolvableError, match="test_source"):
+        with pytest.raises(NotImplementedError, match="DictSource"):
             src.resolve_field("row_0", "val")
 
 
 # ---------------------------------------------------------------------------
-# ArrowTableSource: resolve_field with row-index record IDs
+# ArrowTableSource: resolve_field raises NotImplementedError
 # ---------------------------------------------------------------------------
 
 
-class TestArrowTableSourceResolveFieldRowIndex:
+class TestArrowTableSourceResolveFieldNotSupported:
+    """ArrowTableSource no longer implements resolve_field; all calls raise."""
+
     def setup_method(self):
-        self.src = _make_arrow_source()  # no record_id_column → row_N IDs
+        self.src = _make_arrow_source()
 
-    def test_resolve_first_row(self):
-        assert self.src.resolve_field("row_0", "score") == 10
-
-    def test_resolve_middle_row(self):
-        assert self.src.resolve_field("row_1", "score") == 20
-
-    def test_resolve_last_row(self):
-        assert self.src.resolve_field("row_2", "score") == 30
-
-    def test_resolve_tag_column(self):
-        assert self.src.resolve_field("row_0", "user_id") == "u1"
-
-    def test_unknown_field_raises(self):
-        with pytest.raises(FieldNotResolvableError, match="nonexistent"):
-            self.src.resolve_field("row_0", "nonexistent")
-
-    def test_out_of_range_index_raises(self):
-        with pytest.raises(FieldNotResolvableError):
-            self.src.resolve_field("row_99", "score")
-
-    def test_malformed_record_id_raises(self):
-        with pytest.raises(FieldNotResolvableError):
-            self.src.resolve_field("user_id=u1", "score")
-
-    def test_non_integer_index_raises(self):
-        with pytest.raises(FieldNotResolvableError):
-            self.src.resolve_field("row_abc", "score")
-
-
-# ---------------------------------------------------------------------------
-# ArrowTableSource: resolve_field with column-value record IDs
-# ---------------------------------------------------------------------------
-
-
-class TestArrowTableSourceResolveFieldColumnValue:
-    def setup_method(self):
-        self.src = _make_arrow_source(record_id_column="user_id")
-
-    def test_resolve_by_column_value(self):
-        assert self.src.resolve_field("user_id=u1", "score") == 10
-
-    def test_resolve_second_record(self):
-        assert self.src.resolve_field("user_id=u2", "score") == 20
-
-    def test_resolve_id_column_itself(self):
-        assert self.src.resolve_field("user_id=u3", "user_id") == "u3"
-
-    def test_unknown_field_raises(self):
-        with pytest.raises(FieldNotResolvableError, match="nonexistent"):
-            self.src.resolve_field("user_id=u1", "nonexistent")
-
-    def test_unknown_record_id_value_raises(self):
-        with pytest.raises(FieldNotResolvableError):
-            self.src.resolve_field("user_id=no_such_user", "score")
-
-    def test_wrong_format_raises(self):
-        # Providing a row_N token when column-value format is expected
-        with pytest.raises(FieldNotResolvableError):
+    def test_resolve_field_raises_not_implemented(self):
+        with pytest.raises(NotImplementedError):
             self.src.resolve_field("row_0", "score")
 
-    def test_wrong_column_name_in_token_raises(self):
-        with pytest.raises(FieldNotResolvableError):
-            self.src.resolve_field("score=10", "score")
+    def test_resolve_field_with_record_id_column_raises(self):
+        src = _make_arrow_source(record_id_column="user_id")
+        with pytest.raises(NotImplementedError):
+            src.resolve_field("user_id=u1", "score")
 
 
 # ---------------------------------------------------------------------------
@@ -304,18 +250,16 @@ class TestSourceRegistry:
 
 
 class TestSourceRegistryRoundTrip:
-    """Registry + resolve_field end-to-end."""
+    """Registry + resolve_field end-to-end (now raises NotImplementedError)."""
 
-    def test_resolve_via_registry(self):
+    def test_resolve_field_raises_not_implemented(self):
         src = _make_arrow_source(source_id="sales", record_id_column="user_id")
         registry = SourceRegistry()
         registry.register("sales", src)
 
-        # Simulate what downstream code does: parse the source_id from a
-        # provenance token, look up the source, resolve the field.
         resolved_src = registry.get("sales")
-        value = resolved_src.resolve_field("user_id=u2", "score")
-        assert value == 20
+        with pytest.raises(NotImplementedError):
+            resolved_src.resolve_field("user_id=u2", "score")
 
     def test_global_registry_is_a_source_registry_instance(self):
         assert isinstance(GLOBAL_SOURCE_REGISTRY, SourceRegistry)
