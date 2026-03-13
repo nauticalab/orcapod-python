@@ -1,4 +1,4 @@
-"""FunctionNode and PersistentFunctionNode — stream nodes for packet function invocations."""
+"""FunctionNode — stream node for packet function invocations with optional DB persistence."""
 
 from __future__ import annotations
 
@@ -55,11 +55,13 @@ def _executor_supports_concurrent(
 
 
 class FunctionNode(StreamBase):
-    """Non-persistent stream node representing a packet function invocation.
+    """Stream node representing a packet function invocation with optional DB persistence.
 
-    Provides the core stream interface (identity, schema, iteration) without
-    any database persistence.  Subclass ``PersistentFunctionNode`` adds
-    DB-backed caching and pipeline record storage.
+    When constructed without database parameters, provides the core stream
+    interface (identity, schema, iteration) without any persistence.  When
+    databases are provided (either at construction or via ``attach_databases``),
+    adds result caching via ``CachedPacketFunction``, pipeline record storage,
+    and two-phase iteration (cached first, then compute missing).
     """
 
     node_type = "function"
@@ -71,6 +73,11 @@ class FunctionNode(StreamBase):
         tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
         config: Config | None = None,
+        # Optional DB params for persistent mode:
+        pipeline_database: ArrowDatabaseProtocol | None = None,
+        result_database: ArrowDatabaseProtocol | None = None,
+        result_path_prefix: tuple[str, ...] | None = None,
+        pipeline_path_prefix: tuple[str, ...] = (),
     ):
         if tracker_manager is None:
             tracker_manager = DEFAULT_TRACKER_MANAGER
@@ -110,6 +117,222 @@ class FunctionNode(StreamBase):
         self._cached_output_table: pa.Table | None = None
         self._cached_content_hash_column: pa.Array | None = None
 
+        # DB persistence state (initially None; set via __init__ params or attach_databases)
+        self._pipeline_database: ArrowDatabaseProtocol | None = None
+        self._pipeline_path_prefix: tuple[str, ...] = ()
+        self._pipeline_node_hash: str | None = None
+        self._output_schema_hash: str | None = None
+
+        if pipeline_database is not None:
+            self.attach_databases(
+                pipeline_database=pipeline_database,
+                result_database=result_database,
+                result_path_prefix=result_path_prefix,
+                pipeline_path_prefix=pipeline_path_prefix,
+            )
+
+    # ------------------------------------------------------------------
+    # attach_databases
+    # ------------------------------------------------------------------
+
+    def attach_databases(
+        self,
+        pipeline_database: ArrowDatabaseProtocol,
+        result_database: ArrowDatabaseProtocol | None = None,
+        result_path_prefix: tuple[str, ...] | None = None,
+        pipeline_path_prefix: tuple[str, ...] = (),
+    ) -> None:
+        """Attach databases for persistent caching and pipeline records.
+
+        Args:
+            pipeline_database: Database for pipeline records.
+            result_database: Database for cached results. Defaults to
+                pipeline_database.
+            result_path_prefix: Path prefix for result records.
+            pipeline_path_prefix: Path prefix for pipeline records.
+        """
+        computed_result_path_prefix: tuple[str, ...] = ()
+        if result_database is None:
+            result_database = pipeline_database
+            computed_result_path_prefix = (
+                result_path_prefix
+                if result_path_prefix is not None
+                else pipeline_path_prefix + ("_result",)
+            )
+        elif result_path_prefix is not None:
+            computed_result_path_prefix = result_path_prefix
+
+        # Guard against double-wrapping
+        pf = self._packet_function
+        if isinstance(pf, CachedPacketFunction):
+            pf = pf._packet_function
+
+        self._packet_function = CachedPacketFunction(
+            pf,
+            result_database=result_database,
+            record_path_prefix=computed_result_path_prefix,
+        )
+
+        self._pipeline_database = pipeline_database
+        self._pipeline_path_prefix = pipeline_path_prefix
+
+        # Clear all caches
+        self.clear_cache()
+        self._content_hash_cache.clear()
+        self._pipeline_hash_cache.clear()
+
+        # Compute pipeline node hash
+        self._pipeline_node_hash = self.pipeline_hash().to_string()
+        self._output_schema_hash = self.data_context.semantic_hasher.hash_object(
+            self._packet_function.output_packet_schema
+        ).to_string()
+
+    # ------------------------------------------------------------------
+    # from_descriptor — reconstruct from a serialized pipeline descriptor
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_descriptor(
+        cls,
+        descriptor: dict[str, Any],
+        function_pod: FunctionPodProtocol | None,
+        input_stream: StreamProtocol | None,
+        databases: dict[str, Any],
+    ) -> "FunctionNode":
+        """Construct a FunctionNode from a serialized descriptor.
+
+        When *function_pod* and *input_stream* are both provided the node
+        operates in full mode -- constructed normally via ``__init__``.
+        When *function_pod* is ``None`` the node is created in read-only
+        mode with metadata from the descriptor; computation methods will
+        raise ``RuntimeError``.
+
+        Args:
+            descriptor: The serialized node descriptor dict.
+            function_pod: An optional live function pod.  ``None`` for
+                read-only mode.
+            input_stream: An optional live input stream.  ``None`` for
+                read-only mode.
+            databases: Mapping of database role names (``"pipeline"``,
+                ``"result"``) to database instances.
+
+        Returns:
+            A new ``FunctionNode`` instance.
+        """
+        from orcapod.pipeline.serialization import LoadStatus
+
+        pipeline_db = databases.get("pipeline")
+        result_db = databases.get("result", pipeline_db)
+
+        if function_pod is not None and input_stream is not None:
+            # Full mode: construct normally
+            pipeline_path = tuple(descriptor.get("pipeline_path", ()))
+            # Derive pipeline_path_prefix by stripping the suffix that
+            # __init__ appends (packet_function.uri + node hash element).
+            # We pass the full pipeline_path_prefix from the descriptor.
+            # The descriptor stores the complete pipeline_path; we need
+            # to reconstruct the prefix that was originally passed to
+            # __init__. The suffix added is: pf.uri + (f"node:{hash}",).
+            # Instead of reverse-engineering, use the descriptor's path
+            # minus what __init__ will add.  For full mode we let __init__
+            # recompute pipeline_path from the prefix.
+            pf_uri_len = len(function_pod.packet_function.uri) + 1  # +1 for node:hash
+            prefix = (
+                pipeline_path[:-pf_uri_len] if len(pipeline_path) > pf_uri_len else ()
+            )
+
+            node = cls(
+                function_pod=function_pod,
+                input_stream=input_stream,
+                pipeline_database=pipeline_db,
+                result_database=result_db,
+                pipeline_path_prefix=prefix,
+                label=descriptor.get("label"),
+            )
+            node._descriptor = descriptor
+            node._load_status = LoadStatus.FULL
+            return node
+
+        # Read-only mode: bypass __init__, set minimum required state
+        node = cls.__new__(cls)
+
+        # From LabelableMixin
+        node._label = descriptor.get("label")
+
+        # From DataContextMixin
+        node._data_context = contexts.resolve_context(
+            descriptor.get("data_context_key")
+        )
+        from orcapod.config import DEFAULT_CONFIG
+
+        node._orcapod_config = DEFAULT_CONFIG
+
+        # From ContentIdentifiableBase
+        node._content_hash_cache = {}
+        node._cached_int_hash = None
+
+        # From PipelineElementBase
+        node._pipeline_hash_cache = {}
+
+        # From TemporalMixin
+        node._modified_time = None
+
+        # From FunctionNode
+        node._function_pod = None
+        node._packet_function = None
+        node._input_stream = None
+        node.tracker_manager = DEFAULT_TRACKER_MANAGER
+        node.execution_engine_opts = descriptor.get("execution_engine_opts")
+        node._cached_input_iterator = None
+        node._needs_iterator = True
+        node._cached_output_packets = {}
+        node._cached_output_table = None
+        node._cached_content_hash_column = None
+
+        # DB persistence state
+        node._pipeline_database = pipeline_db
+        node._pipeline_path_prefix = ()
+        node._pipeline_node_hash = None
+        node._output_schema_hash = None
+
+        # Descriptor metadata for read-only access
+        node._descriptor = descriptor
+        node._stored_schema = descriptor.get("output_schema", {})
+        node._stored_content_hash = descriptor.get("content_hash")
+        node._stored_pipeline_hash = descriptor.get("pipeline_hash")
+        node._stored_pipeline_path = tuple(descriptor.get("pipeline_path", ()))
+        node._stored_result_record_path = tuple(
+            descriptor.get("result_record_path", ())
+        )
+
+        # Determine load status based on DB availability
+        node._load_status = LoadStatus.UNAVAILABLE
+        if pipeline_db is not None:
+            node._load_status = LoadStatus.READ_ONLY
+
+        return node
+
+    # ------------------------------------------------------------------
+    # load_status
+    # ------------------------------------------------------------------
+
+    @property
+    def load_status(self) -> Any:
+        """Return the load status of this node.
+
+        Returns:
+            The ``LoadStatus`` enum value indicating how this node was
+            loaded.  Defaults to ``FULL`` for nodes created via
+            ``__init__``.
+        """
+        from orcapod.pipeline.serialization import LoadStatus
+
+        return getattr(self, "_load_status", LoadStatus.FULL)
+
+    # ------------------------------------------------------------------
+    # Core properties
+    # ------------------------------------------------------------------
+
     @property
     def producer(self) -> FunctionPodProtocol:
         return self._function_pod
@@ -142,16 +365,27 @@ class FunctionNode(StreamBase):
             raise ValueError("FunctionPod can only have one upstream")
         self._input_stream = value[0]
 
-    def keys(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        tag_schema, packet_schema = self.output_schema(
-            columns=columns, all_info=all_info
-        )
-        return tuple(tag_schema.keys()), tuple(packet_schema.keys())
+    # ------------------------------------------------------------------
+    # Read-only overrides (for deserialized nodes without live function_pod)
+    # ------------------------------------------------------------------
+
+    def content_hash(self, hasher=None) -> ContentHash:
+        """Return the content hash, using stored value in read-only mode."""
+        stored = getattr(self, "_stored_content_hash", None)
+        if self._function_pod is None and stored is not None:
+            from orcapod.types import ContentHash as CH
+
+            return CH.from_string(stored)
+        return super().content_hash(hasher)
+
+    def pipeline_hash(self, hasher=None) -> ContentHash:
+        """Return the pipeline hash, using stored value in read-only mode."""
+        stored = getattr(self, "_stored_pipeline_hash", None)
+        if self._function_pod is None and stored is not None:
+            from orcapod.types import ContentHash as CH
+
+            return CH.from_string(stored)
+        return super().pipeline_hash(hasher)
 
     def output_schema(
         self,
@@ -159,10 +393,62 @@ class FunctionNode(StreamBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
+        """Return output schema, using stored value in read-only mode."""
+        if self._function_pod is None:
+            stored = getattr(self, "_stored_schema", {})
+            tag = Schema(stored.get("tag", {}))
+            packet = Schema(stored.get("packet", {}))
+            return tag, packet
         tag_schema = self._input_stream.output_schema(
             columns=columns, all_info=all_info
         )[0]
         return tag_schema, self._packet_function.output_packet_schema
+
+    def keys(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        if self._function_pod is None:
+            stored = getattr(self, "_stored_schema", {})
+            tag_keys = tuple(stored.get("tag", {}).keys())
+            packet_keys = tuple(stored.get("packet", {}).keys())
+            return tag_keys, packet_keys
+        tag_schema, packet_schema = self.output_schema(
+            columns=columns, all_info=all_info
+        )
+        return tuple(tag_schema.keys()), tuple(packet_schema.keys())
+
+    # ------------------------------------------------------------------
+    # Pipeline path
+    # ------------------------------------------------------------------
+
+    @property
+    def pipeline_path(self) -> tuple[str, ...]:
+        """Return the pipeline path for DB record scoping.
+
+        Raises:
+            RuntimeError: If no database is attached and this is not a
+                read-only deserialized node.
+        """
+        stored = getattr(self, "_stored_pipeline_path", None)
+        if self._packet_function is None and stored is not None:
+            return stored
+        if self._pipeline_database is None:
+            raise RuntimeError(
+                "Cannot compute pipeline_path without an attached database. "
+                "Call attach_databases() first."
+            )
+        return (
+            self._pipeline_path_prefix
+            + self._packet_function.uri
+            + (f"node:{self._pipeline_node_hash}",)
+        )
+
+    # ------------------------------------------------------------------
+    # Caching
+    # ------------------------------------------------------------------
 
     def _ensure_iterator(self) -> None:
         """Lazily acquire the upstream iterator on first use."""
@@ -179,32 +465,302 @@ class FunctionNode(StreamBase):
         self._cached_content_hash_column = None
         self._update_modified_time()
 
+    # ------------------------------------------------------------------
+    # Packet processing
+    # ------------------------------------------------------------------
+
+    def process_packet(
+        self,
+        tag: TagProtocol,
+        packet: PacketProtocol,
+        skip_cache_lookup: bool = False,
+        skip_cache_insert: bool = False,
+    ) -> tuple[TagProtocol, PacketProtocol | None]:
+        """Process a single packet, optionally recording to the pipeline database.
+
+        Args:
+            tag: The tag associated with the packet.
+            packet: The input packet to process.
+            skip_cache_lookup: If True, bypass DB lookup for existing result.
+            skip_cache_insert: If True, skip writing result to DB.
+
+        Returns:
+            A ``(tag, output_packet)`` tuple; output_packet is ``None`` if
+            the function filters the packet out.
+        """
+        if self._pipeline_database is not None:
+            # Persistent mode: use CachedPacketFunction + pipeline record
+            output_packet = self._packet_function.call(
+                packet,
+                skip_cache_lookup=skip_cache_lookup,
+                skip_cache_insert=skip_cache_insert,
+            )
+
+            if output_packet is not None:
+                result_computed = bool(
+                    output_packet.get_meta_value(
+                        self._packet_function.RESULT_COMPUTED_FLAG, False
+                    )
+                )
+                self.add_pipeline_record(
+                    tag,
+                    packet,
+                    packet_record_id=output_packet.datagram_id,
+                    computed=result_computed,
+                )
+
+            return tag, output_packet
+        else:
+            return self._function_pod.process_packet(tag, packet)
+
+    async def async_process_packet(
+        self,
+        tag: TagProtocol,
+        packet: PacketProtocol,
+        skip_cache_lookup: bool = False,
+        skip_cache_insert: bool = False,
+    ) -> tuple[TagProtocol, PacketProtocol | None]:
+        """Async counterpart of ``process_packet``.
+
+        Uses the CachedPacketFunction's async_call for computation + result
+        caching when a database is attached.  Pipeline record storage is
+        synchronous (DB protocol is sync).
+        """
+        if self._pipeline_database is not None:
+            output_packet = await self._packet_function.async_call(
+                packet,
+                skip_cache_lookup=skip_cache_lookup,
+                skip_cache_insert=skip_cache_insert,
+            )
+
+            if output_packet is not None:
+                result_computed = bool(
+                    output_packet.get_meta_value(
+                        self._packet_function.RESULT_COMPUTED_FLAG, False
+                    )
+                )
+                self.add_pipeline_record(
+                    tag,
+                    packet,
+                    packet_record_id=output_packet.datagram_id,
+                    computed=result_computed,
+                )
+
+            return tag, output_packet
+        else:
+            return await self._function_pod.async_process_packet(tag, packet)
+
+    def add_pipeline_record(
+        self,
+        tag: TagProtocol,
+        input_packet: PacketProtocol,
+        packet_record_id: str,
+        computed: bool,
+        skip_cache_lookup: bool = False,
+    ) -> None:
+        """Add a pipeline record to the database for a processed packet."""
+        # combine TagProtocol with packet content hash to compute entry hash
+        # TODO: add system tag columns
+        # TODO: consider using bytes instead of string representation
+        tag_with_hash = tag.as_table(columns={"system_tags": True}).append_column(
+            constants.INPUT_PACKET_HASH_COL,
+            pa.array([input_packet.content_hash().to_string()], type=pa.large_string()),
+        )
+
+        # unique entry ID is determined by the combination of tags, system_tags, and input_packet hash
+        entry_id = self.data_context.arrow_hasher.hash_table(tag_with_hash).to_string()
+
+        # check presence of an existing entry with the same entry_id
+        existing_record = None
+        if not skip_cache_lookup:
+            existing_record = self._pipeline_database.get_record_by_id(
+                self.pipeline_path,
+                entry_id,
+            )
+
+        if existing_record is not None:
+            # if the record already exists, then skip adding
+            logger.debug(
+                f"Record with entry_id {entry_id} already exists. Skipping addition."
+            )
+            return
+
+        # rename all keys to avoid potential collision with result columns
+        renamed_input_packet = input_packet.rename(
+            {k: f"_input_{k}" for k in input_packet.keys()}
+        )
+        input_packet_info = (
+            renamed_input_packet.as_table(columns={"source": True})
+            .append_column(
+                constants.PACKET_RECORD_ID,  # record ID for the packet function output packet
+                pa.array([packet_record_id], type=pa.large_string()),
+            )
+            .append_column(
+                f"{constants.META_PREFIX}input_packet{constants.CONTEXT_KEY}",  # data context key for the input packet
+                pa.array([input_packet.data_context_key], type=pa.large_string()),
+            )
+            .append_column(
+                f"{constants.META_PREFIX}computed",
+                pa.array([computed], type=pa.bool_()),
+            )
+            .drop_columns(list(renamed_input_packet.keys()))
+        )
+
+        combined_record = arrow_utils.hstack_tables(
+            tag.as_table(columns={"system_tags": True}), input_packet_info
+        )
+
+        self._pipeline_database.add_record(
+            self.pipeline_path,
+            entry_id,
+            combined_record,
+            skip_duplicates=False,
+        )
+
+    # ------------------------------------------------------------------
+    # Records and sources
+    # ------------------------------------------------------------------
+
+    def get_all_records(
+        self,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> "pa.Table | None":
+        """Return all computed results joined with their pipeline tag records.
+
+        Args:
+            columns: Column configuration controlling which groups are included.
+            all_info: Shorthand to include all info columns.
+
+        Returns:
+            A PyArrow table of joined results, or ``None`` if no database is
+            attached or no records exist.
+        """
+        if self._pipeline_database is None:
+            return None
+
+        results = self._packet_function._result_database.get_all_records(
+            self._packet_function.record_path,
+            record_id_column=constants.PACKET_RECORD_ID,
+        )
+        taginfo = self._pipeline_database.get_all_records(self.pipeline_path)
+
+        if results is None or taginfo is None:
+            return None
+
+        joined = (
+            pl.DataFrame(taginfo)
+            .join(pl.DataFrame(results), on=constants.PACKET_RECORD_ID, how="inner")
+            .to_arrow()
+        )
+
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+
+        drop_columns = []
+        if not column_config.meta and not column_config.all_info:
+            drop_columns.extend(
+                c for c in joined.column_names if c.startswith(constants.META_PREFIX)
+            )
+        if not column_config.source and not column_config.all_info:
+            drop_columns.extend(
+                c for c in joined.column_names if c.startswith(constants.SOURCE_PREFIX)
+            )
+        if not column_config.system_tags and not column_config.all_info:
+            drop_columns.extend(
+                c
+                for c in joined.column_names
+                if c.startswith(constants.SYSTEM_TAG_PREFIX)
+            )
+        if drop_columns:
+            joined = joined.drop([c for c in drop_columns if c in joined.column_names])
+
+        return joined if joined.num_rows > 0 else None
+
+    def as_source(self):
+        """Return a DerivedSource backed by the DB records of this node.
+
+        Raises:
+            RuntimeError: If no database is attached.
+        """
+        if self._pipeline_database is None:
+            raise RuntimeError("Cannot create a DerivedSource without a database")
+
+        from orcapod.core.sources.derived_source import DerivedSource
+
+        path_str = "/".join(self.pipeline_path)
+        content_frag = self.content_hash().to_string()[:16]
+        source_id = f"{path_str}:{content_frag}"
+        return DerivedSource(
+            origin=self,
+            source_id=source_id,
+            data_context=self.data_context_key,
+            config=self.orcapod_config,
+        )
+
+    # ------------------------------------------------------------------
+    # Iteration
+    # ------------------------------------------------------------------
+
     def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
         if self.is_stale:
             self.clear_cache()
         self._ensure_iterator()
-        if self._cached_input_iterator is not None:
-            if _executor_supports_concurrent(self._packet_function):
-                yield from self._iter_packets_concurrent(self._cached_input_iterator)
+
+        if self._pipeline_database is not None:
+            # Two-phase iteration with DB backing
+            if self._cached_input_iterator is not None:
+                input_iter = self._cached_input_iterator
+                # --- Phase 1: yield already-computed results from the databases ---
+                existing = self.get_all_records(columns={"meta": True})
+                computed_hashes: set[str] = set()
+                if existing is not None and existing.num_rows > 0:
+                    tag_keys = self._input_stream.keys()[0]
+                    # Strip the meta column before handing to ArrowTableStream so it only
+                    # sees tag + output-packet columns.
+                    hash_col = constants.INPUT_PACKET_HASH_COL
+                    hash_values = cast(list[str], existing.column(hash_col).to_pylist())
+                    computed_hashes = set(hash_values)
+                    data_table = existing.drop([hash_col])
+                    existing_stream = ArrowTableStream(data_table, tag_columns=tag_keys)
+                    for i, (tag, packet) in enumerate(existing_stream.iter_packets()):
+                        self._cached_output_packets[i] = (tag, packet)
+                        yield tag, packet
+
+                # --- Phase 2: process only missing input packets ---
+                next_idx = len(self._cached_output_packets)
+                for tag, packet in input_iter:
+                    input_hash = packet.content_hash().to_string()
+                    if input_hash in computed_hashes:
+                        continue
+                    tag, output_packet = self.process_packet(tag, packet)
+                    self._cached_output_packets[next_idx] = (tag, output_packet)
+                    next_idx += 1
+                    if output_packet is not None:
+                        yield tag, output_packet
+
+                self._cached_input_iterator = None
             else:
-                yield from self._iter_packets_sequential(self._cached_input_iterator)
+                # Yield from snapshot of complete cache
+                for i in range(len(self._cached_output_packets)):
+                    tag, packet = self._cached_output_packets[i]
+                    if packet is not None:
+                        yield tag, packet
         else:
-            for i in range(len(self._cached_output_packets)):
-                tag, packet = self._cached_output_packets[i]
-                if packet is not None:
-                    yield tag, packet
-
-    def process_packet(
-        self, tag: TagProtocol, packet: PacketProtocol
-    ) -> tuple[TagProtocol, PacketProtocol | None]:
-        """Process a single packet by delegating to the function pod."""
-        return self._function_pod.process_packet(tag, packet)
-
-    async def async_process_packet(
-        self, tag: TagProtocol, packet: PacketProtocol
-    ) -> tuple[TagProtocol, PacketProtocol | None]:
-        """Async counterpart of ``process_packet``."""
-        return await self._function_pod.async_process_packet(tag, packet)
+            # Simple iteration without DB
+            if self._cached_input_iterator is not None:
+                if _executor_supports_concurrent(self._packet_function):
+                    yield from self._iter_packets_concurrent(
+                        self._cached_input_iterator
+                    )
+                else:
+                    yield from self._iter_packets_sequential(
+                        self._cached_input_iterator
+                    )
+            else:
+                for i in range(len(self._cached_output_packets)):
+                    tag, packet = self._cached_output_packets[i]
+                    if packet is not None:
+                        yield tag, packet
 
     def _iter_packets_sequential(
         self, input_iter: Iterator[tuple[TagProtocol, PacketProtocol]]
@@ -265,6 +821,15 @@ class FunctionNode(StreamBase):
             tag, packet = self._cached_output_packets[i]
             if packet is not None:
                 yield tag, packet
+
+    def run(self) -> None:
+        """Eagerly process all input packets, filling the pipeline and result databases."""
+        for _ in self.iter_packets():
+            pass
+
+    # ------------------------------------------------------------------
+    # as_table
+    # ------------------------------------------------------------------
 
     def as_table(
         self,
@@ -376,38 +941,84 @@ class FunctionNode(StreamBase):
     ) -> None:
         """Streaming async execution for FunctionNode.
 
-        Routes each packet through ``async_process_packet`` so that
-        subclasses (e.g. ``PersistentFunctionNode``) can override the
-        per-packet logic without re-implementing the concurrency scaffold.
+        When a database is attached, uses two-phase execution: replay cached
+        results first, then compute missing packets concurrently.  Otherwise,
+        routes each packet through ``async_process_packet`` directly.
         """
         try:
             pipeline_config = pipeline_config or PipelineConfig()
             # TODO: revisit this logic as use of accidental property is not desirable
             node_config = getattr(self._function_pod, "node_config", NodeConfig())
-
             max_concurrency = resolve_concurrency(node_config, pipeline_config)
-            sem = (
-                asyncio.Semaphore(max_concurrency)
-                if max_concurrency is not None
-                else None
-            )
 
-            async def process_one(tag: TagProtocol, packet: PacketProtocol) -> None:
-                try:
-                    tag_out, result_packet = await self.async_process_packet(
-                        tag, packet
+            if self._pipeline_database is not None:
+                # Two-phase async execution with DB backing
+                # Phase 1: emit existing results from DB
+                existing = self.get_all_records(columns={"meta": True})
+                computed_hashes: set[str] = set()
+                if existing is not None and existing.num_rows > 0:
+                    tag_keys = self._input_stream.keys()[0]
+                    hash_col = constants.INPUT_PACKET_HASH_COL
+                    computed_hashes = set(
+                        cast(list[str], existing.column(hash_col).to_pylist())
                     )
-                    if result_packet is not None:
-                        await output.send((tag_out, result_packet))
-                finally:
-                    if sem is not None:
-                        sem.release()
+                    data_table = existing.drop([hash_col])
+                    existing_stream = ArrowTableStream(data_table, tag_columns=tag_keys)
+                    for tag, packet in existing_stream.iter_packets():
+                        await output.send((tag, packet))
 
-            async with asyncio.TaskGroup() as tg:
-                async for tag, packet in inputs[0]:
-                    if sem is not None:
-                        await sem.acquire()
-                    tg.create_task(process_one(tag, packet))
+                # Phase 2: process new packets concurrently
+                sem = (
+                    asyncio.Semaphore(max_concurrency)
+                    if max_concurrency is not None
+                    else None
+                )
+
+                async def process_one_db(
+                    tag: TagProtocol, packet: PacketProtocol
+                ) -> None:
+                    try:
+                        tag_out, result_packet = await self.async_process_packet(
+                            tag, packet
+                        )
+                        if result_packet is not None:
+                            await output.send((tag_out, result_packet))
+                    finally:
+                        if sem is not None:
+                            sem.release()
+
+                async with asyncio.TaskGroup() as tg:
+                    async for tag, packet in inputs[0]:
+                        input_hash = packet.content_hash().to_string()
+                        if input_hash in computed_hashes:
+                            continue
+                        if sem is not None:
+                            await sem.acquire()
+                        tg.create_task(process_one_db(tag, packet))
+            else:
+                # Simple async execution without DB
+                sem = (
+                    asyncio.Semaphore(max_concurrency)
+                    if max_concurrency is not None
+                    else None
+                )
+
+                async def process_one(tag: TagProtocol, packet: PacketProtocol) -> None:
+                    try:
+                        tag_out, result_packet = await self.async_process_packet(
+                            tag, packet
+                        )
+                        if result_packet is not None:
+                            await output.send((tag_out, result_packet))
+                    finally:
+                        if sem is not None:
+                            sem.release()
+
+                async with asyncio.TaskGroup() as tg:
+                    async for tag, packet in inputs[0]:
+                        if sem is not None:
+                            await sem.acquire()
+                        tg.create_task(process_one(tag, packet))
         finally:
             await output.close()
 
@@ -418,571 +1029,6 @@ class FunctionNode(StreamBase):
         )
 
 
-class PersistentFunctionNode(FunctionNode):
-    """DB-backed stream node that applies a cached packet function to an input stream.
-
-    Extends ``FunctionNode`` with result caching via ``CachedPacketFunction``,
-    pipeline record storage, and two-phase iteration (cached first, then compute
-    missing).
-    """
-
-    def __init__(
-        self,
-        function_pod: FunctionPodProtocol,
-        input_stream: StreamProtocol,
-        pipeline_database: ArrowDatabaseProtocol,
-        result_database: ArrowDatabaseProtocol | None = None,
-        result_path_prefix: tuple[str, ...] | None = None,
-        pipeline_path_prefix: tuple[str, ...] = (),
-        tracker_manager: TrackerManagerProtocol | None = None,
-        label: str | None = None,
-        config: Config | None = None,
-    ):
-        super().__init__(
-            function_pod=function_pod,
-            input_stream=input_stream,
-            tracker_manager=tracker_manager,
-            label=label,
-            config=config,
-        )
-
-        computed_result_path_prefix: tuple[str, ...] = ()
-        if result_database is None:
-            result_database = pipeline_database
-            computed_result_path_prefix = (
-                result_path_prefix
-                if result_path_prefix is not None
-                else pipeline_path_prefix + ("_result",)
-            )
-        elif result_path_prefix is not None:
-            computed_result_path_prefix = result_path_prefix
-
-        # replace the packet function with a cached version
-        self._packet_function = CachedPacketFunction(
-            self._packet_function,
-            result_database=result_database,
-            record_path_prefix=computed_result_path_prefix,
-        )
-
-        self._pipeline_database = pipeline_database
-        self._pipeline_path_prefix = pipeline_path_prefix
-
-        # use pipeline_hash() (schema+topology only), not content_hash() (data-inclusive)
-        self._pipeline_node_hash = self.pipeline_hash().to_string()
-
-        self._output_schema_hash = self.data_context.semantic_hasher.hash_object(
-            self._packet_function.output_packet_schema
-        ).to_string()
-
-    # ------------------------------------------------------------------
-    # from_descriptor — reconstruct from a serialized pipeline descriptor
-    # ------------------------------------------------------------------
-
-    @classmethod
-    def from_descriptor(
-        cls,
-        descriptor: dict[str, Any],
-        function_pod: FunctionPodProtocol | None,
-        input_stream: StreamProtocol | None,
-        databases: dict[str, Any],
-    ) -> "PersistentFunctionNode":
-        """Construct a PersistentFunctionNode from a serialized descriptor.
-
-        When *function_pod* and *input_stream* are both provided the node
-        operates in full mode — constructed normally via ``__init__``.
-        When *function_pod* is ``None`` the node is created in read-only
-        mode with metadata from the descriptor; computation methods will
-        raise ``RuntimeError``.
-
-        Args:
-            descriptor: The serialized node descriptor dict.
-            function_pod: An optional live function pod.  ``None`` for
-                read-only mode.
-            input_stream: An optional live input stream.  ``None`` for
-                read-only mode.
-            databases: Mapping of database role names (``"pipeline"``,
-                ``"result"``) to database instances.
-
-        Returns:
-            A new ``PersistentFunctionNode`` instance.
-        """
-        from orcapod.pipeline.serialization import LoadStatus
-
-        pipeline_db = databases.get("pipeline")
-        result_db = databases.get("result", pipeline_db)
-
-        if function_pod is not None and input_stream is not None:
-            # Full mode: construct normally
-            pipeline_path = tuple(descriptor.get("pipeline_path", ()))
-            # Derive pipeline_path_prefix by stripping the suffix that
-            # __init__ appends (packet_function.uri + node hash element).
-            # We pass the full pipeline_path_prefix from the descriptor.
-            # The descriptor stores the complete pipeline_path; we need
-            # to reconstruct the prefix that was originally passed to
-            # __init__. The suffix added is: pf.uri + (f"node:{hash}",).
-            # Instead of reverse-engineering, use the descriptor's path
-            # minus what __init__ will add.  For full mode we let __init__
-            # recompute pipeline_path from the prefix.
-            pf_uri_len = len(function_pod.packet_function.uri) + 1  # +1 for node:hash
-            prefix = (
-                pipeline_path[:-pf_uri_len] if len(pipeline_path) > pf_uri_len else ()
-            )
-
-            node = cls(
-                function_pod=function_pod,
-                input_stream=input_stream,
-                pipeline_database=pipeline_db,
-                result_database=result_db,
-                pipeline_path_prefix=prefix,
-                label=descriptor.get("label"),
-            )
-            node._descriptor = descriptor
-            node._load_status = LoadStatus.FULL
-            return node
-
-        # Read-only mode: bypass __init__, set minimum required state
-        node = cls.__new__(cls)
-
-        # From LabelableMixin
-        node._label = descriptor.get("label")
-
-        # From DataContextMixin
-        node._data_context = contexts.resolve_context(
-            descriptor.get("data_context_key")
-        )
-        from orcapod.config import DEFAULT_CONFIG
-
-        node._orcapod_config = DEFAULT_CONFIG
-
-        # From ContentIdentifiableBase
-        node._content_hash_cache = {}
-        node._cached_int_hash = None
-
-        # From PipelineElementBase
-        node._pipeline_hash_cache = {}
-
-        # From TemporalMixin
-        node._modified_time = None
-
-        # From FunctionNode
-        node._function_pod = None
-        node._packet_function = None
-        node._input_stream = None
-        node.tracker_manager = DEFAULT_TRACKER_MANAGER
-        node.execution_engine_opts = descriptor.get("execution_engine_opts")
-        node._cached_input_iterator = None
-        node._needs_iterator = True
-        node._cached_output_packets = {}
-        node._cached_output_table = None
-        node._cached_content_hash_column = None
-
-        # From PersistentFunctionNode
-        node._pipeline_database = pipeline_db
-        node._pipeline_path_prefix = ()
-        node._pipeline_node_hash = None
-        node._output_schema_hash = None
-
-        # Descriptor metadata for read-only access
-        node._descriptor = descriptor
-        node._stored_schema = descriptor.get("output_schema", {})
-        node._stored_content_hash = descriptor.get("content_hash")
-        node._stored_pipeline_hash = descriptor.get("pipeline_hash")
-        node._stored_pipeline_path = tuple(descriptor.get("pipeline_path", ()))
-        node._stored_result_record_path = tuple(
-            descriptor.get("result_record_path", ())
-        )
-
-        # Determine load status based on DB availability
-        node._load_status = LoadStatus.UNAVAILABLE
-        if pipeline_db is not None:
-            node._load_status = LoadStatus.READ_ONLY
-
-        return node
-
-    # ------------------------------------------------------------------
-    # load_status
-    # ------------------------------------------------------------------
-
-    @property
-    def load_status(self) -> Any:
-        """Return the load status of this node.
-
-        Returns:
-            The ``LoadStatus`` enum value indicating how this node was
-            loaded.  Defaults to ``FULL`` for nodes created via
-            ``__init__``.
-        """
-        from orcapod.pipeline.serialization import LoadStatus
-
-        return getattr(self, "_load_status", LoadStatus.FULL)
-
-    # ------------------------------------------------------------------
-    # Read-only overrides
-    # ------------------------------------------------------------------
-
-    def content_hash(self, hasher=None) -> ContentHash:
-        """Return the content hash, using stored value in read-only mode."""
-        stored = getattr(self, "_stored_content_hash", None)
-        if self._function_pod is None and stored is not None:
-            from orcapod.types import ContentHash as CH
-
-            return CH.from_string(stored)
-        return super().content_hash(hasher)
-
-    def pipeline_hash(self, hasher=None) -> ContentHash:
-        """Return the pipeline hash, using stored value in read-only mode."""
-        stored = getattr(self, "_stored_pipeline_hash", None)
-        if self._function_pod is None and stored is not None:
-            from orcapod.types import ContentHash as CH
-
-            return CH.from_string(stored)
-        return super().pipeline_hash(hasher)
-
-    def output_schema(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> tuple[Schema, Schema]:
-        """Return output schema, using stored value in read-only mode."""
-        if self._function_pod is None:
-            stored = getattr(self, "_stored_schema", {})
-            tag = Schema(stored.get("tag", {}))
-            packet = Schema(stored.get("packet", {}))
-            return tag, packet
-        return super().output_schema(columns=columns, all_info=all_info)
-
-    def keys(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        if self._function_pod is None:
-            stored = getattr(self, "_stored_schema", {})
-            tag_keys = tuple(stored.get("tag", {}).keys())
-            packet_keys = tuple(stored.get("packet", {}).keys())
-            return tag_keys, packet_keys
-        return super().keys(columns=columns, all_info=all_info)
-
-    @property
-    def pipeline_path(self) -> tuple[str, ...]:
-        stored = getattr(self, "_stored_pipeline_path", None)
-        if self._packet_function is None and stored is not None:
-            return stored
-        return (
-            self._pipeline_path_prefix
-            + self._packet_function.uri
-            + (f"node:{self._pipeline_node_hash}",)
-        )
-
-    def process_packet(
-        self,
-        tag: TagProtocol,
-        packet: PacketProtocol,
-        skip_cache_lookup: bool = False,
-        skip_cache_insert: bool = False,
-    ) -> tuple[TagProtocol, PacketProtocol | None]:
-        """Process a single packet, recording the result in the pipeline database.
-
-        Args:
-            tag: The tag associated with the packet.
-            packet: The input packet to process.
-            skip_cache_lookup: If True, bypass DB lookup for existing result.
-            skip_cache_insert: If True, skip writing result to DB.
-
-        Returns:
-            A ``(tag, output_packet)`` tuple; output_packet is ``None`` if
-            the function filters the packet out.
-        """
-        output_packet = self._packet_function.call(
-            packet,
-            skip_cache_lookup=skip_cache_lookup,
-            skip_cache_insert=skip_cache_insert,
-        )
-
-        if output_packet is not None:
-            # check if the packet was computed or retrieved from cache
-            result_computed = bool(
-                output_packet.get_meta_value(
-                    self._packet_function.RESULT_COMPUTED_FLAG, False
-                )
-            )
-            self.add_pipeline_record(
-                tag,
-                packet,
-                packet_record_id=output_packet.datagram_id,
-                computed=result_computed,
-            )
-
-        return tag, output_packet
-
-    async def async_process_packet(
-        self,
-        tag: TagProtocol,
-        packet: PacketProtocol,
-        skip_cache_lookup: bool = False,
-        skip_cache_insert: bool = False,
-    ) -> tuple[TagProtocol, PacketProtocol | None]:
-        """Async counterpart of ``process_packet``.
-
-        Uses the CachedPacketFunction's async_call for computation + result
-        caching.  Pipeline record storage is synchronous (DB protocol is sync).
-        """
-        output_packet = await self._packet_function.async_call(
-            packet,
-            skip_cache_lookup=skip_cache_lookup,
-            skip_cache_insert=skip_cache_insert,
-        )
-
-        if output_packet is not None:
-            result_computed = bool(
-                output_packet.get_meta_value(
-                    self._packet_function.RESULT_COMPUTED_FLAG, False
-                )
-            )
-            self.add_pipeline_record(
-                tag,
-                packet,
-                packet_record_id=output_packet.datagram_id,
-                computed=result_computed,
-            )
-
-        return tag, output_packet
-
-    def add_pipeline_record(
-        self,
-        tag: TagProtocol,
-        input_packet: PacketProtocol,
-        packet_record_id: str,
-        computed: bool,
-        skip_cache_lookup: bool = False,
-    ) -> None:
-        # combine TagProtocol with packet content hash to compute entry hash
-        # TODO: add system tag columns
-        # TODO: consider using bytes instead of string representation
-        tag_with_hash = tag.as_table(columns={"system_tags": True}).append_column(
-            constants.INPUT_PACKET_HASH_COL,
-            pa.array([input_packet.content_hash().to_string()], type=pa.large_string()),
-        )
-
-        # unique entry ID is determined by the combination of tags, system_tags, and input_packet hash
-        entry_id = self.data_context.arrow_hasher.hash_table(tag_with_hash).to_string()
-
-        # check presence of an existing entry with the same entry_id
-        existing_record = None
-        if not skip_cache_lookup:
-            existing_record = self._pipeline_database.get_record_by_id(
-                self.pipeline_path,
-                entry_id,
-            )
-
-        if existing_record is not None:
-            # if the record already exists, then skip adding
-            logger.debug(
-                f"Record with entry_id {entry_id} already exists. Skipping addition."
-            )
-            return
-
-        # rename all keys to avoid potential collision with result columns
-        renamed_input_packet = input_packet.rename(
-            {k: f"_input_{k}" for k in input_packet.keys()}
-        )
-        input_packet_info = (
-            renamed_input_packet.as_table(columns={"source": True})
-            .append_column(
-                constants.PACKET_RECORD_ID,  # record ID for the packet function output packet
-                pa.array([packet_record_id], type=pa.large_string()),
-            )
-            .append_column(
-                f"{constants.META_PREFIX}input_packet{constants.CONTEXT_KEY}",  # data context key for the input packet
-                pa.array([input_packet.data_context_key], type=pa.large_string()),
-            )
-            .append_column(
-                f"{constants.META_PREFIX}computed",
-                pa.array([computed], type=pa.bool_()),
-            )
-            .drop_columns(list(renamed_input_packet.keys()))
-        )
-
-        combined_record = arrow_utils.hstack_tables(
-            tag.as_table(columns={"system_tags": True}), input_packet_info
-        )
-
-        self._pipeline_database.add_record(
-            self.pipeline_path,
-            entry_id,
-            combined_record,
-            skip_duplicates=False,
-        )
-
-    def get_all_records(
-        self,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> "pa.Table | None":
-        """Return all computed results joined with their pipeline tag records.
-
-        Args:
-            columns: Column configuration controlling which groups are included.
-            all_info: Shorthand to include all info columns.
-
-        Returns:
-            A PyArrow table of joined results, or ``None`` if no records exist.
-        """
-        results = self._packet_function._result_database.get_all_records(
-            self._packet_function.record_path,
-            record_id_column=constants.PACKET_RECORD_ID,
-        )
-        taginfo = self._pipeline_database.get_all_records(self.pipeline_path)
-
-        if results is None or taginfo is None:
-            return None
-
-        joined = (
-            pl.DataFrame(taginfo)
-            .join(pl.DataFrame(results), on=constants.PACKET_RECORD_ID, how="inner")
-            .to_arrow()
-        )
-
-        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
-
-        drop_columns = []
-        if not column_config.meta and not column_config.all_info:
-            drop_columns.extend(
-                c for c in joined.column_names if c.startswith(constants.META_PREFIX)
-            )
-        if not column_config.source and not column_config.all_info:
-            drop_columns.extend(
-                c for c in joined.column_names if c.startswith(constants.SOURCE_PREFIX)
-            )
-        if not column_config.system_tags and not column_config.all_info:
-            drop_columns.extend(
-                c
-                for c in joined.column_names
-                if c.startswith(constants.SYSTEM_TAG_PREFIX)
-            )
-        if drop_columns:
-            joined = joined.drop([c for c in drop_columns if c in joined.column_names])
-
-        return joined if joined.num_rows > 0 else None
-
-    def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
-        if self.is_stale:
-            self.clear_cache()
-        self._ensure_iterator()
-        if self._cached_input_iterator is not None:
-            input_iter = self._cached_input_iterator
-            # --- Phase 1: yield already-computed results from the databases ---
-            existing = self.get_all_records(columns={"meta": True})
-            computed_hashes: set[str] = set()
-            if existing is not None and existing.num_rows > 0:
-                tag_keys = self._input_stream.keys()[0]
-                # Strip the meta column before handing to ArrowTableStream so it only
-                # sees tag + output-packet columns.
-                hash_col = constants.INPUT_PACKET_HASH_COL
-                hash_values = cast(list[str], existing.column(hash_col).to_pylist())
-                computed_hashes = set(hash_values)
-                data_table = existing.drop([hash_col])
-                existing_stream = ArrowTableStream(data_table, tag_columns=tag_keys)
-                for i, (tag, packet) in enumerate(existing_stream.iter_packets()):
-                    self._cached_output_packets[i] = (tag, packet)
-                    yield tag, packet
-
-            # --- Phase 2: process only missing input packets ---
-            next_idx = len(self._cached_output_packets)
-            for tag, packet in input_iter:
-                input_hash = packet.content_hash().to_string()
-                if input_hash in computed_hashes:
-                    continue
-                tag, output_packet = self.process_packet(tag, packet)
-                self._cached_output_packets[next_idx] = (tag, output_packet)
-                next_idx += 1
-                if output_packet is not None:
-                    yield tag, output_packet
-
-            self._cached_input_iterator = None
-        else:
-            # Yield from snapshot of complete cache
-            for i in range(len(self._cached_output_packets)):
-                tag, packet = self._cached_output_packets[i]
-                if packet is not None:
-                    yield tag, packet
-
-    def run(self) -> None:
-        """Eagerly process all input packets, filling the pipeline and result databases."""
-        for _ in self.iter_packets():
-            pass
-
-    # ------------------------------------------------------------------
-    # Async channel execution (two-phase)
-    # ------------------------------------------------------------------
-
-    async def async_execute(
-        self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
-        pipeline_config: PipelineConfig | None = None,
-    ) -> None:
-        """Two-phase async execution: replay cached, then compute missing concurrently."""
-        try:
-            pipeline_config = pipeline_config or PipelineConfig()
-            node_config = getattr(self._function_pod, "node_config", NodeConfig())
-            max_concurrency = resolve_concurrency(node_config, pipeline_config)
-
-            # Phase 1: emit existing results from DB
-            existing = self.get_all_records(columns={"meta": True})
-            computed_hashes: set[str] = set()
-            if existing is not None and existing.num_rows > 0:
-                tag_keys = self._input_stream.keys()[0]
-                hash_col = constants.INPUT_PACKET_HASH_COL
-                computed_hashes = set(
-                    cast(list[str], existing.column(hash_col).to_pylist())
-                )
-                data_table = existing.drop([hash_col])
-                existing_stream = ArrowTableStream(data_table, tag_columns=tag_keys)
-                for tag, packet in existing_stream.iter_packets():
-                    await output.send((tag, packet))
-
-            # Phase 2: process new packets concurrently
-            sem = (
-                asyncio.Semaphore(max_concurrency)
-                if max_concurrency is not None
-                else None
-            )
-
-            async def process_one(tag: TagProtocol, packet: PacketProtocol) -> None:
-                try:
-                    tag_out, result_packet = await self.async_process_packet(
-                        tag, packet
-                    )
-                    if result_packet is not None:
-                        await output.send((tag_out, result_packet))
-                finally:
-                    if sem is not None:
-                        sem.release()
-
-            async with asyncio.TaskGroup() as tg:
-                async for tag, packet in inputs[0]:
-                    input_hash = packet.content_hash().to_string()
-                    if input_hash in computed_hashes:
-                        continue
-                    if sem is not None:
-                        await sem.acquire()
-                    tg.create_task(process_one(tag, packet))
-        finally:
-            await output.close()
-
-    def as_source(self):
-        """Return a DerivedSource backed by the DB records of this node."""
-        from orcapod.core.sources.derived_source import DerivedSource
-
-        path_str = "/".join(self.pipeline_path)
-        content_frag = self.content_hash().to_string()[:16]
-        source_id = f"{path_str}:{content_frag}"
-        return DerivedSource(
-            origin=self,
-            source_id=source_id,
-            data_context=self.data_context_key,
-            config=self.orcapod_config,
-        )
+# Temporary alias so that existing imports of PersistentFunctionNode continue to
+# resolve.  Task 8 will update all call sites and remove this alias.
+PersistentFunctionNode = FunctionNode
