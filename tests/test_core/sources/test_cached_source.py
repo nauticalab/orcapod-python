@@ -95,9 +95,7 @@ class TestCachedSourceCachePath:
 
     def test_cache_path_prefix(self, simple_source, db):
         prefix = ("my_project", "v1")
-        ps = CachedSource(
-            simple_source, cache_database=db, cache_path_prefix=prefix
-        )
+        ps = CachedSource(simple_source, cache_database=db, cache_path_prefix=prefix)
         assert ps.cache_path[:2] == prefix
 
     def test_same_source_same_cache_path(self, simple_table, db):
@@ -286,13 +284,13 @@ class TestCachedSourceCumulative:
 
 
 class TestCachedSourceFieldResolution:
-    def test_resolve_field_delegates(self, simple_source, db):
+    def test_resolve_field_delegates_raises_not_implemented(self, simple_source, db):
+        """CachedSource delegates to wrapped source which raises NotImplementedError."""
         ps = CachedSource(simple_source, cache_database=db)
-        value = ps.resolve_field("row_0", "age")
-        expected = simple_source.resolve_field("row_0", "age")
-        assert value == expected
+        with pytest.raises(NotImplementedError):
+            ps.resolve_field("row_0", "age")
 
-    def test_resolve_field_with_record_id_column(self, db):
+    def test_resolve_field_with_record_id_column_raises(self, db):
         table = pa.table(
             {
                 "user_id": pa.array(["u1", "u2"], type=pa.large_string()),
@@ -303,7 +301,8 @@ class TestCachedSourceFieldResolution:
             table, tag_columns=["user_id"], record_id_column="user_id", source_id="test"
         )
         ps = CachedSource(source, cache_database=db)
-        assert ps.resolve_field("user_id=u1", "score") == 100
+        with pytest.raises(NotImplementedError):
+            ps.resolve_field("user_id=u1", "score")
 
 
 # ---------------------------------------------------------------------------

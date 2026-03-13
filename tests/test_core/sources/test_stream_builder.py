@@ -82,3 +82,35 @@ class TestSourceStreamBuilder:
         result = builder.build(table, tag_columns=["id"])
         tag_schema, packet_schema = result.stream.output_schema()
         assert "__system_col" not in packet_schema
+
+
+from orcapod.core.sources.arrow_table_source import ArrowTableSource
+from orcapod.core.sources.base import RootSource
+
+
+class TestArrowTableSourceUsesBuilder:
+    def test_arrow_table_source_works(self):
+        """ArrowTableSource should use SourceStreamBuilder internally."""
+        table = pa.table({"id": pa.array([1, 2]), "x": pa.array([10, 20])})
+        src = ArrowTableSource(table=table, tag_columns=["id"])
+        assert src.as_table().num_rows == 2
+        tag_schema, packet_schema = src.output_schema()
+        assert "id" in tag_schema
+        assert "x" in packet_schema
+
+    def test_arrow_table_source_has_stream_attr(self):
+        table = pa.table({"id": pa.array([1, 2]), "x": pa.array([10, 20])})
+        src = ArrowTableSource(table=table, tag_columns=["id"])
+        assert hasattr(src, "_stream")
+
+    def test_arrow_table_source_identity_uses_class_name(self):
+        table = pa.table({"id": pa.array([1]), "x": pa.array([10])})
+        src = ArrowTableSource(table=table, tag_columns=["id"])
+        identity = src.identity_structure()
+        assert identity[0] == "ArrowTableSource"
+
+    def test_resolve_field_raises_not_implemented(self):
+        table = pa.table({"id": pa.array([1]), "x": pa.array([10])})
+        src = ArrowTableSource(table=table, tag_columns=["id"])
+        with pytest.raises(NotImplementedError):
+            src.resolve_field("row_0", "x")

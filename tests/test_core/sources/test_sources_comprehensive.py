@@ -42,7 +42,6 @@ from orcapod.core.sources import (
     RootSource,
     SourceRegistry,
 )
-from orcapod.errors import FieldNotResolvableError
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.types import Schema
 
@@ -111,24 +110,11 @@ class TestCSVSource:
         src = CSVSource(file_path=csv_path, source_id="my_csv_name")
         assert src.source_id == "my_csv_name"
 
-    def test_resolve_field_row_index(self, csv_path):
+    def test_resolve_field_raises_not_implemented(self, csv_path):
+        """CSVSource delegates to ArrowTableSource which no longer implements resolve_field."""
         src = CSVSource(file_path=csv_path, tag_columns=["user_id"])
-        assert src.resolve_field("row_0", "score") == 10
-        assert src.resolve_field("row_2", "score") == 30
-
-    def test_resolve_field_column_value(self, csv_path):
-        src = CSVSource(
-            file_path=csv_path,
-            tag_columns=["user_id"],
-            record_id_column="user_id",
-            source_id="csv_src",
-        )
-        assert src.resolve_field("user_id=u2", "score") == 20
-
-    def test_resolve_field_unknown_field_raises(self, csv_path):
-        src = CSVSource(file_path=csv_path)
-        with pytest.raises(FieldNotResolvableError):
-            src.resolve_field("row_0", "nonexistent")
+        with pytest.raises(NotImplementedError):
+            src.resolve_field("row_0", "score")
 
     def test_file_not_found_raises(self, tmp_path):
         with pytest.raises(Exception):
@@ -215,21 +201,11 @@ class TestDeltaTableSource:
         src = DeltaTableSource(delta_table_path=delta_path, source_id="my_delta")
         assert src.source_id == "my_delta"
 
-    def test_resolve_field_row_index(self, delta_path):
+    def test_resolve_field_raises_not_implemented(self, delta_path):
+        """DeltaTableSource delegates to ArrowTableSource which no longer implements resolve_field."""
         src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
-        # Delta read order may vary; we just check a valid row resolves.
-        result = src.resolve_field("row_0", "id")
-        assert isinstance(result, int)
-
-    def test_resolve_field_column_value(self, delta_path):
-        src = DeltaTableSource(
-            delta_table_path=delta_path,
-            tag_columns=["id"],
-            record_id_column="id",
-            source_id="delta_src",
-        )
-        result = src.resolve_field("id=1", "value")
-        assert isinstance(result, str)
+        with pytest.raises(NotImplementedError):
+            src.resolve_field("row_0", "id")
 
     def test_bad_path_raises_value_error(self, tmp_path):
         with pytest.raises(ValueError, match="Delta table not found"):
@@ -270,11 +246,11 @@ class TestDataFrameSourceAdditional:
         assert "id" in tag_keys
         assert "value" in packet_keys
 
-    def test_resolve_field_raises_field_not_resolvable(self):
+    def test_resolve_field_raises_not_implemented(self):
         """DataFrameSource does not override resolve_field; must raise."""
         df = pl.DataFrame({"id": [1, 2], "value": ["x", "y"]})
         src = DataFrameSource(data=df, tag_columns="id")
-        with pytest.raises(FieldNotResolvableError):
+        with pytest.raises(NotImplementedError):
             src.resolve_field("row_0", "value")
 
     def test_system_columns_stripped_from_polars_input(self):
@@ -356,10 +332,10 @@ class TestDictSourceAdditional:
         src = DictSource(data=data, tag_columns=["id"], source_id="my_dict")
         assert src.source_id == "my_dict"
 
-    def test_resolve_field_error_mentions_source_id(self):
+    def test_resolve_field_error_mentions_class_name(self):
         data = [{"id": 1, "val": "a"}]
         src = DictSource(data=data, tag_columns=["id"], source_id="named_dict")
-        with pytest.raises(FieldNotResolvableError, match="named_dict"):
+        with pytest.raises(NotImplementedError, match="DictSource"):
             src.resolve_field("row_0", "val")
 
 
@@ -515,36 +491,12 @@ class TestArrowTableSourceAdditional:
         token = t.column(source_cols[0])[0].as_py()
         assert token.startswith("my_source::")
 
-    def test_negative_row_index_raises(self):
-        """row_-1 parses as -1 which is out of range."""
+    def test_resolve_field_raises_not_implemented(self):
+        """ArrowTableSource no longer implements resolve_field."""
         table = pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
         src = ArrowTableSource(table=table)
-        with pytest.raises(FieldNotResolvableError):
-            src.resolve_field("row_-1", "x")
-
-    def test_duplicate_record_id_takes_first_match(self):
-        """When multiple rows share a record_id value, resolve_field returns first."""
-        table = pa.table(
-            {
-                "id": pa.array(["a", "a", "b"], type=pa.large_string()),
-                "val": pa.array([1, 2, 3], type=pa.int64()),
-            }
-        )
-        src = ArrowTableSource(table=table, tag_columns=["id"], record_id_column="id")
-        assert src.resolve_field("id=a", "val") == 1
-
-    def test_integer_record_id_column(self):
-        """record_id_column holding integer values: token format is col=<str(val)>."""
-        table = pa.table(
-            {
-                "row_key": pa.array([10, 20, 30], type=pa.int64()),
-                "data": pa.array(["x", "y", "z"], type=pa.large_string()),
-            }
-        )
-        src = ArrowTableSource(
-            table=table, tag_columns=["row_key"], record_id_column="row_key"
-        )
-        assert src.resolve_field("row_key=20", "data") == "y"
+        with pytest.raises(NotImplementedError):
+            src.resolve_field("row_0", "x")
 
     def test_system_tag_columns_forwarded_to_stream(self):
         """system_tag_columns passed at construction are preserved."""
@@ -569,10 +521,10 @@ class TestArrowTableSourceAdditional:
         )
 
     def test_resolve_field_on_empty_record_id_prefix_raises(self):
-        """An empty string record_id raises FieldNotResolvableError."""
+        """An empty string record_id raises NotImplementedError."""
         table = pa.table({"x": pa.array([1, 2], type=pa.int64())})
         src = ArrowTableSource(table=table)
-        with pytest.raises(FieldNotResolvableError):
+        with pytest.raises(NotImplementedError):
             src.resolve_field("", "x")
 
     def test_tag_columns_not_present_in_table_raises(self):
