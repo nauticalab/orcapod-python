@@ -7,7 +7,7 @@ Covers:
    - Named sources: same name + same schema = same identity (data-independent)
    - Unnamed sources: identity determined by table hash (data-dependent)
    - Cumulative caching across data updates
-2. PersistentFunctionNode — pipeline_hash()-scoped cache, cross-source sharing
+2. FunctionNode — pipeline_hash()-scoped cache, cross-source sharing
    - Two pipelines with different source identities but same schema share one cache table
 3. PersistentOperatorNode — content_hash()-scoped with CacheMode (OFF/LOG/REPLAY)
 """
@@ -21,7 +21,7 @@ import pytest
 from deltalake import write_deltalake
 
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes import PersistentFunctionNode, PersistentOperatorNode
+from orcapod.core.nodes import FunctionNode, PersistentOperatorNode
 from orcapod.core.operators import Join
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource, DeltaTableSource, CachedSource
@@ -261,7 +261,7 @@ class TestSourcePodCaching:
 
 
 # ---------------------------------------------------------------------------
-# 2. PersistentFunctionNode — function pod caching + cross-source sharing
+# 2. FunctionNode — function pod caching + cross-source sharing
 # ---------------------------------------------------------------------------
 
 
@@ -280,7 +280,7 @@ class TestFunctionPodCaching:
         )
         joined = Join()(patients, labs)
 
-        fn_node = PersistentFunctionNode(
+        fn_node = FunctionNode(
             function_pod=pod,
             input_stream=joined,
             pipeline_database=pipeline_db,
@@ -308,7 +308,7 @@ class TestFunctionPodCaching:
             DeltaTableSource(labs_a, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
-        fn_a = PersistentFunctionNode(
+        fn_a = FunctionNode(
             function_pod=pod,
             input_stream=Join()(pa_src, la_src),
             pipeline_database=pipeline_db,
@@ -324,7 +324,7 @@ class TestFunctionPodCaching:
             DeltaTableSource(labs_b, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
-        fn_b = PersistentFunctionNode(
+        fn_b = FunctionNode(
             function_pod=pod,
             input_stream=Join()(pb_src, lb_src),
             pipeline_database=pipeline_db,
@@ -341,7 +341,7 @@ class TestFunctionPodCaching:
         patients_b, labs_b = clinic_b
 
         # Pipeline A: 3 patients
-        fn_a = PersistentFunctionNode(
+        fn_a = FunctionNode(
             function_pod=pod,
             input_stream=Join()(
                 CachedSource(
@@ -360,7 +360,7 @@ class TestFunctionPodCaching:
         assert fn_a.get_all_records().num_rows == 3
 
         # Pipeline B: 2 patients, different source identity, same schema
-        fn_b = PersistentFunctionNode(
+        fn_b = FunctionNode(
             function_pod=pod,
             input_stream=Join()(
                 CachedSource(
@@ -512,7 +512,7 @@ class TestEndToEndPipeline:
     ):
         """
         Full pipeline: DeltaTableSource → CachedSource → Join →
-        PersistentFunctionNode → PersistentOperatorNode (LOG + REPLAY).
+        FunctionNode → PersistentOperatorNode (LOG + REPLAY).
         """
         patients_a, labs_a = clinic_a
 
@@ -526,9 +526,9 @@ class TestEndToEndPipeline:
             cache_database=source_db,
         )
 
-        # Step 2: Join + PersistentFunctionNode
+        # Step 2: Join + FunctionNode
         joined = Join()(patients, labs)
-        fn_node = PersistentFunctionNode(
+        fn_node = FunctionNode(
             function_pod=pod,
             input_stream=joined,
             pipeline_database=pipeline_db,
@@ -560,7 +560,7 @@ class TestEndToEndPipeline:
 
         # Step 5: Second clinic shares function pod cache
         patients_b, labs_b = clinic_b
-        fn_node_b = PersistentFunctionNode(
+        fn_node_b = FunctionNode(
             function_pod=pod,
             input_stream=Join()(
                 CachedSource(

@@ -115,7 +115,7 @@ class TestSourceNodeFromDescriptor:
         assert loaded.pipeline_hash().to_string() == descriptor["pipeline_hash"]
 
 
-from orcapod.core.nodes.function_node import PersistentFunctionNode
+from orcapod.core.nodes.function_node import FunctionNode
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
 
@@ -124,7 +124,7 @@ def _sample_func(b: int) -> dict[str, int]:
     return {"result": b * 2}
 
 
-class TestPersistentFunctionNodeFromDescriptor:
+class TestFunctionNodeFromDescriptor:
     def _make_function_node_descriptor(self):
         source = DictSource(
             data=[{"a": 1, "b": 2}],
@@ -134,7 +134,7 @@ class TestPersistentFunctionNodeFromDescriptor:
         pf = PythonPacketFunction(function=_sample_func, output_keys=["result"])
         pod = FunctionPod(packet_function=pf)
         db = InMemoryArrowDatabase()
-        node = PersistentFunctionNode(
+        node = FunctionNode(
             function_pod=pod,
             input_stream=source,
             pipeline_database=db,
@@ -167,7 +167,7 @@ class TestPersistentFunctionNodeFromDescriptor:
         )
         pf = PythonPacketFunction(function=_sample_func, output_keys=["result"])
         pod = FunctionPod(packet_function=pf)
-        loaded = PersistentFunctionNode.from_descriptor(
+        loaded = FunctionNode.from_descriptor(
             descriptor=descriptor,
             function_pod=pod,
             input_stream=source,
@@ -177,7 +177,7 @@ class TestPersistentFunctionNodeFromDescriptor:
 
     def test_from_descriptor_read_only(self):
         original, descriptor, db = self._make_function_node_descriptor()
-        loaded = PersistentFunctionNode.from_descriptor(
+        loaded = FunctionNode.from_descriptor(
             descriptor=descriptor,
             function_pod=None,
             input_stream=None,

@@ -1,6 +1,6 @@
 from typing import TypeAlias
 
-from .function_node import FunctionNode, PersistentFunctionNode
+from .function_node import FunctionNode
 from .operator_node import OperatorNode, PersistentOperatorNode
 from .source_node import SourceNode
 
@@ -10,7 +10,6 @@ __all__ = [
     "FunctionNode",
     "GraphNode",
     "OperatorNode",
-    "PersistentFunctionNode",
     "PersistentOperatorNode",
     "SourceNode",
 ]

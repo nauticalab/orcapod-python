@@ -3,7 +3,7 @@ Persistent variants.
 
 Tests based on design specification:
 - FunctionNode: in-memory function pod execution as a stream
-- PersistentFunctionNode: two-phase iteration (cached first, compute missing)
+- FunctionNode: two-phase iteration (cached first, compute missing)
 - OperatorNode: operator execution as a stream
 - PersistentOperatorNode: CacheMode behavior (OFF/LOG/REPLAY)
 """
@@ -17,7 +17,7 @@ from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import (
     FunctionNode,
     OperatorNode,
-    PersistentFunctionNode,
+    FunctionNode,
     PersistentOperatorNode,
 )
 from orcapod.core.operators import Join
@@ -122,11 +122,11 @@ class TestFunctionNode:
 
 
 # ===================================================================
-# PersistentFunctionNode
+# FunctionNode
 # ===================================================================
 
 
-class TestPersistentFunctionNode:
+class TestFunctionNode:
     """Per design: two-phase iteration — Phase 1 returns cached records,
     Phase 2 computes missing. Uses pipeline_hash for DB path scoping."""
 
@@ -136,7 +136,7 @@ class TestPersistentFunctionNode:
         stream = _make_stream(3)
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
-        node = PersistentFunctionNode(
+        node = FunctionNode(
             function_pod=pod,
             input_stream=stream,
             pipeline_database=pipeline_db,
@@ -152,7 +152,7 @@ class TestPersistentFunctionNode:
         stream = _make_stream(3)
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
-        node = PersistentFunctionNode(
+        node = FunctionNode(
             function_pod=pod,
             input_stream=stream,
             pipeline_database=pipeline_db,
@@ -170,7 +170,7 @@ class TestPersistentFunctionNode:
         stream = _make_stream(3)
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
-        node = PersistentFunctionNode(
+        node = FunctionNode(
             function_pod=pod,
             input_stream=stream,
             pipeline_database=pipeline_db,
@@ -186,7 +186,7 @@ class TestPersistentFunctionNode:
         stream = _make_stream()
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
-        node = PersistentFunctionNode(
+        node = FunctionNode(
             function_pod=pod,
             input_stream=stream,
             pipeline_database=pipeline_db,

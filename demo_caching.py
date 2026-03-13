@@ -6,7 +6,7 @@ Demonstrates:
    - DeltaTableSource with canonical source_id (defaults to dir name)
    - Named sources: same name + same schema = same identity (data-independent)
    - Unnamed sources: identity determined by table hash (data-dependent)
-2. PersistentFunctionNode — pipeline_hash()-scoped cache, cross-source sharing
+2. FunctionNode — pipeline_hash()-scoped cache, cross-source sharing
    - Two pipelines with different source identities but same schema share one cache table
 3. PersistentOperatorNode — content_hash()-scoped with CacheMode (OFF/LOG/REPLAY)
 """
@@ -20,7 +20,7 @@ import pyarrow as pa
 from deltalake import DeltaTable, write_deltalake
 
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes import PersistentFunctionNode, PersistentOperatorNode
+from orcapod.core.nodes import FunctionNode, PersistentOperatorNode
 from orcapod.core.operators import Join
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource, DeltaTableSource, PersistentSource
@@ -152,10 +152,10 @@ with tempfile.TemporaryDirectory() as tmpdir:
     )
 
     # ============================================================
-    # STEP 2: PersistentFunctionNode — cross-source sharing
+    # STEP 2: FunctionNode — cross-source sharing
     # ============================================================
     print("\n" + "=" * 70)
-    print("STEP 2: PersistentFunctionNode (function pod caching)")
+    print("STEP 2: FunctionNode (function pod caching)")
     print("=" * 70)
 
     def risk_score(age: int, cholesterol: int) -> float:
@@ -167,7 +167,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
     # Pipeline 1: original patients + labs
     joined_1 = Join()(patients, labs)
-    fn_node_1 = PersistentFunctionNode(
+    fn_node_1 = FunctionNode(
         function_pod=pod,
         input_stream=joined_1,
         pipeline_database=pipeline_db,
@@ -217,7 +217,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
     )
 
     joined_2 = Join()(patients_b, labs_b)
-    fn_node_2 = PersistentFunctionNode(
+    fn_node_2 = FunctionNode(
         function_pod=pod,
         input_stream=joined_2,
         pipeline_database=pipeline_db,
@@ -343,7 +343,7 @@ print("""
       (data updates accumulate cumulatively, deduped by row hash)
     - Transparent StreamProtocol — downstream is unaware of caching
 
-  Function pod (PersistentFunctionNode):
+  Function pod (FunctionNode):
     - Cache scoped to pipeline_hash() (schema + topology only)
     - Cross-source sharing: different source identities, same schema
       → same pipeline_path → same cache table

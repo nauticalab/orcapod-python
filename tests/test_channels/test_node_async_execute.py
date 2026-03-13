@@ -5,7 +5,7 @@ Covers:
 - AsyncExecutableProtocol conformance for all four Node types
 - CachedPacketFunction.async_call with cache support
 - FunctionNode.async_execute basic streaming
-- PersistentFunctionNode.async_execute two-phase logic
+- FunctionNode.async_execute two-phase logic
 - OperatorNode.async_execute delegation
 - PersistentOperatorNode.async_execute with cache modes
 - process_packet / async_process_packet routing
@@ -24,7 +24,7 @@ from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import (
     FunctionNode,
     OperatorNode,
-    PersistentFunctionNode,
+    FunctionNode,
     PersistentOperatorNode,
 )
 from orcapod.core.operators import SelectPacketColumns
@@ -95,7 +95,7 @@ class TestProtocolConformance:
         _, pod = make_double_pod()
         stream = make_stream(3)
         db = InMemoryArrowDatabase()
-        node = PersistentFunctionNode(pod, stream, pipeline_database=db)
+        node = FunctionNode(pod, stream, pipeline_database=db)
         assert isinstance(node, AsyncExecutableProtocol)
 
     def test_operator_node_satisfies_protocol(self):
@@ -261,18 +261,18 @@ class TestFunctionNodeAsyncExecute:
 
 
 # ---------------------------------------------------------------------------
-# 4. PersistentFunctionNode.async_execute
+# 4. FunctionNode.async_execute
 # ---------------------------------------------------------------------------
 
 
-class TestPersistentFunctionNodeAsyncExecute:
+class TestFunctionNodeAsyncExecute:
     @pytest.mark.asyncio
     async def test_no_cache_processes_all_inputs(self):
         """With an empty DB, all inputs should be computed."""
         pf, pod = make_double_pod()
         db = InMemoryArrowDatabase()
         stream = make_stream(3)
-        node = PersistentFunctionNode(pod, stream, pipeline_database=db)
+        node = FunctionNode(pod, stream, pipeline_database=db)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -293,11 +293,11 @@ class TestPersistentFunctionNodeAsyncExecute:
         stream = make_stream(3)
 
         # Sync run to populate DB
-        node1 = PersistentFunctionNode(pod, stream, pipeline_database=db)
+        node1 = FunctionNode(pod, stream, pipeline_database=db)
         node1.run()
 
         # New node with same DB — Phase 1 should emit cached
-        node2 = PersistentFunctionNode(pod, make_stream(3), pipeline_database=db)
+        node2 = FunctionNode(pod, make_stream(3), pipeline_database=db)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -319,11 +319,11 @@ class TestPersistentFunctionNodeAsyncExecute:
 
         # Sync run with 3 items to populate DB
         stream = make_stream(3)
-        node1 = PersistentFunctionNode(pod, stream, pipeline_database=db)
+        node1 = FunctionNode(pod, stream, pipeline_database=db)
         node1.run()
 
         # Now run async with 5 items (3 cached + 2 new)
-        node2 = PersistentFunctionNode(pod, make_stream(5), pipeline_database=db)
+        node2 = FunctionNode(pod, make_stream(5), pipeline_database=db)
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
 
@@ -348,7 +348,7 @@ class TestPersistentFunctionNodeAsyncExecute:
         pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=5))
         db = InMemoryArrowDatabase()
         stream = make_stream(5)
-        node = PersistentFunctionNode(pod, stream, pipeline_database=db)
+        node = FunctionNode(pod, stream, pipeline_database=db)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -374,7 +374,7 @@ class TestPersistentFunctionNodeAsyncExecute:
         pf, pod = make_double_pod()
         db = InMemoryArrowDatabase()
         stream = make_stream(3)
-        node = PersistentFunctionNode(pod, stream, pipeline_database=db)
+        node = FunctionNode(pod, stream, pipeline_database=db)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -740,7 +740,7 @@ class TestAsyncPipelineThenSyncRetrieval:
 
     @pytest.mark.asyncio
     async def test_persistent_function_node_async_then_sync_db_retrieval(self):
-        """PersistentFunctionNode: async execute → sync get_all_records."""
+        """FunctionNode: async execute → sync get_all_records."""
 
         # --- Setup ---
         def double(x: int) -> int:
@@ -751,7 +751,7 @@ class TestAsyncPipelineThenSyncRetrieval:
         db = InMemoryArrowDatabase()
         stream = make_stream(5)  # ids 0..4, x values 0..4
 
-        node = PersistentFunctionNode(pod, stream, pipeline_database=db)
+        node = FunctionNode(pod, stream, pipeline_database=db)
 
         # --- Async pipeline execution ---
         input_ch = Channel(buffer_size=16)
@@ -780,7 +780,7 @@ class TestAsyncPipelineThenSyncRetrieval:
         assert sorted(result_col) == [0, 2, 4, 6, 8]
 
         # A *new* node sharing the same DB can also read these records
-        node2 = PersistentFunctionNode(pod, make_stream(5), pipeline_database=db)
+        node2 = FunctionNode(pod, make_stream(5), pipeline_database=db)
         records2 = node2.get_all_records()
         assert records2 is not None
         assert records2.num_rows == 5
@@ -853,7 +853,7 @@ class TestAsyncPipelineThenSyncRetrieval:
         fn_db = InMemoryArrowDatabase()
         stream = make_stream(3)  # ids 0..2, x 0..2
 
-        fn_node = PersistentFunctionNode(pod, stream, pipeline_database=fn_db)
+        fn_node = FunctionNode(pod, stream, pipeline_database=fn_db)
 
         # --- Setup stage 2: select only "result" column ---
         # Build a placeholder stream for schema purposes (OperatorNode needs

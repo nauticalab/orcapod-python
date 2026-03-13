@@ -12,7 +12,7 @@ import pytest
 from orcapod.core.datagrams.datagram import Datagram
 from orcapod.core.datagrams.tag_packet import Packet, Tag
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes import FunctionNode, PersistentFunctionNode
+from orcapod.core.nodes import FunctionNode
 from orcapod.core.operators import (
     Batch,
     DropPacketColumns,
