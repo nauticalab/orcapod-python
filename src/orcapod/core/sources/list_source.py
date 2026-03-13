@@ -3,41 +3,20 @@ from __future__ import annotations
 from collections.abc import Callable, Collection
 from typing import TYPE_CHECKING, Any, Literal
 
-from orcapod.core.sources.arrow_table_source import ArrowTableSource
 from orcapod.core.sources.base import RootSource
+from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.protocols.core_protocols import TagProtocol
-from orcapod.types import ColumnConfig, Schema
 
 if TYPE_CHECKING:
     import pyarrow as pa
 
 
 class ListSource(RootSource):
-    """
-    A source backed by a Python list.
+    """A source backed by a Python list.
 
-    Each element in the list becomes one (tag, packet) pair.  The element is
+    Each element in the list becomes one (tag, packet) pair. The element is
     stored as the packet under ``name``; the tag is either the element's index
     (default) or the dict returned by ``tag_function(element, index)``.
-
-    The list is converted to an Arrow table at construction time so the same
-    ``ArrowTableStream`` is returned from every ``process()`` call.  Source-info
-    provenance and schema-hash system tags are added via ``ArrowTableSource``.
-
-    Parameters
-    ----------
-    name:
-        PacketProtocol column name under which each list element is stored.
-    data:
-        The list of elements.
-    tag_function:
-        Optional callable ``(element, index) -> dict[str, Any]`` producing the
-        tag fields for each element.  Defaults to ``{"element_index": index}``.
-    tag_function_hash_mode:
-        How to identify the tag function for content-hash purposes.
-    expected_tag_keys:
-        Explicit tag key names (used when ``tag_function`` is provided and the
-        keys are known statically).
     """
 
     @staticmethod
@@ -54,8 +33,7 @@ class ListSource(RootSource):
         source_id: str | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(**kwargs)
-        self._init_source_id = source_id
+        super().__init__(source_id=source_id, **kwargs)
 
         self.name = name
         self._elements = list(data)
@@ -79,7 +57,7 @@ class ListSource(RootSource):
         for idx, element in enumerate(self._elements):
             tag_fields = tag_function(element, idx)
             if hasattr(tag_fields, "as_dict"):
-                tag_fields = tag_fields.as_dict()  # type: ignore[mehod] TagProtocol protocol → plain dict
+                tag_fields = tag_fields.as_dict()
             row = dict(tag_fields)
             row[name] = element
             rows.append(row)
@@ -90,49 +68,18 @@ class ListSource(RootSource):
             else [k for k in (rows[0].keys() if rows else []) if k != name]
         )
 
-        self._arrow_source = ArrowTableSource(
-            table=self.data_context.type_converter.python_dicts_to_arrow_table(rows),
+        arrow_table = self.data_context.type_converter.python_dicts_to_arrow_table(rows)
+
+        builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
+        result = builder.build(
+            arrow_table,
             tag_columns=tag_columns,
-            source_id=self._init_source_id,
-            data_context=self.data_context,
-            config=self.orcapod_config,
+            source_id=self._source_id,
         )
 
-    def to_config(self) -> dict[str, Any]:
-        """Serialize metadata-only config (data is not serializable).
-
-        Returns:
-            Dict with source metadata. Cannot be used to reconstruct the source
-            since the original list data is not preserved.
-        """
-        return {
-            "source_type": "list",
-            "name": self.name,
-            "source_id": self.source_id,
-        }
-
-    @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "ListSource":
-        """Not supported — ListSource data cannot be reconstructed from config.
-
-        Args:
-            config: Config dict (ignored).
-
-        Raises:
-            NotImplementedError: Always, because the original list data cannot
-                be recovered from config.
-        """
-        raise NotImplementedError(
-            "ListSource cannot be reconstructed from config — "
-            "original list data is not serializable."
-        )
-
-    @property
-    def source_id(self) -> str:
-        return self._arrow_source.source_id
-
-    def computed_label(self) -> str | None:
-        return self._arrow_source.computed_label()
+        self._stream = result.stream
+        if self._source_id is None:
+            self._source_id = result.source_id
 
     def _hash_tag_function(self) -> str:
         """Produce a stable hash string for the tag function."""
@@ -150,6 +97,9 @@ class ListSource(RootSource):
             return self.data_context.semantic_hasher.hash_object(src).to_hex()
 
     def identity_structure(self) -> Any:
+        """Return identity including class name, field name, elements, and tag
+        function hash.
+        """
         try:
             elements_repr: Any = tuple(self._elements)
         except TypeError:
@@ -161,29 +111,22 @@ class ListSource(RootSource):
             self._tag_function_hash,
         )
 
-    def output_schema(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> tuple[Schema, Schema]:
-        return self._arrow_source.output_schema(columns=columns, all_info=all_info)
+    def to_config(self) -> dict[str, Any]:
+        """Serialize metadata-only config (data is not serializable)."""
+        return {
+            "source_type": "list",
+            "name": self.name,
+            "source_id": self.source_id,
+        }
 
-    def keys(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        return self._arrow_source.keys(columns=columns, all_info=all_info)
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "ListSource":
+        """Not supported — ListSource data cannot be reconstructed from config.
 
-    def iter_packets(self):
-        return self._arrow_source.iter_packets()
-
-    def as_table(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> "pa.Table":
-        return self._arrow_source.as_table(columns=columns, all_info=all_info)
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError(
+            "ListSource cannot be reconstructed from config — "
+            "original list data is not serializable."
+        )

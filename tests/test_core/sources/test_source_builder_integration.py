@@ -137,3 +137,42 @@ class TestDeltaTableSourceBuilder:
     def test_identity_uses_class_name(self, delta_path):
         src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
         assert src.identity_structure()[0] == "DeltaTableSource"
+
+
+from orcapod.core.sources.list_source import ListSource
+
+
+class TestListSourceBuilder:
+    def test_no_arrow_source_attr(self):
+        src = ListSource(name="val", data=[1, 2, 3])
+        assert not hasattr(src, "_arrow_source")
+
+    def test_has_stream_attr(self):
+        src = ListSource(name="val", data=[1, 2, 3])
+        assert hasattr(src, "_stream")
+
+    def test_iter_packets(self):
+        src = ListSource(name="val", data=[1, 2, 3])
+        assert len(list(src.iter_packets())) == 3
+
+    def test_custom_identity_structure(self):
+        src = ListSource(name="val", data=[1, 2, 3])
+        identity = src.identity_structure()
+        assert identity[0] == "ListSource"
+        assert identity[1] == "val"
+        assert identity[2] == (1, 2, 3)
+        assert len(identity) == 4  # includes tag_function_hash
+
+    def test_with_tag_function(self):
+        src = ListSource(
+            name="val",
+            data=[10, 20],
+            tag_function=lambda e, i: {"idx": i, "label": f"item_{i}"},
+            expected_tag_keys=["idx", "label"],
+        )
+        results = list(src.iter_packets())
+        assert len(results) == 2
+
+    def test_source_id_defaults(self):
+        src = ListSource(name="val", data=[1])
+        assert src.source_id is not None
