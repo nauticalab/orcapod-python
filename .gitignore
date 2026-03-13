@@ -218,3 +218,9 @@ dj_*_conf.json
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# Superpowers (Claude Code skill artifacts)
+superpowers/
+
+# General JSON files at project root
+/*.json
