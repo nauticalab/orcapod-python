@@ -37,10 +37,51 @@ This is a greenfield project pre-v0.1.0. Do **not** add backward-compatibility s
 re-exports, aliases, or deprecation wrappers when making design or implementation changes.
 Just change the code and update all references directly.
 
+## No `sys.modules` hacks
+
+Never manipulate `sys.modules` directly (e.g. `sys.modules.setdefault`). If a subpackage
+import path doesn't work, create a proper re-export package with an `__init__.py` instead.
+
 ## Docstrings
 
 Use [Google style](https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings)
 Python docstrings everywhere.
+
+## Linear issues
+
+When creating Linear issues, always use this template for the description:
+
+```
+## Overview
+What is this project about? Describe the problem space and the high-level approach.
+
+## Goals & Success Criteria
+* Specific, measurable outcomes.
+
+## Scope & Boundaries
+(Optional — remove if not needed.)
+In scope:
+* ...
+Out of scope:
+* ...
+
+## Dependencies & Risks
+(Optional — remove if none.)
+* ...
+
+## Resources & References
+(Optional — remove if none.)
+* ...
+
+## Milestones
+(Optional — only for projects longer than ~4 weeks. Remove for shorter projects.)
+* ...
+```
+
+Remove any optional sections that don't apply rather than leaving them empty.
+
+When working on a Linear issue, create and checkout a git branch using the `gitBranchName`
+returned by Linear (e.g. `eywalker/plt-911-add-documentation-for-orcapod-python`).
 
 ## Git commits
 
