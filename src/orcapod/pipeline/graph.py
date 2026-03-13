@@ -214,14 +214,15 @@ class Pipeline(AutoRegisteringContextBasedTracker):
     # ------------------------------------------------------------------
 
     def compile(self) -> None:
-        """
-        Replace all recorded nodes with persistent variants.
+        """Compile recorded invocations into execution-ready nodes.
 
-        Walks the graph in topological order and creates:
+        Walks the graph in topological order and:
 
-        - ``SourceNode`` for every leaf stream
-        - ``FunctionNode`` for every function pod invocation
-        - ``OperatorNode`` for every operator invocation
+        - Wraps leaf streams in ``SourceNode``
+        - Rewires upstream references on recorded ``FunctionNode`` /
+          ``OperatorNode`` to point at persistent (compiled) nodes
+        - Attaches databases to function/operator nodes via
+          ``attach_databases()``
 
         After compile, nodes are accessible by label as attributes on the
         pipeline instance.
@@ -264,6 +265,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     # Rewire input stream to persistent upstream
                     input_hash = node._input_stream.content_hash().to_string()
                     rewired_input = persistent_node_map[input_hash]
+                    node.upstreams = (rewired_input,)
 
                     # Determine result database and path prefix
                     if self._function_database is not None:
@@ -273,16 +275,13 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                         result_db = self._pipeline_database
                         result_prefix = self._name + ("_results",)
 
-                    persistent_node = FunctionNode(
-                        function_pod=node._function_pod,
-                        input_stream=rewired_input,
+                    node.attach_databases(
                         pipeline_database=self._pipeline_database,
                         result_database=result_db,
                         result_path_prefix=result_prefix,
                         pipeline_path_prefix=self._pipeline_path_prefix,
-                        label=node.label,
                     )
-                    persistent_node_map[node_hash] = persistent_node
+                    persistent_node_map[node_hash] = node
 
                 elif isinstance(node, OperatorNode):
                     # Rewire all input streams to persistent upstreams
@@ -290,15 +289,13 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                         persistent_node_map[s.content_hash().to_string()]
                         for s in node.upstreams
                     )
+                    node.upstreams = rewired_inputs
 
-                    persistent_node = OperatorNode(
-                        operator=node._operator,
-                        input_streams=rewired_inputs,
+                    node.attach_databases(
                         pipeline_database=self._pipeline_database,
                         pipeline_path_prefix=self._pipeline_path_prefix,
-                        label=node.label,
                     )
-                    persistent_node_map[node_hash] = persistent_node
+                    persistent_node_map[node_hash] = node
 
                 else:
                     raise TypeError(
@@ -306,12 +303,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     )
 
                 # Track for label assignment (only non-leaf nodes)
-                label = (
-                    persistent_node.label
-                    or persistent_node.computed_label()
-                    or "unnamed"
-                )
-                name_candidates.setdefault(label, []).append(persistent_node)
+                label = node.label or node.computed_label() or "unnamed"
+                name_candidates.setdefault(label, []).append(node)
 
         # Save persistent node map for incremental re-compile
         self._persistent_node_map = persistent_node_map
