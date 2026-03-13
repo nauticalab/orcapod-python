@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Simplify the pipeline architecture by merging redundant class hierarchies: GraphTracker → Pipeline, PersistentFunctionNode → FunctionNode, PersistentOperatorNode → OperatorNode, and refactor source delegation to inheritance.
+**Goal:** Simplify the pipeline architecture by merging redundant class hierarchies: GraphTracker → Pipeline, PersistentFunctionNode → FunctionNode, PersistentOperatorNode → OperatorNode, and refactor sources via a compositional builder pattern.
 
-**Architecture:** Merge persistent node variants into their base classes with optional database params. Merge GraphTracker recording logic directly into Pipeline. Refactor delegating sources (DictSource, CSVSource, etc.) to inherit from ArrowTableSource instead of wrapping an internal `_arrow_source`. Make source nodes first-class pipeline members.
+**Architecture:** Merge persistent node variants into their base classes with optional database params. Merge GraphTracker recording logic directly into Pipeline. Extract source enrichment logic into a `SourceStreamBuilder` class used by all table-backed sources (including ArrowTableSource), eliminating `_arrow_source` delegation boilerplate. Make source nodes first-class pipeline members.
 
 **Tech Stack:** Python 3.12+, PyArrow, NetworkX, pytest, uv
 
@@ -13,12 +13,15 @@
 ## File Structure
 
 ### Source files modified/created:
-- `src/orcapod/core/sources/base.py` — remove `computed_label()` override
-- `src/orcapod/core/sources/dict_source.py` — rewrite: inherit from ArrowTableSource
-- `src/orcapod/core/sources/data_frame_source.py` — rewrite: inherit from ArrowTableSource
-- `src/orcapod/core/sources/csv_source.py` — rewrite: inherit from ArrowTableSource
-- `src/orcapod/core/sources/delta_table_source.py` — rewrite: inherit from ArrowTableSource
-- `src/orcapod/core/sources/list_source.py` — rewrite: inherit from ArrowTableSource
+- `src/orcapod/core/sources/stream_builder.py` — new: `SourceStreamBuilder`, `SourceStreamResult`
+- `src/orcapod/core/sources/base.py` — add default stream delegation, default `identity_structure()`, `resolve_field()` → `NotImplementedError`, remove `computed_label()`
+- `src/orcapod/core/sources/arrow_table_source.py` — use builder, remove enrichment logic and stream/identity methods
+- `src/orcapod/core/sources/dict_source.py` — rewrite: use builder, remove delegation
+- `src/orcapod/core/sources/data_frame_source.py` — rewrite: use builder, remove delegation
+- `src/orcapod/core/sources/csv_source.py` — rewrite: use builder, remove delegation
+- `src/orcapod/core/sources/delta_table_source.py` — rewrite: use builder, remove delegation
+- `src/orcapod/core/sources/list_source.py` — rewrite: use builder, remove delegation (keep custom `identity_structure`)
+- `src/orcapod/core/sources/cached_source.py` — remove `resolve_field()` delegation
 - `src/orcapod/core/nodes/function_node.py` — merge PersistentFunctionNode in
 - `src/orcapod/core/nodes/operator_node.py` — merge PersistentOperatorNode in
 - `src/orcapod/core/nodes/__init__.py` — remove Persistent* exports
@@ -29,7 +32,8 @@
 - `src/orcapod/pipeline/orchestrator.py` — update references
 
 ### Test files created:
-- `tests/test_core/sources/test_source_label.py` — source label and inheritance tests
+- `tests/test_core/sources/test_stream_builder.py` — SourceStreamBuilder unit tests
+- `tests/test_core/sources/test_source_builder_integration.py` — source builder integration + label tests
 - `tests/test_core/function_pod/test_function_node_attach_db.py` — FunctionNode.attach_databases()
 - `tests/test_core/operators/test_operator_node_attach_db.py` — OperatorNode.attach_databases()
 
@@ -49,26 +53,553 @@
 
 ---
 
-## Chunk 1: Source Inheritance Refactor & Label Cleanup
+## Chunk 1: Source Refactor (Compositional Builder) & Label Cleanup
 
-**Strategy:** Refactor each delegating source to inherit from ArrowTableSource first. Each refactored source naturally loses its `computed_label()` override and `_arrow_source` delegation. After all sources are refactored, remove `computed_label()` from `RootSource` as the final cleanup step.
+**Strategy:** Extract the enrichment pipeline from `ArrowTableSource.__init__` into a
+`SourceStreamBuilder` class. Add default stream delegation to `RootSource`. Refactor
+`ArrowTableSource` to use the builder. Then refactor each delegating source to use
+the builder directly (inheriting `RootSource`, no `_arrow_source`). Finally remove
+`computed_label()` from `RootSource` and change `resolve_field()` to
+`NotImplementedError` (deferred redesign).
 
-**Note on hash stability:** `ArrowTableSource.identity_structure()` includes `self.__class__.__name__`. After inheritance, a `DictSource` will report `"DictSource"` instead of `"ArrowTableSource"`, changing content hashes. Per CLAUDE.md, this is a pre-v0.1.0 project with no backward-compatibility concerns.
+**Note on hash stability:** `identity_structure()` includes `self.__class__.__name__`.
+Sources that previously reported as `"ArrowTableSource"` (via delegation) will now
+report their own class name. This is an acceptable one-time hash break (pre-v0.1.0).
 
-**Note on CachedSource:** `CachedSource` wraps a `RootSource` and a cache database. It does NOT use `_arrow_source` delegation and is unaffected by this refactor.
+**Note on CachedSource / DerivedSource:** These do NOT use `_arrow_source` delegation.
+They override all stream methods themselves. Unaffected by this refactor except for
+`resolve_field()` removal (CachedSource) and import updates (DerivedSource, later chunk).
 
-### Task 1: Refactor DictSource to Inherit from ArrowTableSource
+### Task 1: Create SourceStreamBuilder
 
 **Files:**
-- Modify: `src/orcapod/core/sources/dict_source.py`
-- Test: `tests/test_core/sources/test_source_label.py` (new)
+- Create: `src/orcapod/core/sources/stream_builder.py`
+- Test: `tests/test_core/sources/test_stream_builder.py` (new)
+
+The builder extracts enrichment logic from `ArrowTableSource.__init__` (lines 70-145)
+into a reusable class. It takes a raw Arrow table + metadata and produces an enriched
+`ArrowTableStream` plus artifacts (schema_hash, table_hash, source_id, tag_columns).
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/test_core/sources/test_source_label.py`:
+Create `tests/test_core/sources/test_stream_builder.py`:
 
 ```python
-"""Tests for source inheritance and label defaults."""
+"""Tests for SourceStreamBuilder."""
+
+from __future__ import annotations
+
+import pyarrow as pa
+import pytest
+
+from orcapod.core.sources.stream_builder import SourceStreamBuilder, SourceStreamResult
+
+
+class TestSourceStreamBuilder:
+    @pytest.fixture
+    def builder(self):
+        from orcapod.contexts import resolve_context
+        from orcapod.config import DEFAULT_CONFIG
+        ctx = resolve_context(None)
+        return SourceStreamBuilder(data_context=ctx, config=DEFAULT_CONFIG)
+
+    def test_build_returns_source_stream_result(self, builder):
+        table = pa.table({"id": pa.array([1, 2]), "x": pa.array([10, 20])})
+        result = builder.build(table, tag_columns=["id"])
+        assert isinstance(result, SourceStreamResult)
+
+    def test_build_stream_has_correct_row_count(self, builder):
+        table = pa.table({"id": pa.array([1, 2, 3]), "x": pa.array([10, 20, 30])})
+        result = builder.build(table, tag_columns=["id"])
+        assert result.stream.as_table().num_rows == 3
+
+    def test_build_source_id_defaults_to_table_hash(self, builder):
+        table = pa.table({"id": pa.array([1]), "x": pa.array([10])})
+        result = builder.build(table, tag_columns=["id"])
+        assert result.source_id is not None
+        assert len(result.source_id) > 0
+
+    def test_build_source_id_explicit(self, builder):
+        table = pa.table({"id": pa.array([1]), "x": pa.array([10])})
+        result = builder.build(table, tag_columns=["id"], source_id="my_source")
+        assert result.source_id == "my_source"
+
+    def test_build_schema_hash_is_string(self, builder):
+        table = pa.table({"id": pa.array([1]), "x": pa.array([10])})
+        result = builder.build(table, tag_columns=["id"])
+        assert isinstance(result.schema_hash, str)
+        assert len(result.schema_hash) > 0
+
+    def test_build_tag_columns_tuple(self, builder):
+        table = pa.table({"id": pa.array([1]), "x": pa.array([10])})
+        result = builder.build(table, tag_columns=["id"])
+        assert result.tag_columns == ("id",)
+
+    def test_build_validates_missing_tag_columns(self, builder):
+        table = pa.table({"id": pa.array([1]), "x": pa.array([10])})
+        with pytest.raises(ValueError, match="tag_columns not found"):
+            builder.build(table, tag_columns=["nonexistent"])
+
+    def test_build_validates_missing_record_id_column(self, builder):
+        table = pa.table({"id": pa.array([1]), "x": pa.array([10])})
+        with pytest.raises(ValueError, match="record_id_column"):
+            builder.build(table, tag_columns=["id"], record_id_column="bad")
+
+    def test_build_output_schema_has_tag_and_packet(self, builder):
+        table = pa.table({"id": pa.array([1]), "x": pa.array([10])})
+        result = builder.build(table, tag_columns=["id"])
+        tag_schema, packet_schema = result.stream.output_schema()
+        assert "id" in tag_schema
+        assert "x" in packet_schema
+
+    def test_build_with_record_id_column(self, builder):
+        table = pa.table({"id": pa.array([1, 2]), "x": pa.array([10, 20])})
+        result = builder.build(
+            table, tag_columns=["id"], record_id_column="id"
+        )
+        assert result.stream.as_table().num_rows == 2
+
+    def test_build_drops_system_columns_from_input(self, builder):
+        table = pa.table({
+            "id": pa.array([1]),
+            "x": pa.array([10]),
+            "__system_col": pa.array(["sys"]),
+        })
+        result = builder.build(table, tag_columns=["id"])
+        tag_schema, packet_schema = result.stream.output_schema()
+        assert "__system_col" not in packet_schema
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `uv run pytest tests/test_core/sources/test_stream_builder.py -v`
+Expected: FAIL — `stream_builder` module does not exist
+
+- [ ] **Step 3: Implement SourceStreamBuilder**
+
+Create `src/orcapod/core/sources/stream_builder.py`:
+
+```python
+"""Compositional builder for enriching raw Arrow tables into source streams.
+
+Extracts the enrichment pipeline that was previously embedded in
+``ArrowTableSource.__init__``: dropping system columns, validating tags,
+computing schema/table hashes, adding source-info provenance, adding system
+tag columns, and wrapping the result in an ``ArrowTableStream``.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Collection
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+from orcapod.core.streams.arrow_table_stream import ArrowTableStream
+from orcapod.system_constants import constants
+from orcapod.types import ContentHash
+from orcapod.utils import arrow_data_utils
+from orcapod.utils.lazy_module import LazyModule
+
+if TYPE_CHECKING:
+    import pyarrow as pa
+
+    from orcapod.config import Config
+    from orcapod.contexts import DataContext
+else:
+    pa = LazyModule("pyarrow")
+
+
+def _make_record_id(record_id_column: str | None, row_index: int, row: dict) -> str:
+    """Build the record-ID token for a single row.
+
+    When *record_id_column* is given the token is ``"{column}={value}"``,
+    giving a stable, human-readable key that survives row reordering.
+    When no column is specified the fallback is ``"row_{index}"``.
+    """
+    if record_id_column is not None:
+        return f"{record_id_column}={row[record_id_column]}"
+    return f"row_{row_index}"
+
+
+@dataclass(frozen=True)
+class SourceStreamResult:
+    """Artifacts produced by ``SourceStreamBuilder.build()``."""
+
+    stream: ArrowTableStream
+    schema_hash: str
+    table_hash: ContentHash
+    source_id: str
+    tag_columns: tuple[str, ...]
+    system_tag_columns: tuple[str, ...]
+
+
+class SourceStreamBuilder:
+    """Builds an enriched ``ArrowTableStream`` from a raw Arrow table.
+
+    Args:
+        data_context: Provides type_converter, semantic_hasher, arrow_hasher.
+        config: Orcapod config (controls hash character counts).
+    """
+
+    def __init__(self, data_context: "DataContext", config: "Config") -> None:
+        self._data_context = data_context
+        self._config = config
+
+    def build(
+        self,
+        table: "pa.Table",
+        tag_columns: Collection[str],
+        source_id: str | None = None,
+        record_id_column: str | None = None,
+        system_tag_columns: Collection[str] = (),
+    ) -> SourceStreamResult:
+        """Run the full enrichment pipeline.
+
+        Args:
+            table: Raw Arrow table (system columns will be stripped).
+            tag_columns: Column names forming the tag for each row.
+            source_id: Canonical source name. Defaults to table hash.
+            record_id_column: Column for stable record IDs in provenance.
+            system_tag_columns: Additional system-level tag columns.
+
+        Returns:
+            SourceStreamResult with enriched stream and metadata.
+
+        Raises:
+            ValueError: If tag_columns or record_id_column are not in table.
+        """
+        tag_columns_tuple = tuple(tag_columns)
+        system_tag_columns_tuple = tuple(system_tag_columns)
+
+        # 1. Drop system columns from raw input.
+        table = arrow_data_utils.drop_system_columns(table)
+
+        # 2. Validate tag_columns.
+        missing_tags = set(tag_columns_tuple) - set(table.column_names)
+        if missing_tags:
+            raise ValueError(
+                f"tag_columns not found in table: {missing_tags}. "
+                f"Available columns: {list(table.column_names)}"
+            )
+
+        # 3. Validate record_id_column.
+        if record_id_column is not None and record_id_column not in table.column_names:
+            raise ValueError(
+                f"record_id_column {record_id_column!r} not found in table columns: "
+                f"{table.column_names}"
+            )
+
+        # 4. Compute schema hash from tag/packet python schemas.
+        non_sys = arrow_data_utils.drop_system_columns(table)
+        tag_schema = non_sys.select(list(tag_columns_tuple)).schema
+        packet_schema = non_sys.drop(list(tag_columns_tuple)).schema
+        tag_python = self._data_context.type_converter.arrow_schema_to_python_schema(
+            tag_schema
+        )
+        packet_python = self._data_context.type_converter.arrow_schema_to_python_schema(
+            packet_schema
+        )
+        schema_hash = self._data_context.semantic_hasher.hash_object(
+            (tag_python, packet_python)
+        ).to_hex(char_count=self._config.schema_hash_n_char)
+
+        # 5. Compute table hash for data identity.
+        table_hash = self._data_context.arrow_hasher.hash_table(table)
+
+        # 6. Default source_id to table hash.
+        if source_id is None:
+            source_id = table_hash.to_hex(
+                char_count=self._config.path_hash_n_char
+            )
+
+        # 7. Build per-row source-info strings.
+        rows_as_dicts = table.to_pylist()
+        source_info = [
+            f"{source_id}{constants.BLOCK_SEPARATOR}"
+            f"{_make_record_id(record_id_column, i, row)}"
+            for i, row in enumerate(rows_as_dicts)
+        ]
+
+        # 8. Add source-info provenance columns.
+        table = arrow_data_utils.add_source_info(
+            table, source_info, exclude_columns=tag_columns_tuple
+        )
+
+        # 9. Add system tag columns.
+        record_id_values = [
+            _make_record_id(record_id_column, i, row)
+            for i, row in enumerate(rows_as_dicts)
+        ]
+        table = arrow_data_utils.add_system_tag_columns(
+            table,
+            schema_hash,
+            source_id,
+            record_id_values,
+        )
+
+        # 10. Wrap in ArrowTableStream.
+        stream = ArrowTableStream(
+            table=table,
+            tag_columns=tag_columns_tuple,
+            system_tag_columns=system_tag_columns_tuple,
+        )
+
+        return SourceStreamResult(
+            stream=stream,
+            schema_hash=schema_hash,
+            table_hash=table_hash,
+            source_id=source_id,
+            tag_columns=tag_columns_tuple,
+            system_tag_columns=system_tag_columns_tuple,
+        )
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `uv run pytest tests/test_core/sources/test_stream_builder.py -v`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/orcapod/core/sources/stream_builder.py tests/test_core/sources/test_stream_builder.py
+git commit -m "feat(sources): add SourceStreamBuilder for compositional source enrichment"
+```
+
+---
+
+### Task 2: Update RootSource Defaults and Refactor ArrowTableSource
+
+**Files:**
+- Modify: `src/orcapod/core/sources/base.py`
+- Modify: `src/orcapod/core/sources/arrow_table_source.py`
+- Test: `tests/test_core/sources/test_stream_builder.py` (append)
+
+**Context:** Add default stream delegation methods and default `identity_structure()`
+to `RootSource`. Change `resolve_field()` to raise `NotImplementedError`. Then
+refactor `ArrowTableSource` to use the builder (removing inline enrichment logic).
+CachedSource and DerivedSource already override all stream methods, so the defaults
+do not affect them.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `tests/test_core/sources/test_stream_builder.py`:
+
+```python
+from orcapod.core.sources.arrow_table_source import ArrowTableSource
+from orcapod.core.sources.base import RootSource
+
+
+class TestArrowTableSourceUsesBuilder:
+    def test_arrow_table_source_works(self):
+        """ArrowTableSource should use SourceStreamBuilder internally."""
+        table = pa.table({"id": pa.array([1, 2]), "x": pa.array([10, 20])})
+        src = ArrowTableSource(table=table, tag_columns=["id"])
+        assert src.as_table().num_rows == 2
+        tag_schema, packet_schema = src.output_schema()
+        assert "id" in tag_schema
+        assert "x" in packet_schema
+
+    def test_arrow_table_source_has_stream_attr(self):
+        table = pa.table({"id": pa.array([1, 2]), "x": pa.array([10, 20])})
+        src = ArrowTableSource(table=table, tag_columns=["id"])
+        assert hasattr(src, "_stream")
+
+    def test_arrow_table_source_identity_uses_class_name(self):
+        table = pa.table({"id": pa.array([1]), "x": pa.array([10])})
+        src = ArrowTableSource(table=table, tag_columns=["id"])
+        identity = src.identity_structure()
+        assert identity[0] == "ArrowTableSource"
+
+    def test_resolve_field_raises_not_implemented(self):
+        table = pa.table({"id": pa.array([1]), "x": pa.array([10])})
+        src = ArrowTableSource(table=table, tag_columns=["id"])
+        with pytest.raises(NotImplementedError):
+            src.resolve_field("row_0", "x")
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `uv run pytest tests/test_core/sources/test_stream_builder.py::TestArrowTableSourceUsesBuilder -v`
+Expected: FAIL — ArrowTableSource still has inline enrichment, resolve_field works
+
+- [ ] **Step 3: Update RootSource with defaults**
+
+In `src/orcapod/core/sources/base.py`:
+
+1. Add default `identity_structure()`:
+```python
+    def identity_structure(self) -> Any:
+        return (self.__class__.__name__, self.output_schema(), self.source_id)
+```
+
+2. Add default stream delegation methods:
+```python
+    def output_schema(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]:
+        return self._stream.output_schema(columns=columns, all_info=all_info)
+
+    def keys(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        return self._stream.keys(columns=columns, all_info=all_info)
+
+    def iter_packets(self):
+        return self._stream.iter_packets()
+
+    def as_table(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> "pa.Table":
+        return self._stream.as_table(columns=columns, all_info=all_info)
+```
+
+3. Change `resolve_field()` to raise `NotImplementedError`:
+```python
+    def resolve_field(self, record_id: str, field_name: str) -> Any:
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not implement resolve_field. "
+            f"Cannot resolve field {field_name!r} for record {record_id!r}."
+        )
+```
+
+Add necessary imports: `ColumnConfig`, `Schema` from `orcapod.types`.
+
+- [ ] **Step 4: Refactor ArrowTableSource to use SourceStreamBuilder**
+
+Replace `src/orcapod/core/sources/arrow_table_source.py`. The new version:
+- Calls `super().__init__()` first (sets up data_context)
+- Creates `SourceStreamBuilder`, calls `build()`
+- Stores `_stream`, `_schema_hash`, `_table_hash`, `_tag_columns`,
+  `_system_tag_columns`, `_record_id_column` from the result
+- Removes inline enrichment logic (steps 1-10 moved to builder)
+- Removes `output_schema()`, `keys()`, `iter_packets()`, `as_table()`,
+  `identity_structure()` (inherited from RootSource defaults)
+- Removes `resolve_field()` (inherited NotImplementedError from RootSource)
+- Keeps: `to_config()`, `from_config()`, `table` property
+
+```python
+from __future__ import annotations
+
+from collections.abc import Collection
+from typing import TYPE_CHECKING, Any, Self
+
+from orcapod.core.sources.base import RootSource
+from orcapod.core.sources.stream_builder import SourceStreamBuilder
+
+if TYPE_CHECKING:
+    import pyarrow as pa
+
+
+class ArrowTableSource(RootSource):
+    """A source backed by an in-memory PyArrow Table.
+
+    Uses ``SourceStreamBuilder`` to strip system columns, add per-row
+    source-info provenance columns and a system tag column encoding the
+    schema hash, then wraps the result in an ``ArrowTableStream``.
+    """
+
+    def __init__(
+        self,
+        table: "pa.Table",
+        tag_columns: Collection[str] = (),
+        system_tag_columns: Collection[str] = (),
+        record_id_column: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+
+        builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
+        result = builder.build(
+            table,
+            tag_columns=tag_columns,
+            source_id=self._source_id,
+            record_id_column=record_id_column,
+            system_tag_columns=system_tag_columns,
+        )
+
+        self._stream = result.stream
+        self._schema_hash = result.schema_hash
+        self._table_hash = result.table_hash
+        self._tag_columns = result.tag_columns
+        self._system_tag_columns = result.system_tag_columns
+        self._record_id_column = record_id_column
+
+        if self._source_id is None:
+            self._source_id = result.source_id
+
+    def to_config(self) -> dict[str, Any]:
+        """Serialize metadata-only config (in-memory table is not serializable)."""
+        return {
+            "source_type": "arrow_table",
+            "tag_columns": list(self._tag_columns),
+            "source_id": self.source_id,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> Self:
+        """Not supported — ArrowTableSource cannot be reconstructed from config.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError(
+            "ArrowTableSource cannot be reconstructed from config — "
+            "the in-memory Arrow table is not serializable."
+        )
+
+    @property
+    def table(self) -> "pa.Table":
+        return self._stream.as_table(
+            columns={"source": True, "system_tags": True}
+        )
+```
+
+- [ ] **Step 5: Run tests**
+
+Run: `uv run pytest tests/test_core/sources/ -v --tb=short`
+Expected: Most pass. Some tests may fail due to:
+- `resolve_field` now raises `NotImplementedError` instead of `FieldNotResolvableError`
+- Tests that directly accessed `ArrowTableSource._data_table` — update to use `table` property
+- Hash values may change (no `_make_record_id` import from `arrow_table_source`)
+
+Fix any failures.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/orcapod/core/sources/base.py src/orcapod/core/sources/arrow_table_source.py tests/test_core/sources/test_stream_builder.py
+git commit -m "refactor(sources): ArrowTableSource uses SourceStreamBuilder, RootSource gains defaults"
+```
+
+---
+
+### Task 3: Refactor DictSource and DataFrameSource to Use Builder
+
+**Files:**
+- Modify: `src/orcapod/core/sources/dict_source.py`
+- Modify: `src/orcapod/core/sources/data_frame_source.py`
+- Test: `tests/test_core/sources/test_source_builder_integration.py` (new)
+
+**Context:** Both sources currently create an internal `_arrow_source` and delegate ~7
+methods. Replace with: `super().__init__()` → convert data → builder → store `_stream`.
+All stream/identity methods inherited from `RootSource` defaults.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `tests/test_core/sources/test_source_builder_integration.py`:
+
+```python
+"""Tests that sources use SourceStreamBuilder (no _arrow_source delegation)."""
 
 from __future__ import annotations
 
@@ -77,51 +608,80 @@ import pytest
 
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
 from orcapod.core.sources.dict_source import DictSource
+from orcapod.core.sources.data_frame_source import DataFrameSource
 
 
-def _simple_table():
-    return pa.table({"id": pa.array([1, 2]), "x": pa.array([10, 20])})
-
-
-class TestDictSourceInheritance:
-    def test_dict_source_is_arrow_table_source(self):
-        src = DictSource(
-            data=[{"id": 1, "x": 10}],
-            tag_columns=["id"],
-        )
-        assert isinstance(src, ArrowTableSource)
-
-    def test_dict_source_has_no_arrow_source_attr(self):
-        src = DictSource(
-            data=[{"id": 1, "x": 10}],
-            tag_columns=["id"],
-        )
+class TestDictSourceBuilder:
+    def test_no_arrow_source_attr(self):
+        src = DictSource(data=[{"id": 1, "x": 10}], tag_columns=["id"])
         assert not hasattr(src, "_arrow_source")
 
-    def test_dict_source_iter_packets(self):
+    def test_has_stream_attr(self):
+        src = DictSource(data=[{"id": 1, "x": 10}], tag_columns=["id"])
+        assert hasattr(src, "_stream")
+
+    def test_iter_packets(self):
         src = DictSource(
             data=[{"id": 1, "x": 10}, {"id": 2, "x": 20}],
             tag_columns=["id"],
         )
-        results = list(src.iter_packets())
-        assert len(results) == 2
+        assert len(list(src.iter_packets())) == 2
 
-    def test_dict_source_to_config(self):
-        src = DictSource(
-            data=[{"id": 1, "x": 10}],
-            tag_columns=["id"],
-        )
+    def test_output_schema(self):
+        src = DictSource(data=[{"id": 1, "x": 10}], tag_columns=["id"])
+        tag_schema, packet_schema = src.output_schema()
+        assert "id" in tag_schema
+        assert "x" in packet_schema
+
+    def test_to_config(self):
+        src = DictSource(data=[{"id": 1, "x": 10}], tag_columns=["id"])
         config = src.to_config()
         assert config["source_type"] == "dict"
-        assert "tag_columns" in config
+        assert config["tag_columns"] == ["id"]
+
+    def test_identity_uses_class_name(self):
+        src = DictSource(data=[{"id": 1, "x": 10}], tag_columns=["id"])
+        identity = src.identity_structure()
+        assert identity[0] == "DictSource"
+
+    def test_source_id_defaults(self):
+        src = DictSource(data=[{"id": 1, "x": 10}], tag_columns=["id"])
+        assert src.source_id is not None
+
+
+class TestDataFrameSourceBuilder:
+    def test_no_arrow_source_attr(self):
+        src = DataFrameSource(
+            data={"id": [1, 2], "x": [10, 20]}, tag_columns=["id"]
+        )
+        assert not hasattr(src, "_arrow_source")
+
+    def test_has_stream_attr(self):
+        src = DataFrameSource(
+            data={"id": [1, 2], "x": [10, 20]}, tag_columns=["id"]
+        )
+        assert hasattr(src, "_stream")
+
+    def test_iter_packets(self):
+        src = DataFrameSource(
+            data={"id": [1, 2], "x": [10, 20]}, tag_columns=["id"]
+        )
+        assert len(list(src.iter_packets())) == 2
+
+    def test_identity_uses_class_name(self):
+        src = DataFrameSource(
+            data={"id": [1], "x": [10]}, tag_columns=["id"]
+        )
+        identity = src.identity_structure()
+        assert identity[0] == "DataFrameSource"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_core/sources/test_source_label.py::TestDictSourceInheritance -v`
-Expected: FAIL — DictSource is not an ArrowTableSource, has `_arrow_source`
+Run: `uv run pytest tests/test_core/sources/test_source_builder_integration.py -v`
+Expected: FAIL — sources still have `_arrow_source`, identity reports "ArrowTableSource"
 
-- [ ] **Step 3: Rewrite DictSource to inherit from ArrowTableSource**
+- [ ] **Step 3: Rewrite DictSource**
 
 Replace `src/orcapod/core/sources/dict_source.py`:
 
@@ -131,18 +691,17 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping
 from typing import Any
 
-from orcapod import contexts
-from orcapod.core.sources.arrow_table_source import ArrowTableSource
+from orcapod.core.sources.base import RootSource
+from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.types import DataValue, SchemaLike
 
 
-class DictSource(ArrowTableSource):
+class DictSource(RootSource):
     """A source backed by a collection of Python dictionaries.
 
     Each dict becomes one (tag, packet) pair in the stream. The dicts are
     converted to an Arrow table via the data-context type converter, then
-    handled by ``ArrowTableSource`` (including source-info and schema-hash
-    annotation).
+    enriched by ``SourceStreamBuilder`` (source-info, schema-hash, system tags).
     """
 
     def __init__(
@@ -154,29 +713,28 @@ class DictSource(ArrowTableSource):
         source_id: str | None = None,
         **kwargs: Any,
     ) -> None:
-        # Resolve data_context before super().__init__ so type_converter is available
-        data_context = kwargs.get("data_context")
-        resolved_ctx = contexts.resolve_context(data_context)
+        super().__init__(source_id=source_id, **kwargs)
 
-        arrow_table = resolved_ctx.type_converter.python_dicts_to_arrow_table(
+        arrow_table = self.data_context.type_converter.python_dicts_to_arrow_table(
             [dict(row) for row in data],
             python_schema=data_schema,
         )
-        super().__init__(
-            table=arrow_table,
+
+        builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
+        result = builder.build(
+            arrow_table,
             tag_columns=tag_columns,
+            source_id=self._source_id,
             system_tag_columns=system_tag_columns,
-            source_id=source_id,
-            **kwargs,
         )
 
-    def to_config(self) -> dict[str, Any]:
-        """Serialize metadata-only config (data is not serializable).
+        self._stream = result.stream
+        self._tag_columns = result.tag_columns
+        if self._source_id is None:
+            self._source_id = result.source_id
 
-        Returns:
-            Dict with source metadata. Cannot be used to reconstruct the source
-            since the original data is not preserved.
-        """
+    def to_config(self) -> dict[str, Any]:
+        """Serialize metadata-only config (data is not serializable)."""
         return {
             "source_type": "dict",
             "tag_columns": list(self._tag_columns),
@@ -196,68 +754,7 @@ class DictSource(ArrowTableSource):
         )
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `uv run pytest tests/test_core/sources/test_source_label.py::TestDictSourceInheritance -v`
-Expected: PASS
-
-- [ ] **Step 5: Run existing source tests**
-
-Run: `uv run pytest tests/test_core/sources/ -v --tb=short`
-Expected: PASS (some hash-dependent tests may need updating)
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/orcapod/core/sources/dict_source.py tests/test_core/sources/test_source_label.py
-git commit -m "refactor(sources): DictSource inherits from ArrowTableSource"
-```
-
----
-
-### Task 2: Refactor DataFrameSource to Inherit from ArrowTableSource
-
-**Files:**
-- Modify: `src/orcapod/core/sources/data_frame_source.py`
-- Test: `tests/test_core/sources/test_source_label.py` (append)
-
-- [ ] **Step 1: Write the failing test**
-
-Append to `tests/test_core/sources/test_source_label.py`:
-
-```python
-from orcapod.core.sources.data_frame_source import DataFrameSource
-
-
-class TestDataFrameSourceInheritance:
-    def test_data_frame_source_is_arrow_table_source(self):
-        src = DataFrameSource(
-            data={"id": [1, 2], "x": [10, 20]},
-            tag_columns=["id"],
-        )
-        assert isinstance(src, ArrowTableSource)
-
-    def test_data_frame_source_has_no_arrow_source_attr(self):
-        src = DataFrameSource(
-            data={"id": [1, 2], "x": [10, 20]},
-            tag_columns=["id"],
-        )
-        assert not hasattr(src, "_arrow_source")
-
-    def test_data_frame_source_iter_packets(self):
-        src = DataFrameSource(
-            data={"id": [1, 2], "x": [10, 20]},
-            tag_columns=["id"],
-        )
-        assert len(list(src.iter_packets())) == 2
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `uv run pytest tests/test_core/sources/test_source_label.py::TestDataFrameSourceInheritance -v`
-Expected: FAIL
-
-- [ ] **Step 3: Rewrite DataFrameSource**
+- [ ] **Step 4: Rewrite DataFrameSource**
 
 Replace `src/orcapod/core/sources/data_frame_source.py`:
 
@@ -268,8 +765,8 @@ import logging
 from collections.abc import Collection
 from typing import TYPE_CHECKING, Any
 
-from orcapod import contexts
-from orcapod.core.sources.arrow_table_source import ArrowTableSource
+from orcapod.core.sources.base import RootSource
+from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.utils import polars_data_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -282,12 +779,11 @@ else:
 logger = logging.getLogger(__name__)
 
 
-class DataFrameSource(ArrowTableSource):
+class DataFrameSource(RootSource):
     """A source backed by a Polars DataFrame (or any Polars-compatible data).
 
-    The DataFrame is converted to an Arrow table and then handled identically
-    to ``ArrowTableSource``, including source-info provenance annotation and
-    schema-hash system tags.
+    The DataFrame is converted to an Arrow table and enriched by
+    ``SourceStreamBuilder`` (source-info, schema-hash, system tags).
     """
 
     def __init__(
@@ -298,9 +794,7 @@ class DataFrameSource(ArrowTableSource):
         source_id: str | None = None,
         **kwargs: Any,
     ) -> None:
-        # Resolve data_context before super().__init__ so type_converter is available
-        data_context = kwargs.get("data_context")
-        resolved_ctx = contexts.resolve_context(data_context)
+        super().__init__(source_id=source_id, **kwargs)
 
         df = pl.DataFrame(data)
 
@@ -310,7 +804,7 @@ class DataFrameSource(ArrowTableSource):
             logger.info(
                 f"Converting {len(object_columns)} object column(s) to Arrow format"
             )
-            sub_table = resolved_ctx.type_converter.python_dicts_to_arrow_table(
+            sub_table = self.data_context.type_converter.python_dicts_to_arrow_table(
                 df.select(object_columns).to_dicts()
             )
             df = df.with_columns([pl.from_arrow(c) for c in sub_table])
@@ -325,13 +819,18 @@ class DataFrameSource(ArrowTableSource):
         if missing:
             raise ValueError(f"TagProtocol column(s) not found in data: {missing}")
 
-        super().__init__(
-            table=df.to_arrow(),
+        builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
+        result = builder.build(
+            df.to_arrow(),
             tag_columns=tag_columns,
+            source_id=self._source_id,
             system_tag_columns=system_tag_columns,
-            source_id=source_id,
-            **kwargs,
         )
+
+        self._stream = result.stream
+        self._tag_columns = result.tag_columns
+        if self._source_id is None:
+            self._source_id = result.source_id
 
     def to_config(self) -> dict[str, Any]:
         """Serialize metadata-only config (DataFrame is not serializable)."""
@@ -354,61 +853,106 @@ class DataFrameSource(ArrowTableSource):
         )
 ```
 
-- [ ] **Step 4: Run tests**
+- [ ] **Step 5: Run tests**
 
 Run: `uv run pytest tests/test_core/sources/ -v --tb=short`
-Expected: PASS
+Expected: PASS. Fix any failures from hash changes or `_arrow_source` references.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/orcapod/core/sources/data_frame_source.py tests/test_core/sources/test_source_label.py
-git commit -m "refactor(sources): DataFrameSource inherits from ArrowTableSource"
+git add src/orcapod/core/sources/dict_source.py src/orcapod/core/sources/data_frame_source.py tests/test_core/sources/test_source_builder_integration.py
+git commit -m "refactor(sources): DictSource and DataFrameSource use SourceStreamBuilder"
 ```
 
 ---
 
-### Task 3: Refactor CSVSource to Inherit from ArrowTableSource
+### Task 4: Refactor CSVSource and DeltaTableSource to Use Builder
 
 **Files:**
 - Modify: `src/orcapod/core/sources/csv_source.py`
-- Test: `tests/test_core/sources/test_source_label.py` (append)
+- Modify: `src/orcapod/core/sources/delta_table_source.py`
+- Test: `tests/test_core/sources/test_source_builder_integration.py` (append)
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `tests/test_core/sources/test_source_label.py`:
+Append to `tests/test_core/sources/test_source_builder_integration.py`:
 
 ```python
-import csv
+from orcapod.core.sources.csv_source import CSVSource
+from orcapod.core.sources.delta_table_source import DeltaTableSource
 
 
-class TestCSVSourceInheritance:
-    def test_csv_source_is_arrow_table_source(self, tmp_path):
-        csv_path = str(tmp_path / "test.csv")
-        with open(csv_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["id", "x"])
-            writer.writeheader()
-            writer.writerow({"id": 1, "x": 10})
-        from orcapod.core.sources.csv_source import CSVSource
-
-        src = CSVSource(file_path=csv_path, tag_columns=["id"])
-        assert isinstance(src, ArrowTableSource)
-
-    def test_csv_source_has_no_arrow_source_attr(self, tmp_path):
-        csv_path = str(tmp_path / "test.csv")
-        with open(csv_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["id", "x"])
-            writer.writeheader()
-            writer.writerow({"id": 1, "x": 10})
-        from orcapod.core.sources.csv_source import CSVSource
-
-        src = CSVSource(file_path=csv_path, tag_columns=["id"])
+class TestCSVSourceBuilder:
+    def test_no_arrow_source_attr(self, tmp_path):
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("id,x\n1,10\n2,20\n")
+        src = CSVSource(file_path=str(csv_file), tag_columns=["id"])
         assert not hasattr(src, "_arrow_source")
+
+    def test_has_stream_attr(self, tmp_path):
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("id,x\n1,10\n2,20\n")
+        src = CSVSource(file_path=str(csv_file), tag_columns=["id"])
+        assert hasattr(src, "_stream")
+
+    def test_iter_packets(self, tmp_path):
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("id,x\n1,10\n2,20\n")
+        src = CSVSource(file_path=str(csv_file), tag_columns=["id"])
+        assert len(list(src.iter_packets())) == 2
+
+    def test_round_trip_config(self, tmp_path):
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("id,x\n1,10\n2,20\n")
+        src = CSVSource(
+            file_path=str(csv_file), tag_columns=["id"], record_id_column="id"
+        )
+        config = src.to_config()
+        assert config["source_type"] == "csv"
+        assert config["file_path"] == str(csv_file)
+        src2 = CSVSource.from_config(config)
+        assert src2.source_id == src.source_id
+
+    def test_identity_uses_class_name(self, tmp_path):
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("id,x\n1,10\n")
+        src = CSVSource(file_path=str(csv_file), tag_columns=["id"])
+        assert src.identity_structure()[0] == "CSVSource"
+
+
+class TestDeltaTableSourceBuilder:
+    @pytest.fixture
+    def delta_path(self, tmp_path):
+        from deltalake import write_deltalake
+        table = pa.table({"id": pa.array([1, 2]), "x": pa.array([10, 20])})
+        path = str(tmp_path / "delta_test")
+        write_deltalake(path, table)
+        return path
+
+    def test_no_arrow_source_attr(self, delta_path):
+        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
+        assert not hasattr(src, "_arrow_source")
+
+    def test_has_stream_attr(self, delta_path):
+        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
+        assert hasattr(src, "_stream")
+
+    def test_round_trip_config(self, delta_path):
+        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
+        config = src.to_config()
+        assert config["source_type"] == "delta_table"
+        src2 = DeltaTableSource.from_config(config)
+        assert src2.source_id == src.source_id
+
+    def test_identity_uses_class_name(self, delta_path):
+        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
+        assert src.identity_structure()[0] == "DeltaTableSource"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_core/sources/test_source_label.py::TestCSVSourceInheritance -v`
+Run: `uv run pytest tests/test_core/sources/test_source_builder_integration.py::TestCSVSourceBuilder tests/test_core/sources/test_source_builder_integration.py::TestDeltaTableSourceBuilder -v`
 Expected: FAIL
 
 - [ ] **Step 3: Rewrite CSVSource**
@@ -421,7 +965,8 @@ from __future__ import annotations
 from collections.abc import Collection
 from typing import TYPE_CHECKING, Any
 
-from orcapod.core.sources.arrow_table_source import ArrowTableSource
+from orcapod.core.sources.base import RootSource
+from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -430,19 +975,12 @@ else:
     pa = LazyModule("pyarrow")
 
 
-class CSVSource(ArrowTableSource):
+class CSVSource(RootSource):
     """A source backed by a CSV file.
 
     The file is read once at construction time using PyArrow's CSV reader,
-    converted to an Arrow table, and then handled identically to
-    ``ArrowTableSource``.
-
-    Args:
-        file_path: Path to the CSV file to read.
-        tag_columns: Column names whose values form the tag for each row.
-        system_tag_columns: Additional system-level tag columns.
-        record_id_column: Column whose values serve as stable record identifiers.
-        source_id: Canonical registry name for this source.
+    converted to an Arrow table, and enriched by ``SourceStreamBuilder``
+    (source-info, schema-hash, system tags).
     """
 
     def __init__(
@@ -454,22 +992,30 @@ class CSVSource(ArrowTableSource):
         source_id: str | None = None,
         **kwargs: Any,
     ) -> None:
+        import pyarrow.csv as pa_csv
+
         if source_id is None:
             source_id = file_path
-
-        import pyarrow.csv as pa_csv
+        super().__init__(source_id=source_id, **kwargs)
 
         self._file_path = file_path
         table: pa.Table = pa_csv.read_csv(file_path)
 
-        super().__init__(
-            table=table,
+        builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
+        result = builder.build(
+            table,
             tag_columns=tag_columns,
-            system_tag_columns=system_tag_columns,
+            source_id=self._source_id,
             record_id_column=record_id_column,
-            source_id=source_id,
-            **kwargs,
+            system_tag_columns=system_tag_columns,
         )
+
+        self._stream = result.stream
+        self._tag_columns = result.tag_columns
+        self._system_tag_columns = result.system_tag_columns
+        self._record_id_column = record_id_column
+        if self._source_id is None:
+            self._source_id = result.source_id
 
     def to_config(self) -> dict[str, Any]:
         """Serialize this source's configuration to a JSON-compatible dict."""
@@ -494,26 +1040,7 @@ class CSVSource(ArrowTableSource):
         )
 ```
 
-- [ ] **Step 4: Run tests**
-
-Run: `uv run pytest tests/test_core/sources/ -v --tb=short`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/orcapod/core/sources/csv_source.py tests/test_core/sources/test_source_label.py
-git commit -m "refactor(sources): CSVSource inherits from ArrowTableSource"
-```
-
----
-
-### Task 4: Refactor DeltaTableSource to Inherit from ArrowTableSource
-
-**Files:**
-- Modify: `src/orcapod/core/sources/delta_table_source.py`
-
-- [ ] **Step 1: Rewrite DeltaTableSource**
+- [ ] **Step 4: Rewrite DeltaTableSource**
 
 Replace `src/orcapod/core/sources/delta_table_source.py`:
 
@@ -524,7 +1051,8 @@ from collections.abc import Collection
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from orcapod.core.sources.arrow_table_source import ArrowTableSource
+from orcapod.core.sources.base import RootSource
+from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.types import PathLike
 from orcapod.utils.lazy_module import LazyModule
 
@@ -534,20 +1062,12 @@ else:
     pa = LazyModule("pyarrow")
 
 
-class DeltaTableSource(ArrowTableSource):
+class DeltaTableSource(RootSource):
     """A source backed by a Delta Lake table.
 
     The table is read once at construction time using ``deltalake``'s
-    PyArrow integration. The resulting Arrow table is passed to
-    ``ArrowTableSource`` which adds source-info provenance and schema-hash
-    system tags.
-
-    Args:
-        delta_table_path: Filesystem path to the Delta table directory.
-        tag_columns: Column names whose values form the tag for each row.
-        system_tag_columns: Additional system-level tag columns.
-        record_id_column: Column whose values serve as stable record identifiers.
-        source_id: Canonical registry name for this source.
+    PyArrow integration. The resulting Arrow table is enriched by
+    ``SourceStreamBuilder`` (source-info, schema-hash, system tags).
     """
 
     def __init__(
@@ -566,6 +1086,7 @@ class DeltaTableSource(ArrowTableSource):
 
         if source_id is None:
             source_id = resolved.name
+        super().__init__(source_id=source_id, **kwargs)
 
         self._delta_table_path = resolved
 
@@ -574,16 +1095,25 @@ class DeltaTableSource(ArrowTableSource):
         except TableNotFoundError:
             raise ValueError(f"Delta table not found at {resolved}")
 
-        table: pa.Table = delta_table.to_pyarrow_dataset(as_large_types=True).to_table()
+        table: pa.Table = delta_table.to_pyarrow_dataset(
+            as_large_types=True
+        ).to_table()
 
-        super().__init__(
-            table=table,
+        builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
+        result = builder.build(
+            table,
             tag_columns=tag_columns,
-            system_tag_columns=system_tag_columns,
+            source_id=self._source_id,
             record_id_column=record_id_column,
-            source_id=source_id,
-            **kwargs,
+            system_tag_columns=system_tag_columns,
         )
+
+        self._stream = result.stream
+        self._tag_columns = result.tag_columns
+        self._system_tag_columns = result.system_tag_columns
+        self._record_id_column = record_id_column
+        if self._source_id is None:
+            self._source_id = result.source_id
 
     def to_config(self) -> dict[str, Any]:
         """Serialize this source's configuration to a JSON-compatible dict."""
@@ -608,70 +1138,78 @@ class DeltaTableSource(ArrowTableSource):
         )
 ```
 
-- [ ] **Step 2: Run existing DeltaTableSource tests**
+- [ ] **Step 5: Run tests**
 
-Run: `uv run pytest tests/test_core/sources/test_sources_comprehensive.py -v --tb=short -k delta`
-Expected: PASS (or skip if deltalake not installed)
+Run: `uv run pytest tests/test_core/sources/ -v --tb=short`
+Expected: PASS. Fix any hash or import failures.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/orcapod/core/sources/delta_table_source.py
-git commit -m "refactor(sources): DeltaTableSource inherits from ArrowTableSource"
+git add src/orcapod/core/sources/csv_source.py src/orcapod/core/sources/delta_table_source.py tests/test_core/sources/test_source_builder_integration.py
+git commit -m "refactor(sources): CSVSource and DeltaTableSource use SourceStreamBuilder"
 ```
 
 ---
 
-### Task 5: Refactor ListSource to Inherit from ArrowTableSource
+### Task 5: Refactor ListSource to Use Builder
 
 **Files:**
 - Modify: `src/orcapod/core/sources/list_source.py`
-- Test: `tests/test_core/sources/test_source_label.py` (append)
+- Test: `tests/test_core/sources/test_source_builder_integration.py` (append)
 
-ListSource is more complex: it has a custom `identity_structure()` including tag function hash, and needs `data_context` resolved before `super().__init__()` for `_hash_tag_function()`.
+**Note:** ListSource keeps its custom `identity_structure()` (includes tag function
+hash) and `_hash_tag_function()`. Since `super().__init__()` runs first,
+`self.data_context` is available for the `"content"` hash mode.
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `tests/test_core/sources/test_source_label.py`:
+Append to `tests/test_core/sources/test_source_builder_integration.py`:
 
 ```python
 from orcapod.core.sources.list_source import ListSource
 
 
-class TestListSourceInheritance:
-    def test_list_source_is_arrow_table_source(self):
-        src = ListSource(name="val", data=[1, 2, 3])
-        assert isinstance(src, ArrowTableSource)
-
-    def test_list_source_has_no_arrow_source_attr(self):
+class TestListSourceBuilder:
+    def test_no_arrow_source_attr(self):
         src = ListSource(name="val", data=[1, 2, 3])
         assert not hasattr(src, "_arrow_source")
 
-    def test_list_source_identity_includes_tag_function_hash(self):
-        src1 = ListSource(name="val", data=[1, 2])
-        src2 = ListSource(name="val", data=[1, 2])
-        assert src1.identity_structure() == src2.identity_structure()
+    def test_has_stream_attr(self):
+        src = ListSource(name="val", data=[1, 2, 3])
+        assert hasattr(src, "_stream")
 
-    def test_list_source_custom_tag_function(self):
+    def test_iter_packets(self):
+        src = ListSource(name="val", data=[1, 2, 3])
+        assert len(list(src.iter_packets())) == 3
+
+    def test_custom_identity_structure(self):
+        src = ListSource(name="val", data=[1, 2, 3])
+        identity = src.identity_structure()
+        assert identity[0] == "ListSource"
+        assert identity[1] == "val"
+        assert identity[2] == (1, 2, 3)
+        assert len(identity) == 4  # includes tag_function_hash
+
+    def test_with_tag_function(self):
         src = ListSource(
             name="val",
             data=[10, 20],
-            tag_function=lambda elem, idx: {"my_tag": idx * 10},
-            expected_tag_keys=["my_tag"],
+            tag_function=lambda e, i: {"idx": i, "label": f"item_{i}"},
+            expected_tag_keys=["idx", "label"],
         )
-        tags, packets = src.keys()
-        assert "my_tag" in tags
-        assert "val" in packets
+        results = list(src.iter_packets())
+        assert len(results) == 2
 
-    def test_list_source_iter_packets(self):
-        src = ListSource(name="val", data=[10, 20, 30])
-        assert len(list(src.iter_packets())) == 3
+    def test_source_id_defaults(self):
+        src = ListSource(name="val", data=[1])
+        assert src.source_id is not None
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_core/sources/test_source_label.py::TestListSourceInheritance -v`
-Expected: FAIL on isinstance check
+Run: `uv run pytest tests/test_core/sources/test_source_builder_integration.py::TestListSourceBuilder -v`
+Expected: FAIL — ListSource still has `_arrow_source`
 
 - [ ] **Step 3: Rewrite ListSource**
 
@@ -683,29 +1221,20 @@ from __future__ import annotations
 from collections.abc import Callable, Collection
 from typing import TYPE_CHECKING, Any, Literal
 
-from orcapod import contexts
-from orcapod.core.sources.arrow_table_source import ArrowTableSource
+from orcapod.core.sources.base import RootSource
+from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.protocols.core_protocols import TagProtocol
 
 if TYPE_CHECKING:
     import pyarrow as pa
 
 
-class ListSource(ArrowTableSource):
+class ListSource(RootSource):
     """A source backed by a Python list.
 
     Each element in the list becomes one (tag, packet) pair. The element is
     stored as the packet under ``name``; the tag is either the element's index
     (default) or the dict returned by ``tag_function(element, index)``.
-
-    Args:
-        name: Packet column name under which each list element is stored.
-        data: The list of elements.
-        tag_function: Optional callable ``(element, index) -> dict[str, Any]``
-            producing the tag fields for each element.
-        expected_tag_keys: Explicit tag key names.
-        tag_function_hash_mode: How to identify the tag function for content-hash.
-        source_id: Canonical registry name for this source.
     """
 
     @staticmethod
@@ -722,9 +1251,7 @@ class ListSource(ArrowTableSource):
         source_id: str | None = None,
         **kwargs: Any,
     ) -> None:
-        # Resolve data_context before super().__init__ so semantic_hasher is available
-        data_context = kwargs.get("data_context")
-        resolved_ctx = contexts.resolve_context(data_context)
+        super().__init__(source_id=source_id, **kwargs)
 
         self.name = name
         self._elements = list(data)
@@ -740,8 +1267,8 @@ class ListSource(ArrowTableSource):
             tuple(expected_tag_keys) if expected_tag_keys is not None else None
         )
 
-        # Hash the tag function for identity purposes (needs resolved_ctx).
-        self._tag_function_hash = self._hash_tag_function(resolved_ctx)
+        # Hash the tag function for identity purposes.
+        self._tag_function_hash = self._hash_tag_function()
 
         # Build rows: each row is tag_fields merged with {name: element}.
         rows = []
@@ -759,15 +1286,42 @@ class ListSource(ArrowTableSource):
             else [k for k in (rows[0].keys() if rows else []) if k != name]
         )
 
-        table = resolved_ctx.type_converter.python_dicts_to_arrow_table(rows)
+        arrow_table = self.data_context.type_converter.python_dicts_to_arrow_table(rows)
 
-        # Pass resolved context so super().__init__ doesn't re-resolve
-        super().__init__(
-            table=table,
+        builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
+        result = builder.build(
+            arrow_table,
             tag_columns=tag_columns,
-            source_id=source_id,
-            data_context=resolved_ctx,
-            **{k: v for k, v in kwargs.items() if k != "data_context"},
+            source_id=self._source_id,
+        )
+
+        self._stream = result.stream
+        if self._source_id is None:
+            self._source_id = result.source_id
+
+    def _hash_tag_function(self) -> str:
+        """Produce a stable hash string for the tag function."""
+        if self._tag_function_hash_mode == "name":
+            fn = self._tag_function
+            return f"{fn.__module__}.{fn.__qualname__}"
+        elif self._tag_function_hash_mode == "signature":
+            import inspect
+            return str(inspect.signature(self._tag_function))
+        else:  # "content"
+            import inspect
+            src = inspect.getsource(self._tag_function)
+            return self.data_context.semantic_hasher.hash_object(src).to_hex()
+
+    def identity_structure(self) -> Any:
+        try:
+            elements_repr: Any = tuple(self._elements)
+        except TypeError:
+            elements_repr = tuple(str(e) for e in self._elements)
+        return (
+            self.__class__.__name__,
+            self.name,
+            elements_repr,
+            self._tag_function_hash,
         )
 
     def to_config(self) -> dict[str, Any]:
@@ -789,34 +1343,6 @@ class ListSource(ArrowTableSource):
             "ListSource cannot be reconstructed from config — "
             "original list data is not serializable."
         )
-
-    def _hash_tag_function(self, ctx: contexts.DataContext | None = None) -> str:
-        """Produce a stable hash string for the tag function."""
-        if self._tag_function_hash_mode == "name":
-            fn = self._tag_function
-            return f"{fn.__module__}.{fn.__qualname__}"
-        elif self._tag_function_hash_mode == "signature":
-            import inspect
-
-            return str(inspect.signature(self._tag_function))
-        else:  # "content"
-            import inspect
-
-            resolved_ctx = ctx or self.data_context
-            src = inspect.getsource(self._tag_function)
-            return resolved_ctx.semantic_hasher.hash_object(src).to_hex()
-
-    def identity_structure(self) -> Any:
-        try:
-            elements_repr: Any = tuple(self._elements)
-        except TypeError:
-            elements_repr = tuple(str(e) for e in self._elements)
-        return (
-            self.__class__.__name__,
-            self.name,
-            elements_repr,
-            self._tag_function_hash,
-        )
 ```
 
 - [ ] **Step 4: Run tests**
@@ -827,99 +1353,101 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/orcapod/core/sources/list_source.py tests/test_core/sources/test_source_label.py
-git commit -m "refactor(sources): ListSource inherits from ArrowTableSource"
+git add src/orcapod/core/sources/list_source.py tests/test_core/sources/test_source_builder_integration.py
+git commit -m "refactor(sources): ListSource uses SourceStreamBuilder"
 ```
 
 ---
 
-### Task 6: Remove `computed_label()` from RootSource and Fix Regressions
-
-Now that all delegating sources inherit from ArrowTableSource (no more `_arrow_source` delegation), remove the `computed_label()` override from `RootSource` and fix any test regressions.
+### Task 6: Remove `computed_label()` from RootSource, Remove CachedSource resolve_field, Full Verification
 
 **Files:**
-- Modify: `src/orcapod/core/sources/base.py:117-119`
-- Test: `tests/test_core/sources/test_source_label.py` (append)
+- Modify: `src/orcapod/core/sources/base.py`
+- Modify: `src/orcapod/core/sources/cached_source.py`
+- Test: `tests/test_core/sources/test_source_builder_integration.py` (append)
+
+**Context:** After Tasks 1-5, all delegating sources use the builder. The only
+remaining `computed_label()` is on `RootSource` (returns `self._source_id`). Removing
+it causes sources without an explicit label to fall back to `self.__class__.__name__`
+via `LabelableMixin.label`. Also remove `resolve_field` delegation from CachedSource
+(it inherits `NotImplementedError` from RootSource).
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `tests/test_core/sources/test_source_label.py`:
+Append to `tests/test_core/sources/test_source_builder_integration.py`:
 
 ```python
 class TestSourceLabelDefaults:
-    def test_arrow_table_source_label_is_class_name(self):
-        src = ArrowTableSource(table=_simple_table(), tag_columns=["id"])
-        assert src.label == "ArrowTableSource"
-
-    def test_dict_source_label_is_class_name(self):
-        src = DictSource(
-            data=[{"id": 1, "x": 10}, {"id": 2, "x": 20}],
-            tag_columns=["id"],
-        )
+    def test_dict_source_label_defaults_to_class_name(self):
+        src = DictSource(data=[{"id": 1, "x": 10}], tag_columns=["id"])
         assert src.label == "DictSource"
 
-    def test_list_source_label_is_class_name(self):
-        src = ListSource(name="val", data=[1, 2, 3])
-        assert src.label == "ListSource"
-
-    def test_data_frame_source_label_is_class_name(self):
-        src = DataFrameSource(
-            data={"id": [1, 2], "x": [10, 20]},
+    def test_dict_source_explicit_label_preserved(self):
+        src = DictSource(
+            data=[{"id": 1, "x": 10}],
             tag_columns=["id"],
-        )
-        assert src.label == "DataFrameSource"
-
-    def test_explicit_label_overrides_default(self):
-        src = ArrowTableSource(
-            table=_simple_table(), tag_columns=["id"], label="my_source"
+            label="my_source",
         )
         assert src.label == "my_source"
 
-    def test_source_id_is_not_label(self):
-        """source_id should not leak into label."""
-        src = ArrowTableSource(
-            table=_simple_table(),
-            tag_columns=["id"],
-            source_id="custom_sid",
-        )
+    def test_arrow_table_source_label_defaults_to_class_name(self):
+        table = pa.table({"id": pa.array([1, 2]), "x": pa.array([10, 20])})
+        src = ArrowTableSource(table=table, tag_columns=["id"])
         assert src.label == "ArrowTableSource"
-        assert src.source_id == "custom_sid"
+
+    def test_list_source_label_defaults_to_class_name(self):
+        src = ListSource(name="val", data=[1, 2])
+        assert src.label == "ListSource"
+
+    def test_csv_source_label_defaults_to_class_name(self, tmp_path):
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("id,x\n1,10\n")
+        src = CSVSource(file_path=str(csv_file), tag_columns=["id"])
+        assert src.label == "CSVSource"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_core/sources/test_source_label.py::TestSourceLabelDefaults -v`
-Expected: FAIL — `ArrowTableSource` still returns `source_id` as label via inherited `RootSource.computed_label()`
+Run: `uv run pytest tests/test_core/sources/test_source_builder_integration.py::TestSourceLabelDefaults -v`
+Expected: FAIL — labels currently return source_id, not class name
 
-- [ ] **Step 3: Remove `computed_label()` from RootSource**
+- [ ] **Step 3: Remove computed_label() from RootSource**
 
-In `src/orcapod/core/sources/base.py`, delete lines 117-119:
+In `src/orcapod/core/sources/base.py`, delete the `computed_label()` method:
+
 ```python
+# DELETE these lines:
     def computed_label(self) -> str | None:
         """Return the source_id as the label."""
         return self._source_id
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: Remove resolve_field delegation from CachedSource**
 
-Run: `uv run pytest tests/test_core/sources/test_source_label.py -v`
-Expected: PASS
+In `src/orcapod/core/sources/cached_source.py`, delete the `resolve_field()` method
+(it now inherits `NotImplementedError` from RootSource):
 
-- [ ] **Step 5: Run full test suite to catch regressions**
+```python
+# DELETE these lines:
+    def resolve_field(self, record_id: str, field_name: str) -> Any:
+        return self._source.resolve_field(record_id, field_name)
+```
+
+- [ ] **Step 5: Run full test suite**
 
 Run: `uv run pytest tests/ -v --tb=short`
 
 Fix any failures. Common issues:
-- Tests in `test_sources.py` that accessed `_arrow_source` directly — update to use source attributes directly
-- Tests in `test_source_protocol_conformance.py` that checked `_arrow_source` — remove those checks
-- Tests in `test_pipeline_hash_integration.py` that compare exact hash values — update expected hashes (class name changed in identity_structure)
-- Tests that assert source labels equal source_id — update to class name
+- Tests that assert source labels equal source_id → update to class name
+- Tests that call `resolve_field` expecting data → expect `NotImplementedError`
+- Tests in `test_pipeline_hash_integration.py` with exact hash values → update
+- Tests that accessed `_arrow_source` → should have been caught in Tasks 3-5
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add -u
-git commit -m "refactor(sources): remove computed_label() from RootSource, fix regressions"
+git commit -m "refactor(sources): remove computed_label() from RootSource, resolve_field → NotImplementedError"
 ```
 
 ---
