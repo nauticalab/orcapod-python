@@ -8,7 +8,7 @@ from orcapod import contexts
 from orcapod.config import Config
 from orcapod.core.sources.base import RootSource
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
-from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
+from orcapod.protocols.core_protocols import PacketProtocol, SourceProtocol, TagProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.lazy_module import LazyModule
@@ -22,8 +22,9 @@ logger = logging.getLogger(__name__)
 
 
 class CachedSource(RootSource):
-    """DB-backed wrapper around a ``RootSource`` that caches every packet.
+    """DB-backed wrapper around a source that caches every packet.
 
+    Accepts any ``SourceProtocol`` implementation as the inner source.
     Implements ``StreamProtocol`` transparently so downstream consumers
     are unaware of caching.  Cache table is scoped to the source's
     ``content_hash()`` — each unique source gets its own table.
@@ -50,7 +51,7 @@ class CachedSource(RootSource):
 
     def __init__(
         self,
-        source: RootSource,
+        source: SourceProtocol,
         cache_database: ArrowDatabaseProtocol,
         cache_path_prefix: tuple[str, ...] = (),
         label: str | None = None,
@@ -59,8 +60,6 @@ class CachedSource(RootSource):
     ) -> None:
         if data_context is None:
             data_context = source.data_context_key
-        if config is None:
-            config = source.orcapod_config
         super().__init__(
             source_id=source.source_id,
             label=label,
