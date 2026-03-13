@@ -23,7 +23,7 @@ from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.protocols.core_protocols import FunctionPodProtocol
 
-from ..conftest import add, double, make_int_stream, to_upper
+from ..conftest import make_int_stream, to_upper
 
 
 # ---------------------------------------------------------------------------

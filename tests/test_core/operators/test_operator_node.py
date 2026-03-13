@@ -22,7 +22,6 @@ from orcapod.core.operators import (
     DropPacketColumns,
     Join,
     MapPackets,
-    SelectTagColumns,
 )
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase

@@ -13,7 +13,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 import pyarrow as pa
-import pytest
 
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.protocols.core_protocols.datagrams import PacketProtocol, TagProtocol

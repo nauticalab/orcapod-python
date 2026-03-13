@@ -85,7 +85,6 @@ class TestSourceStreamBuilder:
 
 
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
-from orcapod.core.sources.base import RootSource
 
 
 class TestArrowTableSourceUsesBuilder:

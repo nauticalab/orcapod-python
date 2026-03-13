@@ -20,12 +20,11 @@ from unittest.mock import MagicMock, patch
 import pyarrow as pa
 import pytest
 
-from orcapod.channels import Channel, ChannelClosed
-from orcapod.core.datagrams import Packet, Tag
+from orcapod.channels import Channel
+from orcapod.core.datagrams import Packet
 from orcapod.core.executors import LocalExecutor, PacketFunctionExecutorBase
 from orcapod.core.function_pod import FunctionPod, FunctionPodStream
 from orcapod.core.operators import SelectPacketColumns
-from orcapod.core.operators.join import Join
 from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
 from orcapod.core.packet_function import (
     PacketFunctionWrapper,

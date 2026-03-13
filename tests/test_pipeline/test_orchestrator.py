@@ -18,7 +18,6 @@ Covers:
 
 from __future__ import annotations
 
-import asyncio
 
 import pyarrow as pa
 import pytest

@@ -8,7 +8,6 @@ available on ArrowTableStream, ArrowTableSource, and all derived streams.
 from __future__ import annotations
 
 import pyarrow as pa
-import pytest
 
 from orcapod.core.sources import ArrowTableSource
 from orcapod.core.streams import ArrowTableStream

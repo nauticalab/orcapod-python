@@ -316,9 +316,7 @@ def resolve_concurrency(
     else:
         result = pipeline_config.default_max_concurrency
     if result is not None and result <= 0:
-        raise ValueError(
-            f"max_concurrency must be >= 1, got {result}"
-        )
+        raise ValueError(f"max_concurrency must be >= 1, got {result}")
     return result
 
 
@@ -337,7 +335,6 @@ class CacheMode(Enum):
     OFF = "off"
     LOG = "log"
     REPLAY = "replay"
-
 
 
 @dataclass(frozen=True, slots=True)

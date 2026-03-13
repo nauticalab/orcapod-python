@@ -6,8 +6,6 @@ returned raw bytes instead of ContentHash, and verify the CachedFileHasher
 correctly round-trips ContentHash through the string cache.
 """
 
-from pathlib import Path
-
 import pytest
 
 from orcapod.hashing.file_hashers import BasicFileHasher, CachedFileHasher

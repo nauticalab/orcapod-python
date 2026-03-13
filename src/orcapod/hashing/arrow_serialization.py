@@ -725,7 +725,7 @@ def _serialize_array_fallback(
             try:
                 value = array[i].as_py()
                 _serialize_complex_value(buffer, value, data_type)
-            except Exception as e:
+            except Exception:
                 # If .as_py() fails, try alternative approaches
                 try:
                     # For some array types, we can access scalar values differently
@@ -1152,7 +1152,7 @@ def run_comprehensive_tests():
     row_indep_hash = hashes["Row-order independent"]
     full_indep_hash = hashes["Fully order-independent"]
 
-    print(f"\nHash uniqueness:")
+    print("\nHash uniqueness:")
     print(f"  Default != Col-independent:  {default_hash != col_indep_hash}")
     print(f"  Default != Row-independent:  {default_hash != row_indep_hash}")
     print(f"  Default != Fully independent: {default_hash != full_indep_hash}")

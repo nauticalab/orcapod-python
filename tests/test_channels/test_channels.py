@@ -29,9 +29,6 @@ from orcapod.channels import (
     ChannelClosed,
     ReadableChannel,
     WritableChannel,
-    _BroadcastReader,
-    _ChannelReader,
-    _ChannelWriter,
 )
 
 
@@ -420,9 +417,7 @@ class TestConcurrentPatterns:
         async def consumer():
             return await ch2.reader.collect()
 
-        _, _, result = await asyncio.gather(
-            producer(), transformer(), consumer()
-        )
+        _, _, result = await asyncio.gather(producer(), transformer(), consumer())
         assert result == [0, 2, 4, 6, 8]
 
     @pytest.mark.asyncio

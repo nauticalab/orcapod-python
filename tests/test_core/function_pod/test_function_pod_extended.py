@@ -21,7 +21,7 @@ from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.protocols.core_protocols import StreamProtocol
 
-from ..conftest import make_int_stream, make_two_col_stream
+from ..conftest import make_int_stream
 
 
 # ---------------------------------------------------------------------------

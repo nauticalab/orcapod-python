@@ -18,7 +18,6 @@ import pytest
 from orcapod.hashing.arrow_hashers import SemanticArrowHasher
 from orcapod.hashing.file_hashers import BasicFileHasher
 from orcapod.hashing.semantic_hashing.builtin_handlers import (
-    PathContentHandler,
     register_builtin_handlers,
 )
 from orcapod.hashing.semantic_hashing.semantic_hasher import BaseSemanticHasher
@@ -69,9 +68,7 @@ def semantic_hasher(file_hasher):
 class TestArrowStructPathHashing:
     """Tests for file hashing through the Arrow hasher path."""
 
-    def test_same_content_different_paths_same_hash(
-        self, arrow_hasher, tmp_path
-    ):
+    def test_same_content_different_paths_same_hash(self, arrow_hasher, tmp_path):
         """Two distinct files with identical content produce the same table hash."""
         file1 = tmp_path / "a.txt"
         file2 = tmp_path / "b.txt"
@@ -80,11 +77,15 @@ class TestArrowStructPathHashing:
 
         table1 = pa.table(
             {"file": [{"path": str(file1)}]},
-            schema=pa.schema([pa.field("file", pa.struct([pa.field("path", pa.large_string())]))]),
+            schema=pa.schema(
+                [pa.field("file", pa.struct([pa.field("path", pa.large_string())]))]
+            ),
         )
         table2 = pa.table(
             {"file": [{"path": str(file2)}]},
-            schema=pa.schema([pa.field("file", pa.struct([pa.field("path", pa.large_string())]))]),
+            schema=pa.schema(
+                [pa.field("file", pa.struct([pa.field("path", pa.large_string())]))]
+            ),
         )
 
         hash1 = arrow_hasher.hash_table(table1)
@@ -96,7 +97,9 @@ class TestArrowStructPathHashing:
         file = tmp_path / "mutable.txt"
         file.write_text("version 1")
 
-        schema = pa.schema([pa.field("file", pa.struct([pa.field("path", pa.large_string())]))])
+        schema = pa.schema(
+            [pa.field("file", pa.struct([pa.field("path", pa.large_string())]))]
+        )
         table_v1 = pa.table({"file": [{"path": str(file)}]}, schema=schema)
         hash1 = arrow_hasher.hash_table(table_v1)
 
@@ -113,7 +116,9 @@ class TestArrowStructPathHashing:
         file1.write_text("content A")
         file2.write_text("content B")
 
-        schema = pa.schema([pa.field("file", pa.struct([pa.field("path", pa.large_string())]))])
+        schema = pa.schema(
+            [pa.field("file", pa.struct([pa.field("path", pa.large_string())]))]
+        )
         table1 = pa.table({"file": [{"path": str(file1)}]}, schema=schema)
         table2 = pa.table({"file": [{"path": str(file2)}]}, schema=schema)
 
@@ -130,9 +135,7 @@ class TestArrowStructPathHashing:
 class TestSemanticPathHashing:
     """Tests for file hashing through the semantic hasher path."""
 
-    def test_same_content_different_paths_same_hash(
-        self, semantic_hasher, tmp_path
-    ):
+    def test_same_content_different_paths_same_hash(self, semantic_hasher, tmp_path):
         """Two distinct Path objects pointing to files with identical content."""
         file1 = tmp_path / "a.txt"
         file2 = tmp_path / "b.txt"
