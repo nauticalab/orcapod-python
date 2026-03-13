@@ -1084,12 +1084,12 @@ class TestIncrementalCompile:
             joined = src_a.join(src_b, label="joiner")
             pod(joined, label="adder")
 
-        assert len(pipeline.compiled_nodes) == 2  # joiner + adder
+        assert len(pipeline.compiled_nodes) == 4  # 2 sources + joiner + adder
 
         with pipeline:
             pipeline.adder.map_packets({"total": "final_total"}, label="renamer")
 
-        assert len(pipeline.compiled_nodes) == 3  # joiner + adder + renamer
+        assert len(pipeline.compiled_nodes) == 5  # 2 sources + joiner + adder + renamer
         assert isinstance(pipeline.renamer, OperatorNode)
 
         # Run to verify everything works end-to-end
@@ -1256,6 +1256,61 @@ class TestRunExecutionEngine:
 
         # Node opts win: executor should have been created with num_cpus=2
         assert pipeline.doubler.executor.opts.get("num_cpus") == 2
+
+
+class TestSourceNodesInPipeline:
+    """Verify that source nodes are first-class pipeline members."""
+
+    def test_source_nodes_in_compiled_nodes(self, pipeline_db):
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
+        with pipeline:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        source_nodes = [
+            n for n in pipeline.compiled_nodes.values() if isinstance(n, SourceNode)
+        ]
+        assert len(source_nodes) > 0
+
+    def test_source_node_accessible_by_label(self, pipeline_db):
+        src = ArrowTableSource(
+            table=pa.table(
+                {
+                    "key": pa.array(["a"], type=pa.large_string()),
+                    "value": pa.array([10], type=pa.int64()),
+                }
+            ),
+            tag_columns=["key"],
+            label="my_source",
+        )
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
+        with pipeline:
+            pod(src, label="doubler")
+
+        assert "my_source" in pipeline.compiled_nodes
+        assert isinstance(pipeline.my_source, SourceNode)
+
+    def test_source_node_label_defaults_to_class_name(self, pipeline_db):
+        src_a, _ = _make_two_sources()
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
+        with pipeline:
+            pod(src_a, label="doubler")
+
+        # Source without explicit label gets class name as label
+        source_nodes = [
+            n for n in pipeline.compiled_nodes.values() if isinstance(n, SourceNode)
+        ]
+        assert len(source_nodes) == 1
 
 
 class TestSourceNodeNoCaching:
