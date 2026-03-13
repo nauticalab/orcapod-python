@@ -51,6 +51,7 @@ class DictSource(RootSource):
             "source_type": "dict",
             "tag_columns": list(self._tag_columns),
             "source_id": self.source_id,
+            **self._identity_config(),
         }
 
     @classmethod

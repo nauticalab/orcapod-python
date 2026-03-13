@@ -54,21 +54,26 @@ class CachedSource(RootSource):
         source: SourceProtocol,
         cache_database: ArrowDatabaseProtocol,
         cache_path_prefix: tuple[str, ...] = (),
+        cache_path: tuple[str, ...] | None = None,
+        source_id: str | None = None,
         label: str | None = None,
         data_context: str | contexts.DataContext | None = None,
         config: Config | None = None,
     ) -> None:
         if data_context is None:
             data_context = source.data_context_key
+        if source_id is None:
+            source_id = source.source_id
         super().__init__(
-            source_id=source.source_id,
+            source_id=source_id,
             label=label,
             data_context=data_context,
             config=config,
         )
-        self._source = source
+        self._source: SourceProtocol = source
         self._cache_database = cache_database
         self._cache_path_prefix = cache_path_prefix
+        self._explicit_cache_path = cache_path
         self._cached_stream: ArrowTableStream | None = None
 
     # -------------------------------------------------------------------------
@@ -79,19 +84,27 @@ class CachedSource(RootSource):
         """Serialize this CachedSource configuration to a JSON-compatible dict.
 
         Returns:
-            Dict containing the inner source config, cache database config, and
-            cache path prefix.
+            Dict containing the inner source config, cache database config,
+            cache path prefix, and resolved cache path (for cache-only loading).
         """
         return {
             "source_type": "cached",
             "inner_source": self._source.to_config(),
             "cache_database": self._cache_database.to_config(),
             "cache_path_prefix": list(self._cache_path_prefix),
+            "cache_path": list(self.cache_path),
+            "source_id": self.source_id,
+            **self._identity_config(),
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "CachedSource":
+    def from_config(cls, config: dict[str, Any]) -> CachedSource:
         """Reconstruct a CachedSource from a config dict.
+
+        If the inner source cannot be resolved (e.g. it requires live data
+        that is unavailable), ``resolve_source_from_config`` returns a
+        ``SourceProxy`` preserving the original source's identity.  The
+        CachedSource can still serve data from its cache database.
 
         Args:
             config: Dict as produced by :meth:`to_config`.
@@ -104,12 +117,17 @@ class CachedSource(RootSource):
             resolve_source_from_config,
         )
 
-        inner_source = resolve_source_from_config(config["inner_source"])
         cache_db = resolve_database_from_config(config["cache_database"])
+        inner_source = resolve_source_from_config(
+            config["inner_source"], fallback_to_proxy=True
+        )
+
         return cls(
             source=inner_source,
             cache_database=cache_db,
             cache_path_prefix=tuple(config.get("cache_path_prefix", ())),
+            cache_path=tuple(config["cache_path"]) if "cache_path" in config else None,
+            source_id=config.get("source_id"),
         )
 
     # -------------------------------------------------------------------------
@@ -126,6 +144,8 @@ class CachedSource(RootSource):
     @property
     def cache_path(self) -> tuple[str, ...]:
         """Cache table path, scoped to the source's content hash."""
+        if self._explicit_cache_path is not None:
+            return self._explicit_cache_path
         return self._cache_path_prefix + (
             "source",
             f"node:{self._source.content_hash().to_string()}",
@@ -151,12 +171,12 @@ class CachedSource(RootSource):
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         return self._source.keys(columns=columns, all_info=all_info)
 
-    def _build_merged_stream(self) -> ArrowTableStream:
+    def _ingest_live_data(self) -> None:
+        """Fetch live data from the source and store new rows in the cache.
+
+        Raises if the source cannot provide data (e.g. an unbound
+        ``SourceProxy``).
         """
-        Run the live source, store new rows in the cache, load all cached
-        rows, and return the merged result as an ArrowTableStream.
-        """
-        # Get live source table with source info and system tags
         live_table = self._source.as_table(
             columns={"source": True, "system_tags": True}
         )
@@ -184,15 +204,37 @@ class CachedSource(RootSource):
         )
         self._cache_database.flush()
 
-        # Load all cached records (union of current + prior runs)
-        all_records = self._cache_database.get_all_records(self.cache_path)
-        assert all_records is not None, (
-            "Cache should contain records after storing live data."
-        )
+    def _build_merged_stream(self) -> ArrowTableStream:
+        """Ingest live data (if available), then return all cached records.
 
-        # Build stream from merged table
+        If the inner source cannot provide data (e.g. an unbound
+        ``SourceProxy``), the method falls back to returning whatever is
+        already stored in the cache database.  If the cache is empty, an
+        empty stream is returned.
+        """
+        try:
+            self._ingest_live_data()
+        except NotImplementedError:
+            logger.info(
+                "Inner source %r cannot provide data; serving from cache only.",
+                self._source.source_id,
+            )
+
+        all_records = self._cache_database.get_all_records(self.cache_path)
+        if all_records is None:
+            all_records = self._empty_table()
+
         tag_keys = self._source.keys()[0]
         return ArrowTableStream(all_records, tag_columns=tag_keys)
+
+    def _empty_table(self) -> pa.Table:
+        """Build an empty Arrow table matching the source's output schema."""
+        tag_schema, packet_schema = self._source.output_schema()
+        merged = dict(tag_schema)
+        merged.update(packet_schema)
+        type_converter = self.data_context.type_converter
+        arrow_schema = type_converter.python_schema_to_arrow_schema(merged)
+        return pa.Table.from_pylist([], schema=arrow_schema)
 
     @property
     def is_stale(self) -> bool:

@@ -110,6 +110,24 @@ class RootSource(StreamBase):
     # PipelineElementProtocol — schema-only identity (base case of Merkle chain)
     # -------------------------------------------------------------------------
 
+    def _identity_config(self) -> dict[str, Any]:
+        """Return identity fields for inclusion in ``to_config()`` output.
+
+        These fields allow ``SourceProxy`` to be constructed when the source
+        cannot be reconstructed from config, preserving identity hashes and
+        schemas for downstream consumers.
+        """
+        from orcapod.pipeline.serialization import serialize_schema
+
+        tag_schema, packet_schema = self.output_schema()
+        type_converter = self.data_context.type_converter
+        return {
+            "content_hash": self.content_hash().to_string(),
+            "pipeline_hash": self.pipeline_hash().to_string(),
+            "tag_schema": serialize_schema(tag_schema, type_converter),
+            "packet_schema": serialize_schema(packet_schema, type_converter),
+        }
+
     def pipeline_identity_structure(self) -> Any:
         """Return (tag_schema, packet_schema) as the pipeline identity for this
         source.  Schema-only: no data content is included, so sources with

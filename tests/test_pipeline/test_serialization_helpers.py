@@ -1,5 +1,8 @@
 """Tests for pipeline serialization registries and helpers."""
 
+from __future__ import annotations
+
+import pyarrow as pa
 import pytest
 
 from orcapod.pipeline.serialization import (
@@ -9,11 +12,15 @@ from orcapod.pipeline.serialization import (
     SOURCE_REGISTRY,
     LoadStatus,
     PIPELINE_FORMAT_VERSION,
+    deserialize_schema,
+    parse_arrow_type_string,
     resolve_database_from_config,
     resolve_operator_from_config,
+    serialize_schema,
 )
 from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
 from orcapod.core.operators import Join, Batch
+from orcapod.types import Schema
 
 
 class TestRegistries:
@@ -88,3 +95,202 @@ class TestPipelineFormatVersion:
     def test_version_is_string(self):
         assert isinstance(PIPELINE_FORMAT_VERSION, str)
         assert PIPELINE_FORMAT_VERSION == "0.1.0"
+
+
+# ---------------------------------------------------------------------------
+# Arrow type string parser
+# ---------------------------------------------------------------------------
+
+
+class TestParseArrowTypeStringPrimitives:
+    """parse_arrow_type_string for primitive (non-nested) types."""
+
+    @pytest.mark.parametrize(
+        "type_str, expected",
+        [
+            ("int8", pa.int8()),
+            ("int16", pa.int16()),
+            ("int32", pa.int32()),
+            ("int64", pa.int64()),
+            ("uint8", pa.uint8()),
+            ("uint16", pa.uint16()),
+            ("uint32", pa.uint32()),
+            ("uint64", pa.uint64()),
+            ("float16", pa.float16()),
+            ("float32", pa.float32()),
+            ("float64", pa.float64()),
+            ("double", pa.float64()),
+            ("string", pa.string()),
+            ("utf8", pa.utf8()),
+            ("large_string", pa.large_string()),
+            ("large_utf8", pa.large_utf8()),
+            ("binary", pa.binary()),
+            ("large_binary", pa.large_binary()),
+            ("bool_", pa.bool_()),
+            ("bool", pa.bool_()),
+            ("date32", pa.date32()),
+            ("date64", pa.date64()),
+            ("null", pa.null()),
+        ],
+    )
+    def test_primitive_type(self, type_str, expected):
+        assert parse_arrow_type_string(type_str) == expected
+
+    def test_unknown_type_raises(self):
+        with pytest.raises(ValueError, match="Unknown Arrow type"):
+            parse_arrow_type_string("not_a_type")
+
+    def test_strips_whitespace(self):
+        assert parse_arrow_type_string("  int64  ") == pa.int64()
+
+
+class TestParseArrowTypeStringNested:
+    """parse_arrow_type_string for nested (parameterized) types."""
+
+    def test_list(self):
+        assert parse_arrow_type_string("list<item: int64>") == pa.list_(pa.int64())
+
+    def test_large_list(self):
+        assert parse_arrow_type_string(
+            "large_list<item: large_string>"
+        ) == pa.large_list(pa.large_string())
+
+    def test_struct_single_field(self):
+        assert parse_arrow_type_string("struct<a: int64>") == pa.struct(
+            [("a", pa.int64())]
+        )
+
+    def test_struct_multiple_fields(self):
+        result = parse_arrow_type_string("struct<a: int64, b: large_string>")
+        expected = pa.struct([("a", pa.int64()), ("b", pa.large_string())])
+        assert result == expected
+
+    def test_map(self):
+        assert parse_arrow_type_string("map<large_string, int64>") == pa.map_(
+            pa.large_string(), pa.int64()
+        )
+
+    def test_list_of_struct(self):
+        result = parse_arrow_type_string(
+            "list<item: struct<x: int64, y: large_string>>"
+        )
+        expected = pa.list_(pa.struct([("x", pa.int64()), ("y", pa.large_string())]))
+        assert result == expected
+
+    def test_struct_with_nested_list_and_map(self):
+        type_str = "struct<a: list<item: int64>, b: map<large_string, int64>>"
+        result = parse_arrow_type_string(type_str)
+        expected = pa.struct(
+            [
+                ("a", pa.list_(pa.int64())),
+                ("b", pa.map_(pa.large_string(), pa.int64())),
+            ]
+        )
+        assert result == expected
+
+    def test_list_of_list(self):
+        result = parse_arrow_type_string("list<item: list<item: int64>>")
+        expected = pa.list_(pa.list_(pa.int64()))
+        assert result == expected
+
+    def test_map_with_struct_value(self):
+        type_str = "map<large_string, struct<x: int64, y: float64>>"
+        result = parse_arrow_type_string(type_str)
+        expected = pa.map_(
+            pa.large_string(),
+            pa.struct([("x", pa.int64()), ("y", pa.float64())]),
+        )
+        assert result == expected
+
+    def test_unknown_nested_type_raises(self):
+        with pytest.raises(ValueError, match="Unknown nested Arrow type"):
+            parse_arrow_type_string("frobnicate<int64>")
+
+
+# ---------------------------------------------------------------------------
+# Schema serialization round-trip
+# ---------------------------------------------------------------------------
+
+
+class TestSerializeSchema:
+    """serialize_schema produces correct Arrow type strings."""
+
+    def test_simple_python_types(self):
+        from orcapod.contexts import resolve_context
+
+        tc = resolve_context(None).type_converter
+        schema = Schema({"x": int, "y": str})
+        result = serialize_schema(schema, type_converter=tc)
+        assert result["x"] == "int64"
+        assert result["y"] == "large_string"
+
+    def test_without_type_converter_uses_str(self):
+        schema = {"a": int, "b": str}
+        result = serialize_schema(schema)
+        # Without converter, values are str() of the Python type
+        assert result["a"] == str(int)
+        assert result["b"] == str(str)
+
+
+class TestDeserializeSchema:
+    """deserialize_schema recovers Python types from Arrow type strings."""
+
+    def test_simple_types(self):
+        serialized = {"x": "int64", "y": "large_string"}
+        result = deserialize_schema(serialized)
+        assert result["x"] is int
+        assert result["y"] is str
+
+    def test_unknown_type_falls_back_to_string(self):
+        serialized = {"x": "int64", "mystery": "unknown_type_xyz"}
+        result = deserialize_schema(serialized)
+        assert result["x"] is int
+        assert result["mystery"] == "unknown_type_xyz"
+
+
+class TestSchemaRoundTrip:
+    """Full serialize → deserialize round-trip preserves Python types."""
+
+    @staticmethod
+    def _round_trip(python_schema: dict[str, type]) -> dict[str, type]:
+        from orcapod.contexts import resolve_context
+
+        tc = resolve_context(None).type_converter
+        serialized = serialize_schema(Schema(python_schema), type_converter=tc)
+        return deserialize_schema(serialized, type_converter=tc)
+
+    def test_basic_types(self):
+        schema = {"a": int, "b": str, "c": float, "d": bool}
+        result = self._round_trip(schema)
+        assert result == schema
+
+    def test_list_type(self):
+        schema = {"items": list[int]}
+        result = self._round_trip(schema)
+        assert result == schema
+
+    def test_nested_list(self):
+        schema = {"matrix": list[list[int]]}
+        result = self._round_trip(schema)
+        assert result == schema
+
+    def test_dict_type(self):
+        schema = {"mapping": dict[str, int]}
+        result = self._round_trip(schema)
+        assert result == schema
+
+    def test_mixed_types(self):
+        schema = {
+            "id": int,
+            "name": str,
+            "score": float,
+            "tags": list[str],
+            "active": bool,
+        }
+        result = self._round_trip(schema)
+        assert result == schema
+
+    def test_preserves_field_order(self):
+        schema = {"z": int, "a": str, "m": float}
+        result = self._round_trip(schema)
+        assert list(result.keys()) == ["z", "a", "m"]

@@ -77,6 +77,7 @@ class DataFrameSource(RootSource):
             "source_type": "data_frame",
             "tag_columns": list(self._tag_columns),
             "source_id": self.source_id,
+            **self._identity_config(),
         }
 
     @classmethod
