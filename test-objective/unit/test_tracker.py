@@ -1,7 +1,7 @@
-"""Specification-derived tests for tracker and graph tracker.
+"""Specification-derived tests for tracker and pipeline.
 
 Tests based on TrackerProtocol, TrackerManagerProtocol, and
-GraphTracker documented behavior.
+Pipeline documented behavior.
 """
 
 from __future__ import annotations
@@ -13,11 +13,24 @@ from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import Join
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.streams import ArrowTableStream
-from orcapod.core.tracker import BasicTrackerManager, GraphTracker
+from orcapod.core.tracker import BasicTrackerManager
+from orcapod.databases import InMemoryArrowDatabase
+from orcapod.pipeline import Pipeline
 
 
 def _double(x: int) -> int:
     return x * 2
+
+
+def _make_pipeline(
+    tracker_manager: BasicTrackerManager | None = None,
+) -> Pipeline:
+    return Pipeline(
+        name="test",
+        pipeline_database=InMemoryArrowDatabase(),
+        tracker_manager=tracker_manager,
+        auto_compile=False,
+    )
 
 
 def _make_stream(n: int = 3) -> ArrowTableStream:
@@ -36,20 +49,20 @@ class TestBasicTrackerManager:
 
     def test_register_and_get_active_trackers(self):
         mgr = BasicTrackerManager()
-        tracker = GraphTracker(tracker_manager=mgr)
+        tracker = _make_pipeline(tracker_manager=mgr)
         tracker.set_active(True)
         active = mgr.get_active_trackers()
         assert tracker in active
 
     def test_deregister_removes_tracker(self):
         mgr = BasicTrackerManager()
-        tracker = GraphTracker(tracker_manager=mgr)
+        tracker = _make_pipeline(tracker_manager=mgr)
         mgr.deregister_tracker(tracker)
         assert tracker not in mgr.get_active_trackers()
 
     def test_no_tracking_context_suspends_recording(self):
         mgr = BasicTrackerManager()
-        tracker = GraphTracker(tracker_manager=mgr)
+        tracker = _make_pipeline(tracker_manager=mgr)
         tracker.set_active(True)
         with mgr.no_tracking():
             # Invocations inside this block should not be recorded
@@ -60,12 +73,12 @@ class TestBasicTrackerManager:
         assert tracker in active
 
 
-class TestGraphTracker:
-    """Per design, GraphTracker records pipeline structure as a directed graph."""
+class TestPipelineTracker:
+    """Per design, Pipeline records pipeline structure as a directed graph."""
 
     def test_records_function_pod_invocation(self):
         mgr = BasicTrackerManager()
-        tracker = GraphTracker(tracker_manager=mgr)
+        tracker = _make_pipeline(tracker_manager=mgr)
         tracker.set_active(True)
 
         pf = PythonPacketFunction(_double, output_keys="result")
@@ -80,7 +93,7 @@ class TestGraphTracker:
 
     def test_reset_clears_state(self):
         mgr = BasicTrackerManager()
-        tracker = GraphTracker(tracker_manager=mgr)
+        tracker = _make_pipeline(tracker_manager=mgr)
         tracker.set_active(True)
 
         pf = PythonPacketFunction(_double, output_keys="result")
@@ -93,7 +106,7 @@ class TestGraphTracker:
 
     def test_compile_builds_graph(self):
         mgr = BasicTrackerManager()
-        tracker = GraphTracker(tracker_manager=mgr)
+        tracker = _make_pipeline(tracker_manager=mgr)
         tracker.set_active(True)
 
         pf = PythonPacketFunction(_double, output_keys="result")

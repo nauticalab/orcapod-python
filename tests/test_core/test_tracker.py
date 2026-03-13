@@ -4,10 +4,10 @@ Tests for the tracker module covering:
 - SourceNode: construction, properties, delegation, repr
 - BasicTrackerManager: register/deregister, active state, no_tracking context
 - AutoRegisteringContextBasedTracker: context manager lifecycle
-- GraphTracker:
-    - record_function_pod_invocation → creates FunctionNode, stores edges
-    - record_operator_pod_invocation → creates OperatorNode, stores edges
-    - compile() → topological walk, SourceNode creation, upstream rewiring
+- Pipeline (tracker functionality):
+    - record_function_pod_invocation -> creates FunctionNode, stores edges
+    - record_operator_pod_invocation -> creates OperatorNode, stores edges
+    - compile() -> topological walk, SourceNode creation, upstream rewiring
     - Source deduplication
     - reset() clears all state
     - nodes property
@@ -25,10 +25,9 @@ from orcapod.core.operators import Join, SelectTagColumns
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
 from orcapod.core.streams import ArrowTableStream
-from orcapod.core.tracker import (
-    BasicTrackerManager,
-    GraphTracker,
-)
+from orcapod.core.tracker import BasicTrackerManager
+from orcapod.databases import InMemoryArrowDatabase
+from orcapod.pipeline import Pipeline
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -41,6 +40,18 @@ def _double(x: int) -> int:
 
 def _inc_result(result: int) -> int:
     return result + 1
+
+
+def _make_pipeline(
+    tracker_manager: BasicTrackerManager | None = None,
+) -> Pipeline:
+    """Create a Pipeline for testing (auto_compile=False)."""
+    return Pipeline(
+        name="test",
+        pipeline_database=InMemoryArrowDatabase(),
+        tracker_manager=tracker_manager,
+        auto_compile=False,
+    )
 
 
 def _make_stream(n: int = 3) -> ArrowTableStream:
@@ -235,7 +246,7 @@ class TestBasicTrackerManager:
 
     def test_register_and_deregister(self):
         mgr = BasicTrackerManager()
-        tracker = GraphTracker(tracker_manager=mgr)
+        tracker = _make_pipeline(tracker_manager=mgr)
         tracker.set_active(True)
         assert tracker in mgr.get_active_trackers()
         tracker.set_active(False)
@@ -243,20 +254,20 @@ class TestBasicTrackerManager:
 
     def test_duplicate_register_ignored(self):
         mgr = BasicTrackerManager()
-        tracker = GraphTracker(tracker_manager=mgr)
+        tracker = _make_pipeline(tracker_manager=mgr)
         mgr.register_tracker(tracker)
         mgr.register_tracker(tracker)
         assert mgr._active_trackers.count(tracker) == 1
 
     def test_deregister_nonexistent_is_noop(self):
         mgr = BasicTrackerManager()
-        tracker = GraphTracker(tracker_manager=mgr)
+        tracker = _make_pipeline(tracker_manager=mgr)
         # Should not raise
         mgr.deregister_tracker(tracker)
 
     def test_set_active_false_returns_empty(self):
         mgr = BasicTrackerManager()
-        tracker = GraphTracker(tracker_manager=mgr)
+        tracker = _make_pipeline(tracker_manager=mgr)
         tracker.set_active(True)
         mgr.set_active(False)
         assert mgr.get_active_trackers() == []
@@ -265,7 +276,7 @@ class TestBasicTrackerManager:
 
     def test_no_tracking_context(self):
         mgr = BasicTrackerManager()
-        tracker = GraphTracker(tracker_manager=mgr)
+        tracker = _make_pipeline(tracker_manager=mgr)
         tracker.set_active(True)
 
         with mgr.no_tracking():
@@ -283,14 +294,14 @@ class TestBasicTrackerManager:
 
 
 # ---------------------------------------------------------------------------
-# GraphTracker — context manager lifecycle
+# Pipeline — context manager lifecycle
 # ---------------------------------------------------------------------------
 
 
-class TestGraphTrackerLifecycle:
+class TestPipelineLifecycle:
     def test_context_manager_activates_and_deactivates(self):
         mgr = BasicTrackerManager()
-        tracker = GraphTracker(tracker_manager=mgr)
+        tracker = _make_pipeline(tracker_manager=mgr)
         assert not tracker.is_active()
 
         with tracker:
@@ -302,25 +313,25 @@ class TestGraphTrackerLifecycle:
 
     def test_inactive_tracker_not_in_active_list(self):
         mgr = BasicTrackerManager()
-        tracker = GraphTracker(tracker_manager=mgr)
+        tracker = _make_pipeline(tracker_manager=mgr)
         tracker.set_active(True)
         tracker.set_active(False)
         assert mgr.get_active_trackers() == []
 
 
 # ---------------------------------------------------------------------------
-# GraphTracker — recording
+# Pipeline — recording
 # ---------------------------------------------------------------------------
 
 
-class TestGraphTrackerRecording:
+class TestPipelineRecording:
     def test_record_function_pod_creates_function_node(self):
         pf = PythonPacketFunction(_double, output_keys="result")
         pod = FunctionPod(packet_function=pf)
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_function_pod_invocation(pod, stream, label="dbl")
 
         # Should have one FunctionNode in node_lut
@@ -335,7 +346,7 @@ class TestGraphTrackerRecording:
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_function_pod_invocation(pod, stream)
 
         assert len(tracker._graph_edges) == 1
@@ -349,7 +360,7 @@ class TestGraphTrackerRecording:
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_function_pod_invocation(pod, stream)
 
         stream_hash = stream.content_hash().to_string()
@@ -361,7 +372,7 @@ class TestGraphTrackerRecording:
         op = SelectTagColumns(columns=["id"])
         mgr = BasicTrackerManager()
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_operator_pod_invocation(op, upstreams=(stream,))
 
         assert len(tracker._node_lut) == 1
@@ -375,7 +386,7 @@ class TestGraphTrackerRecording:
         op = Join()
         mgr = BasicTrackerManager()
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_operator_pod_invocation(op, upstreams=(stream_a, stream_b))
 
         assert len(tracker._graph_edges) == 2
@@ -385,7 +396,7 @@ class TestGraphTrackerRecording:
         pf = PythonPacketFunction(_double, output_keys="result")
         pod = FunctionPod(packet_function=pf)
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_function_pod_invocation(pod, _make_stream())
             nodes = tracker.nodes
             nodes.clear()
@@ -398,7 +409,7 @@ class TestGraphTrackerRecording:
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_function_pod_invocation(pod, stream)
             assert len(tracker.nodes) == 1
 
@@ -409,29 +420,35 @@ class TestGraphTrackerRecording:
 
 
 # ---------------------------------------------------------------------------
-# GraphTracker — compile()
+# Pipeline — compile()
 # ---------------------------------------------------------------------------
 
 
-class TestGraphTrackerCompile:
+class TestPipelineCompile:
     """Tests for compile() which resolves content-hash edges into node-to-node
     upstream relationships via topological sort."""
 
+    @staticmethod
+    def _persistent_nodes(pipeline: Pipeline) -> list:
+        """Return all persistent nodes after compile()."""
+        return list(pipeline._persistent_node_map.values())
+
     def test_compile_single_function_pod(self):
-        """Source stream → FunctionNode: compile creates SourceNode and wires upstream."""
+        """Source stream -> FunctionNode: compile creates SourceNode and wires upstream."""
         pf = PythonPacketFunction(_double, output_keys="result")
         pod = FunctionPod(packet_function=pf)
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_function_pod_invocation(pod, stream)
             tracker.compile()
 
-        # After compile: 1 SourceNode + 1 FunctionNode
-        assert len(tracker._node_lut) == 2
-        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
-        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
+        # After compile: 1 SourceNode + 1 FunctionNode in persistent map
+        all_nodes = self._persistent_nodes(tracker)
+        assert len(all_nodes) == 2
+        source_nodes = [n for n in all_nodes if isinstance(n, SourceNode)]
+        fn_nodes = [n for n in all_nodes if isinstance(n, FunctionNode)]
         assert len(source_nodes) == 1
         assert len(fn_nodes) == 1
 
@@ -443,36 +460,38 @@ class TestGraphTrackerCompile:
         assert fn_nodes[0].upstreams == (source_nodes[0],)
 
     def test_compile_single_operator(self):
-        """Source stream → Operator: compile creates SourceNode and wires upstream."""
+        """Source stream -> Operator: compile creates SourceNode and wires upstream."""
         stream = _make_stream()
         op = SelectTagColumns(columns=["id"])
         mgr = BasicTrackerManager()
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_operator_pod_invocation(op, upstreams=(stream,))
             tracker.compile()
 
-        assert len(tracker._node_lut) == 2
-        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
-        op_nodes = [n for n in tracker.nodes if isinstance(n, OperatorNode)]
+        all_nodes = self._persistent_nodes(tracker)
+        assert len(all_nodes) == 2
+        source_nodes = [n for n in all_nodes if isinstance(n, SourceNode)]
+        op_nodes = [n for n in all_nodes if isinstance(n, OperatorNode)]
         assert len(source_nodes) == 1
         assert len(op_nodes) == 1
         assert op_nodes[0].upstreams == (source_nodes[0],)
 
     def test_compile_operator_with_two_inputs(self):
-        """Two source streams → Join: compile creates 2 SourceNodes."""
+        """Two source streams -> Join: compile creates 2 SourceNodes."""
         stream_a = _make_stream()
         stream_b = _make_y_stream()
         op = Join()
         mgr = BasicTrackerManager()
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_operator_pod_invocation(op, upstreams=(stream_a, stream_b))
 
         tracker.compile()
-        assert len(tracker._node_lut) == 3
-        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
-        op_nodes = [n for n in tracker.nodes if isinstance(n, OperatorNode)]
+        all_nodes = self._persistent_nodes(tracker)
+        assert len(all_nodes) == 3
+        source_nodes = [n for n in all_nodes if isinstance(n, SourceNode)]
+        op_nodes = [n for n in all_nodes if isinstance(n, OperatorNode)]
         assert len(source_nodes) == 2
         assert len(op_nodes) == 1
 
@@ -481,7 +500,7 @@ class TestGraphTrackerCompile:
         assert all(isinstance(u, SourceNode) for u in op_nodes[0].upstreams)
 
     def test_compile_chained_function_pods(self):
-        """Source → fn1 → fn2: compile wires SourceNode → FunctionNode1 → FunctionNode2.
+        """Source -> fn1 -> fn2: compile wires SourceNode -> FunctionNode1 -> FunctionNode2.
 
         The key insight: FunctionNode and FunctionPodStream have the same
         identity_structure for the same (function_pod, input_stream), so
@@ -496,27 +515,28 @@ class TestGraphTrackerCompile:
         pod1.tracker_manager = mgr
         pod2.tracker_manager = mgr
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             mid = pod1.process(stream)  # records fn1, returns FunctionPodStream
             _ = pod2.process(mid)  # records fn2, mid.content_hash == fn1.content_hash
             tracker.compile()
 
-        assert len(tracker._node_lut) == 3
-        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
-        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
+        all_nodes = self._persistent_nodes(tracker)
+        assert len(all_nodes) == 3
+        source_nodes = [n for n in all_nodes if isinstance(n, SourceNode)]
+        fn_nodes = [n for n in all_nodes if isinstance(n, FunctionNode)]
         assert len(source_nodes) == 1
         assert len(fn_nodes) == 2
 
-        # Identify fn1 and fn2 by checking their packet_function
-        fn1 = next(n for n in fn_nodes if n._packet_function is pf1)
-        fn2 = next(n for n in fn_nodes if n._packet_function is pf2)
+        # Identify fn1 and fn2 by checking their function_pod's packet_function
+        fn1 = next(n for n in fn_nodes if n._function_pod.packet_function is pf1)
+        fn2 = next(n for n in fn_nodes if n._function_pod.packet_function is pf2)
 
-        # Chain: SourceNode → fn1 → fn2
+        # Chain: SourceNode -> fn1 -> fn2
         assert fn1.upstreams == (source_nodes[0],)
         assert fn2.upstreams == (fn1,)
 
     def test_compile_function_then_operator(self):
-        """Source → FunctionPod → Operator: compile wires SourceNode → FunctionNode → OperatorNode."""
+        """Source -> FunctionPod -> Operator: compile wires SourceNode -> FunctionNode -> OperatorNode."""
         pf = PythonPacketFunction(_double, output_keys="result")
         pod = FunctionPod(packet_function=pf)
         op = SelectTagColumns(columns=["id"])
@@ -525,14 +545,15 @@ class TestGraphTrackerCompile:
         pod.tracker_manager = mgr
         op.tracker_manager = mgr
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             mid = pod.process(stream)
             _ = op.process(mid)
             tracker.compile()
 
-        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
-        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
-        op_nodes = [n for n in tracker.nodes if isinstance(n, OperatorNode)]
+        all_nodes = self._persistent_nodes(tracker)
+        source_nodes = [n for n in all_nodes if isinstance(n, SourceNode)]
+        fn_nodes = [n for n in all_nodes if isinstance(n, FunctionNode)]
+        op_nodes = [n for n in all_nodes if isinstance(n, OperatorNode)]
         assert len(source_nodes) == 1
         assert len(fn_nodes) == 1
         assert len(op_nodes) == 1
@@ -541,7 +562,7 @@ class TestGraphTrackerCompile:
         assert op_nodes[0].upstreams == (fn_nodes[0],)
 
     def test_compile_operator_then_function(self):
-        """Source → Operator → FunctionPod: compile wires SourceNode → OperatorNode → FunctionNode."""
+        """Source -> Operator -> FunctionPod: compile wires SourceNode -> OperatorNode -> FunctionNode."""
         stream = _make_stream()
         op = SelectTagColumns(columns=["id"])
         pf = PythonPacketFunction(_double, output_keys="result")
@@ -550,14 +571,15 @@ class TestGraphTrackerCompile:
         op.tracker_manager = mgr
         pod.tracker_manager = mgr
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             mid = op.process(stream)
             _ = pod.process(mid)
             tracker.compile()
 
-        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
-        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
-        op_nodes = [n for n in tracker.nodes if isinstance(n, OperatorNode)]
+        all_nodes = self._persistent_nodes(tracker)
+        source_nodes = [n for n in all_nodes if isinstance(n, SourceNode)]
+        fn_nodes = [n for n in all_nodes if isinstance(n, FunctionNode)]
+        op_nodes = [n for n in all_nodes if isinstance(n, OperatorNode)]
         assert len(source_nodes) == 1
         assert len(op_nodes) == 1
         assert len(fn_nodes) == 1
@@ -566,9 +588,9 @@ class TestGraphTrackerCompile:
         assert fn_nodes[0].upstreams == (op_nodes[0],)
 
     def test_compile_diamond(self):
-        """Diamond: source → fn1, source → fn2, (fn1, fn2) → join.
+        """Diamond: source -> fn1, source -> fn2, (fn1, fn2) -> join.
 
-        Same source used twice → single SourceNode (dedup by content hash).
+        Same source used twice -> single SourceNode (dedup by content hash).
         """
         pf1 = PythonPacketFunction(_double, output_keys="result")
         pf2 = PythonPacketFunction(_double, output_keys="out")
@@ -581,15 +603,16 @@ class TestGraphTrackerCompile:
         pod2.tracker_manager = mgr
         op.tracker_manager = mgr
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             mid1 = pod1.process(stream)
             mid2 = pod2.process(stream)
             _ = op.process(mid1, mid2)
             tracker.compile()
 
-        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
-        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
-        op_nodes = [n for n in tracker.nodes if isinstance(n, OperatorNode)]
+        all_nodes = self._persistent_nodes(tracker)
+        source_nodes = [n for n in all_nodes if isinstance(n, SourceNode)]
+        fn_nodes = [n for n in all_nodes if isinstance(n, FunctionNode)]
+        op_nodes = [n for n in all_nodes if isinstance(n, OperatorNode)]
 
         # 1 source (deduped), 2 function nodes, 1 operator node
         assert len(source_nodes) == 1
@@ -605,7 +628,7 @@ class TestGraphTrackerCompile:
         assert all(isinstance(u, FunctionNode) for u in op_nodes[0].upstreams)
 
     def test_compile_source_deduplication(self):
-        """Same stream used as input to two separate function pods → single SourceNode."""
+        """Same stream used as input to two separate function pods -> single SourceNode."""
         pf1 = PythonPacketFunction(_double, output_keys="result")
         pf2 = PythonPacketFunction(_double, output_keys="out")
         pod1 = FunctionPod(packet_function=pf1)
@@ -613,13 +636,14 @@ class TestGraphTrackerCompile:
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_function_pod_invocation(pod1, stream)
             tracker.record_function_pod_invocation(pod2, stream)
             tracker.compile()
 
-        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
-        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
+        all_nodes = self._persistent_nodes(tracker)
+        source_nodes = [n for n in all_nodes if isinstance(n, SourceNode)]
+        fn_nodes = [n for n in all_nodes if isinstance(n, FunctionNode)]
         assert len(source_nodes) == 1
         assert len(fn_nodes) == 2
 
@@ -627,29 +651,30 @@ class TestGraphTrackerCompile:
         assert fn_nodes[0].upstreams[0] is fn_nodes[1].upstreams[0]
 
     def test_compile_two_independent_sources(self):
-        """Two different source streams → two distinct SourceNodes."""
+        """Two different source streams -> two distinct SourceNodes."""
         pf = PythonPacketFunction(_double, output_keys="result")
         pod = FunctionPod(packet_function=pf)
         stream_a = _make_stream(n=3)
         stream_b = _make_stream(n=5)
         mgr = BasicTrackerManager()
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_function_pod_invocation(pod, stream_a)
             tracker.record_function_pod_invocation(pod, stream_b)
             tracker.compile()
 
-        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
+        all_nodes = self._persistent_nodes(tracker)
+        source_nodes = [n for n in all_nodes if isinstance(n, SourceNode)]
         assert len(source_nodes) == 2
 
     def test_compile_empty_tracker(self):
-        """Compile on empty tracker is a no-op."""
+        """Compile on empty pipeline is a no-op."""
         mgr = BasicTrackerManager()
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.compile()
 
-        assert len(tracker.nodes) == 0
+        assert len(self._persistent_nodes(tracker)) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -659,26 +684,27 @@ class TestGraphTrackerCompile:
 
 class TestFunctionPodTrackerIntegration:
     def test_function_pod_process_records_to_tracker(self):
-        """FunctionPod.process() automatically records to an active GraphTracker."""
+        """FunctionPod.process() automatically records to an active Pipeline."""
         pf = PythonPacketFunction(_double, output_keys="result")
         pod = FunctionPod(packet_function=pf)
         stream = _make_stream()
         mgr = BasicTrackerManager()
         pod.tracker_manager = mgr
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             _ = pod.process(stream)
             tracker.compile()
 
-        assert len(tracker._node_lut) == 2
-        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
-        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
+        all_nodes = list(tracker._persistent_node_map.values())
+        assert len(all_nodes) == 2
+        source_nodes = [n for n in all_nodes if isinstance(n, SourceNode)]
+        fn_nodes = [n for n in all_nodes if isinstance(n, FunctionNode)]
         assert len(source_nodes) == 1
         assert len(fn_nodes) == 1
         assert fn_nodes[0].upstreams == (source_nodes[0],)
 
     def test_chained_function_pods_end_to_end(self):
-        """Two FunctionPods chained: source → fn1 → fn2."""
+        """Two FunctionPods chained: source -> fn1 -> fn2."""
         pf1 = PythonPacketFunction(_double, output_keys="result")
         pf2 = PythonPacketFunction(_inc_result, output_keys="out")
         pod1 = FunctionPod(packet_function=pf1)
@@ -688,18 +714,19 @@ class TestFunctionPodTrackerIntegration:
         pod1.tracker_manager = mgr
         pod2.tracker_manager = mgr
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             mid = pod1.process(stream)
             _ = pod2.process(mid)
             tracker.compile()
 
-        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
-        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
+        all_nodes = list(tracker._persistent_node_map.values())
+        source_nodes = [n for n in all_nodes if isinstance(n, SourceNode)]
+        fn_nodes = [n for n in all_nodes if isinstance(n, FunctionNode)]
         assert len(source_nodes) == 1
         assert len(fn_nodes) == 2
 
-        fn1 = next(n for n in fn_nodes if n._packet_function is pf1)
-        fn2 = next(n for n in fn_nodes if n._packet_function is pf2)
+        fn1 = next(n for n in fn_nodes if n._function_pod.packet_function is pf1)
+        fn2 = next(n for n in fn_nodes if n._function_pod.packet_function is pf2)
         assert fn1.upstreams == (source_nodes[0],)
         assert fn2.upstreams == (fn1,)
 
@@ -711,24 +738,25 @@ class TestFunctionPodTrackerIntegration:
 
 class TestOperatorTrackerIntegration:
     def test_operator_process_records_to_tracker(self):
-        """StaticOutputPod.process() automatically records to an active GraphTracker."""
+        """StaticOutputPod.process() automatically records to an active Pipeline."""
         stream = _make_stream()
         op = SelectTagColumns(columns=["id"])
         mgr = BasicTrackerManager()
         op.tracker_manager = mgr
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             _ = op.process(stream)
             tracker.compile()
 
-        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
-        op_nodes = [n for n in tracker.nodes if isinstance(n, OperatorNode)]
+        all_nodes = list(tracker._persistent_node_map.values())
+        source_nodes = [n for n in all_nodes if isinstance(n, SourceNode)]
+        op_nodes = [n for n in all_nodes if isinstance(n, OperatorNode)]
         assert len(source_nodes) == 1
         assert len(op_nodes) == 1
         assert op_nodes[0].upstreams == (source_nodes[0],)
 
     def test_operator_chain(self):
-        """Source → operator1 → operator2."""
+        """Source -> operator1 -> operator2."""
         stream = _make_two_col_stream()
         op1 = SelectTagColumns(columns=["id"])
         op2 = SelectTagColumns(columns=["id"])
@@ -736,13 +764,14 @@ class TestOperatorTrackerIntegration:
         op1.tracker_manager = mgr
         op2.tracker_manager = mgr
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             mid = op1.process(stream)
             _ = op2.process(mid)
             tracker.compile()
 
-        source_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
-        op_nodes = [n for n in tracker.nodes if isinstance(n, OperatorNode)]
+        all_nodes = list(tracker._persistent_node_map.values())
+        source_nodes = [n for n in all_nodes if isinstance(n, SourceNode)]
+        op_nodes = [n for n in all_nodes if isinstance(n, OperatorNode)]
         assert len(source_nodes) == 1
         assert len(op_nodes) == 2
 
@@ -760,8 +789,8 @@ class TestManagerBroadcast:
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
-        tracker1 = GraphTracker(tracker_manager=mgr)
-        tracker2 = GraphTracker(tracker_manager=mgr)
+        tracker1 = _make_pipeline(tracker_manager=mgr)
+        tracker2 = _make_pipeline(tracker_manager=mgr)
 
         with tracker1, tracker2:
             mgr.record_function_pod_invocation(pod, stream)
@@ -776,7 +805,7 @@ class TestManagerBroadcast:
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
-        with GraphTracker(tracker_manager=mgr) as tracker:
+        with _make_pipeline(tracker_manager=mgr) as tracker:
             with mgr.no_tracking():
                 mgr.record_function_pod_invocation(pod, stream)
 
@@ -846,7 +875,7 @@ class TestBMIPipelineEndToEnd:
         """The pipeline produces correct BMI values."""
         heights, weights = sources
 
-        tracker = GraphTracker()
+        tracker = _make_pipeline()
         with tracker:
             converted = _cm_to_m.pod(heights)
             joined = Join()(converted, weights)
@@ -862,7 +891,7 @@ class TestBMIPipelineEndToEnd:
         """After compile(), the graph has the expected node types and count."""
         heights, weights = sources
 
-        tracker = GraphTracker()
+        tracker = _make_pipeline()
         with tracker:
             converted = _cm_to_m.pod(heights)
             joined = Join()(converted, weights)
@@ -870,9 +899,10 @@ class TestBMIPipelineEndToEnd:
 
         tracker.compile()
 
-        src_nodes = [n for n in tracker.nodes if isinstance(n, SourceNode)]
-        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
-        op_nodes = [n for n in tracker.nodes if isinstance(n, OperatorNode)]
+        all_nodes = list(tracker._persistent_node_map.values())
+        src_nodes = [n for n in all_nodes if isinstance(n, SourceNode)]
+        fn_nodes = [n for n in all_nodes if isinstance(n, FunctionNode)]
+        op_nodes = [n for n in all_nodes if isinstance(n, OperatorNode)]
 
         assert len(src_nodes) == 2
         assert len(fn_nodes) == 2
@@ -882,7 +912,7 @@ class TestBMIPipelineEndToEnd:
         """Every upstream reference is a graph node after compile()."""
         heights, weights = sources
 
-        tracker = GraphTracker()
+        tracker = _make_pipeline()
         with tracker:
             converted = _cm_to_m.pod(heights)
             joined = Join()(converted, weights)
@@ -890,17 +920,18 @@ class TestBMIPipelineEndToEnd:
 
         tracker.compile()
 
-        for node in tracker.nodes:
+        all_nodes = list(tracker._persistent_node_map.values())
+        for node in all_nodes:
             for up in node.upstreams:
                 assert isinstance(up, (SourceNode, FunctionNode, OperatorNode)), (
                     f"Upstream of {node.label} is {type(up).__name__}, expected a graph node"
                 )
 
     def test_compiled_graph_wiring(self, sources):
-        """Verify specific upstream wiring: cm_to_m←source, join←(cm_to_m, source), bmi←join."""
+        """Verify specific upstream wiring: cm_to_m<-source, join<-(cm_to_m, source), bmi<-join."""
         heights, weights = sources
 
-        tracker = GraphTracker()
+        tracker = _make_pipeline()
         with tracker:
             converted = _cm_to_m.pod(heights)
             joined = Join()(converted, weights)
@@ -908,12 +939,15 @@ class TestBMIPipelineEndToEnd:
 
         tracker.compile()
 
-        fn_nodes = [n for n in tracker.nodes if isinstance(n, FunctionNode)]
-        op_nodes = [n for n in tracker.nodes if isinstance(n, OperatorNode)]
+        all_nodes = list(tracker._persistent_node_map.values())
+        fn_nodes = [n for n in all_nodes if isinstance(n, FunctionNode)]
+        op_nodes = [n for n in all_nodes if isinstance(n, OperatorNode)]
 
         # cm_to_m has a single SourceNode upstream
         cm_node = next(
-            n for n in fn_nodes if n._packet_function is _cm_to_m.pod.packet_function
+            n
+            for n in fn_nodes
+            if n._function_pod.packet_function is _cm_to_m.pod.packet_function
         )
         assert len(cm_node.upstreams) == 1
         assert isinstance(cm_node.upstreams[0], SourceNode)
@@ -928,7 +962,7 @@ class TestBMIPipelineEndToEnd:
         bmi_node = next(
             n
             for n in fn_nodes
-            if n._packet_function is _compute_bmi.pod.packet_function
+            if n._function_pod.packet_function is _compute_bmi.pod.packet_function
         )
         assert len(bmi_node.upstreams) == 1
         assert isinstance(bmi_node.upstreams[0], OperatorNode)
