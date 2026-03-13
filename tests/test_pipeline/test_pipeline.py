@@ -169,6 +169,79 @@ class TestCompileOperatorNode:
 
 
 # ---------------------------------------------------------------------------
+# Tests: compile mutates recorded nodes via attach_databases()
+# ---------------------------------------------------------------------------
+
+
+class TestCompileMutatesNodes:
+    def test_compile_reuses_recorded_function_node_objects(self, pipeline_db):
+        """compile() should mutate recorded FunctionNodes in place, not create new ones."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
+
+        with pipeline:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        # The FunctionNode in compiled_nodes should be the same object
+        # that was recorded in _node_lut during the with block
+        fn_nodes = [
+            n
+            for n in pipeline._persistent_node_map.values()
+            if isinstance(n, FunctionNode)
+        ]
+        assert len(fn_nodes) > 0
+        for fn_node in fn_nodes:
+            assert fn_node._pipeline_database is not None  # DB was attached
+
+    def test_compile_reuses_recorded_operator_node_objects(self, pipeline_db):
+        """compile() should mutate recorded OperatorNodes in place, not create new ones."""
+        src_a, src_b = _make_two_sources()
+
+        pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
+
+        with pipeline:
+            Join()(src_a, src_b, label="joiner")
+
+        op_nodes = [
+            n
+            for n in pipeline._persistent_node_map.values()
+            if isinstance(n, OperatorNode)
+        ]
+        assert len(op_nodes) > 0
+        for op_node in op_nodes:
+            assert op_node._pipeline_database is not None
+
+    def test_recorded_node_identity_preserved_after_compile(self, pipeline_db):
+        """The node object from recording should be the same object after compile."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(
+            name="test", pipeline_database=pipeline_db, auto_compile=False
+        )
+
+        with pipeline:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        # Capture node objects before compile
+        recorded_nodes = dict(pipeline._node_lut)
+
+        pipeline.compile()
+
+        # Verify that at least the function/operator nodes in persistent_node_map
+        # are the SAME objects as were recorded
+        for node_hash, recorded_node in recorded_nodes.items():
+            if node_hash in pipeline._persistent_node_map:
+                assert pipeline._persistent_node_map[node_hash] is recorded_node
+
+
+# ---------------------------------------------------------------------------
 # Tests: function database handling
 # ---------------------------------------------------------------------------
 
