@@ -1,3 +1,5 @@
+import sys
+
 from .core.function_pod import (
     FunctionPod,
     function_pod,
@@ -11,6 +13,13 @@ from .core import sources  # noqa: F401
 from .core import streams  # noqa: F401
 from . import databases  # noqa: F401
 from . import types  # noqa: F401
+
+# Register subpackage aliases in sys.modules so that
+# "from orcapod.sources import X" works (not just "orcapod.sources.X").
+sys.modules.setdefault("orcapod.sources", sources)
+sys.modules.setdefault("orcapod.operators", operators)
+sys.modules.setdefault("orcapod.nodes", nodes)
+sys.modules.setdefault("orcapod.streams", streams)
 
 __all__ = [
     "FunctionPod",

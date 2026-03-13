@@ -34,7 +34,7 @@ import time
 
 import pyarrow as pa
 
-from orcapod import ArrowTableSource
+from orcapod.sources import ArrowTableSource
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.databases import InMemoryArrowDatabase
@@ -160,12 +160,18 @@ def main() -> None:
 
     print()
     print("  Analysis:")
-    print(f"    sync+sync   {t1:.2f}s  — fully sequential ({NUM_PACKETS}x2 x {SLEEP_SECONDS}s)")
-    print(f"    sync+async  {t2:.2f}s  — still sequential (sync executor runs nodes one by one)")
+    print(
+        f"    sync+sync   {t1:.2f}s  — fully sequential ({NUM_PACKETS}x2 x {SLEEP_SECONDS}s)"
+    )
+    print(
+        f"    sync+async  {t2:.2f}s  — still sequential (sync executor runs nodes one by one)"
+    )
     print(f"    async+sync  {t3:.2f}s  — branches overlap, but GIL-holding busy-wait")
     print(f"                          serializes packets even across threads")
     print(f"    async+async {t4:.2f}s  — branches overlap AND packets overlap")
-    print(f"                          (native coroutines yield at await points, enabling I/O overlap)")
+    print(
+        f"                          (native coroutines yield at await points, enabling I/O overlap)"
+    )
     print()
     print(f"  Key insight: async+sync is much slower than async+async because")
     print(f"  the sync function holds the GIL, so run_in_executor threads")

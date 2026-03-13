@@ -24,7 +24,8 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from orcapod import ArrowTableSource, function_pod
+from orcapod import function_pod
+from orcapod.sources import ArrowTableSource
 from orcapod.core.operators import Join
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import AsyncPipelineOrchestrator, Pipeline
