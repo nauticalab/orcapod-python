@@ -176,3 +176,32 @@ class TestListSourceBuilder:
     def test_source_id_defaults(self):
         src = ListSource(name="val", data=[1])
         assert src.source_id is not None
+
+
+class TestSourceLabelDefaults:
+    def test_dict_source_label_defaults_to_class_name(self):
+        src = DictSource(data=[{"id": 1, "x": 10}], tag_columns=["id"])
+        assert src.label == "DictSource"
+
+    def test_dict_source_explicit_label_preserved(self):
+        src = DictSource(
+            data=[{"id": 1, "x": 10}],
+            tag_columns=["id"],
+            label="my_source",
+        )
+        assert src.label == "my_source"
+
+    def test_arrow_table_source_label_defaults_to_class_name(self):
+        table = pa.table({"id": pa.array([1, 2]), "x": pa.array([10, 20])})
+        src = ArrowTableSource(table=table, tag_columns=["id"])
+        assert src.label == "ArrowTableSource"
+
+    def test_list_source_label_defaults_to_class_name(self):
+        src = ListSource(name="val", data=[1, 2])
+        assert src.label == "ListSource"
+
+    def test_csv_source_label_defaults_to_class_name(self, tmp_path):
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("id,x\n1,10\n")
+        src = CSVSource(file_path=str(csv_file), tag_columns=["id"])
+        assert src.label == "CSVSource"
