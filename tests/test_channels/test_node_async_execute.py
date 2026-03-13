@@ -7,7 +7,7 @@ Covers:
 - FunctionNode.async_execute basic streaming
 - FunctionNode.async_execute two-phase logic
 - OperatorNode.async_execute delegation
-- PersistentOperatorNode.async_execute with cache modes
+- OperatorNode.async_execute with cache modes
 - process_packet / async_process_packet routing
 """
 
@@ -24,8 +24,6 @@ from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import (
     FunctionNode,
     OperatorNode,
-    FunctionNode,
-    PersistentOperatorNode,
 )
 from orcapod.core.operators import SelectPacketColumns
 from orcapod.core.operators.join import Join
@@ -108,7 +106,7 @@ class TestProtocolConformance:
         op = SelectPacketColumns(["x"])
         stream = make_stream(3)
         db = InMemoryArrowDatabase()
-        node = PersistentOperatorNode(op, [stream], pipeline_database=db)
+        node = OperatorNode(op, [stream], pipeline_database=db)
         assert isinstance(node, AsyncExecutableProtocol)
 
 
@@ -503,17 +501,17 @@ class TestOperatorNodeAsyncExecute:
 
 
 # ---------------------------------------------------------------------------
-# 6. PersistentOperatorNode.async_execute
+# 6. OperatorNode.async_execute
 # ---------------------------------------------------------------------------
 
 
-class TestPersistentOperatorNodeAsyncExecute:
+class TestOperatorNodeAsyncExecute:
     @pytest.mark.asyncio
     async def test_off_mode_no_db_write(self):
         stream = make_two_col_stream(3)
         op = SelectPacketColumns(["x"])
         db = InMemoryArrowDatabase()
-        node = PersistentOperatorNode(
+        node = OperatorNode(
             op, [stream], pipeline_database=db, cache_mode=CacheMode.OFF
         )
 
@@ -535,7 +533,7 @@ class TestPersistentOperatorNodeAsyncExecute:
         stream = make_two_col_stream(3)
         op = SelectPacketColumns(["x"])
         db = InMemoryArrowDatabase()
-        node = PersistentOperatorNode(
+        node = OperatorNode(
             op, [stream], pipeline_database=db, cache_mode=CacheMode.LOG
         )
 
@@ -560,13 +558,13 @@ class TestPersistentOperatorNodeAsyncExecute:
         db = InMemoryArrowDatabase()
 
         # First: sync LOG to populate DB
-        node1 = PersistentOperatorNode(
+        node1 = OperatorNode(
             op, [stream], pipeline_database=db, cache_mode=CacheMode.LOG
         )
         node1.run()
 
         # Second: async REPLAY from DB
-        node2 = PersistentOperatorNode(
+        node2 = OperatorNode(
             op,
             [make_two_col_stream(3)],
             pipeline_database=db,
@@ -591,7 +589,7 @@ class TestPersistentOperatorNodeAsyncExecute:
         op = SelectPacketColumns(["x"])
         db = InMemoryArrowDatabase()
 
-        node = PersistentOperatorNode(
+        node = OperatorNode(
             op,
             [stream],
             pipeline_database=db,
@@ -788,13 +786,13 @@ class TestAsyncPipelineThenSyncRetrieval:
 
     @pytest.mark.asyncio
     async def test_persistent_operator_node_log_then_sync_db_retrieval(self):
-        """PersistentOperatorNode (LOG): async execute → sync get_all_records."""
+        """OperatorNode (LOG): async execute → sync get_all_records."""
         # --- Setup ---
         stream = make_two_col_stream(4)  # ids 0..3, x 0..3, y 0,11,22,33
         op = SelectPacketColumns(["x"])
         db = InMemoryArrowDatabase()
 
-        node = PersistentOperatorNode(
+        node = OperatorNode(
             op, [stream], pipeline_database=db, cache_mode=CacheMode.LOG
         )
 
@@ -825,7 +823,7 @@ class TestAsyncPipelineThenSyncRetrieval:
         assert "y" not in records.column_names
 
         # --- REPLAY from DB via a new node (no computation) ---
-        replay_node = PersistentOperatorNode(
+        replay_node = OperatorNode(
             op,
             [make_two_col_stream(4)],
             pipeline_database=db,
@@ -867,7 +865,7 @@ class TestAsyncPipelineThenSyncRetrieval:
         stage1_stream = ArrowTableStream(stage1_table, tag_columns=["id"])
         op = SelectPacketColumns(["result"])
         op_db = InMemoryArrowDatabase()
-        op_node = PersistentOperatorNode(
+        op_node = OperatorNode(
             op, [stage1_stream], pipeline_database=op_db, cache_mode=CacheMode.LOG
         )
 

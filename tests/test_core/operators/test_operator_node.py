@@ -1,5 +1,5 @@
 """
-Tests for PersistentOperatorNode covering:
+Tests for OperatorNode covering:
 - Construction, producer, upstreams
 - pipeline_path structure
 - output_schema and keys
@@ -17,7 +17,7 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from orcapod.core.nodes import PersistentOperatorNode
+from orcapod.core.nodes import OperatorNode
 from orcapod.core.operators import (
     DropPacketColumns,
     Join,
@@ -101,10 +101,10 @@ def _make_node(
     db: InMemoryArrowDatabase | None = None,
     prefix: tuple[str, ...] = (),
     cache_mode: CacheMode = CacheMode.OFF,
-) -> PersistentOperatorNode:
+) -> OperatorNode:
     if db is None:
         db = InMemoryArrowDatabase()
-    return PersistentOperatorNode(
+    return OperatorNode(
         operator=operator,
         input_streams=streams,
         pipeline_database=db,

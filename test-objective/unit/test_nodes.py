@@ -5,7 +5,7 @@ Tests based on design specification:
 - FunctionNode: in-memory function pod execution as a stream
 - FunctionNode: two-phase iteration (cached first, compute missing)
 - OperatorNode: operator execution as a stream
-- PersistentOperatorNode: CacheMode behavior (OFF/LOG/REPLAY)
+- OperatorNode: CacheMode behavior (OFF/LOG/REPLAY)
 """
 
 from __future__ import annotations
@@ -17,8 +17,6 @@ from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import (
     FunctionNode,
     OperatorNode,
-    FunctionNode,
-    PersistentOperatorNode,
 )
 from orcapod.core.operators import Join
 from orcapod.core.packet_function import PythonPacketFunction
@@ -226,11 +224,11 @@ class TestOperatorNode:
 
 
 # ===================================================================
-# PersistentOperatorNode
+# OperatorNode
 # ===================================================================
 
 
-class TestPersistentOperatorNode:
+class TestOperatorNode:
     """Per design, supports CacheMode: OFF (always compute), LOG (compute+store),
     REPLAY (load from DB)."""
 
@@ -238,7 +236,7 @@ class TestPersistentOperatorNode:
         join = Join()
         s1, s2 = _make_joinable_streams()
         db = InMemoryArrowDatabase()
-        node = PersistentOperatorNode(
+        node = OperatorNode(
             operator=join,
             input_streams=[s1, s2],
             pipeline_database=db,
@@ -252,7 +250,7 @@ class TestPersistentOperatorNode:
         join = Join()
         s1, s2 = _make_joinable_streams()
         db = InMemoryArrowDatabase()
-        node = PersistentOperatorNode(
+        node = OperatorNode(
             operator=join,
             input_streams=[s1, s2],
             pipeline_database=db,
@@ -270,7 +268,7 @@ class TestPersistentOperatorNode:
         db = InMemoryArrowDatabase()
 
         # First: LOG to populate DB
-        node1 = PersistentOperatorNode(
+        node1 = OperatorNode(
             operator=join,
             input_streams=[s1, s2],
             pipeline_database=db,
@@ -279,7 +277,7 @@ class TestPersistentOperatorNode:
         node1.run()
 
         # Second: REPLAY to load from DB
-        node2 = PersistentOperatorNode(
+        node2 = OperatorNode(
             operator=join,
             input_streams=[s1, s2],
             pipeline_database=db,
@@ -293,7 +291,7 @@ class TestPersistentOperatorNode:
         join = Join()
         s1, s2 = _make_joinable_streams()
         db = InMemoryArrowDatabase()
-        node = PersistentOperatorNode(
+        node = OperatorNode(
             operator=join,
             input_streams=[s1, s2],
             pipeline_database=db,

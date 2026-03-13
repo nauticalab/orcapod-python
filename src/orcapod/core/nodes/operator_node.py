@@ -635,7 +635,3 @@ class OperatorNode(StreamBase):
             f"{type(self).__name__}(operator={self._operator!r}, "
             f"upstreams={self._input_streams!r})"
         )
-
-
-# Temporary alias for backward compatibility (removed in Task 10)
-PersistentOperatorNode = OperatorNode

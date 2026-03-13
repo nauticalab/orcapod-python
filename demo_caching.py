@@ -8,7 +8,7 @@ Demonstrates:
    - Unnamed sources: identity determined by table hash (data-dependent)
 2. FunctionNode — pipeline_hash()-scoped cache, cross-source sharing
    - Two pipelines with different source identities but same schema share one cache table
-3. PersistentOperatorNode — content_hash()-scoped with CacheMode (OFF/LOG/REPLAY)
+3. OperatorNode — content_hash()-scoped with CacheMode (OFF/LOG/REPLAY)
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import pyarrow as pa
 from deltalake import DeltaTable, write_deltalake
 
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes import FunctionNode, PersistentOperatorNode
+from orcapod.core.nodes import FunctionNode, OperatorNode
 from orcapod.core.operators import Join
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource, DeltaTableSource, PersistentSource
@@ -241,17 +241,17 @@ with tempfile.TemporaryDirectory() as tmpdir:
     print(fn_node_2.as_table().to_pandas().to_string(index=False))
 
     # ============================================================
-    # STEP 3: PersistentOperatorNode — CacheMode
+    # STEP 3: OperatorNode — CacheMode
     # ============================================================
     print("\n" + "=" * 70)
-    print("STEP 3: PersistentOperatorNode (operator pod caching)")
+    print("STEP 3: OperatorNode (operator pod caching)")
     print("=" * 70)
 
     join_op = Join()
 
     # --- CacheMode.OFF (default): compute, no DB writes ---
     print("\n  --- CacheMode.OFF ---")
-    op_node_off = PersistentOperatorNode(
+    op_node_off = OperatorNode(
         operator=join_op,
         input_streams=[patients, labs],
         pipeline_database=operator_db,
@@ -267,7 +267,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
     # --- CacheMode.LOG: compute AND write to DB ---
     print("\n  --- CacheMode.LOG ---")
-    op_node_log = PersistentOperatorNode(
+    op_node_log = OperatorNode(
         operator=join_op,
         input_streams=[patients, labs],
         pipeline_database=operator_db,
@@ -284,7 +284,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
     print("  (scoped to content_hash — each source combination gets its own table)")
 
     # Show content_hash scoping: different sources → different paths
-    op_node_b = PersistentOperatorNode(
+    op_node_b = OperatorNode(
         operator=join_op,
         input_streams=[patients_b, labs_b],
         pipeline_database=operator_db,
@@ -299,7 +299,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
     # --- CacheMode.REPLAY: skip computation, load from DB ---
     print("\n  --- CacheMode.REPLAY ---")
-    op_node_replay = PersistentOperatorNode(
+    op_node_replay = OperatorNode(
         operator=join_op,
         input_streams=[patients, labs],
         pipeline_database=operator_db,
@@ -313,7 +313,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
     # --- REPLAY with no prior cache → empty stream ---
     print("\n  --- CacheMode.REPLAY with no prior cache ---")
-    op_node_empty = PersistentOperatorNode(
+    op_node_empty = OperatorNode(
         operator=join_op,
         input_streams=[patients, labs],
         pipeline_database=InMemoryArrowDatabase(),
@@ -349,7 +349,7 @@ print("""
       → same pipeline_path → same cache table
     - Rows distinguished by system tags (source_id + record_id)
 
-  Operator pod (PersistentOperatorNode):
+  Operator pod (OperatorNode):
     - Cache scoped to content_hash() (includes source identity)
     - Different source combinations → different cache tables
     - CacheMode.OFF: compute only (default)
