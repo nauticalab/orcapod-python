@@ -1,6 +1,6 @@
 """Specification-derived integration tests for DB-backed caching flows.
 
-Tests PersistentFunctionNode and PersistentOperatorNode caching behavior
+Tests FunctionNode and PersistentOperatorNode caching behavior
 as documented in the design specification.
 """
 
@@ -11,7 +11,7 @@ import pytest
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import (
-    PersistentFunctionNode,
+    FunctionNode,
     PersistentOperatorNode,
 )
 from orcapod.core.operators import Join
@@ -42,11 +42,11 @@ def _make_source(n: int = 3) -> ArrowTableSource:
 
 
 # ===================================================================
-# PersistentFunctionNode caching
+# FunctionNode caching
 # ===================================================================
 
 
-class TestPersistentFunctionNodeCaching:
+class TestFunctionNodeCaching:
     """Per design: first run computes and stores; second run replays cached."""
 
     def test_first_run_computes_all(self):
@@ -55,7 +55,7 @@ class TestPersistentFunctionNodeCaching:
         source = _make_source(3)
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
-        node = PersistentFunctionNode(
+        node = FunctionNode(
             function_pod=pod,
             input_stream=source,
             pipeline_database=pipeline_db,
@@ -74,7 +74,7 @@ class TestPersistentFunctionNodeCaching:
         result_db = InMemoryArrowDatabase()
 
         # First run
-        node1 = PersistentFunctionNode(
+        node1 = FunctionNode(
             function_pod=pod,
             input_stream=source,
             pipeline_database=pipeline_db,
@@ -83,7 +83,7 @@ class TestPersistentFunctionNodeCaching:
         node1.run()
 
         # Second run with same inputs — should use cached results
-        node2 = PersistentFunctionNode(
+        node2 = FunctionNode(
             function_pod=pod,
             input_stream=source,
             pipeline_database=pipeline_db,
@@ -94,7 +94,7 @@ class TestPersistentFunctionNodeCaching:
 
 
 class TestDerivedSourceReingestion:
-    """Per design: PersistentFunctionNode → DerivedSource → further pipeline."""
+    """Per design: FunctionNode → DerivedSource → further pipeline."""
 
     def test_derived_source_as_pipeline_input(self):
         pf = PythonPacketFunction(_double, output_keys="result")
@@ -103,7 +103,7 @@ class TestDerivedSourceReingestion:
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
 
-        node = PersistentFunctionNode(
+        node = FunctionNode(
             function_pod=pod,
             input_stream=source,
             pipeline_database=pipeline_db,

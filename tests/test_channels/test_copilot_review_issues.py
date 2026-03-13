@@ -23,7 +23,7 @@ import pytest
 from orcapod.channels import Channel
 from orcapod.core.datagrams import Packet
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes import FunctionNode, PersistentFunctionNode
+from orcapod.core.nodes import FunctionNode
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
@@ -84,7 +84,7 @@ class TestDeterministicConcurrencyTracking:
         pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=5))
         db = InMemoryArrowDatabase()
         stream = make_stream(5)
-        node = PersistentFunctionNode(pod, stream, pipeline_database=db)
+        node = FunctionNode(pod, stream, pipeline_database=db)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -118,6 +118,7 @@ class TestThreadPoolExecutorReuse:
     def test_executor_not_created_per_call(self):
         """Calling an async function sync multiple times should not create
         a new ThreadPoolExecutor each time."""
+
         async def simple_add(x: int, y: int) -> int:
             return x + y
 
@@ -270,6 +271,7 @@ class TestSemaphoreZeroDeadlock:
         This is a demonstration of the bug — if resolve_concurrency returns 0,
         the pipeline hangs forever. We use a timeout to detect the deadlock.
         """
+
         async def double(x: int) -> int:
             return x * 2
 

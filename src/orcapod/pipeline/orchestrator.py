@@ -38,7 +38,7 @@ class AsyncPipelineOrchestrator:
        ``asyncio.TaskGroup``.
 
     Results are written to the pipeline databases by the persistent
-    nodes themselves (``PersistentFunctionNode``, ``PersistentOperatorNode``
+    nodes themselves (``FunctionNode``, ``PersistentOperatorNode``
     in LOG mode, etc.).  After ``run()`` returns, callers retrieve data
     via ``pipeline.<label>.get_all_records()``.
     """

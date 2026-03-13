@@ -9,7 +9,6 @@ from .core.function_pod import (
 )
 from .core.nodes import (
     FunctionNode,
-    PersistentFunctionNode,
 )
 from .core.sources import (
     ArrowTableSource,
@@ -27,7 +26,6 @@ from .pipeline import Pipeline
 
 __all__ = [
     "FunctionNode",
-    "PersistentFunctionNode",
     "FunctionPod",
     "function_pod",
     "ArrowTableSource",

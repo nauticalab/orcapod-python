@@ -1027,8 +1027,3 @@ class FunctionNode(StreamBase):
             f"{type(self).__name__}(packet_function={self._packet_function!r}, "
             f"input_stream={self._input_stream!r})"
         )
-
-
-# Temporary alias so that existing imports of PersistentFunctionNode continue to
-# resolve.  Task 8 will update all call sites and remove this alias.
-PersistentFunctionNode = FunctionNode

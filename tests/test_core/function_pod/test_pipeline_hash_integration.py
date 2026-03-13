@@ -20,8 +20,8 @@ across Phases 1–5 of the redesign:
     ArrowTableStream (no source) → schema-based pipeline_hash
     Two same-schema TableStreams share pipeline_hash even with different data
 
-  Phase 5 — PersistentFunctionNode and THE CORE FIX
-    PersistentFunctionNode.pipeline_path is derived from pipeline_hash, not content_hash
+  Phase 5 — FunctionNode and THE CORE FIX
+    FunctionNode.pipeline_path is derived from pipeline_hash, not content_hash
     Two FunctionNodes with same schema/function but different data share pipeline_path
     They also share the DB: node1's cached results are reused by node2
 
@@ -37,7 +37,7 @@ from typing import cast
 import pyarrow as pa
 
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes import PersistentFunctionNode
+from orcapod.core.nodes import FunctionNode
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource, DictSource
 from orcapod.core.streams import ArrowTableStream
@@ -56,7 +56,7 @@ class TestPipelineElementBase:
     """Verify PipelineElementBase invariants on concrete instances."""
 
     def test_function_node_pipeline_hash_returns_content_hash(self, double_pf):
-        node = PersistentFunctionNode(
+        node = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=InMemoryArrowDatabase(),
@@ -65,7 +65,7 @@ class TestPipelineElementBase:
         assert isinstance(h, ContentHash)
 
     def test_pipeline_hash_is_cached(self, double_pf):
-        node = PersistentFunctionNode(
+        node = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=InMemoryArrowDatabase(),
@@ -75,7 +75,7 @@ class TestPipelineElementBase:
     def test_pipeline_hash_not_equal_to_content_hash(self, double_pf):
         """pipeline_hash (schema+topology) must differ from content_hash (data-inclusive)
         when the input stream contains real data."""
-        node = PersistentFunctionNode(
+        node = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=InMemoryArrowDatabase(),
@@ -83,7 +83,7 @@ class TestPipelineElementBase:
         assert node.pipeline_hash() != node.content_hash()
 
     def test_source_satisfies_pipeline_element_protocol(self, double_pf):
-        node = PersistentFunctionNode(
+        node = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=InMemoryArrowDatabase(),
@@ -136,12 +136,12 @@ class TestFunctionPodPipelineHash:
         have different pipeline_hashes because the FunctionPod hashes differ."""
         db = InMemoryArrowDatabase()
         stream = make_two_col_stream(n=3)
-        node_double = PersistentFunctionNode(
+        node_double = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
-        node_add = PersistentFunctionNode(
+        node_add = FunctionNode(
             function_pod=FunctionPod(packet_function=add_pf),
             input_stream=stream,
             pipeline_database=db,
@@ -261,13 +261,13 @@ class TestTableStreamPipelineHash:
 
 
 # ---------------------------------------------------------------------------
-# Phase 5: PersistentFunctionNode — the core DB-scoping fix
+# Phase 5: FunctionNode — the core DB-scoping fix
 # ---------------------------------------------------------------------------
 
 
 class TestFunctionNodePipelineHashFix:
     """
-    The critical invariant: PersistentFunctionNode._pipeline_node_hash (and therefore
+    The critical invariant: FunctionNode._pipeline_node_hash (and therefore
     pipeline_path) is derived from pipeline_hash(), not content_hash().
 
     Before the fix: _pipeline_node_hash = self.content_hash().to_string()
@@ -278,12 +278,12 @@ class TestFunctionNodePipelineHashFix:
 
     def test_different_data_same_schema_share_pipeline_path(self, double_pf):
         db = InMemoryArrowDatabase()
-        node1 = PersistentFunctionNode(
+        node1 = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
-        node2 = PersistentFunctionNode(
+        node2 = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=5),
             pipeline_database=db,
@@ -293,12 +293,12 @@ class TestFunctionNodePipelineHashFix:
     def test_different_data_same_schema_share_uri(self, double_pf):
         """URI is also schema-based, so two nodes with same schema share it."""
         db = InMemoryArrowDatabase()
-        node1 = PersistentFunctionNode(
+        node1 = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
-        node2 = PersistentFunctionNode(
+        node2 = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=ArrowTableStream(
                 pa.table(
@@ -316,12 +316,12 @@ class TestFunctionNodePipelineHashFix:
     def test_different_data_yields_different_content_hash(self, double_pf):
         """Same schema, different actual data → content_hash must differ."""
         db = InMemoryArrowDatabase()
-        node1 = PersistentFunctionNode(
+        node1 = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
-        node2 = PersistentFunctionNode(
+        node2 = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=ArrowTableStream(
                 pa.table(
@@ -339,12 +339,12 @@ class TestFunctionNodePipelineHashFix:
     def test_different_function_different_pipeline_path(self, double_pf, add_pf):
         """Different functions → different pipeline_hash → different pipeline_path."""
         db = InMemoryArrowDatabase()
-        node_double = PersistentFunctionNode(
+        node_double = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
-        node_add = PersistentFunctionNode(
+        node_add = FunctionNode(
             function_pod=FunctionPod(packet_function=add_pf),
             input_stream=make_two_col_stream(n=3),
             pipeline_database=db,
@@ -354,7 +354,7 @@ class TestFunctionNodePipelineHashFix:
     def test_pipeline_path_prefix_propagates(self, double_pf):
         db = InMemoryArrowDatabase()
         prefix = ("stage", "one")
-        node = PersistentFunctionNode(
+        node = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
@@ -363,7 +363,7 @@ class TestFunctionNodePipelineHashFix:
         assert node.pipeline_path[: len(prefix)] == prefix
 
     def test_pipeline_path_without_prefix_starts_with_pf_uri(self, double_pf):
-        node = PersistentFunctionNode(
+        node = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=2),
             pipeline_database=InMemoryArrowDatabase(),
@@ -382,7 +382,7 @@ class TestPipelineDbScoping:
     """
     The definitive end-to-end test for the pipeline DB scoping fix.
 
-    Two PersistentFunctionNode instances:
+    Two FunctionNode instances:
       - Same packet function
       - Same input schema
       - DIFFERENT input data (overlapping subset)
@@ -406,12 +406,12 @@ class TestPipelineDbScoping:
         pf = PythonPacketFunction(counting_double, output_keys="result")
         db = InMemoryArrowDatabase()
 
-        node1 = PersistentFunctionNode(
+        node1 = FunctionNode(
             function_pod=FunctionPod(packet_function=pf),
             input_stream=make_int_stream(n=3),  # x in {0,1,2}
             pipeline_database=db,
         )
-        node2 = PersistentFunctionNode(
+        node2 = FunctionNode(
             function_pod=FunctionPod(packet_function=pf),
             input_stream=make_int_stream(n=5),  # x in {0,1,2,3,4}
             pipeline_database=db,
@@ -442,12 +442,12 @@ class TestPipelineDbScoping:
         pf = PythonPacketFunction(counting_double, output_keys="result")
         db = InMemoryArrowDatabase()
 
-        node1 = PersistentFunctionNode(
+        node1 = FunctionNode(
             function_pod=FunctionPod(packet_function=pf),
             input_stream=make_int_stream(n=5),
             pipeline_database=db,
         )
-        node2 = PersistentFunctionNode(
+        node2 = FunctionNode(
             function_pod=FunctionPod(packet_function=pf),
             input_stream=make_int_stream(n=3),  # strict subset of node1's data
             pipeline_database=db,
@@ -464,14 +464,14 @@ class TestPipelineDbScoping:
         """Correctness: DB-served results from a shared pipeline have correct values."""
         db = InMemoryArrowDatabase()
 
-        node1 = PersistentFunctionNode(
+        node1 = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
         node1.run()
 
-        node2 = PersistentFunctionNode(
+        node2 = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=5),
             pipeline_database=db,
@@ -493,13 +493,13 @@ class TestPipelineDbScoping:
         pf = PythonPacketFunction(counting_double, output_keys="result")
         n = 3
 
-        PersistentFunctionNode(
+        FunctionNode(
             function_pod=FunctionPod(packet_function=pf),
             input_stream=make_int_stream(n=n),
             pipeline_database=InMemoryArrowDatabase(),
         ).run()
 
-        PersistentFunctionNode(
+        FunctionNode(
             function_pod=FunctionPod(packet_function=pf),
             input_stream=make_int_stream(n=n),
             pipeline_database=InMemoryArrowDatabase(),
@@ -511,7 +511,7 @@ class TestPipelineDbScoping:
         """
         Verify the full Merkle-like chain:
           RootSource.pipeline_hash  →  ArrowTableStream.pipeline_hash
-            →  PersistentFunctionNode.pipeline_hash
+            →  FunctionNode.pipeline_hash
 
         Two pipelines (same schema, different data) must share pipeline_hash
         at every level of the chain.
@@ -524,12 +524,12 @@ class TestPipelineDbScoping:
         # Level 0 (root): same schema → same pipeline_hash
         assert stream_a.pipeline_hash() == stream_b.pipeline_hash()
 
-        node_a = PersistentFunctionNode(
+        node_a = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=stream_a,
             pipeline_database=db,
         )
-        node_b = PersistentFunctionNode(
+        node_b = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=stream_b,
             pipeline_database=db,
@@ -550,7 +550,7 @@ class TestPipelineDbScoping:
 
         # Pipeline A: stream(n=3) → node1_a → source_a → node2_a
         stream_a = make_int_stream(n=3)
-        node1_a = PersistentFunctionNode(
+        node1_a = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=stream_a,
             pipeline_database=db,
@@ -560,7 +560,7 @@ class TestPipelineDbScoping:
 
         # Pipeline B: stream(n=5) → node1_b → source_b → node2_b
         stream_b = make_int_stream(n=5)
-        node1_b = PersistentFunctionNode(
+        node1_b = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=stream_b,
             pipeline_database=db,

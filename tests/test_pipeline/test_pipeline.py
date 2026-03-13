@@ -4,7 +4,7 @@ Tests for the Pipeline class.
 Verifies that Pipeline (a GraphTracker subclass) correctly wraps all nodes
 during compile():
 - Leaf streams → SourceNode
-- Function pod invocations → PersistentFunctionNode
+- Function pod invocations → FunctionNode
 - Operator invocations → PersistentOperatorNode
 """
 
@@ -18,7 +18,7 @@ import pytest
 from orcapod.core.executors import PacketFunctionExecutorBase
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import (
-    PersistentFunctionNode,
+    FunctionNode,
     PersistentOperatorNode,
     SourceNode,
 )
@@ -94,15 +94,13 @@ class TestCompileSourceWrapping:
         assert pipeline._node_graph is not None
         # The node graph should contain SourceNode instances
         source_nodes = [
-            n
-            for n in pipeline._node_graph.nodes()
-            if isinstance(n, SourceNode)
+            n for n in pipeline._node_graph.nodes() if isinstance(n, SourceNode)
         ]
         assert len(source_nodes) == 2
 
 
 # ---------------------------------------------------------------------------
-# Tests: compile creates PersistentFunctionNode
+# Tests: compile creates FunctionNode
 # ---------------------------------------------------------------------------
 
 
@@ -120,7 +118,7 @@ class TestCompileFunctionNode:
 
         assert "adder" in pipeline.compiled_nodes
         node = pipeline.compiled_nodes["adder"]
-        assert isinstance(node, PersistentFunctionNode)
+        assert isinstance(node, FunctionNode)
 
     def test_function_node_pipeline_path_prefix(self, pipeline_db):
         src_a, src_b = _make_two_sources()
@@ -134,7 +132,7 @@ class TestCompileFunctionNode:
             pod(joined, label="adder")
 
         node = pipeline.compiled_nodes["adder"]
-        assert isinstance(node, PersistentFunctionNode)
+        assert isinstance(node, FunctionNode)
         # pipeline_path should start with the pipeline name
         assert node.pipeline_path[0] == "fn_pipe"
 
@@ -191,7 +189,7 @@ class TestFunctionDatabaseHandling:
             pod(joined, label="adder")
 
         node = pipeline.compiled_nodes["adder"]
-        assert isinstance(node, PersistentFunctionNode)
+        assert isinstance(node, FunctionNode)
 
         # The CachedPacketFunction's record_path should start with
         # (pipeline_name, "_results", ...)
@@ -216,7 +214,7 @@ class TestFunctionDatabaseHandling:
             pod(joined, label="adder")
 
         node = pipeline.compiled_nodes["adder"]
-        assert isinstance(node, PersistentFunctionNode)
+        assert isinstance(node, FunctionNode)
 
         # The CachedPacketFunction should use function_db
         assert node._packet_function._result_database is function_db
@@ -259,8 +257,8 @@ class TestLabelAccess:
         # Both should be disambiguated
         assert "compute_1" in pipeline.compiled_nodes
         assert "compute_2" in pipeline.compiled_nodes
-        assert isinstance(pipeline.compute_1, PersistentFunctionNode)
-        assert isinstance(pipeline.compute_2, PersistentFunctionNode)
+        assert isinstance(pipeline.compute_1, FunctionNode)
+        assert isinstance(pipeline.compute_2, FunctionNode)
 
         # Verify deterministic ordering by content hash
         hash_1 = pipeline.compute_1.content_hash().to_string()
@@ -382,7 +380,7 @@ class TestEndToEnd:
 
         # Verify node types
         assert isinstance(pipeline.joiner, PersistentOperatorNode)
-        assert isinstance(pipeline.adder, PersistentFunctionNode)
+        assert isinstance(pipeline.adder, FunctionNode)
 
         # Run the pipeline
         pipeline.run()
@@ -435,7 +433,7 @@ class TestPipelineExtension:
         assert "adder" in pipeline.compiled_nodes
         assert isinstance(pipeline.joiner, PersistentOperatorNode)
         assert isinstance(pipeline.wider_join, PersistentOperatorNode)
-        assert isinstance(pipeline.adder, PersistentFunctionNode)
+        assert isinstance(pipeline.adder, FunctionNode)
 
         pipeline.run()
 
@@ -461,8 +459,8 @@ class TestPipelineExtension:
             joined = src_a.join(src_b, label="joiner")
             pod(joined, label="adder")
 
-        # pipeline.adder is now a PersistentFunctionNode
-        assert isinstance(pipeline.adder, PersistentFunctionNode)
+        # pipeline.adder is now a FunctionNode
+        assert isinstance(pipeline.adder, FunctionNode)
 
         # Second context: extend from the compiled node
         with pipeline:
@@ -987,9 +985,7 @@ class TestIncrementalCompile:
 
         assert pipeline._node_graph is not None
         first_source_nodes = {
-            id(n)
-            for n in pipeline._node_graph.nodes()
-            if isinstance(n, SourceNode)
+            id(n) for n in pipeline._node_graph.nodes() if isinstance(n, SourceNode)
         }
 
         # Extend with another operation
@@ -997,9 +993,7 @@ class TestIncrementalCompile:
             pipeline.joiner.map_packets({"value": "val"}, label="renamer")
 
         second_source_nodes = {
-            id(n)
-            for n in pipeline._node_graph.nodes()
-            if isinstance(n, SourceNode)
+            id(n) for n in pipeline._node_graph.nodes() if isinstance(n, SourceNode)
         }
 
         # All original source nodes should be preserved (same object ids)
@@ -1214,9 +1208,7 @@ class TestSourceNodeNoCaching:
 
         # Source nodes are plain SourceNode — no caching, no DB writes
         source_nodes = [
-            n
-            for n in pipeline._node_graph.nodes()
-            if isinstance(n, SourceNode)
+            n for n in pipeline._node_graph.nodes() if isinstance(n, SourceNode)
         ]
         assert len(source_nodes) == 2
         for sn in source_nodes:

@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.nodes import (
+    FunctionNode,
     GraphNode,
-    PersistentFunctionNode,
     PersistentOperatorNode,
     SourceNode,
 )
@@ -64,7 +64,7 @@ class Pipeline(GraphTracker):
     exit, ``compile()`` rewires the graph into execution-ready nodes:
 
     - Leaf streams → ``SourceNode`` (thin wrapper for graph vertex)
-    - Function pod invocations → ``PersistentFunctionNode``
+    - Function pod invocations → ``FunctionNode``
     - Operator invocations → ``PersistentOperatorNode``
 
     Source caching is not a pipeline concern — sources that need caching
@@ -150,16 +150,14 @@ class Pipeline(GraphTracker):
         Walks the graph in topological order and creates:
 
         - ``SourceNode`` for every leaf stream
-        - ``PersistentFunctionNode`` for every function pod invocation
+        - ``FunctionNode`` for every function pod invocation
         - ``PersistentOperatorNode`` for every operator invocation
 
         After compile, nodes are accessible by label as attributes on the
         pipeline instance.
         """
         from orcapod.core.nodes import (
-            FunctionNode,
             OperatorNode,
-            PersistentFunctionNode,
             PersistentOperatorNode,
         )
 
@@ -205,7 +203,7 @@ class Pipeline(GraphTracker):
                         result_db = self._pipeline_database
                         result_prefix = self._name + ("_results",)
 
-                    persistent_node = PersistentFunctionNode(
+                    persistent_node = FunctionNode(
                         function_pod=node._function_pod,
                         input_stream=rewired_input,
                         pipeline_database=self._pipeline_database,
@@ -268,7 +266,7 @@ class Pipeline(GraphTracker):
             if not attrs.get("node_type"):
                 if isinstance(node, SourceNode):
                     attrs["node_type"] = "source"
-                elif isinstance(node, PersistentFunctionNode):
+                elif isinstance(node, FunctionNode):
                     attrs["node_type"] = "function"
                 elif isinstance(node, PersistentOperatorNode):
                     attrs["node_type"] = "operator"
@@ -368,7 +366,7 @@ class Pipeline(GraphTracker):
         execution_engine: cp.PacketFunctionExecutorProtocol,
         execution_engine_opts: dict[str, Any] | None,
     ) -> None:
-        """Apply *execution_engine* to every ``PersistentFunctionNode`` in the pipeline.
+        """Apply *execution_engine* to every ``FunctionNode`` in the pipeline.
 
         For each function node, the pipeline-level *execution_engine_opts* are
         merged with any per-node ``execution_engine_opts`` override (node opts
@@ -383,8 +381,6 @@ class Pipeline(GraphTracker):
             execution_engine_opts: Pipeline-level default options dict, or
                 ``None`` for no defaults.
         """
-        from orcapod.core.nodes import PersistentFunctionNode
-
         assert self._node_graph is not None, (
             "_apply_execution_engine called before compile()"
         )
@@ -392,7 +388,7 @@ class Pipeline(GraphTracker):
         pipeline_opts = execution_engine_opts or {}
 
         for node in self._node_graph.nodes:
-            if not isinstance(node, PersistentFunctionNode):
+            if not isinstance(node, FunctionNode):
                 continue
             node_opts = node.execution_engine_opts or {}
             merged = {**pipeline_opts, **node_opts}
@@ -438,10 +434,7 @@ class Pipeline(GraphTracker):
                 "auto_compile=True before saving."
             )
 
-        from orcapod.core.nodes import (
-            PersistentFunctionNode,
-            PersistentOperatorNode,
-        )
+        from orcapod.core.nodes import PersistentOperatorNode
         from orcapod.pipeline.serialization import (
             PIPELINE_FORMAT_VERSION,
             serialize_schema,
@@ -479,7 +472,7 @@ class Pipeline(GraphTracker):
 
             if isinstance(node, SourceNode):
                 descriptor.update(self._build_source_descriptor(node))
-            elif isinstance(node, PersistentFunctionNode):
+            elif isinstance(node, FunctionNode):
                 descriptor.update(self._build_function_descriptor(node))
             elif isinstance(node, PersistentOperatorNode):
                 descriptor.update(self._build_operator_descriptor(node))
@@ -536,13 +529,11 @@ class Pipeline(GraphTracker):
             "source_config": source_config,
         }
 
-    def _build_function_descriptor(
-        self, node: "PersistentFunctionNode"
-    ) -> dict[str, Any]:
-        """Build function-specific descriptor fields for a PersistentFunctionNode.
+    def _build_function_descriptor(self, node: "FunctionNode") -> dict[str, Any]:
+        """Build function-specific descriptor fields for a FunctionNode.
 
         Args:
-            node: The PersistentFunctionNode to describe.
+            node: The FunctionNode to describe.
 
         Returns:
             Dict with function-specific fields.
@@ -643,7 +634,7 @@ class Pipeline(GraphTracker):
 
         # 4. Walk nodes in topological order, reconstruct each
         reconstructed: dict[
-            str, SourceNode | PersistentFunctionNode | PersistentOperatorNode
+            str, SourceNode | FunctionNode | PersistentOperatorNode
         ] = {}
 
         # Build reverse edge map: downstream -> list of upstream hashes
@@ -805,8 +796,8 @@ class Pipeline(GraphTracker):
         upstream_node: Any | None,
         upstream_usable: bool,
         databases: dict[str, Any],
-    ) -> PersistentFunctionNode:
-        """Reconstruct a PersistentFunctionNode from a descriptor.
+    ) -> FunctionNode:
+        """Reconstruct a FunctionNode from a descriptor.
 
         Args:
             descriptor: The serialized node descriptor.
@@ -816,10 +807,9 @@ class Pipeline(GraphTracker):
             databases: Database role mapping.
 
         Returns:
-            A ``PersistentFunctionNode`` instance.
+            A ``FunctionNode`` instance.
         """
         from orcapod.core.function_pod import FunctionPod
-        from orcapod.core.nodes import PersistentFunctionNode
 
         if mode == "full":
             if not upstream_usable:
@@ -831,7 +821,7 @@ class Pipeline(GraphTracker):
             else:
                 try:
                     pod = FunctionPod.from_config(descriptor["function_pod"])
-                    return PersistentFunctionNode.from_descriptor(
+                    return FunctionNode.from_descriptor(
                         descriptor,
                         function_pod=pod,
                         input_stream=upstream_node,
@@ -844,7 +834,7 @@ class Pipeline(GraphTracker):
                         descriptor.get("label"),
                     )
 
-        return PersistentFunctionNode.from_descriptor(
+        return FunctionNode.from_descriptor(
             descriptor,
             function_pod=None,
             input_stream=None,
