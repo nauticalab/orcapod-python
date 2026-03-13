@@ -853,6 +853,112 @@ class TestFullMode:
 # ---------------------------------------------------------------------------
 
 
+class TestCachedSourceWithSourceProxyRoundTrip:
+    """End-to-end: build pipeline with cached DictSource, run, save, load,
+    and verify data is recovered from the cache database."""
+
+    def test_cached_dict_source_recovers_data_after_load(self, tmp_path):
+        """DictSource wrapped in CachedSource → pipeline run → save → load.
+
+        On load the DictSource becomes a SourceProxy (not reconstructable),
+        but the CachedSource should still serve the cached data.
+        """
+        from orcapod.core.sources import CachedSource, DictSource
+        from orcapod.core.sources.source_proxy import SourceProxy
+
+        db = DeltaTableDatabase(base_path=str(tmp_path / "pipeline_db"))
+        cache_db = DeltaTableDatabase(base_path=str(tmp_path / "cache_db"))
+
+        source = DictSource(
+            data=[{"x": 1, "y": 10}, {"x": 2, "y": 20}],
+            tag_columns=["x"],
+            source_id="dict_src",
+        )
+        cached_source = CachedSource(source, cache_database=cache_db)
+
+        pf = PythonPacketFunction(
+            function=transform_func,
+            output_keys="result",
+            function_name="transform_func",
+        )
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(name="cached_test", pipeline_database=db)
+        with pipeline:
+            result = pod.process(cached_source, label="transform")
+
+        pipeline.run()
+        pipeline.flush()
+        cache_db.flush()
+
+        # Capture original output
+        original_table = result.as_table()
+        original_rows = original_table.num_rows
+
+        # Save and reload
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="full")
+
+        # The source node should wrap a CachedSource whose inner source is
+        # a SourceProxy (DictSource is not reconstructable)
+        source_nodes = [
+            n for n in loaded._persistent_node_map.values() if n.node_type == "source"
+        ]
+        assert len(source_nodes) == 1
+        loaded_stream = source_nodes[0].stream
+        assert isinstance(loaded_stream, CachedSource)
+        assert isinstance(loaded_stream._source, SourceProxy)
+        assert loaded_stream._source.expected_class_name == "DictSource"
+
+        # The cached source should serve data from the cache
+        cached_table = loaded_stream.as_table()
+        assert cached_table.num_rows == 2
+
+    def test_cached_dict_source_function_output_matches(self, tmp_path):
+        """After load, iterating the function node produces the same results
+        as the original pipeline run."""
+        from orcapod.core.sources import CachedSource, DictSource
+
+        db = DeltaTableDatabase(base_path=str(tmp_path / "pipeline_db"))
+        cache_db = DeltaTableDatabase(base_path=str(tmp_path / "cache_db"))
+
+        source = DictSource(
+            data=[{"x": 1, "y": 5}, {"x": 2, "y": 15}],
+            tag_columns=["x"],
+            source_id="dict_src2",
+        )
+        cached_source = CachedSource(source, cache_database=cache_db)
+
+        pf = PythonPacketFunction(
+            function=transform_func,
+            output_keys="result",
+            function_name="transform_func",
+        )
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(name="cached_e2e", pipeline_database=db)
+        with pipeline:
+            result = pod.process(cached_source, label="transform")
+
+        pipeline.run()
+        pipeline.flush()
+        cache_db.flush()
+
+        # Capture original results
+        original_packets = [p.as_dict()["result"] for _, p in result.iter_packets()]
+
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path), mode="full")
+
+        fn_node = loaded.compiled_nodes["transform"]
+        assert fn_node.load_status == LoadStatus.FULL
+
+        loaded_packets = [p.as_dict()["result"] for _, p in fn_node.iter_packets()]
+        assert sorted(loaded_packets) == sorted(original_packets)
+
+
 class TestLoadEdgeCases:
     """Edge cases for Pipeline.load()."""
 

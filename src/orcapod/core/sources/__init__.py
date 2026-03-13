@@ -8,6 +8,7 @@ from .derived_source import DerivedSource
 from .dict_source import DictSource
 from .list_source import ListSource
 from .source_registry import GLOBAL_SOURCE_REGISTRY, SourceRegistry
+from .source_proxy import SourceProxy
 
 __all__ = [
     "RootSource",
@@ -20,5 +21,6 @@ __all__ = [
     "DictSource",
     "ListSource",
     "SourceRegistry",
+    "SourceProxy",
     "GLOBAL_SOURCE_REGISTRY",
 ]

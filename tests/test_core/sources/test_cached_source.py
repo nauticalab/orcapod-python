@@ -350,6 +350,124 @@ class TestCachedSourceIntegration:
         assert sorted(ages) == [50, 60]
 
 
+# ---------------------------------------------------------------------------
+# CachedSource with unrecoverable inner source (SourceProxy fallback)
+# ---------------------------------------------------------------------------
+
+
+class TestCachedSourceWithSourceProxy:
+    """CachedSource loaded from config where the inner source is not
+    reconstructable should still serve data from the cache database."""
+
+    @staticmethod
+    def _make_proxy(source):
+        """Create a SourceProxy matching the given source's identity."""
+        from orcapod.core.sources.source_proxy import SourceProxy
+        from orcapod.types import Schema
+
+        tag_schema, packet_schema = source.output_schema()
+        return SourceProxy(
+            source_id=source.source_id,
+            content_hash_str=source.content_hash().to_string(),
+            pipeline_hash_str=source.pipeline_hash().to_string(),
+            tag_schema=tag_schema,
+            packet_schema=packet_schema,
+            expected_class_name=source.__class__.__name__,
+        )
+
+    def test_serves_cached_data_when_inner_source_unrecoverable(self, db):
+        """Populate cache → replace inner source with SourceProxy →
+        data still available from cache."""
+        table = pa.table(
+            {
+                "name": pa.array(["Alice", "Bob"], type=pa.large_string()),
+                "age": pa.array([30, 25], type=pa.int64()),
+            }
+        )
+        source = ArrowTableSource(table, tag_columns=["name"], source_id="test_src")
+        cached = CachedSource(source, cache_database=db)
+
+        # Force data into the cache
+        _ = cached.as_table()
+
+        # Reconstruct with a SourceProxy standing in for the inner source
+        proxy = self._make_proxy(source)
+        loaded = CachedSource(
+            source=proxy,
+            cache_database=db,
+            cache_path=cached.cache_path,
+            source_id=source.source_id,
+        )
+
+        result = loaded.as_table()
+        assert result.num_rows == 2
+        assert "name" in result.column_names
+        assert "age" in result.column_names
+
+    def test_inner_source_is_source_proxy(self, db):
+        """Verify the CachedSource wraps a SourceProxy."""
+        from orcapod.core.sources.source_proxy import SourceProxy
+
+        table = pa.table(
+            {
+                "id": pa.array([1, 2], type=pa.int64()),
+                "value": pa.array([10, 20], type=pa.int64()),
+            }
+        )
+        source = ArrowTableSource(table, tag_columns=["id"], source_id="proxy_test")
+        proxy = self._make_proxy(source)
+        loaded = CachedSource(source=proxy, cache_database=db)
+
+        assert isinstance(loaded._source, SourceProxy)
+        assert loaded._source.expected_class_name == "ArrowTableSource"
+
+    def test_identity_preserved_with_proxy(self, db):
+        """CachedSource wrapping SourceProxy has same content_hash and
+        pipeline_hash as the original CachedSource."""
+        table = pa.table(
+            {
+                "key": pa.array(["a", "b"], type=pa.large_string()),
+                "val": pa.array([1, 2], type=pa.int64()),
+            }
+        )
+        source = ArrowTableSource(table, tag_columns=["key"], source_id="id_test")
+        cached = CachedSource(source, cache_database=db)
+
+        original_content = cached.content_hash()
+        original_pipeline = cached.pipeline_hash()
+
+        proxy = self._make_proxy(source)
+        loaded = CachedSource(
+            source=proxy,
+            cache_database=db,
+            cache_path=cached.cache_path,
+            source_id=source.source_id,
+        )
+        assert loaded.content_hash() == original_content
+        assert loaded.pipeline_hash() == original_pipeline
+
+    def test_empty_cache_returns_empty_stream(self, db):
+        """CachedSource with unrecoverable source and empty cache returns
+        an empty stream rather than raising."""
+        table = pa.table(
+            {
+                "x": pa.array(["a"], type=pa.large_string()),
+                "y": pa.array([1], type=pa.int64()),
+            }
+        )
+        source = ArrowTableSource(table, tag_columns=["x"], source_id="empty_test")
+        proxy = self._make_proxy(source)
+
+        loaded = CachedSource(
+            source=proxy,
+            cache_database=db,
+            cache_path=("test", "empty"),
+        )
+
+        result = loaded.as_table()
+        assert result.num_rows == 0
+
+
 class TestCachedConvenienceMethod:
     """Test the ``RootSource.cached()`` convenience method."""
 

@@ -64,6 +64,7 @@ class CSVSource(RootSource):
             "system_tag_columns": list(self._system_tag_columns),
             "record_id_column": self._record_id_column,
             "source_id": self.source_id,
+            **self._identity_config(),
         }
 
     @classmethod

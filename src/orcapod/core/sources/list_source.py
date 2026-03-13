@@ -117,6 +117,7 @@ class ListSource(RootSource):
             "source_type": "list",
             "name": self.name,
             "source_id": self.source_id,
+            **self._identity_config(),
         }
 
     @classmethod
