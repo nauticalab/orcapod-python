@@ -19,7 +19,7 @@ from pathlib import Path
 import pyarrow as pa
 
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes import FunctionNode, PersistentOperatorNode
+from orcapod.core.nodes import FunctionNode, OperatorNode
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import DeltaTableDatabase, InMemoryArrowDatabase
@@ -108,7 +108,7 @@ print(f"  pipeline.compute_risk    -> {type(pipeline.compute_risk).__name__}")
 print(f"  pipeline.categorize      -> {type(pipeline.categorize).__name__}")
 
 # --- Node types ---
-assert isinstance(pipeline.join_data, PersistentOperatorNode)
+assert isinstance(pipeline.join_data, OperatorNode)
 assert isinstance(pipeline.compute_risk, FunctionNode)
 assert isinstance(pipeline.categorize, FunctionNode)
 print("\n  All node types verified.")
@@ -316,7 +316,7 @@ print("=" * 70)
 print("""
   Pipeline wraps ALL nodes as persistent variants automatically:
     - Leaf streams       -> SourceNode  (graph vertex wrapper, no caching)
-    - Operator calls     -> PersistentOperatorNode (DB-backed cache)
+    - Operator calls     -> OperatorNode (DB-backed cache)
     - Function pod calls -> FunctionNode (DB-backed cache)
 
   Building a pipeline (using stream convenience methods):
@@ -340,7 +340,7 @@ print("""
     stream.polars_filter(col="val")  # PolarsFilter
 
   Accessing results:
-    pipeline.my_join          # -> PersistentOperatorNode
+    pipeline.my_join          # -> OperatorNode
     pipeline.my_func          # -> FunctionNode
     pipeline.my_func.as_table()    # -> PyArrow Table with results
 

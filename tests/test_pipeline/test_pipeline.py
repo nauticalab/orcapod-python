@@ -5,7 +5,7 @@ Verifies that Pipeline (a GraphTracker subclass) correctly wraps all nodes
 during compile():
 - Leaf streams → SourceNode
 - Function pod invocations → FunctionNode
-- Operator invocations → PersistentOperatorNode
+- Operator invocations → OperatorNode
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from orcapod.core.executors import PacketFunctionExecutorBase
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import (
     FunctionNode,
-    PersistentOperatorNode,
+    OperatorNode,
     SourceNode,
 )
 from orcapod.core.operators import Join, MapPackets
@@ -138,7 +138,7 @@ class TestCompileFunctionNode:
 
 
 # ---------------------------------------------------------------------------
-# Tests: compile creates PersistentOperatorNode
+# Tests: compile creates OperatorNode
 # ---------------------------------------------------------------------------
 
 
@@ -153,7 +153,7 @@ class TestCompileOperatorNode:
 
         assert "joiner" in pipeline.compiled_nodes
         node = pipeline.compiled_nodes["joiner"]
-        assert isinstance(node, PersistentOperatorNode)
+        assert isinstance(node, OperatorNode)
 
     def test_operator_node_pipeline_path_prefix(self, pipeline_db):
         src_a, src_b = _make_two_sources()
@@ -164,7 +164,7 @@ class TestCompileOperatorNode:
             Join()(src_a, src_b, label="joiner")
 
         node = pipeline.compiled_nodes["joiner"]
-        assert isinstance(node, PersistentOperatorNode)
+        assert isinstance(node, OperatorNode)
         assert node.pipeline_path[0] == "op_pipe"
 
 
@@ -236,7 +236,7 @@ class TestLabelAccess:
 
         # Access via __getattr__
         node = pipeline.my_join
-        assert isinstance(node, PersistentOperatorNode)
+        assert isinstance(node, OperatorNode)
 
     def test_label_collision_sorted_by_content_hash(self, pipeline_db):
         """Two nodes with same label get _1, _2 sorted by content hash."""
@@ -379,7 +379,7 @@ class TestEndToEnd:
             pod(joined, label="adder")
 
         # Verify node types
-        assert isinstance(pipeline.joiner, PersistentOperatorNode)
+        assert isinstance(pipeline.joiner, OperatorNode)
         assert isinstance(pipeline.adder, FunctionNode)
 
         # Run the pipeline
@@ -431,8 +431,8 @@ class TestPipelineExtension:
         assert "wider_join" in pipeline.compiled_nodes
         assert "selector" in pipeline.compiled_nodes
         assert "adder" in pipeline.compiled_nodes
-        assert isinstance(pipeline.joiner, PersistentOperatorNode)
-        assert isinstance(pipeline.wider_join, PersistentOperatorNode)
+        assert isinstance(pipeline.joiner, OperatorNode)
+        assert isinstance(pipeline.wider_join, OperatorNode)
         assert isinstance(pipeline.adder, FunctionNode)
 
         pipeline.run()
@@ -468,7 +468,7 @@ class TestPipelineExtension:
 
         # Re-compile picks up the extension
         assert "renamer" in pipeline.compiled_nodes
-        assert isinstance(pipeline.renamer, PersistentOperatorNode)
+        assert isinstance(pipeline.renamer, OperatorNode)
 
         pipeline.run()
 
@@ -500,7 +500,7 @@ class TestPipelineExtension:
             pipe_a.adder.map_packets({"total": "renamed_total"}, label="renamer")
 
         assert "renamer" in pipe_b.compiled_nodes
-        assert isinstance(pipe_b.renamer, PersistentOperatorNode)
+        assert isinstance(pipe_b.renamer, OperatorNode)
 
         # pipe_b should scope everything under "pipe_b"
         assert pipe_b.renamer.pipeline_path[0] == "pipe_b"
@@ -1017,7 +1017,7 @@ class TestIncrementalCompile:
             pipeline.adder.map_packets({"total": "final_total"}, label="renamer")
 
         assert len(pipeline.compiled_nodes) == 3  # joiner + adder + renamer
-        assert isinstance(pipeline.renamer, PersistentOperatorNode)
+        assert isinstance(pipeline.renamer, OperatorNode)
 
         # Run to verify everything works end-to-end
         pipeline.run()

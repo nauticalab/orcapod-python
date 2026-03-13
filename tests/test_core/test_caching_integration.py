@@ -9,7 +9,7 @@ Covers:
    - Cumulative caching across data updates
 2. FunctionNode — pipeline_hash()-scoped cache, cross-source sharing
    - Two pipelines with different source identities but same schema share one cache table
-3. PersistentOperatorNode — content_hash()-scoped with CacheMode (OFF/LOG/REPLAY)
+3. OperatorNode — content_hash()-scoped with CacheMode (OFF/LOG/REPLAY)
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import pytest
 from deltalake import write_deltalake
 
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes import FunctionNode, PersistentOperatorNode
+from orcapod.core.nodes import FunctionNode, OperatorNode
 from orcapod.core.operators import Join
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource, DeltaTableSource, CachedSource
@@ -381,7 +381,7 @@ class TestFunctionPodCaching:
 
 
 # ---------------------------------------------------------------------------
-# 3. PersistentOperatorNode — operator pod caching with CacheMode
+# 3. OperatorNode — operator pod caching with CacheMode
 # ---------------------------------------------------------------------------
 
 
@@ -400,7 +400,7 @@ class TestOperatorPodCaching:
 
     def test_off_computes_without_db_writes(self, clinic_a, source_db, operator_db):
         patients, labs = self._make_joined_streams(clinic_a, source_db)
-        node = PersistentOperatorNode(
+        node = OperatorNode(
             operator=Join(),
             input_streams=[patients, labs],
             pipeline_database=operator_db,
@@ -412,7 +412,7 @@ class TestOperatorPodCaching:
 
     def test_log_computes_and_writes(self, clinic_a, source_db, operator_db):
         patients, labs = self._make_joined_streams(clinic_a, source_db)
-        node = PersistentOperatorNode(
+        node = OperatorNode(
             operator=Join(),
             input_streams=[patients, labs],
             pipeline_database=operator_db,
@@ -428,7 +428,7 @@ class TestOperatorPodCaching:
         patients, labs = self._make_joined_streams(clinic_a, source_db)
 
         # First LOG to populate
-        log_node = PersistentOperatorNode(
+        log_node = OperatorNode(
             operator=Join(),
             input_streams=[patients, labs],
             pipeline_database=operator_db,
@@ -437,7 +437,7 @@ class TestOperatorPodCaching:
         log_node.run()
 
         # Then REPLAY from cache
-        replay_node = PersistentOperatorNode(
+        replay_node = OperatorNode(
             operator=Join(),
             input_streams=[patients, labs],
             pipeline_database=operator_db,
@@ -448,7 +448,7 @@ class TestOperatorPodCaching:
 
     def test_replay_empty_cache_returns_empty_stream(self, clinic_a, source_db):
         patients, labs = self._make_joined_streams(clinic_a, source_db)
-        node = PersistentOperatorNode(
+        node = OperatorNode(
             operator=Join(),
             input_streams=[patients, labs],
             pipeline_database=InMemoryArrowDatabase(),
@@ -486,13 +486,13 @@ class TestOperatorPodCaching:
             cache_database=source_db,
         )
 
-        node_a = PersistentOperatorNode(
+        node_a = OperatorNode(
             operator=Join(),
             input_streams=[pa_src, la_src],
             pipeline_database=operator_db,
             cache_mode=CacheMode.LOG,
         )
-        node_b = PersistentOperatorNode(
+        node_b = OperatorNode(
             operator=Join(),
             input_streams=[pb_src, lb_src],
             pipeline_database=operator_db,
@@ -512,7 +512,7 @@ class TestEndToEndPipeline:
     ):
         """
         Full pipeline: DeltaTableSource → CachedSource → Join →
-        FunctionNode → PersistentOperatorNode (LOG + REPLAY).
+        FunctionNode → OperatorNode (LOG + REPLAY).
         """
         patients_a, labs_a = clinic_a
 
@@ -537,9 +537,9 @@ class TestEndToEndPipeline:
         fn_node.run()
         assert fn_node.get_all_records().num_rows == 3
 
-        # Step 3: PersistentOperatorNode (LOG)
+        # Step 3: OperatorNode (LOG)
         # Use fn_node output as input to an operator
-        op_node = PersistentOperatorNode(
+        op_node = OperatorNode(
             operator=Join(),
             input_streams=[patients, labs],
             pipeline_database=operator_db,
@@ -549,7 +549,7 @@ class TestEndToEndPipeline:
         assert operator_db.get_all_records(op_node.pipeline_path).num_rows == 3
 
         # Step 4: REPLAY from operator cache
-        op_replay = PersistentOperatorNode(
+        op_replay = OperatorNode(
             operator=Join(),
             input_streams=[patients, labs],
             pipeline_database=operator_db,

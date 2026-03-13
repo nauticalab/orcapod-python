@@ -186,11 +186,11 @@ class TestFunctionNodeFromDescriptor:
         assert loaded.load_status in (LoadStatus.READ_ONLY, LoadStatus.UNAVAILABLE)
 
 
-from orcapod.core.nodes.operator_node import PersistentOperatorNode
+from orcapod.core.nodes.operator_node import OperatorNode
 from orcapod.core.operators import Join
 
 
-class TestPersistentOperatorNodeFromDescriptor:
+class TestOperatorNodeFromDescriptor:
     def test_from_descriptor_read_only(self):
         db = InMemoryArrowDatabase()
         descriptor = {
@@ -211,7 +211,7 @@ class TestPersistentOperatorNodeFromDescriptor:
             "cache_mode": "OFF",
             "pipeline_path": ["test", "Join", "hash", "node:abc"],
         }
-        loaded = PersistentOperatorNode.from_descriptor(
+        loaded = OperatorNode.from_descriptor(
             descriptor=descriptor,
             operator=None,
             input_streams=(),
@@ -225,7 +225,7 @@ class TestPersistentOperatorNodeFromDescriptor:
         source1 = DictSource(data=[{"a": 1, "b": 2}], tag_columns=["a"], source_id="s1")
         source2 = DictSource(data=[{"a": 1, "c": 3}], tag_columns=["a"], source_id="s2")
         op = Join()
-        node = PersistentOperatorNode(
+        node = OperatorNode(
             operator=op,
             input_streams=(source1, source2),
             pipeline_database=db,
@@ -245,7 +245,7 @@ class TestPersistentOperatorNodeFromDescriptor:
             "cache_mode": "OFF",
             "pipeline_path": list(node.pipeline_path),
         }
-        loaded = PersistentOperatorNode.from_descriptor(
+        loaded = OperatorNode.from_descriptor(
             descriptor=descriptor,
             operator=op,
             input_streams=(source1, source2),

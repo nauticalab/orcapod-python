@@ -1,6 +1,6 @@
 """Specification-derived integration tests for DB-backed caching flows.
 
-Tests FunctionNode and PersistentOperatorNode caching behavior
+Tests FunctionNode and OperatorNode caching behavior
 as documented in the design specification.
 """
 
@@ -12,7 +12,7 @@ import pytest
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import (
     FunctionNode,
-    PersistentOperatorNode,
+    OperatorNode,
 )
 from orcapod.core.operators import Join
 from orcapod.core.packet_function import CachedPacketFunction, PythonPacketFunction
@@ -121,11 +121,11 @@ class TestDerivedSourceReingestion:
 
 
 # ===================================================================
-# PersistentOperatorNode caching
+# OperatorNode caching
 # ===================================================================
 
 
-class TestPersistentOperatorNodeCaching:
+class TestOperatorNodeCaching:
     """Per design: CacheMode.LOG stores results, REPLAY loads from DB."""
 
     def test_log_mode_stores_results(self):
@@ -149,7 +149,7 @@ class TestPersistentOperatorNodeCaching:
         )
         join = Join()
         db = InMemoryArrowDatabase()
-        node = PersistentOperatorNode(
+        node = OperatorNode(
             operator=join,
             input_streams=[source_a, source_b],
             pipeline_database=db,
@@ -183,7 +183,7 @@ class TestPersistentOperatorNodeCaching:
         db = InMemoryArrowDatabase()
 
         # First: LOG
-        node1 = PersistentOperatorNode(
+        node1 = OperatorNode(
             operator=join,
             input_streams=[source_a, source_b],
             pipeline_database=db,
@@ -192,7 +192,7 @@ class TestPersistentOperatorNodeCaching:
         node1.run()
 
         # Second: REPLAY
-        node2 = PersistentOperatorNode(
+        node2 = OperatorNode(
             operator=join,
             input_streams=[source_a, source_b],
             pipeline_database=db,

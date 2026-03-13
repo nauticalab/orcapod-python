@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.nodes import (
     FunctionNode,
     GraphNode,
-    PersistentOperatorNode,
+    OperatorNode,
     SourceNode,
 )
 from orcapod.core.tracker import GraphTracker
@@ -65,7 +65,7 @@ class Pipeline(GraphTracker):
 
     - Leaf streams → ``SourceNode`` (thin wrapper for graph vertex)
     - Function pod invocations → ``FunctionNode``
-    - Operator invocations → ``PersistentOperatorNode``
+    - Operator invocations → ``OperatorNode``
 
     Source caching is not a pipeline concern — sources that need caching
     should be wrapped in a ``CachedSource`` before being used in the
@@ -151,14 +151,14 @@ class Pipeline(GraphTracker):
 
         - ``SourceNode`` for every leaf stream
         - ``FunctionNode`` for every function pod invocation
-        - ``PersistentOperatorNode`` for every operator invocation
+        - ``OperatorNode`` for every operator invocation
 
         After compile, nodes are accessible by label as attributes on the
         pipeline instance.
         """
         from orcapod.core.nodes import (
+            FunctionNode,
             OperatorNode,
-            PersistentOperatorNode,
         )
 
         G = nx.DiGraph()
@@ -221,7 +221,7 @@ class Pipeline(GraphTracker):
                         for s in node.upstreams
                     )
 
-                    persistent_node = PersistentOperatorNode(
+                    persistent_node = OperatorNode(
                         operator=node._operator,
                         input_streams=rewired_inputs,
                         pipeline_database=self._pipeline_database,
@@ -268,7 +268,7 @@ class Pipeline(GraphTracker):
                     attrs["node_type"] = "source"
                 elif isinstance(node, FunctionNode):
                     attrs["node_type"] = "function"
-                elif isinstance(node, PersistentOperatorNode):
+                elif isinstance(node, OperatorNode):
                     attrs["node_type"] = "operator"
             if not attrs.get("label"):
                 computed = node.label or (
@@ -434,7 +434,7 @@ class Pipeline(GraphTracker):
                 "auto_compile=True before saving."
             )
 
-        from orcapod.core.nodes import PersistentOperatorNode
+        from orcapod.core.nodes import OperatorNode
         from orcapod.pipeline.serialization import (
             PIPELINE_FORMAT_VERSION,
             serialize_schema,
@@ -474,7 +474,7 @@ class Pipeline(GraphTracker):
                 descriptor.update(self._build_source_descriptor(node))
             elif isinstance(node, FunctionNode):
                 descriptor.update(self._build_function_descriptor(node))
-            elif isinstance(node, PersistentOperatorNode):
+            elif isinstance(node, OperatorNode):
                 descriptor.update(self._build_operator_descriptor(node))
 
             nodes[content_hash_str] = descriptor
@@ -545,13 +545,11 @@ class Pipeline(GraphTracker):
             "execution_engine_opts": node.execution_engine_opts,
         }
 
-    def _build_operator_descriptor(
-        self, node: PersistentOperatorNode
-    ) -> dict[str, Any]:
-        """Build operator-specific descriptor fields for a PersistentOperatorNode.
+    def _build_operator_descriptor(self, node: OperatorNode) -> dict[str, Any]:
+        """Build operator-specific descriptor fields for a OperatorNode.
 
         Args:
-            node: The PersistentOperatorNode to describe.
+            node: The OperatorNode to describe.
 
         Returns:
             Dict with operator-specific fields.
@@ -633,9 +631,7 @@ class Pipeline(GraphTracker):
         topo_order = list(nx.topological_sort(edge_graph))
 
         # 4. Walk nodes in topological order, reconstruct each
-        reconstructed: dict[
-            str, SourceNode | FunctionNode | PersistentOperatorNode
-        ] = {}
+        reconstructed: dict[str, SourceNode | FunctionNode | OperatorNode] = {}
 
         # Build reverse edge map: downstream -> list of upstream hashes
         upstream_map: dict[str, list[str]] = {}
@@ -849,8 +845,8 @@ class Pipeline(GraphTracker):
         all_upstreams_usable: bool,
         databases: dict[str, Any],
         resolve_operator_from_config: Any,
-    ) -> "PersistentOperatorNode":
-        """Reconstruct a PersistentOperatorNode from a descriptor.
+    ) -> "OperatorNode":
+        """Reconstruct a OperatorNode from a descriptor.
 
         Args:
             descriptor: The serialized node descriptor.
@@ -861,9 +857,9 @@ class Pipeline(GraphTracker):
             resolve_operator_from_config: Callable to reconstruct an operator.
 
         Returns:
-            A ``PersistentOperatorNode`` instance.
+            A ``OperatorNode`` instance.
         """
-        from orcapod.core.nodes import PersistentOperatorNode
+        from orcapod.core.nodes import OperatorNode
 
         if mode != "read_only":
             if not all_upstreams_usable:
@@ -875,7 +871,7 @@ class Pipeline(GraphTracker):
             else:
                 try:
                     op = resolve_operator_from_config(descriptor["operator"])
-                    return PersistentOperatorNode.from_descriptor(
+                    return OperatorNode.from_descriptor(
                         descriptor,
                         operator=op,
                         input_streams=upstream_nodes,
@@ -888,7 +884,7 @@ class Pipeline(GraphTracker):
                         descriptor.get("label"),
                     )
 
-        return PersistentOperatorNode.from_descriptor(
+        return OperatorNode.from_descriptor(
             descriptor,
             operator=None,
             input_streams=(),
