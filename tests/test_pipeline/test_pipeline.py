@@ -1,7 +1,7 @@
 """
 Tests for the Pipeline class.
 
-Verifies that Pipeline (a GraphTracker subclass) correctly wraps all nodes
+Verifies that Pipeline correctly wraps all nodes
 during compile():
 - Leaf streams → SourceNode
 - Function pod invocations → FunctionNode

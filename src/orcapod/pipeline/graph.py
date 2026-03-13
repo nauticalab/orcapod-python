@@ -13,7 +13,7 @@ from orcapod.core.nodes import (
     OperatorNode,
     SourceNode,
 )
-from orcapod.core.tracker import GraphTracker
+from orcapod.core.tracker import AutoRegisteringContextBasedTracker
 from orcapod.protocols import core_protocols as cp
 from orcapod.protocols import database_protocols as dbp
 from orcapod.types import PipelineConfig
@@ -55,39 +55,33 @@ class VizGraphNode:
 # ---------------------------------------------------------------------------
 
 
-class Pipeline(GraphTracker):
-    """
-    A persistent pipeline that extends ``GraphTracker``.
+class Pipeline(AutoRegisteringContextBasedTracker):
+    """A persistent pipeline that records operator and function pod invocations.
 
     During the ``with`` block, operator and function pod invocations are
-    recorded as non-persistent nodes (same as ``GraphTracker``).  On context
-    exit, ``compile()`` rewires the graph into execution-ready nodes:
+    recorded into an internal graph.  On context exit, ``compile()`` rewires
+    the graph into execution-ready nodes:
 
-    - Leaf streams → ``SourceNode`` (thin wrapper for graph vertex)
-    - Function pod invocations → ``FunctionNode``
-    - Operator invocations → ``OperatorNode``
+    - Leaf streams -> ``SourceNode`` (thin wrapper for graph vertex)
+    - Function pod invocations -> ``FunctionNode``
+    - Operator invocations -> ``OperatorNode``
 
-    Source caching is not a pipeline concern — sources that need caching
+    Source caching is not a pipeline concern -- sources that need caching
     should be wrapped in a ``CachedSource`` before being used in the
     pipeline.
 
     All persistent nodes share the same ``pipeline_database`` and use
     ``pipeline_name`` as path prefix, scoping their cache tables.
 
-    Parameters
-    ----------
-    name:
-        Pipeline name (string or tuple).  Used as the path prefix for
-        all cache/pipeline paths within the databases.
-    pipeline_database:
-        Database for pipeline records and operator caches.
-    function_database:
-        Optional separate database for function pod result caches.
-        When ``None``, ``pipeline_database`` is used with a ``_results``
-        subfolder under the pipeline name.
-    auto_compile:
-        If ``True`` (default), ``compile()`` is called automatically
-        when the context manager exits.
+    Parameters:
+        name: Pipeline name (string or tuple).  Used as the path prefix for
+            all cache/pipeline paths within the databases.
+        pipeline_database: Database for pipeline records and operator caches.
+        function_database: Optional separate database for function pod result
+            caches.  When ``None``, ``pipeline_database`` is used with a
+            ``_results`` subfolder under the pipeline name.
+        auto_compile: If ``True`` (default), ``compile()`` is called
+            automatically when the context manager exits.
     """
 
     def __init__(
@@ -99,6 +93,10 @@ class Pipeline(GraphTracker):
         auto_compile: bool = True,
     ) -> None:
         super().__init__(tracker_manager=tracker_manager)
+        self._node_lut: dict[str, GraphNode] = {}
+        self._upstreams: dict[str, cp.StreamProtocol] = {}
+        self._graph_edges: list[tuple[str, str]] = []
+        self._hash_graph: "nx.DiGraph" = nx.DiGraph()
         self._name = (name,) if isinstance(name, str) else tuple(name)
         self._pipeline_database = pipeline_database
         self._function_database = function_database
@@ -108,6 +106,78 @@ class Pipeline(GraphTracker):
         self._node_graph: "nx.DiGraph | None" = None
         self._auto_compile = auto_compile
         self._compiled = False
+
+    # ------------------------------------------------------------------
+    # Recording (TrackerProtocol)
+    # ------------------------------------------------------------------
+
+    def record_function_pod_invocation(
+        self,
+        pod: cp.FunctionPodProtocol,
+        input_stream: cp.StreamProtocol,
+        label: str | None = None,
+    ) -> None:
+        input_stream_hash = input_stream.content_hash().to_string()
+        function_node = FunctionNode(
+            function_pod=pod,
+            input_stream=input_stream,
+            label=label,
+        )
+        function_node_hash = function_node.content_hash().to_string()
+        self._node_lut[function_node_hash] = function_node
+        self._upstreams[input_stream_hash] = input_stream
+        self._graph_edges.append((input_stream_hash, function_node_hash))
+        self._hash_graph.add_edge(input_stream_hash, function_node_hash)
+        if not self._hash_graph.nodes[function_node_hash].get("node_type"):
+            self._hash_graph.nodes[function_node_hash]["node_type"] = "function"
+
+    def record_operator_pod_invocation(
+        self,
+        pod: cp.OperatorPodProtocol,
+        upstreams: tuple[cp.StreamProtocol, ...] = (),
+        label: str | None = None,
+    ) -> None:
+        operator_node = OperatorNode(
+            operator=pod,
+            input_streams=upstreams,
+            label=label,
+        )
+        operator_node_hash = operator_node.content_hash().to_string()
+        self._node_lut[operator_node_hash] = operator_node
+        upstream_hashes = [stream.content_hash().to_string() for stream in upstreams]
+        for upstream_hash, upstream in zip(upstream_hashes, upstreams):
+            self._upstreams[upstream_hash] = upstream
+            self._graph_edges.append((upstream_hash, operator_node_hash))
+            self._hash_graph.add_edge(upstream_hash, operator_node_hash)
+        if not self._hash_graph.nodes[operator_node_hash].get("node_type"):
+            self._hash_graph.nodes[operator_node_hash]["node_type"] = "operator"
+
+    @property
+    def nodes(self) -> list[GraphNode]:
+        """Return the list of recorded (non-persistent) nodes."""
+        return list(self._node_lut.values())
+
+    @property
+    def graph(self) -> "nx.DiGraph":
+        """Directed graph of content-hash strings representing the accumulated
+        pipeline structure.  Vertices are ``content_hash`` strings; node
+        attributes include ``node_type`` ("source" / "function" / "operator")
+        and, after ``compile()``, ``label`` and ``pipeline_hash``.
+
+        The graph accumulates across multiple ``with`` blocks and is never
+        cleared by ``reset()``.
+        """
+        return self._hash_graph
+
+    def reset(self) -> None:
+        """Clear session-scoped recorded state (node LUT, upstreams, edge list).
+
+        Note: ``_hash_graph`` is intentionally *not* cleared -- it accumulates
+        the pipeline structure across ``with`` blocks.
+        """
+        self._node_lut.clear()
+        self._upstreams.clear()
+        self._graph_edges.clear()
 
     # ------------------------------------------------------------------
     # Properties
