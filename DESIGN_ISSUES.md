@@ -317,15 +317,14 @@ which column groups (meta, source, system_tags) are returned.
 
 ## `src/orcapod/core/nodes/function_node.py`
 
-### FN1 — `PersistentFunctionNode.async_execute` Phase 2 was fully sequential
+### FN1 — `FunctionNode.async_execute` Phase 2 was fully sequential
 **Status:** resolved
 **Severity:** high
 
-`PersistentFunctionNode.async_execute` overrode the parent `FunctionNode.async_execute` with a
-fully sequential Phase 2 — each packet was awaited one at a time in a simple `async for` loop.
-This meant async packet functions (which can overlap I/O via `await`) got no concurrency benefit
-when run through the Pipeline API, since `Pipeline.compile()` wraps all function pods in
-`PersistentFunctionNode`.
+`FunctionNode.async_execute` (formerly `PersistentFunctionNode`) had a fully sequential Phase 2
+— each packet was awaited one at a time in a simple `async for` loop.  This meant async packet
+functions (which can overlap I/O via `await`) got no concurrency benefit when run through the
+Pipeline API.
 
 The parent `FunctionNode.async_execute` already had the correct concurrent pattern using
 `asyncio.Semaphore + TaskGroup`, but the persistent override did not replicate it.

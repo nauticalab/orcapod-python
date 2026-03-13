@@ -1,7 +1,7 @@
 # Pipeline & Node Simplification
 
 **Date**: 2026-03-12
-**Status**: Approved design, pending implementation
+**Status**: Implemented
 
 ## Overview
 
