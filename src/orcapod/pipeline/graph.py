@@ -244,20 +244,16 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             if node_hash in persistent_node_map:
                 # Already compiled — reuse, but track for label assignment
                 existing_node = persistent_node_map[node_hash]
-                if node_hash in self._node_lut:
-                    label = (
-                        existing_node.label
-                        or existing_node.computed_label()
-                        or "unnamed"
-                    )
-                    name_candidates.setdefault(label, []).append(existing_node)
+                name_candidates.setdefault(existing_node.label, []).append(
+                    existing_node
+                )
                 continue
 
             if node_hash not in self._node_lut:
                 # -- Leaf stream: wrap in SourceNode --
                 stream = self._upstreams[node_hash]
-                persistent_node = SourceNode(stream=stream)
-                persistent_node_map[node_hash] = persistent_node
+                node = SourceNode(stream=stream)
+                persistent_node_map[node_hash] = node
             else:
                 node = self._node_lut[node_hash]
 
@@ -281,7 +277,6 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                         result_path_prefix=result_prefix,
                         pipeline_path_prefix=self._pipeline_path_prefix,
                     )
-                    persistent_node_map[node_hash] = node
 
                 elif isinstance(node, OperatorNode):
                     # Rewire all input streams to persistent upstreams
@@ -295,16 +290,16 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                         pipeline_database=self._pipeline_database,
                         pipeline_path_prefix=self._pipeline_path_prefix,
                     )
-                    persistent_node_map[node_hash] = node
 
                 else:
                     raise TypeError(
                         f"Unknown node type in pipeline graph: {type(node)}"
                     )
 
-                # Track for label assignment (only non-leaf nodes)
-                label = node.label or node.computed_label() or "unnamed"
-                name_candidates.setdefault(label, []).append(node)
+                persistent_node_map[node_hash] = node
+
+            # Track all nodes for label assignment
+            name_candidates.setdefault(node.label, []).append(node)
 
         # Save persistent node map for incremental re-compile
         self._persistent_node_map = persistent_node_map
