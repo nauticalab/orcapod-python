@@ -304,7 +304,7 @@ is set. This flows through correctly: `SourceNode.computed_label()` → `stream.
 
 ---
 
-## 7. Source Inheritance Refactor
+## 7. Source Refactor: Compositional Builder Pattern
 
 ### Current pattern
 
@@ -317,75 +317,223 @@ and delegates ~7 methods to it. This causes:
 - Boilerplate delegation for `output_schema`, `keys`, `iter_packets`, `as_table`,
   `source_id`, `computed_label`, `identity_structure`, `resolve_field`
 
-### New pattern
+Inheritance from `ArrowTableSource` was considered but rejected due to a fundamental
+init order problem: `data_context` (providing `type_converter`, `semantic_hasher`,
+`arrow_hasher`) is not available until `super().__init__()` completes via
+`DataContextMixin`, but subclasses need these services to build their Arrow table
+*before* passing it to `super().__init__()`.
 
-Each source inherits from `ArrowTableSource` directly:
+### New pattern: SourceStreamBuilder (composition)
+
+A small builder class extracts the enrichment pipeline from `ArrowTableSource.__init__`
+into a reusable component. All sources — including `ArrowTableSource` itself — use the
+builder after `super().__init__()` completes.
+
+**New file: `src/orcapod/core/sources/stream_builder.py`**
 
 ```python
-class DictSource(ArrowTableSource):
-    def __init__(self, data, tag_columns, source_id=None, ...):
-        table = type_converter.python_dicts_to_arrow_table(data)
-        super().__init__(table=table, tag_columns=tag_columns,
-                         source_id=source_id, ...)
+@dataclass(frozen=True)
+class SourceStreamResult:
+    """Artifacts produced by SourceStreamBuilder.build()."""
+    stream: ArrowTableStream
+    schema_hash: str
+    table_hash: ContentHash
+    source_id: str              # defaulted to table_hash hex if not provided
+    tag_columns: tuple[str, ...]
+    system_tag_columns: tuple[str, ...]
+
+
+class SourceStreamBuilder:
+    """Builds an enriched ArrowTableStream from a raw Arrow table.
+
+    Encapsulates the full enrichment pipeline:
+    1. Drop system columns from raw input
+    2. Validate tag_columns and record_id_column
+    3. Compute schema hash (via type_converter + semantic_hasher)
+    4. Compute table hash (via arrow_hasher)
+    5. Default source_id to table hash if not provided
+    6. Build per-row source-info strings
+    7. Add source-info provenance columns
+    8. Add system tag columns (schema hash, source_id, record_id)
+    9. Wrap in ArrowTableStream
+    """
+
+    def __init__(self, data_context: DataContext, config: Config):
+        self._data_context = data_context
+        self._config = config
+
+    def build(
+        self,
+        table: pa.Table,
+        tag_columns: Collection[str],
+        source_id: str | None = None,
+        record_id_column: str | None = None,
+        system_tag_columns: Collection[str] = (),
+    ) -> SourceStreamResult:
+        """Run the full enrichment pipeline and return the result."""
+        ...
+```
+
+The builder takes `DataContext` and `Config` as constructor args (both available on any
+source after `super().__init__()`) and produces a `SourceStreamResult` containing the
+enriched stream plus metadata needed by the source.
+
+**RootSource gains default stream delegation and default identity:**
+
+```python
+class RootSource(StreamBase):
+    _stream: ArrowTableStream  # set by subclass __init__ after builder
+
+    # Default stream delegation — concrete implementations for the 4 abstract
+    # stream methods. CachedSource and DerivedSource override these.
+    def output_schema(self, *, columns=None, all_info=False):
+        return self._stream.output_schema(columns=columns, all_info=all_info)
+
+    def keys(self, *, columns=None, all_info=False):
+        return self._stream.keys(columns=columns, all_info=all_info)
+
+    def iter_packets(self):
+        return self._stream.iter_packets()
+
+    def as_table(self, *, columns=None, all_info=False):
+        return self._stream.as_table(columns=columns, all_info=all_info)
+
+    # Default identity — works for ArrowTableSource, DictSource, CSVSource,
+    # DataFrameSource, DeltaTableSource. ListSource, CachedSource, DerivedSource
+    # override.
+    def identity_structure(self):
+        return (self.__class__.__name__, self.output_schema(), self.source_id)
+```
+
+These defaults work because:
+- CachedSource and DerivedSource already override all 4 stream methods and
+  `identity_structure()` — they shadow the defaults.
+- `_stream` is always set during `__init__` of builder-based sources before the
+  object is usable.
+- `identity_structure()` includes `self.__class__.__name__`, so each source type
+  (DictSource, CSVSource, etc.) naturally gets a distinct identity.
+- `RootSource` remains abstract via `ContentIdentifiableBase` (which had
+  `identity_structure` as abstract) — but now it's concrete on RootSource. The class
+  is still non-instantiable in practice since it has no `__init__` that sets `_stream`.
+
+**ArrowTableSource becomes:**
+
+```python
+class ArrowTableSource(RootSource):
+    def __init__(self, table, tag_columns, record_id_column=None, **kwargs):
+        super().__init__(**kwargs)
+        builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
+        result = builder.build(
+            table, tag_columns,
+            source_id=self._source_id,
+            record_id_column=record_id_column,
+        )
+        self._stream = result.stream
+        self._schema_hash = result.schema_hash
+        self._table_hash = result.table_hash
+        self._tag_columns = result.tag_columns
+        self._system_tag_columns = result.system_tag_columns
+        if self._source_id is None:
+            self._source_id = result.source_id
+    # No output_schema, keys, iter_packets, as_table, identity_structure needed
+    # — all inherited from RootSource defaults
+```
+
+**DictSource becomes:**
+
+```python
+class DictSource(RootSource):
+    def __init__(self, data, tag_columns, data_schema=None, **kwargs):
+        super().__init__(**kwargs)
+        table = self.data_context.type_converter.python_dicts_to_arrow_table(
+            [dict(row) for row in data], python_schema=data_schema,
+        )
+        builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
+        result = builder.build(table, tag_columns, source_id=self._source_id)
+        self._stream = result.stream
+        self._tag_columns = result.tag_columns
+        if self._source_id is None:
+            self._source_id = result.source_id
+    # No delegation methods needed — inherited from RootSource
 ```
 
 **Per-source changes:**
 
-- **DictSource**: converts Python dicts → Arrow table, calls `super().__init__()`.
-  Stores no extra state beyond what `ArrowTableSource` holds.
-- **ListSource**: converts list elements via tag function → Arrow table, calls
-  `super().__init__()`. Stores `_tag_function`, `_tag_function_hash_mode`, `_name`
-  for `identity_structure()` override and `to_config()`.
-- **CSVSource**: reads CSV → Arrow table, calls `super().__init__()`. Stores
-  `_file_path` for `to_config()` and `from_config()`.
-- **DataFrameSource**: converts DataFrame → Arrow table, calls `super().__init__()`.
-  Stores no extra state.
-- **DeltaTableSource**: reads Delta table → Arrow table, calls `super().__init__()`.
-  Stores `_delta_table_path` for `to_config()` and `from_config()`.
+- **ArrowTableSource**: uses builder instead of inline enrichment. Stores
+  `_schema_hash`, `_table_hash`, `_tag_columns` from builder result.
+  `resolve_field()` removed (see below). Stream/identity methods inherited.
+- **DictSource**: converts dicts → Arrow table, calls builder. Stores `_tag_columns`
+  for `to_config()`. No delegation methods.
+- **ListSource**: builds rows from elements + tag function, converts to Arrow table,
+  calls builder. Keeps custom `identity_structure()` (includes tag function hash).
+  `_hash_tag_function()` uses `self.data_context.semantic_hasher` — works because
+  `super().__init__()` has already run.
+- **CSVSource**: reads CSV → Arrow table, calls builder. Stores `_file_path`,
+  `_tag_columns`, `_system_tag_columns`, `_record_id_column` for `to_config()`/
+  `from_config()`.
+- **DataFrameSource**: converts DataFrame → Arrow table, calls builder.
+  Stores `_tag_columns` for `to_config()`.
+- **DeltaTableSource**: reads Delta table → Arrow table, calls builder. Stores
+  `_delta_table_path`, `_tag_columns`, `_system_tag_columns`, `_record_id_column`
+  for `to_config()`/`from_config()`.
 
-**Methods eliminated (no longer needed):**
+**Methods eliminated from all delegating sources:**
 - All `computed_label()` overrides (removed per section 6)
-- All `source_id` property overrides (inherited from `ArrowTableSource`)
+- All `source_id` property overrides (no longer needed — `_source_id` set directly)
 - All `output_schema()`, `keys()`, `iter_packets()`, `as_table()` delegations
-- All `identity_structure()` delegations (except `ListSource` which has custom logic)
-- All `resolve_field()` delegations (inherited from `ArrowTableSource`)
+- All `identity_structure()` delegations (except ListSource which has custom logic)
+- All `resolve_field()` delegations (see below)
 
 **Methods retained per source:**
-- `to_config()` — each source serializes its own constructor args
+- `to_config()` — each source serializes its own constructor args (no longer
+  reaches into `_arrow_source` private attributes — stores its own copies)
 - `from_config()` — CSVSource and DeltaTableSource only
 - `identity_structure()` — ListSource only (includes tag function hash)
 
+### resolve_field: deferred redesign
+
+`resolve_field` is removed from all sources. `RootSource.resolve_field()` raises
+`NotImplementedError` (replacing the current `FieldNotResolvableError`). The detailed
+lookup logic currently in `ArrowTableSource.resolve_field()` is deleted. This will be
+redesigned separately — the current implementation is tightly coupled to
+`ArrowTableSource`'s internal `_data_table` and `_record_id_column`, and the right
+abstraction for field resolution across source types needs fresh thought.
+
 ### Hash stability
 
-`ArrowTableSource.identity_structure()` includes `self.__class__.__name__`. With
-inheritance, a `DictSource` will report `"DictSource"` instead of `"ArrowTableSource"`,
-changing content hashes. This is acceptable — the project is pre-v0.1.0 with no
-deployed pipelines depending on hash stability. The hash change is a one-time break
-that makes the identity more accurate (a DictSource *should* identify as DictSource).
-
-### ListSource initialization order
-
-`ListSource` currently computes `_tag_function_hash` using
-`self.data_context.semantic_hasher` before creating the `_arrow_source`. With
-inheritance, `self.data_context` requires `super().__init__()` to have run. Solution:
-accept `data_context` as a parameter, resolve it to a `DataContext` object before
-`super().__init__()`, and pass it along. The `DataContext` resolution function
-(`contexts.resolve_context()`) does not require an initialized instance.
+Same as before: `identity_structure()` includes `self.__class__.__name__`. Sources
+that previously reported as `"ArrowTableSource"` (via delegation) will now report
+their own class name. This is an acceptable one-time hash break (pre-v0.1.0).
 
 ### Files affected
 
-- **Modify** `src/orcapod/core/sources/dict_source.py`: inherit from ArrowTableSource.
-- **Modify** `src/orcapod/core/sources/list_source.py`: inherit from ArrowTableSource.
-- **Modify** `src/orcapod/core/sources/csv_source.py`: inherit from ArrowTableSource.
-- **Modify** `src/orcapod/core/sources/data_frame_source.py`: inherit from ArrowTableSource.
-- **Modify** `src/orcapod/core/sources/delta_table_source.py`: inherit from ArrowTableSource.
-- **Update** tests that assert on content hashes of these sources (hashes will change).
+- **Create** `src/orcapod/core/sources/stream_builder.py`: `SourceStreamBuilder`,
+  `SourceStreamResult`, `_make_record_id` (moved from `arrow_table_source.py`).
+- **Modify** `src/orcapod/core/sources/base.py`: add default stream delegation
+  methods, default `identity_structure()`, change `resolve_field()` to raise
+  `NotImplementedError`.
+- **Modify** `src/orcapod/core/sources/arrow_table_source.py`: use builder, remove
+  enrichment logic, remove `resolve_field()`, remove stream/identity methods.
+- **Modify** `src/orcapod/core/sources/dict_source.py`: use builder, remove
+  delegation.
+- **Modify** `src/orcapod/core/sources/list_source.py`: use builder, remove
+  delegation, keep custom `identity_structure()`.
+- **Modify** `src/orcapod/core/sources/csv_source.py`: use builder, remove
+  delegation.
+- **Modify** `src/orcapod/core/sources/data_frame_source.py`: use builder, remove
+  delegation.
+- **Modify** `src/orcapod/core/sources/delta_table_source.py`: use builder, remove
+  delegation.
+- **Modify** `src/orcapod/core/sources/cached_source.py`: remove `resolve_field()`
+  delegation (inherits `NotImplementedError` from RootSource).
+- **Update** tests that assert on content hashes (hashes will change).
+- **Update** tests that call `resolve_field()` — expect `NotImplementedError`.
 
 ### CachedSource
 
-`CachedSource` wraps a `RootSource` and a cache database. It does NOT delegate to
-an internal `ArrowTableSource` — it wraps the source itself. This class is unaffected
-by the inheritance refactor.
+`CachedSource` wraps a `RootSource` and a cache database. It does NOT use the
+builder — it wraps the source itself and overrides all stream methods. Unaffected
+by the builder refactor except for `resolve_field()` removal.
 
 ---
 
