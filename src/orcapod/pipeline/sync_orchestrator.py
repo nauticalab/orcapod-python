@@ -31,8 +31,8 @@ class SyncPipelineOrchestrator:
 
     Walks the node graph in topological order. For each node:
 
-    - **SourceNode**: materializes ``iter_packets()`` into a buffer.
-      The source node self-caches on first call.
+    - **SourceNode**: materializes ``iter_packets()`` into an
+      orchestrator-owned buffer. The source node itself does not cache.
     - **FunctionNode**: per-packet execution with cache lookup and
       observer hooks. ``execute_packet`` handles computation +
       function-level memoization.
