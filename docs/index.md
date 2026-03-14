@@ -7,12 +7,16 @@ content-addressable, and reproducible by design.
 
 ## Installation
 
-Orcapod is not yet published on PyPI. Install from source using [uv](https://docs.astral.sh/uv/):
+Install from [PyPI](https://pypi.org/project/orcapod/) using [uv](https://docs.astral.sh/uv/):
 
 ```bash
-git clone https://github.com/walkerlab/orcapod-python.git
-cd orcapod-python
-uv sync
+uv add orcapod
+```
+
+For the latest development version, install directly from GitHub:
+
+```bash
+uv add git+https://github.com/walkerlab/orcapod-python.git
 ```
 
 ## Quick example
