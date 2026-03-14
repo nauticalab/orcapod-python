@@ -146,3 +146,91 @@ class TestFunctionNodeProcess:
         wrong_stream = ArrowTableSource(wrong_table, tag_columns=["wrong_key"])
         with pytest.raises(InputValidationError):
             node.process(wrong_stream)
+
+
+# ------------------------------------------------------------------
+# OperatorNode.process() tests
+# ------------------------------------------------------------------
+
+from orcapod.core.nodes import OperatorNode
+from orcapod.core.operators import SelectPacketColumns
+from orcapod.databases import InMemoryArrowDatabase
+from orcapod.types import CacheMode
+
+
+@pytest.fixture
+def operator_with_db():
+    table = pa.table(
+        {
+            "key": pa.array(["a", "b"], type=pa.large_string()),
+            "value": pa.array([10, 20], type=pa.int64()),
+        }
+    )
+    src = ArrowTableSource(table, tag_columns=["key"])
+    op = SelectPacketColumns(columns=["value"])
+    db = InMemoryArrowDatabase()
+    node = OperatorNode(
+        op,
+        input_streams=[src],
+        pipeline_database=db,
+        cache_mode=CacheMode.LOG,
+    )
+    return node, db, src
+
+
+@pytest.fixture
+def operator_no_db():
+    table = pa.table(
+        {
+            "key": pa.array(["a", "b"], type=pa.large_string()),
+            "value": pa.array([10, 20], type=pa.int64()),
+        }
+    )
+    src = ArrowTableSource(table, tag_columns=["key"])
+    op = SelectPacketColumns(columns=["value"])
+    node = OperatorNode(op, input_streams=[src])
+    return node, src
+
+
+class TestOperatorNodeProcess:
+    def test_returns_materialized_results(self, operator_no_db):
+        node, src = operator_no_db
+        results = node.process(src)
+        assert isinstance(results, list)
+        assert len(results) == 2
+
+    def test_writes_to_db_in_log_mode(self, operator_with_db):
+        node, db, src = operator_with_db
+        node.process(src)
+        records = node.get_all_records()
+        assert records is not None
+        assert records.num_rows == 2
+
+    def test_caches_internally(self, operator_no_db):
+        node, src = operator_no_db
+        node.process(src)
+        cached = list(node.iter_packets())
+        assert len(cached) == 2
+
+    def test_validates_stream_schema(self, operator_no_db):
+        node, _ = operator_no_db
+        wrong_table = pa.table(
+            {
+                "wrong": pa.array(["x"], type=pa.large_string()),
+                "bad": pa.array([1], type=pa.int64()),
+            }
+        )
+        wrong_stream = ArrowTableSource(wrong_table, tag_columns=["wrong"])
+        with pytest.raises(InputValidationError):
+            node.process(wrong_stream)
+
+    def test_validates_stream_count(self, operator_no_db):
+        node, src = operator_no_db
+        with pytest.raises(InputValidationError, match="Expected 1"):
+            node.process(src, src)  # Too many inputs
+
+    def test_noop_db_in_off_mode(self, operator_no_db):
+        node, src = operator_no_db
+        results = node.process(src)
+        assert len(results) == 2
+        assert node.get_all_records() is None

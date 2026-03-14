@@ -36,7 +36,7 @@ class SyncPipelineOrchestrator:
       observer hooks. ``process_packet`` handles computation +
       function-level memoization; ``store_result`` writes pipeline
       provenance.
-    - **OperatorNode**: bulk execution via ``operator.process()``.
+    - **OperatorNode**: bulk execution via ``node.process()``.
 
     All nodes have ``store_result`` called after computation. The
     orchestrator returns an ``OrchestratorResult`` with all node outputs.
@@ -144,9 +144,7 @@ class SyncPipelineOrchestrator:
                 self._materialize_as_stream(buf, upstream_node)
                 for buf, upstream_node in upstream_buffers
             ]
-            result_stream = node.operator.process(*input_streams)
-            output = list(result_stream.iter_packets())
-            node.store_result(output)
+            output = node.process(*input_streams)
 
         self._observer.on_node_end(node)
         return output

@@ -17,7 +17,6 @@ if TYPE_CHECKING:
         StreamProtocol,
         TagProtocol,
     )
-    from orcapod.protocols.core_protocols.operator_pod import OperatorPodProtocol
 
 
 @runtime_checkable
@@ -64,13 +63,11 @@ class OperatorNodeProtocol(Protocol):
 
     node_type: str
 
-    @property
-    def operator(self) -> "OperatorPodProtocol": ...
+    def process(
+        self, *input_streams: "StreamProtocol"
+    ) -> list[tuple["TagProtocol", "PacketProtocol"]]: ...
 
     def get_cached_output(self) -> "StreamProtocol | None": ...
-    def store_result(
-        self, results: list[tuple["TagProtocol", "PacketProtocol"]]
-    ) -> None: ...
 
 
 def is_source_node(node: "GraphNode") -> TypeGuard[SourceNodeProtocol]:
