@@ -752,10 +752,18 @@ class TestPythonFunctionExecutorProtocol:
 # ---------------------------------------------------------------------------
 
 
-class _CustomExecutorProtocol:
-    """A non-executor class to test type-safe dispatch rejection."""
+class _NotAnExecutor:
+    """A class that does NOT satisfy PythonFunctionExecutorProtocol."""
 
-    pass
+    @property
+    def executor_type_id(self) -> str:
+        return "fake"
+
+    def supported_function_type_ids(self) -> frozenset[str]:
+        return frozenset()
+
+    def supports(self, packet_function_type_id: str) -> bool:
+        return True
 
 
 class TestGenericExecutorDispatch:
@@ -765,6 +773,10 @@ class TestGenericExecutorDispatch:
             PythonPacketFunction._resolved_executor_protocol
             is PythonFunctionExecutorProtocol
         )
+
+    def test_wrapper_does_not_resolve_protocol(self):
+        """PacketFunctionWrapper[E] should NOT resolve a protocol (E is unbound)."""
+        assert PacketFunctionWrapper._resolved_executor_protocol is None
 
     def test_set_executor_accepts_compatible_protocol(self):
         pf = PythonPacketFunction(add, output_keys="result")
@@ -777,6 +789,13 @@ class TestGenericExecutorDispatch:
         pf.set_executor(None)
         assert pf.executor is None
 
+    def test_set_executor_rejects_non_conforming_protocol(self):
+        """An object that doesn't implement PythonFunctionExecutorProtocol is rejected."""
+        pf = PythonPacketFunction(add, output_keys="result")
+        fake = _NotAnExecutor()
+        with pytest.raises(TypeError, match="requires an executor implementing"):
+            pf.set_executor(fake)
+
     def test_call_routes_through_execute_callable(self):
         """PythonPacketFunction.call() should use execute_callable, not execute."""
         spy = SpyExecutor()
@@ -786,3 +805,65 @@ class TestGenericExecutorDispatch:
         assert result is not None
         assert result.as_dict()["result"] == 3
         assert len(spy.calls) == 1
+
+    def test_call_with_inactive_function_returns_none(self):
+        """When the function is inactive and executor is set, call returns None."""
+        spy = SpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pf.set_active(False)
+        packet = Packet({"x": 1, "y": 2})
+        result = pf.call(packet)
+        assert result is None
+        assert len(spy.calls) == 0
+
+    def test_async_call_routes_through_async_execute_callable(self):
+        """PythonPacketFunction.async_call() should use async_execute_callable."""
+        import asyncio
+
+        spy = ConcurrentSpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        packet = Packet({"x": 1, "y": 2})
+        result = asyncio.run(pf.async_call(packet))
+        assert result is not None
+        assert result.as_dict()["result"] == 3
+        assert len(spy.async_calls) == 1
+        assert len(spy.sync_calls) == 0
+
+
+# ---------------------------------------------------------------------------
+# 13. LocalExecutor execute_callable with async function
+# ---------------------------------------------------------------------------
+
+
+class TestLocalExecutorCallable:
+    def test_execute_callable_with_async_fn(self):
+        """LocalExecutor.execute_callable handles async functions via asyncio.run."""
+        import asyncio
+
+        async def async_add(x: int, y: int) -> int:
+            return x + y
+
+        executor = LocalExecutor()
+        result = executor.execute_callable(async_add, {"x": 5, "y": 3})
+        assert result == 8
+
+    def test_async_execute_callable_with_sync_fn(self):
+        """LocalExecutor.async_execute_callable handles sync fns via run_in_executor."""
+        import asyncio
+
+        executor = LocalExecutor()
+        result = asyncio.run(executor.async_execute_callable(add, {"x": 10, "y": 20}))
+        assert result == 30
+
+    def test_async_execute_callable_with_async_fn(self):
+        """LocalExecutor.async_execute_callable awaits async functions directly."""
+        import asyncio
+
+        async def async_add(x: int, y: int) -> int:
+            return x + y
+
+        executor = LocalExecutor()
+        result = asyncio.run(
+            executor.async_execute_callable(async_add, {"x": 7, "y": 8})
+        )
+        assert result == 15

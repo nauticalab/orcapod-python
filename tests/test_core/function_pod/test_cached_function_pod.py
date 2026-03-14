@@ -165,6 +165,105 @@ class TestTagAwareCaching:
         # Should have 2 records since tags differ
         assert records.num_rows == 2
 
+    def test_same_tag_different_packet_cached_separately(self, double_pod, cache_db):
+        """Same tag value with different packet data should produce separate entries."""
+        cached_pod = CachedFunctionPod(double_pod, result_database=cache_db)
+
+        stream1 = _make_stream([{"id": 0, "x": 10}])
+        list(cached_pod.process(stream1).iter_packets())
+
+        stream2 = _make_stream([{"id": 0, "x": 99}])
+        list(cached_pod.process(stream2).iter_packets())
+
+        records = cache_db.get_all_records(cached_pod.record_path)
+        assert records is not None
+        assert records.num_rows == 2
+
+    def test_same_tag_same_packet_is_cache_hit(self, double_pod, cache_db):
+        """Exact same tag + packet should be a cache hit (no new record)."""
+        cached_pod = CachedFunctionPod(double_pod, result_database=cache_db)
+
+        stream1 = _make_stream([{"id": 0, "x": 10}])
+        list(cached_pod.process(stream1).iter_packets())
+
+        # Identical stream
+        stream2 = _make_stream([{"id": 0, "x": 10}])
+        list(cached_pod.process(stream2).iter_packets())
+
+        records = cache_db.get_all_records(cached_pod.record_path)
+        assert records is not None
+        assert records.num_rows == 1
+
+
+# ---------------------------------------------------------------------------
+# Decorator integration
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Inner function returns None (inactive / filtering)
+# ---------------------------------------------------------------------------
+
+
+class TestInnerReturnsNone:
+    def test_inactive_function_does_not_store(self, cache_db):
+        pf = PythonPacketFunction(double, output_keys="result")
+        pf.set_active(False)
+        pod = FunctionPod(pf)
+        cached_pod = CachedFunctionPod(pod, result_database=cache_db)
+
+        stream = _make_stream([{"id": 0, "x": 10}])
+        results = list(cached_pod.process(stream).iter_packets())
+        assert len(results) == 0
+
+        records = cache_db.get_all_records(cached_pod.record_path)
+        assert records is None
+
+
+# ---------------------------------------------------------------------------
+# Output schema delegation
+# ---------------------------------------------------------------------------
+
+
+class TestOutputSchema:
+    def test_output_schema_delegates_to_inner_pod(self, cached_pod, double_pod):
+        stream = _make_stream()
+        expected = double_pod.output_schema(stream)
+        actual = cached_pod.output_schema(stream)
+        assert actual == expected
+
+
+# ---------------------------------------------------------------------------
+# Dual caching (CachedPacketFunction + CachedFunctionPod)
+# ---------------------------------------------------------------------------
+
+
+class TestDualCaching:
+    def test_both_result_database_and_pod_cache_database(self):
+        """Decorator with both caching layers produces correct results."""
+        pkt_db = InMemoryArrowDatabase()
+        pod_db = InMemoryArrowDatabase()
+
+        @function_pod(
+            output_keys="result",
+            result_database=pkt_db,
+            pod_cache_database=pod_db,
+        )
+        def my_double(x: int) -> int:
+            return x * 2
+
+        stream = _make_stream()
+        output = my_double.pod.process(stream)
+        results = list(output.iter_packets())
+
+        assert len(results) == 2
+        assert results[0][1].as_dict()["result"] == 20
+
+        # Pod-level cache should have entries
+        pod_records = pod_db.get_all_records(my_double.pod.record_path)
+        assert pod_records is not None
+        assert pod_records.num_rows == 2
+
 
 # ---------------------------------------------------------------------------
 # Decorator integration
