@@ -429,65 +429,22 @@ class OperatorNode(StreamBase):
         self._replay_from_cache()
         return self._cached_output_stream
 
-    def _validate_input_schemas(self, *input_streams: StreamProtocol) -> None:
-        """Validate input stream schemas match expected upstream schemas.
-
-        Compares Schema objects (order-independent, type-aware) including
-        system tag columns for topology correctness. Uses the same
-        comparison strategy as FunctionNode's validation.
-
-        Raises:
-            InputValidationError: If schemas don't match.
-        """
-        from orcapod.errors import InputValidationError
-
-        if len(input_streams) != len(self._input_streams):
-            raise InputValidationError(
-                f"Expected {len(self._input_streams)} input streams, "
-                f"got {len(input_streams)}"
-            )
-
-        for i, (actual, expected) in enumerate(zip(input_streams, self._input_streams)):
-            expected_tag_schema, _ = expected.output_schema(
-                columns={"system_tags": True}
-            )
-            actual_tag_schema, _ = actual.output_schema(columns={"system_tags": True})
-
-            if expected_tag_schema != actual_tag_schema:
-                raise InputValidationError(
-                    f"Input stream {i} tag schema mismatch: "
-                    f"expected {dict(expected_tag_schema)}, got {dict(actual_tag_schema)}"
-                )
-
-            expected_pkt = expected.output_schema()[1]
-            actual_pkt = actual.output_schema()[1]
-            if expected_pkt != actual_pkt:
-                raise InputValidationError(
-                    f"Input stream {i} packet schema mismatch: "
-                    f"expected {dict(expected_pkt)}, got {dict(actual_pkt)}"
-                )
-
     def execute(
         self,
         *input_streams: StreamProtocol,
     ) -> list[tuple[TagProtocol, PacketProtocol]]:
-        """Execute input streams with schema validation, persistence, and caching.
+        """Execute input streams: compute, persist, and cache.
 
-        Validates input schemas, computes via the internal operator,
-        materializes results, persists to DB (if LOG mode), and caches
-        internally.
+        Internal method for orchestrators. The caller must guarantee that
+        the input streams' identities (content hash, schema) match
+        ``self._input_streams``. No validation is performed.
 
         Args:
-            *input_streams: Input streams to execute (must match expected
-                upstream count and schemas).
+            *input_streams: Input streams to execute.
 
         Returns:
             Materialized list of (tag, packet) pairs.
-
-        Raises:
-            InputValidationError: If input schemas don't match expected.
         """
-        self._validate_input_schemas(*input_streams)
 
         # Compute
         result_stream = self._operator.process(*input_streams)

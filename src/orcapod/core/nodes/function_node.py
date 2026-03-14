@@ -465,79 +465,16 @@ class FunctionNode(StreamBase):
     # Packet processing
     # ------------------------------------------------------------------
 
-    def _validate_input_schema(self, tag: TagProtocol, packet: PacketProtocol) -> None:
-        """Validate that tag and packet match the expected input schema.
-
-        Compares Schema objects (order-independent, type-aware) including
-        system tag columns for topology correctness. Uses the same
-        comparison strategy as ``_validate_stream_schema``.
-
-        Raises:
-            InputValidationError: If schemas don't match.
-        """
-        from orcapod.errors import InputValidationError
-
-        expected_tag_schema, expected_packet_schema = self._input_stream.output_schema(
-            columns={"system_tags": True}
-        )
-
-        actual_tag_schema = tag.schema(columns={"system_tags": True})
-        if expected_tag_schema != actual_tag_schema:
-            raise InputValidationError(
-                f"Tag schema mismatch: expected {dict(expected_tag_schema)}, "
-                f"got {dict(actual_tag_schema)}"
-            )
-
-        actual_packet_schema = packet.schema()
-        expected_pkt_schema = self._input_stream.output_schema()[1]
-        if expected_pkt_schema != actual_packet_schema:
-            raise InputValidationError(
-                f"Packet schema mismatch: expected {dict(expected_pkt_schema)}, "
-                f"got {dict(actual_packet_schema)}"
-            )
-
-    def _validate_stream_schema(self, input_stream: StreamProtocol) -> None:
-        """Validate that a stream's output schema matches expected input.
-
-        Compares Schema objects (order-independent, type-aware) and
-        validates system tag column names.
-
-        Raises:
-            InputValidationError: If schemas don't match.
-        """
-        from orcapod.errors import InputValidationError
-
-        expected_tag_schema, expected_packet_schema = self._input_stream.output_schema(
-            columns={"system_tags": True}
-        )
-        actual_tag_schema, actual_packet_schema = input_stream.output_schema(
-            columns={"system_tags": True}
-        )
-
-        if expected_tag_schema != actual_tag_schema:
-            raise InputValidationError(
-                f"Stream tag schema mismatch: expected {dict(expected_tag_schema)}, "
-                f"got {dict(actual_tag_schema)}"
-            )
-
-        # Compare packet schemas without system tags (they're tag-only)
-        expected_pkt = self._input_stream.output_schema()[1]
-        actual_pkt = input_stream.output_schema()[1]
-        if expected_pkt != actual_pkt:
-            raise InputValidationError(
-                f"Stream packet schema mismatch: expected {dict(expected_pkt)}, "
-                f"got {dict(actual_pkt)}"
-            )
-
     def execute_packet(
         self,
         tag: TagProtocol,
         packet: PacketProtocol,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
-        """Execute a single packet with schema validation, persistence, and caching.
+        """Execute a single packet: compute, persist, and cache.
 
-        Validates input schema, computes via CachedFunctionPod (or raw FunctionPod),
-        writes pipeline provenance record, and caches the result.
+        Internal method for orchestrators. The caller must guarantee that
+        the tag and packet conform to the expected input schema (matching
+        ``self._input_stream``). No validation is performed.
 
         Args:
             tag: The tag associated with the packet.
@@ -545,22 +482,20 @@ class FunctionNode(StreamBase):
 
         Returns:
             A ``(tag, output_packet)`` tuple.
-
-        Raises:
-            InputValidationError: If the tag/packet schema doesn't match
-                the expected input schema.
         """
-        self._validate_input_schema(tag, packet)
         return self._process_packet_internal(tag, packet)
 
     def execute(
         self, input_stream: StreamProtocol
     ) -> list[tuple[TagProtocol, PacketProtocol]]:
-        """Execute all packets from a stream with schema validation.
+        """Execute all packets from a stream: compute, persist, and cache.
 
-        Validates the stream schema once, then processes each packet using
-        the internal (unchecked) path. More efficient than calling
-        ``execute_packet`` per-packet when observer hooks aren't needed.
+        Internal method for orchestrators. The caller must guarantee that
+        the input stream's identity (content hash, schema) matches
+        ``self._input_stream``. No validation is performed.
+
+        More efficient than calling ``execute_packet`` per-packet when
+        observer hooks aren't needed.
 
         Args:
             input_stream: The input stream to process.
@@ -568,11 +503,7 @@ class FunctionNode(StreamBase):
         Returns:
             Materialized list of (tag, output_packet) pairs, excluding
             None outputs.
-
-        Raises:
-            InputValidationError: If the stream schema doesn't match expected.
         """
-        self._validate_stream_schema(input_stream)
         output: list[tuple[TagProtocol, PacketProtocol]] = []
         for tag, packet in input_stream.iter_packets():
             tag_out, result = self._process_packet_internal(tag, packet)
