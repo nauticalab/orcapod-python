@@ -468,30 +468,32 @@ class FunctionNode(StreamBase):
     def _validate_input_schema(self, tag: TagProtocol, packet: PacketProtocol) -> None:
         """Validate that tag and packet match the expected input schema.
 
-        Checks user tag keys and packet keys using set comparison
-        (order-independent). System tag columns are excluded because
-        they contain pipeline hashes that may differ when streams are
-        reconstructed by the orchestrator.
+        Compares Schema objects (order-independent, type-aware) including
+        system tag columns for topology correctness. Uses the same
+        comparison strategy as ``_validate_stream_schema``.
 
         Raises:
             InputValidationError: If schemas don't match.
         """
         from orcapod.errors import InputValidationError
 
-        expected_tag_keys, expected_packet_keys = self._input_stream.keys()
+        expected_tag_schema, expected_packet_schema = self._input_stream.output_schema(
+            columns={"system_tags": True}
+        )
 
-        actual_tag_keys = tag.keys()
-        if set(actual_tag_keys) != set(expected_tag_keys):
+        actual_tag_schema = tag.schema(columns={"system_tags": True})
+        if expected_tag_schema != actual_tag_schema:
             raise InputValidationError(
-                f"Tag schema mismatch: expected {sorted(expected_tag_keys)}, "
-                f"got {sorted(actual_tag_keys)}"
+                f"Tag schema mismatch: expected {dict(expected_tag_schema)}, "
+                f"got {dict(actual_tag_schema)}"
             )
 
-        actual_packet_keys = packet.keys()
-        if set(actual_packet_keys) != set(expected_packet_keys):
+        actual_packet_schema = packet.schema()
+        expected_pkt_schema = self._input_stream.output_schema()[1]
+        if expected_pkt_schema != actual_packet_schema:
             raise InputValidationError(
-                f"Packet schema mismatch: expected {sorted(expected_packet_keys)}, "
-                f"got {sorted(actual_packet_keys)}"
+                f"Packet schema mismatch: expected {dict(expected_pkt_schema)}, "
+                f"got {dict(actual_packet_schema)}"
             )
 
     def _validate_stream_schema(self, input_stream: StreamProtocol) -> None:
