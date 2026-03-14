@@ -1263,6 +1263,23 @@ class TestRunExecutionEngine:
         # Executor should have been created with the pipeline opts
         assert pipeline.doubler.executor.opts.get("num_cpus") == 4
 
+    def test_no_opts_uses_engine_directly(self, pipeline_db):
+        """Without execution_engine_opts, the engine itself is assigned (no with_options)."""
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(packet_function=pf)
+        mock = _MockExecutor()
+
+        pipeline = Pipeline(name="test_no_opts", pipeline_database=pipeline_db)
+        with pipeline:
+            pod(src, label="doubler")
+
+        pipeline.run(execution_engine=mock)
+
+        # Without opts, the original mock executor is assigned directly
+        assert pipeline.doubler.executor is mock
+        assert pipeline.doubler.executor.opts == {}
+
 
 class TestSourceNodesInPipeline:
     """Verify that source nodes are first-class pipeline members."""
