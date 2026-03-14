@@ -133,7 +133,7 @@ class ArrowTableStream(StreamBase):
 
     def identity_structure(self) -> Any:
         if self._producer is not None:
-            return (self._producer, *self._upstreams)
+            return super().identity_structure()
         return (
             self.__class__.__name__,
             self.as_table(all_info=True),
@@ -146,7 +146,7 @@ class ArrowTableStream(StreamBase):
         ):
             tag_schema, packet_schema = self.output_schema()
             return (tag_schema, packet_schema)
-        return (self._producer, *self._upstreams)
+        return super().pipeline_identity_structure()
 
     @property
     def producer(self) -> PodProtocol | None:

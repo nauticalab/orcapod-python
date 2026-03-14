@@ -300,3 +300,84 @@ class TestSyncAsyncParity:
         )
 
         assert sync_values == async_values
+
+
+class TestMaterializedStreamIdentity:
+    """Materialized streams should preserve the original node's identity."""
+
+    def test_materialized_stream_has_same_pipeline_hash(self):
+        """Stream reconstructed from buffer should have same pipeline_hash as original."""
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
+        from orcapod.core.nodes import SourceNode
+
+        node = SourceNode(src)
+        buf = list(node.iter_packets())
+
+        stream = SyncPipelineOrchestrator._materialize_as_stream(buf, node)
+        assert stream.pipeline_hash() == node.pipeline_hash()
+
+    def test_materialized_stream_has_same_content_hash(self):
+        """Stream reconstructed from an operator node's buffer should have same
+        content_hash.
+
+        For OperatorNodes, the identity_structure is (operator, argument_symmetry(upstreams)),
+        so the materialized stream (which carries the same producer and upstreams) shares
+        the same content_hash as the original node.
+        """
+        src_a = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
+        src_b = _make_source("key", "score", {"key": ["a", "b"], "score": [100, 200]})
+        from orcapod.core.nodes import OperatorNode
+
+        op_node = OperatorNode(Join(), input_streams=[src_a, src_b])
+        op_node.run()
+        buf = list(op_node.iter_packets())
+
+        stream = SyncPipelineOrchestrator._materialize_as_stream(buf, op_node)
+        assert stream.content_hash() == op_node.content_hash()
+
+    def test_materialized_stream_preserves_system_tags(self):
+        """System tag column names in materialized stream should match original."""
+        src_a = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
+        src_b = _make_source("key", "score", {"key": ["a", "b"], "score": [100, 200]})
+        from orcapod.core.operators.join import Join
+        from orcapod.core.nodes import OperatorNode
+
+        op = Join()
+        op_node = OperatorNode(op, input_streams=[src_a, src_b])
+        op_node.run()
+        buf = list(op_node.iter_packets())
+
+        stream = SyncPipelineOrchestrator._materialize_as_stream(buf, op_node)
+
+        expected_tag_schema = op_node.output_schema(columns={"system_tags": True})[0]
+        actual_tag_schema = stream.output_schema(columns={"system_tags": True})[0]
+        assert expected_tag_schema == actual_tag_schema
+
+    def test_operator_with_materialized_upstream_produces_correct_system_tags(self):
+        """When an operator receives a materialized stream, its output system
+        tags should embed the correct pipeline hashes (same as if it received
+        the original stream)."""
+        src_a = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
+        src_b = _make_source("key", "score", {"key": ["a", "b"], "score": [100, 200]})
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(pf)
+
+        # Run via orchestrator (uses materialized streams internally)
+        orch_pipeline = Pipeline(name="orch", pipeline_database=InMemoryArrowDatabase())
+        with orch_pipeline:
+            joined = Join()(src_a, src_b, label="join")
+            pod(joined, label="adder")
+        orch_pipeline.run()
+
+        # Run via pull-based path (uses original streams)
+        from orcapod.core.nodes import OperatorNode as ON
+
+        join_op = Join()
+        join_node = ON(join_op, input_streams=[src_a, src_b])
+        join_node.run()
+
+        # Compare system tag schemas — should match
+        orch_join = orch_pipeline.compiled_nodes["join"]
+        orch_tag_schema = orch_join.output_schema(columns={"system_tags": True})[0]
+        pull_tag_schema = join_node.output_schema(columns={"system_tags": True})[0]
+        assert orch_tag_schema == pull_tag_schema

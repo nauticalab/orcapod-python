@@ -394,6 +394,9 @@ class TestArrowTableStreamIdentityStructure:
             def identity_structure(self):
                 return (self._name,)
 
+            def argument_symmetry(self, streams):
+                return tuple(streams)
+
         return cast(PodProtocol, NamedProducer(name))
 
     def test_with_producer_identity_structure_starts_with_producer(self):
