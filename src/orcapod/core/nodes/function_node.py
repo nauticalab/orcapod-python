@@ -517,10 +517,10 @@ class FunctionNode(StreamBase):
         packet: PacketProtocol,
         cache_index: int | None = None,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
-        """Core compute + persist + cache (no schema validation).
+        """Core compute + persist + cache.
 
-        Used by ``execute_packet`` (after validation), ``execute`` (after
-        stream validation), and ``iter_packets`` (internal path).
+        Used by ``execute_packet``, ``execute``, and ``iter_packets``.
+        No input validation is performed — the caller guarantees correctness.
 
         Args:
             tag: The input tag.
@@ -548,13 +548,15 @@ class FunctionNode(StreamBase):
         else:
             tag_out, output_packet = self._function_pod.process_packet(tag, packet)
 
-        # Cache internally
+        # Cache internally and invalidate derived caches
         idx = (
             cache_index if cache_index is not None else len(self._cached_output_packets)
         )
         self._cached_output_packets[idx] = (tag_out, output_packet)
         self._cached_input_iterator = None
         self._needs_iterator = False
+        self._cached_output_table = None
+        self._cached_content_hash_column = None
 
         return tag_out, output_packet
 
@@ -628,7 +630,11 @@ class FunctionNode(StreamBase):
         for entry_id, (tag, packet) in zip(filtered_entry_ids, stream.iter_packets()):
             result_dict[entry_id] = (tag, packet)
 
-        # Populate internal cache with retrieved results
+        # Populate internal cache with retrieved results (clear first to
+        # avoid duplicates on repeated orchestrator runs)
+        self._cached_output_packets.clear()
+        self._cached_output_table = None
+        self._cached_content_hash_column = None
         for entry_id, (tag, packet) in result_dict.items():
             next_idx = len(self._cached_output_packets)
             self._cached_output_packets[next_idx] = (tag, packet)
@@ -677,13 +683,15 @@ class FunctionNode(StreamBase):
                 tag, packet
             )
 
-        # Cache internally
+        # Cache internally and invalidate derived caches
         idx = (
             cache_index if cache_index is not None else len(self._cached_output_packets)
         )
         self._cached_output_packets[idx] = (tag_out, output_packet)
         self._cached_input_iterator = None
         self._needs_iterator = False
+        self._cached_output_table = None
+        self._cached_content_hash_column = None
 
         return tag_out, output_packet
 
