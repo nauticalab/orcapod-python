@@ -1,7 +1,8 @@
 # Sources
 
 Source classes provide the entry point for external data into Orcapod pipelines.
-All convenience sources delegate internally to `ArrowTableSource`.
+All sources convert their input to a PyArrow Table and use `SourceStreamBuilder` for
+enrichment (provenance columns, system tags, hashing).
 
 ::: orcapod.core.sources.ArrowTableSource
 
