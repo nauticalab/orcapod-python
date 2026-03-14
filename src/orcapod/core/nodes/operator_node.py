@@ -438,47 +438,27 @@ class OperatorNode(StreamBase):
         self,
         results: list[tuple[TagProtocol, PacketProtocol]],
     ) -> None:
-        """Persist computed results to the pipeline DB.
+        """Persist computed results to DB and populate in-memory cache.
 
-        Wraps the materialized results as an ArrowTableStream and stores
-        via the existing ``_store_output_stream`` logic. No-op if no DB
-        is attached or cache mode is OFF.
+        Wraps results as an ArrowTableStream for the internal cache.
+        If cache mode is LOG, also writes to the pipeline DB. No-op for
+        empty results.
 
         Args:
             results: Materialized (tag, packet) pairs from computation.
         """
-        if self._pipeline_database is None:
-            return
-        if self._cache_mode == CacheMode.OFF:
-            return
         if not results:
             return
 
         stream = StaticOutputOperatorPod._materialize_to_stream(results)
-        self._store_output_stream(stream)
 
-    def populate_cache(
-        self,
-        results: list[tuple[TagProtocol, PacketProtocol]],
-    ) -> None:
-        """Populate in-memory cache from externally-provided results.
-
-        After calling this, ``iter_packets()`` / ``as_table()`` return
-        from the cache without recomputation. Empty lists clear the cache.
-
-        Args:
-            results: Materialized (tag, packet) pairs.
-        """
-        if not results:
-            self._cached_output_stream = None
-            self._cached_output_table = None
-            self._update_modified_time()
-            return
-
-        self._cached_output_stream = StaticOutputOperatorPod._materialize_to_stream(
-            results
-        )
+        # Always populate in-memory cache
+        self._cached_output_stream = stream
         self._update_modified_time()
+
+        # Write to DB if applicable
+        if self._pipeline_database is not None and self._cache_mode != CacheMode.OFF:
+            self._store_output_stream(stream)
 
     def _compute_and_store(self) -> None:
         """Compute operator output, optionally store in DB."""

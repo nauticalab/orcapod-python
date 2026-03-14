@@ -83,3 +83,22 @@ class TestGetCachedResults:
         assert len(cached) == 1
         assert entry_ids[0] in cached
         assert entry_ids[1] not in cached
+
+    def test_get_cached_results_populates_internal_cache(self, function_node_with_db):
+        """get_cached_results should populate _cached_output_packets."""
+        node = function_node_with_db
+        packets = list(node._input_stream.iter_packets())
+
+        entry_ids = []
+        for tag, packet in packets:
+            tag_out, result = node.process_packet(tag, packet)
+            node.store_result(tag, packet, result)
+            entry_ids.append(node.compute_pipeline_entry_id(tag, packet))
+
+        # Clear internal cache
+        node._cached_output_packets.clear()
+        assert len(node._cached_output_packets) == 0
+
+        # get_cached_results should repopulate
+        node.get_cached_results(entry_ids)
+        assert len(node._cached_output_packets) == 2

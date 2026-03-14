@@ -234,31 +234,19 @@ class SourceNode(StreamBase):
             return iter(self._cached_results)
         return self.stream.iter_packets()
 
-    def populate_cache(
-        self, results: list[tuple[cp.TagProtocol, cp.PacketProtocol]]
-    ) -> None:
-        """Populate the in-memory cache with externally-provided results.
-
-        After calling this, ``iter_packets()`` returns from the cache
-        instead of delegating to the wrapped stream.
-
-        Args:
-            results: List of (tag, packet) pairs to cache.
-        """
-        self._cached_results = list(results)
-
     def store_result(
         self, results: list[tuple[cp.TagProtocol, cp.PacketProtocol]]
     ) -> None:
-        """Persist source data snapshot to the pipeline DB if configured.
+        """Persist source data snapshot and populate in-memory cache.
 
-        Currently a no-op. Future implementations may store a snapshot of
-        what the pipeline consumed from this source.
+        Populates the internal cache so ``iter_packets()`` returns from
+        cache after orchestrated execution. Future implementations may
+        also store a snapshot to the pipeline DB.
 
         Args:
             results: List of (tag, packet) pairs produced by this source.
         """
-        pass
+        self._cached_results = list(results)
 
     def run(self) -> None:
         """No-op for source nodes — data is already available."""

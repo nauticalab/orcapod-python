@@ -30,9 +30,6 @@ class SourceNodeProtocol(Protocol):
     def store_result(
         self, results: list[tuple["TagProtocol", "PacketProtocol"]]
     ) -> None: ...
-    def populate_cache(
-        self, results: list[tuple["TagProtocol", "PacketProtocol"]]
-    ) -> None: ...
 
 
 @runtime_checkable
@@ -60,10 +57,6 @@ class FunctionNodeProtocol(Protocol):
         output_packet: "PacketProtocol | None",
     ) -> None: ...
 
-    def populate_cache(
-        self, results: list[tuple["TagProtocol", "PacketProtocol"]]
-    ) -> None: ...
-
 
 @runtime_checkable
 class OperatorNodeProtocol(Protocol):
@@ -76,9 +69,6 @@ class OperatorNodeProtocol(Protocol):
 
     def get_cached_output(self) -> "StreamProtocol | None": ...
     def store_result(
-        self, results: list[tuple["TagProtocol", "PacketProtocol"]]
-    ) -> None: ...
-    def populate_cache(
         self, results: list[tuple["TagProtocol", "PacketProtocol"]]
     ) -> None: ...
 
