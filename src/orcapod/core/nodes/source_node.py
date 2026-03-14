@@ -29,6 +29,9 @@ class SourceNode(StreamBase):
     ):
         super().__init__(label=label, config=config)
         self.stream = stream
+        self._cached_results: list[tuple[cp.TagProtocol, cp.PacketProtocol]] | None = (
+            None
+        )
 
     # ------------------------------------------------------------------
     # from_descriptor — reconstruct from a serialized pipeline descriptor
@@ -92,6 +95,7 @@ class SourceNode(StreamBase):
 
         # SourceNode's own state
         node.stream = None
+        node._cached_results = None
         node._descriptor = descriptor
         node._load_status = LoadStatus.UNAVAILABLE
         node._stored_schema = descriptor.get("output_schema", {})
@@ -226,7 +230,35 @@ class SourceNode(StreamBase):
             raise RuntimeError(
                 "SourceNode in read-only mode has no stream data available"
             )
+        if self._cached_results is not None:
+            return iter(self._cached_results)
         return self.stream.iter_packets()
+
+    def populate_cache(
+        self, results: list[tuple[cp.TagProtocol, cp.PacketProtocol]]
+    ) -> None:
+        """Populate the in-memory cache with externally-provided results.
+
+        After calling this, ``iter_packets()`` returns from the cache
+        instead of delegating to the wrapped stream.
+
+        Args:
+            results: List of (tag, packet) pairs to cache.
+        """
+        self._cached_results = list(results)
+
+    def store_result(
+        self, results: list[tuple[cp.TagProtocol, cp.PacketProtocol]]
+    ) -> None:
+        """Persist source data snapshot to the pipeline DB if configured.
+
+        Currently a no-op. Future implementations may store a snapshot of
+        what the pipeline consumed from this source.
+
+        Args:
+            results: List of (tag, packet) pairs produced by this source.
+        """
+        pass
 
     def run(self) -> None:
         """No-op for source nodes — data is already available."""
