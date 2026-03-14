@@ -48,8 +48,21 @@ class LocalExecutor(PacketFunctionExecutorBase):
         executor_options: dict[str, Any] | None = None,
     ) -> Any:
         if inspect.iscoroutinefunction(fn):
-            return asyncio.run(fn(**kwargs))
+            return self._run_async_sync(fn, kwargs)
         return fn(**kwargs)
+
+    @staticmethod
+    def _run_async_sync(fn: Callable[..., Any], kwargs: dict[str, Any]) -> Any:
+        """Run an async function synchronously, handling nested event loops."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(fn(**kwargs))
+        else:
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(1) as pool:
+                return pool.submit(lambda: asyncio.run(fn(**kwargs))).result()
 
     async def async_execute_callable(
         self,

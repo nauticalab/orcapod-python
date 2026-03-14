@@ -84,25 +84,14 @@ class PacketFunctionExecutorProtocol(Protocol):
 
 
 @runtime_checkable
-class PythonFunctionExecutorProtocol(Protocol):
+class PythonFunctionExecutorProtocol(PacketFunctionExecutorProtocol, Protocol):
     """Executor protocol for Python callable-based packet functions.
 
-    Unlike ``PacketFunctionExecutorProtocol`` which operates on
-    (packet_function, packet) pairs, this protocol operates on raw
-    Python callables — the executor receives the function and its
-    keyword arguments directly.  The packet function handles
+    Extends ``PacketFunctionExecutorProtocol`` with callable-level
+    execution methods.  The executor receives the raw Python function
+    and its keyword arguments directly — the packet function handles
     packet construction/deconstruction around the executor call.
     """
-
-    @property
-    def executor_type_id(self) -> str:
-        """Unique identifier for this executor type."""
-        ...
-
-    @property
-    def supports_concurrent_execution(self) -> bool:
-        """Whether this executor can run multiple calls concurrently."""
-        ...
 
     def execute_callable(
         self,
@@ -139,12 +128,4 @@ class PythonFunctionExecutorProtocol(Protocol):
         Returns:
             The raw return value of *fn*.
         """
-        ...
-
-    def with_options(self, **opts: Any) -> Self:
-        """Return a **new** executor instance with the given options merged in."""
-        ...
-
-    def get_execution_data(self) -> dict[str, Any]:
-        """Return metadata describing the execution environment."""
         ...

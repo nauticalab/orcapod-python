@@ -1146,8 +1146,8 @@ class _MockExecutor(PacketFunctionExecutorBase):
 
     def __init__(self, opts: dict[str, Any] | None = None) -> None:
         self.opts: dict[str, Any] = opts or {}
-        self.sync_calls: list[PacketProtocol] = []
-        self.async_calls: list[PacketProtocol] = []
+        self.sync_calls: list[Any] = []
+        self.async_calls: list[Any] = []
 
     @property
     def executor_type_id(self) -> str:
@@ -1204,7 +1204,7 @@ class TestRunExecutionEngine:
 
         pipeline.run(execution_engine=mock)
 
-        assert pipeline.doubler.executor is mock
+        assert isinstance(pipeline.doubler.executor, _MockExecutor)
 
     def test_engine_without_config_triggers_async_mode(self, pipeline_db):
         """No config + execution_engine → async channels mode by default."""
@@ -1219,8 +1219,10 @@ class TestRunExecutionEngine:
 
         pipeline.run(execution_engine=mock)
 
-        assert len(mock.async_calls) > 0
-        assert len(mock.sync_calls) == 0
+        # Each node gets its own copy; check the node's executor
+        node_executor = pipeline.doubler.executor
+        assert len(node_executor.async_calls) > 0
+        assert len(node_executor.sync_calls) == 0
 
     def test_explicit_sync_config_overrides_async_default(self, pipeline_db):
         """Explicit config=PipelineConfig(executor=SYNCHRONOUS) takes priority
@@ -1241,8 +1243,9 @@ class TestRunExecutionEngine:
             config=PipelineConfig(executor=ExecutorType.SYNCHRONOUS),
         )
 
-        assert len(mock.sync_calls) > 0
-        assert len(mock.async_calls) == 0
+        node_executor = pipeline.doubler.executor
+        assert len(node_executor.sync_calls) > 0
+        assert len(node_executor.async_calls) == 0
 
     def test_pipeline_opts_applied_via_with_options(self, pipeline_db):
         """Pipeline-level execution_engine_opts are applied via with_options."""
@@ -1263,8 +1266,8 @@ class TestRunExecutionEngine:
         # Executor should have been created with the pipeline opts
         assert pipeline.doubler.executor.opts.get("num_cpus") == 4
 
-    def test_no_opts_uses_engine_directly(self, pipeline_db):
-        """Without execution_engine_opts, the engine itself is assigned (no with_options)."""
+    def test_no_opts_produces_per_node_copy(self, pipeline_db):
+        """Without execution_engine_opts, each node gets its own executor copy."""
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
         pf = PythonPacketFunction(double_value, output_keys="result")
         pod = FunctionPod(packet_function=pf)
@@ -1276,8 +1279,9 @@ class TestRunExecutionEngine:
 
         pipeline.run(execution_engine=mock)
 
-        # Without opts, the original mock executor is assigned directly
-        assert pipeline.doubler.executor is mock
+        # Each node gets a copy via with_options(), not the original
+        assert pipeline.doubler.executor is not mock
+        assert isinstance(pipeline.doubler.executor, _MockExecutor)
         assert pipeline.doubler.executor.opts == {}
 
 

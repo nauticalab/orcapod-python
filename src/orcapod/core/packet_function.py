@@ -141,7 +141,7 @@ class PacketFunctionBase(TraceableBase, Generic[E]):
         super().__init__(label=label, data_context=data_context, config=config)
         self._active = True
         self._version = version
-        self._executor: PacketFunctionExecutorProtocol | None = None
+        self._executor: E | None = None
 
         # Parse version string to extract major and minor versions
         # 0.5.2 -> 0 and 5.2, 1.3rc -> 1 and 3rc
@@ -244,12 +244,12 @@ class PacketFunctionBase(TraceableBase, Generic[E]):
     # ==================== Executor ====================
 
     @property
-    def executor(self) -> PacketFunctionExecutorProtocol | None:
+    def executor(self) -> E | None:
         """Return the executor used to run this packet function, or ``None`` for direct execution."""
         return self._executor
 
     @executor.setter
-    def executor(self, executor: PacketFunctionExecutorProtocol | None) -> None:
+    def executor(self, executor: E | None) -> None:
         """Set or clear the executor for this packet function.
 
         Delegates to ``set_executor`` for validation.
