@@ -172,6 +172,13 @@ operator = Join()
 result_stream = operator.process(stream_a, stream_b)
 ```
 
+All standard operators also support `__call__` as a shorthand for `.process()`, so you can
+write:
+
+```python
+result_stream = Join()(stream_a, stream_b)
+```
+
 The result is a new [stream](streams.md) that you can inspect, iterate, or pass to further
 operators or function pods.
 

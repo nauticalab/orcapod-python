@@ -44,7 +44,7 @@ def compute_birth_year(age: int) -> int:
     return 2026 - age
 
 # 3. Apply the function pod and inspect the output
-result = compute_birth_year.pod.process(source)
+result = compute_birth_year.pod(source)
 for tag, packet in result.iter_packets():
     print(f"{tag.as_dict()} -> {packet.as_dict()}")
 # {'name': 'Alice'} -> {'birth_year': 1996}

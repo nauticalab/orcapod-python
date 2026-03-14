@@ -62,7 +62,7 @@ source = DictSource(
 )
 
 # Apply the function pod to the source stream
-result = compute_bmi.pod.process(source)
+result = compute_bmi.pod(source)  # shorthand for compute_bmi.pod.process(source)
 
 # Inspect the output schema -- tags pass through, packets are replaced
 tag_schema, packet_schema = result.output_schema()
@@ -81,6 +81,10 @@ for tag, packet in result.iter_packets():
 The function pod preserves tags and replaces packet columns with the function's output. If the
 input stream has multiple packet columns but the function only needs some of them, Orcapod
 extracts the matching columns by name.
+
+!!! tip
+    All standard pods support `__call__` as a shorthand for `.process()`, so
+    `compute_bmi.pod(source)` is equivalent to `compute_bmi.pod.process(source)`.
 
 ## `FunctionNode` -- DB-backed cached execution
 
@@ -134,7 +138,7 @@ If you pass multiple streams to a function pod, they are automatically joined (u
 [Join](operators.md)) before the function is applied:
 
 ```python
-result = compute_bmi.pod.process(weight_stream, height_stream)
+result = compute_bmi.pod(weight_stream, height_stream)
 ```
 
 The join happens on shared tag columns, and the merged packet columns are fed to the function.
