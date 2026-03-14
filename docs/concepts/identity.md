@@ -7,12 +7,18 @@ storage, and detect when a pipeline's structure or data has changed.
 
 ## Two identity chains
 
-### `content_hash()` -- data-inclusive identity
+### `content_hash()` -- recursive source-inclusive identity
 
-The content hash includes **everything**: schema, topology, and actual data values. It changes
-whenever any data in the pipeline changes. Two pipeline elements have the same content hash
-only if they are completely identical -- same structure, same function, same input data, same
-output.
+The content hash captures schema, topology, and the **identity of the sources** feeding the
+pipeline. It is computed recursively: each element's content hash depends on its own identity
+plus the content hashes of all its upstream elements, all the way back to the sources.
+
+What "source identity" means depends on the source type. For in-memory sources like
+`ArrowTableSource` or `DictSource`, the content hash includes the actual data values. For
+storage-backed sources like `DeltaTableSource`, the content hash is derived from the source's
+canonical identity (e.g., its path and metadata) rather than the raw data. The key point is
+that the content hash changes whenever a different source is used, even if the schema is the
+same.
 
 **Used for:** deduplication and memoization. When a `FunctionNode` processes a packet, it
 checks the packet's content hash against its database. If the hash already exists, the cached
@@ -21,14 +27,14 @@ result is returned without recomputation.
 ### `pipeline_hash()` -- schema and topology only
 
 The pipeline hash captures the pipeline's **structure** -- schemas, function identities, and
-how elements are connected -- but deliberately ignores data content. Two pipeline elements
+how elements are connected -- but deliberately ignores source identity. Two pipeline elements
 with identical schemas and the same computational graph have the same pipeline hash, even if
-they process completely different data.
+they are fed by completely different sources.
 
 **Used for:** database scoping. Pipeline hash determines the database table path where results
 are stored. This means that two `FunctionNode` instances with the same function and the same
-input schema share the same database table -- even if they process different source data. This
-is a powerful feature: it means that running the same function on new data automatically
+input schema share the same database table -- regardless of which source produced the data.
+This is a powerful feature: it means that running the same function on new data automatically
 benefits from results already cached for previous data with the same schema.
 
 ## How it works in practice
@@ -40,7 +46,7 @@ source_a = DictSource(data=[{"x": 1, "y": 2}], tag_columns=["x"])
 source_b = DictSource(data=[{"x": 10, "y": 20}], tag_columns=["x"])
 ```
 
-- `source_a.content_hash() != source_b.content_hash()` -- different data
+- `source_a.content_hash() != source_b.content_hash()` -- different source identity
 - `source_a.pipeline_hash() == source_b.pipeline_hash()` -- same schema and structure
 
 If both sources feed into the same function via `FunctionNode`, the nodes share a database
@@ -109,7 +115,8 @@ returned for the modified pipeline.
 
 ## How it connects to other concepts
 
-- [Sources](sources.md) form the base case of the Merkle chain with schema-only identity
+- [Sources](sources.md) form the base case of the Merkle chain (schema-only for pipeline hash,
+  source identity for content hash)
 - [Streams](streams.md) carry both hashes and propagate them through the pipeline
 - [Operators](operators.md) contribute their own identity to the chain
 - [Function Pods](function-pods.md) and `FunctionNode` use content hashes for memoization
