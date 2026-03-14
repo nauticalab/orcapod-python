@@ -296,11 +296,6 @@ class OperatorNode(StreamBase):
     # ------------------------------------------------------------------
 
     @property
-    def operator(self) -> OperatorPodProtocol:
-        """Return the wrapped operator pod."""
-        return self._operator
-
-    @property
     def producer(self) -> OperatorPodProtocol:
         return self._operator
 
@@ -434,31 +429,85 @@ class OperatorNode(StreamBase):
         self._replay_from_cache()
         return self._cached_output_stream
 
-    def store_result(
-        self,
-        results: list[tuple[TagProtocol, PacketProtocol]],
-    ) -> None:
-        """Persist computed results to DB and populate in-memory cache.
+    def _validate_input_schemas(self, *input_streams: StreamProtocol) -> None:
+        """Validate input stream schemas match expected upstream schemas.
 
-        Wraps results as an ArrowTableStream for the internal cache.
-        If cache mode is LOG, also writes to the pipeline DB. No-op for
-        empty results.
+        Raises:
+            InputValidationError: If schemas don't match.
+        """
+        from orcapod.errors import InputValidationError
+
+        if len(input_streams) != len(self._input_streams):
+            raise InputValidationError(
+                f"Expected {len(self._input_streams)} input streams, "
+                f"got {len(input_streams)}"
+            )
+
+        for i, (actual, expected) in enumerate(zip(input_streams, self._input_streams)):
+            actual_tag_keys, actual_packet_keys = actual.keys()
+            expected_tag_keys, expected_packet_keys = expected.keys()
+
+            if set(actual_tag_keys) != set(expected_tag_keys):
+                raise InputValidationError(
+                    f"Input stream {i} tag schema mismatch: "
+                    f"expected {set(expected_tag_keys)}, "
+                    f"got {set(actual_tag_keys)}"
+                )
+
+            if set(actual_packet_keys) != set(expected_packet_keys):
+                raise InputValidationError(
+                    f"Input stream {i} packet schema mismatch: "
+                    f"expected {set(expected_packet_keys)}, "
+                    f"got {set(actual_packet_keys)}"
+                )
+
+    def process(
+        self,
+        *input_streams: StreamProtocol,
+    ) -> list[tuple[TagProtocol, PacketProtocol]]:
+        """Process input streams with schema validation, persistence, and caching.
+
+        Validates input schemas, computes via the internal operator,
+        materializes results, persists to DB (if LOG mode), and caches
+        internally.
 
         Args:
-            results: Materialized (tag, packet) pairs from computation.
+            *input_streams: Input streams to process (must match expected
+                upstream count and schemas).
+
+        Returns:
+            Materialized list of (tag, packet) pairs.
+
+        Raises:
+            InputValidationError: If input schemas don't match expected.
         """
-        if not results:
-            return
+        self._validate_input_schemas(*input_streams)
 
-        stream = StaticOutputOperatorPod._materialize_to_stream(results)
+        # Compute
+        result_stream = self._operator.process(*input_streams)
 
-        # Always populate in-memory cache
-        self._cached_output_stream = stream
+        # Materialize
+        output = list(result_stream.iter_packets())
+
+        # Cache
+        if output:
+            self._cached_output_stream = StaticOutputOperatorPod._materialize_to_stream(
+                output
+            )
+        else:
+            self._cached_output_stream = result_stream
+
         self._update_modified_time()
 
-        # Write to DB if applicable
-        if self._pipeline_database is not None and self._cache_mode != CacheMode.OFF:
-            self._store_output_stream(stream)
+        # Persist to DB if applicable
+        if (
+            self._pipeline_database is not None
+            and self._cache_mode != CacheMode.OFF
+            and self._cached_output_stream is not None
+        ):
+            self._store_output_stream(self._cached_output_stream)
+
+        return output
 
     def _compute_and_store(self) -> None:
         """Compute operator output, optionally store in DB."""
