@@ -358,6 +358,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
 
     def run(
         self,
+        orchestrator=None,
         config: PipelineConfig | None = None,
         execution_engine: cp.PacketFunctionExecutorProtocol | None = None,
         execution_engine_opts: "dict[str, Any] | None" = None,
@@ -365,6 +366,12 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         """Execute all compiled nodes.
 
         Args:
+            orchestrator: Optional orchestrator instance that drives
+                execution.  When provided, the orchestrator's ``run()``
+                method is called and results are applied to nodes via
+                ``_apply_results``.  When omitted, the pipeline uses
+                ``SyncPipelineOrchestrator`` for synchronous mode or
+                ``AsyncPipelineOrchestrator`` for async mode.
             config: Pipeline configuration.  When ``config.executor`` is
                 ``ExecutorType.ASYNC_CHANNELS``, the pipeline runs
                 asynchronously via the orchestrator.  When ``config`` is
@@ -403,20 +410,39 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         if effective_engine is not None:
             self._apply_execution_engine(effective_engine, effective_opts)
 
-        # Default to async when an execution engine is provided, unless the
-        # caller explicitly supplied a config — in which case config.executor
-        # is authoritative and takes priority.
-        use_async = config.executor == ExecutorType.ASYNC_CHANNELS or (
-            effective_engine is not None and not explicit_config
-        )
-        if use_async:
-            self._run_async(config)
+        if orchestrator is not None:
+            result = orchestrator.run(self._node_graph)
+            self._apply_results(result)
         else:
-            assert self._node_graph is not None
-            for node in nx.topological_sort(self._node_graph):
-                node.run()
+            # Default to async when an execution engine is provided, unless
+            # the caller explicitly supplied a config — in which case
+            # config.executor is authoritative and takes priority.
+            use_async = config.executor == ExecutorType.ASYNC_CHANNELS or (
+                effective_engine is not None and not explicit_config
+            )
+            if use_async:
+                self._run_async(config)
+            else:
+                from orcapod.pipeline.sync_orchestrator import (
+                    SyncPipelineOrchestrator,
+                )
+
+                orch = SyncPipelineOrchestrator()
+                result = orch.run(self._node_graph)
+                self._apply_results(result)
 
         self.flush()
+
+    def _apply_results(self, result) -> None:
+        """Populate node caches from orchestrator results.
+
+        Args:
+            result: An ``OrchestratorResult`` whose ``node_outputs`` maps
+                each graph node to its computed ``(Tag, Packet)`` pairs.
+        """
+        for node, outputs in result.node_outputs.items():
+            if hasattr(node, "populate_cache"):
+                node.populate_cache(outputs)
 
     def _apply_execution_engine(
         self,
@@ -457,7 +483,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
 
     def _run_async(self, config: PipelineConfig) -> None:
         """Run the pipeline asynchronously using the orchestrator."""
-        from orcapod.pipeline.orchestrator import AsyncPipelineOrchestrator
+        from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
 
         orchestrator = AsyncPipelineOrchestrator()
         orchestrator.run(self, config)
