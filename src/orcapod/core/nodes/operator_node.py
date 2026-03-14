@@ -432,11 +432,9 @@ class OperatorNode(StreamBase):
     def _validate_input_schemas(self, *input_streams: StreamProtocol) -> None:
         """Validate input stream schemas match expected upstream schemas.
 
-        Compares Schema objects (order-independent, type-aware) for user-level
-        tag and packet columns. System tag columns are excluded because the
-        operator itself manages system tag evolution and the reconstructed
-        streams from the orchestrator may have different pipeline hashes
-        embedded in their system tag column names.
+        Compares Schema objects (order-independent, type-aware) including
+        system tag columns for topology correctness. Uses the same
+        comparison strategy as FunctionNode's validation.
 
         Raises:
             InputValidationError: If schemas don't match.
@@ -450,8 +448,10 @@ class OperatorNode(StreamBase):
             )
 
         for i, (actual, expected) in enumerate(zip(input_streams, self._input_streams)):
-            expected_tag_schema, _ = expected.output_schema()
-            actual_tag_schema, _ = actual.output_schema()
+            expected_tag_schema, _ = expected.output_schema(
+                columns={"system_tags": True}
+            )
+            actual_tag_schema, _ = actual.output_schema(columns={"system_tags": True})
 
             if expected_tag_schema != actual_tag_schema:
                 raise InputValidationError(
