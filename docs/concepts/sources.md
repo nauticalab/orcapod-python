@@ -18,18 +18,15 @@ dependencies -- it sits at the root of the computational graph. Key properties:
 - `source.upstreams` is always an empty tuple
 - `source.source_id` is a canonical name used for provenance tracking and the source registry
 
-### `ArrowTableSource`
+### Concrete source types
 
-The core source implementation. All other source types (CSV, dict, list, DataFrame, Delta)
-delegate to `ArrowTableSource` internally. It accepts a PyArrow Table directly and wraps it
-as a stream.
-
-### Convenience wrappers
-
-These sources convert common Python data formats into an `ArrowTableSource` under the hood:
+All sources follow the same pattern: convert input data to a PyArrow Table, then pass it
+through `SourceStreamBuilder` which handles enrichment (provenance columns, system tags,
+hashing) and produces the final immutable stream.
 
 | Source | Input type | Notes |
 |---|---|---|
+| `ArrowTableSource` | PyArrow `Table` | Accepts an Arrow table directly |
 | `DictSource` | `list[dict]` | Each dict becomes one (Tag, Packet) pair |
 | `ListSource` | `list[Any]` | Each element stored under a named packet column |
 | `DataFrameSource` | Pandas `DataFrame` | Converts via Arrow |
