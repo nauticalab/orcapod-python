@@ -432,6 +432,12 @@ class OperatorNode(StreamBase):
     def _validate_input_schemas(self, *input_streams: StreamProtocol) -> None:
         """Validate input stream schemas match expected upstream schemas.
 
+        Compares Schema objects (order-independent, type-aware) for user-level
+        tag and packet columns. System tag columns are excluded because the
+        operator itself manages system tag evolution and the reconstructed
+        streams from the orchestrator may have different pipeline hashes
+        embedded in their system tag column names.
+
         Raises:
             InputValidationError: If schemas don't match.
         """
@@ -444,21 +450,21 @@ class OperatorNode(StreamBase):
             )
 
         for i, (actual, expected) in enumerate(zip(input_streams, self._input_streams)):
-            actual_tag_keys, actual_packet_keys = actual.keys()
-            expected_tag_keys, expected_packet_keys = expected.keys()
+            expected_tag_schema, _ = expected.output_schema()
+            actual_tag_schema, _ = actual.output_schema()
 
-            if set(actual_tag_keys) != set(expected_tag_keys):
+            if expected_tag_schema != actual_tag_schema:
                 raise InputValidationError(
                     f"Input stream {i} tag schema mismatch: "
-                    f"expected {set(expected_tag_keys)}, "
-                    f"got {set(actual_tag_keys)}"
+                    f"expected {dict(expected_tag_schema)}, got {dict(actual_tag_schema)}"
                 )
 
-            if set(actual_packet_keys) != set(expected_packet_keys):
+            expected_pkt = expected.output_schema()[1]
+            actual_pkt = actual.output_schema()[1]
+            if expected_pkt != actual_pkt:
                 raise InputValidationError(
                     f"Input stream {i} packet schema mismatch: "
-                    f"expected {set(expected_packet_keys)}, "
-                    f"got {set(actual_packet_keys)}"
+                    f"expected {dict(expected_pkt)}, got {dict(actual_pkt)}"
                 )
 
     def process(
@@ -499,10 +505,10 @@ class OperatorNode(StreamBase):
 
         self._update_modified_time()
 
-        # Persist to DB if applicable
+        # Persist to DB only in LOG mode
         if (
             self._pipeline_database is not None
-            and self._cache_mode != CacheMode.OFF
+            and self._cache_mode == CacheMode.LOG
             and self._cached_output_stream is not None
         ):
             self._store_output_stream(self._cached_output_stream)
