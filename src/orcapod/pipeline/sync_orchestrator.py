@@ -123,7 +123,6 @@ class SyncPipelineOrchestrator:
                 output.append((tag_out, result))
             else:
                 tag_out, result = node.process_packet(tag, packet)
-                node.store_result(tag, packet, result)
                 self._observer.on_packet_end(node, tag, packet, result, cached=False)
                 if result is not None:
                     output.append((tag_out, result))
