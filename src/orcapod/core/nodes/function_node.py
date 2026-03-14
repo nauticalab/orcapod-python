@@ -468,8 +468,13 @@ class FunctionNode(StreamBase):
     def _validate_input_schema(self, tag: TagProtocol, packet: PacketProtocol) -> None:
         """Validate that tag and packet match the expected input schema.
 
+        Checks user tag keys and packet keys using set comparison
+        (order-independent). System tag columns are excluded because
+        they contain pipeline hashes that may differ when streams are
+        reconstructed by the orchestrator.
+
         Raises:
-            InputValidationError: If column names don't match expected schema.
+            InputValidationError: If schemas don't match.
         """
         from orcapod.errors import InputValidationError
 
@@ -478,38 +483,48 @@ class FunctionNode(StreamBase):
         actual_tag_keys = tag.keys()
         if set(actual_tag_keys) != set(expected_tag_keys):
             raise InputValidationError(
-                f"Tag schema mismatch: expected {set(expected_tag_keys)}, "
-                f"got {set(actual_tag_keys)}"
+                f"Tag schema mismatch: expected {sorted(expected_tag_keys)}, "
+                f"got {sorted(actual_tag_keys)}"
             )
 
         actual_packet_keys = packet.keys()
         if set(actual_packet_keys) != set(expected_packet_keys):
             raise InputValidationError(
-                f"Packet schema mismatch: expected {set(expected_packet_keys)}, "
-                f"got {set(actual_packet_keys)}"
+                f"Packet schema mismatch: expected {sorted(expected_packet_keys)}, "
+                f"got {sorted(actual_packet_keys)}"
             )
 
     def _validate_stream_schema(self, input_stream: StreamProtocol) -> None:
         """Validate that a stream's output schema matches expected input.
+
+        Compares Schema objects (order-independent, type-aware) and
+        validates system tag column names.
 
         Raises:
             InputValidationError: If schemas don't match.
         """
         from orcapod.errors import InputValidationError
 
-        expected_tag_keys, expected_packet_keys = self._input_stream.keys()
-        actual_tag_keys, actual_packet_keys = input_stream.keys()
+        expected_tag_schema, expected_packet_schema = self._input_stream.output_schema(
+            columns={"system_tags": True}
+        )
+        actual_tag_schema, actual_packet_schema = input_stream.output_schema(
+            columns={"system_tags": True}
+        )
 
-        if set(actual_tag_keys) != set(expected_tag_keys):
+        if expected_tag_schema != actual_tag_schema:
             raise InputValidationError(
-                f"Stream tag schema mismatch: expected {set(expected_tag_keys)}, "
-                f"got {set(actual_tag_keys)}"
+                f"Stream tag schema mismatch: expected {dict(expected_tag_schema)}, "
+                f"got {dict(actual_tag_schema)}"
             )
 
-        if set(actual_packet_keys) != set(expected_packet_keys):
+        # Compare packet schemas without system tags (they're tag-only)
+        expected_pkt = self._input_stream.output_schema()[1]
+        actual_pkt = input_stream.output_schema()[1]
+        if expected_pkt != actual_pkt:
             raise InputValidationError(
-                f"Stream packet schema mismatch: expected {set(expected_packet_keys)}, "
-                f"got {set(actual_packet_keys)}"
+                f"Stream packet schema mismatch: expected {dict(expected_pkt)}, "
+                f"got {dict(actual_pkt)}"
             )
 
     def process_packet(
@@ -567,11 +582,18 @@ class FunctionNode(StreamBase):
         self,
         tag: TagProtocol,
         packet: PacketProtocol,
+        cache_index: int | None = None,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
         """Core compute + persist + cache (no schema validation).
 
         Used by ``process_packet`` (after validation), ``process`` (after
         stream validation), and ``iter_packets`` (internal path).
+
+        Args:
+            tag: The input tag.
+            packet: The input packet.
+            cache_index: Optional explicit index for the internal cache.
+                When ``None``, auto-assigns at ``len(_cached_output_packets)``.
         """
         if self._cached_function_pod is not None:
             tag_out, output_packet = self._cached_function_pod.process_packet(
@@ -585,7 +607,7 @@ class FunctionNode(StreamBase):
                     )
                 )
                 self.add_pipeline_record(
-                    tag_out,
+                    tag,
                     packet,
                     packet_record_id=output_packet.datagram_id,
                     computed=result_computed,
@@ -594,8 +616,10 @@ class FunctionNode(StreamBase):
             tag_out, output_packet = self._function_pod.process_packet(tag, packet)
 
         # Cache internally
-        next_idx = len(self._cached_output_packets)
-        self._cached_output_packets[next_idx] = (tag_out, output_packet)
+        idx = (
+            cache_index if cache_index is not None else len(self._cached_output_packets)
+        )
+        self._cached_output_packets[idx] = (tag_out, output_packet)
         self._cached_input_iterator = None
         self._needs_iterator = False
 
@@ -684,11 +708,18 @@ class FunctionNode(StreamBase):
         self,
         tag: TagProtocol,
         packet: PacketProtocol,
+        cache_index: int | None = None,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
         """Async counterpart of ``_process_packet_internal``.
 
         Computes via async path, writes pipeline provenance, and caches
         internally — no schema validation.
+
+        Args:
+            tag: The input tag.
+            packet: The input packet.
+            cache_index: Optional explicit index for the internal cache.
+                When ``None``, auto-assigns at ``len(_cached_output_packets)``.
         """
         if self._cached_function_pod is not None:
             (
@@ -703,7 +734,7 @@ class FunctionNode(StreamBase):
                     )
                 )
                 self.add_pipeline_record(
-                    tag_out,
+                    tag,
                     packet,
                     packet_record_id=output_packet.datagram_id,
                     computed=result_computed,
@@ -714,8 +745,10 @@ class FunctionNode(StreamBase):
             )
 
         # Cache internally
-        next_idx = len(self._cached_output_packets)
-        self._cached_output_packets[next_idx] = (tag_out, output_packet)
+        idx = (
+            cache_index if cache_index is not None else len(self._cached_output_packets)
+        )
+        self._cached_output_packets[idx] = (tag_out, output_packet)
         self._cached_input_iterator = None
         self._needs_iterator = False
 
@@ -1030,16 +1063,18 @@ class FunctionNode(StreamBase):
 
             if loop is not None:
                 # Already in event loop — fall back to sequential sync
-                for _, tag, pkt in to_compute:
-                    self._process_packet_internal(tag, pkt)
+                for i, tag, pkt in to_compute:
+                    self._process_packet_internal(tag, pkt, cache_index=i)
             else:
 
                 async def _gather() -> list[tuple[TagProtocol, PacketProtocol | None]]:
                     return list(
                         await asyncio.gather(
                             *[
-                                self._async_process_packet_internal(tag, pkt)
-                                for _, tag, pkt in to_compute
+                                self._async_process_packet_internal(
+                                    tag, pkt, cache_index=i
+                                )
+                                for i, tag, pkt in to_compute
                             ]
                         )
                     )

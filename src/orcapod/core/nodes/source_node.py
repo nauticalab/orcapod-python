@@ -232,9 +232,7 @@ class SourceNode(StreamBase):
             )
         if self._cached_results is not None:
             return iter(self._cached_results)
-        # Cache on first iteration
-        self._cached_results = list(self.stream.iter_packets())
-        return iter(self._cached_results)
+        return self.stream.iter_packets()
 
     def run(self) -> None:
         """No-op for source nodes — data is already available."""

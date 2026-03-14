@@ -366,17 +366,16 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         """Execute all compiled nodes.
 
         Args:
-            orchestrator: Optional orchestrator instance that drives
-                execution.  When provided, the orchestrator's ``run()``
-                method is called and nodes self-cache their results via
-                ``store_result``.  When omitted, the pipeline uses
-                ``SyncPipelineOrchestrator`` for synchronous mode or
-                ``AsyncPipelineOrchestrator`` for async mode.
-            config: Pipeline configuration.  When ``config.executor`` is
+            orchestrator: Optional orchestrator instance. When provided,
+                the orchestrator drives execution and nodes handle their
+                own persistence internally. When omitted, defaults to
+                ``SyncPipelineOrchestrator`` (sync mode) or
+                ``AsyncPipelineOrchestrator`` (async mode).
+            config: Pipeline configuration. When ``config.executor`` is
                 ``ExecutorType.ASYNC_CHANNELS``, the pipeline runs
-                asynchronously via the orchestrator.  When ``config`` is
+                asynchronously via the orchestrator. When ``config`` is
                 omitted and an ``execution_engine`` is provided, async mode
-                is used by default.  Passing an explicit ``config`` always
+                is used by default. Passing an explicit ``config`` always
                 takes priority — supply ``ExecutorType.SYNCHRONOUS`` to force
                 synchronous execution even when an engine is present.
             execution_engine: Optional packet-function executor applied to
