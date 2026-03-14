@@ -46,12 +46,9 @@ class FunctionNodeProtocol(Protocol):
         self, tag: "TagProtocol", packet: "PacketProtocol"
     ) -> tuple["TagProtocol", "PacketProtocol | None"]: ...
 
-    def store_result(
-        self,
-        tag: "TagProtocol",
-        input_packet: "PacketProtocol",
-        output_packet: "PacketProtocol | None",
-    ) -> None: ...
+    def process(
+        self, input_stream: "StreamProtocol"
+    ) -> list[tuple["TagProtocol", "PacketProtocol"]]: ...
 
 
 @runtime_checkable
