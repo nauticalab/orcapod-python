@@ -96,11 +96,11 @@ class TestConstruction:
         assert cpf.record_path == ("org", "project") + inner_pf.uri
 
     def test_auto_flush_true_by_default(self, cached_pf):
-        assert cached_pf._auto_flush is True
+        assert cached_pf._cache._auto_flush is True
 
     def test_set_auto_flush_false(self, cached_pf):
         cached_pf.set_auto_flush(False)
-        assert cached_pf._auto_flush is False
+        assert cached_pf._cache._auto_flush is False
 
 
 # ---------------------------------------------------------------------------
