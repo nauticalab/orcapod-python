@@ -51,19 +51,34 @@ runtime. The stream wiring remains valuable for standalone/ad-hoc use without an
 All node types follow the same two-step pattern during orchestrated execution:
 
 ```
-1. Compute  → produce output data (pure, no DB side effects)
-2. Store    → persist to DB (node decides what to do internally; no-op if no DB)
+1. Compute  → produce output data
+2. Store    → persist pipeline-level records to DB (node decides what to do; no-op if no DB)
 ```
 
 The orchestrator always calls both steps for every node. It does not check whether a node
 has a database or any storage capability — that is the node's concern. This keeps the
 orchestrator simple and the node protocol uniform.
 
-| Node Type    | Compute                                   | Store                                    |
-|-------------|-------------------------------------------|------------------------------------------|
-| SourceNode  | `iter_packets()`                          | `store_result(results)`                  |
-| FunctionNode| `process_packet(tag, packet)` per-packet  | `store_result(tag, input_packet, output)` per-packet |
-| OperatorNode| `operator.process(*input_streams)`        | `store_result(results)`                  |
+| Node Type    | Compute                                   | Compute DB effects                       | Store (pipeline-level)                   |
+|-------------|-------------------------------------------|------------------------------------------|------------------------------------------|
+| SourceNode  | `iter_packets()`                          | None                                     | `store_result(results)` — snapshot (future) |
+| FunctionNode| `process_packet(tag, packet)` per-packet  | Function-level result memoization (result DB) | `store_result(tag, input_packet, output)` — pipeline provenance record |
+| OperatorNode| `operator.process(*input_streams)`        | None                                     | `store_result(results)` — pipeline cache (LOG mode) |
+
+**Two levels of persistence for FunctionNode:**
+
+1. **Function-level result memoization** (result DB, via `CachedFunctionPod`): "This
+   function, given this input packet, produces this output." This is a property of the
+   function itself, not of any specific pipeline. It happens inside `process_packet` and
+   is the function pod's own concern.
+
+2. **Pipeline-level provenance** (pipeline DB, via `add_pipeline_record`): "In this pipeline
+   run, this (tag + system_tags + packet) was processed and points to result record Y." This
+   is pipeline bookkeeping, handled by `store_result`.
+
+This distinction matters: function-level memoization transcends any single pipeline — if the
+same function runs in a different pipeline with the same input, the cached result is reused.
+Pipeline provenance is specific to a pipeline execution context.
 
 ### Post-Execution Contract
 
@@ -101,15 +116,15 @@ orchestrator.run(node_graph)
   ├── FunctionNode:
   │     observer.on_node_start(node)
   │     compute entry_ids from upstream buffer
-  │     cached = node.get_cached_results(entry_ids)     ← DB read
+  │     cached = node.get_cached_results(entry_ids)     ← pipeline DB read
   │     for each (tag, packet) in upstream buffer:
   │       observer.on_packet_start(node, tag, packet)
   │       if entry_id in cached:
-  │         use cached result                           ← DB hit
+  │         use cached result                           ← pipeline-level cache hit
   │         observer.on_packet_end(..., cached=True)
   │       else:
-  │         tag_out, result = node.process_packet(...)  ← compute (pure)
-  │         node.store_result(tag, packet, result)      ← store (pipeline record + result cache)
+  │         tag_out, result = node.process_packet(...)  ← compute (+ function-level memoization in result DB)
+  │         node.store_result(tag, packet, result)      ← pipeline provenance record only
   │         observer.on_packet_end(..., cached=False)
   │     observer.on_node_end(node)
   │
@@ -171,8 +186,10 @@ of what the pipeline actually consumed.
 Per-packet computation with optional DB caching. The orchestrator drives iteration externally,
 calling `process_packet()` for each input with observer hooks.
 
-`process_packet()` is pure computation — no DB side effects. All persistence happens in
-`store_result()`.
+`process_packet()` handles computation and function-level result memoization (via
+`CachedFunctionPod` when DB is attached). This memoization is the function pod's own
+concern — it transcends any single pipeline. `store_result()` handles pipeline-level
+provenance recording only.
 
 ```python
 class FunctionNodeProtocol(Protocol):
@@ -202,9 +219,9 @@ class FunctionNodeProtocol(Protocol):
     ) -> None: ...
 ```
 
-`store_result`: when DB is attached, writes the computation result to the result DB (via
-`CachedFunctionPod`) and adds a pipeline provenance record to the pipeline DB (via
-`add_pipeline_record`). No-op if no DB is attached.
+`store_result`: adds a pipeline provenance record to the pipeline DB (via
+`add_pipeline_record`). Does NOT write to the result DB — that is handled by
+`process_packet` via `CachedFunctionPod`. No-op if no DB is attached or output is None.
 
 #### `OperatorNodeProtocol`
 
@@ -432,27 +449,26 @@ per node in the worst case.
 
 #### FunctionNode Changes
 
-**`process_packet(tag, packet)` — now pure computation**
+**`process_packet(tag, packet)` — computation + function-level memoization**
 
-Refactored to perform computation only (via `FunctionPod.process_packet` or
-`CachedFunctionPod` for result-level caching) without writing pipeline records. All
-pipeline DB writes move to `store_result`.
+Refactored to remove pipeline record writing. Now delegates to `CachedFunctionPod`
+(when DB is attached) or raw `FunctionPod` (when not). `CachedFunctionPod` handles
+function-level result memoization internally: it checks if this input packet's content
+hash has been computed before, and if not, computes and stores the result in the result
+DB. This memoization is the function pod's own concern — it transcends any single pipeline.
 
-Note: result-level caching via `CachedFunctionPod` (which checks if this specific
-tag+packet combination has been computed before) is still handled transparently within
-`process_packet`. This is computation-level memoization, not pipeline-level persistence.
-The distinction: `CachedFunctionPod` caches the function's output for a given input;
-`store_result` records the pipeline provenance (which tag+packet was processed in this
-pipeline run). These are separate concerns.
+Pipeline provenance recording (which was previously bundled into `process_packet`) is
+extracted into `store_result`.
 
 **`store_result(tag, input_packet, output_packet) -> None`**
 
-Handles all pipeline-level DB persistence for a single packet:
+Handles pipeline-level provenance recording only:
 
-1. Stores the result via `CachedFunctionPod` to the result DB (if not already cached).
-2. Adds a pipeline provenance record to the pipeline DB (tag + system tags + input packet
-   hash → output packet record ID).
-3. No-op if no DB is attached.
+1. Adds a pipeline provenance record to the pipeline DB (tag + system tags + input packet
+   hash → output packet record ID) via `add_pipeline_record`.
+2. Does NOT write to the result DB — that is `CachedFunctionPod`'s concern, handled
+   during `process_packet`.
+3. No-op if no pipeline DB is attached or output is None.
 
 **`get_cached_results(entry_ids: list[str]) -> dict[str, tuple[Tag, Packet]]`**
 
@@ -585,10 +601,11 @@ can be added later.
   Verify that non-DB node data is inaccessible (explicit trade-off).
 - **FunctionNode.get_cached_results tests**: targeted lookup returns correct subset;
   empty DB returns `{}`; entry IDs not in DB are absent from result.
-- **FunctionNode.store_result tests**: verify pipeline record + result cache writes;
-  verify no-op when no DB attached.
-- **FunctionNode.process_packet purity tests**: verify no DB side effects from
-  process_packet alone (pipeline records only written via store_result).
+- **FunctionNode.store_result tests**: verify pipeline provenance record write only;
+  verify no-op when no DB attached; verify no-op when output is None.
+- **FunctionNode.process_packet tests**: verify process_packet does NOT write pipeline
+  records (only store_result does); verify function-level memoization still works
+  (CachedFunctionPod caches results in result DB during process_packet).
 - **OperatorNode.get_cached_output / store_result tests**: cache mode behavior (OFF → no-op,
   LOG → writes, REPLAY → reads).
 - **SourceNode.store_result tests**: verify DB snapshot write when configured; no-op otherwise.
