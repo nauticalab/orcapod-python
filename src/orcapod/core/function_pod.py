@@ -667,7 +667,7 @@ def function_pod(
             (wraps the packet function in ``CachedPacketFunction``).
         pod_cache_database: Optional database for pod-level caching
             (wraps the pod in ``CachedFunctionPod``, which caches at the
-            ``process_packet(tag, packet)`` level using tag+packet hash).
+            ``process_packet`` level using input packet content hash).
         executor: Optional executor for running the packet function.
         **kwargs: Forwarded to ``PythonPacketFunction``.
 

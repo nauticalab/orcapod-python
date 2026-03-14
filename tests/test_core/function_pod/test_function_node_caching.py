@@ -39,7 +39,9 @@ def _make_pod():
     return FunctionPod(pf)
 
 
-def _make_stream(rows: list[dict], tag_columns: list[str] = None) -> ArrowTableStream:
+def _make_stream(
+    rows: list[dict], tag_columns: list[str] | None = None
+) -> ArrowTableStream:
     if tag_columns is None:
         tag_columns = ["id"]
     table = pa.table(
@@ -49,7 +51,7 @@ def _make_stream(rows: list[dict], tag_columns: list[str] = None) -> ArrowTableS
 
 
 def _make_source_stream(
-    rows: list[dict], tag_columns: list[str] = None, source_id: str = "src_a"
+    rows: list[dict], tag_columns: list[str] | None = None, source_id: str = "src_a"
 ) -> ArrowTableStream:
     """Create a stream from an ArrowTableSource so it has system tag columns."""
     if tag_columns is None:

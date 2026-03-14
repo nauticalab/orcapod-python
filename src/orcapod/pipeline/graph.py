@@ -425,9 +425,11 @@ class Pipeline(AutoRegisteringContextBasedTracker):
     ) -> None:
         """Apply *execution_engine* to every ``FunctionNode`` in the pipeline.
 
-        If *execution_engine_opts* is non-empty, ``engine.with_options``
-        is called to produce a configured executor; otherwise the engine
-        instance is used directly.
+        Each node receives its own executor instance via
+        ``engine.with_options(**opts)`` — even when *opts* is empty.
+        The executor's ``with_options`` implementation decides which
+        components to copy vs share (e.g. connection handles may be
+        shared while per-node state is copied).
 
         Args:
             execution_engine: Executor to apply (must implement
@@ -441,14 +443,11 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         )
 
         opts = execution_engine_opts or {}
-        configured_executor = (
-            execution_engine.with_options(**opts) if opts else execution_engine
-        )
 
         for node in self._node_graph.nodes:
             if not isinstance(node, FunctionNode):
                 continue
-            node.executor = configured_executor
+            node.executor = execution_engine.with_options(**opts)
             logger.debug(
                 "Applied execution engine %r to node %r (opts=%r)",
                 type(execution_engine).__name__,
