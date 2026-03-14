@@ -495,20 +495,24 @@ class FunctionNode(StreamBase):
         input_packet: PacketProtocol,
         output_packet: PacketProtocol | None,
     ) -> None:
-        """Record pipeline provenance for a processed packet.
+        """Record pipeline provenance and populate in-memory cache.
 
-        Writes a pipeline record associating this (tag + system_tags +
-        input_packet) with the output packet record ID. Does NOT write
-        to the result DB — that is handled by ``process_packet`` via
-        ``CachedFunctionPod``.
+        Writes a pipeline record and caches the result internally so
+        ``iter_packets()`` / ``as_table()`` work after orchestrated execution.
 
-        No-op if no pipeline DB is attached or output is None.
+        No-op if output is None (except for cache tracking).
 
         Args:
             tag: The tag associated with the packet.
             input_packet: The original input packet.
             output_packet: The computation result, or None if filtered.
         """
+        # Always add to internal cache (even None results, for index tracking)
+        next_idx = len(self._cached_output_packets)
+        self._cached_output_packets[next_idx] = (tag, output_packet)
+        self._cached_input_iterator = None
+        self._needs_iterator = False
+
         if output_packet is None:
             return
         if self._pipeline_database is None:
@@ -551,22 +555,6 @@ class FunctionNode(StreamBase):
         tag_out, output_packet = self.process_packet(tag, packet)
         self.store_result(tag_out, packet, output_packet)
         return tag_out, output_packet
-
-    def populate_cache(self, results: list[tuple[TagProtocol, PacketProtocol]]) -> None:
-        """Populate in-memory cache from externally-provided results.
-
-        After calling this, ``iter_packets()`` returns from the cache
-        without upstream iteration or computation.
-
-        Args:
-            results: Materialized (tag, packet) pairs.
-        """
-        self._cached_output_packets.clear()
-        for i, (tag, packet) in enumerate(results):
-            self._cached_output_packets[i] = (tag, packet)
-        self._cached_input_iterator = None
-        self._needs_iterator = False
-        self._update_modified_time()
 
     def get_cached_results(
         self, entry_ids: list[str]
@@ -637,6 +625,13 @@ class FunctionNode(StreamBase):
         result_dict: dict[str, tuple[TagProtocol, PacketProtocol]] = {}
         for entry_id, (tag, packet) in zip(filtered_entry_ids, stream.iter_packets()):
             result_dict[entry_id] = (tag, packet)
+
+        # Populate internal cache with retrieved results
+        for entry_id, (tag, packet) in result_dict.items():
+            next_idx = len(self._cached_output_packets)
+            self._cached_output_packets[next_idx] = (tag, packet)
+        self._cached_input_iterator = None
+        self._needs_iterator = False
 
         return result_dict
 

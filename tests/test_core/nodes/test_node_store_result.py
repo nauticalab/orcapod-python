@@ -30,6 +30,14 @@ class TestSourceNodeStoreResult:
         # Should not raise
         node.store_result(packets)
 
+    def test_store_result_populates_internal_cache(self, source_and_node):
+        """store_result should populate internal cache for iter_packets."""
+        _, node = source_and_node
+        packets = list(node.iter_packets())
+        node.store_result(packets)
+        cached = list(node.iter_packets())
+        assert len(cached) == len(packets)
+
 
 from orcapod.core.nodes import OperatorNode
 from orcapod.core.operators import SelectPacketColumns
@@ -80,6 +88,24 @@ class TestOperatorNodeStoreResult:
         records = node.get_all_records()
         assert records is not None
         assert records.num_rows == 2
+
+    def test_store_result_populates_internal_cache(self, operator_with_db):
+        """store_result should populate in-memory cache for iter_packets."""
+        node, _ = operator_with_db
+        stream = node._operator.process(*node._input_streams)
+        output = list(stream.iter_packets())
+        node.store_result(output)
+        cached = list(node.iter_packets())
+        assert len(cached) == 2
+
+    def test_store_result_populates_cache_without_db(self, operator_no_db):
+        """store_result should populate cache even without a DB."""
+        node = operator_no_db
+        stream = node._operator.process(*node._input_streams)
+        output = list(stream.iter_packets())
+        node.store_result(output)
+        cached = list(node.iter_packets())
+        assert len(cached) == 2
 
     def test_store_result_noop_in_off_mode(self, operator_no_db):
         node = operator_no_db
@@ -237,3 +263,12 @@ class TestFunctionNodeStoreResult:
         node.store_result(tag, packet, None)
         records = pipeline_db.get_all_records(node.pipeline_path)
         assert records is None
+
+    def test_store_result_populates_internal_cache(self, function_node_with_db):
+        """store_result should populate _cached_output_packets."""
+        node, _, _ = function_node_with_db
+        packets = list(node._input_stream.iter_packets())
+        tag, packet = packets[0]
+        tag_out, result = node.process_packet(tag, packet)
+        node.store_result(tag, packet, result)
+        assert len(node._cached_output_packets) == 1

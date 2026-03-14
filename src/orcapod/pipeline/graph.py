@@ -368,8 +368,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         Args:
             orchestrator: Optional orchestrator instance that drives
                 execution.  When provided, the orchestrator's ``run()``
-                method is called and results are applied to nodes via
-                ``_apply_results``.  When omitted, the pipeline uses
+                method is called and nodes self-cache their results via
+                ``store_result``.  When omitted, the pipeline uses
                 ``SyncPipelineOrchestrator`` for synchronous mode or
                 ``AsyncPipelineOrchestrator`` for async mode.
             config: Pipeline configuration.  When ``config.executor`` is
@@ -411,8 +411,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             self._apply_execution_engine(effective_engine, effective_opts)
 
         if orchestrator is not None:
-            result = orchestrator.run(self._node_graph)
-            self._apply_results(result)
+            orchestrator.run(self._node_graph)
         else:
             # Default to async when an execution engine is provided, unless
             # the caller explicitly supplied a config — in which case
@@ -427,22 +426,9 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     SyncPipelineOrchestrator,
                 )
 
-                orch = SyncPipelineOrchestrator()
-                result = orch.run(self._node_graph)
-                self._apply_results(result)
+                SyncPipelineOrchestrator().run(self._node_graph)
 
         self.flush()
-
-    def _apply_results(self, result) -> None:
-        """Populate node caches from orchestrator results.
-
-        Args:
-            result: An ``OrchestratorResult`` whose ``node_outputs`` maps
-                each graph node to its computed ``(Tag, Packet)`` pairs.
-        """
-        for node, outputs in result.node_outputs.items():
-            if hasattr(node, "populate_cache"):
-                node.populate_cache(outputs)
 
     def _apply_execution_engine(
         self,
