@@ -237,3 +237,66 @@ class TestPipelineRunIntegration:
 
         table = pipeline.doubler.as_table()
         assert table.num_rows == 2
+
+
+class TestSyncAsyncParity:
+    """Sync orchestrator should produce same DB results as async."""
+
+    def test_linear_pipeline_parity(self):
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(pf)
+
+        # Sync via orchestrator
+        sync_pipeline = Pipeline(name="sync", pipeline_database=InMemoryArrowDatabase())
+        with sync_pipeline:
+            pod(src, label="doubler")
+        sync_pipeline.run()
+        sync_records = sync_pipeline.doubler.get_all_records()
+        sync_values = sorted(sync_records.column("result").to_pylist())
+
+        # Async
+        from orcapod.pipeline import AsyncPipelineOrchestrator
+
+        async_pipeline = Pipeline(
+            name="async", pipeline_database=InMemoryArrowDatabase()
+        )
+        with async_pipeline:
+            pod(src, label="doubler")
+        AsyncPipelineOrchestrator().run(async_pipeline)
+        async_records = async_pipeline.doubler.get_all_records()
+        async_values = sorted(async_records.column("result").to_pylist())
+
+        assert sync_values == async_values
+
+    def test_diamond_pipeline_parity(self):
+        src_a = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
+        src_b = _make_source("key", "score", {"key": ["a", "b"], "score": [100, 200]})
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(pf)
+
+        sync_pipeline = Pipeline(
+            name="sync_d", pipeline_database=InMemoryArrowDatabase()
+        )
+        with sync_pipeline:
+            joined = Join()(src_a, src_b, label="join")
+            pod(joined, label="adder")
+        sync_pipeline.run()
+        sync_values = sorted(
+            sync_pipeline.adder.get_all_records().column("total").to_pylist()
+        )
+
+        from orcapod.pipeline import AsyncPipelineOrchestrator
+
+        async_pipeline = Pipeline(
+            name="async_d", pipeline_database=InMemoryArrowDatabase()
+        )
+        with async_pipeline:
+            joined = Join()(src_a, src_b, label="join")
+            pod(joined, label="adder")
+        AsyncPipelineOrchestrator().run(async_pipeline)
+        async_values = sorted(
+            async_pipeline.adder.get_all_records().column("total").to_pylist()
+        )
+
+        assert sync_values == async_values
