@@ -15,6 +15,7 @@ reusable building blocks, and simplifies `Pipeline.run()` to delegate to an orch
 
 - Sync orchestrator with per-packet hooks for logging, metrics, and debugging.
 - Clean separation: orchestrator controls scheduling; nodes handle computation and persistence.
+- Uniform compute/store pattern across all node types.
 - Node protocols so the orchestrator is decoupled from concrete node classes.
 - Orchestrator operates on a graph of nodes, not on the `Pipeline` object directly.
 - Orchestrator returns results; pipeline decides how to apply them to node caches.
@@ -45,16 +46,35 @@ The pipeline graph's stream wiring declares **topology** (what connects to what)
 orchestrator creates its own **execution transport** (buffers) to control data flow at
 runtime. The stream wiring remains valuable for standalone/ad-hoc use without an orchestrator.
 
+### Uniform Compute/Store Pattern
+
+All node types follow the same two-step pattern during orchestrated execution:
+
+```
+1. Compute  → produce output data (pure, no DB side effects)
+2. Store    → persist to DB (node decides what to do internally; no-op if no DB)
+```
+
+The orchestrator always calls both steps for every node. It does not check whether a node
+has a database or any storage capability — that is the node's concern. This keeps the
+orchestrator simple and the node protocol uniform.
+
+| Node Type    | Compute                                   | Store                                    |
+|-------------|-------------------------------------------|------------------------------------------|
+| SourceNode  | `iter_packets()`                          | `store_result(results)`                  |
+| FunctionNode| `process_packet(tag, packet)` per-packet  | `store_result(tag, input_packet, output)` per-packet |
+| OperatorNode| `operator.process(*input_streams)`        | `store_result(results)`                  |
+
 ### Post-Execution Contract
 
-- **Orchestrator's job**: execute the graph, invoke DB persistence on nodes via their
-  protocol methods during execution, and return computed results for all nodes.
+- **Orchestrator's job**: execute the graph, invoke `store_result` on every node after
+  computation, and return computed results for all nodes.
 - **Pipeline's job**: receive the orchestrator's results and decide per-node whether to
   populate in-memory caches (making `iter_packets()` / `as_table()` work after execution).
 - **DB-backed nodes**: results persisted to DB during orchestrator execution AND optionally
   cached in memory after (via pipeline's `_apply_results`).
-- **Non-DB nodes**: results available only if the pipeline populates their cache from the
-  orchestrator's returned results.
+- **Non-DB nodes**: `store_result` is a no-op; results available only if the pipeline
+  populates their cache from the orchestrator's returned results.
 - **`materialize_results=False` mode**: orchestrator discards buffers after all downstream
   consumers have read them. `OrchestratorResult.node_outputs` is empty. Only DB-persisted
   results survive. This is an explicit trade-off: non-DB nodes lose all data after execution.
@@ -74,31 +94,33 @@ orchestrator.run(node_graph)
   │
   ├── SourceNode:
   │     observer.on_node_start(node)
-  │     output = materialize node.iter_packets()
+  │     output = materialize node.iter_packets()        ← compute
+  │     node.store_result(output)                       ← store (no-op if no DB)
   │     observer.on_node_end(node)
   │
   ├── FunctionNode:
   │     observer.on_node_start(node)
   │     compute entry_ids from upstream buffer
-  │     cached = node.get_cached_results(entry_ids)    ← DB read
+  │     cached = node.get_cached_results(entry_ids)     ← DB read
   │     for each (tag, packet) in upstream buffer:
   │       observer.on_packet_start(node, tag, packet)
   │       if entry_id in cached:
-  │         use cached result                          ← DB hit
+  │         use cached result                           ← DB hit
   │         observer.on_packet_end(..., cached=True)
   │       else:
-  │         node.process_packet(tag, packet)           ← compute + DB write
+  │         tag_out, result = node.process_packet(...)  ← compute (pure)
+  │         node.store_result(tag, packet, result)      ← store (pipeline record + result cache)
   │         observer.on_packet_end(..., cached=False)
   │     observer.on_node_end(node)
   │
   └── OperatorNode:
         observer.on_node_start(node)
-        cached = node.get_cached_output()              ← DB read (REPLAY mode)
+        cached = node.get_cached_output()               ← DB read (REPLAY mode)
         if cached:
           output = materialize cached stream
         else:
-          output = node.operator.process(*input_streams)  ← compute
-          node.store_output(output)                       ← DB write (LOG mode)
+          output = node.operator.process(*input_streams) ← compute (pure)
+          node.store_result(output)                      ← store (LOG → write; OFF → no-op)
         observer.on_node_end(node)
   │
   ▼
@@ -119,6 +141,10 @@ different execution model. The orchestrator dispatches via `TypeGuard` functions
 the existing `node_type` string attribute — cheap at runtime, with full type narrowing for
 static analysis.
 
+All protocols share `store_result` (persistence) and `populate_cache` (in-memory caching)
+as the uniform post-computation interface. The orchestrator always calls `store_result`
+after computation — nodes decide internally what to do (write to DB or no-op).
+
 #### `SourceNodeProtocol`
 
 Provides data with no computation. The orchestrator materializes its output into a buffer.
@@ -128,17 +154,25 @@ class SourceNodeProtocol(Protocol):
     node_type: str  # "source"
 
     def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]: ...
-    def populate_cache(self, results: list[tuple[TagProtocol, PacketProtocol]]) -> None: ...
+    def store_result(
+        self, results: list[tuple[TagProtocol, PacketProtocol]]
+    ) -> None: ...
+    def populate_cache(
+        self, results: list[tuple[TagProtocol, PacketProtocol]]
+    ) -> None: ...
 ```
+
+`store_result`: persists a snapshot of the source data to the pipeline DB if configured.
+No-op if no DB is attached. Useful for transient/updatable sources where you want a record
+of what the pipeline actually consumed.
 
 #### `FunctionNodeProtocol`
 
 Per-packet computation with optional DB caching. The orchestrator drives iteration externally,
 calling `process_packet()` for each input with observer hooks.
 
-`process_packet()` handles DB persistence internally: it delegates to `CachedFunctionPod`
-for result caching and calls `add_pipeline_record()` for pipeline provenance. No separate
-`store_output()` method is needed.
+`process_packet()` is pure computation — no DB side effects. All persistence happens in
+`store_result()`.
 
 ```python
 class FunctionNodeProtocol(Protocol):
@@ -156,15 +190,26 @@ class FunctionNodeProtocol(Protocol):
         self, tag: TagProtocol, packet: PacketProtocol
     ) -> tuple[TagProtocol, PacketProtocol | None]: ...
 
-    def populate_cache(self, results: list[tuple[TagProtocol, PacketProtocol]]) -> None: ...
+    def store_result(
+        self,
+        tag: TagProtocol,
+        input_packet: PacketProtocol,
+        output_packet: PacketProtocol | None,
+    ) -> None: ...
+
+    def populate_cache(
+        self, results: list[tuple[TagProtocol, PacketProtocol]]
+    ) -> None: ...
 ```
+
+`store_result`: when DB is attached, writes the computation result to the result DB (via
+`CachedFunctionPod`) and adds a pipeline provenance record to the pipeline DB (via
+`add_pipeline_record`). No-op if no DB is attached.
 
 #### `OperatorNodeProtocol`
 
 Whole-stream computation with cache modes. The orchestrator extracts the operator pod and
 invokes it with orchestrator-prepared streams.
-
-`store_output()` is cache-mode-aware: writes to DB in LOG mode, no-op in OFF mode.
 
 ```python
 class OperatorNodeProtocol(Protocol):
@@ -172,14 +217,18 @@ class OperatorNodeProtocol(Protocol):
     operator: OperatorPodProtocol
 
     def get_cached_output(self) -> StreamProtocol | None: ...
-    def store_output(self, results: list[tuple[TagProtocol, PacketProtocol]]) -> None: ...
-    def populate_cache(self, results: list[tuple[TagProtocol, PacketProtocol]]) -> None: ...
+    def store_result(
+        self, results: list[tuple[TagProtocol, PacketProtocol]]
+    ) -> None: ...
+    def populate_cache(
+        self, results: list[tuple[TagProtocol, PacketProtocol]]
+    ) -> None: ...
 ```
 
-Note: `store_output` accepts a materialized list of (tag, packet) pairs rather than a stream.
-This avoids the double-consumption problem where materializing a stream for the buffer would
-exhaust it before `store_output` can read it. The implementation wraps the list as an
-`ArrowTableStream` internally before writing to the DB.
+`store_result`: accepts a materialized list of (tag, packet) pairs. If cache mode is LOG,
+wraps the list as an `ArrowTableStream` and writes to DB. No-op for OFF mode. This avoids
+the double-consumption problem where materializing a stream for the buffer would exhaust it
+before storage could read it.
 
 #### TypeGuard Dispatch
 
@@ -292,6 +341,7 @@ in `node.run()` halts the pipeline.
 def _execute_source(self, node):
     self._observer.on_node_start(node)
     output = list(node.iter_packets())
+    node.store_result(output)  # no-op if no DB
     self._observer.on_node_end(node)
     return output
 ```
@@ -320,8 +370,10 @@ def _execute_function(self, node, upstream_buffer):
             self._observer.on_packet_end(node, tag, packet, result, cached=True)
             output.append((tag_out, result))
         else:
-            # process_packet handles DB write internally
+            # process_packet is pure computation — no DB side effects
             tag_out, result = node.process_packet(tag, packet)
+            # store_result handles all DB writes (result cache + pipeline record)
+            node.store_result(tag, packet, result)
             self._observer.on_packet_end(node, tag, packet, result, cached=False)
             if result is not None:
                 output.append((tag_out, result))
@@ -345,7 +397,7 @@ def _execute_operator(self, node, upstream_buffers):
         ]
         result_stream = node.operator.process(*input_streams)
         output = list(result_stream.iter_packets())
-        node.store_output(output)  # DB write (LOG mode); no-op for OFF
+        node.store_result(output)  # LOG → write; OFF → no-op
 
     self._observer.on_node_end(node)
     return output
@@ -378,7 +430,29 @@ per node in the worst case.
 
 ### Node Refactoring
 
-#### FunctionNode Additions
+#### FunctionNode Changes
+
+**`process_packet(tag, packet)` — now pure computation**
+
+Refactored to perform computation only (via `FunctionPod.process_packet` or
+`CachedFunctionPod` for result-level caching) without writing pipeline records. All
+pipeline DB writes move to `store_result`.
+
+Note: result-level caching via `CachedFunctionPod` (which checks if this specific
+tag+packet combination has been computed before) is still handled transparently within
+`process_packet`. This is computation-level memoization, not pipeline-level persistence.
+The distinction: `CachedFunctionPod` caches the function's output for a given input;
+`store_result` records the pipeline provenance (which tag+packet was processed in this
+pipeline run). These are separate concerns.
+
+**`store_result(tag, input_packet, output_packet) -> None`**
+
+Handles all pipeline-level DB persistence for a single packet:
+
+1. Stores the result via `CachedFunctionPod` to the result DB (if not already cached).
+2. Adds a pipeline provenance record to the pipeline DB (tag + system tags + input packet
+   hash → output packet record ID).
+3. No-op if no DB is attached.
 
 **`get_cached_results(entry_ids: list[str]) -> dict[str, tuple[Tag, Packet]]`**
 
@@ -405,26 +479,32 @@ Populates `_cached_output_packets` dict from externally-provided results so that
 `_cached_input_iterator = None` and `_needs_iterator = False` to indicate iteration is
 complete.
 
-#### OperatorNode Additions
+#### OperatorNode Changes
 
 **`get_cached_output() -> StreamProtocol | None`**
 
 Returns the cached output stream when in REPLAY mode and DB records exist. Returns `None`
 otherwise. Factored out of `run()`. Wraps the existing `_replay_from_cache()` logic.
 
-**`store_output(results: list[tuple[Tag, Packet]]) -> None`**
+**`store_result(results: list[tuple[Tag, Packet]]) -> None`**
 
 Accepts a materialized list of (tag, packet) pairs. If cache mode is LOG, wraps the list
 as an `ArrowTableStream` and calls the existing `_store_output_stream()` to write to DB.
 No-op for OFF mode. This avoids the double-consumption problem: the orchestrator materializes
-the stream into a list first, then passes the list to both the buffer and `store_output`.
+the stream into a list first, then passes the list to both the buffer and `store_result`.
 
 **`populate_cache(results: list[tuple[Tag, Packet]]) -> None`**
 
 Wraps results as an `ArrowTableStream` and sets `_cached_output_stream` so that
 `iter_packets()` / `as_table()` work after orchestrated execution.
 
-#### SourceNode Additions
+#### SourceNode Changes
+
+**`store_result(results: list[tuple[Tag, Packet]]) -> None`**
+
+Persists a snapshot of the source data to the pipeline DB if configured. No-op if no DB
+is attached. Useful for transient/updatable sources where you want a record of what the
+pipeline actually consumed.
 
 **`populate_cache(results: list[tuple[Tag, Packet]]) -> None`**
 
@@ -505,8 +585,13 @@ can be added later.
   Verify that non-DB node data is inaccessible (explicit trade-off).
 - **FunctionNode.get_cached_results tests**: targeted lookup returns correct subset;
   empty DB returns `{}`; entry IDs not in DB are absent from result.
-- **OperatorNode.get_cached_output / store_output tests**: cache mode behavior (OFF → no-op,
+- **FunctionNode.store_result tests**: verify pipeline record + result cache writes;
+  verify no-op when no DB attached.
+- **FunctionNode.process_packet purity tests**: verify no DB side effects from
+  process_packet alone (pipeline records only written via store_result).
+- **OperatorNode.get_cached_output / store_result tests**: cache mode behavior (OFF → no-op,
   LOG → writes, REPLAY → reads).
+- **SourceNode.store_result tests**: verify DB snapshot write when configured; no-op otherwise.
 - **Sync vs async parity tests**: same pipeline produces same DB results regardless of
   orchestrator type.
 - **Error propagation tests**: exception in mid-pipeline node halts execution; earlier
