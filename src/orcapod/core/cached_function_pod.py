@@ -28,24 +28,17 @@ logger = logging.getLogger(__name__)
 class CachedFunctionPod(WrappedFunctionPod):
     """Pod-level caching wrapper that intercepts ``process_packet()``.
 
-    Unlike ``CachedPacketFunction`` (which caches at the ``call(packet)``
-    level using only the packet content hash as the cache key), this
-    wrapper operates at the ``process_packet(tag, packet)`` level and
-    incorporates the tag (including system tags) and the packet content
-    hash into a single cache entry hash.
+    Caches at the ``process_packet(tag, packet)`` level using only the
+    **input packet content hash** as the cache key — the output of a
+    packet function depends solely on the packet, not the tag.
 
-    The cache entry hash is computed the same way as the pipeline record's
-    ``entry_id``: ``arrow_hasher.hash_table(tag_with_system_tags + input_packet_hash)``.
-    This ensures two rows with identical user tags but different system
-    tags (reflecting different source entries) are cached separately.
+    Tag-level provenance tracking (tag + system tags + packet hash) is
+    handled separately by ``FunctionNode.add_pipeline_record``.
 
     Storage format aligns with ``CachedPacketFunction``: each cached
-    record includes function variation data, execution data, the cache
-    entry hash, and a timestamp.
+    record includes function variation data, execution data, input packet
+    hash, and a timestamp.
     """
-
-    # Column storing the combined hash of tag + system tags + input packet hash
-    CACHE_ENTRY_HASH_COL = f"{constants.META_PREFIX}cache_entry_hash"
 
     # Meta column indicating whether the result was freshly computed
     RESULT_COMPUTED_FLAG = f"{constants.META_PREFIX}computed"
@@ -68,32 +61,11 @@ class CachedFunctionPod(WrappedFunctionPod):
         """Return the path to the cached records in the result store."""
         return self._record_path_prefix + self.uri
 
-    def _compute_entry_hash(self, tag: TagProtocol, packet: PacketProtocol) -> str:
-        """Compute a cache entry hash from tag (with system tags) and packet.
-
-        The hash includes user-facing tag columns, system tag columns, and
-        the input packet content hash — matching the pipeline record's
-        entry_id computation.
+    def _lookup(self, input_packet: PacketProtocol) -> PacketProtocol | None:
+        """Look up a cached output packet by input packet content hash.
 
         Args:
-            tag: The tag associated with the packet.
-            packet: The input packet.
-
-        Returns:
-            A hash string uniquely identifying this (tag, system_tags, packet)
-            combination.
-        """
-        tag_with_hash = tag.as_table(columns={"system_tags": True}).append_column(
-            constants.INPUT_PACKET_HASH_COL,
-            pa.array([packet.content_hash().to_string()], type=pa.large_string()),
-        )
-        return self.data_context.arrow_hasher.hash_table(tag_with_hash).to_string()
-
-    def _lookup(self, entry_hash: str) -> PacketProtocol | None:
-        """Look up a cached output packet by cache entry hash.
-
-        Args:
-            entry_hash: The combined tag+system_tags+packet hash.
+            input_packet: The input packet whose content hash is used for lookup.
 
         Returns:
             The cached output packet, or ``None`` if not found.
@@ -102,9 +74,15 @@ class CachedFunctionPod(WrappedFunctionPod):
 
         RECORD_ID_COL = "_record_id"
 
+        # TODO: add match based on match_tier if specified
+        # TODO: implement matching policy/strategy (see DESIGN_ISSUES P6)
+        constraints = {
+            constants.INPUT_PACKET_HASH_COL: input_packet.content_hash().to_string(),
+        }
+
         result_table = self._result_database.get_records_with_column_value(
             self.record_path,
-            {self.CACHE_ENTRY_HASH_COL: entry_hash},
+            constraints,
             record_id_column=RECORD_ID_COL,
         )
 
@@ -113,7 +91,8 @@ class CachedFunctionPod(WrappedFunctionPod):
 
         if result_table.num_rows > 1:
             logger.info(
-                "Pod-level cache: multiple records for entry hash, taking most recent"
+                "Pod-level cache: multiple records for input packet hash, "
+                "taking most recent"
             )
             result_table = result_table.sort_by(
                 [(constants.POD_TIMESTAMP, "descending")]
@@ -121,7 +100,7 @@ class CachedFunctionPod(WrappedFunctionPod):
 
         record_id = result_table.to_pylist()[0][RECORD_ID_COL]
         result_table = result_table.drop_columns(
-            [RECORD_ID_COL, self.CACHE_ENTRY_HASH_COL]
+            [RECORD_ID_COL, constants.INPUT_PACKET_HASH_COL]
         )
 
         return Packet(
@@ -132,18 +111,16 @@ class CachedFunctionPod(WrappedFunctionPod):
 
     def _store(
         self,
-        entry_hash: str,
         input_packet: PacketProtocol,
         output_packet: PacketProtocol,
     ) -> None:
         """Store an output packet in the cache.
 
         Stores the output packet data alongside function variation data,
-        execution data, the cache entry hash, and a timestamp — matching
-        the column structure of ``CachedPacketFunction``.
+        execution data, input packet hash, and timestamp — matching the
+        column structure of ``CachedPacketFunction``.
 
         Args:
-            entry_hash: The combined tag+system_tags+packet hash.
             input_packet: The input packet (used for its content hash).
             output_packet: The computed output packet to store.
         """
@@ -170,11 +147,11 @@ class CachedFunctionPod(WrappedFunctionPod):
             )
             i += 1
 
-        # Add cache entry hash (position 0)
+        # Add input packet hash (position 0, same as CachedPacketFunction)
         data_table = data_table.add_column(
             0,
-            self.CACHE_ENTRY_HASH_COL,
-            pa.array([entry_hash], type=pa.large_string()),
+            constants.INPUT_PACKET_HASH_COL,
+            pa.array([input_packet.content_hash().to_string()], type=pa.large_string()),
         )
 
         # Append timestamp
@@ -199,11 +176,10 @@ class CachedFunctionPod(WrappedFunctionPod):
     ) -> tuple[TagProtocol, PacketProtocol | None]:
         """Process a packet with pod-level caching.
 
-        The cache entry hash incorporates tag columns, system tag columns,
-        and the input packet content hash.  On a cache hit, the stored
-        output packet is returned without invoking the inner pod's
-        computation.  The output packet carries a ``RESULT_COMPUTED_FLAG``
-        meta value: ``True`` if freshly computed, ``False`` if from cache.
+        The cache key is the input packet content hash only — the function
+        output depends solely on the packet, not the tag.  The output
+        packet carries a ``RESULT_COMPUTED_FLAG`` meta value: ``True`` if
+        freshly computed, ``False`` if retrieved from cache.
 
         Args:
             tag: The tag associated with the packet.
@@ -213,15 +189,14 @@ class CachedFunctionPod(WrappedFunctionPod):
             A ``(tag, output_packet)`` tuple; output_packet is ``None``
             if the inner function filters the packet out.
         """
-        entry_hash = self._compute_entry_hash(tag, packet)
-        cached = self._lookup(entry_hash)
+        cached = self._lookup(packet)
         if cached is not None:
             logger.info("Pod-level cache hit")
             return tag, cached
 
         tag, output = self._function_pod.process_packet(tag, packet)
         if output is not None:
-            self._store(entry_hash, packet, output)
+            self._store(packet, output)
             output = output.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: True})
         return tag, output
 
@@ -234,15 +209,14 @@ class CachedFunctionPod(WrappedFunctionPod):
         actual computation uses the inner pod's ``async_process_packet``
         for true async execution.
         """
-        entry_hash = self._compute_entry_hash(tag, packet)
-        cached = self._lookup(entry_hash)
+        cached = self._lookup(packet)
         if cached is not None:
             logger.info("Pod-level cache hit")
             return tag, cached
 
         tag, output = await self._function_pod.async_process_packet(tag, packet)
         if output is not None:
-            self._store(entry_hash, packet, output)
+            self._store(packet, output)
             output = output.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: True})
         return tag, output
 

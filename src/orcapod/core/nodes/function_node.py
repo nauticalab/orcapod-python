@@ -538,6 +538,27 @@ class FunctionNode(StreamBase):
         else:
             return await self._function_pod.async_process_packet(tag, packet)
 
+    def compute_pipeline_entry_id(
+        self, tag: TagProtocol, input_packet: PacketProtocol
+    ) -> str:
+        """Compute a unique pipeline entry ID from tag + system tags + input packet hash.
+
+        This ID uniquely identifies a (tag, system_tags, input_packet) combination
+        and is used as the record ID in the pipeline database.
+
+        Args:
+            tag: The tag (including system tags).
+            input_packet: The input packet.
+
+        Returns:
+            A hash string uniquely identifying this combination.
+        """
+        tag_with_hash = tag.as_table(columns={"system_tags": True}).append_column(
+            constants.INPUT_PACKET_HASH_COL,
+            pa.array([input_packet.content_hash().to_string()], type=pa.large_string()),
+        )
+        return self.data_context.arrow_hasher.hash_table(tag_with_hash).to_string()
+
     def add_pipeline_record(
         self,
         tag: TagProtocol,
@@ -555,14 +576,7 @@ class FunctionNode(StreamBase):
         - Input packet data context key
         - Whether the result was freshly computed or cached
         """
-        # Compute entry hash from tag + system tags + input packet hash
-        tag_with_hash = tag.as_table(columns={"system_tags": True}).append_column(
-            constants.INPUT_PACKET_HASH_COL,
-            pa.array([input_packet.content_hash().to_string()], type=pa.large_string()),
-        )
-
-        # Unique entry ID: combination of tags, system_tags, and input_packet hash
-        entry_id = self.data_context.arrow_hasher.hash_table(tag_with_hash).to_string()
+        entry_id = self.compute_pipeline_entry_id(tag, input_packet)
 
         # Check for existing entry
         existing_record = None
@@ -710,28 +724,65 @@ class FunctionNode(StreamBase):
             if self._cached_input_iterator is not None:
                 input_iter = self._cached_input_iterator
                 # --- Phase 1: yield already-computed results from the databases ---
-                existing = self.get_all_records(columns={"meta": True})
-                computed_entry_hashes: set[str] = set()
-                if existing is not None and existing.num_rows > 0:
-                    tag_keys = self._input_stream.keys()[0]
-                    entry_hash_col = CachedFunctionPod.CACHE_ENTRY_HASH_COL
-                    computed_entry_hashes = set(
-                        cast(list[str], existing.column(entry_hash_col).to_pylist())
+                # Retrieve pipeline records with their entry_ids (record IDs)
+                # and join with result records to reconstruct (tag, output_packet).
+                PIPELINE_ENTRY_ID_COL = "__pipeline_entry_id"
+                existing_entry_ids: set[str] = set()
+
+                taginfo = self._pipeline_database.get_all_records(
+                    self.pipeline_path,
+                    record_id_column=PIPELINE_ENTRY_ID_COL,
+                )
+                results = self._cached_function_pod._result_database.get_all_records(
+                    self._cached_function_pod.record_path,
+                    record_id_column=constants.PACKET_RECORD_ID,
+                )
+
+                if taginfo is not None and results is not None:
+                    joined = (
+                        pl.DataFrame(taginfo)
+                        .join(
+                            pl.DataFrame(results),
+                            on=constants.PACKET_RECORD_ID,
+                            how="inner",
+                        )
+                        .to_arrow()
                     )
-                    # Strip the entry hash column before yielding as stream
-                    data_table = existing.drop([entry_hash_col])
-                    existing_stream = ArrowTableStream(data_table, tag_columns=tag_keys)
-                    for i, (tag, packet) in enumerate(existing_stream.iter_packets()):
-                        self._cached_output_packets[i] = (tag, packet)
-                        yield tag, packet
+                    if joined.num_rows > 0:
+                        tag_keys = self._input_stream.keys()[0]
+                        # Collect pipeline entry_ids for Phase 2 skip check
+                        existing_entry_ids = set(
+                            cast(
+                                list[str],
+                                joined.column(PIPELINE_ENTRY_ID_COL).to_pylist(),
+                            )
+                        )
+                        # Drop internal columns before yielding as stream
+                        drop_cols = [
+                            c
+                            for c in joined.column_names
+                            if c.startswith(constants.META_PREFIX)
+                            or c == PIPELINE_ENTRY_ID_COL
+                        ]
+                        data_table = joined.drop(
+                            [c for c in drop_cols if c in joined.column_names]
+                        )
+                        existing_stream = ArrowTableStream(
+                            data_table, tag_columns=tag_keys
+                        )
+                        for i, (tag, packet) in enumerate(
+                            existing_stream.iter_packets()
+                        ):
+                            self._cached_output_packets[i] = (tag, packet)
+                            yield tag, packet
 
                 # --- Phase 2: process only missing input packets ---
+                # Skip inputs whose pipeline entry_id (tag+system_tags+packet_hash)
+                # already exists in the pipeline database.
                 next_idx = len(self._cached_output_packets)
                 for tag, packet in input_iter:
-                    entry_hash = self._cached_function_pod._compute_entry_hash(
-                        tag, packet
-                    )
-                    if entry_hash in computed_entry_hashes:
+                    entry_id = self.compute_pipeline_entry_id(tag, packet)
+                    if entry_id in existing_entry_ids:
                         continue
                     tag, output_packet = self.process_packet(tag, packet)
                     self._cached_output_packets[next_idx] = (tag, output_packet)
@@ -955,21 +1006,50 @@ class FunctionNode(StreamBase):
             if self._cached_function_pod is not None:
                 # Two-phase async execution with DB backing
                 # Phase 1: emit existing results from DB
-                existing = self.get_all_records(columns={"meta": True})
-                computed_entry_hashes: set[str] = set()
-                if existing is not None and existing.num_rows > 0:
-                    tag_keys = self._input_stream.keys()[0]
-                    entry_hash_col = CachedFunctionPod.CACHE_ENTRY_HASH_COL
-                    computed_entry_hashes = set(
-                        cast(
-                            list[str],
-                            existing.column(entry_hash_col).to_pylist(),
+                PIPELINE_ENTRY_ID_COL = "__pipeline_entry_id"
+                existing_entry_ids: set[str] = set()
+
+                taginfo = self._pipeline_database.get_all_records(
+                    self.pipeline_path,
+                    record_id_column=PIPELINE_ENTRY_ID_COL,
+                )
+                results = self._cached_function_pod._result_database.get_all_records(
+                    self._cached_function_pod.record_path,
+                    record_id_column=constants.PACKET_RECORD_ID,
+                )
+
+                if taginfo is not None and results is not None:
+                    joined = (
+                        pl.DataFrame(taginfo)
+                        .join(
+                            pl.DataFrame(results),
+                            on=constants.PACKET_RECORD_ID,
+                            how="inner",
                         )
+                        .to_arrow()
                     )
-                    data_table = existing.drop([entry_hash_col])
-                    existing_stream = ArrowTableStream(data_table, tag_columns=tag_keys)
-                    for tag, packet in existing_stream.iter_packets():
-                        await output.send((tag, packet))
+                    if joined.num_rows > 0:
+                        tag_keys = self._input_stream.keys()[0]
+                        existing_entry_ids = set(
+                            cast(
+                                list[str],
+                                joined.column(PIPELINE_ENTRY_ID_COL).to_pylist(),
+                            )
+                        )
+                        drop_cols = [
+                            c
+                            for c in joined.column_names
+                            if c.startswith(constants.META_PREFIX)
+                            or c == PIPELINE_ENTRY_ID_COL
+                        ]
+                        data_table = joined.drop(
+                            [c for c in drop_cols if c in joined.column_names]
+                        )
+                        existing_stream = ArrowTableStream(
+                            data_table, tag_columns=tag_keys
+                        )
+                        for tag, packet in existing_stream.iter_packets():
+                            await output.send((tag, packet))
 
                 # Phase 2: process new packets concurrently
                 sem = (
@@ -993,10 +1073,8 @@ class FunctionNode(StreamBase):
 
                 async with asyncio.TaskGroup() as tg:
                     async for tag, packet in inputs[0]:
-                        entry_hash = self._cached_function_pod._compute_entry_hash(
-                            tag, packet
-                        )
-                        if entry_hash in computed_entry_hashes:
+                        entry_id = self.compute_pipeline_entry_id(tag, packet)
+                        if entry_id in existing_entry_ids:
                             continue
                         if sem is not None:
                             await sem.acquire()
