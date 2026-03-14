@@ -763,7 +763,6 @@ class TestHashChainDetaching:
         derived_src2 = pipe.adder.as_source()
         assert derived_src.pipeline_hash() == derived_src2.pipeline_hash()
 
-    @pytest.mark.xfail(reason="PLT-924: DerivedSource system tag schema mismatch")
     def test_detached_pipeline_downstream_hash_differs_from_extending(
         self, pipeline_db
     ):
@@ -809,7 +808,6 @@ class TestHashChainDetaching:
         # 110*2=220, 220*2=440
         assert sorted(table.column("doubled").to_pylist()) == [220, 440]
 
-    @pytest.mark.xfail(reason="PLT-924: DerivedSource system tag schema mismatch")
     def test_detached_pipeline_hash_matches_equivalent_fresh_source(self, pipeline_db):
         """A DerivedSource and a fresh ArrowTableSource with the same schema
         produce identical pipeline_hash downstream, but different content_hash

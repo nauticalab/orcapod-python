@@ -1,4 +1,8 @@
-"""Tests for node execute methods (schema validation, persistence, caching)."""
+"""Tests for node execute methods (persistence, caching).
+
+Note: execute / execute_packet are internal methods for orchestrators.
+The caller guarantees input identity — no schema validation is performed.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +14,6 @@ from orcapod.core.nodes import FunctionNode
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.errors import InputValidationError
 
 
 def double_value(value: int) -> int:
@@ -87,32 +90,6 @@ class TestFunctionNodeExecutePacket:
         node.execute_packet(tag, packet)
         assert len(node._cached_output_packets) == 1
 
-    def test_validates_schema_rejects_wrong_tag(self, function_node_with_db):
-        node, _, _ = function_node_with_db
-        wrong_table = pa.table(
-            {
-                "wrong_key": pa.array(["x"], type=pa.large_string()),
-                "value": pa.array([99], type=pa.int64()),
-            }
-        )
-        wrong_src = ArrowTableSource(wrong_table, tag_columns=["wrong_key"])
-        wrong_tag, wrong_pkt = list(wrong_src.iter_packets())[0]
-        with pytest.raises(InputValidationError):
-            node.execute_packet(wrong_tag, wrong_pkt)
-
-    def test_validates_schema_rejects_wrong_packet(self, function_node_with_db):
-        node, _, _ = function_node_with_db
-        wrong_table = pa.table(
-            {
-                "key": pa.array(["x"], type=pa.large_string()),
-                "wrong_col": pa.array([99], type=pa.int64()),
-            }
-        )
-        wrong_src = ArrowTableSource(wrong_table, tag_columns=["key"])
-        wrong_tag, wrong_pkt = list(wrong_src.iter_packets())[0]
-        with pytest.raises(InputValidationError):
-            node.execute_packet(wrong_tag, wrong_pkt)
-
 
 class TestFunctionNodeExecute:
     def test_returns_materialized_results(self, function_node_with_db):
@@ -135,18 +112,6 @@ class TestFunctionNodeExecute:
         node.execute(node._input_stream)
         assert len(node._cached_output_packets) == 2
 
-    def test_validates_stream_schema(self, function_node_with_db):
-        node, _, _ = function_node_with_db
-        wrong_table = pa.table(
-            {
-                "wrong_key": pa.array(["x"], type=pa.large_string()),
-                "wrong_col": pa.array([99], type=pa.int64()),
-            }
-        )
-        wrong_stream = ArrowTableSource(wrong_table, tag_columns=["wrong_key"])
-        with pytest.raises(InputValidationError):
-            node.execute(wrong_stream)
-
 
 # ------------------------------------------------------------------
 # OperatorNode.execute() tests
@@ -154,7 +119,6 @@ class TestFunctionNodeExecute:
 
 from orcapod.core.nodes import OperatorNode
 from orcapod.core.operators import SelectPacketColumns
-from orcapod.databases import InMemoryArrowDatabase
 from orcapod.types import CacheMode
 
 
@@ -211,23 +175,6 @@ class TestOperatorNodeExecute:
         node.execute(src)
         cached = list(node.iter_packets())
         assert len(cached) == 2
-
-    def test_validates_stream_schema(self, operator_no_db):
-        node, _ = operator_no_db
-        wrong_table = pa.table(
-            {
-                "wrong": pa.array(["x"], type=pa.large_string()),
-                "bad": pa.array([1], type=pa.int64()),
-            }
-        )
-        wrong_stream = ArrowTableSource(wrong_table, tag_columns=["wrong"])
-        with pytest.raises(InputValidationError):
-            node.execute(wrong_stream)
-
-    def test_validates_stream_count(self, operator_no_db):
-        node, src = operator_no_db
-        with pytest.raises(InputValidationError, match="Expected 1"):
-            node.execute(src, src)  # Too many inputs
 
     def test_noop_db_in_off_mode(self, operator_no_db):
         node, src = operator_no_db
