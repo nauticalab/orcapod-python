@@ -595,7 +595,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         return {
             "function_pod": node._function_pod.to_config(),
             "pipeline_path": list(node.pipeline_path),
-            "result_record_path": list(node._packet_function.record_path),
+            "result_record_path": list(node._cached_function_pod.record_path),
         }
 
     def _build_operator_descriptor(self, node: OperatorNode) -> dict[str, Any]:

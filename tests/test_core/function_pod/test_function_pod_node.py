@@ -455,10 +455,12 @@ class TestGetAllRecordsMetaColumns:
         assert result is not None
         assert constants.PACKET_RECORD_ID in result.column_names
 
-    def test_meta_true_includes_input_packet_hash(self, filled_node):
+    def test_meta_true_includes_cache_entry_hash(self, filled_node):
+        from orcapod.core.cached_function_pod import CachedFunctionPod
+
         result = filled_node.get_all_records(columns={"meta": True})
         assert result is not None
-        assert constants.INPUT_PACKET_HASH_COL in result.column_names
+        assert CachedFunctionPod.CACHE_ENTRY_HASH_COL in result.column_names
 
     def test_meta_true_still_has_data_columns(self, filled_node):
         result = filled_node.get_all_records(columns={"meta": True})
@@ -466,10 +468,12 @@ class TestGetAllRecordsMetaColumns:
         assert "id" in result.column_names
         assert "result" in result.column_names
 
-    def test_input_packet_hash_values_are_non_empty_strings(self, filled_node):
+    def test_cache_entry_hash_values_are_non_empty_strings(self, filled_node):
+        from orcapod.core.cached_function_pod import CachedFunctionPod
+
         result = filled_node.get_all_records(columns={"meta": True})
         assert result is not None
-        hashes = result.column(constants.INPUT_PACKET_HASH_COL).to_pylist()
+        hashes = result.column(CachedFunctionPod.CACHE_ENTRY_HASH_COL).to_pylist()
         assert all(isinstance(h, str) and len(h) > 0 for h in hashes)
 
     def test_packet_record_id_values_are_non_empty_strings(self, filled_node):
@@ -665,7 +669,7 @@ class TestFunctionNodeResultPath:
         node.process_packet(tag, packet)
         db.flush()
 
-        result_path = node._packet_function.record_path
+        result_path = node._cached_function_pod.record_path
         assert result_path[-1] == "_result" or any(
             "_result" in part for part in result_path
         )
