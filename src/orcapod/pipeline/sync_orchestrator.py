@@ -34,9 +34,9 @@ class SyncPipelineOrchestrator:
     - **SourceNode**: materializes ``iter_packets()`` into a buffer.
       The source node self-caches on first call.
     - **FunctionNode**: per-packet execution with cache lookup and
-      observer hooks. ``process_packet`` handles computation +
+      observer hooks. ``execute_packet`` handles computation +
       function-level memoization.
-    - **OperatorNode**: bulk execution via ``node.process()``.
+    - **OperatorNode**: bulk execution via ``node.execute()``.
 
     The orchestrator returns an ``OrchestratorResult`` with all node outputs.
 
@@ -120,7 +120,7 @@ class SyncPipelineOrchestrator:
                 self._observer.on_packet_end(node, tag, packet, result, cached=True)
                 output.append((tag_out, result))
             else:
-                tag_out, result = node.process_packet(tag, packet)
+                tag_out, result = node.execute_packet(tag, packet)
                 self._observer.on_packet_end(node, tag, packet, result, cached=False)
                 if result is not None:
                     output.append((tag_out, result))
@@ -142,7 +142,7 @@ class SyncPipelineOrchestrator:
                 self._materialize_as_stream(buf, upstream_node)
                 for buf, upstream_node in upstream_buffers
             ]
-            output = node.process(*input_streams)
+            output = node.execute(*input_streams)
 
         self._observer.on_node_end(node)
         return output

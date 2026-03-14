@@ -42,11 +42,11 @@ class FunctionNodeProtocol(Protocol):
         self, tag: "TagProtocol", packet: "PacketProtocol"
     ) -> str: ...
 
-    def process_packet(
+    def execute_packet(
         self, tag: "TagProtocol", packet: "PacketProtocol"
     ) -> tuple["TagProtocol", "PacketProtocol | None"]: ...
 
-    def process(
+    def execute(
         self, input_stream: "StreamProtocol"
     ) -> list[tuple["TagProtocol", "PacketProtocol"]]: ...
 
@@ -57,7 +57,7 @@ class OperatorNodeProtocol(Protocol):
 
     node_type: str
 
-    def process(
+    def execute(
         self, *input_streams: "StreamProtocol"
     ) -> list[tuple["TagProtocol", "PacketProtocol"]]: ...
 

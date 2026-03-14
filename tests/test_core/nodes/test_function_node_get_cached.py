@@ -61,7 +61,7 @@ class TestGetCachedResults:
 
         entry_ids = []
         for tag, packet in packets:
-            node.process_packet(tag, packet)
+            node.execute_packet(tag, packet)
             entry_ids.append(node.compute_pipeline_entry_id(tag, packet))
 
         cached = node.get_cached_results(entry_ids)
@@ -74,7 +74,7 @@ class TestGetCachedResults:
 
         entry_ids = []
         for tag, packet in packets:
-            node.process_packet(tag, packet)
+            node.execute_packet(tag, packet)
             entry_ids.append(node.compute_pipeline_entry_id(tag, packet))
 
         cached = node.get_cached_results([entry_ids[0]])
@@ -89,7 +89,7 @@ class TestGetCachedResults:
 
         entry_ids = []
         for tag, packet in packets:
-            node.process_packet(tag, packet)
+            node.execute_packet(tag, packet)
             entry_ids.append(node.compute_pipeline_entry_id(tag, packet))
 
         # Clear internal cache

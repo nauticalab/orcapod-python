@@ -467,18 +467,18 @@ class OperatorNode(StreamBase):
                     f"expected {dict(expected_pkt)}, got {dict(actual_pkt)}"
                 )
 
-    def process(
+    def execute(
         self,
         *input_streams: StreamProtocol,
     ) -> list[tuple[TagProtocol, PacketProtocol]]:
-        """Process input streams with schema validation, persistence, and caching.
+        """Execute input streams with schema validation, persistence, and caching.
 
         Validates input schemas, computes via the internal operator,
         materializes results, persists to DB (if LOG mode), and caches
         internally.
 
         Args:
-            *input_streams: Input streams to process (must match expected
+            *input_streams: Input streams to execute (must match expected
                 upstream count and schemas).
 
         Returns:
