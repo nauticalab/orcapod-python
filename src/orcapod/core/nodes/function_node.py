@@ -470,11 +470,12 @@ class FunctionNode(StreamBase):
         tag: TagProtocol,
         packet: PacketProtocol,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
-        """Process a single packet, optionally recording to the pipeline database.
+        """Process a single packet with function-level memoization.
 
-        When a database is attached, uses ``CachedFunctionPod`` for result
-        caching (tag+packet level) and separately records a pipeline
-        provenance entry.
+        Delegates to ``CachedFunctionPod`` (when DB is attached) for
+        computation and result-level caching, or to the raw ``FunctionPod``
+        otherwise. Does NOT write pipeline provenance records — use
+        ``store_result`` for that.
 
         Args:
             tag: The tag associated with the packet.
@@ -485,25 +486,159 @@ class FunctionNode(StreamBase):
             the function filters the packet out.
         """
         if self._cached_function_pod is not None:
-            # Persistent mode: CachedFunctionPod for result caching + pipeline record
-            tag, output_packet = self._cached_function_pod.process_packet(tag, packet)
+            return self._cached_function_pod.process_packet(tag, packet)
+        return self._function_pod.process_packet(tag, packet)
 
-            if output_packet is not None:
-                result_computed = bool(
-                    output_packet.get_meta_value(
-                        self._cached_function_pod.RESULT_COMPUTED_FLAG, False
-                    )
-                )
-                self.add_pipeline_record(
-                    tag,
-                    packet,
-                    packet_record_id=output_packet.datagram_id,
-                    computed=result_computed,
-                )
+    def store_result(
+        self,
+        tag: TagProtocol,
+        input_packet: PacketProtocol,
+        output_packet: PacketProtocol | None,
+    ) -> None:
+        """Record pipeline provenance for a processed packet.
 
-            return tag, output_packet
-        else:
-            return self._function_pod.process_packet(tag, packet)
+        Writes a pipeline record associating this (tag + system_tags +
+        input_packet) with the output packet record ID. Does NOT write
+        to the result DB — that is handled by ``process_packet`` via
+        ``CachedFunctionPod``.
+
+        No-op if no pipeline DB is attached or output is None.
+
+        Args:
+            tag: The tag associated with the packet.
+            input_packet: The original input packet.
+            output_packet: The computation result, or None if filtered.
+        """
+        if output_packet is None:
+            return
+        if self._pipeline_database is None:
+            return
+
+        result_computed = True
+        if self._cached_function_pod is not None:
+            result_computed = bool(
+                output_packet.get_meta_value(
+                    self._cached_function_pod.RESULT_COMPUTED_FLAG, True
+                )
+            )
+
+        self.add_pipeline_record(
+            tag,
+            input_packet,
+            packet_record_id=output_packet.datagram_id,
+            computed=result_computed,
+        )
+
+    def _process_and_store_packet(
+        self,
+        tag: TagProtocol,
+        packet: PacketProtocol,
+    ) -> tuple[TagProtocol, PacketProtocol | None]:
+        """Process a single packet and record pipeline provenance.
+
+        Combines ``process_packet`` (computation + function-level memoization)
+        with ``store_result`` (pipeline provenance recording). Used internally
+        by ``iter_packets()`` and related iteration methods.
+
+        Args:
+            tag: The tag associated with the packet.
+            packet: The input packet to process.
+
+        Returns:
+            A ``(tag, output_packet)`` tuple; output_packet is ``None`` if
+            the function filters the packet out.
+        """
+        tag_out, output_packet = self.process_packet(tag, packet)
+        self.store_result(tag_out, packet, output_packet)
+        return tag_out, output_packet
+
+    def populate_cache(self, results: list[tuple[TagProtocol, PacketProtocol]]) -> None:
+        """Populate in-memory cache from externally-provided results.
+
+        After calling this, ``iter_packets()`` returns from the cache
+        without upstream iteration or computation.
+
+        Args:
+            results: Materialized (tag, packet) pairs.
+        """
+        self._cached_output_packets.clear()
+        for i, (tag, packet) in enumerate(results):
+            self._cached_output_packets[i] = (tag, packet)
+        self._cached_input_iterator = None
+        self._needs_iterator = False
+        self._update_modified_time()
+
+    def get_cached_results(
+        self, entry_ids: list[str]
+    ) -> dict[str, tuple[TagProtocol, PacketProtocol]]:
+        """Retrieve cached results for specific pipeline entry IDs.
+
+        Looks up the pipeline DB and result DB, joins them, and filters
+        to the requested entry IDs. Returns a mapping from entry ID to
+        (tag, output_packet).
+
+        Args:
+            entry_ids: Pipeline entry IDs to look up.
+
+        Returns:
+            Mapping from entry_id to (tag, output_packet) for found entries.
+            Empty dict if no DB is attached or no matches found.
+        """
+        if self._cached_function_pod is None or not entry_ids:
+            return {}
+
+        PIPELINE_ENTRY_ID_COL = "__pipeline_entry_id"
+        entry_id_set = set(entry_ids)
+
+        taginfo = self._pipeline_database.get_all_records(
+            self.pipeline_path,
+            record_id_column=PIPELINE_ENTRY_ID_COL,
+        )
+        results = self._cached_function_pod._result_database.get_all_records(
+            self._cached_function_pod.record_path,
+            record_id_column=constants.PACKET_RECORD_ID,
+        )
+
+        if taginfo is None or results is None:
+            return {}
+
+        joined = (
+            pl.DataFrame(taginfo)
+            .join(
+                pl.DataFrame(results),
+                on=constants.PACKET_RECORD_ID,
+                how="inner",
+            )
+            .to_arrow()
+        )
+
+        if joined.num_rows == 0:
+            return {}
+
+        # Filter to requested entry IDs
+        all_entry_ids = joined.column(PIPELINE_ENTRY_ID_COL).to_pylist()
+        mask = [eid in entry_id_set for eid in all_entry_ids]
+        filtered = joined.filter(pa.array(mask))
+
+        if filtered.num_rows == 0:
+            return {}
+
+        tag_keys = self._input_stream.keys()[0]
+        drop_cols = [
+            c
+            for c in filtered.column_names
+            if c.startswith(constants.META_PREFIX) or c == PIPELINE_ENTRY_ID_COL
+        ]
+        data_table = filtered.drop([c for c in drop_cols if c in filtered.column_names])
+
+        stream = ArrowTableStream(data_table, tag_columns=tag_keys)
+        filtered_entry_ids = [eid for eid, m in zip(all_entry_ids, mask) if m]
+
+        result_dict: dict[str, tuple[TagProtocol, PacketProtocol]] = {}
+        for entry_id, (tag, packet) in zip(filtered_entry_ids, stream.iter_packets()):
+            result_dict[entry_id] = (tag, packet)
+
+        return result_dict
 
     async def async_process_packet(
         self,
@@ -513,30 +648,26 @@ class FunctionNode(StreamBase):
         """Async counterpart of ``process_packet``.
 
         Uses ``CachedFunctionPod.async_process_packet`` (sync DB caching
-        + async computation) when a database is attached.  Pipeline record
-        storage is synchronous (DB protocol is sync).
+        + async computation) when a database is attached. Does NOT write
+        pipeline provenance records — use ``store_result`` for that.
         """
         if self._cached_function_pod is not None:
-            tag, output_packet = await self._cached_function_pod.async_process_packet(
-                tag, packet
-            )
+            return await self._cached_function_pod.async_process_packet(tag, packet)
+        return await self._function_pod.async_process_packet(tag, packet)
 
-            if output_packet is not None:
-                result_computed = bool(
-                    output_packet.get_meta_value(
-                        self._cached_function_pod.RESULT_COMPUTED_FLAG, False
-                    )
-                )
-                self.add_pipeline_record(
-                    tag,
-                    packet,
-                    packet_record_id=output_packet.datagram_id,
-                    computed=result_computed,
-                )
+    async def _async_process_and_store_packet(
+        self,
+        tag: TagProtocol,
+        packet: PacketProtocol,
+    ) -> tuple[TagProtocol, PacketProtocol | None]:
+        """Async counterpart of ``_process_and_store_packet``.
 
-            return tag, output_packet
-        else:
-            return await self._function_pod.async_process_packet(tag, packet)
+        Combines ``async_process_packet`` (computation + function-level
+        memoization) with ``store_result`` (pipeline provenance recording).
+        """
+        tag_out, output_packet = await self.async_process_packet(tag, packet)
+        self.store_result(tag_out, packet, output_packet)
+        return tag_out, output_packet
 
     def compute_pipeline_entry_id(
         self, tag: TagProtocol, input_packet: PacketProtocol
@@ -784,7 +915,7 @@ class FunctionNode(StreamBase):
                     entry_id = self.compute_pipeline_entry_id(tag, packet)
                     if entry_id in existing_entry_ids:
                         continue
-                    tag, output_packet = self.process_packet(tag, packet)
+                    tag, output_packet = self._process_and_store_packet(tag, packet)
                     self._cached_output_packets[next_idx] = (tag, output_packet)
                     next_idx += 1
                     if output_packet is not None:
@@ -823,7 +954,7 @@ class FunctionNode(StreamBase):
                 if packet is not None:
                     yield tag, packet
             else:
-                tag, output_packet = self.process_packet(tag, packet)
+                tag, output_packet = self._process_and_store_packet(tag, packet)
                 self._cached_output_packets[i] = (tag, output_packet)
                 if output_packet is not None:
                     yield tag, output_packet
@@ -851,14 +982,17 @@ class FunctionNode(StreamBase):
 
             if loop is not None:
                 # Already in event loop — fall back to sequential sync
-                results = [self.process_packet(tag, pkt) for _, tag, pkt in to_compute]
+                results = [
+                    self._process_and_store_packet(tag, pkt)
+                    for _, tag, pkt in to_compute
+                ]
             else:
 
                 async def _gather() -> list[tuple[TagProtocol, PacketProtocol | None]]:
                     return list(
                         await asyncio.gather(
                             *[
-                                self.async_process_packet(tag, pkt)
+                                self._async_process_and_store_packet(tag, pkt)
                                 for _, tag, pkt in to_compute
                             ]
                         )
@@ -1062,9 +1196,10 @@ class FunctionNode(StreamBase):
                     tag: TagProtocol, packet: PacketProtocol
                 ) -> None:
                     try:
-                        tag_out, result_packet = await self.async_process_packet(
-                            tag, packet
-                        )
+                        (
+                            tag_out,
+                            result_packet,
+                        ) = await self._async_process_and_store_packet(tag, packet)
                         if result_packet is not None:
                             await output.send((tag_out, result_packet))
                     finally:
@@ -1089,9 +1224,10 @@ class FunctionNode(StreamBase):
 
                 async def process_one(tag: TagProtocol, packet: PacketProtocol) -> None:
                     try:
-                        tag_out, result_packet = await self.async_process_packet(
-                            tag, packet
-                        )
+                        (
+                            tag_out,
+                            result_packet,
+                        ) = await self._async_process_and_store_packet(tag, packet)
                         if result_packet is not None:
                             await output.send((tag_out, result_packet))
                     finally:
