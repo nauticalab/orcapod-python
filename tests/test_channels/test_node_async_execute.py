@@ -620,35 +620,35 @@ class TestProcessPacketRouting:
         stream = make_stream(3)
         node = FunctionNode(pod, stream)
 
-        # Monkey-patch to verify routing
-        original = node.process_packet
+        # Monkey-patch to verify routing through internal path
+        original = node._process_packet_internal
 
         def patched(tag, packet):
-            call_log.append("process_packet")
+            call_log.append("_process_packet_internal")
             return original(tag, packet)
 
-        node.process_packet = patched
+        node._process_packet_internal = patched
 
         results = list(node.iter_packets())
         assert len(results) == 3
         assert len(call_log) == 3
 
     @pytest.mark.asyncio
-    async def test_function_node_async_uses_async_process_packet(self):
-        """Verify FunctionNode.async_execute routes through async_process_packet."""
+    async def test_function_node_async_uses_async_process_packet_internal(self):
+        """Verify FunctionNode.async_execute routes through _async_process_packet_internal."""
         call_log = []
 
         _, pod = make_double_pod()
         stream = make_stream(3)
         node = FunctionNode(pod, stream)
 
-        original = node.async_process_packet
+        original = node._async_process_packet_internal
 
         async def patched(tag, packet):
-            call_log.append("async_process_packet")
+            call_log.append("_async_process_packet_internal")
             return await original(tag, packet)
 
-        node.async_process_packet = patched
+        node._async_process_packet_internal = patched
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)

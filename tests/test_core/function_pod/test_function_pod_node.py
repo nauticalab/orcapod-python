@@ -239,31 +239,32 @@ class TestFunctionNodeProcessPacket:
         _, out_packet = node.process_packet(tag, packet)
         assert out_packet["result"] == 12  # 6 * 2
 
-    def test_process_packet_does_not_add_pipeline_record(self, node, double_pf):
-        """process_packet no longer writes pipeline records (use store_result)."""
+    def test_process_packet_adds_pipeline_record(self, node, double_pf):
+        """process_packet writes pipeline records (compute + persist + cache)."""
         tag = Tag({"id": 0})
         packet = Packet({"x": 3})
         node.process_packet(tag, packet)
         db = node._pipeline_database
         db.flush()
         all_records = db.get_all_records(node.pipeline_path)
-        assert all_records is None
+        assert all_records is not None
+        assert all_records.num_rows >= 1
 
-    def test_process_and_store_packet_adds_pipeline_record(self, node, double_pf):
+    def test_process_packet_internal_adds_pipeline_record(self, node, double_pf):
         tag = Tag({"id": 0})
         packet = Packet({"x": 3})
-        node._process_and_store_packet(tag, packet)
+        node._process_packet_internal(tag, packet)
         db = node._pipeline_database
         db.flush()
         all_records = db.get_all_records(node.pipeline_path)
         assert all_records is not None
         assert all_records.num_rows >= 1
 
-    def test_process_and_store_second_call_same_input_deduplicates(self, node):
+    def test_process_packet_second_call_same_input_deduplicates(self, node):
         tag = Tag({"id": 0})
         packet = Packet({"x": 3})
-        node._process_and_store_packet(tag, packet)
-        node._process_and_store_packet(tag, packet)
+        node._process_packet_internal(tag, packet)
+        node._process_packet_internal(tag, packet)
         db = node._pipeline_database
         db.flush()
         all_records = db.get_all_records(node.pipeline_path)
@@ -274,8 +275,8 @@ class TestFunctionNodeProcessPacket:
         tag = Tag({"id": 0})
         packet1 = Packet({"x": 3})
         packet2 = Packet({"x": 4})
-        node._process_and_store_packet(tag, packet1)
-        node._process_and_store_packet(tag, packet2)
+        node._process_packet_internal(tag, packet1)
+        node._process_packet_internal(tag, packet2)
         db = node._pipeline_database
         all_records = db.get_all_records(node.pipeline_path)
         assert all_records is not None

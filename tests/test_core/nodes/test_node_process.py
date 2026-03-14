@@ -1,0 +1,148 @@
+"""Tests for node process methods (schema validation, persistence, caching)."""
+
+from __future__ import annotations
+
+import pyarrow as pa
+import pytest
+
+from orcapod.core.function_pod import FunctionPod
+from orcapod.core.nodes import FunctionNode
+from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.sources import ArrowTableSource
+from orcapod.databases import InMemoryArrowDatabase
+from orcapod.errors import InputValidationError
+
+
+def double_value(value: int) -> int:
+    return value * 2
+
+
+@pytest.fixture
+def function_node_with_db():
+    table = pa.table(
+        {
+            "key": pa.array(["a", "b"], type=pa.large_string()),
+            "value": pa.array([1, 2], type=pa.int64()),
+        }
+    )
+    src = ArrowTableSource(table, tag_columns=["key"])
+    pf = PythonPacketFunction(double_value, output_keys="result")
+    pod = FunctionPod(pf)
+    pipeline_db = InMemoryArrowDatabase()
+    result_db = InMemoryArrowDatabase()
+    node = FunctionNode(
+        pod,
+        src,
+        pipeline_database=pipeline_db,
+        result_database=result_db,
+    )
+    return node, pipeline_db, result_db
+
+
+@pytest.fixture
+def function_node_no_db():
+    table = pa.table(
+        {
+            "key": pa.array(["a", "b"], type=pa.large_string()),
+            "value": pa.array([1, 2], type=pa.int64()),
+        }
+    )
+    src = ArrowTableSource(table, tag_columns=["key"])
+    pf = PythonPacketFunction(double_value, output_keys="result")
+    pod = FunctionPod(pf)
+    return FunctionNode(pod, src)
+
+
+class TestFunctionNodeProcessPacket:
+    def test_returns_correct_result(self, function_node_no_db):
+        node = function_node_no_db
+        packets = list(node._input_stream.iter_packets())
+        tag, packet = packets[0]
+        tag_out, result = node.process_packet(tag, packet)
+        assert result is not None
+        assert result.as_dict()["result"] == 2
+
+    def test_writes_pipeline_record(self, function_node_with_db):
+        node, pipeline_db, _ = function_node_with_db
+        packets = list(node._input_stream.iter_packets())
+        tag, packet = packets[0]
+        node.process_packet(tag, packet)
+        records = pipeline_db.get_all_records(node.pipeline_path)
+        assert records is not None
+        assert records.num_rows == 1
+
+    def test_writes_to_result_db(self, function_node_with_db):
+        node, _, _ = function_node_with_db
+        packets = list(node._input_stream.iter_packets())
+        tag, packet = packets[0]
+        node.process_packet(tag, packet)
+        cached = node._cached_function_pod.get_all_cached_outputs()
+        assert cached is not None
+        assert cached.num_rows == 1
+
+    def test_caches_internally(self, function_node_with_db):
+        node, _, _ = function_node_with_db
+        packets = list(node._input_stream.iter_packets())
+        tag, packet = packets[0]
+        node.process_packet(tag, packet)
+        assert len(node._cached_output_packets) == 1
+
+    def test_validates_schema_rejects_wrong_tag(self, function_node_with_db):
+        node, _, _ = function_node_with_db
+        wrong_table = pa.table(
+            {
+                "wrong_key": pa.array(["x"], type=pa.large_string()),
+                "value": pa.array([99], type=pa.int64()),
+            }
+        )
+        wrong_src = ArrowTableSource(wrong_table, tag_columns=["wrong_key"])
+        wrong_tag, wrong_pkt = list(wrong_src.iter_packets())[0]
+        with pytest.raises(InputValidationError):
+            node.process_packet(wrong_tag, wrong_pkt)
+
+    def test_validates_schema_rejects_wrong_packet(self, function_node_with_db):
+        node, _, _ = function_node_with_db
+        wrong_table = pa.table(
+            {
+                "key": pa.array(["x"], type=pa.large_string()),
+                "wrong_col": pa.array([99], type=pa.int64()),
+            }
+        )
+        wrong_src = ArrowTableSource(wrong_table, tag_columns=["key"])
+        wrong_tag, wrong_pkt = list(wrong_src.iter_packets())[0]
+        with pytest.raises(InputValidationError):
+            node.process_packet(wrong_tag, wrong_pkt)
+
+
+class TestFunctionNodeProcess:
+    def test_returns_materialized_results(self, function_node_with_db):
+        node, _, _ = function_node_with_db
+        results = node.process(node._input_stream)
+        assert isinstance(results, list)
+        assert len(results) == 2
+        values = sorted([pkt.as_dict()["result"] for _, pkt in results])
+        assert values == [2, 4]
+
+    def test_writes_pipeline_records(self, function_node_with_db):
+        node, pipeline_db, _ = function_node_with_db
+        node.process(node._input_stream)
+        records = pipeline_db.get_all_records(node.pipeline_path)
+        assert records is not None
+        assert records.num_rows == 2
+
+    def test_caches_internally(self, function_node_with_db):
+        node, _, _ = function_node_with_db
+        node.process(node._input_stream)
+        assert len(node._cached_output_packets) == 2
+
+    def test_validates_stream_schema(self, function_node_with_db):
+        node, _, _ = function_node_with_db
+        wrong_table = pa.table(
+            {
+                "wrong_key": pa.array(["x"], type=pa.large_string()),
+                "wrong_col": pa.array([99], type=pa.int64()),
+            }
+        )
+        wrong_stream = ArrowTableSource(wrong_table, tag_columns=["wrong_key"])
+        with pytest.raises(InputValidationError):
+            node.process(wrong_stream)

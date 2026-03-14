@@ -465,95 +465,140 @@ class FunctionNode(StreamBase):
     # Packet processing
     # ------------------------------------------------------------------
 
+    def _validate_input_schema(self, tag: TagProtocol, packet: PacketProtocol) -> None:
+        """Validate that tag and packet match the expected input schema.
+
+        Raises:
+            InputValidationError: If column names don't match expected schema.
+        """
+        from orcapod.errors import InputValidationError
+
+        expected_tag_keys, expected_packet_keys = self._input_stream.keys()
+
+        actual_tag_keys = tag.keys()
+        if set(actual_tag_keys) != set(expected_tag_keys):
+            raise InputValidationError(
+                f"Tag schema mismatch: expected {set(expected_tag_keys)}, "
+                f"got {set(actual_tag_keys)}"
+            )
+
+        actual_packet_keys = packet.keys()
+        if set(actual_packet_keys) != set(expected_packet_keys):
+            raise InputValidationError(
+                f"Packet schema mismatch: expected {set(expected_packet_keys)}, "
+                f"got {set(actual_packet_keys)}"
+            )
+
+    def _validate_stream_schema(self, input_stream: StreamProtocol) -> None:
+        """Validate that a stream's output schema matches expected input.
+
+        Raises:
+            InputValidationError: If schemas don't match.
+        """
+        from orcapod.errors import InputValidationError
+
+        expected_tag_keys, expected_packet_keys = self._input_stream.keys()
+        actual_tag_keys, actual_packet_keys = input_stream.keys()
+
+        if set(actual_tag_keys) != set(expected_tag_keys):
+            raise InputValidationError(
+                f"Stream tag schema mismatch: expected {set(expected_tag_keys)}, "
+                f"got {set(actual_tag_keys)}"
+            )
+
+        if set(actual_packet_keys) != set(expected_packet_keys):
+            raise InputValidationError(
+                f"Stream packet schema mismatch: expected {set(expected_packet_keys)}, "
+                f"got {set(actual_packet_keys)}"
+            )
+
     def process_packet(
         self,
         tag: TagProtocol,
         packet: PacketProtocol,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
-        """Process a single packet with function-level memoization.
+        """Process a single packet with schema validation, persistence, and caching.
 
-        Delegates to ``CachedFunctionPod`` (when DB is attached) for
-        computation and result-level caching, or to the raw ``FunctionPod``
-        otherwise. Does NOT write pipeline provenance records — use
-        ``store_result`` for that.
+        Validates input schema, computes via CachedFunctionPod (or raw FunctionPod),
+        writes pipeline provenance record, and caches the result.
 
         Args:
             tag: The tag associated with the packet.
             packet: The input packet to process.
 
         Returns:
-            A ``(tag, output_packet)`` tuple; output_packet is ``None`` if
-            the function filters the packet out.
+            A ``(tag, output_packet)`` tuple.
+
+        Raises:
+            InputValidationError: If the tag/packet schema doesn't match
+                the expected input schema.
         """
-        if self._cached_function_pod is not None:
-            return self._cached_function_pod.process_packet(tag, packet)
-        return self._function_pod.process_packet(tag, packet)
+        self._validate_input_schema(tag, packet)
+        return self._process_packet_internal(tag, packet)
 
-    def store_result(
-        self,
-        tag: TagProtocol,
-        input_packet: PacketProtocol,
-        output_packet: PacketProtocol | None,
-    ) -> None:
-        """Record pipeline provenance and populate in-memory cache.
+    def process(
+        self, input_stream: StreamProtocol
+    ) -> list[tuple[TagProtocol, PacketProtocol]]:
+        """Process all packets from a stream with schema validation.
 
-        Writes a pipeline record and caches the result internally so
-        ``iter_packets()`` / ``as_table()`` work after orchestrated execution.
-
-        No-op if output is None (except for cache tracking).
+        Validates the stream schema once, then processes each packet using
+        the internal (unchecked) path. More efficient than calling
+        ``process_packet`` per-packet when observer hooks aren't needed.
 
         Args:
-            tag: The tag associated with the packet.
-            input_packet: The original input packet.
-            output_packet: The computation result, or None if filtered.
+            input_stream: The input stream to process.
+
+        Returns:
+            Materialized list of (tag, output_packet) pairs, excluding
+            None outputs.
+
+        Raises:
+            InputValidationError: If the stream schema doesn't match expected.
         """
-        # Always add to internal cache (even None results, for index tracking)
-        next_idx = len(self._cached_output_packets)
-        self._cached_output_packets[next_idx] = (tag, output_packet)
-        self._cached_input_iterator = None
-        self._needs_iterator = False
+        self._validate_stream_schema(input_stream)
+        output: list[tuple[TagProtocol, PacketProtocol]] = []
+        for tag, packet in input_stream.iter_packets():
+            tag_out, result = self._process_packet_internal(tag, packet)
+            if result is not None:
+                output.append((tag_out, result))
+        return output
 
-        if output_packet is None:
-            return
-        if self._pipeline_database is None:
-            return
-
-        result_computed = True
-        if self._cached_function_pod is not None:
-            result_computed = bool(
-                output_packet.get_meta_value(
-                    self._cached_function_pod.RESULT_COMPUTED_FLAG, True
-                )
-            )
-
-        self.add_pipeline_record(
-            tag,
-            input_packet,
-            packet_record_id=output_packet.datagram_id,
-            computed=result_computed,
-        )
-
-    def _process_and_store_packet(
+    def _process_packet_internal(
         self,
         tag: TagProtocol,
         packet: PacketProtocol,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
-        """Process a single packet and record pipeline provenance.
+        """Core compute + persist + cache (no schema validation).
 
-        Combines ``process_packet`` (computation + function-level memoization)
-        with ``store_result`` (pipeline provenance recording). Used internally
-        by ``iter_packets()`` and related iteration methods.
-
-        Args:
-            tag: The tag associated with the packet.
-            packet: The input packet to process.
-
-        Returns:
-            A ``(tag, output_packet)`` tuple; output_packet is ``None`` if
-            the function filters the packet out.
+        Used by ``process_packet`` (after validation), ``process`` (after
+        stream validation), and ``iter_packets`` (internal path).
         """
-        tag_out, output_packet = self.process_packet(tag, packet)
-        self.store_result(tag_out, packet, output_packet)
+        if self._cached_function_pod is not None:
+            tag_out, output_packet = self._cached_function_pod.process_packet(
+                tag, packet
+            )
+
+            if output_packet is not None:
+                result_computed = bool(
+                    output_packet.get_meta_value(
+                        self._cached_function_pod.RESULT_COMPUTED_FLAG, False
+                    )
+                )
+                self.add_pipeline_record(
+                    tag_out,
+                    packet,
+                    packet_record_id=output_packet.datagram_id,
+                    computed=result_computed,
+                )
+        else:
+            tag_out, output_packet = self._function_pod.process_packet(tag, packet)
+
+        # Cache internally
+        next_idx = len(self._cached_output_packets)
+        self._cached_output_packets[next_idx] = (tag_out, output_packet)
+        self._cached_input_iterator = None
+        self._needs_iterator = False
+
         return tag_out, output_packet
 
     def get_cached_results(
@@ -635,33 +680,45 @@ class FunctionNode(StreamBase):
 
         return result_dict
 
-    async def async_process_packet(
+    async def _async_process_packet_internal(
         self,
         tag: TagProtocol,
         packet: PacketProtocol,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
-        """Async counterpart of ``process_packet``.
+        """Async counterpart of ``_process_packet_internal``.
 
-        Uses ``CachedFunctionPod.async_process_packet`` (sync DB caching
-        + async computation) when a database is attached. Does NOT write
-        pipeline provenance records — use ``store_result`` for that.
+        Computes via async path, writes pipeline provenance, and caches
+        internally — no schema validation.
         """
         if self._cached_function_pod is not None:
-            return await self._cached_function_pod.async_process_packet(tag, packet)
-        return await self._function_pod.async_process_packet(tag, packet)
+            (
+                tag_out,
+                output_packet,
+            ) = await self._cached_function_pod.async_process_packet(tag, packet)
 
-    async def _async_process_and_store_packet(
-        self,
-        tag: TagProtocol,
-        packet: PacketProtocol,
-    ) -> tuple[TagProtocol, PacketProtocol | None]:
-        """Async counterpart of ``_process_and_store_packet``.
+            if output_packet is not None:
+                result_computed = bool(
+                    output_packet.get_meta_value(
+                        self._cached_function_pod.RESULT_COMPUTED_FLAG, False
+                    )
+                )
+                self.add_pipeline_record(
+                    tag_out,
+                    packet,
+                    packet_record_id=output_packet.datagram_id,
+                    computed=result_computed,
+                )
+        else:
+            tag_out, output_packet = await self._function_pod.async_process_packet(
+                tag, packet
+            )
 
-        Combines ``async_process_packet`` (computation + function-level
-        memoization) with ``store_result`` (pipeline provenance recording).
-        """
-        tag_out, output_packet = await self.async_process_packet(tag, packet)
-        self.store_result(tag_out, packet, output_packet)
+        # Cache internally
+        next_idx = len(self._cached_output_packets)
+        self._cached_output_packets[next_idx] = (tag_out, output_packet)
+        self._cached_input_iterator = None
+        self._needs_iterator = False
+
         return tag_out, output_packet
 
     def compute_pipeline_entry_id(
@@ -905,14 +962,11 @@ class FunctionNode(StreamBase):
                 # --- Phase 2: process only missing input packets ---
                 # Skip inputs whose pipeline entry_id (tag+system_tags+packet_hash)
                 # already exists in the pipeline database.
-                next_idx = len(self._cached_output_packets)
                 for tag, packet in input_iter:
                     entry_id = self.compute_pipeline_entry_id(tag, packet)
                     if entry_id in existing_entry_ids:
                         continue
-                    tag, output_packet = self._process_and_store_packet(tag, packet)
-                    self._cached_output_packets[next_idx] = (tag, output_packet)
-                    next_idx += 1
+                    tag, output_packet = self._process_packet_internal(tag, packet)
                     if output_packet is not None:
                         yield tag, output_packet
 
@@ -949,8 +1003,7 @@ class FunctionNode(StreamBase):
                 if packet is not None:
                     yield tag, packet
             else:
-                tag, output_packet = self._process_and_store_packet(tag, packet)
-                self._cached_output_packets[i] = (tag, output_packet)
+                tag, output_packet = self._process_packet_internal(tag, packet)
                 if output_packet is not None:
                     yield tag, output_packet
         self._cached_input_iterator = None
@@ -977,29 +1030,25 @@ class FunctionNode(StreamBase):
 
             if loop is not None:
                 # Already in event loop — fall back to sequential sync
-                results = [
-                    self._process_and_store_packet(tag, pkt)
-                    for _, tag, pkt in to_compute
-                ]
+                for _, tag, pkt in to_compute:
+                    self._process_packet_internal(tag, pkt)
             else:
 
                 async def _gather() -> list[tuple[TagProtocol, PacketProtocol | None]]:
                     return list(
                         await asyncio.gather(
                             *[
-                                self._async_process_and_store_packet(tag, pkt)
+                                self._async_process_packet_internal(tag, pkt)
                                 for _, tag, pkt in to_compute
                             ]
                         )
                     )
 
-                results = asyncio.run(_gather())
+                asyncio.run(_gather())
 
-            for (i, _, _), (tag, output_packet) in zip(to_compute, results):
-                self._cached_output_packets[i] = (tag, output_packet)
-
-        for i, *_ in all_inputs:
-            tag, packet = self._cached_output_packets[i]
+        # Yield all results in order from internal cache
+        for idx in sorted(self._cached_output_packets.keys()):
+            tag, packet = self._cached_output_packets[idx]
             if packet is not None:
                 yield tag, packet
 
@@ -1194,7 +1243,7 @@ class FunctionNode(StreamBase):
                         (
                             tag_out,
                             result_packet,
-                        ) = await self._async_process_and_store_packet(tag, packet)
+                        ) = await self._async_process_packet_internal(tag, packet)
                         if result_packet is not None:
                             await output.send((tag_out, result_packet))
                     finally:
@@ -1222,7 +1271,7 @@ class FunctionNode(StreamBase):
                         (
                             tag_out,
                             result_packet,
-                        ) = await self._async_process_and_store_packet(tag, packet)
+                        ) = await self._async_process_packet_internal(tag, packet)
                         if result_packet is not None:
                             await output.send((tag_out, result_packet))
                     finally:
