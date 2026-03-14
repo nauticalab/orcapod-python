@@ -275,9 +275,8 @@ class PipelineConfig:
         execution_engine: Optional packet-function executor applied to all
             function nodes (e.g. ``RayExecutor``).  ``None`` means in-process
             execution.
-        execution_engine_opts: Default resource/options dict forwarded to the
-            engine for every node (e.g. ``{"num_cpus": 4}``).  Individual
-            nodes may override via their ``execution_engine_opts`` attribute.
+        execution_engine_opts: Resource/options dict forwarded to the engine
+            via ``with_options()`` (e.g. ``{"num_cpus": 4}``).
     """
 
     executor: ExecutorType = ExecutorType.SYNCHRONOUS

@@ -7,7 +7,8 @@ import sys
 from abc import abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Literal
+import typing
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, TypeVar
 
 from uuid_utils import uuid7
 
@@ -20,7 +21,10 @@ from orcapod.hashing.hash_utils import (
     get_function_signature,
 )
 from orcapod.protocols.core_protocols import PacketFunctionProtocol, PacketProtocol
-from orcapod.protocols.core_protocols.executor import PacketFunctionExecutorProtocol
+from orcapod.protocols.core_protocols.executor import (
+    PacketFunctionExecutorProtocol,
+    PythonFunctionExecutorProtocol,
+)
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.system_constants import constants
 from orcapod.types import DataValue, Schema, SchemaLike
@@ -101,8 +105,29 @@ def parse_function_outputs(
     return dict(zip(output_keys, output_values))
 
 
-class PacketFunctionBase(TraceableBase):
-    """Abstract base class for PacketFunctionProtocol."""
+E = TypeVar("E", bound=PacketFunctionExecutorProtocol)
+
+
+class PacketFunctionBase(TraceableBase, Generic[E]):
+    """Abstract base class for PacketFunctionProtocol.
+
+    Type-parameterized with the executor protocol ``E``.  Concrete
+    subclasses that bind ``E`` (e.g. ``class Foo(PacketFunctionBase[SomeProto])``)
+    get automatic ``isinstance`` validation in ``set_executor`` at class
+    definition time via ``__init_subclass__``.
+    """
+
+    _resolved_executor_protocol: ClassVar[type | None] = None
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        for base in getattr(cls, "__orig_bases__", ()):
+            origin = typing.get_origin(base)
+            if origin is PacketFunctionBase:
+                args = typing.get_args(base)
+                if args and not isinstance(args[0], TypeVar):
+                    cls._resolved_executor_protocol = args[0]
+                    return
 
     def __init__(
         self,
@@ -226,16 +251,35 @@ class PacketFunctionBase(TraceableBase):
     def executor(self, executor: PacketFunctionExecutorProtocol | None) -> None:
         """Set or clear the executor for this packet function.
 
-        Raises:
-            TypeError: If *executor* does not support this function's
-                ``packet_function_type_id``.
+        Delegates to ``set_executor`` for validation.
         """
-        if executor is not None and not executor.supports(self.packet_function_type_id):
-            raise TypeError(
-                f"Executor {executor.executor_type_id!r} does not support "
-                f"packet function type {self.packet_function_type_id!r}. "
-                f"Supported types: {executor.supported_function_type_ids()}"
-            )
+        self.set_executor(executor)
+
+    def set_executor(self, executor: PacketFunctionExecutorProtocol | None) -> None:
+        """Set or clear the executor, validating type compatibility.
+
+        Performs two checks:
+        1. The executor supports this function's ``packet_function_type_id``.
+        2. If the subclass bound ``E`` via ``Generic[E]``, the executor is an
+           instance of the resolved protocol (checked once at assignment time,
+           not in the hot path).
+
+        Raises:
+            TypeError: If *executor* fails either compatibility check.
+        """
+        if executor is not None:
+            if not executor.supports(self.packet_function_type_id):
+                raise TypeError(
+                    f"Executor {executor.executor_type_id!r} does not support "
+                    f"packet function type {self.packet_function_type_id!r}. "
+                    f"Supported types: {executor.supported_function_type_ids()}"
+                )
+            proto = getattr(type(self), "_resolved_executor_protocol", None)
+            if proto is not None and not isinstance(executor, proto):
+                raise TypeError(
+                    f"{type(self).__name__} requires an executor implementing "
+                    f"{proto.__name__}, got {type(executor).__name__}"
+                )
         self._executor = executor
 
     # ==================== Execution ====================
@@ -273,7 +317,7 @@ class PacketFunctionBase(TraceableBase):
         ...
 
 
-class PythonPacketFunction(PacketFunctionBase):
+class PythonPacketFunction(PacketFunctionBase[PythonFunctionExecutorProtocol]):
     @property
     def packet_function_type_id(self) -> str:
         """Unique function type identifier."""
@@ -463,6 +507,31 @@ class PythonPacketFunction(PacketFunctionBase):
                 _get_sync_executor().submit(lambda: asyncio.run(fn(**kwargs))).result()
             )
 
+    def call(self, packet: PacketProtocol) -> PacketProtocol | None:
+        """Process a single packet, routing through the executor if one is set.
+
+        When an executor implementing ``PythonFunctionExecutorProtocol`` is
+        set, the raw callable and kwargs are handed to
+        ``execute_callable`` and the result is wrapped into an output packet.
+        """
+        if self._executor is not None:
+            if not self._active:
+                return None
+            raw = self._executor.execute_callable(self._function, packet.as_dict())
+            return self._build_output_packet(raw)
+        return self.direct_call(packet)
+
+    async def async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
+        """Async counterpart of ``call``."""
+        if self._executor is not None:
+            if not self._active:
+                return None
+            raw = await self._executor.async_execute_callable(
+                self._function, packet.as_dict()
+            )
+            return self._build_output_packet(raw)
+        return await self.direct_async_call(packet)
+
     def direct_call(self, packet: PacketProtocol) -> PacketProtocol | None:
         """Execute the function on *packet* synchronously.
 
@@ -544,8 +613,13 @@ class PythonPacketFunction(PacketFunctionBase):
         )
 
 
-class PacketFunctionWrapper(PacketFunctionBase):
-    """Wrapper around a PacketFunctionProtocol to modify or extend its behavior."""
+class PacketFunctionWrapper(PacketFunctionBase[E]):
+    """Wrapper around a PacketFunctionProtocol to modify or extend its behavior.
+
+    Remains generic over ``E`` — the executor protocol is not bound here
+    so that wrappers inherit the executor type constraint of the wrapped
+    function.
+    """
 
     def __init__(self, packet_function: PacketFunctionProtocol, **kwargs) -> None:
         super().__init__(**kwargs)

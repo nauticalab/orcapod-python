@@ -652,6 +652,7 @@ def function_pod(
     version: str = "v0.0",
     label: str | None = None,
     result_database: ArrowDatabaseProtocol | None = None,
+    pod_cache_database: ArrowDatabaseProtocol | None = None,
     executor: PacketFunctionExecutorProtocol | None = None,
     **kwargs,
 ) -> Callable[..., CallableWithPod]:
@@ -662,7 +663,11 @@ def function_pod(
         function_name: Name of the function pod; defaults to ``func.__name__``.
         version: Version string for the packet function.
         label: Optional label for tracking.
-        result_database: Optional database for caching results.
+        result_database: Optional database for packet-level caching
+            (wraps the packet function in ``CachedPacketFunction``).
+        pod_cache_database: Optional database for pod-level caching
+            (wraps the pod in ``CachedFunctionPod``, which caches at the
+            ``process_packet(tag, packet)`` level using tag+packet hash).
         executor: Optional executor for running the packet function.
         **kwargs: Forwarded to ``PythonPacketFunction``.
 
@@ -692,9 +697,18 @@ def function_pod(
             )
 
         # Create a simple typed function pod
-        pod = FunctionPod(
+        pod: _FunctionPodBase = FunctionPod(
             packet_function=packet_function,
         )
+
+        # if pod_cache_database is provided, wrap in CachedFunctionPod
+        if pod_cache_database is not None:
+            from orcapod.core.cached_function_pod import CachedFunctionPod
+
+            pod = CachedFunctionPod(
+                function_pod=pod,
+                result_database=pod_cache_database,
+            )
 
         @wraps(func)
         def wrapper(*args, **kwargs):

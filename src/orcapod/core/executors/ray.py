@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.executors.base import PacketFunctionExecutorBase
@@ -156,6 +157,34 @@ class RayExecutor(PacketFunctionExecutorBase):
         ref = remote_fn.remote(**kwargs)
         raw_result = await asyncio.wrap_future(ref.future())
         return pf._build_output_packet(raw_result)
+
+    # -- PythonFunctionExecutorProtocol --
+
+    def execute_callable(
+        self,
+        fn: Callable[..., Any],
+        kwargs: dict[str, Any],
+        executor_options: dict[str, Any] | None = None,
+    ) -> Any:
+        import ray
+
+        self._ensure_ray_initialized()
+        remote_fn = ray.remote(**self._build_remote_opts())(fn)
+        ref = remote_fn.remote(**kwargs)
+        return ray.get(ref)
+
+    async def async_execute_callable(
+        self,
+        fn: Callable[..., Any],
+        kwargs: dict[str, Any],
+        executor_options: dict[str, Any] | None = None,
+    ) -> Any:
+        import ray
+
+        self._ensure_ray_initialized()
+        remote_fn = ray.remote(**self._build_remote_opts())(fn)
+        ref = remote_fn.remote(**kwargs)
+        return await asyncio.wrap_future(ref.future())
 
     def with_options(self, **opts: Any) -> "RayExecutor":
         """Return a new ``RayExecutor`` with the given options merged in.

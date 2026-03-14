@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol, Self, runtime_checkable
 
 from orcapod.protocols.core_protocols.datagrams import PacketProtocol
@@ -63,11 +64,13 @@ class PacketFunctionExecutorProtocol(Protocol):
         ...
 
     def with_options(self, **opts: Any) -> Self:
-        """Return an executor configured with the given per-node options.
+        """Return a **new** executor instance configured with the given per-node options.
 
         Used by the pipeline to produce node-specific executor instances
         (e.g. with different CPU/GPU allocations) from a shared base executor.
-        Implementations that do not support options may return *self*.
+        Implementations must always return a new instance, even when no
+        options change, so that executors are effectively immutable value
+        objects after construction.
         """
         ...
 
@@ -77,4 +80,71 @@ class PacketFunctionExecutorProtocol(Protocol):
         Stored alongside results for observability/provenance but does not
         affect content or pipeline hashes.
         """
+        ...
+
+
+@runtime_checkable
+class PythonFunctionExecutorProtocol(Protocol):
+    """Executor protocol for Python callable-based packet functions.
+
+    Unlike ``PacketFunctionExecutorProtocol`` which operates on
+    (packet_function, packet) pairs, this protocol operates on raw
+    Python callables — the executor receives the function and its
+    keyword arguments directly.  The packet function handles
+    packet construction/deconstruction around the executor call.
+    """
+
+    @property
+    def executor_type_id(self) -> str:
+        """Unique identifier for this executor type."""
+        ...
+
+    @property
+    def supports_concurrent_execution(self) -> bool:
+        """Whether this executor can run multiple calls concurrently."""
+        ...
+
+    def execute_callable(
+        self,
+        fn: Callable[..., Any],
+        kwargs: dict[str, Any],
+        executor_options: dict[str, Any] | None = None,
+    ) -> Any:
+        """Synchronously execute *fn* with *kwargs*.
+
+        Args:
+            fn: The Python callable to execute.
+            kwargs: Keyword arguments to pass to *fn*.
+            executor_options: Optional per-call options (e.g. resource
+                overrides).
+
+        Returns:
+            The raw return value of *fn*.
+        """
+        ...
+
+    async def async_execute_callable(
+        self,
+        fn: Callable[..., Any],
+        kwargs: dict[str, Any],
+        executor_options: dict[str, Any] | None = None,
+    ) -> Any:
+        """Asynchronously execute *fn* with *kwargs*.
+
+        Args:
+            fn: The Python callable to execute.
+            kwargs: Keyword arguments to pass to *fn*.
+            executor_options: Optional per-call options.
+
+        Returns:
+            The raw return value of *fn*.
+        """
+        ...
+
+    def with_options(self, **opts: Any) -> Self:
+        """Return a **new** executor instance with the given options merged in."""
+        ...
+
+    def get_execution_data(self) -> dict[str, Any]:
+        """Return metadata describing the execution environment."""
         ...

@@ -1176,6 +1176,14 @@ class _MockExecutor(PacketFunctionExecutorBase):
         self.async_calls.append(packet)
         return packet_function.direct_call(packet)
 
+    def execute_callable(self, fn, kwargs, executor_options=None):
+        self.sync_calls.append(kwargs)
+        return fn(**kwargs)
+
+    async def async_execute_callable(self, fn, kwargs, executor_options=None):
+        self.async_calls.append(kwargs)
+        return fn(**kwargs)
+
     def with_options(self, **opts: Any) -> "_MockExecutor":
         return _MockExecutor(opts={**self.opts, **opts})
 
@@ -1236,26 +1244,24 @@ class TestRunExecutionEngine:
         assert len(mock.sync_calls) > 0
         assert len(mock.async_calls) == 0
 
-    def test_per_node_opts_override_pipeline_opts(self, pipeline_db):
-        """Node-level execution_engine_opts win over pipeline-level defaults."""
+    def test_pipeline_opts_applied_via_with_options(self, pipeline_db):
+        """Pipeline-level execution_engine_opts are applied via with_options."""
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
         pf = PythonPacketFunction(double_value, output_keys="result")
         pod = FunctionPod(packet_function=pf)
         mock = _MockExecutor()
 
-        pipeline = Pipeline(name="test_node_opts", pipeline_database=pipeline_db)
+        pipeline = Pipeline(name="test_pipeline_opts", pipeline_database=pipeline_db)
         with pipeline:
             pod(src, label="doubler")
 
-        pipeline.doubler.execution_engine_opts = {"num_cpus": 2}
-
         pipeline.run(
             execution_engine=mock,
-            execution_engine_opts={"num_cpus": 1},
+            execution_engine_opts={"num_cpus": 4},
         )
 
-        # Node opts win: executor should have been created with num_cpus=2
-        assert pipeline.doubler.executor.opts.get("num_cpus") == 2
+        # Executor should have been created with the pipeline opts
+        assert pipeline.doubler.executor.opts.get("num_cpus") == 4
 
 
 class TestSourceNodesInPipeline:

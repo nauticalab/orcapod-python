@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import copy
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -77,13 +79,52 @@ class PacketFunctionExecutorBase(ABC):
         return False
 
     def with_options(self, **opts: Any) -> "PacketFunctionExecutorBase":
-        """Return an executor configured with the given per-node options.
+        """Return a **new** executor instance configured with the given per-node options.
 
-        The default implementation ignores *opts* and returns *self*.
-        Subclasses that support resource options (e.g. ``RayExecutor``)
-        should override to return a new instance with the merged options.
+        The default implementation returns a shallow copy of *self*.
+        Subclasses that carry mutable state (e.g. ``RayExecutor``) should
+        override to produce a properly configured new instance.
         """
-        return self
+        return copy.copy(self)
+
+    # ------------------------------------------------------------------
+    # Callable-level execution (PythonFunctionExecutorProtocol)
+    # ------------------------------------------------------------------
+
+    def execute_callable(
+        self,
+        fn: Callable[..., Any],
+        kwargs: dict[str, Any],
+        executor_options: dict[str, Any] | None = None,
+    ) -> Any:
+        """Synchronously execute *fn* with *kwargs*.
+
+        Default implementation calls ``fn(**kwargs)`` in-process.
+        Subclasses should override for remote/distributed execution.
+
+        Args:
+            fn: The Python callable to execute.
+            kwargs: Keyword arguments to pass to *fn*.
+            executor_options: Optional per-call options.
+
+        Returns:
+            The raw return value of *fn*.
+        """
+        return fn(**kwargs)
+
+    async def async_execute_callable(
+        self,
+        fn: Callable[..., Any],
+        kwargs: dict[str, Any],
+        executor_options: dict[str, Any] | None = None,
+    ) -> Any:
+        """Asynchronously execute *fn* with *kwargs*.
+
+        Default implementation delegates to ``execute_callable``
+        synchronously.  Subclasses should override for truly async
+        execution.
+        """
+        return self.execute_callable(fn, kwargs, executor_options)
 
     def get_execution_data(self) -> dict[str, Any]:
         """Return metadata describing the execution environment.

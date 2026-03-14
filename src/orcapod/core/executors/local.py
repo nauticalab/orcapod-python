@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import asyncio
+import inspect
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from orcapod.core.executors.base import PacketFunctionExecutorBase
 
@@ -35,3 +38,33 @@ class LocalExecutor(PacketFunctionExecutorBase):
         packet: PacketProtocol,
     ) -> PacketProtocol | None:
         return await packet_function.direct_async_call(packet)
+
+    # -- PythonFunctionExecutorProtocol --
+
+    def execute_callable(
+        self,
+        fn: Callable[..., Any],
+        kwargs: dict[str, Any],
+        executor_options: dict[str, Any] | None = None,
+    ) -> Any:
+        if inspect.iscoroutinefunction(fn):
+            return asyncio.run(fn(**kwargs))
+        return fn(**kwargs)
+
+    async def async_execute_callable(
+        self,
+        fn: Callable[..., Any],
+        kwargs: dict[str, Any],
+        executor_options: dict[str, Any] | None = None,
+    ) -> Any:
+        if inspect.iscoroutinefunction(fn):
+            return await fn(**kwargs)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, lambda: fn(**kwargs))
+
+    def with_options(self, **opts: Any) -> "LocalExecutor":
+        """Return a new ``LocalExecutor``.
+
+        ``LocalExecutor`` carries no state, so options are ignored.
+        """
+        return LocalExecutor()

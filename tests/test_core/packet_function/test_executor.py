@@ -26,6 +26,7 @@ from orcapod.protocols.core_protocols import (
     PacketFunctionExecutorProtocol,
     PacketFunctionProtocol,
     PacketProtocol,
+    PythonFunctionExecutorProtocol,
 )
 
 # ---------------------------------------------------------------------------
@@ -62,6 +63,10 @@ class SpyExecutor(PacketFunctionExecutorBase):
     ) -> PacketProtocol | None:
         self.calls.append((packet_function, packet))
         return packet_function.direct_call(packet)
+
+    def execute_callable(self, fn, kwargs, executor_options=None):
+        self.calls.append((fn, kwargs))
+        return fn(**kwargs)
 
 
 class PythonOnlyExecutor(PacketFunctionExecutorBase):
@@ -147,6 +152,19 @@ class TestPacketFunctionExecutorBase:
         data = executor.get_execution_data()
         assert data["executor_type"] == "spy"
 
+    def test_with_options_returns_new_instance(self):
+        executor = SpyExecutor()
+        new_executor = executor.with_options()
+        assert new_executor is not executor
+        assert isinstance(new_executor, SpyExecutor)
+
+    def test_with_options_preserves_state(self):
+        executor = SpyExecutor(supported_types=frozenset({"python.function.v0"}))
+        new_executor = executor.with_options()
+        assert new_executor.supported_function_type_ids() == frozenset(
+            {"python.function.v0"}
+        )
+
 
 # ---------------------------------------------------------------------------
 # 2. LocalExecutor
@@ -174,6 +192,11 @@ class TestLocalExecutor:
     def test_get_execution_data(self, local_executor: LocalExecutor):
         data = local_executor.get_execution_data()
         assert data["executor_type"] == "local"
+
+    def test_with_options_returns_new_instance(self, local_executor: LocalExecutor):
+        new_executor = local_executor.with_options()
+        assert new_executor is not local_executor
+        assert isinstance(new_executor, LocalExecutor)
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +261,6 @@ class TestExecutorRouting:
         assert result is not None
         assert result.as_dict()["result"] == 3
         assert len(spy_executor.calls) == 1
-        assert spy_executor.calls[0][0] is add_pf
 
     def test_direct_call_bypasses_executor(
         self,
@@ -559,8 +581,8 @@ class ConcurrentSpyExecutor(PacketFunctionExecutorBase):
     """Executor that supports concurrent execution and tracks sync vs async calls."""
 
     def __init__(self) -> None:
-        self.sync_calls: list[PacketProtocol] = []
-        self.async_calls: list[PacketProtocol] = []
+        self.sync_calls: list[Any] = []
+        self.async_calls: list[Any] = []
 
     @property
     def executor_type_id(self) -> str:
@@ -588,6 +610,14 @@ class ConcurrentSpyExecutor(PacketFunctionExecutorBase):
     ) -> PacketProtocol | None:
         self.async_calls.append(packet)
         return packet_function.direct_call(packet)
+
+    def execute_callable(self, fn, kwargs, executor_options=None):
+        self.sync_calls.append(kwargs)
+        return fn(**kwargs)
+
+    async def async_execute_callable(self, fn, kwargs, executor_options=None):
+        self.async_calls.append(kwargs)
+        return fn(**kwargs)
 
 
 class TestConcurrentIteration:
@@ -688,3 +718,71 @@ class TestConcurrentIteration:
         second = list(output_stream.iter_packets())
         assert len(spy.async_calls) == 2  # unchanged
         assert len(first) == len(second)
+
+
+# ---------------------------------------------------------------------------
+# 11. PythonFunctionExecutorProtocol conformance
+# ---------------------------------------------------------------------------
+
+
+class TestPythonFunctionExecutorProtocol:
+    def test_local_executor_satisfies_protocol(self):
+        executor = LocalExecutor()
+        assert isinstance(executor, PythonFunctionExecutorProtocol)
+
+    def test_spy_executor_satisfies_protocol(self):
+        executor = SpyExecutor()
+        assert isinstance(executor, PythonFunctionExecutorProtocol)
+
+    def test_execute_callable_runs_function(self):
+        executor = LocalExecutor()
+        result = executor.execute_callable(add, {"x": 3, "y": 4})
+        assert result == 7
+
+    def test_execute_callable_with_executor_options(self):
+        executor = LocalExecutor()
+        result = executor.execute_callable(
+            add, {"x": 1, "y": 2}, executor_options={"num_cpus": 1}
+        )
+        assert result == 3
+
+
+# ---------------------------------------------------------------------------
+# 12. Type-safe executor dispatch via Generic[E] + __init_subclass__
+# ---------------------------------------------------------------------------
+
+
+class _CustomExecutorProtocol:
+    """A non-executor class to test type-safe dispatch rejection."""
+
+    pass
+
+
+class TestGenericExecutorDispatch:
+    def test_python_pf_resolves_executor_protocol(self):
+        """PythonPacketFunction should have resolved PythonFunctionExecutorProtocol."""
+        assert (
+            PythonPacketFunction._resolved_executor_protocol
+            is PythonFunctionExecutorProtocol
+        )
+
+    def test_set_executor_accepts_compatible_protocol(self):
+        pf = PythonPacketFunction(add, output_keys="result")
+        executor = LocalExecutor()
+        pf.set_executor(executor)
+        assert pf.executor is executor
+
+    def test_set_executor_accepts_none(self):
+        pf = PythonPacketFunction(add, output_keys="result", executor=LocalExecutor())
+        pf.set_executor(None)
+        assert pf.executor is None
+
+    def test_call_routes_through_execute_callable(self):
+        """PythonPacketFunction.call() should use execute_callable, not execute."""
+        spy = SpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        packet = Packet({"x": 1, "y": 2})
+        result = pf.call(packet)
+        assert result is not None
+        assert result.as_dict()["result"] == 3
+        assert len(spy.calls) == 1
