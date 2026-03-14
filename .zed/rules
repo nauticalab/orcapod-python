@@ -27,6 +27,14 @@ When fixing a bug or addressing a design problem:
 When discovering a new issue that won't be fixed immediately, ask the user whether it should be
 logged in DESIGN_ISSUES.md before adding it.
 
+## Superpowers artifacts
+
+Place all superpowers-related artifacts (design specs, plans, etc.) in the superpowers/
+directory at the project root — NOT under docs/. The docs/ directory is reserved for
+actual library documentation.
+
+- Specs go in superpowers/specs/
+
 ## Backward compatibility
 
 This is a greenfield project pre-v0.1.0. Do NOT add backward-compatibility shims,
