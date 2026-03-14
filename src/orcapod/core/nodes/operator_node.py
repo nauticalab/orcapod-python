@@ -296,6 +296,11 @@ class OperatorNode(StreamBase):
     # ------------------------------------------------------------------
 
     @property
+    def operator(self) -> OperatorPodProtocol:
+        """Return the wrapped operator pod."""
+        return self._operator
+
+    @property
     def producer(self) -> OperatorPodProtocol:
         return self._operator
 
@@ -414,6 +419,66 @@ class OperatorNode(StreamBase):
         )
 
         self._cached_output_table = output_table.drop(self.HASH_COLUMN_NAME)
+
+    def get_cached_output(self) -> "StreamProtocol | None":
+        """Return cached output stream in REPLAY mode, else None.
+
+        Returns:
+            The cached stream if REPLAY mode and DB records exist,
+            otherwise None.
+        """
+        if self._pipeline_database is None:
+            return None
+        if self._cache_mode != CacheMode.REPLAY:
+            return None
+        self._replay_from_cache()
+        return self._cached_output_stream
+
+    def store_result(
+        self,
+        results: list[tuple[TagProtocol, PacketProtocol]],
+    ) -> None:
+        """Persist computed results to the pipeline DB.
+
+        Wraps the materialized results as an ArrowTableStream and stores
+        via the existing ``_store_output_stream`` logic. No-op if no DB
+        is attached or cache mode is OFF.
+
+        Args:
+            results: Materialized (tag, packet) pairs from computation.
+        """
+        if self._pipeline_database is None:
+            return
+        if self._cache_mode == CacheMode.OFF:
+            return
+        if not results:
+            return
+
+        stream = StaticOutputOperatorPod._materialize_to_stream(results)
+        self._store_output_stream(stream)
+
+    def populate_cache(
+        self,
+        results: list[tuple[TagProtocol, PacketProtocol]],
+    ) -> None:
+        """Populate in-memory cache from externally-provided results.
+
+        After calling this, ``iter_packets()`` / ``as_table()`` return
+        from the cache without recomputation. Empty lists clear the cache.
+
+        Args:
+            results: Materialized (tag, packet) pairs.
+        """
+        if not results:
+            self._cached_output_stream = None
+            self._cached_output_table = None
+            self._update_modified_time()
+            return
+
+        self._cached_output_stream = StaticOutputOperatorPod._materialize_to_stream(
+            results
+        )
+        self._update_modified_time()
 
     def _compute_and_store(self) -> None:
         """Compute operator output, optionally store in DB."""
