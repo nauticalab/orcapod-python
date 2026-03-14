@@ -210,7 +210,12 @@ class SyncPipelineOrchestrator:
                 empty_fields[name] = pa.array([], type=arrow_type)
             empty_table = pa.table(empty_fields)
             tag_keys = upstream_node.keys()[0]
-            return ArrowTableStream(empty_table, tag_columns=tag_keys)
+            return ArrowTableStream(
+                empty_table,
+                tag_columns=tag_keys,
+                producer=upstream_node.producer,
+                upstreams=upstream_node.upstreams,
+            )
 
         tag_tables = [tag.as_table(columns={"system_tags": True}) for tag, _ in buf]
         packet_tables = [pkt.as_table(columns={"source": True}) for _, pkt in buf]
@@ -223,10 +228,20 @@ class SyncPipelineOrchestrator:
 
         full_table = arrow_utils.hstack_tables(combined_tags, combined_packets)
 
+        # Pass the upstream node's producer and upstreams so the
+        # materialized stream inherits the correct identity_structure
+        # and pipeline_identity_structure (via StreamBase delegation).
+        # This ensures downstream operators produce correct system tag
+        # column names (which embed pipeline hashes of their inputs).
+        producer = upstream_node.producer
+        upstreams = upstream_node.upstreams
+
         return ArrowTableStream(
             full_table,
             tag_columns=user_tag_keys,
             source_info=source_info,
+            producer=producer,
+            upstreams=upstreams,
         )
 
     @staticmethod
