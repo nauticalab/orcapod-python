@@ -199,7 +199,18 @@ class SyncPipelineOrchestrator:
         pa = LazyModule("pyarrow")
 
         if not buf:
-            raise ValueError("Cannot materialize empty buffer as stream")
+            # Build an empty stream with the correct schema from the upstream node
+            tag_schema, packet_schema = upstream_node.output_schema(
+                columns={"system_tags": True, "source": True}
+            )
+            type_converter = upstream_node.data_context.type_converter
+            empty_fields = {}
+            for name, py_type in {**tag_schema, **packet_schema}.items():
+                arrow_type = type_converter.python_type_to_arrow_type(py_type)
+                empty_fields[name] = pa.array([], type=arrow_type)
+            empty_table = pa.table(empty_fields)
+            tag_keys = upstream_node.keys()[0]
+            return ArrowTableStream(empty_table, tag_columns=tag_keys)
 
         tag_tables = [tag.as_table(columns={"system_tags": True}) for tag, _ in buf]
         packet_tables = [pkt.as_table(columns={"source": True}) for _, pkt in buf]
