@@ -20,6 +20,7 @@ from orcapod.hashing.hash_utils import (
     get_function_components,
     get_function_signature,
 )
+from orcapod.core.result_cache import ResultCache
 from orcapod.protocols.core_protocols import PacketFunctionProtocol, PacketProtocol
 from orcapod.protocols.core_protocols.executor import (
     PacketFunctionExecutorProtocol,
@@ -724,10 +725,14 @@ class PacketFunctionWrapper(PacketFunctionBase[E]):
 
 
 class CachedPacketFunction(PacketFunctionWrapper):
-    """Wrapper around a PacketFunctionProtocol that caches results for identical input packets."""
+    """Wrapper around a PacketFunctionProtocol that caches results for identical input packets.
 
-    # cloumn name containing indication of whether the result was computed
-    RESULT_COMPUTED_FLAG = f"{constants.META_PREFIX}computed"
+    Uses a shared ``ResultCache`` for lookup/store/conflict-resolution
+    logic (same mechanism as ``CachedFunctionPod``).
+    """
+
+    # Expose RESULT_COMPUTED_FLAG from the shared ResultCache
+    RESULT_COMPUTED_FLAG = ResultCache.RESULT_COMPUTED_FLAG
 
     def __init__(
         self,
@@ -739,16 +744,20 @@ class CachedPacketFunction(PacketFunctionWrapper):
         super().__init__(packet_function, **kwargs)
         self._result_database = result_database
         self._record_path_prefix = record_path_prefix
-        self._auto_flush = True
+        self._cache = ResultCache(
+            result_database=result_database,
+            record_path=record_path_prefix + self.uri,
+            auto_flush=True,
+        )
 
     def set_auto_flush(self, on: bool = True) -> None:
         """Set auto-flush behavior. If True, the database flushes after each record."""
-        self._auto_flush = on
+        self._cache.set_auto_flush(on)
 
     @property
     def record_path(self) -> tuple[str, ...]:
         """Return the path to the record in the result store."""
-        return self._record_path_prefix + self.uri
+        return self._cache.record_path
 
     def call(
         self,
@@ -757,20 +766,22 @@ class CachedPacketFunction(PacketFunctionWrapper):
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
     ) -> PacketProtocol | None:
-        # execution_engine_hash = execution_engine.name if execution_engine else "default"
         output_packet = None
         if not skip_cache_lookup:
             logger.info("Checking for cache...")
-            # lookup stored result for the input packet
-            output_packet = self.get_cached_output_for_packet(packet)
+            output_packet = self._cache.lookup(packet)
             if output_packet is not None:
                 logger.info(f"Cache hit for {packet}!")
         if output_packet is None:
             output_packet = self._packet_function.call(packet)
             if output_packet is not None:
                 if not skip_cache_insert:
-                    self.record_packet(packet, output_packet)
-                # add meta column to indicate that this was computed
+                    self._cache.store(
+                        packet,
+                        output_packet,
+                        variation_data=self.get_function_variation_data(),
+                        execution_data=self.get_execution_data(),
+                    )
                 output_packet = output_packet.with_meta_columns(
                     **{self.RESULT_COMPUTED_FLAG: True}
                 )
@@ -788,14 +799,19 @@ class CachedPacketFunction(PacketFunctionWrapper):
         output_packet = None
         if not skip_cache_lookup:
             logger.info("Checking for cache...")
-            output_packet = self.get_cached_output_for_packet(packet)
+            output_packet = self._cache.lookup(packet)
             if output_packet is not None:
                 logger.info(f"Cache hit for {packet}!")
         if output_packet is None:
             output_packet = await self._packet_function.async_call(packet)
             if output_packet is not None:
                 if not skip_cache_insert:
-                    self.record_packet(packet, output_packet)
+                    self._cache.store(
+                        packet,
+                        output_packet,
+                        variation_data=self.get_function_variation_data(),
+                        execution_data=self.get_execution_data(),
+                    )
                 output_packet = output_packet.with_meta_columns(
                     **{self.RESULT_COMPUTED_FLAG: True}
                 )
@@ -811,45 +827,7 @@ class CachedPacketFunction(PacketFunctionWrapper):
         Returns:
             The cached output packet, or ``None`` if no entry was found.
         """
-
-        # get all records with matching the input packet hash
-        # TODO: add match based on match_tier if specified
-
-        # TODO: implement matching policy/strategy
-        constraints = {
-            constants.INPUT_PACKET_HASH_COL: input_packet.content_hash().to_string()
-        }
-
-        RECORD_ID_COLUMN = "_record_id"
-        result_table = self._result_database.get_records_with_column_value(
-            self.record_path,
-            constraints,
-            record_id_column=RECORD_ID_COLUMN,
-        )
-
-        if result_table is None or result_table.num_rows == 0:
-            return None
-
-        if result_table.num_rows > 1:
-            logger.info(
-                f"Performing conflict resolution for multiple records for {input_packet.content_hash().display_name()}"
-            )
-            result_table = result_table.sort_by(
-                [(constants.POD_TIMESTAMP, "descending")]
-            ).take([0])
-
-        # extract the record_id column
-        record_id = result_table.to_pylist()[0][RECORD_ID_COLUMN]
-        result_table = result_table.drop_columns(
-            [RECORD_ID_COLUMN, constants.INPUT_PACKET_HASH_COL]
-        )
-
-        # note that data context will be loaded from the result store
-        return Packet(
-            result_table,
-            record_id=record_id,
-            meta_info={self.RESULT_COMPUTED_FLAG: False},
-        )
+        return self._cache.lookup(input_packet)
 
     def record_packet(
         self,
@@ -858,54 +836,13 @@ class CachedPacketFunction(PacketFunctionWrapper):
         skip_duplicates: bool = False,
     ) -> PacketProtocol:
         """Record the output packet against the input packet in the result store."""
-
-        # TODO: consider incorporating execution_engine_opts into the record
-        data_table = output_packet.as_table(columns={"source": True, "context": True})
-
-        i = 0
-        for k, v in self.get_function_variation_data().items():
-            # add the tiered pod ID to the data table
-            data_table = data_table.add_column(
-                i,
-                f"{constants.PF_VARIATION_PREFIX}{k}",
-                pa.array([v], type=pa.large_string()),
-            )
-            i += 1
-
-        for k, v in self.get_execution_data().items():
-            # add the tiered pod ID to the data table
-            data_table = data_table.add_column(
-                i,
-                f"{constants.PF_EXECUTION_PREFIX}{k}",
-                pa.array([v], type=pa.large_string()),
-            )
-            i += 1
-
-        # add the input packet hash as a column
-        data_table = data_table.add_column(
-            0,
-            constants.INPUT_PACKET_HASH_COL,
-            pa.array([input_packet.content_hash().to_string()], type=pa.large_string()),
-        )
-
-        # add computation timestamp
-        timestamp = datetime.now(timezone.utc)
-        data_table = data_table.append_column(
-            constants.POD_TIMESTAMP,
-            pa.array([timestamp], type=pa.timestamp("us", tz="UTC")),
-        )
-
-        self._result_database.add_record(
-            self.record_path,
-            output_packet.datagram_id,  # output packet datagram ID (uuid) is used as a unique identification
-            data_table,
+        self._cache.store(
+            input_packet,
+            output_packet,
+            variation_data=self.get_function_variation_data(),
+            execution_data=self.get_execution_data(),
             skip_duplicates=skip_duplicates,
         )
-
-        if self._auto_flush:
-            self._result_database.flush()
-
-        # TODO: make store return retrieved table
         return output_packet
 
     def get_all_cached_outputs(
@@ -920,13 +857,6 @@ class CachedPacketFunction(PacketFunctionWrapper):
         Returns:
             A PyArrow table of cached results, or ``None`` if empty.
         """
-        record_id_column = (
-            constants.PACKET_RECORD_ID if include_system_columns else None
+        return self._cache.get_all_records(
+            include_system_columns=include_system_columns
         )
-        result_table = self._result_database.get_all_records(
-            self.record_path, record_id_column=record_id_column
-        )
-        if result_table is None or result_table.num_rows == 0:
-            return None
-
-        return result_table

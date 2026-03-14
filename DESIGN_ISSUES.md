@@ -318,7 +318,7 @@ which column groups (meta, source, system_tags) are returned.
 ## `src/orcapod/core/cached_function_pod.py` / `src/orcapod/core/packet_function.py`
 
 ### CFP1 — Extract shared result caching logic from CachedPacketFunction and CachedFunctionPod
-**Status:** open
+**Status:** resolved
 **Severity:** medium
 
 `CachedPacketFunction` and `CachedFunctionPod` implement nearly identical result caching
@@ -326,14 +326,11 @@ logic: DB lookup by `INPUT_PACKET_HASH_COL`, conflict resolution by most-recent 
 record storage with variation/execution/timestamp columns, and a `RESULT_COMPUTED_FLAG`
 meta column. The match tier / matching policy design (P6) will also need to apply to both.
 
-This duplication means any future changes to caching behavior (e.g. implementing match
-tiers, adding new stored columns, changing conflict resolution) must be applied in two
-places.
-
-**Suggested refactor:** Extract a `ResultCache` (or similar) class that owns the DB,
-record path, lookup, store, and conflict resolution logic. Both `CachedPacketFunction`
-and `CachedFunctionPod` would delegate to a shared `ResultCache` instance. The match tier
-strategy (P6) would then be implemented once on `ResultCache`.
+**Fix:** Extracted `ResultCache` class (`src/orcapod/core/result_cache.py`) that owns the DB,
+record path, lookup (with `additional_constraints` for future match tiers), store, conflict
+resolution, and auto-flush logic. Both `CachedPacketFunction` and `CachedFunctionPod` now
+delegate to a `ResultCache` instance. The match tier strategy (P6) can be implemented once
+on `ResultCache.lookup` via `additional_constraints`.
 
 ---
 
