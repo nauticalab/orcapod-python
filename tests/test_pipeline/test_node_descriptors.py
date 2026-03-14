@@ -153,7 +153,7 @@ class TestFunctionNodeFromDescriptor:
             },
             "function_pod": pod.to_config(),
             "pipeline_path": list(node.pipeline_path),
-            "result_record_path": list(node._packet_function.record_path),
+            "result_record_path": list(node._cached_function_pod.record_path),
         }
         return node, descriptor, db
 

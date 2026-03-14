@@ -59,13 +59,13 @@ class TestFunctionNodeAttachDatabases:
         node.attach_databases(pipeline_database=db, result_database=db)
         assert node._pipeline_database is db
 
-    def test_attach_databases_wraps_packet_function(self):
-        from orcapod.core.packet_function import CachedPacketFunction
+    def test_attach_databases_creates_cached_function_pod(self):
+        from orcapod.core.cached_function_pod import CachedFunctionPod
 
         node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream())
         db = InMemoryArrowDatabase()
         node.attach_databases(pipeline_database=db, result_database=db)
-        assert isinstance(node._packet_function, CachedPacketFunction)
+        assert isinstance(node._cached_function_pod, CachedFunctionPod)
 
     def test_attach_databases_clears_caches(self):
         node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream())
@@ -83,17 +83,17 @@ class TestFunctionNodeAttachDatabases:
         assert len(node.pipeline_path) > 0
 
     def test_double_attach_does_not_double_wrap(self):
-        from orcapod.core.packet_function import CachedPacketFunction
+        from orcapod.core.cached_function_pod import CachedFunctionPod
 
         node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream())
         db = InMemoryArrowDatabase()
         node.attach_databases(pipeline_database=db, result_database=db)
-        assert isinstance(node._packet_function, CachedPacketFunction)
-        # Second attach should not double-wrap
+        assert isinstance(node._cached_function_pod, CachedFunctionPod)
+        # Second attach wraps the original function_pod, not the cached one
         node.attach_databases(pipeline_database=db, result_database=db)
-        assert isinstance(node._packet_function, CachedPacketFunction)
+        assert isinstance(node._cached_function_pod, CachedFunctionPod)
         assert not isinstance(
-            node._packet_function._packet_function, CachedPacketFunction
+            node._cached_function_pod._function_pod, CachedFunctionPod
         )
 
     def test_iter_packets_after_attach_works(self):

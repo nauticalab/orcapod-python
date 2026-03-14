@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 from orcapod import contexts
 from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.config import Config
-from orcapod.core.packet_function import CachedPacketFunction
+from orcapod.core.cached_function_pod import CachedFunctionPod
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
@@ -60,7 +60,7 @@ class FunctionNode(StreamBase):
     When constructed without database parameters, provides the core stream
     interface (identity, schema, iteration) without any persistence.  When
     databases are provided (either at construction or via ``attach_databases``),
-    adds result caching via ``CachedPacketFunction``, pipeline record storage,
+    adds result caching via ``CachedFunctionPod``, pipeline record storage,
     and two-phase iteration (cached first, then compute missing).
     """
 
@@ -114,6 +114,7 @@ class FunctionNode(StreamBase):
 
         # DB persistence state (initially None; set via __init__ params or attach_databases)
         self._pipeline_database: ArrowDatabaseProtocol | None = None
+        self._cached_function_pod: CachedFunctionPod | None = None
         self._pipeline_path_prefix: tuple[str, ...] = ()
         self._pipeline_node_hash: str | None = None
         self._output_schema_hash: str | None = None
@@ -139,6 +140,10 @@ class FunctionNode(StreamBase):
     ) -> None:
         """Attach databases for persistent caching and pipeline records.
 
+        Creates a ``CachedFunctionPod`` wrapping the original function pod
+        for result caching.  The pipeline database is used separately for
+        pipeline-level provenance records (tag + packet hash).
+
         Args:
             pipeline_database: Database for pipeline records.
             result_database: Database for cached results. Defaults to
@@ -157,13 +162,9 @@ class FunctionNode(StreamBase):
         elif result_path_prefix is not None:
             computed_result_path_prefix = result_path_prefix
 
-        # Guard against double-wrapping
-        pf = self._packet_function
-        if isinstance(pf, CachedPacketFunction):
-            pf = pf._packet_function
-
-        self._packet_function = CachedPacketFunction(
-            pf,
+        # Always wrap the original function_pod (not a previous cached wrapper)
+        self._cached_function_pod = CachedFunctionPod(
+            self._function_pod,
             result_database=result_database,
             record_path_prefix=computed_result_path_prefix,
         )
@@ -285,6 +286,7 @@ class FunctionNode(StreamBase):
 
         # DB persistence state
         node._pipeline_database = pipeline_db
+        node._cached_function_pod = None
         node._pipeline_path_prefix = ()
         node._pipeline_node_hash = None
         node._output_schema_hash = None
@@ -467,33 +469,29 @@ class FunctionNode(StreamBase):
         self,
         tag: TagProtocol,
         packet: PacketProtocol,
-        skip_cache_lookup: bool = False,
-        skip_cache_insert: bool = False,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
         """Process a single packet, optionally recording to the pipeline database.
+
+        When a database is attached, uses ``CachedFunctionPod`` for result
+        caching (tag+packet level) and separately records a pipeline
+        provenance entry.
 
         Args:
             tag: The tag associated with the packet.
             packet: The input packet to process.
-            skip_cache_lookup: If True, bypass DB lookup for existing result.
-            skip_cache_insert: If True, skip writing result to DB.
 
         Returns:
             A ``(tag, output_packet)`` tuple; output_packet is ``None`` if
             the function filters the packet out.
         """
-        if self._pipeline_database is not None:
-            # Persistent mode: use CachedPacketFunction + pipeline record
-            output_packet = self._packet_function.call(
-                packet,
-                skip_cache_lookup=skip_cache_lookup,
-                skip_cache_insert=skip_cache_insert,
-            )
+        if self._cached_function_pod is not None:
+            # Persistent mode: CachedFunctionPod for result caching + pipeline record
+            tag, output_packet = self._cached_function_pod.process_packet(tag, packet)
 
             if output_packet is not None:
                 result_computed = bool(
                     output_packet.get_meta_value(
-                        self._packet_function.RESULT_COMPUTED_FLAG, False
+                        self._cached_function_pod.RESULT_COMPUTED_FLAG, False
                     )
                 )
                 self.add_pipeline_record(
@@ -511,26 +509,22 @@ class FunctionNode(StreamBase):
         self,
         tag: TagProtocol,
         packet: PacketProtocol,
-        skip_cache_lookup: bool = False,
-        skip_cache_insert: bool = False,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
         """Async counterpart of ``process_packet``.
 
-        Uses the CachedPacketFunction's async_call for computation + result
-        caching when a database is attached.  Pipeline record storage is
-        synchronous (DB protocol is sync).
+        Uses ``CachedFunctionPod.async_process_packet`` (sync DB caching
+        + async computation) when a database is attached.  Pipeline record
+        storage is synchronous (DB protocol is sync).
         """
-        if self._pipeline_database is not None:
-            output_packet = await self._packet_function.async_call(
-                packet,
-                skip_cache_lookup=skip_cache_lookup,
-                skip_cache_insert=skip_cache_insert,
+        if self._cached_function_pod is not None:
+            tag, output_packet = await self._cached_function_pod.async_process_packet(
+                tag, packet
             )
 
             if output_packet is not None:
                 result_computed = bool(
                     output_packet.get_meta_value(
-                        self._packet_function.RESULT_COMPUTED_FLAG, False
+                        self._cached_function_pod.RESULT_COMPUTED_FLAG, False
                     )
                 )
                 self.add_pipeline_record(
@@ -552,19 +546,25 @@ class FunctionNode(StreamBase):
         computed: bool,
         skip_cache_lookup: bool = False,
     ) -> None:
-        """Add a pipeline record to the database for a processed packet."""
-        # combine TagProtocol with packet content hash to compute entry hash
-        # TODO: add system tag columns
-        # TODO: consider using bytes instead of string representation
+        """Add a pipeline record to the database for a processed packet.
+
+        The pipeline record stores:
+        - Tag columns (including system tags)
+        - All source columns of the input packet (provenance, not data)
+        - Output packet record ID (for joining with result records)
+        - Input packet data context key
+        - Whether the result was freshly computed or cached
+        """
+        # Compute entry hash from tag + system tags + input packet hash
         tag_with_hash = tag.as_table(columns={"system_tags": True}).append_column(
             constants.INPUT_PACKET_HASH_COL,
             pa.array([input_packet.content_hash().to_string()], type=pa.large_string()),
         )
 
-        # unique entry ID is determined by the combination of tags, system_tags, and input_packet hash
+        # Unique entry ID: combination of tags, system_tags, and input_packet hash
         entry_id = self.data_context.arrow_hasher.hash_table(tag_with_hash).to_string()
 
-        # check presence of an existing entry with the same entry_id
+        # Check for existing entry
         existing_record = None
         if not skip_cache_lookup:
             existing_record = self._pipeline_database.get_record_by_id(
@@ -573,35 +573,40 @@ class FunctionNode(StreamBase):
             )
 
         if existing_record is not None:
-            # if the record already exists, then skip adding
             logger.debug(
                 f"Record with entry_id {entry_id} already exists. Skipping addition."
             )
             return
 
-        # rename all keys to avoid potential collision with result columns
-        renamed_input_packet = input_packet.rename(
-            {k: f"_input_{k}" for k in input_packet.keys()}
-        )
-        input_packet_info = (
-            renamed_input_packet.as_table(columns={"source": True})
-            .append_column(
-                constants.PACKET_RECORD_ID,  # record ID for the packet function output packet
-                pa.array([packet_record_id], type=pa.large_string()),
-            )
-            .append_column(
-                f"{constants.META_PREFIX}input_packet{constants.CONTEXT_KEY}",  # data context key for the input packet
-                pa.array([input_packet.data_context_key], type=pa.large_string()),
-            )
-            .append_column(
-                f"{constants.META_PREFIX}computed",
-                pa.array([computed], type=pa.bool_()),
-            )
-            .drop_columns(list(renamed_input_packet.keys()))
+        # Extract source columns only (no data columns) from the input packet
+        input_table_with_source = input_packet.as_table(columns={"source": True})
+        source_col_names = [
+            c
+            for c in input_table_with_source.column_names
+            if c.startswith(constants.SOURCE_PREFIX)
+        ]
+        input_source_table = input_table_with_source.select(source_col_names)
+
+        # Build the meta columns table
+        meta_table = pa.table(
+            {
+                constants.PACKET_RECORD_ID: pa.array(
+                    [packet_record_id], type=pa.large_string()
+                ),
+                f"{constants.META_PREFIX}input_packet{constants.CONTEXT_KEY}": pa.array(
+                    [input_packet.data_context_key], type=pa.large_string()
+                ),
+                f"{constants.META_PREFIX}computed": pa.array(
+                    [computed], type=pa.bool_()
+                ),
+            }
         )
 
+        # Combine: tag (with system tags) + input source columns + meta columns
         combined_record = arrow_utils.hstack_tables(
-            tag.as_table(columns={"system_tags": True}), input_packet_info
+            tag.as_table(columns={"system_tags": True}),
+            input_source_table,
+            meta_table,
         )
 
         self._pipeline_database.add_record(
@@ -630,11 +635,11 @@ class FunctionNode(StreamBase):
             A PyArrow table of joined results, or ``None`` if no database is
             attached or no records exist.
         """
-        if self._pipeline_database is None:
+        if self._cached_function_pod is None:
             return None
 
-        results = self._packet_function._result_database.get_all_records(
-            self._packet_function.record_path,
+        results = self._cached_function_pod._result_database.get_all_records(
+            self._cached_function_pod.record_path,
             record_id_column=constants.PACKET_RECORD_ID,
         )
         taginfo = self._pipeline_database.get_all_records(self.pipeline_path)
@@ -700,21 +705,21 @@ class FunctionNode(StreamBase):
             self.clear_cache()
         self._ensure_iterator()
 
-        if self._pipeline_database is not None:
+        if self._cached_function_pod is not None:
             # Two-phase iteration with DB backing
             if self._cached_input_iterator is not None:
                 input_iter = self._cached_input_iterator
                 # --- Phase 1: yield already-computed results from the databases ---
                 existing = self.get_all_records(columns={"meta": True})
-                computed_hashes: set[str] = set()
+                computed_entry_hashes: set[str] = set()
                 if existing is not None and existing.num_rows > 0:
                     tag_keys = self._input_stream.keys()[0]
-                    # Strip the meta column before handing to ArrowTableStream so it only
-                    # sees tag + output-packet columns.
-                    hash_col = constants.INPUT_PACKET_HASH_COL
-                    hash_values = cast(list[str], existing.column(hash_col).to_pylist())
-                    computed_hashes = set(hash_values)
-                    data_table = existing.drop([hash_col])
+                    entry_hash_col = CachedFunctionPod.CACHE_ENTRY_HASH_COL
+                    computed_entry_hashes = set(
+                        cast(list[str], existing.column(entry_hash_col).to_pylist())
+                    )
+                    # Strip the entry hash column before yielding as stream
+                    data_table = existing.drop([entry_hash_col])
                     existing_stream = ArrowTableStream(data_table, tag_columns=tag_keys)
                     for i, (tag, packet) in enumerate(existing_stream.iter_packets()):
                         self._cached_output_packets[i] = (tag, packet)
@@ -723,8 +728,10 @@ class FunctionNode(StreamBase):
                 # --- Phase 2: process only missing input packets ---
                 next_idx = len(self._cached_output_packets)
                 for tag, packet in input_iter:
-                    input_hash = packet.content_hash().to_string()
-                    if input_hash in computed_hashes:
+                    entry_hash = self._cached_function_pod._compute_entry_hash(
+                        tag, packet
+                    )
+                    if entry_hash in computed_entry_hashes:
                         continue
                     tag, output_packet = self.process_packet(tag, packet)
                     self._cached_output_packets[next_idx] = (tag, output_packet)
@@ -945,18 +952,21 @@ class FunctionNode(StreamBase):
             node_config = getattr(self._function_pod, "node_config", NodeConfig())
             max_concurrency = resolve_concurrency(node_config, pipeline_config)
 
-            if self._pipeline_database is not None:
+            if self._cached_function_pod is not None:
                 # Two-phase async execution with DB backing
                 # Phase 1: emit existing results from DB
                 existing = self.get_all_records(columns={"meta": True})
-                computed_hashes: set[str] = set()
+                computed_entry_hashes: set[str] = set()
                 if existing is not None and existing.num_rows > 0:
                     tag_keys = self._input_stream.keys()[0]
-                    hash_col = constants.INPUT_PACKET_HASH_COL
-                    computed_hashes = set(
-                        cast(list[str], existing.column(hash_col).to_pylist())
+                    entry_hash_col = CachedFunctionPod.CACHE_ENTRY_HASH_COL
+                    computed_entry_hashes = set(
+                        cast(
+                            list[str],
+                            existing.column(entry_hash_col).to_pylist(),
+                        )
                     )
-                    data_table = existing.drop([hash_col])
+                    data_table = existing.drop([entry_hash_col])
                     existing_stream = ArrowTableStream(data_table, tag_columns=tag_keys)
                     for tag, packet in existing_stream.iter_packets():
                         await output.send((tag, packet))
@@ -983,8 +993,10 @@ class FunctionNode(StreamBase):
 
                 async with asyncio.TaskGroup() as tg:
                     async for tag, packet in inputs[0]:
-                        input_hash = packet.content_hash().to_string()
-                        if input_hash in computed_hashes:
+                        entry_hash = self._cached_function_pod._compute_entry_hash(
+                            tag, packet
+                        )
+                        if entry_hash in computed_entry_hashes:
                             continue
                         if sem is not None:
                             await sem.acquire()

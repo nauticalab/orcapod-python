@@ -315,6 +315,25 @@ which column groups (meta, source, system_tags) are returned.
 
 ---
 
+## `src/orcapod/core/cached_function_pod.py`
+
+### CFP1 — Consider single-column lookup optimization for pipeline record entry_id
+**Status:** open
+**Severity:** low
+
+`CachedFunctionPod` and `FunctionNode.add_pipeline_record` both compute a combined hash
+from `tag.as_table(columns={"system_tags": True}) + input_packet_hash`. The
+`CachedFunctionPod` uses this as a single-column DB lookup key (`CACHE_ENTRY_HASH_COL`),
+while the pipeline record stores it as `entry_id`.
+
+Currently `FunctionNode.add_pipeline_record` recomputes this hash independently. Consider
+benchmarking whether passing the already-computed `entry_hash` from `CachedFunctionPod`
+through to `add_pipeline_record` would yield a meaningful speedup. The hash computation
+involves Arrow table construction + semantic hashing, so avoiding the second computation
+could be worthwhile for large pipelines.
+
+---
+
 ## `src/orcapod/core/nodes/function_node.py`
 
 ### FN1 — `FunctionNode.async_execute` Phase 2 was fully sequential

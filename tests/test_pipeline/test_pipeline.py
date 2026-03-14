@@ -264,9 +264,9 @@ class TestFunctionDatabaseHandling:
         node = pipeline.compiled_nodes["adder"]
         assert isinstance(node, FunctionNode)
 
-        # The CachedPacketFunction's record_path should start with
+        # The CachedFunctionPod's record_path should start with
         # (pipeline_name, "_results", ...)
-        record_path = node._packet_function.record_path
+        record_path = node._cached_function_pod.record_path
         assert record_path[0] == "my_pipe"
         assert record_path[1] == "_results"
 
@@ -289,8 +289,8 @@ class TestFunctionDatabaseHandling:
         node = pipeline.compiled_nodes["adder"]
         assert isinstance(node, FunctionNode)
 
-        # The CachedPacketFunction should use function_db
-        assert node._packet_function._result_database is function_db
+        # The CachedFunctionPod should use function_db
+        assert node._cached_function_pod._result_database is function_db
 
 
 # ---------------------------------------------------------------------------
