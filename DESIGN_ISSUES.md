@@ -315,22 +315,25 @@ which column groups (meta, source, system_tags) are returned.
 
 ---
 
-## `src/orcapod/core/cached_function_pod.py`
+## `src/orcapod/core/cached_function_pod.py` / `src/orcapod/core/packet_function.py`
 
-### CFP1 — Consider single-column lookup optimization for pipeline record entry_id
+### CFP1 — Extract shared result caching logic from CachedPacketFunction and CachedFunctionPod
 **Status:** open
-**Severity:** low
+**Severity:** medium
 
-`CachedFunctionPod` and `FunctionNode.add_pipeline_record` both compute a combined hash
-from `tag.as_table(columns={"system_tags": True}) + input_packet_hash`. The
-`CachedFunctionPod` uses this as a single-column DB lookup key (`CACHE_ENTRY_HASH_COL`),
-while the pipeline record stores it as `entry_id`.
+`CachedPacketFunction` and `CachedFunctionPod` implement nearly identical result caching
+logic: DB lookup by `INPUT_PACKET_HASH_COL`, conflict resolution by most-recent timestamp,
+record storage with variation/execution/timestamp columns, and a `RESULT_COMPUTED_FLAG`
+meta column. The match tier / matching policy design (P6) will also need to apply to both.
 
-Currently `FunctionNode.add_pipeline_record` recomputes this hash independently. Consider
-benchmarking whether passing the already-computed `entry_hash` from `CachedFunctionPod`
-through to `add_pipeline_record` would yield a meaningful speedup. The hash computation
-involves Arrow table construction + semantic hashing, so avoiding the second computation
-could be worthwhile for large pipelines.
+This duplication means any future changes to caching behavior (e.g. implementing match
+tiers, adding new stored columns, changing conflict resolution) must be applied in two
+places.
+
+**Suggested refactor:** Extract a `ResultCache` (or similar) class that owns the DB,
+record path, lookup, store, and conflict resolution logic. Both `CachedPacketFunction`
+and `CachedFunctionPod` would delegate to a shared `ResultCache` instance. The match tier
+strategy (P6) would then be implemented once on `ResultCache`.
 
 ---
 

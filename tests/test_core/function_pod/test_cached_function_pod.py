@@ -147,26 +147,28 @@ class TestCacheHit:
 # ---------------------------------------------------------------------------
 
 
-class TestTagAwareCaching:
-    def test_different_tags_same_packet_cached_separately(self, double_pod, cache_db):
-        """Same packet data with different tag values should be cached separately."""
+class TestCacheKeySemantics:
+    def test_same_packet_different_tags_is_cache_hit(self, double_pod, cache_db):
+        """Same packet data with different tags is a cache hit — the function
+        output depends only on the packet, not the tag."""
         cached_pod = CachedFunctionPod(double_pod, result_database=cache_db)
 
-        # Stream with tag=0, x=10
         stream1 = _make_stream([{"id": 0, "x": 10}])
         list(cached_pod.process(stream1).iter_packets())
 
-        # Stream with tag=1, x=10 (same packet data, different tag)
+        # Same packet data, different tag — should be cache hit
         stream2 = _make_stream([{"id": 1, "x": 10}])
-        list(cached_pod.process(stream2).iter_packets())
+        results = list(cached_pod.process(stream2).iter_packets())
 
         records = cache_db.get_all_records(cached_pod.record_path)
         assert records is not None
-        # Should have 2 records since tags differ
-        assert records.num_rows == 2
+        # Only 1 record since the cache key is input packet hash only
+        assert records.num_rows == 1
+        # But result is still correct
+        assert results[0][1].as_dict()["result"] == 20
 
-    def test_same_tag_different_packet_cached_separately(self, double_pod, cache_db):
-        """Same tag value with different packet data should produce separate entries."""
+    def test_different_packet_data_cached_separately(self, double_pod, cache_db):
+        """Different packet data should produce separate cache entries."""
         cached_pod = CachedFunctionPod(double_pod, result_database=cache_db)
 
         stream1 = _make_stream([{"id": 0, "x": 10}])
@@ -179,14 +181,13 @@ class TestTagAwareCaching:
         assert records is not None
         assert records.num_rows == 2
 
-    def test_same_tag_same_packet_is_cache_hit(self, double_pod, cache_db):
-        """Exact same tag + packet should be a cache hit (no new record)."""
+    def test_identical_input_is_cache_hit(self, double_pod, cache_db):
+        """Exact same input is a cache hit (no new record)."""
         cached_pod = CachedFunctionPod(double_pod, result_database=cache_db)
 
         stream1 = _make_stream([{"id": 0, "x": 10}])
         list(cached_pod.process(stream1).iter_packets())
 
-        # Identical stream
         stream2 = _make_stream([{"id": 0, "x": 10}])
         list(cached_pod.process(stream2).iter_packets())
 
