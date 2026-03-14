@@ -121,8 +121,12 @@ A few things to note about function pods:
 Now apply it:
 
 ```python
-result = analyze_conditions.pod.process(source)
+result = analyze_conditions.pod(source)
 ```
+
+!!! tip
+    All standard pods support `__call__` as a shorthand for `.process()`, so
+    `pod(stream)` is equivalent to `pod.process(stream)`.
 
 The `result` is a new stream. Tags are preserved from the input; the packet columns
 are replaced with the function's outputs.
@@ -189,7 +193,7 @@ def analyze_conditions(temperature: float, pressure: float) -> tuple[float, bool
     return temp_f, is_high
 
 # Apply and view results
-result = analyze_conditions.pod.process(source)
+result = analyze_conditions.pod(source)
 print(result.as_table().to_pandas())
 #   experiment  temp_fahrenheit  is_high_pressure
 # 0    exp_001            68.90              True
