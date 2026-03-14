@@ -168,3 +168,72 @@ class TestSyncOrchestratorUnknownNodeType:
         orch = SyncPipelineOrchestrator()
         with pytest.raises(TypeError, match="Unknown node type"):
             orch.run(G)
+
+
+class TestPipelineRunIntegration:
+    """Pipeline.run() with orchestrator parameter."""
+
+    def test_default_run_uses_sync_orchestrator(self):
+        """Pipeline.run() without args should use SyncPipelineOrchestrator."""
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(pf)
+
+        pipeline = Pipeline(name="default", pipeline_database=InMemoryArrowDatabase())
+        with pipeline:
+            pod(src, label="doubler")
+
+        pipeline.run()
+
+        records = pipeline.doubler.get_all_records()
+        assert records is not None
+        assert records.num_rows == 2
+        values = sorted(records.column("result").to_pylist())
+        assert values == [2, 4]
+
+    def test_run_with_explicit_orchestrator(self):
+        """Pipeline.run(orchestrator=...) uses the provided orchestrator."""
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(pf)
+
+        pipeline = Pipeline(name="explicit", pipeline_database=InMemoryArrowDatabase())
+        with pipeline:
+            pod(src, label="doubler")
+
+        events = []
+
+        class RecordingObserver:
+            def on_node_start(self, node):
+                events.append(("node_start", node.node_type))
+
+            def on_node_end(self, node):
+                events.append(("node_end", node.node_type))
+
+            def on_packet_start(self, node, tag, packet):
+                events.append(("packet_start",))
+
+            def on_packet_end(self, node, tag, input_pkt, output_pkt, cached):
+                events.append(("packet_end",))
+
+        orch = SyncPipelineOrchestrator(observer=RecordingObserver())
+        pipeline.run(orchestrator=orch)
+
+        assert len(events) > 0
+        records = pipeline.doubler.get_all_records()
+        assert records is not None
+
+    def test_run_populates_node_caches(self):
+        """After run(), iter_packets()/as_table() should work on nodes."""
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(pf)
+
+        pipeline = Pipeline(name="cache", pipeline_database=InMemoryArrowDatabase())
+        with pipeline:
+            pod(src, label="doubler")
+
+        pipeline.run()
+
+        table = pipeline.doubler.as_table()
+        assert table.num_rows == 2
