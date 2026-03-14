@@ -79,3 +79,34 @@ class TestOperatorNodePopulateCache:
         # After clearing, run() should recompute
         node.run()
         assert len(list(node.iter_packets())) == 2
+
+
+from orcapod.core.function_pod import FunctionPod
+from orcapod.core.nodes import FunctionNode
+from orcapod.core.packet_function import PythonPacketFunction
+
+
+class TestFunctionNodePopulateCache:
+    def test_iter_packets_uses_cache_when_populated(self):
+        table = pa.table(
+            {
+                "key": pa.array(["a", "b"], type=pa.large_string()),
+                "value": pa.array([1, 2], type=pa.int64()),
+            }
+        )
+        src = ArrowTableSource(table, tag_columns=["key"])
+
+        def double_value(value: int) -> int:
+            return value * 2
+
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(pf)
+        node = FunctionNode(pod, src)
+
+        original = list(node.iter_packets())
+        assert len(original) == 2
+
+        node.clear_cache()
+        node.populate_cache([original[0]])
+        cached = list(node.iter_packets())
+        assert len(cached) == 1
