@@ -3,7 +3,7 @@ from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 
 from .async_executable import AsyncExecutableProtocol
 from .datagrams import DatagramProtocol, PacketProtocol, TagProtocol
-from .executor import PacketFunctionExecutorProtocol
+from .executor import PacketFunctionExecutorProtocol, PythonFunctionExecutorProtocol
 from .function_pod import FunctionPodProtocol
 from .operator_pod import OperatorPodProtocol
 from .packet_function import PacketFunctionProtocol
@@ -27,6 +27,7 @@ __all__ = [
     "OperatorPodProtocol",
     "PacketFunctionProtocol",
     "PacketFunctionExecutorProtocol",
+    "PythonFunctionExecutorProtocol",
     "TrackerProtocol",
     "TrackerManagerProtocol",
 ]

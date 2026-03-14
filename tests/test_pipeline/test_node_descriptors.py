@@ -154,7 +154,6 @@ class TestFunctionNodeFromDescriptor:
             "function_pod": pod.to_config(),
             "pipeline_path": list(node.pipeline_path),
             "result_record_path": list(node._packet_function.record_path),
-            "execution_engine_opts": None,
         }
         return node, descriptor, db
 

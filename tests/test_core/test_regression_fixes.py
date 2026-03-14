@@ -82,6 +82,10 @@ class SpyExecutor(PacketFunctionExecutorBase):
         self.calls.append((packet_function, packet))
         return packet_function.direct_call(packet)
 
+    def execute_callable(self, fn, kwargs, executor_options=None):
+        self.calls.append((fn, kwargs))
+        return fn(**kwargs)
+
 
 # ===========================================================================
 # 1. async_execute output channel closed on exception (try/finally)
