@@ -26,9 +26,6 @@ class SourceNodeProtocol(Protocol):
     node_type: str
 
     def iter_packets(self) -> Iterator[tuple["TagProtocol", "PacketProtocol"]]: ...
-    def store_result(
-        self, results: list[tuple["TagProtocol", "PacketProtocol"]]
-    ) -> None: ...
 
 
 @runtime_checkable

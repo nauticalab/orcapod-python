@@ -32,14 +32,13 @@ class SyncPipelineOrchestrator:
     Walks the node graph in topological order. For each node:
 
     - **SourceNode**: materializes ``iter_packets()`` into a buffer.
+      The source node self-caches on first call.
     - **FunctionNode**: per-packet execution with cache lookup and
       observer hooks. ``process_packet`` handles computation +
-      function-level memoization; ``store_result`` writes pipeline
-      provenance.
+      function-level memoization.
     - **OperatorNode**: bulk execution via ``node.process()``.
 
-    All nodes have ``store_result`` called after computation. The
-    orchestrator returns an ``OrchestratorResult`` with all node outputs.
+    The orchestrator returns an ``OrchestratorResult`` with all node outputs.
 
     Args:
         observer: Optional execution observer for hooks. Defaults to
@@ -96,7 +95,6 @@ class SyncPipelineOrchestrator:
         """Execute a source node: materialize its packets."""
         self._observer.on_node_start(node)
         output = list(node.iter_packets())
-        node.store_result(output)
         self._observer.on_node_end(node)
         return output
 
