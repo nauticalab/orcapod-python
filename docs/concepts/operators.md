@@ -77,12 +77,15 @@ print(joined.as_table().to_pandas())
 ### MergeJoin
 
 Binary join that handles colliding packet columns by merging their values into sorted
-`list[T]`. Both inputs must have the same type for any colliding packet columns.
+`list[T]`. Both inputs must have the same type for any colliding packet columns. MergeJoin
+is **commutative** -- the order of the two input streams does not affect the result.
 
 ### SemiJoin
 
-Binary, non-commutative join that filters the left stream to only include rows whose tags
-match the right stream. The right stream's packet columns are discarded.
+Binary join that filters the left stream to only include rows whose tags match the right
+stream. The right stream's packet columns are discarded. SemiJoin is **not commutative** --
+the order of inputs matters. The first stream is the one being filtered; the second stream
+provides the set of matching tags.
 
 ### Batch
 
