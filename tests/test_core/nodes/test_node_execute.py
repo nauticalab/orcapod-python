@@ -1,4 +1,4 @@
-"""Tests for node process methods (schema validation, persistence, caching)."""
+"""Tests for node execute methods (schema validation, persistence, caching)."""
 
 from __future__ import annotations
 
@@ -53,12 +53,12 @@ def function_node_no_db():
     return FunctionNode(pod, src)
 
 
-class TestFunctionNodeProcessPacket:
+class TestFunctionNodeExecutePacket:
     def test_returns_correct_result(self, function_node_no_db):
         node = function_node_no_db
         packets = list(node._input_stream.iter_packets())
         tag, packet = packets[0]
-        tag_out, result = node.process_packet(tag, packet)
+        tag_out, result = node.execute_packet(tag, packet)
         assert result is not None
         assert result.as_dict()["result"] == 2
 
@@ -66,7 +66,7 @@ class TestFunctionNodeProcessPacket:
         node, pipeline_db, _ = function_node_with_db
         packets = list(node._input_stream.iter_packets())
         tag, packet = packets[0]
-        node.process_packet(tag, packet)
+        node.execute_packet(tag, packet)
         records = pipeline_db.get_all_records(node.pipeline_path)
         assert records is not None
         assert records.num_rows == 1
@@ -75,7 +75,7 @@ class TestFunctionNodeProcessPacket:
         node, _, _ = function_node_with_db
         packets = list(node._input_stream.iter_packets())
         tag, packet = packets[0]
-        node.process_packet(tag, packet)
+        node.execute_packet(tag, packet)
         cached = node._cached_function_pod.get_all_cached_outputs()
         assert cached is not None
         assert cached.num_rows == 1
@@ -84,7 +84,7 @@ class TestFunctionNodeProcessPacket:
         node, _, _ = function_node_with_db
         packets = list(node._input_stream.iter_packets())
         tag, packet = packets[0]
-        node.process_packet(tag, packet)
+        node.execute_packet(tag, packet)
         assert len(node._cached_output_packets) == 1
 
     def test_validates_schema_rejects_wrong_tag(self, function_node_with_db):
@@ -98,7 +98,7 @@ class TestFunctionNodeProcessPacket:
         wrong_src = ArrowTableSource(wrong_table, tag_columns=["wrong_key"])
         wrong_tag, wrong_pkt = list(wrong_src.iter_packets())[0]
         with pytest.raises(InputValidationError):
-            node.process_packet(wrong_tag, wrong_pkt)
+            node.execute_packet(wrong_tag, wrong_pkt)
 
     def test_validates_schema_rejects_wrong_packet(self, function_node_with_db):
         node, _, _ = function_node_with_db
@@ -111,13 +111,13 @@ class TestFunctionNodeProcessPacket:
         wrong_src = ArrowTableSource(wrong_table, tag_columns=["key"])
         wrong_tag, wrong_pkt = list(wrong_src.iter_packets())[0]
         with pytest.raises(InputValidationError):
-            node.process_packet(wrong_tag, wrong_pkt)
+            node.execute_packet(wrong_tag, wrong_pkt)
 
 
-class TestFunctionNodeProcess:
+class TestFunctionNodeExecute:
     def test_returns_materialized_results(self, function_node_with_db):
         node, _, _ = function_node_with_db
-        results = node.process(node._input_stream)
+        results = node.execute(node._input_stream)
         assert isinstance(results, list)
         assert len(results) == 2
         values = sorted([pkt.as_dict()["result"] for _, pkt in results])
@@ -125,14 +125,14 @@ class TestFunctionNodeProcess:
 
     def test_writes_pipeline_records(self, function_node_with_db):
         node, pipeline_db, _ = function_node_with_db
-        node.process(node._input_stream)
+        node.execute(node._input_stream)
         records = pipeline_db.get_all_records(node.pipeline_path)
         assert records is not None
         assert records.num_rows == 2
 
     def test_caches_internally(self, function_node_with_db):
         node, _, _ = function_node_with_db
-        node.process(node._input_stream)
+        node.execute(node._input_stream)
         assert len(node._cached_output_packets) == 2
 
     def test_validates_stream_schema(self, function_node_with_db):
@@ -145,11 +145,11 @@ class TestFunctionNodeProcess:
         )
         wrong_stream = ArrowTableSource(wrong_table, tag_columns=["wrong_key"])
         with pytest.raises(InputValidationError):
-            node.process(wrong_stream)
+            node.execute(wrong_stream)
 
 
 # ------------------------------------------------------------------
-# OperatorNode.process() tests
+# OperatorNode.execute() tests
 # ------------------------------------------------------------------
 
 from orcapod.core.nodes import OperatorNode
@@ -192,23 +192,23 @@ def operator_no_db():
     return node, src
 
 
-class TestOperatorNodeProcess:
+class TestOperatorNodeExecute:
     def test_returns_materialized_results(self, operator_no_db):
         node, src = operator_no_db
-        results = node.process(src)
+        results = node.execute(src)
         assert isinstance(results, list)
         assert len(results) == 2
 
     def test_writes_to_db_in_log_mode(self, operator_with_db):
         node, db, src = operator_with_db
-        node.process(src)
+        node.execute(src)
         records = node.get_all_records()
         assert records is not None
         assert records.num_rows == 2
 
     def test_caches_internally(self, operator_no_db):
         node, src = operator_no_db
-        node.process(src)
+        node.execute(src)
         cached = list(node.iter_packets())
         assert len(cached) == 2
 
@@ -222,15 +222,15 @@ class TestOperatorNodeProcess:
         )
         wrong_stream = ArrowTableSource(wrong_table, tag_columns=["wrong"])
         with pytest.raises(InputValidationError):
-            node.process(wrong_stream)
+            node.execute(wrong_stream)
 
     def test_validates_stream_count(self, operator_no_db):
         node, src = operator_no_db
         with pytest.raises(InputValidationError, match="Expected 1"):
-            node.process(src, src)  # Too many inputs
+            node.execute(src, src)  # Too many inputs
 
     def test_noop_db_in_off_mode(self, operator_no_db):
         node, src = operator_no_db
-        results = node.process(src)
+        results = node.execute(src)
         assert len(results) == 2
         assert node.get_all_records() is None

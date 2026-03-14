@@ -2,7 +2,7 @@
 Tests for FunctionNode covering:
 - Construction, pipeline_path, uri
 - output_schema and keys
-- process_packet and add_pipeline_record
+- execute_packet and add_pipeline_record
 - iter_packets, run(), stream interface
 - get_all_records: empty DB, correctness, ColumnConfig (meta/source/system_tags/all_info)
 - pipeline_identity_structure and pipeline_hash
@@ -212,11 +212,11 @@ class TestFunctionNodeOutputSchema:
 
 
 # ---------------------------------------------------------------------------
-# 3. process_packet and add_pipeline_record
+# 3. execute_packet and add_pipeline_record
 # ---------------------------------------------------------------------------
 
 
-class TestFunctionNodeProcessPacket:
+class TestFunctionNodeExecutePacket:
     @pytest.fixture
     def node(self, double_pf) -> FunctionNode:
         db = InMemoryArrowDatabase()
@@ -226,31 +226,31 @@ class TestFunctionNodeProcessPacket:
             pipeline_database=db,
         )
 
-    def test_process_packet_returns_tag_and_packet(self, node):
+    def test_execute_packet_returns_tag_and_packet(self, node):
         tag = Tag({"id": 0})
         packet = Packet({"x": 5})
-        out_tag, out_packet = node.process_packet(tag, packet)
+        out_tag, out_packet = node.execute_packet(tag, packet)
         assert out_tag is tag
         assert out_packet is not None
 
-    def test_process_packet_value_correct(self, node):
+    def test_execute_packet_value_correct(self, node):
         tag = Tag({"id": 0})
         packet = Packet({"x": 6})
-        _, out_packet = node.process_packet(tag, packet)
+        _, out_packet = node.execute_packet(tag, packet)
         assert out_packet["result"] == 12  # 6 * 2
 
-    def test_process_packet_adds_pipeline_record(self, node, double_pf):
-        """process_packet writes pipeline records (compute + persist + cache)."""
+    def test_execute_packet_adds_pipeline_record(self, node, double_pf):
+        """execute_packet writes pipeline records (compute + persist + cache)."""
         tag = Tag({"id": 0})
         packet = Packet({"x": 3})
-        node.process_packet(tag, packet)
+        node.execute_packet(tag, packet)
         db = node._pipeline_database
         db.flush()
         all_records = db.get_all_records(node.pipeline_path)
         assert all_records is not None
         assert all_records.num_rows >= 1
 
-    def test_process_packet_internal_adds_pipeline_record(self, node, double_pf):
+    def test_execute_packet_internal_adds_pipeline_record(self, node, double_pf):
         tag = Tag({"id": 0})
         packet = Packet({"x": 3})
         node._process_packet_internal(tag, packet)
@@ -260,7 +260,7 @@ class TestFunctionNodeProcessPacket:
         assert all_records is not None
         assert all_records.num_rows >= 1
 
-    def test_process_packet_second_call_same_input_deduplicates(self, node):
+    def test_execute_packet_second_call_same_input_deduplicates(self, node):
         tag = Tag({"id": 0})
         packet = Packet({"x": 3})
         node._process_packet_internal(tag, packet)
@@ -673,7 +673,7 @@ class TestFunctionNodeResultPath:
         )
         tag = Tag({"id": 0})
         packet = Packet({"x": 5})
-        node.process_packet(tag, packet)
+        node.execute_packet(tag, packet)
         db.flush()
 
         result_path = node._cached_function_pod.record_path

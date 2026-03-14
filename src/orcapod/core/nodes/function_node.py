@@ -529,12 +529,12 @@ class FunctionNode(StreamBase):
                 f"got {dict(actual_pkt)}"
             )
 
-    def process_packet(
+    def execute_packet(
         self,
         tag: TagProtocol,
         packet: PacketProtocol,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
-        """Process a single packet with schema validation, persistence, and caching.
+        """Execute a single packet with schema validation, persistence, and caching.
 
         Validates input schema, computes via CachedFunctionPod (or raw FunctionPod),
         writes pipeline provenance record, and caches the result.
@@ -553,14 +553,14 @@ class FunctionNode(StreamBase):
         self._validate_input_schema(tag, packet)
         return self._process_packet_internal(tag, packet)
 
-    def process(
+    def execute(
         self, input_stream: StreamProtocol
     ) -> list[tuple[TagProtocol, PacketProtocol]]:
-        """Process all packets from a stream with schema validation.
+        """Execute all packets from a stream with schema validation.
 
         Validates the stream schema once, then processes each packet using
         the internal (unchecked) path. More efficient than calling
-        ``process_packet`` per-packet when observer hooks aren't needed.
+        ``execute_packet`` per-packet when observer hooks aren't needed.
 
         Args:
             input_stream: The input stream to process.
@@ -588,7 +588,7 @@ class FunctionNode(StreamBase):
     ) -> tuple[TagProtocol, PacketProtocol | None]:
         """Core compute + persist + cache (no schema validation).
 
-        Used by ``process_packet`` (after validation), ``process`` (after
+        Used by ``execute_packet`` (after validation), ``execute`` (after
         stream validation), and ``iter_packets`` (internal path).
 
         Args:

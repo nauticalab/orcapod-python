@@ -8,7 +8,7 @@ Covers:
 - FunctionNode.async_execute two-phase logic
 - OperatorNode.async_execute delegation
 - OperatorNode.async_execute with cache modes
-- process_packet / async_process_packet routing
+- execute_packet / async_process_packet routing
 """
 
 from __future__ import annotations
@@ -607,13 +607,13 @@ class TestOperatorNodeAsyncExecute:
 
 
 # ---------------------------------------------------------------------------
-# 7. process_packet routing verification
+# 7. execute_packet routing verification
 # ---------------------------------------------------------------------------
 
 
-class TestProcessPacketRouting:
-    def test_function_node_sequential_uses_process_packet(self):
-        """Verify FunctionNode routes through process_packet (not raw pf.call)."""
+class TestExecutePacketRouting:
+    def test_function_node_sequential_uses_execute_packet(self):
+        """Verify FunctionNode routes through execute_packet (not raw pf.call)."""
         call_log = []
 
         _, pod = make_double_pod()

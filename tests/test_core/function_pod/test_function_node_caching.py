@@ -290,7 +290,7 @@ class TestPhase1Phase2PipelineEntryId:
 
     def test_all_existing_entry_ids_skipped_in_phase2(self):
         """When all inputs already have pipeline records, Phase 2
-        should not call process_packet at all."""
+        should not call execute_packet at all."""
         db = InMemoryArrowDatabase()
 
         stream1 = _make_stream([{"id": 0, "x": 10}, {"id": 1, "x": 20}])
