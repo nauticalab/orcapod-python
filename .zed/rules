@@ -85,6 +85,18 @@ Remove any optional sections that don't apply rather than leaving them empty.
 When working on a Linear issue, create and checkout a git branch using the gitBranchName
 returned by Linear (e.g. eywalker/plt-911-add-documentation-for-orcapod-python).
 
+## Responding to PR reviews
+
+When asked to respond to PR reviewer comments:
+
+1. **Fetch and present** — Read all review comments, then present a response plan as a table:
+   each comment, its severity, whether to fix or explain, and the proposed action.
+2. **Wait for approval** — Let the user approve the plan before making changes.
+3. **Fix, then reply** — Make all fixes in a single commit, then post replies to each
+   reviewer comment explaining what was done (or why it was declined).
+
+Never make fixes silently or skip the plan step.
+
 ## Git commits
 
 Always use Conventional Commits style (https://www.conventionalcommits.org/):
