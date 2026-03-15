@@ -55,7 +55,16 @@ import path doesn't work, create a proper re-export package with an `__init__.py
 Use [Google style](https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings)
 Python docstrings everywhere.
 
-## Linear issues
+## Linear issue tracking
+
+All work must be linked to a Linear issue. Before starting any feature, bug fix, or
+refactor:
+
+1. **Check for an existing issue** — search Linear for a corresponding issue.
+2. **If none exists** — ask the developer whether to create one. Do not proceed without
+   either a linked issue or explicit approval to skip.
+3. **When a new issue is discovered** during development (bug, design problem, deferred
+   work), create a corresponding Linear issue using the template below.
 
 When creating Linear issues, always use this template for the description:
 
