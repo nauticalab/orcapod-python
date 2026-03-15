@@ -13,7 +13,7 @@ from orcapod.core.operators.mappers import MapPackets
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.pipeline import Pipeline
+from orcapod.pipeline import AsyncPipelineOrchestrator, Pipeline
 from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
 
 
@@ -385,3 +385,46 @@ class TestMaterializedStreamIdentity:
         orch_tag_schema = orch_join.output_schema(columns={"system_tags": True})[0]
         pull_tag_schema = join_node.output_schema(columns={"system_tags": True})[0]
         assert orch_tag_schema == pull_tag_schema
+
+
+class TestMaterializeResults:
+    def test_sync_materialize_false_returns_empty(self):
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(pf)
+
+        pipeline = Pipeline(name="mat", pipeline_database=InMemoryArrowDatabase())
+        with pipeline:
+            pod(src, label="doubler")
+
+        orch = SyncPipelineOrchestrator()
+        result = orch.run(pipeline._node_graph, materialize_results=False)
+        assert result.node_outputs == {}
+
+    def test_async_materialize_true_collects_all(self):
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(pf)
+
+        pipeline = Pipeline(name="mat_async", pipeline_database=InMemoryArrowDatabase())
+        with pipeline:
+            pod(src, label="doubler")
+
+        pipeline.compile()
+        orch = AsyncPipelineOrchestrator()
+        result = orch.run(pipeline._node_graph, materialize_results=True)
+        assert len(result.node_outputs) > 0
+
+    def test_async_materialize_false_returns_empty(self):
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(pf)
+
+        pipeline = Pipeline(name="mat_async2", pipeline_database=InMemoryArrowDatabase())
+        with pipeline:
+            pod(src, label="doubler")
+
+        pipeline.compile()
+        orch = AsyncPipelineOrchestrator()
+        result = orch.run(pipeline._node_graph, materialize_results=False)
+        assert result.node_outputs == {}

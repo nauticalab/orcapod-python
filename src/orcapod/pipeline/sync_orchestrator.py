@@ -89,6 +89,8 @@ class SyncPipelineOrchestrator:
             if not materialize_results:
                 self._gc_buffers(node, graph, buffers, processed)
 
+        if not materialize_results:
+            buffers.clear()
         return OrchestratorResult(node_outputs=buffers)
 
     @staticmethod
