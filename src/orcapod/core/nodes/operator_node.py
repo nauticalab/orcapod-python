@@ -432,19 +432,27 @@ class OperatorNode(StreamBase):
     def execute(
         self,
         *input_streams: StreamProtocol,
+        observer: Any = None,
     ) -> list[tuple[TagProtocol, PacketProtocol]]:
         """Execute input streams: compute, persist, and cache.
 
-        Internal method for orchestrators. The caller must guarantee that
-        the input streams' identities (content hash, schema) match
-        ``self._input_streams``. No validation is performed.
-
         Args:
             *input_streams: Input streams to execute.
+            observer: Optional execution observer for hooks.
 
         Returns:
             Materialized list of (tag, packet) pairs.
         """
+        if observer is not None:
+            observer.on_node_start(self)
+
+        # Check REPLAY cache first
+        cached_output = self.get_cached_output()
+        if cached_output is not None:
+            output = list(cached_output.iter_packets())
+            if observer is not None:
+                observer.on_node_end(self)
+            return output
 
         # Compute
         result_stream = self._operator.process(*input_streams)
@@ -470,6 +478,8 @@ class OperatorNode(StreamBase):
         ):
             self._store_output_stream(self._cached_output_stream)
 
+        if observer is not None:
+            observer.on_node_end(self)
         return output
 
     def _compute_and_store(self) -> None:
