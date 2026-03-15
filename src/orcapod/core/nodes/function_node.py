@@ -1185,10 +1185,12 @@ class FunctionNode(StreamBase):
                 observer.on_node_start(self)
 
             if self._cached_function_pod is not None:
-                # Two-phase async execution with DB backing
-                # Phase 1: emit existing results from DB
+                # DB-backed async execution:
+                # Phase 1: build cache lookup from pipeline DB
                 PIPELINE_ENTRY_ID_COL = "__pipeline_entry_id"
-                existing_entry_ids: set[str] = set()
+                cached_by_entry_id: dict[
+                    str, tuple[TagProtocol, PacketProtocol]
+                ] = {}
 
                 taginfo = self._pipeline_database.get_all_records(
                     self.pipeline_path,
@@ -1211,12 +1213,9 @@ class FunctionNode(StreamBase):
                     )
                     if joined.num_rows > 0:
                         tag_keys = self._input_stream.keys()[0]
-                        existing_entry_ids = set(
-                            cast(
-                                list[str],
-                                joined.column(PIPELINE_ENTRY_ID_COL).to_pylist(),
-                            )
-                        )
+                        entry_ids_col = joined.column(
+                            PIPELINE_ENTRY_ID_COL
+                        ).to_pylist()
                         drop_cols = [
                             c
                             for c in joined.column_names
@@ -1229,26 +1228,35 @@ class FunctionNode(StreamBase):
                         existing_stream = ArrowTableStream(
                             data_table, tag_columns=tag_keys
                         )
-                        for tag, packet in existing_stream.iter_packets():
-                            await output.send((tag, packet))
+                        for eid, (tag_out, pkt_out) in zip(
+                            entry_ids_col, existing_stream.iter_packets()
+                        ):
+                            cached_by_entry_id[eid] = (tag_out, pkt_out)
 
-                # Phase 2: process new packets
+                # Phase 2: drive output from input channel — cached or compute
                 async for tag, packet in input_channel:
                     entry_id = self.compute_pipeline_entry_id(tag, packet)
-                    if entry_id in existing_entry_ids:
-                        continue
-                    if observer is not None:
-                        observer.on_packet_start(self, tag, packet)
-                    (
-                        tag_out,
-                        result_packet,
-                    ) = await self._async_process_packet_internal(tag, packet)
-                    if observer is not None:
-                        observer.on_packet_end(
-                            self, tag, packet, result_packet, cached=False
-                        )
-                    if result_packet is not None:
+                    if entry_id in cached_by_entry_id:
+                        tag_out, result_packet = cached_by_entry_id[entry_id]
+                        if observer is not None:
+                            observer.on_packet_start(self, tag, packet)
+                            observer.on_packet_end(
+                                self, tag, packet, result_packet, cached=True
+                            )
                         await output.send((tag_out, result_packet))
+                    else:
+                        if observer is not None:
+                            observer.on_packet_start(self, tag, packet)
+                        (
+                            tag_out,
+                            result_packet,
+                        ) = await self._async_process_packet_internal(tag, packet)
+                        if observer is not None:
+                            observer.on_packet_end(
+                                self, tag, packet, result_packet, cached=False
+                            )
+                        if result_packet is not None:
+                            await output.send((tag_out, result_packet))
             else:
                 # Simple async execution without DB
                 async for tag, packet in input_channel:

@@ -259,14 +259,18 @@ class TestFunctionNodeAsyncExecute:
         node1 = FunctionNode(pod, stream, pipeline_database=db)
         node1.run()
 
-        # New node with same DB — Phase 1 should emit cached
-        node2 = FunctionNode(pod, make_stream(3), pipeline_database=db)
+        # New node with same DB — send same packets, expect cached hits
+        input_stream = make_stream(3)
+        node2 = FunctionNode(pod, input_stream, pipeline_database=db)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
 
-        # Close input immediately — no new packets
+        # Send the same packets that were already cached
+        for tag, packet in input_stream.iter_packets():
+            await input_ch.writer.send((tag, packet))
         await input_ch.writer.close()
+
         await node2.async_execute(input_ch.reader, output_ch.writer)
 
         results = await output_ch.reader.collect()

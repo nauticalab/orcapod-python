@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 
 from orcapod.protocols.node_protocols import (
     SourceNodeProtocol,
@@ -176,7 +176,6 @@ class TestSourceNodeExecute:
         assert len(result) == 3
 
 
-import pytest
 from orcapod.channels import Channel
 
 
