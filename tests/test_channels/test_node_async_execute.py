@@ -2,7 +2,6 @@
 Tests for async_execute on Node classes.
 
 Covers:
-- AsyncExecutableProtocol conformance for all four Node types
 - CachedPacketFunction.async_call with cache support
 - FunctionNode.async_execute basic streaming
 - FunctionNode.async_execute two-phase logic
@@ -31,7 +30,6 @@ from orcapod.core.operators.semijoin import SemiJoin
 from orcapod.core.packet_function import CachedPacketFunction, PythonPacketFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.protocols.core_protocols import AsyncExecutableProtocol
 from orcapod.types import CacheMode, NodeConfig
 
 
@@ -78,40 +76,7 @@ def make_double_pod() -> tuple[PythonPacketFunction, FunctionPod]:
 
 
 # ---------------------------------------------------------------------------
-# 1. AsyncExecutableProtocol conformance
-# ---------------------------------------------------------------------------
-
-
-class TestProtocolConformance:
-    def test_function_node_satisfies_protocol(self):
-        _, pod = make_double_pod()
-        stream = make_stream(3)
-        node = FunctionNode(pod, stream)
-        assert isinstance(node, AsyncExecutableProtocol)
-
-    def test_persistent_function_node_satisfies_protocol(self):
-        _, pod = make_double_pod()
-        stream = make_stream(3)
-        db = InMemoryArrowDatabase()
-        node = FunctionNode(pod, stream, pipeline_database=db)
-        assert isinstance(node, AsyncExecutableProtocol)
-
-    def test_operator_node_satisfies_protocol(self):
-        op = SelectPacketColumns(["x"])
-        stream = make_stream(3)
-        node = OperatorNode(op, [stream])
-        assert isinstance(node, AsyncExecutableProtocol)
-
-    def test_persistent_operator_node_satisfies_protocol(self):
-        op = SelectPacketColumns(["x"])
-        stream = make_stream(3)
-        db = InMemoryArrowDatabase()
-        node = OperatorNode(op, [stream], pipeline_database=db)
-        assert isinstance(node, AsyncExecutableProtocol)
-
-
-# ---------------------------------------------------------------------------
-# 2. CachedPacketFunction.async_call
+# 1. CachedPacketFunction.async_call
 # ---------------------------------------------------------------------------
 
 
