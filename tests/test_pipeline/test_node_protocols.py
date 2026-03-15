@@ -124,3 +124,53 @@ class TestTypeGuardDispatch:
         node = MagicMock()
         node.node_type = "operator"
         assert is_operator_node(node)
+
+
+import pyarrow as pa
+from orcapod.core.sources import ArrowTableSource
+from orcapod.core.nodes import SourceNode
+
+
+class TestSourceNodeExecute:
+    def _make_source_node(self):
+        table = pa.table({
+            "key": pa.array(["a", "b", "c"], type=pa.large_string()),
+            "value": pa.array([1, 2, 3], type=pa.int64()),
+        })
+        src = ArrowTableSource(table, tag_columns=["key"])
+        return SourceNode(src)
+
+    def test_execute_returns_list(self):
+        node = self._make_source_node()
+        result = node.execute()
+        assert isinstance(result, list)
+        assert len(result) == 3
+
+    def test_execute_populates_cached_results(self):
+        node = self._make_source_node()
+        node.execute()
+        assert node._cached_results is not None
+        assert len(node._cached_results) == 3
+
+    def test_execute_with_observer(self):
+        node = self._make_source_node()
+        events = []
+
+        class Obs:
+            def on_node_start(self, n):
+                events.append(("start", n.node_type))
+            def on_node_end(self, n):
+                events.append(("end", n.node_type))
+            def on_packet_start(self, n, t, p):
+                pass
+            def on_packet_end(self, n, t, ip, op, cached):
+                pass
+
+        node.execute(observer=Obs())
+        assert events == [("start", "source"), ("end", "source")]
+
+    def test_execute_without_observer(self):
+        """execute() works fine with no observer."""
+        node = self._make_source_node()
+        result = node.execute()
+        assert len(result) == 3

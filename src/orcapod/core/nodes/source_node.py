@@ -234,6 +234,31 @@ class SourceNode(StreamBase):
             return iter(self._cached_results)
         return self.stream.iter_packets()
 
+    def execute(
+        self,
+        *,
+        observer: Any = None,
+    ) -> list[tuple[cp.TagProtocol, cp.PacketProtocol]]:
+        """Execute this source: materialize packets and return.
+
+        Args:
+            observer: Optional execution observer for hooks.
+
+        Returns:
+            List of (tag, packet) tuples.
+        """
+        if self.stream is None:
+            raise RuntimeError(
+                "SourceNode in read-only mode has no stream data available"
+            )
+        if observer is not None:
+            observer.on_node_start(self)
+        result = list(self.stream.iter_packets())
+        self._cached_results = result
+        if observer is not None:
+            observer.on_node_end(self)
+        return result
+
     def run(self) -> None:
         """No-op for source nodes — data is already available."""
 
