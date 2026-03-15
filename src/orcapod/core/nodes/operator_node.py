@@ -30,6 +30,8 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import pyarrow as pa
+
+    from orcapod.pipeline.observer import ExecutionObserver
 else:
     pa = LazyModule("pyarrow")
 
@@ -432,7 +434,7 @@ class OperatorNode(StreamBase):
     def execute(
         self,
         *input_streams: StreamProtocol,
-        observer: Any = None,
+        observer: "ExecutionObserver | None" = None,
     ) -> list[tuple[TagProtocol, PacketProtocol]]:
         """Execute input streams: compute, persist, and cache.
 
@@ -639,7 +641,7 @@ class OperatorNode(StreamBase):
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
         *,
-        observer: Any = None,
+        observer: "ExecutionObserver | None" = None,
     ) -> None:
         """Async execution with cache mode handling when DB is attached.
 

@@ -38,6 +38,8 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     import polars as pl
     import pyarrow as pa
+
+    from orcapod.pipeline.observer import ExecutionObserver
 else:
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")
@@ -486,7 +488,7 @@ class FunctionNode(StreamBase):
         self,
         input_stream: StreamProtocol,
         *,
-        observer: Any = None,
+        observer: "ExecutionObserver | None" = None,
     ) -> list[tuple[TagProtocol, PacketProtocol]]:
         """Execute all packets from a stream: compute, persist, and cache.
 
@@ -1163,7 +1165,7 @@ class FunctionNode(StreamBase):
         input_channel: ReadableChannel[tuple[TagProtocol, PacketProtocol]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
         *,
-        observer: Any = None,
+        observer: "ExecutionObserver | None" = None,
     ) -> None:
         """Streaming async execution for FunctionNode.
 
@@ -1176,6 +1178,8 @@ class FunctionNode(StreamBase):
             output: Writable channel for output (tag, packet) pairs.
             observer: Optional execution observer for hooks.
         """
+        # TODO(PLT-930): Restore concurrency limiting (semaphore) via node-level config.
+        # Currently all packets are processed sequentially in async_execute.
         try:
             if observer is not None:
                 observer.on_node_start(self)
