@@ -156,9 +156,16 @@ class AsyncPipelineOrchestrator:
                         )
                     )
                 elif is_operator_node(node):
+                    predecessors = in_edges.get(node, [])
+                    # Sort by node.upstreams order for non-commutative operators
+                    upstream_order = {id(s): i for i, s in enumerate(node.upstreams)}
+                    sorted_preds = sorted(
+                        predecessors,
+                        key=lambda p: upstream_order.get(id(p), 0),
+                    )
                     input_readers = [
                         edge_readers[(upstream, node)]
-                        for upstream in in_edges.get(node, [])
+                        for upstream in sorted_preds
                     ]
                     tg.create_task(
                         node.async_execute(
@@ -170,9 +177,9 @@ class AsyncPipelineOrchestrator:
                         f"Unknown node type: {getattr(node, 'node_type', None)!r}"
                     )
 
-        # Drain terminal channels
-        for ch in terminal_channels:
-            await ch.reader.collect()
+            # Drain terminal channels concurrently
+            for ch in terminal_channels:
+                tg.create_task(ch.reader.collect())
 
         return OrchestratorResult(
             node_outputs=collectors if materialize_results else {}
@@ -192,3 +199,6 @@ class _CollectingWriter:
 
     async def close(self) -> None:
         await self._writer.close()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._writer, name)

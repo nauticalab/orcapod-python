@@ -15,6 +15,8 @@ from orcapod.types import ColumnConfig, ContentHash, Schema
 if TYPE_CHECKING:
     import pyarrow as pa
 
+    from orcapod.pipeline.observer import ExecutionObserver
+
 
 class SourceNode(StreamBase):
     """Represents a root source stream in the computation graph."""
@@ -237,7 +239,7 @@ class SourceNode(StreamBase):
     def execute(
         self,
         *,
-        observer: Any = None,
+        observer: "ExecutionObserver | None" = None,
     ) -> list[tuple[cp.TagProtocol, cp.PacketProtocol]]:
         """Execute this source: materialize packets and return.
 
@@ -266,7 +268,7 @@ class SourceNode(StreamBase):
         self,
         output: WritableChannel[tuple[cp.TagProtocol, cp.PacketProtocol]],
         *,
-        observer: Any = None,
+        observer: "ExecutionObserver | None" = None,
     ) -> None:
         """Push all (tag, packet) pairs from the wrapped stream to the output channel.
 
