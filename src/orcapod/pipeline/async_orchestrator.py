@@ -128,15 +128,18 @@ class AsyncPipelineOrchestrator:
         # Launch all nodes concurrently
         async with asyncio.TaskGroup() as tg:
             for node in topo_order:
-                # Gather input readers from upstream edges
-                input_readers = [
-                    edge_readers[(upstream, node)]
-                    for upstream in in_edges.get(node, [])
-                ]
-
                 writer = node_output_channels[node].writer
 
-                tg.create_task(node.async_execute(input_readers, writer))
+                if getattr(node, "node_type", None) == "source":
+                    # SourceNode.async_execute takes only output (no inputs)
+                    tg.create_task(node.async_execute(writer))
+                else:
+                    # Gather input readers from upstream edges
+                    input_readers = [
+                        edge_readers[(upstream, node)]
+                        for upstream in in_edges.get(node, [])
+                    ]
+                    tg.create_task(node.async_execute(input_readers, writer))
 
         # Drain terminal channels so nothing is left buffered
         for ch in terminal_channels:

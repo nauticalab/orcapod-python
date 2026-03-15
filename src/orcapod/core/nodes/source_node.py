@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 from orcapod import contexts
-from orcapod.channels import ReadableChannel, WritableChannel
+from orcapod.channels import WritableChannel
 from orcapod.config import Config, DEFAULT_CONFIG
 from orcapod.core.streams.base import StreamBase
 from orcapod.protocols import core_protocols as cp
@@ -264,16 +264,26 @@ class SourceNode(StreamBase):
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[cp.TagProtocol, cp.PacketProtocol]]],
         output: WritableChannel[tuple[cp.TagProtocol, cp.PacketProtocol]],
+        *,
+        observer: Any = None,
     ) -> None:
-        """Push all (tag, packet) pairs from the wrapped stream to the output channel."""
+        """Push all (tag, packet) pairs from the wrapped stream to the output channel.
+
+        Args:
+            output: Channel to write results to.
+            observer: Optional execution observer for hooks.
+        """
         if self.stream is None:
             raise RuntimeError(
                 "SourceNode in read-only mode has no stream data available"
             )
         try:
+            if observer is not None:
+                observer.on_node_start(self)
             for tag, packet in self.stream.iter_packets():
                 await output.send((tag, packet))
+            if observer is not None:
+                observer.on_node_end(self)
         finally:
             await output.close()
