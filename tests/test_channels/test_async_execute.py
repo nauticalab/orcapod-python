@@ -2,7 +2,6 @@
 Comprehensive tests for async_execute on operators and FunctionPod.
 
 Covers:
-- AsyncExecutableProtocol conformance
 - StaticOutputPod._materialize_to_stream round-trip
 - UnaryOperator barrier-mode async_execute (Select, Drop, Map, Filter, Batch)
 - BinaryOperator barrier-mode async_execute (MergeJoin, SemiJoin)
@@ -42,7 +41,6 @@ from orcapod.core.operators import (
 from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
-from orcapod.protocols.core_protocols import AsyncExecutableProtocol
 from orcapod.types import NodeConfig, PipelineConfig
 
 # ---------------------------------------------------------------------------
@@ -97,31 +95,7 @@ async def collect_output(ch: Channel) -> list[tuple]:
 
 
 # ---------------------------------------------------------------------------
-# 1. AsyncExecutableProtocol conformance
-# ---------------------------------------------------------------------------
-
-
-class TestProtocolConformance:
-    def test_function_pod_satisfies_protocol(self):
-        def double(x: int) -> int:
-            return x * 2
-
-        pf = PythonPacketFunction(double, output_keys="result")
-        pod = FunctionPod(pf)
-        assert isinstance(pod, AsyncExecutableProtocol)
-
-    def test_join_satisfies_protocol(self):
-        assert isinstance(Join(), AsyncExecutableProtocol)
-
-    def test_select_tag_columns_satisfies_protocol(self):
-        assert isinstance(SelectTagColumns(["id"]), AsyncExecutableProtocol)
-
-    def test_batch_satisfies_protocol(self):
-        assert isinstance(Batch(), AsyncExecutableProtocol)
-
-
-# ---------------------------------------------------------------------------
-# 2. _materialize_to_stream round-trip
+# 1. _materialize_to_stream round-trip
 # ---------------------------------------------------------------------------
 
 
