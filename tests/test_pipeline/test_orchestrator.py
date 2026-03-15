@@ -357,3 +357,93 @@ class TestBufferSizeConfiguration:
         records = pipeline.doubler.get_all_records()
         assert records is not None
         assert records.num_rows == 2
+
+
+# ===========================================================================
+# 9. Fan-out: one source feeds multiple downstream nodes
+# ===========================================================================
+
+
+def triple_value(value: int) -> int:
+    return value * 3
+
+
+class TestAsyncOrchestratorFanOut:
+    """One source fans out to multiple downstream nodes."""
+
+    def test_fan_out_source_to_two_functions(self):
+        """Two distinct functions consuming the same source produce two nodes."""
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
+        pf1 = PythonPacketFunction(double_value, output_keys="result")
+        pod1 = FunctionPod(pf1)
+        pf2 = PythonPacketFunction(triple_value, output_keys="result")
+        pod2 = FunctionPod(pf2)
+
+        pipeline = Pipeline(name="fanout", pipeline_database=InMemoryArrowDatabase())
+        with pipeline:
+            pod1(src, label="doubler")
+            pod2(src, label="tripler")
+
+        pipeline.compile()
+        orch = AsyncPipelineOrchestrator()
+        result = orch.run(pipeline._node_graph, materialize_results=True)
+        pipeline.flush()
+
+        fn_outputs = [
+            v for k, v in result.node_outputs.items() if k.node_type == "function"
+        ]
+        assert len(fn_outputs) == 2
+        all_values = sorted(
+            [pkt.as_dict()["result"] for output in fn_outputs for _, pkt in output]
+        )
+        # double_value: [2, 4], triple_value: [3, 6]
+        assert all_values == [2, 3, 4, 6]
+
+
+# ===========================================================================
+# 10. Terminal node: pipeline with just a source
+# ===========================================================================
+
+
+class TestAsyncOrchestratorTerminalNode:
+    """Terminal nodes with no downstream should work correctly."""
+
+    def test_single_terminal_source(self):
+        """A pipeline with just a source (terminal) should work."""
+        import networkx as nx
+
+        src = _make_source("key", "value", {"key": ["a"], "value": [1]})
+        node = SourceNode(src)
+        G = nx.DiGraph()
+        G.add_node(node)
+
+        orch = AsyncPipelineOrchestrator()
+        result = orch.run(G, materialize_results=True)
+        assert len(result.node_outputs) == 1
+
+
+# ===========================================================================
+# 11. Error propagation
+# ===========================================================================
+
+
+class TestAsyncOrchestratorErrorPropagation:
+    """Node failures should propagate correctly."""
+
+    def test_node_failure_propagates(self):
+        def failing_fn(value: int) -> int:
+            raise ValueError("intentional failure")
+
+        src = _make_source("key", "value", {"key": ["a"], "value": [1]})
+        pf = PythonPacketFunction(failing_fn, output_keys="result")
+        pod = FunctionPod(pf)
+
+        pipeline = Pipeline(name="error", pipeline_database=InMemoryArrowDatabase())
+        with pipeline:
+            pod(src, label="failer")
+
+        pipeline.compile()
+        orch = AsyncPipelineOrchestrator()
+
+        with pytest.raises(ExceptionGroup):
+            orch.run(pipeline._node_graph)
