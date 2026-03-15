@@ -174,3 +174,48 @@ class TestSourceNodeExecute:
         node = self._make_source_node()
         result = node.execute()
         assert len(result) == 3
+
+
+import pytest
+from orcapod.channels import Channel
+
+
+class TestSourceNodeAsyncExecuteProtocol:
+    @pytest.mark.asyncio
+    async def test_tightened_signature(self):
+        """async_execute takes output only, no inputs."""
+        table = pa.table({
+            "key": pa.array(["a", "b"], type=pa.large_string()),
+            "value": pa.array([1, 2], type=pa.int64()),
+        })
+        src = ArrowTableSource(table, tag_columns=["key"])
+        node = SourceNode(src)
+
+        output_ch = Channel(buffer_size=16)
+        await node.async_execute(output_ch.writer, observer=None)
+        rows = await output_ch.reader.collect()
+        assert len(rows) == 2
+
+    @pytest.mark.asyncio
+    async def test_async_execute_with_observer(self):
+        table = pa.table({
+            "key": pa.array(["a"], type=pa.large_string()),
+            "value": pa.array([1], type=pa.int64()),
+        })
+        src = ArrowTableSource(table, tag_columns=["key"])
+        node = SourceNode(src)
+        events = []
+
+        class Obs:
+            def on_node_start(self, n):
+                events.append("start")
+            def on_node_end(self, n):
+                events.append("end")
+            def on_packet_start(self, n, t, p):
+                pass
+            def on_packet_end(self, n, t, ip, op, cached):
+                pass
+
+        output_ch = Channel(buffer_size=16)
+        await node.async_execute(output_ch.writer, observer=Obs())
+        assert events == ["start", "end"]

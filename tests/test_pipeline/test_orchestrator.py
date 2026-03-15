@@ -79,7 +79,7 @@ class TestSourceNodeAsyncExecute:
         node = SourceNode(src)
 
         output_ch = Channel(buffer_size=16)
-        await node.async_execute([], output_ch.writer)
+        await node.async_execute(output_ch.writer)
 
         rows = await output_ch.reader.collect()
         assert len(rows) == 3
@@ -90,7 +90,7 @@ class TestSourceNodeAsyncExecute:
         node = SourceNode(src)
 
         output_ch = Channel(buffer_size=4)
-        await node.async_execute([], output_ch.writer)
+        await node.async_execute(output_ch.writer)
 
         rows = await output_ch.reader.collect()
         assert len(rows) == 1
