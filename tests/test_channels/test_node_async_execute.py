@@ -186,7 +186,7 @@ class TestFunctionNodeAsyncExecute:
         output_ch = Channel(buffer_size=16)
 
         await feed_stream_to_channel(make_stream(5), input_ch)
-        await node_async.async_execute([input_ch.reader], output_ch.writer)
+        await node_async.async_execute(input_ch.reader, output_ch.writer)
 
         async_results = await output_ch.reader.collect()
         async_values = sorted(pkt.as_dict()["result"] for _, pkt in async_results)
@@ -201,7 +201,7 @@ class TestFunctionNodeAsyncExecute:
         output_ch = Channel(buffer_size=4)
 
         await input_ch.writer.close()
-        await node.async_execute([input_ch.reader], output_ch.writer)
+        await node.async_execute(input_ch.reader, output_ch.writer)
 
         results = await output_ch.reader.collect()
         assert results == []
@@ -216,7 +216,7 @@ class TestFunctionNodeAsyncExecute:
         output_ch = Channel(buffer_size=16)
 
         await feed_stream_to_channel(make_stream(3), input_ch)
-        await node.async_execute([input_ch.reader], output_ch.writer)
+        await node.async_execute(input_ch.reader, output_ch.writer)
 
         results = await output_ch.reader.collect()
         ids = sorted(tag.as_dict()["id"] for tag, _ in results)
@@ -241,7 +241,7 @@ class TestFunctionNodeAsyncExecute:
         output_ch = Channel(buffer_size=16)
 
         await feed_stream_to_channel(make_stream(3), input_ch)
-        await node.async_execute([input_ch.reader], output_ch.writer)
+        await node.async_execute(input_ch.reader, output_ch.writer)
 
         results = await output_ch.reader.collect()
         assert len(results) == 3
@@ -267,7 +267,7 @@ class TestFunctionNodeAsyncExecute:
 
         # Close input immediately — no new packets
         await input_ch.writer.close()
-        await node2.async_execute([input_ch.reader], output_ch.writer)
+        await node2.async_execute(input_ch.reader, output_ch.writer)
 
         results = await output_ch.reader.collect()
         assert len(results) == 3
@@ -291,7 +291,7 @@ class TestFunctionNodeAsyncExecute:
         output_ch = Channel(buffer_size=16)
 
         await feed_stream_to_channel(make_stream(5), input_ch)
-        await node2.async_execute([input_ch.reader], output_ch.writer)
+        await node2.async_execute(input_ch.reader, output_ch.writer)
 
         results = await output_ch.reader.collect()
         values = sorted(pkt.as_dict()["result"] for _, pkt in results)
@@ -319,7 +319,7 @@ class TestFunctionNodeAsyncExecute:
         await feed_stream_to_channel(make_stream(5), input_ch)
 
         t0 = time.perf_counter()
-        await node.async_execute([input_ch.reader], output_ch.writer)
+        await node.async_execute(input_ch.reader, output_ch.writer)
         elapsed = time.perf_counter() - t0
 
         results = await output_ch.reader.collect()
@@ -327,9 +327,9 @@ class TestFunctionNodeAsyncExecute:
         values = sorted(pkt.as_dict()["result"] for _, pkt in results)
         assert values == [0, 2, 4, 6, 8]
 
-        # With 5 packets at 0.2s each and max_concurrency=5,
-        # concurrent execution should complete in ~0.2s, not ~1.0s
-        assert elapsed < 0.6, f"Expected concurrent execution but took {elapsed:.2f}s"
+        # Concurrency limiting removed in PLT-922 (deferred to PLT-930).
+        # Packets are now processed sequentially.
+        assert elapsed >= 0.9, f"Expected sequential execution but took {elapsed:.2f}s"
 
     @pytest.mark.asyncio
     async def test_db_records_created(self):
@@ -343,7 +343,7 @@ class TestFunctionNodeAsyncExecute:
         output_ch = Channel(buffer_size=16)
 
         await feed_stream_to_channel(make_stream(3), input_ch)
-        await node.async_execute([input_ch.reader], output_ch.writer)
+        await node.async_execute(input_ch.reader, output_ch.writer)
         await output_ch.reader.collect()
 
         # Verify records in DB
@@ -619,7 +619,7 @@ class TestExecutePacketRouting:
         output_ch = Channel(buffer_size=16)
 
         await feed_stream_to_channel(make_stream(3), input_ch)
-        await node.async_execute([input_ch.reader], output_ch.writer)
+        await node.async_execute(input_ch.reader, output_ch.writer)
         await output_ch.reader.collect()
 
         assert len(call_log) == 3
@@ -653,7 +653,7 @@ class TestEndToEnd:
 
         async with asyncio.TaskGroup() as tg:
             tg.create_task(source())
-            tg.create_task(node.async_execute([ch1.reader], ch2.writer))
+            tg.create_task(node.async_execute(ch1.reader, ch2.writer))
 
         results = await ch2.reader.collect()
         assert len(results) == 4
@@ -727,7 +727,7 @@ class TestAsyncPipelineThenSyncRetrieval:
 
         async with asyncio.TaskGroup() as tg:
             tg.create_task(source_producer())
-            tg.create_task(node.async_execute([input_ch.reader], output_ch.writer))
+            tg.create_task(node.async_execute(input_ch.reader, output_ch.writer))
 
         async_results = await output_ch.reader.collect()
         async_values = sorted(pkt.as_dict()["result"] for _, pkt in async_results)
@@ -846,7 +846,7 @@ class TestAsyncPipelineThenSyncRetrieval:
 
         async with asyncio.TaskGroup() as tg:
             tg.create_task(source_producer())
-            tg.create_task(fn_node.async_execute([ch_source.reader], ch_mid.writer))
+            tg.create_task(fn_node.async_execute(ch_source.reader, ch_mid.writer))
             tg.create_task(op_node.async_execute([ch_mid.reader], ch_out.writer))
 
         final_results = await ch_out.reader.collect()

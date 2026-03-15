@@ -90,16 +90,16 @@ class TestDeterministicConcurrencyTracking:
         output_ch = Channel(buffer_size=16)
 
         await feed_stream_to_channel(make_stream(5), input_ch)
-        await node.async_execute([input_ch.reader], output_ch.writer)
+        await node.async_execute(input_ch.reader, output_ch.writer)
 
         results = await output_ch.reader.collect()
         assert len(results) == 5
         values = sorted(pkt.as_dict()["result"] for _, pkt in results)
         assert values == [0, 2, 4, 6, 8]
 
-        # If tasks ran concurrently, peak should equal max_concurrency (5).
-        # If sequential, peak would be 1.
-        assert peak == 5, f"Expected 5 concurrent tasks but peak was {peak}"
+        # Concurrency limiting was removed in PLT-922 (deferred to PLT-930).
+        # Packets are now processed sequentially, so peak should be 1.
+        assert peak == 1, f"Expected sequential execution (peak=1) but peak was {peak}"
 
 
 # ---------------------------------------------------------------------------
@@ -265,11 +265,12 @@ class TestSemaphoreZeroDeadlock:
         assert resolve_concurrency(node_config, pipeline_config) is None
 
     @pytest.mark.asyncio
-    async def test_semaphore_zero_causes_deadlock(self):
-        """Demonstrate that Semaphore(0) actually deadlocks.
+    async def test_max_concurrency_zero_no_deadlock(self):
+        """max_concurrency=0 no longer causes deadlock after PLT-922.
 
-        This is a demonstration of the bug — if resolve_concurrency returns 0,
-        the pipeline hangs forever. We use a timeout to detect the deadlock.
+        Semaphore/concurrency limiting was removed from async_execute
+        (deferred to PLT-930). Packets are processed sequentially regardless
+        of max_concurrency settings.
         """
 
         async def double(x: int) -> int:
@@ -285,13 +286,13 @@ class TestSemaphoreZeroDeadlock:
 
         await feed_stream_to_channel(make_stream(1), input_ch)
 
-        # This should deadlock because Semaphore(0) never allows acquisition.
-        # We use a timeout to detect the deadlock instead of hanging forever.
-        with pytest.raises((asyncio.TimeoutError, ValueError)):
-            await asyncio.wait_for(
-                node.async_execute([input_ch.reader], output_ch.writer),
-                timeout=0.5,
-            )
+        # With concurrency removed, this completes without deadlock.
+        await asyncio.wait_for(
+            node.async_execute(input_ch.reader, output_ch.writer),
+            timeout=2.0,
+        )
+        results = await output_ch.reader.collect()
+        assert len(results) == 1
 
 
 # ---------------------------------------------------------------------------
