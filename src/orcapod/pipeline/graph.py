@@ -722,7 +722,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 upstream_usable = (
                     upstream_node is not None
                     and hasattr(upstream_node, "load_status")
-                    and upstream_node.load_status == LoadStatus.FULL
+                    and upstream_node.load_status
+                    in (LoadStatus.FULL, LoadStatus.READ_ONLY)
                 )
 
                 # Build databases dict
@@ -743,7 +744,9 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 # Check if all upstreams are usable
                 all_upstreams_usable = (
                     all(
-                        hasattr(n, "load_status") and n.load_status == LoadStatus.FULL
+                        hasattr(n, "load_status")
+                        and n.load_status
+                        in (LoadStatus.FULL, LoadStatus.READ_ONLY)
                         for n in upstream_nodes
                     )
                     if upstream_nodes
@@ -857,40 +860,67 @@ class Pipeline(AutoRegisteringContextBasedTracker):
     ) -> FunctionNode:
         """Reconstruct a FunctionNode from a descriptor.
 
+        When the upstream is usable and mode is not ``"read_only"``, attempts
+        to reconstruct the function pod with ``fallback_to_proxy=True`` so
+        that a ``PacketFunctionProxy`` is used when the original function
+        cannot be imported.  Nodes backed by a proxy get
+        ``LoadStatus.READ_ONLY`` — they can read cached results but cannot
+        compute new ones.
+
         Args:
             descriptor: The serialized node descriptor.
             mode: Load mode.
             upstream_node: The reconstructed upstream node, or ``None``.
-            upstream_usable: Whether the upstream is in FULL mode.
+            upstream_usable: Whether the upstream is usable (FULL or
+                READ_ONLY).
             databases: Database role mapping.
 
         Returns:
             A ``FunctionNode`` instance.
         """
         from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.packet_function_proxy import PacketFunctionProxy
+        from orcapod.pipeline.serialization import LoadStatus
 
-        if mode == "full":
-            if not upstream_usable:
+        if mode != "read_only" and upstream_usable:
+            try:
+                pod = FunctionPod.from_config(
+                    descriptor["function_pod"], fallback_to_proxy=True
+                )
+                node = FunctionNode.from_descriptor(
+                    descriptor,
+                    function_pod=pod,
+                    input_stream=upstream_node,
+                    databases=databases,
+                )
+
+                if isinstance(pod.packet_function, PacketFunctionProxy):
+                    node._load_status = LoadStatus.READ_ONLY
+                    # Override the cached function pod's record path to match
+                    # the stored path from the original pipeline run.
+                    stored_result_path = tuple(
+                        descriptor.get("result_record_path", ())
+                    )
+                    if stored_result_path and node._cached_function_pod is not None:
+                        node._cached_function_pod._cache._record_path = (
+                            stored_result_path
+                        )
+                else:
+                    node._load_status = LoadStatus.FULL
+
+                return node
+            except Exception:
                 logger.warning(
-                    "Upstream for function node %r is not usable, "
+                    "Failed to reconstruct function node %r, "
                     "falling back to read-only.",
                     descriptor.get("label"),
                 )
-            else:
-                try:
-                    pod = FunctionPod.from_config(descriptor["function_pod"])
-                    return FunctionNode.from_descriptor(
-                        descriptor,
-                        function_pod=pod,
-                        input_stream=upstream_node,
-                        databases=databases,
-                    )
-                except Exception:
-                    logger.warning(
-                        "Failed to reconstruct function node %r, "
-                        "falling back to read-only.",
-                        descriptor.get("label"),
-                    )
+        elif mode != "read_only" and not upstream_usable:
+            logger.warning(
+                "Upstream for function node %r is not usable, "
+                "falling back to read-only.",
+                descriptor.get("label"),
+            )
 
         return FunctionNode.from_descriptor(
             descriptor,
