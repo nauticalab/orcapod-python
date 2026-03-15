@@ -1,10 +1,8 @@
 """Async pipeline orchestrator for push-based channel execution.
 
-Walks a compiled ``Pipeline``'s persistent node graph and launches all
-nodes concurrently via ``asyncio.TaskGroup``, wiring them together with
-bounded channels.  After execution, results are available in the
-pipeline databases via the usual ``get_all_records()`` / ``as_source()``
-accessors on each persistent node.
+Walks a compiled pipeline's node graph and launches all nodes concurrently
+via ``asyncio.TaskGroup``, wiring them together with bounded channels.
+Uses TypeGuard dispatch with tightened per-type async_execute signatures.
 """
 
 from __future__ import annotations
@@ -15,93 +13,100 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
 from orcapod.channels import BroadcastChannel, Channel
-from orcapod.types import PipelineConfig
+from orcapod.pipeline.result import OrchestratorResult
+from orcapod.protocols.node_protocols import (
+    is_function_node,
+    is_operator_node,
+    is_source_node,
+)
 
 if TYPE_CHECKING:
     import networkx as nx
 
-    from orcapod.pipeline.graph import Pipeline
+    from orcapod.pipeline.observer import ExecutionObserver
+    from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
 
 logger = logging.getLogger(__name__)
 
 
 class AsyncPipelineOrchestrator:
-    """Execute a compiled ``Pipeline`` asynchronously using channels.
+    """Execute a compiled pipeline asynchronously using channels.
 
-    After ``Pipeline.compile()``, the orchestrator:
+    After compilation, the orchestrator:
 
-    1. Walks ``Pipeline._node_graph`` (persistent nodes) in topological
-       order.
+    1. Walks the node graph in topological order.
     2. Creates bounded channels (or broadcast channels for fan-out)
        between connected nodes.
     3. Launches every node's ``async_execute`` concurrently via
-       ``asyncio.TaskGroup``.
+       ``asyncio.TaskGroup``, using TypeGuard dispatch for per-type
+       signatures.
 
-    Results are written to the pipeline databases by the persistent
-    nodes themselves (``FunctionNode``, ``OperatorNode``
-    in LOG mode, etc.).  After ``run()`` returns, callers retrieve data
-    via ``pipeline.<label>.get_all_records()``.
+    Args:
+        observer: Optional execution observer for hooks.
+        buffer_size: Channel buffer size. Defaults to 64.
     """
+
+    def __init__(
+        self,
+        observer: "ExecutionObserver | None" = None,
+        buffer_size: int = 64,
+    ) -> None:
+        self._observer = observer
+        self._buffer_size = buffer_size
 
     def run(
         self,
-        pipeline: Pipeline,
-        config: PipelineConfig | None = None,
-    ) -> None:
+        graph: "nx.DiGraph",
+        materialize_results: bool = True,
+    ) -> OrchestratorResult:
         """Synchronous entry point — runs the async pipeline to completion.
 
         Args:
-            pipeline: A compiled ``Pipeline`` whose ``_node_graph``
-                describes the persistent DAG.
-            config: Pipeline configuration (buffer sizes, concurrency).
+            graph: A NetworkX DiGraph with GraphNode objects as vertices.
+            materialize_results: If True, collect all node outputs into
+                the result. If False, return empty node_outputs.
+
+        Returns:
+            OrchestratorResult with node outputs.
         """
-        config = config or PipelineConfig()
-        asyncio.run(self._run_async(pipeline, config))
+        return asyncio.run(self._run_async(graph, materialize_results))
 
     async def run_async(
         self,
-        pipeline: Pipeline,
-        config: PipelineConfig | None = None,
-    ) -> None:
+        graph: "nx.DiGraph",
+        materialize_results: bool = True,
+    ) -> OrchestratorResult:
         """Async entry point for callers already inside an event loop.
 
         Args:
-            pipeline: A compiled ``Pipeline``.
-            config: Pipeline configuration.
+            graph: A NetworkX DiGraph with GraphNode objects as vertices.
+            materialize_results: If True, collect all node outputs.
+
+        Returns:
+            OrchestratorResult with node outputs.
         """
-        config = config or PipelineConfig()
-        await self._run_async(pipeline, config)
+        return await self._run_async(graph, materialize_results)
 
     async def _run_async(
         self,
-        pipeline: Pipeline,
-        config: PipelineConfig,
-    ) -> None:
-        """Core async logic: wire channels between persistent nodes, launch tasks."""
+        graph: "nx.DiGraph",
+        materialize_results: bool,
+    ) -> OrchestratorResult:
+        """Core async logic: wire channels, launch tasks, collect results."""
         import networkx as nx
 
-        if not pipeline._compiled:
-            pipeline.compile()
+        topo_order = list(nx.topological_sort(graph))
+        buf = self._buffer_size
 
-        G: nx.DiGraph | None = pipeline._node_graph
-        assert G is not None, "Pipeline must be compiled before async execution"
-
-        topo_order = list(nx.topological_sort(G))
-
-        buf = config.channel_buffer_size
-
-        # Build edge maps keyed by node object identity
+        # Build edge maps
         out_edges: dict[Any, list[Any]] = defaultdict(list)
         in_edges: dict[Any, list[Any]] = defaultdict(list)
-        for upstream_node, downstream_node in G.edges():
+        for upstream_node, downstream_node in graph.edges():
             out_edges[upstream_node].append(downstream_node)
             in_edges[downstream_node].append(upstream_node)
 
-        # Create channels for each edge.
-        # If a node fans out to multiple downstreams, use BroadcastChannel.
-        # node → output Channel or BroadcastChannel
+        # Create channels for each edge
         node_output_channels: dict[Any, Channel | BroadcastChannel] = {}
-        # (upstream, downstream) → reader
         edge_readers: dict[tuple[Any, Any], Any] = {}
 
         for node, downstreams in out_edges.items():
@@ -115,41 +120,75 @@ class AsyncPipelineOrchestrator:
                 for ds in downstreams:
                     edge_readers[(node, ds)] = bch.add_reader()
 
-        # Terminal nodes (no outgoing edges) need a sink channel so their
-        # async_execute has somewhere to write.  We drain it after execution.
-        terminal_nodes = [n for n in topo_order if G.out_degree(n) == 0]
+        # Terminal nodes need sink channels
         terminal_channels: list[Channel] = []
-        for node in terminal_nodes:
+        for node in topo_order:
             if node not in node_output_channels:
                 ch = Channel(buffer_size=buf)
                 node_output_channels[node] = ch
                 terminal_channels.append(ch)
+
+        # Result collection
+        collectors: dict[Any, list[tuple[TagProtocol, PacketProtocol]]] = {}
+        if materialize_results:
+            for node in topo_order:
+                collectors[node] = []
 
         # Launch all nodes concurrently
         async with asyncio.TaskGroup() as tg:
             for node in topo_order:
                 writer = node_output_channels[node].writer
 
-                if getattr(node, "node_type", None) == "source":
-                    # SourceNode.async_execute takes only output (no inputs)
-                    tg.create_task(node.async_execute(writer))
-                elif getattr(node, "node_type", None) == "function":
-                    # FunctionNode.async_execute takes single input channel
+                if materialize_results:
+                    collector = collectors[node]
+                    writer = _CollectingWriter(writer, collector)
+
+                if is_source_node(node):
+                    tg.create_task(
+                        node.async_execute(writer, observer=self._observer)
+                    )
+                elif is_function_node(node):
+                    predecessors = in_edges.get(node, [])
+                    input_reader = edge_readers[(predecessors[0], node)]
+                    tg.create_task(
+                        node.async_execute(
+                            input_reader, writer, observer=self._observer
+                        )
+                    )
+                elif is_operator_node(node):
                     input_readers = [
                         edge_readers[(upstream, node)]
                         for upstream in in_edges.get(node, [])
                     ]
                     tg.create_task(
-                        node.async_execute(input_readers[0], writer)
+                        node.async_execute(
+                            input_readers, writer, observer=self._observer
+                        )
                     )
                 else:
-                    # OperatorNode.async_execute takes list of input channels
-                    input_readers = [
-                        edge_readers[(upstream, node)]
-                        for upstream in in_edges.get(node, [])
-                    ]
-                    tg.create_task(node.async_execute(input_readers, writer))
+                    raise TypeError(
+                        f"Unknown node type: {getattr(node, 'node_type', None)!r}"
+                    )
 
-        # Drain terminal channels so nothing is left buffered
+        # Drain terminal channels
         for ch in terminal_channels:
             await ch.reader.collect()
+
+        return OrchestratorResult(
+            node_outputs=collectors if materialize_results else {}
+        )
+
+
+class _CollectingWriter:
+    """Wrapper that collects items while forwarding to real writer."""
+
+    def __init__(self, writer: Any, collector: list) -> None:
+        self._writer = writer
+        self._collector = collector
+
+    async def send(self, item: Any) -> None:
+        self._collector.append(item)
+        await self._writer.send(item)
+
+    async def close(self) -> None:
+        await self._writer.close()

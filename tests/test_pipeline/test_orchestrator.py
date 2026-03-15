@@ -1,19 +1,19 @@
 """
 Tests for the async pipeline orchestrator.
 
-The ``AsyncPipelineOrchestrator`` operates on compiled ``Pipeline``
-objects.  After execution, results are retrieved from the pipeline's
-persistent nodes via ``get_all_records()``.
+The ``AsyncPipelineOrchestrator`` operates on compiled pipeline node graphs.
+After execution, results are retrieved from the pipeline's persistent nodes
+via ``get_all_records()``.
 
 Covers:
-- Linear pipeline: Source → FunctionPod
-- Operator pipeline: Source → Operator → FunctionPod
-- Diamond DAG: Two sources → Join → FunctionPod
+- Linear pipeline: Source -> FunctionPod
+- Operator pipeline: Source -> Operator -> FunctionPod
+- Diamond DAG: Two sources -> Join -> FunctionPod
 - Fan-out: one source feeds multiple downstream nodes
 - Results match synchronous execution
 - SourceNode / OperatorNode / FunctionNode async_execute basics
 - run_async entry point (from within an event loop)
-- PipelineConfig integration (custom buffer sizes)
+- Buffer size configuration
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import AsyncPipelineOrchestrator, Pipeline
-from orcapod.types import ExecutorType, PipelineConfig
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -156,7 +155,7 @@ class TestFunctionNodeAsyncExecute:
 
 
 class TestOrchestratorLinearPipeline:
-    """Source → FunctionPod (linear pipeline)."""
+    """Source -> FunctionPod (linear pipeline)."""
 
     def test_linear_source_to_function_pod(self):
         src = _make_source("key", "value", {"key": ["a", "b", "c"], "value": [1, 2, 3]})
@@ -167,8 +166,9 @@ class TestOrchestratorLinearPipeline:
         with pipeline:
             pod(src, label="doubler")
 
-        orchestrator = AsyncPipelineOrchestrator()
-        orchestrator.run(pipeline)
+        pipeline.compile()
+        AsyncPipelineOrchestrator().run(pipeline._node_graph)
+        pipeline.flush()
 
         records = pipeline.doubler.get_all_records()
         assert records is not None
@@ -197,9 +197,11 @@ class TestOrchestratorLinearPipeline:
         )
         with async_pipeline:
             pod(src, label="doubler")
-        orchestrator = AsyncPipelineOrchestrator()
-        orchestrator.run(async_pipeline)
-        async_records = async_pipeline.doubler.get_all_records()
+        pipeline = async_pipeline
+        pipeline.compile()
+        AsyncPipelineOrchestrator().run(pipeline._node_graph)
+        pipeline.flush()
+        async_records = pipeline.doubler.get_all_records()
         async_values = sorted(async_records.column("result").to_pylist())
 
         assert sync_values == async_values
@@ -211,7 +213,7 @@ class TestOrchestratorLinearPipeline:
 
 
 class TestOrchestratorOperatorPipeline:
-    """Source → Operator → FunctionPod."""
+    """Source -> Operator -> FunctionPod."""
 
     def test_source_to_operator_to_function_pod(self):
         src = _make_source("key", "value", {"key": ["a", "b", "c"], "value": [1, 2, 3]})
@@ -228,8 +230,9 @@ class TestOrchestratorOperatorPipeline:
             mapped = op(src, label="mapper")
             pod(mapped, label="doubler")
 
-        orchestrator = AsyncPipelineOrchestrator()
-        orchestrator.run(pipeline)
+        pipeline.compile()
+        AsyncPipelineOrchestrator().run(pipeline._node_graph)
+        pipeline.flush()
 
         records = pipeline.doubler.get_all_records()
         assert records is not None
@@ -244,7 +247,7 @@ class TestOrchestratorOperatorPipeline:
 
 
 class TestOrchestratorDiamondDag:
-    """Two sources → Join → FunctionPod."""
+    """Two sources -> Join -> FunctionPod."""
 
     def test_two_sources_join_function_pod(self):
         src_a, src_b = _make_two_sources()
@@ -256,8 +259,9 @@ class TestOrchestratorDiamondDag:
             joined = Join()(src_a, src_b, label="join")
             pod(joined, label="adder")
 
-        orchestrator = AsyncPipelineOrchestrator()
-        orchestrator.run(pipeline)
+        pipeline.compile()
+        AsyncPipelineOrchestrator().run(pipeline._node_graph)
+        pipeline.flush()
 
         records = pipeline.adder.get_all_records()
         assert records is not None
@@ -290,8 +294,9 @@ class TestOrchestratorDiamondDag:
         with async_pipeline:
             joined = Join()(src_a, src_b, label="join")
             pod(joined, label="adder")
-        orchestrator = AsyncPipelineOrchestrator()
-        orchestrator.run(async_pipeline)
+        async_pipeline.compile()
+        AsyncPipelineOrchestrator().run(async_pipeline._node_graph)
+        async_pipeline.flush()
         async_values = sorted(
             async_pipeline.adder.get_all_records().column("total").to_pylist()
         )
@@ -318,8 +323,10 @@ class TestOrchestratorRunAsync:
         with pipeline:
             pod(src, label="doubler")
 
+        pipeline.compile()
         orchestrator = AsyncPipelineOrchestrator()
-        await orchestrator.run_async(pipeline)
+        await orchestrator.run_async(pipeline._node_graph)
+        pipeline.flush()
 
         records = pipeline.doubler.get_all_records()
         assert records is not None
@@ -328,11 +335,11 @@ class TestOrchestratorRunAsync:
 
 
 # ===========================================================================
-# 8. PipelineConfig integration
+# 8. Buffer size configuration
 # ===========================================================================
 
 
-class TestPipelineConfigIntegration:
+class TestBufferSizeConfiguration:
     def test_custom_buffer_size(self):
         """Pipeline should work with custom buffer sizes."""
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
@@ -343,13 +350,9 @@ class TestPipelineConfigIntegration:
         with pipeline:
             pod(src, label="doubler")
 
-        config = PipelineConfig(
-            executor=ExecutorType.ASYNC_CHANNELS,
-            channel_buffer_size=4,
-        )
-
-        orchestrator = AsyncPipelineOrchestrator()
-        orchestrator.run(pipeline, config=config)
+        pipeline.compile()
+        AsyncPipelineOrchestrator(buffer_size=4).run(pipeline._node_graph)
+        pipeline.flush()
 
         records = pipeline.doubler.get_all_records()
         assert records is not None
