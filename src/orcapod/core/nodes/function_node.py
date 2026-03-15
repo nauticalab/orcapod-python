@@ -486,29 +486,51 @@ class FunctionNode(StreamBase):
         return self._process_packet_internal(tag, packet)
 
     def execute(
-        self, input_stream: StreamProtocol
+        self,
+        input_stream: StreamProtocol,
+        *,
+        observer: Any = None,
     ) -> list[tuple[TagProtocol, PacketProtocol]]:
         """Execute all packets from a stream: compute, persist, and cache.
 
-        Internal method for orchestrators. The caller must guarantee that
-        the input stream's identity (content hash, schema) matches
-        ``self._input_stream``. No validation is performed.
-
-        More efficient than calling ``execute_packet`` per-packet when
-        observer hooks aren't needed.
-
         Args:
             input_stream: The input stream to process.
+            observer: Optional execution observer for hooks.
 
         Returns:
             Materialized list of (tag, output_packet) pairs, excluding
             None outputs.
         """
+        if observer is not None:
+            observer.on_node_start(self)
+
+        # Gather entry IDs and check cache
+        upstream_entries = [
+            (tag, packet, self.compute_pipeline_entry_id(tag, packet))
+            for tag, packet in input_stream.iter_packets()
+        ]
+        entry_ids = [eid for _, _, eid in upstream_entries]
+        cached = self.get_cached_results(entry_ids=entry_ids)
+
         output: list[tuple[TagProtocol, PacketProtocol]] = []
-        for tag, packet in input_stream.iter_packets():
-            tag_out, result = self._process_packet_internal(tag, packet)
-            if result is not None:
+        for tag, packet, entry_id in upstream_entries:
+            if observer is not None:
+                observer.on_packet_start(self, tag, packet)
+
+            if entry_id in cached:
+                tag_out, result = cached[entry_id]
+                if observer is not None:
+                    observer.on_packet_end(self, tag, packet, result, cached=True)
                 output.append((tag_out, result))
+            else:
+                tag_out, result = self._process_packet_internal(tag, packet)
+                if observer is not None:
+                    observer.on_packet_end(self, tag, packet, result, cached=False)
+                if result is not None:
+                    output.append((tag_out, result))
+
+        if observer is not None:
+            observer.on_node_end(self)
         return output
 
     def _process_packet_internal(
