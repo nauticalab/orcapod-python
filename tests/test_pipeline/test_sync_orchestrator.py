@@ -387,6 +387,147 @@ class TestMaterializedStreamIdentity:
         assert orch_tag_schema == pull_tag_schema
 
 
+class TestSyncObserverInjection:
+    """Verify observer passed to orchestrator flows through to nodes."""
+
+    def test_operator_pipeline_observer_hooks(self):
+        """Source → Operator → Function: all node types fire hooks."""
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
+        op = MapPackets(name_map={"value": "val"})
+
+        def double_val(val: int) -> int:
+            return val * 2
+
+        pf = PythonPacketFunction(double_val, output_keys="result")
+        pod = FunctionPod(pf)
+
+        pipeline = Pipeline(name="obs_op", pipeline_database=InMemoryArrowDatabase())
+        with pipeline:
+            mapped = op(src, label="mapper")
+            pod(mapped, label="doubler")
+
+        events = []
+
+        class RecordingObserver:
+            def on_node_start(self, node):
+                events.append(("node_start", node.node_type))
+
+            def on_node_end(self, node):
+                events.append(("node_end", node.node_type))
+
+            def on_packet_start(self, node, tag, packet):
+                events.append(("packet_start", node.node_type))
+
+            def on_packet_end(self, node, tag, input_pkt, output_pkt, cached):
+                events.append(("packet_end", node.node_type, cached))
+
+        orch = SyncPipelineOrchestrator(observer=RecordingObserver())
+        orch.run(pipeline._node_graph)
+
+        # Source fires node_start/node_end only (no packet-level hooks)
+        assert ("node_start", "source") in events
+        assert ("node_end", "source") in events
+        assert ("packet_start", "source") not in events
+
+        # Operator fires node_start/node_end only
+        assert ("node_start", "operator") in events
+        assert ("node_end", "operator") in events
+        assert ("packet_start", "operator") not in events
+
+        # Function fires node_start, per-packet hooks, node_end
+        assert ("node_start", "function") in events
+        assert ("node_end", "function") in events
+        fn_packet_events = [e for e in events if e[0] == "packet_start" and e[1] == "function"]
+        assert len(fn_packet_events) == 2  # 2 packets
+
+    def test_function_node_cached_flag(self):
+        """Second run with DB should report cached=True for known packets."""
+        src = _make_source("key", "value", {"key": ["a"], "value": [1]})
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(pf)
+
+        db = InMemoryArrowDatabase()
+        pipeline = Pipeline(name="cached_obs", pipeline_database=db, function_database=db)
+        with pipeline:
+            pod(src, label="doubler")
+
+        # First run — should be cached=False
+        events1 = []
+
+        class Obs1:
+            def on_node_start(self, node): pass
+            def on_node_end(self, node): pass
+            def on_packet_start(self, node, tag, packet): pass
+            def on_packet_end(self, node, tag, input_pkt, output_pkt, cached):
+                if node.node_type == "function":
+                    events1.append(cached)
+
+        SyncPipelineOrchestrator(observer=Obs1()).run(pipeline._node_graph)
+        assert events1 == [False]
+
+        # Second run — should be cached=True
+        events2 = []
+
+        class Obs2:
+            def on_node_start(self, node): pass
+            def on_node_end(self, node): pass
+            def on_packet_start(self, node, tag, packet): pass
+            def on_packet_end(self, node, tag, input_pkt, output_pkt, cached):
+                if node.node_type == "function":
+                    events2.append(cached)
+
+        SyncPipelineOrchestrator(observer=Obs2()).run(pipeline._node_graph)
+        assert events2 == [True]
+
+    def test_diamond_dag_observer_event_order(self):
+        """Two sources → Join → Function: events follow topological order."""
+        src_a = _make_source("key", "value", {"key": ["a"], "value": [10]})
+        src_b = _make_source("key", "score", {"key": ["a"], "score": [100]})
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(pf)
+
+        pipeline = Pipeline(name="diamond_obs", pipeline_database=InMemoryArrowDatabase())
+        with pipeline:
+            joined = Join()(src_a, src_b, label="join")
+            pod(joined, label="adder")
+
+        node_order = []
+
+        class OrderObserver:
+            def on_node_start(self, node):
+                node_order.append(("start", node.node_type))
+            def on_node_end(self, node):
+                node_order.append(("end", node.node_type))
+            def on_packet_start(self, node, tag, packet): pass
+            def on_packet_end(self, node, tag, input_pkt, output_pkt, cached): pass
+
+        SyncPipelineOrchestrator(observer=OrderObserver()).run(pipeline._node_graph)
+
+        # Extract just the node types in start order
+        starts = [nt for event, nt in node_order if event == "start"]
+        # Sources first (order between them doesn't matter), then operator, then function
+        assert starts.count("source") == 2
+        assert starts.index("operator") > max(
+            i for i, s in enumerate(starts) if s == "source"
+        )
+        assert starts.index("function") > starts.index("operator")
+
+    def test_no_observer_works(self):
+        """Pipeline runs fine with no observer (None)."""
+        src = _make_source("key", "value", {"key": ["a"], "value": [1]})
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(pf)
+
+        pipeline = Pipeline(name="no_obs", pipeline_database=InMemoryArrowDatabase())
+        with pipeline:
+            pod(src, label="doubler")
+
+        orch = SyncPipelineOrchestrator()  # no observer
+        result = orch.run(pipeline._node_graph)
+        fn_outputs = [v for k, v in result.node_outputs.items() if k.node_type == "function"]
+        assert len(fn_outputs[0]) == 1
+
+
 class TestMaterializeResults:
     def test_sync_materialize_false_returns_empty(self):
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})

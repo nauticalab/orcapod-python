@@ -447,3 +447,119 @@ class TestAsyncOrchestratorErrorPropagation:
 
         with pytest.raises(ExceptionGroup):
             orch.run(pipeline._node_graph)
+
+
+class TestAsyncOrchestratorObserverInjection:
+    """Verify observer passed to async orchestrator flows through to nodes."""
+
+    def test_linear_pipeline_observer_hooks(self):
+        """Source → Function: observer hooks fire from inside nodes."""
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(pf)
+
+        pipeline = Pipeline(name="async_obs", pipeline_database=InMemoryArrowDatabase())
+        with pipeline:
+            pod(src, label="doubler")
+
+        events = []
+
+        class RecordingObserver:
+            def on_node_start(self, node):
+                events.append(("node_start", node.node_type))
+
+            def on_node_end(self, node):
+                events.append(("node_end", node.node_type))
+
+            def on_packet_start(self, node, tag, packet):
+                events.append(("packet_start", node.node_type))
+
+            def on_packet_end(self, node, tag, input_pkt, output_pkt, cached):
+                events.append(("packet_end", node.node_type, cached))
+
+        pipeline.compile()
+        orch = AsyncPipelineOrchestrator(observer=RecordingObserver())
+        orch.run(pipeline._node_graph)
+
+        # Source fires node_start/node_end
+        assert ("node_start", "source") in events
+        assert ("node_end", "source") in events
+
+        # Function fires node_start, per-packet hooks, node_end
+        assert ("node_start", "function") in events
+        assert ("node_end", "function") in events
+        fn_packet_ends = [
+            e for e in events
+            if e[0] == "packet_end" and e[1] == "function"
+        ]
+        assert len(fn_packet_ends) == 2
+        # All should be cached=False (first run, no DB)
+        assert all(e[2] is False for e in fn_packet_ends)
+
+    def test_operator_pipeline_observer_hooks(self):
+        """Source → Operator → Function: all node types fire hooks."""
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
+        op = MapPackets(name_map={"value": "val"})
+
+        def double_val(val: int) -> int:
+            return val * 2
+
+        pf = PythonPacketFunction(double_val, output_keys="result")
+        pod = FunctionPod(pf)
+
+        pipeline = Pipeline(
+            name="async_obs_op", pipeline_database=InMemoryArrowDatabase()
+        )
+        with pipeline:
+            mapped = op(src, label="mapper")
+            pod(mapped, label="doubler")
+
+        events = []
+
+        class RecordingObserver:
+            def on_node_start(self, node):
+                events.append(("node_start", node.node_type))
+
+            def on_node_end(self, node):
+                events.append(("node_end", node.node_type))
+
+            def on_packet_start(self, node, tag, packet):
+                events.append(("packet_start", node.node_type))
+
+            def on_packet_end(self, node, tag, input_pkt, output_pkt, cached):
+                events.append(("packet_end", node.node_type))
+
+        pipeline.compile()
+        orch = AsyncPipelineOrchestrator(observer=RecordingObserver())
+        orch.run(pipeline._node_graph)
+
+        # All three node types fire start/end
+        for node_type in ("source", "operator", "function"):
+            assert ("node_start", node_type) in events
+            assert ("node_end", node_type) in events
+
+        # Only function nodes fire packet-level hooks
+        assert ("packet_start", "function") in events
+        assert ("packet_start", "source") not in events
+        assert ("packet_start", "operator") not in events
+
+    def test_no_observer_works(self):
+        """Async pipeline runs fine with no observer."""
+        src = _make_source("key", "value", {"key": ["a"], "value": [1]})
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(pf)
+
+        pipeline = Pipeline(
+            name="async_no_obs", pipeline_database=InMemoryArrowDatabase()
+        )
+        with pipeline:
+            pod(src, label="doubler")
+
+        pipeline.compile()
+        orch = AsyncPipelineOrchestrator()  # no observer
+        result = orch.run(pipeline._node_graph, materialize_results=True)
+        fn_outputs = [
+            v for k, v in result.node_outputs.items() if k.node_type == "function"
+        ]
+        assert len(fn_outputs) == 1
+        assert len(fn_outputs[0]) == 1
