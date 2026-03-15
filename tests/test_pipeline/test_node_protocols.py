@@ -275,3 +275,68 @@ class TestFunctionNodeExecute:
         assert len(result) == 2
         values = sorted([pkt.as_dict()["result"] for _, pkt in result])
         assert values == [2, 4]
+
+
+# ===========================================================================
+# FunctionNode.async_execute() with tightened signature
+# ===========================================================================
+
+
+class TestFunctionNodeAsyncExecute:
+    @pytest.mark.asyncio
+    async def test_tightened_signature(self):
+        """async_execute takes single input_channel, not Sequence."""
+        table = pa.table({
+            "key": pa.array(["a", "b"], type=pa.large_string()),
+            "value": pa.array([1, 2], type=pa.int64()),
+        })
+        src = ArrowTableSource(table, tag_columns=["key"])
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(pf)
+        node = FunctionNode(pod, src)
+
+        input_ch = Channel(buffer_size=16)
+        output_ch = Channel(buffer_size=16)
+
+        for tag, packet in src.iter_packets():
+            await input_ch.writer.send((tag, packet))
+        await input_ch.writer.close()
+
+        await node.async_execute(input_ch.reader, output_ch.writer)
+        rows = await output_ch.reader.collect()
+        assert len(rows) == 2
+        values = sorted([pkt.as_dict()["result"] for _, pkt in rows])
+        assert values == [2, 4]
+
+    @pytest.mark.asyncio
+    async def test_async_execute_with_observer(self):
+        table = pa.table({
+            "key": pa.array(["a"], type=pa.large_string()),
+            "value": pa.array([1], type=pa.int64()),
+        })
+        src = ArrowTableSource(table, tag_columns=["key"])
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(pf)
+        node = FunctionNode(pod, src)
+
+        events = []
+
+        class Obs:
+            def on_node_start(self, n):
+                events.append("node_start")
+            def on_node_end(self, n):
+                events.append("node_end")
+            def on_packet_start(self, n, t, p):
+                events.append("pkt_start")
+            def on_packet_end(self, n, t, ip, op, cached):
+                events.append("pkt_end")
+
+        input_ch = Channel(buffer_size=16)
+        output_ch = Channel(buffer_size=16)
+        for tag, packet in src.iter_packets():
+            await input_ch.writer.send((tag, packet))
+        await input_ch.writer.close()
+
+        await node.async_execute(input_ch.reader, output_ch.writer, observer=Obs())
+        assert "node_start" in events
+        assert "node_end" in events

@@ -133,8 +133,17 @@ class AsyncPipelineOrchestrator:
                 if getattr(node, "node_type", None) == "source":
                     # SourceNode.async_execute takes only output (no inputs)
                     tg.create_task(node.async_execute(writer))
+                elif getattr(node, "node_type", None) == "function":
+                    # FunctionNode.async_execute takes single input channel
+                    input_readers = [
+                        edge_readers[(upstream, node)]
+                        for upstream in in_edges.get(node, [])
+                    ]
+                    tg.create_task(
+                        node.async_execute(input_readers[0], writer)
+                    )
                 else:
-                    # Gather input readers from upstream edges
+                    # OperatorNode.async_execute takes list of input channels
                     input_readers = [
                         edge_readers[(upstream, node)]
                         for upstream in in_edges.get(node, [])
