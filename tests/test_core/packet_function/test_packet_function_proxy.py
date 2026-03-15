@@ -8,6 +8,23 @@ from orcapod.core.packet_function_proxy import PacketFunctionProxy
 from orcapod.errors import PacketFunctionUnavailableError
 
 
+# ==================== Task 2: Construction tests ====================
+
+
+class TestPacketFunctionProxyConstruction:
+    """Tests for proxy construction and executor property."""
+
+    def test_executor_returns_none(self):
+        pf = _make_sample_function()
+        proxy = _make_proxy_from_function(pf)
+        assert proxy.executor is None
+
+    def test_executor_setter_is_noop(self):
+        pf = _make_sample_function()
+        proxy = _make_proxy_from_function(pf)
+        proxy.executor = None  # should not raise
+
+
 # ==================== Helpers ====================
 
 
@@ -61,6 +78,16 @@ class TestPacketFunctionProxyInvocation:
             PacketFunctionUnavailableError, match="double_age"
         ):
             proxy.direct_call(packet)
+
+    @pytest.mark.asyncio
+    async def test_direct_async_call_raises_when_unbound(self):
+        pf = _make_sample_function()
+        proxy = _make_proxy_from_function(pf)
+        packet = Packet({"age": 25})
+        with pytest.raises(
+            PacketFunctionUnavailableError, match="double_age"
+        ):
+            await proxy.direct_async_call(packet)
 
     def test_variation_data_empty_when_unbound(self):
         pf = _make_sample_function()
@@ -157,4 +184,17 @@ class TestPacketFunctionProxyBinding:
             double_age, output_keys="doubled_age", version="v1.0"
         )
         with pytest.raises(ValueError, match="output_packet_schema"):
+            proxy.bind(other_pf)
+
+    def test_bind_rejects_mismatched_input_schema(self):
+        pf = _make_sample_function()
+        proxy = _make_proxy_from_function(pf)
+
+        def double_age(name: str) -> int:
+            return len(name) * 2
+
+        other_pf = PythonPacketFunction(
+            double_age, output_keys="doubled_age", version="v1.0"
+        )
+        with pytest.raises(ValueError, match="input_packet_schema"):
             proxy.bind(other_pf)
