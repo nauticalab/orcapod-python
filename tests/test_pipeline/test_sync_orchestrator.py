@@ -263,7 +263,9 @@ class TestSyncAsyncParity:
         )
         with async_pipeline:
             pod(src, label="doubler")
-        AsyncPipelineOrchestrator().run(async_pipeline)
+        async_pipeline.compile()
+        AsyncPipelineOrchestrator().run(async_pipeline._node_graph)
+        async_pipeline.flush()
         async_records = async_pipeline.doubler.get_all_records()
         async_values = sorted(async_records.column("result").to_pylist())
 
@@ -294,7 +296,9 @@ class TestSyncAsyncParity:
         with async_pipeline:
             joined = Join()(src_a, src_b, label="join")
             pod(joined, label="adder")
-        AsyncPipelineOrchestrator().run(async_pipeline)
+        async_pipeline.compile()
+        AsyncPipelineOrchestrator().run(async_pipeline._node_graph)
+        async_pipeline.flush()
         async_values = sorted(
             async_pipeline.adder.get_all_records().column("total").to_pylist()
         )

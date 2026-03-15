@@ -419,7 +419,13 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 effective_engine is not None and not explicit_config
             )
             if use_async:
-                self._run_async(config)
+                from orcapod.pipeline.async_orchestrator import (
+                    AsyncPipelineOrchestrator,
+                )
+
+                AsyncPipelineOrchestrator(
+                    buffer_size=config.channel_buffer_size,
+                ).run(self._node_graph)
             else:
                 from orcapod.pipeline.sync_orchestrator import (
                     SyncPipelineOrchestrator,
@@ -465,13 +471,6 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 node.label,
                 opts or None,
             )
-
-    def _run_async(self, config: PipelineConfig) -> None:
-        """Run the pipeline asynchronously using the orchestrator."""
-        from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
-
-        orchestrator = AsyncPipelineOrchestrator()
-        orchestrator.run(self, config)
 
     def flush(self) -> None:
         """Flush all databases."""

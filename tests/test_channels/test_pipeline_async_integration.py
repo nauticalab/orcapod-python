@@ -117,8 +117,9 @@ class TestAsyncPipelineIntegration:
         pipeline = _build_pipeline()
 
         # Run asynchronously — persistent nodes write to the pipeline DB
-        orchestrator = AsyncPipelineOrchestrator()
-        orchestrator.run(pipeline)
+        pipeline.compile()
+        AsyncPipelineOrchestrator().run(pipeline._node_graph)
+        pipeline.flush()
 
         # Retrieve results synchronously via the persistent node
         records = pipeline.letter_grade.get_all_records()
@@ -143,8 +144,10 @@ class TestAsyncPipelineIntegration:
         """run_async() works when an event loop is already running."""
         pipeline = _build_pipeline()
 
+        pipeline.compile()
         orchestrator = AsyncPipelineOrchestrator()
-        await orchestrator.run_async(pipeline)
+        await orchestrator.run_async(pipeline._node_graph)
+        pipeline.flush()
 
         records = pipeline.letter_grade.get_all_records()
         assert records is not None
@@ -172,8 +175,9 @@ class TestAsyncPipelineIntegration:
 
         # Async path
         async_pipeline = _build_pipeline()
-        orchestrator = AsyncPipelineOrchestrator()
-        orchestrator.run(async_pipeline)
+        async_pipeline.compile()
+        AsyncPipelineOrchestrator().run(async_pipeline._node_graph)
+        async_pipeline.flush()
         async_records = async_pipeline.letter_grade.get_all_records()
         assert async_records is not None
         async_grades = _grades_from_table(async_records)
@@ -208,8 +212,9 @@ class TestSyncAsyncSystemTagEquivalence:
         assert sync_records is not None
 
         async_pipeline = _build_pipeline()
-        orchestrator = AsyncPipelineOrchestrator()
-        orchestrator.run(async_pipeline)
+        async_pipeline.compile()
+        AsyncPipelineOrchestrator().run(async_pipeline._node_graph)
+        async_pipeline.flush()
         async_records = async_pipeline.letter_grade.get_all_records(
             columns={"system_tags": True}
         )
@@ -230,8 +235,9 @@ class TestSyncAsyncSystemTagEquivalence:
         """System-tag columns should follow the name-extending convention."""
 
         pipeline = _build_pipeline()
-        orchestrator = AsyncPipelineOrchestrator()
-        orchestrator.run(pipeline)
+        pipeline.compile()
+        AsyncPipelineOrchestrator().run(pipeline._node_graph)
+        pipeline.flush()
         records = pipeline.letter_grade.get_all_records(columns={"system_tags": True})
         assert records is not None
 
@@ -259,8 +265,9 @@ class TestSyncAsyncSystemTagEquivalence:
         assert sync_records is not None
 
         async_pipeline = _build_pipeline()
-        orchestrator = AsyncPipelineOrchestrator()
-        orchestrator.run(async_pipeline)
+        async_pipeline.compile()
+        AsyncPipelineOrchestrator().run(async_pipeline._node_graph)
+        async_pipeline.flush()
         async_records = async_pipeline.letter_grade.get_all_records(
             columns={"system_tags": True}
         )
