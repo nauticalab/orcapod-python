@@ -386,3 +386,46 @@ class TestOperatorNodeExecute:
         node = self._make_join_node()
         result = node.execute(*node._input_streams)
         assert len(result) == 2
+
+
+# ===========================================================================
+# OperatorNode.async_execute() with observer
+# ===========================================================================
+
+from orcapod.core.operators import SelectPacketColumns
+
+
+class TestOperatorNodeAsyncExecute:
+    @pytest.mark.asyncio
+    async def test_async_execute_with_observer(self):
+        table_a = pa.table({
+            "key": pa.array(["a", "b"], type=pa.large_string()),
+            "value": pa.array([10, 20], type=pa.int64()),
+        })
+        src_a = ArrowTableSource(table_a, tag_columns=["key"])
+        op = SelectPacketColumns(columns=["value"])
+        op_node = OperatorNode(op, input_streams=[src_a])
+
+        events = []
+
+        class Obs:
+            def on_node_start(self, n):
+                events.append("start")
+            def on_node_end(self, n):
+                events.append("end")
+            def on_packet_start(self, n, t, p):
+                pass
+            def on_packet_end(self, n, t, ip, op, cached):
+                pass
+
+        input_ch = Channel(buffer_size=16)
+        output_ch = Channel(buffer_size=16)
+        for tag, packet in src_a.iter_packets():
+            await input_ch.writer.send((tag, packet))
+        await input_ch.writer.close()
+
+        await op_node.async_execute(
+            [input_ch.reader], output_ch.writer, observer=Obs()
+        )
+        assert "start" in events
+        assert "end" in events

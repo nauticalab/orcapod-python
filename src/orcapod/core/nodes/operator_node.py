@@ -638,6 +638,8 @@ class OperatorNode(StreamBase):
         self,
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        *,
+        observer: Any = None,
     ) -> None:
         """Async execution with cache mode handling when DB is attached.
 
@@ -648,16 +650,28 @@ class OperatorNode(StreamBase):
             - REPLAY: emit from DB, close output.
             - OFF: delegate to operator, forward results.
             - LOG: delegate to operator, forward + collect results, then store in DB.
+
+        Args:
+            inputs: Sequence of readable channels from upstream nodes.
+            output: Writable channel for output (tag, packet) pairs.
+            observer: Optional execution observer for hooks.
         """
         if self._pipeline_database is None:
             # Simple delegation without DB
+            if observer is not None:
+                observer.on_node_start(self)
             hashes = [s.pipeline_hash() for s in self._input_streams]
             await self._operator.async_execute(
                 inputs, output, input_pipeline_hashes=hashes
             )
+            if observer is not None:
+                observer.on_node_end(self)
             return
 
         try:
+            if observer is not None:
+                observer.on_node_start(self)
+
             if self._cache_mode == CacheMode.REPLAY:
                 self._replay_from_cache()
                 assert self._cached_output_stream is not None
@@ -694,6 +708,9 @@ class OperatorNode(StreamBase):
                 self._store_output_stream(stream)
 
             self._update_modified_time()
+
+            if observer is not None:
+                observer.on_node_end(self)
         finally:
             await output.close()
 
