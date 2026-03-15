@@ -224,23 +224,30 @@ class FunctionNode(StreamBase):
             pipeline_path = tuple(descriptor.get("pipeline_path", ()))
             # Derive pipeline_path_prefix by stripping the suffix that
             # __init__ appends (packet_function.uri + node hash element).
-            # We pass the full pipeline_path_prefix from the descriptor.
             # The descriptor stores the complete pipeline_path; we need
             # to reconstruct the prefix that was originally passed to
             # __init__. The suffix added is: pf.uri + (f"node:{hash}",).
-            # Instead of reverse-engineering, use the descriptor's path
-            # minus what __init__ will add.  For full mode we let __init__
-            # recompute pipeline_path from the prefix.
             pf_uri_len = len(function_pod.packet_function.uri) + 1  # +1 for node:hash
             prefix = (
                 pipeline_path[:-pf_uri_len] if len(pipeline_path) > pf_uri_len else ()
             )
+
+            # Derive result_path_prefix from the stored result_record_path
+            # by stripping the URI suffix that CachedFunctionPod appends.
+            stored_result_path = tuple(
+                descriptor.get("result_record_path", ())
+            )
+            uri_len = len(function_pod.packet_function.uri)
+            result_prefix: tuple[str, ...] | None = None
+            if stored_result_path and len(stored_result_path) > uri_len:
+                result_prefix = stored_result_path[:-uri_len]
 
             node = cls(
                 function_pod=function_pod,
                 input_stream=input_stream,
                 pipeline_database=pipeline_db,
                 result_database=result_db,
+                result_path_prefix=result_prefix,
                 pipeline_path_prefix=prefix,
                 label=descriptor.get("label"),
             )

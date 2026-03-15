@@ -894,17 +894,9 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     databases=databases,
                 )
 
+                # Determine load status: proxies can only read cached data.
                 if isinstance(pod.packet_function, PacketFunctionProxy):
                     node._load_status = LoadStatus.READ_ONLY
-                    # Override the cached function pod's record path to match
-                    # the stored path from the original pipeline run.
-                    stored_result_path = tuple(
-                        descriptor.get("result_record_path", ())
-                    )
-                    if stored_result_path and node._cached_function_pod is not None:
-                        node._cached_function_pod._cache._record_path = (
-                            stored_result_path
-                        )
                 else:
                     node._load_status = LoadStatus.FULL
 

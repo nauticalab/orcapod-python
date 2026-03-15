@@ -319,8 +319,8 @@ class TestResolvePacketFunctionFallbackToProxy:
                 "output_keys": ["y"],
             },
         }
-        # Without fallback, should raise
-        with pytest.raises(Exception):
+        # Without fallback, should raise ImportError/ModuleNotFoundError
+        with pytest.raises((ImportError, ModuleNotFoundError)):
             resolve_packet_function_from_config(config)
 
         # With fallback, should return proxy
@@ -366,6 +366,7 @@ class TestFunctionPodFromConfigFallbackToProxy:
             "uri": ["some_func", "hash123", "v1", "python.function.v0"],
             "packet_function": {
                 "packet_function_type_id": "python.function.v0",
+                "uri": ["some_func", "hash123", "v1", "python.function.v0"],
                 "config": {
                     "module_path": "nonexistent.module",
                     "callable_name": "some_func",
@@ -378,16 +379,62 @@ class TestFunctionPodFromConfigFallbackToProxy:
             "node_config": None,
         }
 
-        with pytest.raises(Exception):
+        with pytest.raises((ImportError, ModuleNotFoundError)):
             FunctionPod.from_config(config)
 
         pod = FunctionPod.from_config(config, fallback_to_proxy=True)
         assert isinstance(pod.packet_function, PacketFunctionProxy)
         assert pod.packet_function.canonical_function_name == "some_func"
-        # URI should be injected from parent config
+        # URI comes from the packet function config
         assert pod.packet_function.uri == (
             "some_func",
             "hash123",
             "v1",
             "python.function.v0",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Schema round-trip consistency
+# ---------------------------------------------------------------------------
+
+
+class TestSchemaRoundTripConsistency:
+    """Verify serialize/deserialize round-trips preserve schema structure and hashes."""
+
+    def test_schema_round_trip_consistency(self):
+        """Verify deserialize_schema(serialize_schema(schema)) produces equivalent schemas."""
+        from orcapod.contexts import resolve_context
+
+        tc = resolve_context(None).type_converter
+
+        schemas = [
+            Schema({"x": int, "y": float, "name": str}),
+            Schema({"flag": bool, "data": bytes}),
+            Schema({"items": list[int], "mapping": dict[str, float]}),
+        ]
+        for schema in schemas:
+            serialized = serialize_schema(schema, type_converter=tc)
+            deserialized = Schema(deserialize_schema(serialized, type_converter=tc))
+            assert set(deserialized.keys()) == set(schema.keys()), (
+                f"Keys mismatch: {set(schema.keys())} vs {set(deserialized.keys())}"
+            )
+
+    def test_schema_round_trip_hash_consistency(self):
+        """Verify that schema hash is preserved through serialize/deserialize."""
+        from orcapod.contexts import resolve_context
+
+        ctx = resolve_context(None)
+        hasher = ctx.semantic_hasher
+        tc = ctx.type_converter
+
+        schema = Schema({"age": int, "name": str, "score": float})
+        original_hash = hasher.hash_object(schema).to_string()
+
+        serialized = serialize_schema(schema, type_converter=tc)
+        deserialized = Schema(deserialize_schema(serialized, type_converter=tc))
+        round_trip_hash = hasher.hash_object(deserialized).to_string()
+
+        assert original_hash == round_trip_hash, (
+            f"Hash diverged: {original_hash} vs {round_trip_hash}"
         )
