@@ -149,6 +149,11 @@ class AsyncPipelineOrchestrator:
                     )
                 elif is_function_node(node):
                     predecessors = in_edges.get(node, [])
+                    if len(predecessors) != 1:
+                        raise ValueError(
+                            f"FunctionNode expects exactly 1 upstream, "
+                            f"got {len(predecessors)}"
+                        )
                     input_reader = edge_readers[(predecessors[0], node)]
                     tg.create_task(
                         node.async_execute(
