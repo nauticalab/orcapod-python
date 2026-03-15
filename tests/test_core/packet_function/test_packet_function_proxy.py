@@ -2,9 +2,11 @@
 
 import pytest
 
-from orcapod.core.datagrams.tag_packet import Packet
+from orcapod.core.datagrams.tag_packet import Packet, Tag
+from orcapod.core.function_pod import FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.packet_function_proxy import PacketFunctionProxy
+from orcapod.core.sources.dict_source import DictSource
 from orcapod.errors import PacketFunctionUnavailableError
 
 
@@ -198,3 +200,38 @@ class TestPacketFunctionProxyBinding:
         )
         with pytest.raises(ValueError, match="input_packet_schema"):
             proxy.bind(other_pf)
+
+
+# ==================== Task 5: FunctionPod with proxy ====================
+
+
+class TestFunctionPodWithProxy:
+    """Tests for FunctionPod constructed with a PacketFunctionProxy."""
+
+    def test_function_pod_constructs_with_proxy(self):
+        """FunctionPod accepts a proxy and exposes it as packet_function."""
+        pf = _make_sample_function()
+        proxy = _make_proxy_from_function(pf)
+        pod = FunctionPod(packet_function=proxy)
+        assert pod.packet_function is proxy
+
+    def test_function_pod_output_schema(self):
+        """FunctionPod with proxy correctly reports output schema."""
+        pf = _make_sample_function()
+        proxy = _make_proxy_from_function(pf)
+        pod = FunctionPod(packet_function=proxy)
+        source = DictSource(
+            data=[{"age": 10}, {"age": 20}, {"age": 30}],
+        )
+        _tag_schema, packet_schema = pod.output_schema(source)
+        assert "doubled_age" in packet_schema
+
+    def test_function_pod_process_packet_raises(self):
+        """FunctionPod with unbound proxy raises on process_packet."""
+        pf = _make_sample_function()
+        proxy = _make_proxy_from_function(pf)
+        pod = FunctionPod(packet_function=proxy)
+        tag = Tag({})
+        packet = Packet({"age": 25})
+        with pytest.raises(PacketFunctionUnavailableError):
+            pod.process_packet(tag, packet)
