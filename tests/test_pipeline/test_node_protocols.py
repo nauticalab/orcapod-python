@@ -340,3 +340,49 @@ class TestFunctionNodeAsyncExecute:
         await node.async_execute(input_ch.reader, output_ch.writer, observer=Obs())
         assert "node_start" in events
         assert "node_end" in events
+
+
+# ===========================================================================
+# OperatorNode.execute() with observer + cache check
+# ===========================================================================
+
+from orcapod.core.nodes import OperatorNode
+from orcapod.core.operators.join import Join
+
+
+class TestOperatorNodeExecute:
+    def _make_join_node(self):
+        table_a = pa.table({
+            "key": pa.array(["a", "b"], type=pa.large_string()),
+            "value": pa.array([10, 20], type=pa.int64()),
+        })
+        table_b = pa.table({
+            "key": pa.array(["a", "b"], type=pa.large_string()),
+            "score": pa.array([100, 200], type=pa.int64()),
+        })
+        src_a = ArrowTableSource(table_a, tag_columns=["key"])
+        src_b = ArrowTableSource(table_b, tag_columns=["key"])
+        return OperatorNode(Join(), input_streams=[src_a, src_b])
+
+    def test_execute_with_observer(self):
+        node = self._make_join_node()
+        events = []
+
+        class Obs:
+            def on_node_start(self, n):
+                events.append(("node_start", n.node_type))
+            def on_node_end(self, n):
+                events.append(("node_end", n.node_type))
+            def on_packet_start(self, n, t, p):
+                pass
+            def on_packet_end(self, n, t, ip, op, cached):
+                pass
+
+        result = node.execute(*node._input_streams, observer=Obs())
+        assert len(result) == 2
+        assert events == [("node_start", "operator"), ("node_end", "operator")]
+
+    def test_execute_without_observer(self):
+        node = self._make_join_node()
+        result = node.execute(*node._input_streams)
+        assert len(result) == 2
