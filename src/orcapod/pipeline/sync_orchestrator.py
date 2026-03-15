@@ -1,7 +1,7 @@
 """Synchronous pipeline orchestrator.
 
-Walks a compiled pipeline's node graph topologically, executing each node
-with materialized buffers and per-packet observer hooks for function nodes.
+Walks a compiled pipeline's node graph topologically, delegating to each
+node's ``execute()`` method with observer injection.
 """
 
 from __future__ import annotations
@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from orcapod.pipeline.observer import NoOpObserver
 from orcapod.pipeline.result import OrchestratorResult
 from orcapod.protocols.node_protocols import (
     is_function_node,
@@ -27,26 +26,21 @@ logger = logging.getLogger(__name__)
 
 
 class SyncPipelineOrchestrator:
-    """Execute a compiled pipeline synchronously with observer hooks.
+    """Execute a compiled pipeline synchronously via node ``execute()`` methods.
 
-    Walks the node graph in topological order. For each node:
+    Walks the node graph in topological order. For each node, delegates
+    to ``node.execute(observer=...)`` which owns all per-packet logic,
+    cache lookups, and observer hooks internally.
 
-    - **SourceNode**: materializes ``iter_packets()`` into an
-      orchestrator-owned buffer. The source node itself does not cache.
-    - **FunctionNode**: per-packet execution with cache lookup and
-      observer hooks. ``execute_packet`` handles computation +
-      function-level memoization.
-    - **OperatorNode**: bulk execution via ``node.execute()``.
-
-    The orchestrator returns an ``OrchestratorResult`` with all node outputs.
+    The orchestrator is responsible only for topological ordering,
+    buffer management, and stream materialization between nodes.
 
     Args:
-        observer: Optional execution observer for hooks. Defaults to
-            ``NoOpObserver``.
+        observer: Optional execution observer forwarded to nodes.
     """
 
     def __init__(self, observer: "ExecutionObserver | None" = None) -> None:
-        self._observer = observer or NoOpObserver()
+        self._observer = observer
 
     def run(
         self,
@@ -72,13 +66,19 @@ class SyncPipelineOrchestrator:
 
         for node in topo_order:
             if is_source_node(node):
-                buffers[node] = self._execute_source(node)
+                buffers[node] = node.execute(observer=self._observer)
             elif is_function_node(node):
-                upstream_buffer = self._gather_upstream(node, graph, buffers)
-                buffers[node] = self._execute_function(node, upstream_buffer)
+                upstream_buf = self._gather_upstream(node, graph, buffers)
+                upstream_node = list(graph.predecessors(node))[0]
+                input_stream = self._materialize_as_stream(upstream_buf, upstream_node)
+                buffers[node] = node.execute(input_stream, observer=self._observer)
             elif is_operator_node(node):
                 upstream_buffers = self._gather_upstream_multi(node, graph, buffers)
-                buffers[node] = self._execute_operator(node, upstream_buffers)
+                input_streams = [
+                    self._materialize_as_stream(buf, upstream_node)
+                    for buf, upstream_node in upstream_buffers
+                ]
+                buffers[node] = node.execute(*input_streams, observer=self._observer)
             else:
                 raise TypeError(
                     f"Unknown node type: {getattr(node, 'node_type', None)!r}"
@@ -90,62 +90,6 @@ class SyncPipelineOrchestrator:
                 self._gc_buffers(node, graph, buffers, processed)
 
         return OrchestratorResult(node_outputs=buffers)
-
-    def _execute_source(self, node: Any) -> list[tuple[Any, Any]]:
-        """Execute a source node: materialize its packets."""
-        self._observer.on_node_start(node)
-        output = list(node.iter_packets())
-        self._observer.on_node_end(node)
-        return output
-
-    def _execute_function(
-        self, node: Any, upstream_buffer: list[tuple[Any, Any]]
-    ) -> list[tuple[Any, Any]]:
-        """Execute a function node with per-packet hooks."""
-        self._observer.on_node_start(node)
-
-        upstream_entries = [
-            (tag, packet, node.compute_pipeline_entry_id(tag, packet))
-            for tag, packet in upstream_buffer
-        ]
-        entry_ids = [eid for _, _, eid in upstream_entries]
-
-        cached = node.get_cached_results(entry_ids=entry_ids)
-
-        output: list[tuple[Any, Any]] = []
-        for tag, packet, entry_id in upstream_entries:
-            self._observer.on_packet_start(node, tag, packet)
-            if entry_id in cached:
-                tag_out, result = cached[entry_id]
-                self._observer.on_packet_end(node, tag, packet, result, cached=True)
-                output.append((tag_out, result))
-            else:
-                tag_out, result = node.execute_packet(tag, packet)
-                self._observer.on_packet_end(node, tag, packet, result, cached=False)
-                if result is not None:
-                    output.append((tag_out, result))
-
-        self._observer.on_node_end(node)
-        return output
-
-    def _execute_operator(
-        self, node: Any, upstream_buffers: list[tuple[list[tuple[Any, Any]], Any]]
-    ) -> list[tuple[Any, Any]]:
-        """Execute an operator node: bulk stream processing."""
-        self._observer.on_node_start(node)
-
-        cached = node.get_cached_output()
-        if cached is not None:
-            output = list(cached.iter_packets())
-        else:
-            input_streams = [
-                self._materialize_as_stream(buf, upstream_node)
-                for buf, upstream_node in upstream_buffers
-            ]
-            output = node.execute(*input_streams)
-
-        self._observer.on_node_end(node)
-        return output
 
     @staticmethod
     def _gather_upstream(
