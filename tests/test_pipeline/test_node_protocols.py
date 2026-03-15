@@ -219,3 +219,59 @@ class TestSourceNodeAsyncExecuteProtocol:
         output_ch = Channel(buffer_size=16)
         await node.async_execute(output_ch.writer, observer=Obs())
         assert events == ["start", "end"]
+
+
+# ===========================================================================
+# FunctionNode.execute() with observer
+# ===========================================================================
+
+from orcapod.core.function_pod import FunctionPod
+from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.nodes import FunctionNode
+
+
+def double_value(value: int) -> int:
+    return value * 2
+
+
+class TestFunctionNodeExecute:
+    def _make_function_node(self):
+        table = pa.table({
+            "key": pa.array(["a", "b"], type=pa.large_string()),
+            "value": pa.array([1, 2], type=pa.int64()),
+        })
+        src = ArrowTableSource(table, tag_columns=["key"])
+        pf = PythonPacketFunction(double_value, output_keys="result")
+        pod = FunctionPod(pf)
+        return FunctionNode(pod, src)
+
+    def test_execute_with_observer(self):
+        node = self._make_function_node()
+        events = []
+
+        class Obs:
+            def on_node_start(self, n):
+                events.append(("node_start", n.node_type))
+            def on_node_end(self, n):
+                events.append(("node_end", n.node_type))
+            def on_packet_start(self, n, t, p):
+                events.append(("packet_start",))
+            def on_packet_end(self, n, t, ip, op, cached):
+                events.append(("packet_end", cached))
+
+        input_stream = node._input_stream
+        result = node.execute(input_stream, observer=Obs())
+
+        assert len(result) == 2
+        assert events[0] == ("node_start", "function")
+        assert events[-1] == ("node_end", "function")
+        packet_events = [e for e in events if e[0].startswith("packet")]
+        assert len(packet_events) == 4  # 2 start + 2 end
+
+    def test_execute_without_observer(self):
+        node = self._make_function_node()
+        input_stream = node._input_stream
+        result = node.execute(input_stream)
+        assert len(result) == 2
+        values = sorted([pkt.as_dict()["result"] for _, pkt in result])
+        assert values == [2, 4]
