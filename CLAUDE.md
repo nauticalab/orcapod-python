@@ -97,8 +97,16 @@ Out of scope:
 
 Remove any optional sections that don't apply rather than leaving them empty.
 
-When working on a Linear issue, create and checkout a git branch using the `gitBranchName`
-returned by Linear (e.g. `eywalker/plt-911-add-documentation-for-orcapod-python`).
+### Branches and PRs
+
+When working on a feature, create and checkout a git branch using the `gitBranchName`
+returned by the primary Linear issue (e.g. `eywalker/plt-911-add-documentation-for-orcapod-python`).
+
+If a feature branch / PR corresponds to multiple Linear issues, list all of them in the
+PR description body so that Linear's GitHub integration auto-tracks the PR against each
+issue. Use the format `Fixes PLT-123` or `Closes PLT-123` (GitHub magic words) for issues
+that the PR fully resolves, and simply mention `PLT-456` for issues that are related but
+not fully resolved by the PR.
 
 ## Responding to PR reviews
 
