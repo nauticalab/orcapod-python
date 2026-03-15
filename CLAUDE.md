@@ -63,7 +63,8 @@ refactor:
 1. **Check for an existing issue** — search Linear for a corresponding issue.
 2. **If none exists** — ask the developer whether to create one. Do not proceed without
    either a linked issue or explicit approval to skip.
-3. **When a new issue is discovered** during development (bug, design problem, deferred
+3. **When starting work on an issue** — update its Linear status to **In Progress**.
+4. **When a new issue is discovered** during development (bug, design problem, deferred
    work), create a corresponding Linear issue using the template below.
 
 When creating Linear issues, always use this template for the description:
@@ -101,6 +102,9 @@ Remove any optional sections that don't apply rather than leaving them empty.
 
 When working on a feature, create and checkout a git branch using the `gitBranchName`
 returned by the primary Linear issue (e.g. `eywalker/plt-911-add-documentation-for-orcapod-python`).
+
+**Feature branch PRs always target the `dev` branch.** The `dev` → `main` PR is used
+for versioning/releases only.
 
 If a feature branch / PR corresponds to multiple Linear issues, list all of them in the
 PR description body so that Linear's GitHub integration auto-tracks the PR against each
