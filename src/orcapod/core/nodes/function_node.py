@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, cast
 
 from orcapod import contexts
@@ -28,10 +28,7 @@ from orcapod.system_constants import constants
 from orcapod.types import (
     ColumnConfig,
     ContentHash,
-    NodeConfig,
-    PipelineConfig,
     Schema,
-    resolve_concurrency,
 )
 from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
@@ -1163,21 +1160,25 @@ class FunctionNode(StreamBase):
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        input_channel: ReadableChannel[tuple[TagProtocol, PacketProtocol]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
-        pipeline_config: PipelineConfig | None = None,
+        *,
+        observer: Any = None,
     ) -> None:
         """Streaming async execution for FunctionNode.
 
         When a database is attached, uses two-phase execution: replay cached
         results first, then compute missing packets concurrently.  Otherwise,
         routes each packet through ``async_process_packet`` directly.
+
+        Args:
+            input_channel: Single readable channel of (tag, packet) pairs.
+            output: Writable channel for output (tag, packet) pairs.
+            observer: Optional execution observer for hooks.
         """
         try:
-            pipeline_config = pipeline_config or PipelineConfig()
-            # TODO: revisit this logic as use of accidental property is not desirable
-            node_config = getattr(self._function_pod, "node_config", NodeConfig())
-            max_concurrency = resolve_concurrency(node_config, pipeline_config)
+            if observer is not None:
+                observer.on_node_start(self)
 
             if self._cached_function_pod is not None:
                 # Two-phase async execution with DB backing
@@ -1227,60 +1228,41 @@ class FunctionNode(StreamBase):
                         for tag, packet in existing_stream.iter_packets():
                             await output.send((tag, packet))
 
-                # Phase 2: process new packets concurrently
-                sem = (
-                    asyncio.Semaphore(max_concurrency)
-                    if max_concurrency is not None
-                    else None
-                )
-
-                async def process_one_db(
-                    tag: TagProtocol, packet: PacketProtocol
-                ) -> None:
-                    try:
-                        (
-                            tag_out,
-                            result_packet,
-                        ) = await self._async_process_packet_internal(tag, packet)
-                        if result_packet is not None:
-                            await output.send((tag_out, result_packet))
-                    finally:
-                        if sem is not None:
-                            sem.release()
-
-                async with asyncio.TaskGroup() as tg:
-                    async for tag, packet in inputs[0]:
-                        entry_id = self.compute_pipeline_entry_id(tag, packet)
-                        if entry_id in existing_entry_ids:
-                            continue
-                        if sem is not None:
-                            await sem.acquire()
-                        tg.create_task(process_one_db(tag, packet))
+                # Phase 2: process new packets
+                async for tag, packet in input_channel:
+                    entry_id = self.compute_pipeline_entry_id(tag, packet)
+                    if entry_id in existing_entry_ids:
+                        continue
+                    if observer is not None:
+                        observer.on_packet_start(self, tag, packet)
+                    (
+                        tag_out,
+                        result_packet,
+                    ) = await self._async_process_packet_internal(tag, packet)
+                    if observer is not None:
+                        observer.on_packet_end(
+                            self, tag, packet, result_packet, cached=False
+                        )
+                    if result_packet is not None:
+                        await output.send((tag_out, result_packet))
             else:
                 # Simple async execution without DB
-                sem = (
-                    asyncio.Semaphore(max_concurrency)
-                    if max_concurrency is not None
-                    else None
-                )
+                async for tag, packet in input_channel:
+                    if observer is not None:
+                        observer.on_packet_start(self, tag, packet)
+                    (
+                        tag_out,
+                        result_packet,
+                    ) = await self._async_process_packet_internal(tag, packet)
+                    if observer is not None:
+                        observer.on_packet_end(
+                            self, tag, packet, result_packet, cached=False
+                        )
+                    if result_packet is not None:
+                        await output.send((tag_out, result_packet))
 
-                async def process_one(tag: TagProtocol, packet: PacketProtocol) -> None:
-                    try:
-                        (
-                            tag_out,
-                            result_packet,
-                        ) = await self._async_process_packet_internal(tag, packet)
-                        if result_packet is not None:
-                            await output.send((tag_out, result_packet))
-                    finally:
-                        if sem is not None:
-                            sem.release()
-
-                async with asyncio.TaskGroup() as tg:
-                    async for tag, packet in inputs[0]:
-                        if sem is not None:
-                            await sem.acquire()
-                        tg.create_task(process_one(tag, packet))
+            if observer is not None:
+                observer.on_node_end(self)
         finally:
             await output.close()
 

@@ -141,7 +141,7 @@ class TestFunctionNodeAsyncExecute:
             await input_ch.writer.send((tag, packet))
         await input_ch.writer.close()
 
-        await node.async_execute([input_ch.reader], output_ch.writer)
+        await node.async_execute(input_ch.reader, output_ch.writer)
 
         rows = await output_ch.reader.collect()
         assert len(rows) == 2
