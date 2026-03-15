@@ -3,15 +3,21 @@
 Defines the three node protocols (Source, Function, Operator) that
 formalize the interface between orchestrators and graph nodes, plus
 TypeGuard dispatch functions for runtime type narrowing.
+
+Each protocol exposes ``execute`` (sync) and ``async_execute`` (async).
+Nodes own their execution — caching, per-packet logic, and persistence
+are internal. Orchestrators are topology schedulers.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Protocol, TypeGuard, runtime_checkable
 
 if TYPE_CHECKING:
+    from orcapod.channels import ReadableChannel, WritableChannel
     from orcapod.core.nodes import GraphNode
+    from orcapod.pipeline.observer import ExecutionObserver
     from orcapod.protocols.core_protocols import (
         PacketProtocol,
         StreamProtocol,
@@ -25,7 +31,18 @@ class SourceNodeProtocol(Protocol):
 
     node_type: str
 
-    def iter_packets(self) -> Iterator[tuple["TagProtocol", "PacketProtocol"]]: ...
+    def execute(
+        self,
+        *,
+        observer: "ExecutionObserver | None" = None,
+    ) -> list[tuple["TagProtocol", "PacketProtocol"]]: ...
+
+    async def async_execute(
+        self,
+        output: "WritableChannel[tuple[TagProtocol, PacketProtocol]]",
+        *,
+        observer: "ExecutionObserver | None" = None,
+    ) -> None: ...
 
 
 @runtime_checkable
@@ -34,21 +51,20 @@ class FunctionNodeProtocol(Protocol):
 
     node_type: str
 
-    def get_cached_results(
-        self, entry_ids: list[str]
-    ) -> dict[str, tuple["TagProtocol", "PacketProtocol"]]: ...
-
-    def compute_pipeline_entry_id(
-        self, tag: "TagProtocol", packet: "PacketProtocol"
-    ) -> str: ...
-
-    def execute_packet(
-        self, tag: "TagProtocol", packet: "PacketProtocol"
-    ) -> tuple["TagProtocol", "PacketProtocol | None"]: ...
-
     def execute(
-        self, input_stream: "StreamProtocol"
+        self,
+        input_stream: "StreamProtocol",
+        *,
+        observer: "ExecutionObserver | None" = None,
     ) -> list[tuple["TagProtocol", "PacketProtocol"]]: ...
+
+    async def async_execute(
+        self,
+        input_channel: "ReadableChannel[tuple[TagProtocol, PacketProtocol]]",
+        output: "WritableChannel[tuple[TagProtocol, PacketProtocol]]",
+        *,
+        observer: "ExecutionObserver | None" = None,
+    ) -> None: ...
 
 
 @runtime_checkable
@@ -58,10 +74,18 @@ class OperatorNodeProtocol(Protocol):
     node_type: str
 
     def execute(
-        self, *input_streams: "StreamProtocol"
+        self,
+        *input_streams: "StreamProtocol",
+        observer: "ExecutionObserver | None" = None,
     ) -> list[tuple["TagProtocol", "PacketProtocol"]]: ...
 
-    def get_cached_output(self) -> "StreamProtocol | None": ...
+    async def async_execute(
+        self,
+        inputs: "Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]]",
+        output: "WritableChannel[tuple[TagProtocol, PacketProtocol]]",
+        *,
+        observer: "ExecutionObserver | None" = None,
+    ) -> None: ...
 
 
 def is_source_node(node: "GraphNode") -> TypeGuard[SourceNodeProtocol]:
