@@ -236,12 +236,12 @@ def resolve_packet_function_from_config(
     cls = PACKET_FUNCTION_REGISTRY[type_id]
     try:
         return cls.from_config(config)
-    except Exception:
+    except (ImportError, ModuleNotFoundError, AttributeError) as exc:
         if fallback_to_proxy:
             logger.warning(
-                "Could not reconstruct %s packet function; returning "
-                "PacketFunctionProxy.",
-                type_id,
+                "Could not reconstruct packet function from config (%s); "
+                "returning PacketFunctionProxy.",
+                exc,
             )
             from orcapod.core.packet_function_proxy import PacketFunctionProxy
 
@@ -623,3 +623,16 @@ def _build_arrow_primitive_types() -> dict[str, Any]:
 
 
 _ARROW_PRIMITIVE_TYPES: dict[str, Any] = _build_arrow_primitive_types()
+
+
+# ---------------------------------------------------------------------------
+# Builtin Python type map for schema deserialization from to_config() format
+# ---------------------------------------------------------------------------
+
+_BUILTIN_TYPE_MAP: dict[str, type] = {
+    "<class 'int'>": int,
+    "<class 'float'>": float,
+    "<class 'str'>": str,
+    "<class 'bool'>": bool,
+    "<class 'bytes'>": bytes,
+}

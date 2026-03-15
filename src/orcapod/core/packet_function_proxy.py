@@ -10,60 +10,12 @@ via :meth:`bind`.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from orcapod.core.packet_function import PacketFunctionBase
 from orcapod.errors import PacketFunctionUnavailableError
 from orcapod.protocols.core_protocols import PacketFunctionProtocol
 from orcapod.types import ContentHash, Schema
-
-if TYPE_CHECKING:
-    from orcapod.protocols.core_protocols import PacketProtocol
-    from orcapod.protocols.core_protocols.executor import (
-        PacketFunctionExecutorProtocol,
-    )
-
-
-_BUILTIN_TYPE_MAP: dict[str, type] = {
-    "<class 'int'>": int,
-    "<class 'float'>": float,
-    "<class 'str'>": str,
-    "<class 'bool'>": bool,
-    "<class 'bytes'>": bytes,
-}
-
-
-def _deserialize_schema_from_config(schema_dict: dict[str, str]) -> Schema:
-    """Reconstruct a Schema from a to_config() schema dict.
-
-    Handles both ``str(python_type)`` format (e.g. ``"<class 'int'>"``),
-    used by ``PythonPacketFunction.to_config()``, and Arrow type string
-    format (e.g. ``"int64"``), used by the serialization module.
-
-    Args:
-        schema_dict: Dict mapping field names to type strings.
-
-    Returns:
-        A Schema with Python types reconstructed from the strings.
-    """
-    from orcapod.pipeline.serialization import deserialize_schema
-
-    result: dict[str, Any] = {}
-    needs_arrow_fallback: list[str] = []
-
-    for name, type_str in schema_dict.items():
-        if type_str in _BUILTIN_TYPE_MAP:
-            result[name] = _BUILTIN_TYPE_MAP[type_str]
-        else:
-            needs_arrow_fallback.append(name)
-
-    if needs_arrow_fallback:
-        arrow_result = deserialize_schema(
-            {k: schema_dict[k] for k in needs_arrow_fallback}
-        )
-        result.update(arrow_result)
-
-    return Schema(result)
 
 
 class PacketFunctionProxy(PacketFunctionBase):
@@ -76,7 +28,6 @@ class PacketFunctionProxy(PacketFunctionBase):
     Args:
         config: Serialized packet function config dict (as produced by
             ``PythonPacketFunction.to_config()``).
-        uri: The original URI tuple from ``FunctionPod.to_config()["uri"]``.
         content_hash_str: Optional stored content hash string.
         pipeline_hash_str: Optional stored pipeline hash string.
     """
@@ -84,7 +35,6 @@ class PacketFunctionProxy(PacketFunctionBase):
     def __init__(
         self,
         config: dict[str, Any],
-        uri: tuple[str, ...],
         content_hash_str: str | None = None,
         pipeline_hash_str: str | None = None,
     ) -> None:
@@ -94,12 +44,6 @@ class PacketFunctionProxy(PacketFunctionBase):
         self._canonical_function_name = inner["callable_name"]
 
         # Eagerly deserialize schemas.
-        # to_config() stores types as str(python_type) e.g. "<class 'int'>".
-        # We reconstruct proper Schema objects by going through the type
-        # converter (Python type -> Arrow -> Python) using the Arrow string
-        # representation.  We also try deserialize_schema which handles
-        # Arrow-format strings.  As a fallback we keep the raw config dicts
-        # for serialized-form comparison in bind().
         self._raw_input_schema_dict = inner["input_packet_schema"]
         self._raw_output_schema_dict = inner["output_packet_schema"]
         self._input_packet_schema = _deserialize_schema_from_config(
@@ -109,16 +53,31 @@ class PacketFunctionProxy(PacketFunctionBase):
             self._raw_output_schema_dict
         )
 
+        # Call super().__init__ so that major_version and
+        # output_packet_schema_hash are available for URI fallback.
+        version = inner["version"]
+        super().__init__(version=version)
+
+        # URI: read from config if present, otherwise compute from metadata.
+        uri_list = config.get("uri")
+        if uri_list is not None:
+            self._stored_uri = tuple(uri_list)
+        else:
+            # Fallback: compute from available metadata
+            # (same structure as PacketFunctionBase.uri).
+            self._stored_uri = (
+                self._canonical_function_name,
+                self.output_packet_schema_hash,
+                f"v{self.major_version}",
+                self._packet_function_type_id,
+            )
+
         # Stored identity hashes
-        self._stored_uri = uri
         self._stored_content_hash = content_hash_str
         self._stored_pipeline_hash = pipeline_hash_str
 
         # Late-binding slot
         self._bound_function: PacketFunctionProtocol | None = None
-
-        version = inner["version"]
-        super().__init__(version=version)
 
     # ==================== Identity properties ====================
 
@@ -170,25 +129,25 @@ class PacketFunctionProxy(PacketFunctionBase):
             f"Use bind() to attach a real function, or access cached results only."
         )
 
-    def call(self, packet: PacketProtocol) -> PacketProtocol | None:
+    def call(self, packet: "PacketProtocol") -> "PacketProtocol | None":
         """Process a single packet; delegates to bound function or raises."""
         if self._bound_function is not None:
             return self._bound_function.call(packet)
         self._raise_unavailable()
 
-    async def async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
+    async def async_call(self, packet: "PacketProtocol") -> "PacketProtocol | None":
         """Async counterpart of ``call``."""
         if self._bound_function is not None:
             return await self._bound_function.async_call(packet)
         self._raise_unavailable()
 
-    def direct_call(self, packet: PacketProtocol) -> PacketProtocol | None:
+    def direct_call(self, packet: "PacketProtocol") -> "PacketProtocol | None":
         """Direct execution; delegates to bound function or raises."""
         if self._bound_function is not None:
             return self._bound_function.direct_call(packet)
         self._raise_unavailable()
 
-    async def direct_async_call(self, packet: PacketProtocol) -> PacketProtocol | None:
+    async def direct_async_call(self, packet: "PacketProtocol") -> "PacketProtocol | None":
         """Async direct execution; delegates to bound function or raises."""
         if self._bound_function is not None:
             return await self._bound_function.direct_async_call(packet)
@@ -211,14 +170,14 @@ class PacketFunctionProxy(PacketFunctionBase):
     # ==================== Executor ====================
 
     @property
-    def executor(self) -> PacketFunctionExecutorProtocol | None:
+    def executor(self) -> "PacketFunctionExecutorProtocol | None":
         """Return executor from bound function, or None."""
         if self._bound_function is not None:
             return self._bound_function.executor
         return None
 
     @executor.setter
-    def executor(self, executor: PacketFunctionExecutorProtocol | None) -> None:
+    def executor(self, executor: "PacketFunctionExecutorProtocol | None") -> None:
         """Set executor on bound function; no-op when unbound."""
         if self._bound_function is not None:
             self._bound_function.executor = executor
@@ -233,8 +192,8 @@ class PacketFunctionProxy(PacketFunctionBase):
     def from_config(cls, config: dict[str, Any]) -> PacketFunctionProxy:
         """Construct a proxy from a serialized config dict.
 
-        Builds a placeholder URI from the config fields (callable_name,
-        version, packet_function_type_id with an empty schema hash).
+        The URI is read from the config's ``"uri"`` field if present;
+        otherwise a fallback is computed from config metadata.
 
         Args:
             config: A dict as produced by ``PythonPacketFunction.to_config()``.
@@ -242,13 +201,7 @@ class PacketFunctionProxy(PacketFunctionBase):
         Returns:
             A new ``PacketFunctionProxy`` instance.
         """
-        inner = config.get("config", config)
-        name = inner["callable_name"]
-        version = inner.get("version", "v0.0")
-        type_id = config.get("packet_function_type_id", "unknown")
-        # Build placeholder URI: (name, empty_schema_hash, version, type_id)
-        uri = (name, "", version, type_id)
-        return cls(config=config, uri=uri)
+        return cls(config=config)
 
     # ==================== Bind / unbind ====================
 
@@ -338,3 +291,46 @@ class PacketFunctionProxy(PacketFunctionBase):
     def unbind(self) -> None:
         """Detach the bound function, reverting to proxy mode."""
         self._bound_function = None
+
+
+def _deserialize_schema_from_config(schema_dict: dict[str, str]) -> Schema:
+    """Reconstruct a Schema from a to_config() schema dict.
+
+    Handles both ``str(python_type)`` format (e.g. ``"<class 'int'>"``),
+    used by ``PythonPacketFunction.to_config()``, and Arrow type string
+    format (e.g. ``"int64"``), used by the serialization module.
+
+    Unrecognized type strings are coerced to ``object``.
+
+    Args:
+        schema_dict: Dict mapping field names to type strings.
+
+    Returns:
+        A Schema with Python types reconstructed from the strings.
+    """
+    from orcapod.pipeline.serialization import (
+        _BUILTIN_TYPE_MAP,
+        deserialize_schema,
+    )
+
+    result: dict[str, Any] = {}
+    needs_arrow_fallback: list[str] = []
+
+    for name, type_str in schema_dict.items():
+        if type_str in _BUILTIN_TYPE_MAP:
+            result[name] = _BUILTIN_TYPE_MAP[type_str]
+        else:
+            needs_arrow_fallback.append(name)
+
+    if needs_arrow_fallback:
+        arrow_result = deserialize_schema(
+            {k: schema_dict[k] for k in needs_arrow_fallback}
+        )
+        for k, v in arrow_result.items():
+            # If deserialize_schema fell back to a raw string, coerce to object
+            if isinstance(v, str):
+                result[k] = object
+            else:
+                result[k] = v
+
+    return Schema(result)

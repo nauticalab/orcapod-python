@@ -307,8 +307,6 @@ class FunctionPod(_FunctionPodBase):
             config: A dict as produced by :meth:`to_config`.
             fallback_to_proxy: If ``True`` and the packet function cannot be
                 resolved, use a ``PacketFunctionProxy`` instead of raising.
-                When a proxy is returned, the URI from the parent config's
-                ``"uri"`` field is injected into the proxy.
 
         Returns:
             A new ``FunctionPod`` instance.
@@ -316,20 +314,9 @@ class FunctionPod(_FunctionPodBase):
         from orcapod.pipeline.serialization import resolve_packet_function_from_config
 
         pf_config = config["packet_function"]
-
-        if fallback_to_proxy:
-            from orcapod.core.packet_function_proxy import PacketFunctionProxy
-
-            packet_function = resolve_packet_function_from_config(
-                pf_config, fallback_to_proxy=True
-            )
-            # If we got a proxy, inject the URI from the parent config
-            if isinstance(packet_function, PacketFunctionProxy):
-                uri_list = config.get("uri")
-                if uri_list is not None:
-                    packet_function._stored_uri = tuple(uri_list)
-        else:
-            packet_function = resolve_packet_function_from_config(pf_config)
+        packet_function = resolve_packet_function_from_config(
+            pf_config, fallback_to_proxy=fallback_to_proxy
+        )
 
         node_config = None
         if config.get("node_config") is not None:

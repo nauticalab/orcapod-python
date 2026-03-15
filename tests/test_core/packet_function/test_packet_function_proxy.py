@@ -41,7 +41,6 @@ def _make_proxy_from_function(pf: PythonPacketFunction) -> PacketFunctionProxy:
     config = pf.to_config()
     return PacketFunctionProxy(
         config=config,
-        uri=tuple(pf.uri),
         content_hash_str=pf.content_hash().to_string(),
         pipeline_hash_str=pf.pipeline_hash().to_string(),
     )
