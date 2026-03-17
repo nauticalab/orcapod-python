@@ -15,7 +15,7 @@ from orcapod.types import ColumnConfig, ContentHash, Schema
 if TYPE_CHECKING:
     import pyarrow as pa
 
-    from orcapod.pipeline.observer import ExecutionObserver
+    from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
 
 
 class SourceNode(StreamBase):

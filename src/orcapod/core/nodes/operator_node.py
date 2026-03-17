@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     import pyarrow as pa
 
-    from orcapod.pipeline.observer import ExecutionObserver
+    from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
 else:
     pa = LazyModule("pyarrow")
 

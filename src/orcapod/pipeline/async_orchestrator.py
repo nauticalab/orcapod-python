@@ -8,6 +8,7 @@ Uses TypeGuard dispatch with tightened per-type async_execute signatures.
 from __future__ import annotations
 
 import asyncio
+import uuid
 import logging
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any
@@ -23,7 +24,7 @@ from orcapod.protocols.node_protocols import (
 if TYPE_CHECKING:
     import networkx as nx
 
-    from orcapod.pipeline.observer import ExecutionObserver
+    from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
     from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
 
 logger = logging.getLogger(__name__)
@@ -48,16 +49,19 @@ class AsyncPipelineOrchestrator:
 
     def __init__(
         self,
-        observer: "ExecutionObserver | None" = None,
+        observer: "ExecutionObserverProtocol | None" = None,
         buffer_size: int = 64,
+        error_policy: str = "continue",
     ) -> None:
         self._observer = observer
         self._buffer_size = buffer_size
+        self._error_policy = error_policy
 
     def run(
         self,
         graph: "nx.DiGraph",
         materialize_results: bool = True,
+        run_id: str | None = None,
     ) -> OrchestratorResult:
         """Synchronous entry point — runs the async pipeline to completion.
 
@@ -65,35 +69,45 @@ class AsyncPipelineOrchestrator:
             graph: A NetworkX DiGraph with GraphNode objects as vertices.
             materialize_results: If True, collect all node outputs into
                 the result. If False, return empty node_outputs.
+            run_id: Optional run identifier.  If not provided, a UUID is
+                generated automatically.
 
         Returns:
             OrchestratorResult with node outputs.
         """
-        return asyncio.run(self._run_async(graph, materialize_results))
+        return asyncio.run(self._run_async(graph, materialize_results, run_id=run_id))
 
     async def run_async(
         self,
         graph: "nx.DiGraph",
         materialize_results: bool = True,
+        run_id: str | None = None,
     ) -> OrchestratorResult:
         """Async entry point for callers already inside an event loop.
 
         Args:
             graph: A NetworkX DiGraph with GraphNode objects as vertices.
             materialize_results: If True, collect all node outputs.
+            run_id: Optional run identifier.  If not provided, a UUID is
+                generated automatically.
 
         Returns:
             OrchestratorResult with node outputs.
         """
-        return await self._run_async(graph, materialize_results)
+        return await self._run_async(graph, materialize_results, run_id=run_id)
 
     async def _run_async(
         self,
         graph: "nx.DiGraph",
         materialize_results: bool,
+        run_id: str | None = None,
     ) -> OrchestratorResult:
         """Core async logic: wire channels, launch tasks, collect results."""
         import networkx as nx
+
+        effective_run_id = run_id or str(uuid.uuid4())
+        if self._observer is not None:
+            self._observer.on_run_start(effective_run_id)
 
         topo_order = list(nx.topological_sort(graph))
         buf = self._buffer_size
@@ -186,6 +200,8 @@ class AsyncPipelineOrchestrator:
             for ch in terminal_channels:
                 tg.create_task(ch.reader.collect())
 
+        if self._observer is not None:
+            self._observer.on_run_end(effective_run_id)
         return OrchestratorResult(
             node_outputs=collectors if materialize_results else {}
         )

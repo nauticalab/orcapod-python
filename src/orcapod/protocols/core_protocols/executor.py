@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Protocol, Self, runtime_checkable
 from orcapod.protocols.core_protocols.datagrams import PacketProtocol
 
 if TYPE_CHECKING:
+    from orcapod.pipeline.logging_capture import CapturedLogs
     from orcapod.protocols.core_protocols.packet_function import PacketFunctionProtocol
 
 
@@ -38,11 +39,12 @@ class PacketFunctionExecutorProtocol(Protocol):
         self,
         packet_function: PacketFunctionProtocol,
         packet: PacketProtocol,
-    ) -> PacketProtocol | None:
+    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
         """Synchronously execute *packet_function* on *packet*.
 
         The executor should invoke ``packet_function.direct_call(packet)``
-        in the appropriate execution environment.
+        in the appropriate execution environment and pass through its
+        ``(result, CapturedLogs)`` tuple.
         """
         ...
 
@@ -50,7 +52,7 @@ class PacketFunctionExecutorProtocol(Protocol):
         self,
         packet_function: PacketFunctionProtocol,
         packet: PacketProtocol,
-    ) -> PacketProtocol | None:
+    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
         """Asynchronous counterpart of ``execute``."""
         ...
 
@@ -98,8 +100,8 @@ class PythonFunctionExecutorProtocol(PacketFunctionExecutorProtocol, Protocol):
         fn: Callable[..., Any],
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
-    ) -> Any:
-        """Synchronously execute *fn* with *kwargs*.
+    ) -> "tuple[Any, CapturedLogs]":
+        """Synchronously execute *fn* with *kwargs*, capturing I/O.
 
         Args:
             fn: The Python callable to execute.
@@ -108,7 +110,10 @@ class PythonFunctionExecutorProtocol(PacketFunctionExecutorProtocol, Protocol):
                 overrides).
 
         Returns:
-            The raw return value of *fn*.
+            A ``(raw_result, CapturedLogs)`` tuple.  ``raw_result`` is the
+            return value of *fn* (or ``None`` on failure).
+            ``CapturedLogs.success`` is ``False`` when the function raised;
+            the traceback is stored in ``CapturedLogs.traceback``.
         """
         ...
 
@@ -117,8 +122,8 @@ class PythonFunctionExecutorProtocol(PacketFunctionExecutorProtocol, Protocol):
         fn: Callable[..., Any],
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
-    ) -> Any:
-        """Asynchronously execute *fn* with *kwargs*.
+    ) -> "tuple[Any, CapturedLogs]":
+        """Asynchronously execute *fn* with *kwargs*, capturing I/O.
 
         Args:
             fn: The Python callable to execute.
@@ -126,6 +131,6 @@ class PythonFunctionExecutorProtocol(PacketFunctionExecutorProtocol, Protocol):
             executor_options: Optional per-call options.
 
         Returns:
-            The raw return value of *fn*.
+            A ``(raw_result, CapturedLogs)`` tuple.
         """
         ...

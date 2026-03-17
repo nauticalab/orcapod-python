@@ -420,29 +420,29 @@ class TestActiveState:
 
 class TestCall:
     def test_returns_packet_when_active(self, add_pf, add_packet):
-        result = add_pf.call(add_packet)
+        result, _captured = add_pf.call(add_packet)
         assert result is not None
 
     def test_output_has_correct_key(self, add_pf, add_packet):
-        result = add_pf.call(add_packet)
+        result, _captured = add_pf.call(add_packet)
         assert "result" in result.keys()
 
     def test_output_has_correct_value(self, add_pf, add_packet):
-        result = add_pf.call(add_packet)
+        result, _captured = add_pf.call(add_packet)
         assert result["result"] == 3  # 1 + 2
 
     def test_source_info_contains_result_key(self, add_pf, add_packet):
-        result = add_pf.call(add_packet)
+        result, _captured = add_pf.call(add_packet)
         source = result.source_info()
         assert "result" in source
 
     def test_source_info_ends_with_key_name(self, add_pf, add_packet):
-        result = add_pf.call(add_packet)
+        result, _captured = add_pf.call(add_packet)
         source_str = result.source_info()["result"]
         assert source_str.endswith("::result")
 
     def test_source_info_contains_uri_components(self, add_pf, add_packet):
-        result = add_pf.call(add_packet)
+        result, _captured = add_pf.call(add_packet)
         source_str = result.source_info()["result"]
         for component in add_pf.uri:
             assert component in source_str
@@ -450,7 +450,7 @@ class TestCall:
     def test_source_info_record_id_is_uuid(self, add_pf, add_packet):
         import re
 
-        result = add_pf.call(add_packet)
+        result, _captured = add_pf.call(add_packet)
         source_str = result.source_info()["result"]
         # The record_id segment is between the URI components and the key name
         # Format: uri_part1:uri_part2:..::record_id::key
@@ -461,17 +461,18 @@ class TestCall:
 
     def test_inactive_returns_none(self, add_pf, add_packet):
         add_pf.set_active(False)
-        assert add_pf.call(add_packet) is None
+        result, _captured = add_pf.call(add_packet)
+        assert result is None
 
     def test_multiple_output_keys(self, multi_pf):
         packet = Packet({"a": 3, "b": 4})
-        result = multi_pf.call(packet)
+        result, _captured = multi_pf.call(packet)
         assert result["sum"] == 7  # 3 + 4
         assert result["product"] == 12  # 3 * 4
 
     def test_multiple_output_keys_source_info(self, multi_pf):
         packet = Packet({"a": 3, "b": 4})
-        result = multi_pf.call(packet)
+        result, _captured = multi_pf.call(packet)
         source = result.source_info()
         assert "sum" in source
         assert "product" in source
@@ -479,7 +480,7 @@ class TestCall:
         assert source["product"].endswith("::product")
 
     def test_output_packet_schema_applied(self, add_pf, add_packet):
-        result = add_pf.call(add_packet)
+        result, _captured = add_pf.call(add_packet)
         assert result is not None
         # schema from the packet function should carry through
         schema = result.schema()
@@ -530,7 +531,7 @@ class TestCallErrors:
 
 class TestAsyncCall:
     def test_async_call_returns_correct_result(self, add_pf, add_packet):
-        result = asyncio.run(add_pf.async_call(add_packet))
+        result, _captured = asyncio.run(add_pf.async_call(add_packet))
         assert result is not None
         assert result.as_dict()["result"] == 3  # 1 + 2
 
@@ -596,27 +597,28 @@ class TestAsyncConstruction:
 
 class TestAsyncFunctionSyncCall:
     def test_direct_call_returns_correct_result(self, async_add_pf, add_packet):
-        result = async_add_pf.direct_call(add_packet)
+        result, _captured = async_add_pf.direct_call(add_packet)
         assert result is not None
         assert result["result"] == 3
 
     def test_call_returns_correct_result(self, async_add_pf, add_packet):
-        result = async_add_pf.call(add_packet)
+        result, _captured = async_add_pf.call(add_packet)
         assert result is not None
         assert result["result"] == 3
 
     def test_inactive_returns_none(self, async_add_pf, add_packet):
         async_add_pf.set_active(False)
-        assert async_add_pf.call(add_packet) is None
+        result, _captured = async_add_pf.call(add_packet)
+        assert result is None
 
     def test_multiple_outputs(self, async_multi_pf):
         packet = Packet({"a": 3, "b": 4})
-        result = async_multi_pf.call(packet)
+        result, _captured = async_multi_pf.call(packet)
         assert result["sum"] == 7
         assert result["product"] == 12
 
     def test_source_info_present(self, async_add_pf, add_packet):
-        result = async_add_pf.call(add_packet)
+        result, _captured = async_add_pf.call(add_packet)
         source = result.source_info()
         assert "result" in source
         assert source["result"].endswith("::result")
@@ -629,22 +631,22 @@ class TestAsyncFunctionSyncCall:
 
 class TestAsyncFunctionAsyncCall:
     def test_direct_async_call_awaits_directly(self, async_add_pf, add_packet):
-        result = asyncio.run(async_add_pf.direct_async_call(add_packet))
+        result, _captured = asyncio.run(async_add_pf.direct_async_call(add_packet))
         assert result is not None
         assert result["result"] == 3
 
     def test_async_call_returns_correct_result(self, async_add_pf, add_packet):
-        result = asyncio.run(async_add_pf.async_call(add_packet))
+        result, _captured = asyncio.run(async_add_pf.async_call(add_packet))
         assert result is not None
         assert result["result"] == 3
 
     def test_inactive_returns_none(self, async_add_pf, add_packet):
         async_add_pf.set_active(False)
-        result = asyncio.run(async_add_pf.async_call(add_packet))
+        result, _captured = asyncio.run(async_add_pf.async_call(add_packet))
         assert result is None
 
     def test_multiple_outputs(self, async_multi_pf):
         packet = Packet({"a": 3, "b": 4})
-        result = asyncio.run(async_multi_pf.async_call(packet))
+        result, _captured = asyncio.run(async_multi_pf.async_call(packet))
         assert result["sum"] == 7
         assert result["product"] == 12

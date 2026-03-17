@@ -139,11 +139,11 @@ class TestGetAllCachedOutputsEmpty:
 
 class TestCallCacheMiss:
     def test_returns_non_none_result(self, cached_pf, input_packet):
-        result = cached_pf.call(input_packet)
+        result, _captured = cached_pf.call(input_packet)
         assert result is not None
 
     def test_result_has_correct_value(self, cached_pf, input_packet):
-        result = cached_pf.call(input_packet)
+        result, _captured = cached_pf.call(input_packet)
         assert result["result"] == 7  # 3 + 4
 
     def test_result_stored_in_database(self, cached_pf, input_packet, db):
@@ -167,7 +167,7 @@ class TestCallCacheMiss:
 class TestCallCacheHit:
     def test_second_call_returns_result(self, cached_pf, input_packet):
         cached_pf.call(input_packet)
-        result = cached_pf.call(input_packet)
+        result, _captured = cached_pf.call(input_packet)
         assert result is not None
         assert result["result"] == 7
 
@@ -204,7 +204,7 @@ class TestCallCacheHit:
 class TestSkipCacheLookup:
     def test_skip_cache_lookup_still_returns_result(self, cached_pf, input_packet):
         cached_pf.call(input_packet)  # populate cache
-        result = cached_pf.call(input_packet, skip_cache_lookup=True)
+        result, _captured = cached_pf.call(input_packet, skip_cache_lookup=True)
         assert result is not None
         assert result["result"] == 7
 
@@ -226,7 +226,7 @@ class TestSkipCacheLookup:
 
 class TestSkipCacheInsert:
     def test_skip_cache_insert_returns_result(self, cached_pf, input_packet):
-        result = cached_pf.call(input_packet, skip_cache_insert=True)
+        result, _captured = cached_pf.call(input_packet, skip_cache_insert=True)
         assert result is not None
         assert result["result"] == 7
 
@@ -398,12 +398,12 @@ class TestPacketFunctionWrapperDelegation:
         assert wrapper.get_execution_data() == inner_pf.get_execution_data()
 
     def test_call_delegates(self, wrapper, input_packet):
-        result = wrapper.call(input_packet)
+        result, _captured = wrapper.call(input_packet)
         assert result is not None
         assert result["result"] == 7  # 3 + 4
 
     def test_async_call_delegates_through_wrapper(self, wrapper, input_packet):
-        result = asyncio.run(wrapper.async_call(input_packet))
+        result, _captured = asyncio.run(wrapper.async_call(input_packet))
         assert result is not None
         assert result["result"] == 7  # 3 + 4
 
@@ -493,7 +493,7 @@ class TestCallInnerReturnsNone:
     ):
         inner_pf.set_active(False)
         cpf = CachedPacketFunction(inner_pf, result_database=db)
-        result = cpf.call(input_packet)
+        result, _captured = cpf.call(input_packet)
         assert result is None
         assert db.get_all_records(cpf.record_path) is None
 
@@ -535,27 +535,27 @@ class TestResultComputedFlag:
     """Verify the meta flag that distinguishes fresh computation from cache hits."""
 
     def test_cache_miss_sets_computed_true(self, cached_pf, input_packet):
-        result = cached_pf.call(input_packet)
+        result, _captured = cached_pf.call(input_packet)
         assert result is not None
         flag = result.get_meta_value(CachedPacketFunction.RESULT_COMPUTED_FLAG)
         assert flag is True
 
     def test_cache_hit_sets_computed_false(self, cached_pf, input_packet):
         cached_pf.call(input_packet)  # first call — populates cache
-        result = cached_pf.call(input_packet)  # second call — cache hit
+        result, _captured = cached_pf.call(input_packet)  # second call — cache hit
         assert result is not None
         flag = result.get_meta_value(CachedPacketFunction.RESULT_COMPUTED_FLAG)
         assert flag is False
 
     def test_skip_cache_lookup_sets_computed_true(self, cached_pf, input_packet):
         cached_pf.call(input_packet)  # populate cache
-        result = cached_pf.call(input_packet, skip_cache_lookup=True)
+        result, _captured = cached_pf.call(input_packet, skip_cache_lookup=True)
         assert result is not None
         flag = result.get_meta_value(CachedPacketFunction.RESULT_COMPUTED_FLAG)
         assert flag is True
 
     def test_skip_cache_insert_sets_computed_true(self, cached_pf, input_packet):
-        result = cached_pf.call(input_packet, skip_cache_insert=True)
+        result, _captured = cached_pf.call(input_packet, skip_cache_insert=True)
         assert result is not None
         flag = result.get_meta_value(CachedPacketFunction.RESULT_COMPUTED_FLAG)
         assert flag is True

@@ -91,7 +91,7 @@ class TestCachedPacketFunctionAsync:
         cpf = CachedPacketFunction(pf, result_database=db)
 
         packet = Packet({"x": 5})
-        result = await cpf.async_call(packet)
+        result, _captured = await cpf.async_call(packet)
 
         assert result is not None
         assert result.as_dict()["result"] == 10
@@ -111,13 +111,13 @@ class TestCachedPacketFunctionAsync:
 
         packet = Packet({"x": 5})
         # First call — computes
-        result1 = await cpf.async_call(packet)
+        result1, _captured1 = await cpf.async_call(packet)
         assert result1 is not None
         # Has RESULT_COMPUTED_FLAG
         assert result1.get_meta_value(cpf.RESULT_COMPUTED_FLAG, False) is True
 
         # Second call — should hit cache (no RESULT_COMPUTED_FLAG set to True)
-        result2 = await cpf.async_call(packet)
+        result2, _captured2 = await cpf.async_call(packet)
         assert result2 is not None
         assert result2.as_dict()["result"] == 10
         # Cache hit should NOT have RESULT_COMPUTED_FLAG=True
@@ -138,11 +138,11 @@ class TestCachedPacketFunctionAsync:
         cpf = CachedPacketFunction(pf, result_database=db)
 
         packet = Packet({"x": 5})
-        await cpf.async_call(packet)
+        _result1, _captured1 = await cpf.async_call(packet)
         assert call_count == 1
 
         # With skip_cache_lookup, should recompute
-        await cpf.async_call(packet, skip_cache_lookup=True)
+        _result2, _captured2 = await cpf.async_call(packet, skip_cache_lookup=True)
         assert call_count == 2
 
     @pytest.mark.asyncio
@@ -155,7 +155,7 @@ class TestCachedPacketFunctionAsync:
         cpf = CachedPacketFunction(pf, result_database=db)
 
         packet = Packet({"x": 5})
-        result = await cpf.async_call(packet, skip_cache_insert=True)
+        result, _captured = await cpf.async_call(packet, skip_cache_insert=True)
         assert result is not None
         assert result.as_dict()["result"] == 10
 

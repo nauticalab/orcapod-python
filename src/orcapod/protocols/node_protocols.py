@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Protocol, TypeGuard, runtime_checkable
 if TYPE_CHECKING:
     from orcapod.channels import ReadableChannel, WritableChannel
     from orcapod.core.nodes import GraphNode
-    from orcapod.pipeline.observer import ExecutionObserver
+    from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
     from orcapod.protocols.core_protocols import (
         PacketProtocol,
         StreamProtocol,
@@ -34,14 +34,14 @@ class SourceNodeProtocol(Protocol):
     def execute(
         self,
         *,
-        observer: "ExecutionObserver | None" = None,
+        observer: "ExecutionObserverProtocol | None" = None,
     ) -> list[tuple["TagProtocol", "PacketProtocol"]]: ...
 
     async def async_execute(
         self,
         output: "WritableChannel[tuple[TagProtocol, PacketProtocol]]",
         *,
-        observer: "ExecutionObserver | None" = None,
+        observer: "ExecutionObserverProtocol | None" = None,
     ) -> None: ...
 
 
@@ -55,7 +55,8 @@ class FunctionNodeProtocol(Protocol):
         self,
         input_stream: "StreamProtocol",
         *,
-        observer: "ExecutionObserver | None" = None,
+        observer: "ExecutionObserverProtocol | None" = None,
+        error_policy: str = "continue",
     ) -> list[tuple["TagProtocol", "PacketProtocol"]]: ...
 
     async def async_execute(
@@ -63,7 +64,7 @@ class FunctionNodeProtocol(Protocol):
         input_channel: "ReadableChannel[tuple[TagProtocol, PacketProtocol]]",
         output: "WritableChannel[tuple[TagProtocol, PacketProtocol]]",
         *,
-        observer: "ExecutionObserver | None" = None,
+        observer: "ExecutionObserverProtocol | None" = None,
     ) -> None: ...
 
 
@@ -76,7 +77,7 @@ class OperatorNodeProtocol(Protocol):
     def execute(
         self,
         *input_streams: "StreamProtocol",
-        observer: "ExecutionObserver | None" = None,
+        observer: "ExecutionObserverProtocol | None" = None,
     ) -> list[tuple["TagProtocol", "PacketProtocol"]]: ...
 
     async def async_execute(
@@ -84,7 +85,7 @@ class OperatorNodeProtocol(Protocol):
         inputs: "Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]]",
         output: "WritableChannel[tuple[TagProtocol, PacketProtocol]]",
         *,
-        observer: "ExecutionObserver | None" = None,
+        observer: "ExecutionObserverProtocol | None" = None,
     ) -> None: ...
 
 
