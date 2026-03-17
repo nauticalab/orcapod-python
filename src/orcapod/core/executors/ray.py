@@ -8,6 +8,7 @@ from orcapod.core.executors.base import PacketFunctionExecutorBase
 
 if TYPE_CHECKING:
     from orcapod.core.packet_function import PythonPacketFunction
+    from orcapod.pipeline.logging_capture import CapturedLogs
     from orcapod.protocols.core_protocols import PacketFunctionProtocol, PacketProtocol
 
 
@@ -77,8 +78,37 @@ class RayExecutor(PacketFunctionExecutorBase):
         self._remote_opts.update(ray_remote_opts)
 
     def _ensure_ray_initialized(self) -> None:
-        """Initialize Ray if it has not been initialized yet."""
+        """Initialize Ray if it has not been initialized yet.
+
+        Also registers a cloudpickle dispatch for ``logging.Logger`` so that
+        user functions referencing loggers can be sent to Ray workers that
+        do not have orcapod installed.
+
+        By default cloudpickle serializes Logger instances by value, which
+        traverses the parent chain to the root logger.  After
+        ``install_capture_streams()`` the root logger has a
+        ``ContextVarLoggingHandler`` from ``orcapod``.  Workers without
+        orcapod cannot deserialize that class.
+
+        Registering loggers as ``(logging.getLogger, (name,))`` is the
+        correct semantic — loggers are name-keyed singletons — and produces
+        no orcapod dependency in the pickled bytes.
+        """
+        import logging
         import ray
+
+        try:
+            import cloudpickle
+
+            def _pickle_logger(l: logging.Logger) -> tuple:
+                # Root logger has name "root" but must be fetched as ""
+                name = "" if isinstance(l, logging.RootLogger) else l.name
+                return logging.getLogger, (name,)
+
+            cloudpickle.CloudPickler.dispatch[logging.Logger] = _pickle_logger
+            cloudpickle.CloudPickler.dispatch[logging.RootLogger] = _pickle_logger
+        except Exception:
+            pass  # cloudpickle not available or API changed — best effort
 
         if not ray.is_initialized():
             if self._ray_address is not None:
@@ -124,67 +154,172 @@ class RayExecutor(PacketFunctionExecutorBase):
         self,
         packet_function: PacketFunctionProtocol,
         packet: PacketProtocol,
-    ) -> PacketProtocol | None:
-        import ray
+    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+        from orcapod.pipeline.logging_capture import CapturedLogs
 
         pf = self._as_python_packet_function(packet_function)
         if not pf.is_active():
-            return None
+            return None, CapturedLogs(success=True)
 
-        self._ensure_ray_initialized()
-
-        kwargs = packet.as_dict()
-        remote_fn = ray.remote(**self._build_remote_opts())(pf._function)
-        ref = remote_fn.remote(**kwargs)
-        raw_result = ray.get(ref)
-        return pf._build_output_packet(raw_result)
+        raw, captured = self.execute_callable(pf._function, packet.as_dict())
+        if not captured.success:
+            return None, captured
+        return pf._build_output_packet(raw), captured
 
     async def async_execute(
         self,
         packet_function: PacketFunctionProtocol,
         packet: PacketProtocol,
-    ) -> PacketProtocol | None:
-        import ray
+    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+        from orcapod.pipeline.logging_capture import CapturedLogs
 
         pf = self._as_python_packet_function(packet_function)
         if not pf.is_active():
-            return None
+            return None, CapturedLogs(success=True)
 
-        self._ensure_ray_initialized()
-
-        kwargs = packet.as_dict()
-        remote_fn = ray.remote(**self._build_remote_opts())(pf._function)
-        ref = remote_fn.remote(**kwargs)
-        raw_result = await asyncio.wrap_future(ref.future())
-        return pf._build_output_packet(raw_result)
+        raw, captured = await self.async_execute_callable(pf._function, packet.as_dict())
+        if not captured.success:
+            return None, captured
+        return pf._build_output_packet(raw), captured
 
     # -- PythonFunctionExecutorProtocol --
+
+    @staticmethod
+    def _make_capture_wrapper() -> Callable[..., Any]:
+        """Return an inline capture wrapper suitable for Ray remote execution.
+
+        The wrapper is defined as a closure (not a module-level import) so that
+        cloudpickle serializes it by bytecode rather than by module reference.
+        This means the Ray cluster workers do **not** need ``orcapod`` installed
+        — only the standard library is required on the worker side.
+
+        The wrapper returns a plain 6-tuple ``(raw_result, stdout, stderr,
+        python_logs, traceback_str, success)`` so no orcapod types cross the
+        Ray object store; the driver reconstructs :class:`CapturedLogs` from
+        the tuple.
+        """
+        def _capture(fn: Any, kwargs: dict) -> tuple:
+            import io
+            import logging
+            import os
+            import sys
+            import tempfile
+            import traceback as _tb
+
+            stdout_tmp = tempfile.TemporaryFile()
+            stderr_tmp = tempfile.TemporaryFile()
+            orig_stdout_fd = os.dup(1)
+            orig_stderr_fd = os.dup(2)
+            orig_sys_stdout = sys.stdout
+            orig_sys_stderr = sys.stderr
+            sys_stdout_buf = io.StringIO()
+            sys_stderr_buf = io.StringIO()
+            log_records: list = []
+
+            fmt = logging.Formatter("%(levelname)s:%(name)s:%(message)s")
+
+            class _H(logging.Handler):
+                def emit(self, record: logging.LogRecord) -> None:
+                    log_records.append(fmt.format(record))
+
+            handler = _H()
+            root_logger = logging.getLogger()
+            orig_level = root_logger.level
+            root_logger.setLevel(logging.DEBUG)
+            root_logger.addHandler(handler)
+
+            raw_result = None
+            success = True
+            tb_str = None
+            try:
+                sys.stdout.flush()
+                sys.stderr.flush()
+                os.dup2(stdout_tmp.fileno(), 1)
+                os.dup2(stderr_tmp.fileno(), 2)
+                sys.stdout = sys_stdout_buf
+                sys.stderr = sys_stderr_buf
+                try:
+                    raw_result = fn(**kwargs)
+                except Exception:
+                    success = False
+                    tb_str = _tb.format_exc()
+            finally:
+                sys.stdout = orig_sys_stdout
+                sys.stderr = orig_sys_stderr
+                os.dup2(orig_stdout_fd, 1)
+                os.dup2(orig_stderr_fd, 2)
+                os.close(orig_stdout_fd)
+                os.close(orig_stderr_fd)
+                root_logger.removeHandler(handler)
+                root_logger.setLevel(orig_level)
+                stdout_tmp.seek(0)
+                stderr_tmp.seek(0)
+                cap_stdout = (
+                    stdout_tmp.read().decode("utf-8", errors="replace")
+                    + sys_stdout_buf.getvalue()
+                )
+                cap_stderr = (
+                    stderr_tmp.read().decode("utf-8", errors="replace")
+                    + sys_stderr_buf.getvalue()
+                )
+                stdout_tmp.close()
+                stderr_tmp.close()
+
+            return raw_result, cap_stdout, cap_stderr, "\n".join(log_records), tb_str, success
+
+        return _capture
 
     def execute_callable(
         self,
         fn: Callable[..., Any],
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
-    ) -> Any:
+    ) -> "tuple[Any, CapturedLogs]":
+        """Execute *fn* on the Ray cluster with fd-level I/O capture.
+
+        The capture wrapper is serialized by bytecode (not module reference) so
+        the Ray cluster workers do not need ``orcapod`` installed.
+        """
         import ray
 
+        from orcapod.pipeline.logging_capture import CapturedLogs
+
         self._ensure_ray_initialized()
-        remote_fn = ray.remote(**self._build_remote_opts())(fn)
-        ref = remote_fn.remote(**kwargs)
-        return ray.get(ref)
+        wrapper = self._make_capture_wrapper()
+        wrapper.__name__ = fn.__name__
+        wrapper.__qualname__ = fn.__qualname__
+        remote_fn = ray.remote(**self._build_remote_opts())(wrapper)
+        ref = remote_fn.remote(fn, kwargs)
+        raw, stdout, stderr, python_logs, tb, success = ray.get(ref)
+        return raw, CapturedLogs(
+            stdout=stdout, stderr=stderr, python_logs=python_logs,
+            traceback=tb, success=success,
+        )
 
     async def async_execute_callable(
         self,
         fn: Callable[..., Any],
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
-    ) -> Any:
+    ) -> "tuple[Any, CapturedLogs]":
+        """Async counterpart of :meth:`execute_callable`."""
         import ray
 
+        from orcapod.pipeline.logging_capture import CapturedLogs
+
         self._ensure_ray_initialized()
-        remote_fn = ray.remote(**self._build_remote_opts())(fn)
-        ref = remote_fn.remote(**kwargs)
-        return await asyncio.wrap_future(ref.future())
+        wrapper = self._make_capture_wrapper()
+        wrapper.__name__ = fn.__name__
+        wrapper.__qualname__ = fn.__qualname__
+        remote_fn = ray.remote(**self._build_remote_opts())(wrapper)
+        ref = remote_fn.remote(fn, kwargs)
+        raw, stdout, stderr, python_logs, tb, success = await asyncio.wrap_future(
+            ref.future()
+        )
+        return raw, CapturedLogs(
+            stdout=stdout, stderr=stderr, python_logs=python_logs,
+            traceback=tb, success=success,
+        )
 
     def with_options(self, **opts: Any) -> "RayExecutor":
         """Return a new ``RayExecutor`` with the given options merged in.

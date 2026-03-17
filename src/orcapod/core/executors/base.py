@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from orcapod.pipeline.logging_capture import CapturedLogs
     from orcapod.protocols.core_protocols import PacketFunctionProtocol, PacketProtocol
 
 
@@ -48,12 +49,12 @@ class PacketFunctionExecutorBase(ABC):
         self,
         packet_function: PacketFunctionProtocol,
         packet: PacketProtocol,
-    ) -> PacketProtocol | None:
+    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
         """Synchronously execute *packet_function* on *packet*.
 
         Implementations should call ``packet_function.direct_call(packet)``
         to invoke the function's native computation, bypassing executor
-        routing.
+        routing, and pass through the ``(result, CapturedLogs)`` tuple.
         """
         ...
 
@@ -61,7 +62,7 @@ class PacketFunctionExecutorBase(ABC):
         self,
         packet_function: PacketFunctionProtocol,
         packet: PacketProtocol,
-    ) -> PacketProtocol | None:
+    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
         """Asynchronous counterpart of ``execute``.
 
         The default implementation delegates to ``execute`` synchronously.
@@ -96,11 +97,14 @@ class PacketFunctionExecutorBase(ABC):
         fn: Callable[..., Any],
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
-    ) -> Any:
-        """Synchronously execute *fn* with *kwargs*.
+    ) -> "tuple[Any, CapturedLogs]":
+        """Synchronously execute *fn* with *kwargs*, returning captured I/O.
 
-        Default implementation calls ``fn(**kwargs)`` in-process.
-        Subclasses should override for remote/distributed execution.
+        Default implementation calls ``fn(**kwargs)`` with no capture and
+        returns empty :class:`~orcapod.pipeline.logging_capture.CapturedLogs`.
+        Exceptions propagate to the caller.  Subclasses (e.g.
+        ``LocalExecutor``, ``RayExecutor``) override to add I/O capture and
+        exception swallowing.
 
         Args:
             fn: The Python callable to execute.
@@ -108,21 +112,22 @@ class PacketFunctionExecutorBase(ABC):
             executor_options: Optional per-call options.
 
         Returns:
-            The raw return value of *fn*.
+            ``(raw_result, CapturedLogs)``
         """
-        return fn(**kwargs)
+        from orcapod.pipeline.logging_capture import CapturedLogs
+
+        return fn(**kwargs), CapturedLogs()
 
     async def async_execute_callable(
         self,
         fn: Callable[..., Any],
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
-    ) -> Any:
-        """Asynchronously execute *fn* with *kwargs*.
+    ) -> "tuple[Any, CapturedLogs]":
+        """Asynchronously execute *fn* with *kwargs*, returning captured I/O.
 
         Default implementation delegates to ``execute_callable``
-        synchronously.  Subclasses should override for truly async
-        execution.
+        synchronously.  Subclasses should override for truly async execution.
         """
         return self.execute_callable(fn, kwargs, executor_options)
 

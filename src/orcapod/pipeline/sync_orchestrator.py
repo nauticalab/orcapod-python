@@ -7,6 +7,7 @@ node's ``execute()`` method with observer injection.
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from orcapod.pipeline.result import OrchestratorResult
@@ -19,7 +20,7 @@ from orcapod.protocols.node_protocols import (
 if TYPE_CHECKING:
     import networkx as nx
 
-    from orcapod.pipeline.observer import ExecutionObserver
+    from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
     from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
 
 logger = logging.getLogger(__name__)
@@ -39,13 +40,19 @@ class SyncPipelineOrchestrator:
         observer: Optional execution observer forwarded to nodes.
     """
 
-    def __init__(self, observer: "ExecutionObserver | None" = None) -> None:
+    def __init__(
+        self,
+        observer: "ExecutionObserverProtocol | None" = None,
+        error_policy: str = "continue",
+    ) -> None:
         self._observer = observer
+        self._error_policy = error_policy
 
     def run(
         self,
         graph: "nx.DiGraph",
         materialize_results: bool = True,
+        run_id: str | None = None,
     ) -> OrchestratorResult:
         """Execute the node graph synchronously.
 
@@ -54,11 +61,17 @@ class SyncPipelineOrchestrator:
             materialize_results: If True, keep all node outputs in memory
                 and return them. If False, discard buffers after downstream
                 consumption (only DB-persisted results survive).
+            run_id: Optional run identifier.  If not provided, a UUID is
+                generated automatically.
 
         Returns:
             OrchestratorResult with node outputs.
         """
         import networkx as nx
+
+        effective_run_id = run_id or str(uuid.uuid4())
+        if self._observer is not None:
+            self._observer.on_run_start(effective_run_id)
 
         topo_order = list(nx.topological_sort(graph))
         buffers: dict[Any, list[tuple[TagProtocol, PacketProtocol]]] = {}
@@ -71,7 +84,11 @@ class SyncPipelineOrchestrator:
                 upstream_buf = self._gather_upstream(node, graph, buffers)
                 upstream_node = list(graph.predecessors(node))[0]
                 input_stream = self._materialize_as_stream(upstream_buf, upstream_node)
-                buffers[node] = node.execute(input_stream, observer=self._observer)
+                buffers[node] = node.execute(
+                    input_stream,
+                    observer=self._observer,
+                    error_policy=self._error_policy,
+                )
             elif is_operator_node(node):
                 upstream_buffers = self._gather_upstream_multi(node, graph, buffers)
                 input_streams = [
@@ -91,6 +108,9 @@ class SyncPipelineOrchestrator:
 
         if not materialize_results:
             buffers.clear()
+
+        if self._observer is not None:
+            self._observer.on_run_end(effective_run_id)
         return OrchestratorResult(node_outputs=buffers)
 
     @staticmethod

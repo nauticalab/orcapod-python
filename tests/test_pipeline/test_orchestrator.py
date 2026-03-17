@@ -428,9 +428,10 @@ class TestAsyncOrchestratorTerminalNode:
 
 
 class TestAsyncOrchestratorErrorPropagation:
-    """Node failures should propagate correctly."""
+    """Failed packets do not abort the pipeline; they are handled per-packet."""
 
-    def test_node_failure_propagates(self):
+    def test_node_failure_does_not_abort_pipeline(self):
+        """A crashing packet function is skipped; the pipeline completes normally."""
         def failing_fn(value: int) -> int:
             raise ValueError("intentional failure")
 
@@ -445,8 +446,36 @@ class TestAsyncOrchestratorErrorPropagation:
         pipeline.compile()
         orch = AsyncPipelineOrchestrator()
 
-        with pytest.raises(ExceptionGroup):
-            orch.run(pipeline._node_graph)
+        # Pipeline must complete without raising; failing packet is silently dropped.
+        orch.run(pipeline._node_graph)
+
+    def test_node_failure_calls_on_packet_crash(self):
+        """When an observer is set, on_packet_crash is called for the failing packet."""
+        from orcapod.pipeline.observer import NoOpObserver
+
+        def failing_fn(value: int) -> int:
+            raise ValueError("intentional failure")
+
+        src = _make_source("key", "value", {"key": ["a"], "value": [1]})
+        pf = PythonPacketFunction(failing_fn, output_keys="result")
+        pod = FunctionPod(pf)
+
+        pipeline = Pipeline(name="error2", pipeline_database=InMemoryArrowDatabase())
+        with pipeline:
+            pod(src, label="failer")
+
+        crashes = []
+
+        class CrashRecorder(NoOpObserver):
+            def on_packet_crash(self, node, tag, packet, error):
+                crashes.append(error)
+
+        pipeline.compile()
+        orch = AsyncPipelineOrchestrator(observer=CrashRecorder())
+        orch.run(pipeline._node_graph)
+
+        assert len(crashes) == 1
+        assert isinstance(crashes[0], (ValueError, RuntimeError))
 
 
 class TestAsyncOrchestratorObserverInjection:
@@ -465,17 +494,20 @@ class TestAsyncOrchestratorObserverInjection:
         events = []
 
         class RecordingObserver:
+            def on_run_start(self, run_id): pass
+            def on_run_end(self, run_id): pass
             def on_node_start(self, node):
                 events.append(("node_start", node.node_type))
-
             def on_node_end(self, node):
                 events.append(("node_end", node.node_type))
-
             def on_packet_start(self, node, tag, packet):
                 events.append(("packet_start", node.node_type))
-
             def on_packet_end(self, node, tag, input_pkt, output_pkt, cached):
                 events.append(("packet_end", node.node_type, cached))
+            def on_packet_crash(self, node, tag, packet, exc): pass
+            def create_packet_logger(self, node, tag, packet, **kwargs):
+                from orcapod.pipeline.observer import _NOOP_LOGGER
+                return _NOOP_LOGGER
 
         pipeline.compile()
         orch = AsyncPipelineOrchestrator(observer=RecordingObserver())
@@ -517,17 +549,20 @@ class TestAsyncOrchestratorObserverInjection:
         events = []
 
         class RecordingObserver:
+            def on_run_start(self, run_id): pass
+            def on_run_end(self, run_id): pass
             def on_node_start(self, node):
                 events.append(("node_start", node.node_type))
-
             def on_node_end(self, node):
                 events.append(("node_end", node.node_type))
-
             def on_packet_start(self, node, tag, packet):
                 events.append(("packet_start", node.node_type))
-
             def on_packet_end(self, node, tag, input_pkt, output_pkt, cached):
                 events.append(("packet_end", node.node_type))
+            def on_packet_crash(self, node, tag, packet, exc): pass
+            def create_packet_logger(self, node, tag, packet, **kwargs):
+                from orcapod.pipeline.observer import _NOOP_LOGGER
+                return _NOOP_LOGGER
 
         pipeline.compile()
         orch = AsyncPipelineOrchestrator(observer=RecordingObserver())

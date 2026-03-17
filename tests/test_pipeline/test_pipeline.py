@@ -1164,7 +1164,7 @@ class _MockExecutor(PacketFunctionExecutorBase):
         self,
         packet_function: PacketFunctionProtocol,
         packet: PacketProtocol,
-    ) -> PacketProtocol | None:
+    ) -> "tuple[PacketProtocol | None, Any]":
         self.sync_calls.append(packet)
         return packet_function.direct_call(packet)
 
@@ -1172,17 +1172,21 @@ class _MockExecutor(PacketFunctionExecutorBase):
         self,
         packet_function: PacketFunctionProtocol,
         packet: PacketProtocol,
-    ) -> PacketProtocol | None:
+    ) -> "tuple[PacketProtocol | None, Any]":
         self.async_calls.append(packet)
         return packet_function.direct_call(packet)
 
     def execute_callable(self, fn, kwargs, executor_options=None):
+        from orcapod.pipeline.logging_capture import CapturedLogs
+
         self.sync_calls.append(kwargs)
-        return fn(**kwargs)
+        return fn(**kwargs), CapturedLogs(success=True)
 
     async def async_execute_callable(self, fn, kwargs, executor_options=None):
+        from orcapod.pipeline.logging_capture import CapturedLogs
+
         self.async_calls.append(kwargs)
-        return fn(**kwargs)
+        return fn(**kwargs), CapturedLogs(success=True)
 
     def with_options(self, **opts: Any) -> "_MockExecutor":
         return _MockExecutor(opts={**self.opts, **opts})

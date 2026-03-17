@@ -78,13 +78,15 @@ class SpyExecutor(PacketFunctionExecutorBase):
         self,
         packet_function: PacketFunctionProtocol,
         packet: PacketProtocol,
-    ) -> PacketProtocol | None:
+    ) -> tuple[PacketProtocol | None, Any]:
         self.calls.append((packet_function, packet))
         return packet_function.direct_call(packet)
 
     def execute_callable(self, fn, kwargs, executor_options=None):
+        from orcapod.pipeline.logging_capture import CapturedLogs
+
         self.calls.append((fn, kwargs))
-        return fn(**kwargs)
+        return fn(**kwargs), CapturedLogs(success=True)
 
 
 # ===========================================================================
@@ -97,8 +99,10 @@ class TestAsyncExecuteChannelCloseOnError:
 
     @pytest.mark.asyncio
     async def test_unary_operator_closes_channel_on_error(self):
-        """SelectPacketColumns with a column that doesn't exist should fail,
-        but the output channel must still be closed."""
+        """When a packet function raises, direct_call catches the exception
+        and returns (None, captured_failure).  process_packet discards the
+        captured logs and returns (tag, None).  The output channel is closed
+        normally and no exception propagates."""
 
         def failing(x: int) -> int:
             raise ValueError("boom")
@@ -112,15 +116,14 @@ class TestAsyncExecuteChannelCloseOnError:
 
         await feed_stream_to_channel(stream, input_ch)
 
-        with pytest.raises(ExceptionGroup):
-            await pod.async_execute([input_ch.reader], output_ch.writer)
+        # No exception raised — failures are caught inside direct_call
+        await pod.async_execute([input_ch.reader], output_ch.writer)
 
-        # The output channel should be closed despite the error.
-        # Attempting to collect should return whatever was sent before error,
-        # and not hang forever.
+        # The output channel should be closed.
         results = await output_ch.reader.collect()
-        # We don't assert content, just that it doesn't hang.
+        # All packets failed so no results were sent
         assert isinstance(results, list)
+        assert len(results) == 0
 
     @pytest.mark.asyncio
     async def test_operator_closes_channel_on_static_process_error(self):
@@ -192,7 +195,7 @@ class TestWrapperDirectCallBypassesExecutor:
         _, spy, wrapper = self._make_add_pf_with_spy()
 
         packet = Packet({"x": 3, "y": 4})
-        result = wrapper.direct_call(packet)
+        result, _captured = wrapper.direct_call(packet)
 
         assert result is not None
         assert result.as_dict()["result"] == 7
@@ -204,7 +207,7 @@ class TestWrapperDirectCallBypassesExecutor:
         _, spy, wrapper = self._make_add_pf_with_spy()
 
         packet = Packet({"x": 3, "y": 4})
-        result = await wrapper.direct_async_call(packet)
+        result, _captured = await wrapper.direct_async_call(packet)
 
         assert result is not None
         assert result.as_dict()["result"] == 7
@@ -215,7 +218,7 @@ class TestWrapperDirectCallBypassesExecutor:
         _, spy, wrapper = self._make_add_pf_with_spy()
 
         packet = Packet({"x": 3, "y": 4})
-        result = wrapper.call(packet)
+        result, _captured = wrapper.call(packet)
 
         assert result is not None
         assert result.as_dict()["result"] == 7
@@ -308,7 +311,7 @@ class TestAsyncExecuteBackpressure:
         # Patch async_call to use our concurrency-tracking function
         original_async_call = pf.async_call
 
-        async def tracked_async_call(packet: PacketProtocol) -> PacketProtocol | None:
+        async def tracked_async_call(packet: PacketProtocol) -> tuple:
             nonlocal concurrent_count, max_concurrent
             concurrent_count += 1
             max_concurrent = max(max_concurrent, concurrent_count)
@@ -458,20 +461,22 @@ class TestRayExecutorInitialization:
             mock_ray.init.assert_not_called()
 
     def test_async_execute_uses_wrap_future(self):
-        """async_execute should use ref.future() + asyncio.wrap_future,
-        not bare 'await ref'."""
+        """async_execute_callable should use ref.future() + asyncio.wrap_future,
+        not bare 'await ref'.  async_execute delegates to async_execute_callable."""
         import inspect
 
         from orcapod.core.executors.ray import RayExecutor
 
-        source = inspect.getsource(RayExecutor.async_execute)
+        source = inspect.getsource(RayExecutor.async_execute_callable)
         assert "ref.future()" in source, (
-            "async_execute should use ref.future() for asyncio compatibility"
+            "async_execute_callable should use ref.future() for asyncio compatibility"
         )
-        assert "wrap_future" in source, "async_execute should use asyncio.wrap_future"
+        assert "wrap_future" in source, (
+            "async_execute_callable should use asyncio.wrap_future"
+        )
         # Should NOT do bare 'await ref'
         assert "return await ref\n" not in source, (
-            "async_execute should not use bare 'await ref'"
+            "async_execute_callable should not use bare 'await ref'"
         )
 
 

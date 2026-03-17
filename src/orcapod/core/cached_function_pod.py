@@ -18,6 +18,8 @@ from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 if TYPE_CHECKING:
     import pyarrow as pa
 
+    from orcapod.pipeline.logging_capture import CapturedLogs
+
 logger = logging.getLogger(__name__)
 
 
@@ -124,6 +126,59 @@ class CachedFunctionPod(WrappedFunctionPod):
             )
             output = output.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: True})
         return tag, output
+
+    def process_packet_with_capture(
+        self, tag: TagProtocol, packet: PacketProtocol
+    ) -> "tuple[TagProtocol, PacketProtocol | None, CapturedLogs]":
+        """Process with pod-level caching, returning CapturedLogs alongside.
+
+        On cache hit, returns empty CapturedLogs (no function was executed).
+        """
+        from orcapod.pipeline.logging_capture import CapturedLogs
+
+        cached = self._cache.lookup(packet)
+        if cached is not None:
+            logger.info("Pod-level cache hit")
+            return tag, cached, CapturedLogs(success=True)
+
+        tag, output, captured = self._function_pod.process_packet_with_capture(
+            tag, packet
+        )
+        if output is not None and captured.success:
+            pf = self._function_pod.packet_function
+            self._cache.store(
+                packet,
+                output,
+                variation_data=pf.get_function_variation_data(),
+                execution_data=pf.get_execution_data(),
+            )
+            output = output.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: True})
+        return tag, output, captured
+
+    async def async_process_packet_with_capture(
+        self, tag: TagProtocol, packet: PacketProtocol
+    ) -> "tuple[TagProtocol, PacketProtocol | None, CapturedLogs]":
+        """Async counterpart of ``process_packet_with_capture``."""
+        from orcapod.pipeline.logging_capture import CapturedLogs
+
+        cached = self._cache.lookup(packet)
+        if cached is not None:
+            logger.info("Pod-level cache hit")
+            return tag, cached, CapturedLogs(success=True)
+
+        tag, output, captured = await self._function_pod.async_process_packet_with_capture(
+            tag, packet
+        )
+        if output is not None and captured.success:
+            pf = self._function_pod.packet_function
+            self._cache.store(
+                packet,
+                output,
+                variation_data=pf.get_function_variation_data(),
+                execution_data=pf.get_execution_data(),
+            )
+            output = output.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: True})
+        return tag, output, captured
 
     def get_all_cached_outputs(
         self, include_system_columns: bool = False

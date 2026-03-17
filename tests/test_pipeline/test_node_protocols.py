@@ -257,6 +257,11 @@ class TestFunctionNodeExecute:
                 events.append(("packet_start",))
             def on_packet_end(self, n, t, ip, op, cached):
                 events.append(("packet_end", cached))
+            def on_packet_crash(self, n, t, p, exc):
+                pass
+            def create_packet_logger(self, n, t, p, **kwargs):
+                from orcapod.pipeline.observer import _NOOP_LOGGER
+                return _NOOP_LOGGER
 
         input_stream = node._input_stream
         result = node.execute(input_stream, observer=Obs())
@@ -329,6 +334,11 @@ class TestFunctionNodeAsyncExecute:
                 events.append("pkt_start")
             def on_packet_end(self, n, t, ip, op, cached):
                 events.append("pkt_end")
+            def on_packet_crash(self, n, t, p, exc):
+                pass
+            def create_packet_logger(self, n, t, p, **kwargs):
+                from orcapod.pipeline.observer import _NOOP_LOGGER
+                return _NOOP_LOGGER
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)

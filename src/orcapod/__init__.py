@@ -2,6 +2,7 @@ from .core.function_pod import (
     FunctionPod,
     function_pod,
 )
+from .core.sources.arrow_table_source import ArrowTableSource
 from .pipeline import Pipeline
 
 # Subpackage re-exports for clean public API
@@ -13,6 +14,7 @@ from . import streams  # noqa: F401
 from . import types  # noqa: F401
 
 __all__ = [
+    "ArrowTableSource",
     "FunctionPod",
     "function_pod",
     "Pipeline",

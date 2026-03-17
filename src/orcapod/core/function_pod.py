@@ -152,15 +152,39 @@ class _FunctionPodBase(TraceableBase):
 
         Returns:
             A ``(tag, output_packet)`` tuple; output_packet is ``None`` if
-            the function filters the packet out.
+            the function filters the packet out.  CapturedLogs are discarded
+            (only relevant for node-level execution with observers).
         """
-        return tag, self.packet_function.call(packet)
+        result, _captured = self.packet_function.call(packet)
+        return tag, result
 
     async def async_process_packet(
         self, tag: TagProtocol, packet: PacketProtocol
     ) -> tuple[TagProtocol, PacketProtocol | None]:
         """Async counterpart of ``process_packet``."""
-        return tag, await self.packet_function.async_call(packet)
+        result, _captured = await self.packet_function.async_call(packet)
+        return tag, result
+
+    def process_packet_with_capture(
+        self, tag: TagProtocol, packet: PacketProtocol
+    ) -> tuple[TagProtocol, PacketProtocol | None, "CapturedLogs"]:
+        """Process a single packet and return CapturedLogs alongside the result.
+
+        Used by FunctionNode to get logs without a ContextVar side-channel.
+        """
+        from orcapod.pipeline.logging_capture import CapturedLogs
+
+        result, captured = self.packet_function.call(packet)
+        return tag, result, captured
+
+    async def async_process_packet_with_capture(
+        self, tag: TagProtocol, packet: PacketProtocol
+    ) -> tuple[TagProtocol, PacketProtocol | None, "CapturedLogs"]:
+        """Async counterpart of ``process_packet_with_capture``."""
+        from orcapod.pipeline.logging_capture import CapturedLogs
+
+        result, captured = await self.packet_function.async_call(packet)
+        return tag, result, captured
 
     def handle_input_streams(self, *streams: StreamProtocol) -> StreamProtocol:
         """Handle multiple input streams by joining them if necessary.

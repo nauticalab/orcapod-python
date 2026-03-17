@@ -60,13 +60,15 @@ class SpyExecutor(PacketFunctionExecutorBase):
         self,
         packet_function: PacketFunctionProtocol,
         packet: PacketProtocol,
-    ) -> PacketProtocol | None:
+    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
         self.calls.append((packet_function, packet))
         return packet_function.direct_call(packet)
 
     def execute_callable(self, fn, kwargs, executor_options=None):
+        from orcapod.pipeline.logging_capture import CapturedLogs
+
         self.calls.append((fn, kwargs))
-        return fn(**kwargs)
+        return fn(**kwargs), CapturedLogs(success=True)
 
 
 class PythonOnlyExecutor(PacketFunctionExecutorBase):
@@ -83,7 +85,7 @@ class PythonOnlyExecutor(PacketFunctionExecutorBase):
         self,
         packet_function: PacketFunctionProtocol,
         packet: PacketProtocol,
-    ) -> PacketProtocol | None:
+    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
         return packet_function.direct_call(packet)
 
 
@@ -101,7 +103,7 @@ class NonPythonExecutor(PacketFunctionExecutorBase):
         self,
         packet_function: PacketFunctionProtocol,
         packet: PacketProtocol,
-    ) -> PacketProtocol | None:
+    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
         return packet_function.direct_call(packet)
 
 
@@ -185,7 +187,7 @@ class TestLocalExecutor:
         add_pf: PythonPacketFunction,
         add_packet: Packet,
     ):
-        result = local_executor.execute(add_pf, add_packet)
+        result, _captured = local_executor.execute(add_pf, add_packet)
         assert result is not None
         assert result.as_dict()["result"] == 3
 
@@ -246,7 +248,7 @@ class TestExecutorRouting:
     def test_call_without_executor_uses_direct_call(
         self, add_pf: PythonPacketFunction, add_packet: Packet
     ):
-        result = add_pf.call(add_packet)
+        result, _captured = add_pf.call(add_packet)
         assert result is not None
         assert result.as_dict()["result"] == 3
 
@@ -257,7 +259,7 @@ class TestExecutorRouting:
         spy_executor: SpyExecutor,
     ):
         add_pf.executor = spy_executor
-        result = add_pf.call(add_packet)
+        result, _captured = add_pf.call(add_packet)
         assert result is not None
         assert result.as_dict()["result"] == 3
         assert len(spy_executor.calls) == 1
@@ -269,7 +271,7 @@ class TestExecutorRouting:
         spy_executor: SpyExecutor,
     ):
         add_pf.executor = spy_executor
-        result = add_pf.direct_call(add_packet)
+        result, _captured = add_pf.direct_call(add_packet)
         assert result is not None
         assert result.as_dict()["result"] == 3
         # Executor was NOT called
@@ -343,7 +345,7 @@ class TestWrapperExecutorDelegation:
             pass
 
         wrapper = SimpleWrapper(add_pf, version="v0.0")
-        result = wrapper.call(add_packet)
+        result, _captured = wrapper.call(add_packet)
         assert result is not None
         assert result.as_dict()["result"] == 3
         assert len(spy.calls) == 1
@@ -599,7 +601,9 @@ class ConcurrentSpyExecutor(PacketFunctionExecutorBase):
         self,
         packet_function: PacketFunctionProtocol,
         packet: PacketProtocol,
-    ) -> PacketProtocol | None:
+    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+        from orcapod.pipeline.logging_capture import CapturedLogs
+
         self.sync_calls.append(packet)
         return packet_function.direct_call(packet)
 
@@ -607,17 +611,21 @@ class ConcurrentSpyExecutor(PacketFunctionExecutorBase):
         self,
         packet_function: PacketFunctionProtocol,
         packet: PacketProtocol,
-    ) -> PacketProtocol | None:
+    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
         self.async_calls.append(packet)
         return packet_function.direct_call(packet)
 
     def execute_callable(self, fn, kwargs, executor_options=None):
+        from orcapod.pipeline.logging_capture import CapturedLogs
+
         self.sync_calls.append(kwargs)
-        return fn(**kwargs)
+        return fn(**kwargs), CapturedLogs(success=True)
 
     async def async_execute_callable(self, fn, kwargs, executor_options=None):
+        from orcapod.pipeline.logging_capture import CapturedLogs
+
         self.async_calls.append(kwargs)
-        return fn(**kwargs)
+        return fn(**kwargs), CapturedLogs(success=True)
 
 
 class TestConcurrentIteration:
@@ -736,15 +744,17 @@ class TestPythonFunctionExecutorProtocol:
 
     def test_execute_callable_runs_function(self):
         executor = LocalExecutor()
-        result = executor.execute_callable(add, {"x": 3, "y": 4})
+        result, captured = executor.execute_callable(add, {"x": 3, "y": 4})
         assert result == 7
+        assert captured.success is True
 
     def test_execute_callable_with_executor_options(self):
         executor = LocalExecutor()
-        result = executor.execute_callable(
+        result, captured = executor.execute_callable(
             add, {"x": 1, "y": 2}, executor_options={"num_cpus": 1}
         )
         assert result == 3
+        assert captured.success is True
 
 
 # ---------------------------------------------------------------------------
@@ -801,7 +811,7 @@ class TestGenericExecutorDispatch:
         spy = SpyExecutor()
         pf = PythonPacketFunction(add, output_keys="result", executor=spy)
         packet = Packet({"x": 1, "y": 2})
-        result = pf.call(packet)
+        result, _captured = pf.call(packet)
         assert result is not None
         assert result.as_dict()["result"] == 3
         assert len(spy.calls) == 1
@@ -812,7 +822,7 @@ class TestGenericExecutorDispatch:
         pf = PythonPacketFunction(add, output_keys="result", executor=spy)
         pf.set_active(False)
         packet = Packet({"x": 1, "y": 2})
-        result = pf.call(packet)
+        result, _captured = pf.call(packet)
         assert result is None
         assert len(spy.calls) == 0
 
@@ -823,7 +833,7 @@ class TestGenericExecutorDispatch:
         spy = ConcurrentSpyExecutor()
         pf = PythonPacketFunction(add, output_keys="result", executor=spy)
         packet = Packet({"x": 1, "y": 2})
-        result = asyncio.run(pf.async_call(packet))
+        result, _captured = asyncio.run(pf.async_call(packet))
         assert result is not None
         assert result.as_dict()["result"] == 3
         assert len(spy.async_calls) == 1
@@ -844,16 +854,18 @@ class TestLocalExecutorCallable:
             return x + y
 
         executor = LocalExecutor()
-        result = executor.execute_callable(async_add, {"x": 5, "y": 3})
+        result, captured = executor.execute_callable(async_add, {"x": 5, "y": 3})
         assert result == 8
+        assert captured.success is True
 
     def test_async_execute_callable_with_sync_fn(self):
         """LocalExecutor.async_execute_callable handles sync fns via run_in_executor."""
         import asyncio
 
         executor = LocalExecutor()
-        result = asyncio.run(executor.async_execute_callable(add, {"x": 10, "y": 20}))
+        result, captured = asyncio.run(executor.async_execute_callable(add, {"x": 10, "y": 20}))
         assert result == 30
+        assert captured.success is True
 
     def test_async_execute_callable_with_async_fn(self):
         """LocalExecutor.async_execute_callable awaits async functions directly."""
@@ -863,7 +875,8 @@ class TestLocalExecutorCallable:
             return x + y
 
         executor = LocalExecutor()
-        result = asyncio.run(
+        result, captured = asyncio.run(
             executor.async_execute_callable(async_add, {"x": 7, "y": 8})
         )
         assert result == 15
+        assert captured.success is True
