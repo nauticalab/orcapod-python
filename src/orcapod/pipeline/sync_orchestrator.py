@@ -73,45 +73,47 @@ class SyncPipelineOrchestrator:
         if self._observer is not None:
             self._observer.on_run_start(effective_run_id)
 
-        topo_order = list(nx.topological_sort(graph))
-        buffers: dict[Any, list[tuple[TagProtocol, PacketProtocol]]] = {}
-        processed: set[Any] = set()
+        try:
+            topo_order = list(nx.topological_sort(graph))
+            buffers: dict[Any, list[tuple[TagProtocol, PacketProtocol]]] = {}
+            processed: set[Any] = set()
 
-        for node in topo_order:
-            if is_source_node(node):
-                buffers[node] = node.execute(observer=self._observer)
-            elif is_function_node(node):
-                upstream_buf = self._gather_upstream(node, graph, buffers)
-                upstream_node = list(graph.predecessors(node))[0]
-                input_stream = self._materialize_as_stream(upstream_buf, upstream_node)
-                buffers[node] = node.execute(
-                    input_stream,
-                    observer=self._observer,
-                    error_policy=self._error_policy,
-                )
-            elif is_operator_node(node):
-                upstream_buffers = self._gather_upstream_multi(node, graph, buffers)
-                input_streams = [
-                    self._materialize_as_stream(buf, upstream_node)
-                    for buf, upstream_node in upstream_buffers
-                ]
-                buffers[node] = node.execute(*input_streams, observer=self._observer)
-            else:
-                raise TypeError(
-                    f"Unknown node type: {getattr(node, 'node_type', None)!r}"
-                )
+            for node in topo_order:
+                if is_source_node(node):
+                    buffers[node] = node.execute(observer=self._observer)
+                elif is_function_node(node):
+                    upstream_buf = self._gather_upstream(node, graph, buffers)
+                    upstream_node = list(graph.predecessors(node))[0]
+                    input_stream = self._materialize_as_stream(upstream_buf, upstream_node)
+                    buffers[node] = node.execute(
+                        input_stream,
+                        observer=self._observer,
+                        error_policy=self._error_policy,
+                    )
+                elif is_operator_node(node):
+                    upstream_buffers = self._gather_upstream_multi(node, graph, buffers)
+                    input_streams = [
+                        self._materialize_as_stream(buf, upstream_node)
+                        for buf, upstream_node in upstream_buffers
+                    ]
+                    buffers[node] = node.execute(*input_streams, observer=self._observer)
+                else:
+                    raise TypeError(
+                        f"Unknown node type: {getattr(node, 'node_type', None)!r}"
+                    )
 
-            processed.add(node)
+                processed.add(node)
+
+                if not materialize_results:
+                    self._gc_buffers(node, graph, buffers, processed)
 
             if not materialize_results:
-                self._gc_buffers(node, graph, buffers, processed)
+                buffers.clear()
 
-        if not materialize_results:
-            buffers.clear()
-
-        if self._observer is not None:
-            self._observer.on_run_end(effective_run_id)
-        return OrchestratorResult(node_outputs=buffers)
+            return OrchestratorResult(node_outputs=buffers)
+        finally:
+            if self._observer is not None:
+                self._observer.on_run_end(effective_run_id)
 
     @staticmethod
     def _gather_upstream(
