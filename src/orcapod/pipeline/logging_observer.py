@@ -20,45 +20,50 @@ Typical usage::
 
 Log schema (fixed columns)
 --------------------------
+Fixed columns are prefixed with ``__`` to avoid collision with user-defined
+tag column names.
+
 .. list-table::
    :header-rows: 1
 
    * - Column
      - Type
      - Description
-   * - ``log_id``
+   * - ``__log_id``
      - ``large_utf8``
      - UUID unique to this log entry
-   * - ``run_id``
+   * - ``__run_id``
      - ``large_utf8``
      - UUID of the pipeline run (from ``on_run_start``)
-   * - ``node_label``
+   * - ``__node_label``
      - ``large_utf8``
      - Label of the function node
-   * - ``node_hash``
+   * - ``__node_hash``
      - ``large_utf8``
      - Pipeline hash of the function node
-   * - ``stdout``
+   * - ``__stdout``
      - ``large_utf8``
      - Captured standard output
-   * - ``stderr``
+   * - ``__stderr``
      - ``large_utf8``
      - Captured standard error
-   * - ``python_logs``
+   * - ``__python_logs``
      - ``large_utf8``
      - Python ``logging`` output captured during execution
-   * - ``traceback``
+   * - ``__traceback``
      - ``large_utf8``
      - Full traceback on failure; ``None`` on success
-   * - ``success``
+   * - ``__success``
      - ``bool_``
      - ``True`` if the packet function returned normally
-   * - ``timestamp``
+   * - ``__timestamp``
      - ``large_utf8``
      - ISO-8601 UTC timestamp when ``record()`` was called
 
 In addition, each tag key from the packet's tag becomes a separate
-``large_utf8`` column (queryable, not JSON-encoded).
+``large_utf8`` column (queryable, not JSON-encoded).  Tag columns use
+bare names (no prefix), so they are always distinguishable from fixed
+columns.
 
 Log storage
 -----------
@@ -127,18 +132,18 @@ class PacketLogger:
         log_id = str(uuid7())
         timestamp = datetime.now(timezone.utc).isoformat()
 
-        # Fixed columns
+        # Fixed columns — prefixed with "__" to avoid collision with user tag keys
         columns: dict[str, pa.Array] = {
-            "log_id":      pa.array([log_id],               type=pa.large_utf8()),
-            "run_id":      pa.array([self._run_id],          type=pa.large_utf8()),
-            "node_label":  pa.array([self._node_label],      type=pa.large_utf8()),
-            "node_hash":   pa.array([self._node_hash],       type=pa.large_utf8()),
-            "stdout":      pa.array([captured.stdout],        type=pa.large_utf8()),
-            "stderr":      pa.array([captured.stderr],        type=pa.large_utf8()),
-            "python_logs": pa.array([captured.python_logs],  type=pa.large_utf8()),
-            "traceback":   pa.array([captured.traceback],    type=pa.large_utf8()),
-            "success":     pa.array([captured.success],      type=pa.bool_()),
-            "timestamp":   pa.array([timestamp],             type=pa.large_utf8()),
+            "__log_id":      pa.array([log_id],               type=pa.large_utf8()),
+            "__run_id":      pa.array([self._run_id],          type=pa.large_utf8()),
+            "__node_label":  pa.array([self._node_label],      type=pa.large_utf8()),
+            "__node_hash":   pa.array([self._node_hash],       type=pa.large_utf8()),
+            "__stdout":      pa.array([captured.stdout],        type=pa.large_utf8()),
+            "__stderr":      pa.array([captured.stderr],        type=pa.large_utf8()),
+            "__python_logs": pa.array([captured.python_logs],  type=pa.large_utf8()),
+            "__traceback":   pa.array([captured.traceback],    type=pa.large_utf8()),
+            "__success":     pa.array([captured.success],      type=pa.bool_()),
+            "__timestamp":   pa.array([timestamp],             type=pa.large_utf8()),
         }
 
         # Dynamic tag columns — each tag key becomes its own column
