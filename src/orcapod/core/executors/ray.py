@@ -191,10 +191,13 @@ class RayExecutor(PacketFunctionExecutorBase):
         This means the Ray cluster workers do **not** need ``orcapod`` installed
         — only the standard library is required on the worker side.
 
-        The wrapper returns a plain 6-tuple ``(raw_result, stdout, stderr,
-        python_logs, traceback_str, success)`` so no orcapod types cross the
-        Ray object store; the driver reconstructs :class:`CapturedLogs` from
-        the tuple.
+        On success the wrapper returns a 4-tuple
+        ``(raw_result, stdout, stderr, python_logs)``.
+
+        On failure the wrapper **raises** a ``_CapturedTaskError`` that carries
+        the captured I/O alongside the original exception.  This lets Ray's
+        normal error handling proceed (retries, ``RayTaskError`` wrapping, etc.)
+        while still delivering captured output to the driver.
         """
         def _capture(fn: Any, kwargs: dict) -> tuple:
             import io
@@ -203,6 +206,26 @@ class RayExecutor(PacketFunctionExecutorBase):
             import sys
             import tempfile
             import traceback as _tb
+
+            # -- _CapturedTaskError defined inline so cloudpickle serializes
+            #    it by bytecode — no orcapod import needed on the worker. --
+
+            class _CapturedTaskError(Exception):
+                """Wraps a user exception with captured I/O from the worker."""
+
+                def __init__(self, cause, stdout, stderr, python_logs, tb):
+                    super().__init__(str(cause))
+                    self.cause = cause
+                    self.captured_stdout = stdout
+                    self.captured_stderr = stderr
+                    self.captured_python_logs = python_logs
+                    self.captured_traceback = tb
+
+                def __reduce__(self):
+                    return (self.__class__, (
+                        self.cause, self.captured_stdout, self.captured_stderr,
+                        self.captured_python_logs, self.captured_traceback,
+                    ))
 
             stdout_tmp = tempfile.TemporaryFile()
             stderr_tmp = tempfile.TemporaryFile()
@@ -227,8 +250,7 @@ class RayExecutor(PacketFunctionExecutorBase):
             root_logger.addHandler(handler)
 
             raw_result = None
-            success = True
-            tb_str = None
+            exc_info: tuple | None = None
             try:
                 sys.stdout.flush()
                 sys.stderr.flush()
@@ -238,9 +260,8 @@ class RayExecutor(PacketFunctionExecutorBase):
                 sys.stderr = sys_stderr_buf
                 try:
                     raw_result = fn(**kwargs)
-                except Exception:
-                    success = False
-                    tb_str = _tb.format_exc()
+                except Exception as e:
+                    exc_info = (e, _tb.format_exc())
             finally:
                 sys.stdout = orig_sys_stdout
                 sys.stderr = orig_sys_stderr
@@ -263,7 +284,18 @@ class RayExecutor(PacketFunctionExecutorBase):
                 stdout_tmp.close()
                 stderr_tmp.close()
 
-            return raw_result, cap_stdout, cap_stderr, "\n".join(log_records), tb_str, success
+            python_logs = "\n".join(log_records)
+
+            if exc_info is not None:
+                raise _CapturedTaskError(
+                    cause=exc_info[0],
+                    stdout=cap_stdout,
+                    stderr=cap_stderr,
+                    python_logs=python_logs,
+                    tb=exc_info[1],
+                ) from exc_info[0]
+
+            return raw_result, cap_stdout, cap_stderr, python_logs
 
         return _capture
 
@@ -279,10 +311,14 @@ class RayExecutor(PacketFunctionExecutorBase):
 
         The capture wrapper is serialized by bytecode (not module reference) so
         the Ray cluster workers do not need ``orcapod`` installed.
+
+        On success, returns the raw result and records captured I/O to *logger*.
+        On failure, the worker raises a ``_CapturedTaskError`` which Ray
+        propagates via ``RayTaskError``.  The driver extracts the captured I/O,
+        records it to *logger*, and re-raises the **original** user exception
+        so that Ray's error handling (retries, etc.) is not disrupted.
         """
         import ray
-
-        from orcapod.pipeline.logging_capture import CapturedLogs
 
         self._ensure_ray_initialized()
         wrapper = self._make_capture_wrapper()
@@ -290,16 +326,14 @@ class RayExecutor(PacketFunctionExecutorBase):
         wrapper.__qualname__ = fn.__qualname__
         remote_fn = ray.remote(**self._build_remote_opts())(wrapper)
         ref = remote_fn.remote(fn, kwargs)
-        raw, stdout, stderr, python_logs, tb, success = ray.get(ref)
 
-        captured = CapturedLogs(
-            stdout=stdout, stderr=stderr, python_logs=python_logs,
-            traceback=tb, success=success,
-        )
-        if logger is not None:
-            logger.record(captured)
-        if not success:
-            raise RuntimeError(tb or "Ray worker execution failed")
+        try:
+            raw, stdout, stderr, python_logs = ray.get(ref)
+        except Exception as exc:
+            self._handle_worker_error(exc, logger)
+            raise  # unreachable — _handle_worker_error always raises
+
+        self._record_success(stdout, stderr, python_logs, logger)
         return raw
 
     async def async_execute_callable(
@@ -313,27 +347,74 @@ class RayExecutor(PacketFunctionExecutorBase):
         """Async counterpart of :meth:`execute_callable`."""
         import ray
 
-        from orcapod.pipeline.logging_capture import CapturedLogs
-
         self._ensure_ray_initialized()
         wrapper = self._make_capture_wrapper()
         wrapper.__name__ = fn.__name__
         wrapper.__qualname__ = fn.__qualname__
         remote_fn = ray.remote(**self._build_remote_opts())(wrapper)
         ref = remote_fn.remote(fn, kwargs)
-        raw, stdout, stderr, python_logs, tb, success = await asyncio.wrap_future(
-            ref.future()
-        )
 
-        captured = CapturedLogs(
-            stdout=stdout, stderr=stderr, python_logs=python_logs,
-            traceback=tb, success=success,
-        )
-        if logger is not None:
-            logger.record(captured)
-        if not success:
-            raise RuntimeError(tb or "Ray worker execution failed")
+        try:
+            raw, stdout, stderr, python_logs = await asyncio.wrap_future(
+                ref.future()
+            )
+        except Exception as exc:
+            self._handle_worker_error(exc, logger)
+            raise  # unreachable — _handle_worker_error always raises
+
+        self._record_success(stdout, stderr, python_logs, logger)
         return raw
+
+    @staticmethod
+    def _record_success(
+        stdout: str,
+        stderr: str,
+        python_logs: str,
+        logger: "PacketExecutionLoggerProtocol | None",
+    ) -> None:
+        """Record a successful execution to the logger."""
+        if logger is None:
+            return
+        from orcapod.pipeline.logging_capture import CapturedLogs
+
+        logger.record(CapturedLogs(
+            stdout=stdout, stderr=stderr, python_logs=python_logs, success=True,
+        ))
+
+    @staticmethod
+    def _handle_worker_error(
+        exc: Exception,
+        logger: "PacketExecutionLoggerProtocol | None",
+    ) -> None:
+        """Extract captured I/O from a worker error, record it, and re-raise the original cause.
+
+        The worker's ``_CapturedTaskError`` is wrapped by Ray in a
+        ``RayTaskError``.  We reach through to get the captured output
+        and the original user exception, then re-raise the original so
+        that the caller sees the real exception type (not a synthetic
+        ``RuntimeError``).
+
+        If the exception is not from our wrapper (e.g. a Ray system error),
+        it is re-raised as-is.
+        """
+        from orcapod.pipeline.logging_capture import CapturedLogs
+
+        # Ray wraps worker exceptions: exc.cause is the _CapturedTaskError
+        task_err = getattr(exc, "cause", None)
+        if task_err is not None and hasattr(task_err, "captured_stdout"):
+            captured = CapturedLogs(
+                stdout=task_err.captured_stdout,
+                stderr=task_err.captured_stderr,
+                python_logs=task_err.captured_python_logs,
+                traceback=task_err.captured_traceback,
+                success=False,
+            )
+            if logger is not None:
+                logger.record(captured)
+            # Re-raise the original user exception
+            raise task_err.cause from exc
+        # Not our wrapper error (Ray system error, etc.) — propagate as-is
+        raise
 
     def with_options(self, **opts: Any) -> "RayExecutor":
         """Return a new ``RayExecutor`` with the given options merged in.

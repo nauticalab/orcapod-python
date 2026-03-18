@@ -259,8 +259,9 @@ class TestLocalCaptureContext:
 class TestRayCaptureWrapper:
     """Tests exercise :meth:`RayExecutor._make_capture_wrapper` directly.
 
-    The wrapper runs in the same process (no Ray cluster needed) and
-    returns a plain 6-tuple that the driver reassembles into CapturedLogs.
+    The wrapper runs in the same process (no Ray cluster needed).
+    On success it returns a 4-tuple; on failure it raises a
+    ``_CapturedTaskError`` carrying the captured I/O.
     """
 
     @staticmethod
@@ -269,10 +270,21 @@ class TestRayCaptureWrapper:
         from orcapod.core.executors.ray import RayExecutor
 
         wrapper = RayExecutor._make_capture_wrapper()
-        raw, stdout, stderr, python_logs, tb, success = wrapper(fn, kwargs)
+        try:
+            raw, stdout, stderr, python_logs = wrapper(fn, kwargs)
+        except Exception as exc:
+            if hasattr(exc, "captured_stdout"):
+                return None, CapturedLogs(
+                    stdout=exc.captured_stdout,
+                    stderr=exc.captured_stderr,
+                    python_logs=exc.captured_python_logs,
+                    traceback=exc.captured_traceback,
+                    success=False,
+                )
+            raise
         return raw, CapturedLogs(
             stdout=stdout, stderr=stderr, python_logs=python_logs,
-            traceback=tb, success=success,
+            success=True,
         )
 
     def test_captures_stdout(self):
