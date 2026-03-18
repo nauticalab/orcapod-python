@@ -647,6 +647,7 @@ class PythonPacketFunction(PacketFunctionBase[PythonFunctionExecutorProtocol]):
         """
         return {
             "packet_function_type_id": self.packet_function_type_id,
+            "uri": list(self.uri),
             "config": {
                 "module_path": self._function.__module__,
                 "callable_name": self._function_name,

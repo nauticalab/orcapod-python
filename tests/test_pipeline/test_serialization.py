@@ -1067,3 +1067,190 @@ class TestLoadEdgeCases:
 
         assert loaded.function_database is not None
         assert type(loaded.function_database) is DeltaTableDatabase
+
+
+# ---------------------------------------------------------------------------
+# Pipeline load with unavailable function (Tasks 9-10)
+# ---------------------------------------------------------------------------
+
+
+def _double_age(age: int) -> tuple[int, int]:
+    """A simple function that doubles age and preserves original."""
+    return age * 2, age
+
+
+def _corrupt_function_module_path(save_path):
+    """Edit saved pipeline JSON to make function module unimportable."""
+    with open(save_path) as f:
+        data = json.load(f)
+    for node in data["nodes"].values():
+        if node.get("node_type") == "function":
+            pf_config = node["function_pod"]["packet_function"]["config"]
+            pf_config["module_path"] = "nonexistent.module.that.does.not.exist"
+    with open(save_path, "w") as f:
+        json.dump(data, f)
+
+
+class TestPipelineLoadWithUnavailableFunction:
+    """Tests for loading a pipeline when the function cannot be imported."""
+
+    @staticmethod
+    def _write_csv(path, rows):
+        """Write a list of dicts as a CSV file."""
+        fieldnames = list(rows[0].keys())
+        with open(path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+    def _build_and_save_pipeline(self, tmp_path):
+        """Build pipeline with CSV source and function pod, run it, save to JSON.
+
+        Uses CSVSource (reconstructable) so the source survives load and the
+        function node enters the proxy path rather than the pure read-only path.
+
+        Returns:
+            Tuple of (save_path, db_path).
+        """
+        csv_path = str(tmp_path / "data.csv")
+        self._write_csv(
+            csv_path,
+            [{"name": "alice", "age": "30"}, {"name": "bob", "age": "25"}],
+        )
+
+        db_path = str(tmp_path / "db")
+        db = DeltaTableDatabase(base_path=db_path)
+        source = CSVSource(
+            file_path=csv_path,
+            tag_columns=["name"],
+            source_id="people",
+        )
+        pf = PythonPacketFunction(
+            function=_double_age,
+            output_keys=["doubled_age", "original_age"],
+            function_name="_double_age",
+        )
+        pod = FunctionPod(packet_function=pf)
+        pipeline = Pipeline(name="proxy_test", pipeline_database=db)
+        with pipeline:
+            pod.process(source, label="transform")
+        pipeline.run()
+        db.flush()
+
+        save_path = str(tmp_path / "pipeline.json")
+        pipeline.save(save_path)
+        return save_path, db_path
+
+    def _build_and_save_pipeline_with_operator(self, tmp_path):
+        """Build pipeline: CSV source -> function_pod -> SelectPacketColumns.
+
+        Returns:
+            Tuple of (save_path, db_path).
+        """
+        from orcapod.core.operators import SelectPacketColumns
+
+        csv_path = str(tmp_path / "data.csv")
+        self._write_csv(
+            csv_path,
+            [{"name": "alice", "age": "30"}, {"name": "bob", "age": "25"}],
+        )
+
+        db_path = str(tmp_path / "db")
+        db = DeltaTableDatabase(base_path=db_path)
+        source = CSVSource(
+            file_path=csv_path,
+            tag_columns=["name"],
+            source_id="people",
+        )
+        pf = PythonPacketFunction(
+            function=_double_age,
+            output_keys=["doubled_age", "original_age"],
+            function_name="_double_age",
+        )
+        pod = FunctionPod(packet_function=pf)
+        select_op = SelectPacketColumns(columns=["doubled_age"])
+
+        pipeline = Pipeline(name="proxy_op_test", pipeline_database=db)
+        with pipeline:
+            fn_result = pod.process(source, label="transform")
+            select_op.process(fn_result, label="select_col")
+        pipeline.run()
+        db.flush()
+
+        save_path = str(tmp_path / "pipeline.json")
+        pipeline.save(save_path)
+        return save_path, db_path
+
+    # -- Task 9 tests --
+
+    def test_load_with_unavailable_function_has_read_only_status(self, tmp_path):
+        """Loading a pipeline with corrupted module_path yields READ_ONLY function node."""
+        save_path, _ = self._build_and_save_pipeline(tmp_path)
+        _corrupt_function_module_path(save_path)
+
+        loaded = Pipeline.load(save_path, mode="full")
+
+        fn_nodes = [
+            n
+            for n in loaded.compiled_nodes.values()
+            if n.node_type == "function"
+        ]
+        assert len(fn_nodes) == 1
+        assert fn_nodes[0].load_status == LoadStatus.READ_ONLY
+
+    def test_load_with_unavailable_function_can_get_all_records(self, tmp_path):
+        """A READ_ONLY function node with proxy can retrieve all cached records."""
+        save_path, _ = self._build_and_save_pipeline(tmp_path)
+        _corrupt_function_module_path(save_path)
+
+        loaded = Pipeline.load(save_path, mode="full")
+        fn_node = loaded.compiled_nodes["transform"]
+
+        records = fn_node.get_all_records()
+        assert records is not None
+        assert records.num_rows == 2
+
+    def test_load_with_unavailable_function_iter_packets_yields_cached(self, tmp_path):
+        """A READ_ONLY function node with proxy yields cached packets via iter_packets."""
+        save_path, _ = self._build_and_save_pipeline(tmp_path)
+        _corrupt_function_module_path(save_path)
+
+        loaded = Pipeline.load(save_path, mode="full")
+        fn_node = loaded.compiled_nodes["transform"]
+
+        packets = list(fn_node.iter_packets())
+        assert len(packets) == 2
+
+        # Verify actual data values
+        doubled_ages = sorted(p.as_dict()["doubled_age"] for _, p in packets)
+        assert doubled_ages == [50, 60]
+
+        original_ages = sorted(p.as_dict()["original_age"] for _, p in packets)
+        assert original_ages == [25, 30]
+
+    # -- Task 10 test --
+
+    def test_downstream_operator_computes_from_cached(self, tmp_path):
+        """Operator downstream of READ_ONLY function node can compute from cached data."""
+        save_path, _ = self._build_and_save_pipeline_with_operator(tmp_path)
+        _corrupt_function_module_path(save_path)
+
+        loaded = Pipeline.load(save_path, mode="full")
+
+        # Function node should be READ_ONLY (proxy)
+        fn_node = loaded.compiled_nodes["transform"]
+        assert fn_node.load_status == LoadStatus.READ_ONLY
+
+        # Operator node should be FULL (it can reconstruct from cached upstream)
+        op_node = loaded.compiled_nodes["select_col"]
+        assert op_node.load_status == LoadStatus.FULL
+
+        # Operator should produce correct results
+        table = op_node.as_table()
+        assert table.num_rows == 2
+        assert "doubled_age" in table.column_names
+        # original_age should have been dropped by SelectPacketColumns
+        assert "original_age" not in table.column_names
+
+        doubled_ages = sorted(table.column("doubled_age").to_pylist())
+        assert doubled_ages == [50, 60]

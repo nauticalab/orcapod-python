@@ -11,6 +11,15 @@ class DuplicateTagError(ValueError):
     pass
 
 
+class PacketFunctionUnavailableError(RuntimeError):
+    """Raised when a packet function proxy is invoked without a bound function.
+
+    This occurs when a pipeline is loaded in an environment where the
+    original packet function is not available. Only cached results can
+    be accessed.
+    """
+
+
 class FieldNotResolvableError(LookupError):
     """
     Raised when a source cannot resolve a field value for a given record ID.

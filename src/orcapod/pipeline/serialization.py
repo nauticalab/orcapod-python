@@ -199,28 +199,54 @@ def resolve_operator_from_config(config: dict[str, Any]) -> Any:
     return cls.from_config(config)
 
 
-def resolve_packet_function_from_config(config: dict[str, Any]) -> Any:
+def resolve_packet_function_from_config(
+    config: dict[str, Any],
+    *,
+    fallback_to_proxy: bool = False,
+) -> Any:
     """Reconstruct a packet function from a config dict.
 
     Args:
         config: Dict with at least a ``"packet_function_type_id"`` key matching
             a registered packet function type.
+        fallback_to_proxy: If ``True`` and reconstruction fails (unknown type,
+            ``ImportError``, ``AttributeError``, etc.), return a
+            ``PacketFunctionProxy`` instead of raising.
 
     Returns:
-        A new packet function instance constructed from the config.
+        A new packet function instance constructed from the config, or a
+        ``PacketFunctionProxy`` if reconstruction fails and
+        *fallback_to_proxy* is ``True``.
 
     Raises:
-        ValueError: If the type ID is missing or unknown.
+        ValueError: If the type ID is missing or unknown and
+            *fallback_to_proxy* is ``False``.
     """
     _ensure_registries()
     type_id = config.get("packet_function_type_id")
     if type_id not in PACKET_FUNCTION_REGISTRY:
+        if fallback_to_proxy:
+            from orcapod.core.packet_function_proxy import PacketFunctionProxy
+
+            return PacketFunctionProxy.from_config(config)
         raise ValueError(
             f"Unknown packet function type: {type_id!r}. "
             f"Known types: {sorted(PACKET_FUNCTION_REGISTRY.keys())}"
         )
     cls = PACKET_FUNCTION_REGISTRY[type_id]
-    return cls.from_config(config)
+    try:
+        return cls.from_config(config)
+    except (ImportError, ModuleNotFoundError, AttributeError) as exc:
+        if fallback_to_proxy:
+            logger.warning(
+                "Could not reconstruct packet function from config (%s); "
+                "returning PacketFunctionProxy.",
+                exc,
+            )
+            from orcapod.core.packet_function_proxy import PacketFunctionProxy
+
+            return PacketFunctionProxy.from_config(config)
+        raise
 
 
 def resolve_source_from_config(
@@ -597,3 +623,16 @@ def _build_arrow_primitive_types() -> dict[str, Any]:
 
 
 _ARROW_PRIMITIVE_TYPES: dict[str, Any] = _build_arrow_primitive_types()
+
+
+# ---------------------------------------------------------------------------
+# Builtin Python type map for schema deserialization from to_config() format
+# ---------------------------------------------------------------------------
+
+_BUILTIN_TYPE_MAP: dict[str, type] = {
+    "<class 'int'>": int,
+    "<class 'float'>": float,
+    "<class 'str'>": str,
+    "<class 'bool'>": bool,
+    "<class 'bytes'>": bytes,
+}

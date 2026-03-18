@@ -294,3 +294,147 @@ class TestSchemaRoundTrip:
         schema = {"z": int, "a": str, "m": float}
         result = self._round_trip(schema)
         assert list(result.keys()) == ["z", "a", "m"]
+
+
+# ---------------------------------------------------------------------------
+# PacketFunction proxy fallback
+# ---------------------------------------------------------------------------
+
+
+class TestResolvePacketFunctionFallbackToProxy:
+    """resolve_packet_function_from_config with fallback_to_proxy."""
+
+    def test_resolve_packet_function_fallback_to_proxy(self):
+        from orcapod.core.packet_function_proxy import PacketFunctionProxy
+        from orcapod.pipeline.serialization import resolve_packet_function_from_config
+
+        config = {
+            "packet_function_type_id": "python.function.v0",
+            "config": {
+                "module_path": "nonexistent.module.that.does.not.exist",
+                "callable_name": "some_func",
+                "version": "v1.0",
+                "input_packet_schema": {"x": "int64"},
+                "output_packet_schema": {"y": "float64"},
+                "output_keys": ["y"],
+            },
+        }
+        # Without fallback, should raise ImportError/ModuleNotFoundError
+        with pytest.raises((ImportError, ModuleNotFoundError)):
+            resolve_packet_function_from_config(config)
+
+        # With fallback, should return proxy
+        result = resolve_packet_function_from_config(config, fallback_to_proxy=True)
+        assert isinstance(result, PacketFunctionProxy)
+        assert result.canonical_function_name == "some_func"
+
+    def test_unknown_type_id_fallback(self):
+        from orcapod.core.packet_function_proxy import PacketFunctionProxy
+        from orcapod.pipeline.serialization import resolve_packet_function_from_config
+
+        config = {
+            "packet_function_type_id": "unknown.type.v99",
+            "config": {
+                "callable_name": "mystery",
+                "version": "v1.0",
+                "input_packet_schema": {"a": "int64"},
+                "output_packet_schema": {"b": "int64"},
+                "output_keys": ["b"],
+            },
+        }
+        with pytest.raises(ValueError, match="Unknown packet function type"):
+            resolve_packet_function_from_config(config)
+
+        result = resolve_packet_function_from_config(config, fallback_to_proxy=True)
+        assert isinstance(result, PacketFunctionProxy)
+        assert result.canonical_function_name == "mystery"
+
+
+# ---------------------------------------------------------------------------
+# FunctionPod.from_config proxy fallback
+# ---------------------------------------------------------------------------
+
+
+class TestFunctionPodFromConfigFallbackToProxy:
+    """FunctionPod.from_config with fallback_to_proxy."""
+
+    def test_function_pod_from_config_fallback_to_proxy(self):
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.packet_function_proxy import PacketFunctionProxy
+
+        config = {
+            "uri": ["some_func", "hash123", "v1", "python.function.v0"],
+            "packet_function": {
+                "packet_function_type_id": "python.function.v0",
+                "uri": ["some_func", "hash123", "v1", "python.function.v0"],
+                "config": {
+                    "module_path": "nonexistent.module",
+                    "callable_name": "some_func",
+                    "version": "v1.0",
+                    "input_packet_schema": {"x": "int64"},
+                    "output_packet_schema": {"y": "float64"},
+                    "output_keys": ["y"],
+                },
+            },
+            "node_config": None,
+        }
+
+        with pytest.raises((ImportError, ModuleNotFoundError)):
+            FunctionPod.from_config(config)
+
+        pod = FunctionPod.from_config(config, fallback_to_proxy=True)
+        assert isinstance(pod.packet_function, PacketFunctionProxy)
+        assert pod.packet_function.canonical_function_name == "some_func"
+        # URI comes from the packet function config
+        assert pod.packet_function.uri == (
+            "some_func",
+            "hash123",
+            "v1",
+            "python.function.v0",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Schema round-trip consistency
+# ---------------------------------------------------------------------------
+
+
+class TestSchemaRoundTripConsistency:
+    """Verify serialize/deserialize round-trips preserve schema structure and hashes."""
+
+    def test_schema_round_trip_consistency(self):
+        """Verify deserialize_schema(serialize_schema(schema)) produces equivalent schemas."""
+        from orcapod.contexts import resolve_context
+
+        tc = resolve_context(None).type_converter
+
+        schemas = [
+            Schema({"x": int, "y": float, "name": str}),
+            Schema({"flag": bool, "data": bytes}),
+            Schema({"items": list[int], "mapping": dict[str, float]}),
+        ]
+        for schema in schemas:
+            serialized = serialize_schema(schema, type_converter=tc)
+            deserialized = Schema(deserialize_schema(serialized, type_converter=tc))
+            assert set(deserialized.keys()) == set(schema.keys()), (
+                f"Keys mismatch: {set(schema.keys())} vs {set(deserialized.keys())}"
+            )
+
+    def test_schema_round_trip_hash_consistency(self):
+        """Verify that schema hash is preserved through serialize/deserialize."""
+        from orcapod.contexts import resolve_context
+
+        ctx = resolve_context(None)
+        hasher = ctx.semantic_hasher
+        tc = ctx.type_converter
+
+        schema = Schema({"age": int, "name": str, "score": float})
+        original_hash = hasher.hash_object(schema).to_string()
+
+        serialized = serialize_schema(schema, type_converter=tc)
+        deserialized = Schema(deserialize_schema(serialized, type_converter=tc))
+        round_trip_hash = hasher.hash_object(deserialized).to_string()
+
+        assert original_hash == round_trip_hash, (
+            f"Hash diverged: {original_hash} vs {round_trip_hash}"
+        )

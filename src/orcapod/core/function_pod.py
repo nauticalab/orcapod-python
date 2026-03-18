@@ -319,11 +319,18 @@ class FunctionPod(_FunctionPodBase):
         return config
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "FunctionPod":
+    def from_config(
+        cls,
+        config: dict[str, Any],
+        *,
+        fallback_to_proxy: bool = False,
+    ) -> "FunctionPod":
         """Reconstruct a FunctionPod from a config dict.
 
         Args:
             config: A dict as produced by :meth:`to_config`.
+            fallback_to_proxy: If ``True`` and the packet function cannot be
+                resolved, use a ``PacketFunctionProxy`` instead of raising.
 
         Returns:
             A new ``FunctionPod`` instance.
@@ -331,7 +338,9 @@ class FunctionPod(_FunctionPodBase):
         from orcapod.pipeline.serialization import resolve_packet_function_from_config
 
         pf_config = config["packet_function"]
-        packet_function = resolve_packet_function_from_config(pf_config)
+        packet_function = resolve_packet_function_from_config(
+            pf_config, fallback_to_proxy=fallback_to_proxy
+        )
 
         node_config = None
         if config.get("node_config") is not None:
