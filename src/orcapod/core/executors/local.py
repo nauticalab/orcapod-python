@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.executors.base import PacketFunctionExecutorBase
 
 if TYPE_CHECKING:
-    from orcapod.pipeline.logging_capture import CapturedLogs
     from orcapod.protocols.core_protocols import PacketFunctionProtocol, PacketProtocol
+    from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
 
 
 class LocalExecutor(PacketFunctionExecutorBase):
@@ -29,16 +29,20 @@ class LocalExecutor(PacketFunctionExecutorBase):
 
     def execute(
         self,
-        packet_function: PacketFunctionProtocol,
-        packet: PacketProtocol,
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+        packet_function: "PacketFunctionProtocol",
+        packet: "PacketProtocol",
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> "PacketProtocol | None":
         return packet_function.direct_call(packet)
 
     async def async_execute(
         self,
-        packet_function: PacketFunctionProtocol,
-        packet: PacketProtocol,
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+        packet_function: "PacketFunctionProtocol",
+        packet: "PacketProtocol",
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> "PacketProtocol | None":
         return await packet_function.direct_async_call(packet)
 
     # -- PythonFunctionExecutorProtocol --
@@ -48,13 +52,12 @@ class LocalExecutor(PacketFunctionExecutorBase):
         fn: Callable[..., Any],
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
-    ) -> "tuple[Any, CapturedLogs]":
-        from orcapod.pipeline.logging_capture import CapturedLogs, LocalCaptureContext
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> Any:
+        from orcapod.pipeline.logging_capture import LocalCaptureContext
 
         ctx = LocalCaptureContext()
-        raw_result = None
-        success = True
-        tb: str | None = None
         with ctx:
             try:
                 if inspect.iscoroutinefunction(fn):
@@ -62,9 +65,15 @@ class LocalExecutor(PacketFunctionExecutorBase):
                 else:
                     raw_result = fn(**kwargs)
             except Exception:
-                success = False
                 tb = _traceback_module.format_exc()
-        return raw_result, ctx.get_captured(success=success, tb=tb)
+                captured = ctx.get_captured(success=False, tb=tb)
+                if logger is not None:
+                    logger.record(captured)
+                raise
+        captured = ctx.get_captured(success=True)
+        if logger is not None:
+            logger.record(captured)
+        return raw_result
 
     @staticmethod
     def _run_async_sync(fn: Callable[..., Any], kwargs: dict[str, Any]) -> Any:
@@ -84,24 +93,36 @@ class LocalExecutor(PacketFunctionExecutorBase):
         fn: Callable[..., Any],
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
-    ) -> "tuple[Any, CapturedLogs]":
-        from orcapod.pipeline.logging_capture import CapturedLogs, LocalCaptureContext
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> Any:
+        from orcapod.pipeline.logging_capture import LocalCaptureContext
 
         ctx = LocalCaptureContext()
-        raw_result = None
-        success = True
-        tb: str | None = None
         with ctx:
             try:
                 if inspect.iscoroutinefunction(fn):
                     raw_result = await fn(**kwargs)
                 else:
+                    import contextvars
+                    import functools
+
                     loop = asyncio.get_running_loop()
-                    raw_result = await loop.run_in_executor(None, lambda: fn(**kwargs))
+                    task_ctx = contextvars.copy_context()
+                    raw_result = await loop.run_in_executor(
+                        None,
+                        functools.partial(task_ctx.run, fn, **kwargs),
+                    )
             except Exception:
-                success = False
                 tb = _traceback_module.format_exc()
-        return raw_result, ctx.get_captured(success=success, tb=tb)
+                captured = ctx.get_captured(success=False, tb=tb)
+                if logger is not None:
+                    logger.record(captured)
+                raise
+        captured = ctx.get_captured(success=True)
+        if logger is not None:
+            logger.record(captured)
+        return raw_result
 
     def with_options(self, **opts: Any) -> "LocalExecutor":
         """Return a new ``LocalExecutor``.

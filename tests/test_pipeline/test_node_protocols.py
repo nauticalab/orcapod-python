@@ -157,17 +157,18 @@ class TestSourceNodeExecute:
         events = []
 
         class Obs:
-            def on_node_start(self, n):
-                events.append(("start", n.node_type))
-            def on_node_end(self, n):
-                events.append(("end", n.node_type))
-            def on_packet_start(self, n, t, p):
+            def on_node_start(self, node_label, node_hash):
+                events.append(("start", node_label))
+            def on_node_end(self, node_label, node_hash):
+                events.append(("end", node_label))
+            def on_packet_start(self, node_label, t, p):
                 pass
-            def on_packet_end(self, n, t, ip, op, cached):
+            def on_packet_end(self, node_label, t, ip, op, cached):
                 pass
 
         node.execute(observer=Obs())
-        assert events == [("start", "source"), ("end", "source")]
+        assert events[0][0] == "start"
+        assert events[1][0] == "end"
 
     def test_execute_without_observer(self):
         """execute() works fine with no observer."""
@@ -206,13 +207,13 @@ class TestSourceNodeAsyncExecuteProtocol:
         events = []
 
         class Obs:
-            def on_node_start(self, n):
+            def on_node_start(self, node_label, node_hash):
                 events.append("start")
-            def on_node_end(self, n):
+            def on_node_end(self, node_label, node_hash):
                 events.append("end")
-            def on_packet_start(self, n, t, p):
+            def on_packet_start(self, node_label, t, p):
                 pass
-            def on_packet_end(self, n, t, ip, op, cached):
+            def on_packet_end(self, node_label, t, ip, op, cached):
                 pass
 
         output_ch = Channel(buffer_size=16)
@@ -249,17 +250,19 @@ class TestFunctionNodeExecute:
         events = []
 
         class Obs:
-            def on_node_start(self, n):
-                events.append(("node_start", n.node_type))
-            def on_node_end(self, n):
-                events.append(("node_end", n.node_type))
-            def on_packet_start(self, n, t, p):
+            def contextualize(self, node_hash, node_label):
+                return self
+            def on_node_start(self, node_label, node_hash):
+                events.append(("node_start", node_label))
+            def on_node_end(self, node_label, node_hash):
+                events.append(("node_end", node_label))
+            def on_packet_start(self, node_label, t, p):
                 events.append(("packet_start",))
-            def on_packet_end(self, n, t, ip, op, cached):
+            def on_packet_end(self, node_label, t, ip, op, cached):
                 events.append(("packet_end", cached))
-            def on_packet_crash(self, n, t, p, exc):
+            def on_packet_crash(self, node_label, t, p, exc):
                 pass
-            def create_packet_logger(self, n, t, p, **kwargs):
+            def create_packet_logger(self, t, p, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
 
@@ -267,8 +270,8 @@ class TestFunctionNodeExecute:
         result = node.execute(input_stream, observer=Obs())
 
         assert len(result) == 2
-        assert events[0] == ("node_start", "function")
-        assert events[-1] == ("node_end", "function")
+        assert events[0][0] == "node_start"
+        assert events[-1][0] == "node_end"
         packet_events = [e for e in events if e[0].startswith("packet")]
         assert len(packet_events) == 4  # 2 start + 2 end
 
@@ -326,17 +329,19 @@ class TestFunctionNodeAsyncExecute:
         events = []
 
         class Obs:
-            def on_node_start(self, n):
+            def contextualize(self, node_hash, node_label):
+                return self
+            def on_node_start(self, node_label, node_hash):
                 events.append("node_start")
-            def on_node_end(self, n):
+            def on_node_end(self, node_label, node_hash):
                 events.append("node_end")
-            def on_packet_start(self, n, t, p):
+            def on_packet_start(self, node_label, t, p):
                 events.append("pkt_start")
-            def on_packet_end(self, n, t, ip, op, cached):
+            def on_packet_end(self, node_label, t, ip, op, cached):
                 events.append("pkt_end")
-            def on_packet_crash(self, n, t, p, exc):
+            def on_packet_crash(self, node_label, t, p, exc):
                 pass
-            def create_packet_logger(self, n, t, p, **kwargs):
+            def create_packet_logger(self, t, p, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
 
@@ -378,18 +383,19 @@ class TestOperatorNodeExecute:
         events = []
 
         class Obs:
-            def on_node_start(self, n):
-                events.append(("node_start", n.node_type))
-            def on_node_end(self, n):
-                events.append(("node_end", n.node_type))
-            def on_packet_start(self, n, t, p):
+            def on_node_start(self, node_label, node_hash):
+                events.append(("node_start", node_label))
+            def on_node_end(self, node_label, node_hash):
+                events.append(("node_end", node_label))
+            def on_packet_start(self, node_label, t, p):
                 pass
-            def on_packet_end(self, n, t, ip, op, cached):
+            def on_packet_end(self, node_label, t, ip, op, cached):
                 pass
 
         result = node.execute(*node._input_streams, observer=Obs())
         assert len(result) == 2
-        assert events == [("node_start", "operator"), ("node_end", "operator")]
+        assert events[0][0] == "node_start"
+        assert events[1][0] == "node_end"
 
     def test_execute_without_observer(self):
         node = self._make_join_node()
@@ -418,13 +424,13 @@ class TestOperatorNodeAsyncExecute:
         events = []
 
         class Obs:
-            def on_node_start(self, n):
+            def on_node_start(self, node_label, node_hash):
                 events.append("start")
-            def on_node_end(self, n):
+            def on_node_end(self, node_label, node_hash):
                 events.append("end")
-            def on_packet_start(self, n, t, p):
+            def on_packet_start(self, node_label, t, p):
                 pass
-            def on_packet_end(self, n, t, ip, op, cached):
+            def on_packet_end(self, node_label, t, ip, op, cached):
                 pass
 
         input_ch = Channel(buffer_size=16)

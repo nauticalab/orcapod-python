@@ -39,7 +39,6 @@ if TYPE_CHECKING:
     import polars as pl
     import pyarrow as pa
 
-    from orcapod.pipeline.logging_capture import CapturedLogs
     from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
 else:
     pa = LazyModule("pyarrow")
@@ -488,9 +487,9 @@ class FunctionNode(StreamBase):
             packet: The input packet to process.
 
         Returns:
-            A ``(tag, output_packet)`` tuple.  CapturedLogs are discarded.
+            A ``(tag, output_packet)`` tuple.
         """
-        tag_out, result, _captured = self._process_packet_internal(tag, packet)
+        tag_out, result = self._process_packet_internal(tag, packet)
         return tag_out, result
 
     def execute(
@@ -512,10 +511,13 @@ class FunctionNode(StreamBase):
             Materialized list of (tag, output_packet) pairs, excluding
             None outputs and failed packets.
         """
-        from orcapod.pipeline.observer import _NOOP_LOGGER
+        node_label = self.label or "unknown"
+        node_hash = self.pipeline_hash().to_string() if self._pipeline_database is not None else ""
 
-        if observer is not None:
-            observer.on_node_start(self)
+        ctx_observer = observer.contextualize(node_hash, node_label) if observer is not None else None
+
+        if ctx_observer is not None:
+            ctx_observer.on_node_start(node_label, node_hash)
 
         # Gather entry IDs and check cache
         upstream_entries = [
@@ -529,48 +531,43 @@ class FunctionNode(StreamBase):
 
         output: list[tuple[TagProtocol, PacketProtocol]] = []
         for tag, packet, entry_id in upstream_entries:
-            if observer is not None:
-                observer.on_packet_start(self, tag, packet)
-                pkt_logger = observer.create_packet_logger(
-                    self, tag, packet, pipeline_path=pp
-                )
-            else:
-                pkt_logger = _NOOP_LOGGER
+            if ctx_observer is not None:
+                ctx_observer.on_packet_start(node_label, tag, packet)
 
             if entry_id in cached:
                 tag_out, result = cached[entry_id]
-                if observer is not None:
-                    observer.on_packet_end(self, tag, packet, result, cached=True)
+                if ctx_observer is not None:
+                    ctx_observer.on_packet_end(
+                        node_label, tag, packet, result, cached=True
+                    )
                 output.append((tag_out, result))
             else:
-                tag_out, result, captured = self._process_packet_internal(tag, packet)
-                pkt_logger.record(captured)
-                if not captured.success:
-                    if observer is not None:
-                        observer.on_packet_crash(
-                            self,
-                            tag,
-                            packet,
-                            RuntimeError(
-                                captured.traceback or "packet function failed"
-                            ),
-                        )
+                pkt_logger = (
+                    ctx_observer.create_packet_logger(tag, packet, pipeline_path=pp)
+                    if ctx_observer is not None
+                    else None
+                )
+                try:
+                    tag_out, result = self._process_packet_internal(
+                        tag, packet, logger=pkt_logger
+                    )
+                except Exception as exc:
+                    if ctx_observer is not None:
+                        ctx_observer.on_packet_crash(node_label, tag, packet, exc)
                     if error_policy == "fail_fast":
-                        if observer is not None:
-                            observer.on_node_end(self)
-                        raise RuntimeError(
-                            captured.traceback or "packet function failed"
-                        )
+                        if ctx_observer is not None:
+                            ctx_observer.on_node_end(node_label, node_hash)
+                        raise
                 else:
-                    if observer is not None:
-                        observer.on_packet_end(
-                            self, tag, packet, result, cached=False
+                    if ctx_observer is not None:
+                        ctx_observer.on_packet_end(
+                            node_label, tag, packet, result, cached=False
                         )
                     if result is not None:
                         output.append((tag_out, result))
 
-        if observer is not None:
-            observer.on_node_end(self)
+        if ctx_observer is not None:
+            ctx_observer.on_node_end(node_label, node_hash)
         return output
 
     def _process_packet_internal(
@@ -578,27 +575,31 @@ class FunctionNode(StreamBase):
         tag: TagProtocol,
         packet: PacketProtocol,
         cache_index: int | None = None,
-    ) -> "tuple[TagProtocol, PacketProtocol | None, CapturedLogs]":
+        *,
+        logger: Any = None,
+    ) -> tuple[TagProtocol, PacketProtocol | None]:
         """Core compute + persist + cache.
 
         Used by ``execute_packet``, ``execute``, and ``iter_packets``.
         No input validation is performed — the caller guarantees correctness.
+        Exceptions propagate to the caller.
 
         Returns:
-            A ``(tag, output_packet, captured_logs)`` 3-tuple.
+            A ``(tag, output_packet)`` 2-tuple.
 
         Args:
             tag: The input tag.
             packet: The input packet.
             cache_index: Optional explicit index for the internal cache.
                 When ``None``, auto-assigns at ``len(_cached_output_packets)``.
+            logger: Optional packet execution logger.
         """
         if self._cached_function_pod is not None:
-            tag_out, output_packet, captured = (
-                self._cached_function_pod.process_packet_with_capture(tag, packet)
+            tag_out, output_packet = self._cached_function_pod.process_packet(
+                tag, packet, logger=logger
             )
 
-            if output_packet is not None and captured.success:
+            if output_packet is not None:
                 result_computed = bool(
                     output_packet.get_meta_value(
                         self._cached_function_pod.RESULT_COMPUTED_FLAG, False
@@ -611,8 +612,8 @@ class FunctionNode(StreamBase):
                     computed=result_computed,
                 )
         else:
-            tag_out, output_packet, captured = (
-                self._function_pod.process_packet_with_capture(tag, packet)
+            tag_out, output_packet = self._function_pod.process_packet(
+                tag, packet, logger=logger
             )
 
         # Cache internally and invalidate derived caches
@@ -625,7 +626,7 @@ class FunctionNode(StreamBase):
         self._cached_output_table = None
         self._cached_content_hash_column = None
 
-        return tag_out, output_packet, captured
+        return tag_out, output_packet
 
     def get_cached_results(
         self, entry_ids: list[str]
@@ -715,29 +716,32 @@ class FunctionNode(StreamBase):
         tag: TagProtocol,
         packet: PacketProtocol,
         cache_index: int | None = None,
-    ) -> "tuple[TagProtocol, PacketProtocol | None, CapturedLogs]":
+        *,
+        logger: Any = None,
+    ) -> tuple[TagProtocol, PacketProtocol | None]:
         """Async counterpart of ``_process_packet_internal``.
 
         Computes via async path, writes pipeline provenance, and caches
-        internally — no schema validation.
+        internally — no schema validation. Exceptions propagate.
 
         Returns:
-            A ``(tag, output_packet, captured_logs)`` 3-tuple.
+            A ``(tag, output_packet)`` 2-tuple.
 
         Args:
             tag: The input tag.
             packet: The input packet.
             cache_index: Optional explicit index for the internal cache.
                 When ``None``, auto-assigns at ``len(_cached_output_packets)``.
+            logger: Optional packet execution logger.
         """
         if self._cached_function_pod is not None:
-            tag_out, output_packet, captured = (
-                await self._cached_function_pod.async_process_packet_with_capture(
-                    tag, packet
+            tag_out, output_packet = (
+                await self._cached_function_pod.async_process_packet(
+                    tag, packet, logger=logger
                 )
             )
 
-            if output_packet is not None and captured.success:
+            if output_packet is not None:
                 result_computed = bool(
                     output_packet.get_meta_value(
                         self._cached_function_pod.RESULT_COMPUTED_FLAG, False
@@ -750,8 +754,10 @@ class FunctionNode(StreamBase):
                     computed=result_computed,
                 )
         else:
-            tag_out, output_packet, captured = (
-                await self._function_pod.async_process_packet_with_capture(tag, packet)
+            tag_out, output_packet = (
+                await self._function_pod.async_process_packet(
+                    tag, packet, logger=logger
+                )
             )
 
         # Cache internally and invalidate derived caches
@@ -764,7 +770,7 @@ class FunctionNode(StreamBase):
         self._cached_output_table = None
         self._cached_content_hash_column = None
 
-        return tag_out, output_packet, captured
+        return tag_out, output_packet
 
     def compute_pipeline_entry_id(
         self, tag: TagProtocol, input_packet: PacketProtocol
@@ -1011,9 +1017,7 @@ class FunctionNode(StreamBase):
                     entry_id = self.compute_pipeline_entry_id(tag, packet)
                     if entry_id in existing_entry_ids:
                         continue
-                    tag, output_packet, _captured = self._process_packet_internal(
-                        tag, packet
-                    )
+                    tag, output_packet = self._process_packet_internal(tag, packet)
                     if output_packet is not None:
                         yield tag, output_packet
 
@@ -1050,9 +1054,7 @@ class FunctionNode(StreamBase):
                 if packet is not None:
                     yield tag, packet
             else:
-                tag, output_packet, _captured = self._process_packet_internal(
-                    tag, packet
-                )
+                tag, output_packet = self._process_packet_internal(tag, packet)
                 if output_packet is not None:
                     yield tag, output_packet
         self._cached_input_iterator = None
@@ -1234,9 +1236,14 @@ class FunctionNode(StreamBase):
         """
         # TODO(PLT-930): Restore concurrency limiting (semaphore) via node-level config.
         # Currently all packets are processed sequentially in async_execute.
+        node_label = self.label or "unknown"
+        node_hash = self.pipeline_hash().to_string() if self._pipeline_database is not None else ""
+
+        ctx_observer = observer.contextualize(node_hash, node_label) if observer is not None else None
+
         try:
-            if observer is not None:
-                observer.on_node_start(self)
+            if ctx_observer is not None:
+                ctx_observer.on_node_start(node_label, node_hash)
 
             if self._cached_function_pod is not None:
                 # DB-backed async execution:
@@ -1292,25 +1299,31 @@ class FunctionNode(StreamBase):
                     entry_id = self.compute_pipeline_entry_id(tag, packet)
                     if entry_id in cached_by_entry_id:
                         tag_out, result_packet = cached_by_entry_id[entry_id]
-                        if observer is not None:
-                            observer.on_packet_start(self, tag, packet)
-                            observer.on_packet_end(
-                                self, tag, packet, result_packet, cached=True
+                        if ctx_observer is not None:
+                            ctx_observer.on_packet_start(node_label, tag, packet)
+                            ctx_observer.on_packet_end(
+                                node_label, tag, packet, result_packet, cached=True
                             )
                         await output.send((tag_out, result_packet))
                     else:
                         await self._async_execute_one_packet(
-                            tag, packet, output, observer=observer
+                            tag, packet, output,
+                            ctx_observer=ctx_observer,
+                            node_label=node_label,
+                            node_hash=node_hash,
                         )
             else:
                 # Simple async execution without DB
                 async for tag, packet in input_channel:
                     await self._async_execute_one_packet(
-                        tag, packet, output, observer=observer
+                        tag, packet, output,
+                        ctx_observer=ctx_observer,
+                        node_label=node_label,
+                        node_hash=node_hash,
                     )
 
-            if observer is not None:
-                observer.on_node_end(self)
+            if ctx_observer is not None:
+                ctx_observer.on_node_end(node_label, node_hash)
         finally:
             await output.close()
 
@@ -1320,37 +1333,33 @@ class FunctionNode(StreamBase):
         packet: PacketProtocol,
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
         *,
-        observer: "ExecutionObserverProtocol | None" = None,
+        ctx_observer: "ExecutionObserverProtocol | None" = None,
+        node_label: str = "unknown",
+        node_hash: str = "",
     ) -> None:
         """Process one non-cached packet in the async execute path."""
-        from orcapod.pipeline.observer import _NOOP_LOGGER
-
         pp = self.pipeline_path if self._pipeline_database is not None else ()
 
-        if observer is not None:
-            observer.on_packet_start(self, tag, packet)
-            pkt_logger = observer.create_packet_logger(
-                self, tag, packet, pipeline_path=pp
-            )
-        else:
-            pkt_logger = _NOOP_LOGGER
+        if ctx_observer is not None:
+            ctx_observer.on_packet_start(node_label, tag, packet)
 
-        tag_out, result_packet, captured = await self._async_process_packet_internal(
-            tag, packet
+        pkt_logger = (
+            ctx_observer.create_packet_logger(tag, packet, pipeline_path=pp)
+            if ctx_observer is not None
+            else None
         )
-        pkt_logger.record(captured)
-        if not captured.success:
-            if observer is not None:
-                observer.on_packet_crash(
-                    self,
-                    tag,
-                    packet,
-                    RuntimeError(captured.traceback or "packet function failed"),
-                )
+
+        try:
+            tag_out, result_packet = await self._async_process_packet_internal(
+                tag, packet, logger=pkt_logger
+            )
+        except Exception as exc:
+            if ctx_observer is not None:
+                ctx_observer.on_packet_crash(node_label, tag, packet, exc)
         else:
-            if observer is not None:
-                observer.on_packet_end(
-                    self, tag, packet, result_packet, cached=False
+            if ctx_observer is not None:
+                ctx_observer.on_packet_end(
+                    node_label, tag, packet, result_packet, cached=False
                 )
             if result_packet is not None:
                 await output.send((tag_out, result_packet))

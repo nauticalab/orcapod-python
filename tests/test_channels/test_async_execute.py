@@ -155,8 +155,7 @@ class TestDirectAsyncCall:
 
         pf = PythonPacketFunction(add, output_keys="result")
         packet = Packet({"x": 3, "y": 5})
-        result, captured = await pf.direct_async_call(packet)
-        assert captured.success is True
+        result = await pf.direct_async_call(packet)
         assert result is not None
         assert result.as_dict()["result"] == 8
 
@@ -166,12 +165,11 @@ class TestDirectAsyncCall:
             return x * 2
 
         pf = PythonPacketFunction(double, output_keys="result")
-        raw_results = await asyncio.gather(
+        results = await asyncio.gather(
             pf.async_call(Packet({"x": 1})),
             pf.async_call(Packet({"x": 2})),
             pf.async_call(Packet({"x": 3})),
         )
-        results = [r for r, _captured in raw_results]
         assert all(r is not None for r in results)
         values = [r.as_dict()["result"] for r in results if r is not None]
         assert values == [2, 4, 6]
@@ -188,8 +186,7 @@ class TestDirectAsyncCall:
             return x
 
         pf = PythonPacketFunction(record_thread, output_keys="result")
-        result, captured = await pf.direct_async_call(Packet({"x": 42}))
-        assert captured.success is True
+        result = await pf.direct_async_call(Packet({"x": 42}))
         assert result is not None
         assert len(call_threads) == 1
 
@@ -732,7 +729,7 @@ class TestEndToEndPipeline:
 class TestErrorPropagation:
     @pytest.mark.asyncio
     async def test_function_exception_returns_none(self):
-        """An exception in the packet function returns (None, captured) — no raise."""
+        """An exception in the packet function is caught by process_packet — no raise."""
 
         def failing(x: int) -> int:
             if x == 2:
@@ -756,16 +753,15 @@ class TestErrorPropagation:
         assert values == [0, 1, 3, 4]
 
     @pytest.mark.asyncio
-    async def test_direct_async_call_captures_failure(self):
-        """direct_async_call returns (None, captured) with success=False on error."""
+    async def test_direct_async_call_raises_on_failure(self):
+        """direct_async_call re-raises the exception on error."""
 
         def failing(x: int) -> int:
             raise ValueError("boom")
 
         pf = PythonPacketFunction(failing, output_keys="result")
-        result, captured = await pf.direct_async_call(Packet({"x": 1}))
-        assert result is None
-        assert captured.success is False
+        with pytest.raises(ValueError, match="boom"):
+            await pf.direct_async_call(Packet({"x": 1}))
 
 
 # ---------------------------------------------------------------------------

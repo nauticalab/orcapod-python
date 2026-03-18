@@ -8,8 +8,8 @@ from orcapod.core.executors.base import PacketFunctionExecutorBase
 
 if TYPE_CHECKING:
     from orcapod.core.packet_function import PythonPacketFunction
-    from orcapod.pipeline.logging_capture import CapturedLogs
     from orcapod.protocols.core_protocols import PacketFunctionProtocol, PacketProtocol
+    from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
 
 
 class RayExecutor(PacketFunctionExecutorBase):
@@ -132,7 +132,7 @@ class RayExecutor(PacketFunctionExecutorBase):
         return dict(self._remote_opts)
 
     def _as_python_packet_function(
-        self, packet_function: PacketFunctionProtocol
+        self, packet_function: "PacketFunctionProtocol"
     ) -> "PythonPacketFunction":
         """Return *packet_function* cast to ``PythonPacketFunction``, or raise.
 
@@ -152,35 +152,33 @@ class RayExecutor(PacketFunctionExecutorBase):
 
     def execute(
         self,
-        packet_function: PacketFunctionProtocol,
-        packet: PacketProtocol,
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
-        from orcapod.pipeline.logging_capture import CapturedLogs
-
+        packet_function: "PacketFunctionProtocol",
+        packet: "PacketProtocol",
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> "PacketProtocol | None":
         pf = self._as_python_packet_function(packet_function)
         if not pf.is_active():
-            return None, CapturedLogs(success=True)
+            return None
 
-        raw, captured = self.execute_callable(pf._function, packet.as_dict())
-        if not captured.success:
-            return None, captured
-        return pf._build_output_packet(raw), captured
+        raw = self.execute_callable(pf._function, packet.as_dict(), logger=logger)
+        return pf._build_output_packet(raw)
 
     async def async_execute(
         self,
-        packet_function: PacketFunctionProtocol,
-        packet: PacketProtocol,
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
-        from orcapod.pipeline.logging_capture import CapturedLogs
-
+        packet_function: "PacketFunctionProtocol",
+        packet: "PacketProtocol",
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> "PacketProtocol | None":
         pf = self._as_python_packet_function(packet_function)
         if not pf.is_active():
-            return None, CapturedLogs(success=True)
+            return None
 
-        raw, captured = await self.async_execute_callable(pf._function, packet.as_dict())
-        if not captured.success:
-            return None, captured
-        return pf._build_output_packet(raw), captured
+        raw = await self.async_execute_callable(
+            pf._function, packet.as_dict(), logger=logger
+        )
+        return pf._build_output_packet(raw)
 
     # -- PythonFunctionExecutorProtocol --
 
@@ -274,7 +272,9 @@ class RayExecutor(PacketFunctionExecutorBase):
         fn: Callable[..., Any],
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
-    ) -> "tuple[Any, CapturedLogs]":
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> Any:
         """Execute *fn* on the Ray cluster with fd-level I/O capture.
 
         The capture wrapper is serialized by bytecode (not module reference) so
@@ -291,17 +291,25 @@ class RayExecutor(PacketFunctionExecutorBase):
         remote_fn = ray.remote(**self._build_remote_opts())(wrapper)
         ref = remote_fn.remote(fn, kwargs)
         raw, stdout, stderr, python_logs, tb, success = ray.get(ref)
-        return raw, CapturedLogs(
+
+        captured = CapturedLogs(
             stdout=stdout, stderr=stderr, python_logs=python_logs,
             traceback=tb, success=success,
         )
+        if logger is not None:
+            logger.record(captured)
+        if not success:
+            raise RuntimeError(tb or "Ray worker execution failed")
+        return raw
 
     async def async_execute_callable(
         self,
         fn: Callable[..., Any],
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
-    ) -> "tuple[Any, CapturedLogs]":
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> Any:
         """Async counterpart of :meth:`execute_callable`."""
         import ray
 
@@ -316,10 +324,16 @@ class RayExecutor(PacketFunctionExecutorBase):
         raw, stdout, stderr, python_logs, tb, success = await asyncio.wrap_future(
             ref.future()
         )
-        return raw, CapturedLogs(
+
+        captured = CapturedLogs(
             stdout=stdout, stderr=stderr, python_logs=python_logs,
             traceback=tb, success=success,
         )
+        if logger is not None:
+            logger.record(captured)
+        if not success:
+            raise RuntimeError(tb or "Ray worker execution failed")
+        return raw
 
     def with_options(self, **opts: Any) -> "RayExecutor":
         """Return a new ``RayExecutor`` with the given options merged in.

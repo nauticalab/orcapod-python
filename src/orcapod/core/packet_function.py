@@ -37,12 +37,12 @@ if TYPE_CHECKING:
     import pyarrow as pa
     import pyarrow.compute as pc
 
-    from orcapod.pipeline.logging_capture import CapturedLogs
+    from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
 else:
     pa = LazyModule("pyarrow")
     pc = LazyModule("pyarrow.compute")
 
-logger = logging.getLogger(__name__)
+logger = _logger = logging.getLogger(__name__)
 
 error_handling_options = Literal["raise", "ignore", "warn"]
 
@@ -132,6 +132,8 @@ class PacketFunctionBase(TraceableBase, Generic[E]):
                     cls._resolved_executor_protocol = args[0]
                     return
 
+    _SKIP_AUTO_EXECUTOR = object()
+
     def __init__(
         self,
         version: str = "v0.0",
@@ -139,6 +141,7 @@ class PacketFunctionBase(TraceableBase, Generic[E]):
         data_context: str | DataContext | None = None,
         config: Config | None = None,
         executor: PacketFunctionExecutorProtocol | None = None,
+        _skip_auto_executor: bool = False,
     ):
         super().__init__(label=label, data_context=data_context, config=config)
         self._active = True
@@ -164,6 +167,12 @@ class PacketFunctionBase(TraceableBase, Generic[E]):
         # *after* super().__init__().
         if executor is not None:
             self.executor = executor
+        elif not _skip_auto_executor:
+            # Auto-assign LocalExecutor so all execution routes through
+            # the executor layer (ensuring capture is always available).
+            from orcapod.core.executors.local import LocalExecutor
+
+            self.executor = LocalExecutor()
 
     def computed_label(self) -> str | None:
         """Return the canonical function name as the label if no explicit label is given."""
@@ -288,50 +297,49 @@ class PacketFunctionBase(TraceableBase, Generic[E]):
     # ==================== Execution ====================
 
     def call(
-        self, packet: PacketProtocol
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+        self,
+        packet: PacketProtocol,
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> PacketProtocol | None:
         """Process a single packet, routing through the executor if one is set.
 
         Subclasses should override ``direct_call`` instead of this method.
-
-        Returns:
-            A ``(output_packet, captured_logs)`` tuple.
         """
         if self._executor is not None:
-            return self._executor.execute(self, packet)
+            return self._executor.execute(self, packet, logger=logger)
         return self.direct_call(packet)
 
     async def async_call(
-        self, packet: PacketProtocol
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+        self,
+        packet: PacketProtocol,
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> PacketProtocol | None:
         """Asynchronously process a single packet, routing through the executor if set.
 
         Subclasses should override ``direct_async_call`` instead of this method.
-
-        Returns:
-            A ``(output_packet, captured_logs)`` tuple.
         """
         if self._executor is not None:
-            return await self._executor.async_execute(self, packet)
+            return await self._executor.async_execute(self, packet, logger=logger)
         return await self.direct_async_call(packet)
 
     @abstractmethod
     def direct_call(
         self, packet: PacketProtocol
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+    ) -> PacketProtocol | None:
         """Execute the function's native computation on *packet*.
 
         This is the method executors invoke.  It bypasses executor routing
         and runs the computation directly.  On user-function failure the
-        exception is caught internally and ``(None, captured_failure)``
-        is returned — no re-raise.  Subclasses must implement this.
+        exception is re-raised.  Subclasses must implement this.
         """
         ...
 
     @abstractmethod
     async def direct_async_call(
         self, packet: PacketProtocol
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+    ) -> PacketProtocol | None:
         """Asynchronous counterpart of ``direct_call``."""
         ...
 
@@ -527,115 +535,91 @@ class PythonPacketFunction(PacketFunctionBase[PythonFunctionExecutorProtocol]):
             )
 
     def call(
-        self, packet: PacketProtocol
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+        self,
+        packet: PacketProtocol,
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> PacketProtocol | None:
         """Process a single packet, routing through the executor if one is set.
 
         When an executor implementing ``PythonFunctionExecutorProtocol`` is
         set, the raw callable and kwargs are handed to ``execute_callable``
-        which returns ``(raw_result, CapturedLogs)``.  The output packet is
-        built from ``raw_result``.
+        which captures I/O and records to the logger.
         """
-        from orcapod.pipeline.logging_capture import CapturedLogs
-
         if self._executor is not None:
             if not self._active:
-                return None, CapturedLogs(success=True)
-            raw, captured = self._executor.execute_callable(
-                self._function, packet.as_dict()
+                return None
+            raw = self._executor.execute_callable(
+                self._function, packet.as_dict(), logger=logger
             )
-            if not captured.success:
-                return None, captured
-            return self._build_output_packet(raw), captured
+            return self._build_output_packet(raw)
         return self.direct_call(packet)
 
     async def async_call(
-        self, packet: PacketProtocol
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+        self,
+        packet: PacketProtocol,
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> PacketProtocol | None:
         """Async counterpart of ``call``."""
-        from orcapod.pipeline.logging_capture import CapturedLogs
-
         if self._executor is not None:
             if not self._active:
-                return None, CapturedLogs(success=True)
-            raw, captured = await self._executor.async_execute_callable(
-                self._function, packet.as_dict()
+                return None
+            raw = await self._executor.async_execute_callable(
+                self._function, packet.as_dict(), logger=logger
             )
-            if not captured.success:
-                return None, captured
-            return self._build_output_packet(raw), captured
+            return self._build_output_packet(raw)
         return await self.direct_async_call(packet)
 
     def direct_call(
         self, packet: PacketProtocol
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+    ) -> PacketProtocol | None:
         """Execute the function on *packet* synchronously (no executor path).
 
-        Uses :class:`~orcapod.pipeline.logging_capture.LocalCaptureContext`
-        for I/O capture.  On user-function failure the exception is caught
-        internally and ``(None, captured_failure)`` is returned — no re-raise.
+        On user-function failure the exception is re-raised.
         For async functions, the coroutine is driven to completion via
         ``asyncio.run()`` (or a helper thread when already inside an event loop).
         """
-        import traceback as _tb
-
-        from orcapod.pipeline.logging_capture import CapturedLogs, LocalCaptureContext
-
         if not self._active:
-            return None, CapturedLogs(success=True)
+            return None
 
-        ctx = LocalCaptureContext()
-        raw_result = None
-        with ctx:
-            try:
-                if self._is_async:
-                    raw_result = self._call_async_function_sync(packet)
-                else:
-                    raw_result = self._function(**packet.as_dict())
-            except Exception:
-                return None, ctx.get_captured(success=False, tb=_tb.format_exc())
-        return self._build_output_packet(raw_result), ctx.get_captured(success=True)
+        if self._is_async:
+            raw_result = self._call_async_function_sync(packet)
+        else:
+            raw_result = self._function(**packet.as_dict())
+        return self._build_output_packet(raw_result)
 
     async def direct_async_call(
         self, packet: PacketProtocol
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+    ) -> PacketProtocol | None:
         """Execute the function on *packet* asynchronously (no executor path).
 
         Async functions are ``await``-ed directly. Sync functions are
         offloaded to a thread pool via ``run_in_executor``.  On failure,
-        ``(None, captured_failure)`` is returned — no re-raise.
+        the exception is re-raised.
         """
         import asyncio
-        import traceback as _tb
-
-        from orcapod.pipeline.logging_capture import CapturedLogs, LocalCaptureContext
 
         if not self._active:
-            return None, CapturedLogs(success=True)
+            return None
 
-        ctx = LocalCaptureContext()
-        raw_result = None
-        with ctx:
-            try:
-                if self._is_async:
-                    raw_result = await self._function(**packet.as_dict())
-                else:
-                    import contextvars
-                    import functools
+        if self._is_async:
+            raw_result = await self._function(**packet.as_dict())
+        else:
+            import contextvars
+            import functools
 
-                    loop = asyncio.get_running_loop()
-                    task_ctx = contextvars.copy_context()
-                    raw_result = await loop.run_in_executor(
-                        None,
-                        functools.partial(
-                            task_ctx.run,
-                            self._function,
-                            **packet.as_dict(),
-                        ),
-                    )
-            except Exception:
-                return None, ctx.get_captured(success=False, tb=_tb.format_exc())
-        return self._build_output_packet(raw_result), ctx.get_captured(success=True)
+            loop = asyncio.get_running_loop()
+            task_ctx = contextvars.copy_context()
+            raw_result = await loop.run_in_executor(
+                None,
+                functools.partial(
+                    task_ctx.run,
+                    self._function,
+                    **packet.as_dict(),
+                ),
+            )
+        return self._build_output_packet(raw_result)
 
     def to_config(self) -> dict[str, Any]:
         """Serialize this packet function to a JSON-compatible config dict.
@@ -697,8 +681,10 @@ class PacketFunctionWrapper(PacketFunctionBase[E]):
     """
 
     def __init__(self, packet_function: PacketFunctionProtocol, **kwargs) -> None:
-        super().__init__(**kwargs)
         self._packet_function = packet_function
+        # Skip auto-executor assignment — wrappers delegate executor
+        # to the wrapped packet function which already has one.
+        super().__init__(_skip_auto_executor=True, **kwargs)
 
     def computed_label(self) -> str | None:
         return self._packet_function.label
@@ -786,23 +772,29 @@ class PacketFunctionWrapper(PacketFunctionBase[E]):
     #    direct_async_call bypass executor routing as their names imply.
 
     def call(
-        self, packet: PacketProtocol
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
-        return self._packet_function.call(packet)
+        self,
+        packet: PacketProtocol,
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> PacketProtocol | None:
+        return self._packet_function.call(packet, logger=logger)
 
     async def async_call(
-        self, packet: PacketProtocol
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
-        return await self._packet_function.async_call(packet)
+        self,
+        packet: PacketProtocol,
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> PacketProtocol | None:
+        return await self._packet_function.async_call(packet, logger=logger)
 
     def direct_call(
         self, packet: PacketProtocol
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+    ) -> PacketProtocol | None:
         return self._packet_function.direct_call(packet)
 
     async def direct_async_call(
         self, packet: PacketProtocol
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+    ) -> PacketProtocol | None:
         return await self._packet_function.direct_async_call(packet)
 
 
@@ -845,19 +837,18 @@ class CachedPacketFunction(PacketFunctionWrapper):
         self,
         packet: PacketProtocol,
         *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
-        from orcapod.pipeline.logging_capture import CapturedLogs
-
+    ) -> PacketProtocol | None:
         output_packet = None
         if not skip_cache_lookup:
-            logger.info("Checking for cache...")
+            _logger.info("Checking for cache...")
             output_packet = self._cache.lookup(packet)
             if output_packet is not None:
-                logger.info(f"Cache hit for {packet}!")
-                return output_packet, CapturedLogs(success=True)
-        output_packet, captured = self._packet_function.call(packet)
+                _logger.info(f"Cache hit for {packet}!")
+                return output_packet
+        output_packet = self._packet_function.call(packet, logger=logger)
         if output_packet is not None:
             if not skip_cache_insert:
                 self._cache.store(
@@ -869,26 +860,25 @@ class CachedPacketFunction(PacketFunctionWrapper):
             output_packet = output_packet.with_meta_columns(
                 **{self.RESULT_COMPUTED_FLAG: True}
             )
-        return output_packet, captured
+        return output_packet
 
     async def async_call(
         self,
         packet: PacketProtocol,
         *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+    ) -> PacketProtocol | None:
         """Async counterpart of ``call`` with cache check and recording."""
-        from orcapod.pipeline.logging_capture import CapturedLogs
-
         output_packet = None
         if not skip_cache_lookup:
-            logger.info("Checking for cache...")
+            _logger.info("Checking for cache...")
             output_packet = self._cache.lookup(packet)
             if output_packet is not None:
-                logger.info(f"Cache hit for {packet}!")
-                return output_packet, CapturedLogs(success=True)
-        output_packet, captured = await self._packet_function.async_call(packet)
+                _logger.info(f"Cache hit for {packet}!")
+                return output_packet
+        output_packet = await self._packet_function.async_call(packet, logger=logger)
         if output_packet is not None:
             if not skip_cache_insert:
                 self._cache.store(
@@ -900,7 +890,7 @@ class CachedPacketFunction(PacketFunctionWrapper):
             output_packet = output_packet.with_meta_columns(
                 **{self.RESULT_COMPUTED_FLAG: True}
             )
-        return output_packet, captured
+        return output_packet
 
     def get_cached_output_for_packet(
         self, input_packet: PacketProtocol

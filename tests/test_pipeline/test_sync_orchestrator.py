@@ -132,28 +132,32 @@ class TestSyncOrchestratorObserver:
         class RecordingObserver:
             def on_run_start(self, run_id): pass
             def on_run_end(self, run_id): pass
-            def on_node_start(self, node):
-                events.append(("node_start", node.node_type))
-            def on_node_end(self, node):
-                events.append(("node_end", node.node_type))
-            def on_packet_start(self, node, tag, packet):
+            def on_node_start(self, node_label, node_hash):
+                events.append(("node_start", node_label))
+            def on_node_end(self, node_label, node_hash):
+                events.append(("node_end", node_label))
+            def on_packet_start(self, node_label, tag, packet):
                 events.append(("packet_start",))
-            def on_packet_end(self, node, tag, input_pkt, output_pkt, cached):
+            def on_packet_end(self, node_label, tag, input_pkt, output_pkt, cached):
                 events.append(("packet_end", cached))
-            def on_packet_crash(self, node, tag, packet, exc): pass
-            def create_packet_logger(self, node, tag, packet, **kwargs):
+            def on_packet_crash(self, node_label, tag, packet, exc): pass
+            def create_packet_logger(self, tag, packet, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
+            def contextualize(self, node_hash, node_label):
+                return self
 
         orch = SyncPipelineOrchestrator(observer=RecordingObserver())
         orch.run(pipeline._node_graph)
 
-        assert events[0] == ("node_start", "source")
-        assert events[1] == ("node_end", "source")
-        assert events[2] == ("node_start", "function")
+        # First two events are source node start/end
+        assert events[0][0] == "node_start"
+        assert events[1][0] == "node_end"
+        # Then function node start, packet hooks, function node end
+        assert events[2] == ("node_start", "doubler")
         assert events[3] == ("packet_start",)
         assert events[4] == ("packet_end", False)
-        assert events[5] == ("node_end", "function")
+        assert events[5] == ("node_end", "doubler")
 
 
 class TestSyncOrchestratorUnknownNodeType:
@@ -209,18 +213,20 @@ class TestPipelineRunIntegration:
         class RecordingObserver:
             def on_run_start(self, run_id): pass
             def on_run_end(self, run_id): pass
-            def on_node_start(self, node):
-                events.append(("node_start", node.node_type))
-            def on_node_end(self, node):
-                events.append(("node_end", node.node_type))
-            def on_packet_start(self, node, tag, packet):
+            def on_node_start(self, node_label, node_hash):
+                events.append(("node_start", node_label))
+            def on_node_end(self, node_label, node_hash):
+                events.append(("node_end", node_label))
+            def on_packet_start(self, node_label, tag, packet):
                 events.append(("packet_start",))
-            def on_packet_end(self, node, tag, input_pkt, output_pkt, cached):
+            def on_packet_end(self, node_label, tag, input_pkt, output_pkt, cached):
                 events.append(("packet_end",))
-            def on_packet_crash(self, node, tag, packet, exc): pass
-            def create_packet_logger(self, node, tag, packet, **kwargs):
+            def on_packet_crash(self, node_label, tag, packet, exc): pass
+            def create_packet_logger(self, tag, packet, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
+            def contextualize(self, node_hash, node_label):
+                return self
 
         orch = SyncPipelineOrchestrator(observer=RecordingObserver())
         pipeline.run(orchestrator=orch)
@@ -417,36 +423,33 @@ class TestSyncObserverInjection:
         class RecordingObserver:
             def on_run_start(self, run_id): pass
             def on_run_end(self, run_id): pass
-            def on_node_start(self, node):
-                events.append(("node_start", node.node_type))
-            def on_node_end(self, node):
-                events.append(("node_end", node.node_type))
-            def on_packet_start(self, node, tag, packet):
-                events.append(("packet_start", node.node_type))
-            def on_packet_end(self, node, tag, input_pkt, output_pkt, cached):
-                events.append(("packet_end", node.node_type, cached))
-            def on_packet_crash(self, node, tag, packet, exc): pass
-            def create_packet_logger(self, node, tag, packet, **kwargs):
+            def on_node_start(self, node_label, node_hash):
+                events.append(("node_start", node_label))
+            def on_node_end(self, node_label, node_hash):
+                events.append(("node_end", node_label))
+            def on_packet_start(self, node_label, tag, packet):
+                events.append(("packet_start", node_label))
+            def on_packet_end(self, node_label, tag, input_pkt, output_pkt, cached):
+                events.append(("packet_end", node_label, cached))
+            def on_packet_crash(self, node_label, tag, packet, exc): pass
+            def create_packet_logger(self, tag, packet, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
+            def contextualize(self, node_hash, node_label):
+                return self
 
         orch = SyncPipelineOrchestrator(observer=RecordingObserver())
         orch.run(pipeline._node_graph)
 
-        # Source fires node_start/node_end only (no packet-level hooks)
-        assert ("node_start", "source") in events
-        assert ("node_end", "source") in events
-        assert ("packet_start", "source") not in events
-
-        # Operator fires node_start/node_end only
-        assert ("node_start", "operator") in events
-        assert ("node_end", "operator") in events
-        assert ("packet_start", "operator") not in events
+        # Mapper fires node_start/node_end only (no packet-level hooks)
+        assert ("node_start", "mapper") in events
+        assert ("node_end", "mapper") in events
+        assert ("packet_start", "mapper") not in events
 
         # Function fires node_start, per-packet hooks, node_end
-        assert ("node_start", "function") in events
-        assert ("node_end", "function") in events
-        fn_packet_events = [e for e in events if e[0] == "packet_start" and e[1] == "function"]
+        assert ("node_start", "doubler") in events
+        assert ("node_end", "doubler") in events
+        fn_packet_events = [e for e in events if e[0] == "packet_start" and e[1] == "doubler"]
         assert len(fn_packet_events) == 2  # 2 packets
 
     def test_function_node_cached_flag(self):
@@ -466,16 +469,18 @@ class TestSyncObserverInjection:
         class Obs1:
             def on_run_start(self, run_id): pass
             def on_run_end(self, run_id): pass
-            def on_node_start(self, node): pass
-            def on_node_end(self, node): pass
-            def on_packet_start(self, node, tag, packet): pass
-            def on_packet_end(self, node, tag, input_pkt, output_pkt, cached):
-                if node.node_type == "function":
+            def on_node_start(self, node_label, node_hash): pass
+            def on_node_end(self, node_label, node_hash): pass
+            def on_packet_start(self, node_label, tag, packet): pass
+            def on_packet_end(self, node_label, tag, input_pkt, output_pkt, cached):
+                if node_label == "doubler":
                     events1.append(cached)
-            def on_packet_crash(self, node, tag, packet, exc): pass
-            def create_packet_logger(self, node, tag, packet, **kwargs):
+            def on_packet_crash(self, node_label, tag, packet, exc): pass
+            def create_packet_logger(self, tag, packet, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
+            def contextualize(self, node_hash, node_label):
+                return self
 
         SyncPipelineOrchestrator(observer=Obs1()).run(pipeline._node_graph)
         assert events1 == [False]
@@ -486,16 +491,18 @@ class TestSyncObserverInjection:
         class Obs2:
             def on_run_start(self, run_id): pass
             def on_run_end(self, run_id): pass
-            def on_node_start(self, node): pass
-            def on_node_end(self, node): pass
-            def on_packet_start(self, node, tag, packet): pass
-            def on_packet_end(self, node, tag, input_pkt, output_pkt, cached):
-                if node.node_type == "function":
+            def on_node_start(self, node_label, node_hash): pass
+            def on_node_end(self, node_label, node_hash): pass
+            def on_packet_start(self, node_label, tag, packet): pass
+            def on_packet_end(self, node_label, tag, input_pkt, output_pkt, cached):
+                if node_label == "doubler":
                     events2.append(cached)
-            def on_packet_crash(self, node, tag, packet, exc): pass
-            def create_packet_logger(self, node, tag, packet, **kwargs):
+            def on_packet_crash(self, node_label, tag, packet, exc): pass
+            def create_packet_logger(self, tag, packet, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
+            def contextualize(self, node_hash, node_label):
+                return self
 
         SyncPipelineOrchestrator(observer=Obs2()).run(pipeline._node_graph)
         assert events2 == [True]
@@ -517,27 +524,31 @@ class TestSyncObserverInjection:
         class OrderObserver:
             def on_run_start(self, run_id): pass
             def on_run_end(self, run_id): pass
-            def on_node_start(self, node):
-                node_order.append(("start", node.node_type))
-            def on_node_end(self, node):
-                node_order.append(("end", node.node_type))
-            def on_packet_start(self, node, tag, packet): pass
-            def on_packet_end(self, node, tag, input_pkt, output_pkt, cached): pass
-            def on_packet_crash(self, node, tag, packet, exc): pass
-            def create_packet_logger(self, node, tag, packet, **kwargs):
+            def on_node_start(self, node_label, node_hash):
+                node_order.append(("start", node_label))
+            def on_node_end(self, node_label, node_hash):
+                node_order.append(("end", node_label))
+            def on_packet_start(self, node_label, tag, packet): pass
+            def on_packet_end(self, node_label, tag, input_pkt, output_pkt, cached): pass
+            def on_packet_crash(self, node_label, tag, packet, exc): pass
+            def create_packet_logger(self, tag, packet, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
+            def contextualize(self, node_hash, node_label):
+                return self
 
         SyncPipelineOrchestrator(observer=OrderObserver()).run(pipeline._node_graph)
 
-        # Extract just the node types in start order
-        starts = [nt for event, nt in node_order if event == "start"]
-        # Sources first (order between them doesn't matter), then operator, then function
-        assert starts.count("source") == 2
-        assert starts.index("operator") > max(
-            i for i, s in enumerate(starts) if s == "source"
-        )
-        assert starts.index("function") > starts.index("operator")
+        # Extract just the node labels in start order
+        starts = [label for event, label in node_order if event == "start"]
+        # Sources first, then operator ("join"), then function ("adder")
+        join_idx = starts.index("join")
+        adder_idx = starts.index("adder")
+        # join and adder should come after source labels
+        source_labels = [s for s in starts if s not in ("join", "adder")]
+        assert len(source_labels) == 2
+        assert join_idx > max(starts.index(s) for s in source_labels)
+        assert adder_idx > join_idx
 
     def test_no_observer_works(self):
         """Pipeline runs fine with no observer (None)."""

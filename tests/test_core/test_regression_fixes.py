@@ -78,15 +78,15 @@ class SpyExecutor(PacketFunctionExecutorBase):
         self,
         packet_function: PacketFunctionProtocol,
         packet: PacketProtocol,
-    ) -> tuple[PacketProtocol | None, Any]:
+        *,
+        logger=None,
+    ) -> PacketProtocol | None:
         self.calls.append((packet_function, packet))
         return packet_function.direct_call(packet)
 
-    def execute_callable(self, fn, kwargs, executor_options=None):
-        from orcapod.pipeline.logging_capture import CapturedLogs
-
+    def execute_callable(self, fn, kwargs, executor_options=None, *, logger=None):
         self.calls.append((fn, kwargs))
-        return fn(**kwargs), CapturedLogs(success=True)
+        return fn(**kwargs)
 
 
 # ===========================================================================
@@ -99,9 +99,8 @@ class TestAsyncExecuteChannelCloseOnError:
 
     @pytest.mark.asyncio
     async def test_unary_operator_closes_channel_on_error(self):
-        """When a packet function raises, direct_call catches the exception
-        and returns (None, captured_failure).  process_packet discards the
-        captured logs and returns (tag, None).  The output channel is closed
+        """When a packet function raises, process_packet catches the exception
+        and returns (tag, None).  The output channel is closed
         normally and no exception propagates."""
 
         def failing(x: int) -> int:
@@ -195,7 +194,7 @@ class TestWrapperDirectCallBypassesExecutor:
         _, spy, wrapper = self._make_add_pf_with_spy()
 
         packet = Packet({"x": 3, "y": 4})
-        result, _captured = wrapper.direct_call(packet)
+        result = wrapper.direct_call(packet)
 
         assert result is not None
         assert result.as_dict()["result"] == 7
@@ -207,7 +206,7 @@ class TestWrapperDirectCallBypassesExecutor:
         _, spy, wrapper = self._make_add_pf_with_spy()
 
         packet = Packet({"x": 3, "y": 4})
-        result, _captured = await wrapper.direct_async_call(packet)
+        result = await wrapper.direct_async_call(packet)
 
         assert result is not None
         assert result.as_dict()["result"] == 7
@@ -218,7 +217,7 @@ class TestWrapperDirectCallBypassesExecutor:
         _, spy, wrapper = self._make_add_pf_with_spy()
 
         packet = Packet({"x": 3, "y": 4})
-        result, _captured = wrapper.call(packet)
+        result = wrapper.call(packet)
 
         assert result is not None
         assert result.as_dict()["result"] == 7
@@ -311,13 +310,13 @@ class TestAsyncExecuteBackpressure:
         # Patch async_call to use our concurrency-tracking function
         original_async_call = pf.async_call
 
-        async def tracked_async_call(packet: PacketProtocol) -> tuple:
+        async def tracked_async_call(packet: PacketProtocol, **kwargs):
             nonlocal concurrent_count, max_concurrent
             concurrent_count += 1
             max_concurrent = max(max_concurrent, concurrent_count)
             await asyncio.sleep(0.01)
             concurrent_count -= 1
-            return await original_async_call(packet)
+            return await original_async_call(packet, **kwargs)
 
         pf.async_call = tracked_async_call  # type: ignore
 

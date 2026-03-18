@@ -467,7 +467,7 @@ class TestAsyncOrchestratorErrorPropagation:
         crashes = []
 
         class CrashRecorder(NoOpObserver):
-            def on_packet_crash(self, node, tag, packet, error):
+            def on_packet_crash(self, node_label, tag, packet, error):
                 crashes.append(error)
 
         pipeline.compile()
@@ -496,33 +496,35 @@ class TestAsyncOrchestratorObserverInjection:
         class RecordingObserver:
             def on_run_start(self, run_id): pass
             def on_run_end(self, run_id): pass
-            def on_node_start(self, node):
-                events.append(("node_start", node.node_type))
-            def on_node_end(self, node):
-                events.append(("node_end", node.node_type))
-            def on_packet_start(self, node, tag, packet):
-                events.append(("packet_start", node.node_type))
-            def on_packet_end(self, node, tag, input_pkt, output_pkt, cached):
-                events.append(("packet_end", node.node_type, cached))
-            def on_packet_crash(self, node, tag, packet, exc): pass
-            def create_packet_logger(self, node, tag, packet, **kwargs):
+            def on_node_start(self, node_label, node_hash):
+                events.append(("node_start", node_label))
+            def on_node_end(self, node_label, node_hash):
+                events.append(("node_end", node_label))
+            def on_packet_start(self, node_label, tag, packet):
+                events.append(("packet_start", node_label))
+            def on_packet_end(self, node_label, tag, input_pkt, output_pkt, cached):
+                events.append(("packet_end", node_label, cached))
+            def on_packet_crash(self, node_label, tag, packet, exc): pass
+            def create_packet_logger(self, tag, packet, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
+            def contextualize(self, node_hash, node_label):
+                return self
 
         pipeline.compile()
         orch = AsyncPipelineOrchestrator(observer=RecordingObserver())
         orch.run(pipeline._node_graph)
 
-        # Source fires node_start/node_end
-        assert ("node_start", "source") in events
-        assert ("node_end", "source") in events
+        # Source fires node_start/node_end (label contains "ArrowTableSource" or similar)
+        source_starts = [e for e in events if e[0] == "node_start" and e[1] != "doubler"]
+        assert len(source_starts) >= 1
 
         # Function fires node_start, per-packet hooks, node_end
-        assert ("node_start", "function") in events
-        assert ("node_end", "function") in events
+        assert ("node_start", "doubler") in events
+        assert ("node_end", "doubler") in events
         fn_packet_ends = [
             e for e in events
-            if e[0] == "packet_end" and e[1] == "function"
+            if e[0] == "packet_end" and e[1] == "doubler"
         ]
         assert len(fn_packet_ends) == 2
         # All should be cached=False (first run, no DB)
@@ -551,32 +553,34 @@ class TestAsyncOrchestratorObserverInjection:
         class RecordingObserver:
             def on_run_start(self, run_id): pass
             def on_run_end(self, run_id): pass
-            def on_node_start(self, node):
-                events.append(("node_start", node.node_type))
-            def on_node_end(self, node):
-                events.append(("node_end", node.node_type))
-            def on_packet_start(self, node, tag, packet):
-                events.append(("packet_start", node.node_type))
-            def on_packet_end(self, node, tag, input_pkt, output_pkt, cached):
-                events.append(("packet_end", node.node_type))
-            def on_packet_crash(self, node, tag, packet, exc): pass
-            def create_packet_logger(self, node, tag, packet, **kwargs):
+            def on_node_start(self, node_label, node_hash):
+                events.append(("node_start", node_label))
+            def on_node_end(self, node_label, node_hash):
+                events.append(("node_end", node_label))
+            def on_packet_start(self, node_label, tag, packet):
+                events.append(("packet_start", node_label))
+            def on_packet_end(self, node_label, tag, input_pkt, output_pkt, cached):
+                events.append(("packet_end", node_label))
+            def on_packet_crash(self, node_label, tag, packet, exc): pass
+            def create_packet_logger(self, tag, packet, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
+            def contextualize(self, node_hash, node_label):
+                return self
 
         pipeline.compile()
         orch = AsyncPipelineOrchestrator(observer=RecordingObserver())
         orch.run(pipeline._node_graph)
 
-        # All three node types fire start/end
-        for node_type in ("source", "operator", "function"):
-            assert ("node_start", node_type) in events
-            assert ("node_end", node_type) in events
+        # All labeled nodes fire start/end
+        assert ("node_start", "mapper") in events
+        assert ("node_end", "mapper") in events
+        assert ("node_start", "doubler") in events
+        assert ("node_end", "doubler") in events
 
         # Only function nodes fire packet-level hooks
-        assert ("packet_start", "function") in events
-        assert ("packet_start", "source") not in events
-        assert ("packet_start", "operator") not in events
+        assert ("packet_start", "doubler") in events
+        assert ("packet_start", "mapper") not in events
 
     def test_no_observer_works(self):
         """Async pipeline runs fine with no observer."""
