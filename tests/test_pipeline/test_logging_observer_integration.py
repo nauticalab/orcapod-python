@@ -75,7 +75,7 @@ class TestSyncPipelineSuccessLogs:
 
         assert logs is not None
         assert logs.num_rows == 3
-        success_col = logs.column("success").to_pylist()
+        success_col = logs.column("__success").to_pylist()
         assert all(success_col)
 
 
@@ -109,8 +109,8 @@ class TestFailingPacketsLogged:
         assert logs is not None
         assert logs.num_rows == 2
         for row_idx in range(logs.num_rows):
-            assert logs.column("success").to_pylist()[row_idx] is False
-            tb = logs.column("traceback").to_pylist()[row_idx]
+            assert logs.column("__success").to_pylist()[row_idx] is False
+            tb = logs.column("__traceback").to_pylist()[row_idx]
             assert tb is not None
             assert "ValueError" in tb
             assert "boom" in tb
@@ -214,7 +214,7 @@ class TestAsyncOrchestratorLogs:
 
         assert logs is not None
         assert logs.num_rows == 2
-        assert all(logs.column("success").to_pylist())
+        assert all(logs.column("__success").to_pylist())
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +249,7 @@ class TestFailFastErrorPolicy:
         # At least the first crash should be logged before abort
         assert logs is not None
         assert logs.num_rows >= 1
-        assert logs.column("success").to_pylist()[0] is False
+        assert logs.column("__success").to_pylist()[0] is False
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +289,7 @@ class TestMixedSuccessFailure:
         # x=10 succeeds, x=-1 succeeds (100/-1 = -100), x=30 succeeds
         # All three should succeed since division by these values is fine
         assert logs.num_rows == 3
-        assert all(logs.column("success").to_pylist())
+        assert all(logs.column("__success").to_pylist())
 
 
 # ---------------------------------------------------------------------------
@@ -385,8 +385,8 @@ class TestGetLogsNodeSpecific:
         logs1 = obs.get_logs(pipeline_path=fn_nodes[0].pipeline_path)
         logs2 = obs.get_logs(pipeline_path=fn_nodes[1].pipeline_path)
 
-        labels1 = set(logs1.column("node_label").to_pylist())
-        labels2 = set(logs2.column("node_label").to_pylist())
+        labels1 = set(logs1.column("__node_label").to_pylist())
+        labels2 = set(logs2.column("__node_label").to_pylist())
 
         assert labels1 == {"doubler"}
         assert labels2 == {"tripler"}
