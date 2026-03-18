@@ -253,12 +253,14 @@ class SourceNode(StreamBase):
             raise RuntimeError(
                 "SourceNode in read-only mode has no stream data available"
             )
+        node_label = self.label or "source"
+        node_hash = ""
         if observer is not None:
-            observer.on_node_start(self)
+            observer.on_node_start(node_label, node_hash)
         result = list(self.stream.iter_packets())
         self._cached_results = result
         if observer is not None:
-            observer.on_node_end(self)
+            observer.on_node_end(node_label, node_hash)
         return result
 
     def run(self) -> None:
@@ -280,12 +282,14 @@ class SourceNode(StreamBase):
             raise RuntimeError(
                 "SourceNode in read-only mode has no stream data available"
             )
+        node_label = self.label or "source"
+        node_hash = ""
         try:
             if observer is not None:
-                observer.on_node_start(self)
+                observer.on_node_start(node_label, node_hash)
             for tag, packet in self.stream.iter_packets():
                 await output.send((tag, packet))
             if observer is not None:
-                observer.on_node_end(self)
+                observer.on_node_end(node_label, node_hash)
         finally:
             await output.close()

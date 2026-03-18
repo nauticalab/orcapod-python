@@ -23,27 +23,31 @@ class TestNoOpObserver:
         NoOpObserver().on_run_end("run-123")
 
     def test_on_node_start_noop(self):
-        NoOpObserver().on_node_start(None)  # type: ignore[arg-type]
+        NoOpObserver().on_node_start("label", "hash")
 
     def test_on_node_end_noop(self):
-        NoOpObserver().on_node_end(None)  # type: ignore[arg-type]
+        NoOpObserver().on_node_end("label", "hash")
 
     def test_on_packet_start_noop(self):
-        NoOpObserver().on_packet_start(None, None, None)  # type: ignore[arg-type]
+        NoOpObserver().on_packet_start("label", None, None)  # type: ignore[arg-type]
 
     def test_on_packet_end_noop(self):
-        NoOpObserver().on_packet_end(None, None, None, None, cached=False)  # type: ignore[arg-type]
+        NoOpObserver().on_packet_end("label", None, None, None, cached=False)  # type: ignore[arg-type]
 
     def test_on_packet_crash_noop(self):
-        NoOpObserver().on_packet_crash(None, None, None, RuntimeError("boom"))  # type: ignore[arg-type]
+        NoOpObserver().on_packet_crash("label", None, None, RuntimeError("boom"))  # type: ignore[arg-type]
 
     def test_create_packet_logger_returns_noop(self):
-        logger = NoOpObserver().create_packet_logger(None, None, None)  # type: ignore[arg-type]
+        logger = NoOpObserver().create_packet_logger(None, None)  # type: ignore[arg-type]
         assert logger is _NOOP_LOGGER
 
     def test_create_packet_logger_satisfies_protocol(self):
-        logger = NoOpObserver().create_packet_logger(None, None, None)  # type: ignore[arg-type]
+        logger = NoOpObserver().create_packet_logger(None, None)  # type: ignore[arg-type]
         assert isinstance(logger, PacketExecutionLoggerProtocol)
+
+    def test_contextualize_returns_self(self):
+        obs = NoOpObserver()
+        assert obs.contextualize("hash", "label") is obs
 
 
 class TestNoOpLogger:
@@ -60,6 +64,6 @@ class TestNoOpLogger:
     def test_noop_logger_singleton_identity(self):
         # The singleton returned by create_packet_logger is always the same object.
         obs = NoOpObserver()
-        l1 = obs.create_packet_logger(None, None, None)  # type: ignore[arg-type]
-        l2 = obs.create_packet_logger(None, None, None)  # type: ignore[arg-type]
+        l1 = obs.create_packet_logger(None, None)  # type: ignore[arg-type]
+        l2 = obs.create_packet_logger(None, None)  # type: ignore[arg-type]
         assert l1 is l2

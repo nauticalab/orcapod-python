@@ -142,7 +142,7 @@ class TestThreadPoolExecutorReuse:
             nonlocal creation_count
             with patch.object(ThreadPoolExecutor, "__init__", counting_init):
                 for _ in range(3):
-                    _result, _captured = pf.direct_call(Packet({"x": 1, "y": 2}))
+                    _result = pf.direct_call(Packet({"x": 1, "y": 2}))
 
         asyncio.run(run_in_loop())
         # Current code creates a new executor per call, so creation_count == 3.
@@ -213,7 +213,7 @@ class TestCoroutineConstructedInExecutorThread:
 
         # Run inside an event loop to trigger the ThreadPoolExecutor path
         async def run_in_loop():
-            _result, _captured = pf.direct_call(Packet({"x": 5}))
+            _result = pf.direct_call(Packet({"x": 5}))
 
         asyncio.run(run_in_loop())
 

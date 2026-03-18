@@ -142,49 +142,37 @@ class _FunctionPodBase(TraceableBase):
             )
 
     def process_packet(
-        self, tag: TagProtocol, packet: PacketProtocol
+        self,
+        tag: TagProtocol,
+        packet: PacketProtocol,
+        *,
+        logger: Any = None,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
         """Process a single packet using the pod's packet function.
 
         Args:
             tag: The tag associated with the packet.
             packet: The input packet to process.
+            logger: Optional :class:`PacketExecutionLoggerProtocol` for
+                recording captured I/O.
 
         Returns:
             A ``(tag, output_packet)`` tuple; output_packet is ``None`` if
-            the function filters the packet out.  CapturedLogs are discarded
-            (only relevant for node-level execution with observers).
+            the function filters the packet out.
         """
-        result, _captured = self.packet_function.call(packet)
+        result = self.packet_function.call(packet, logger=logger)
         return tag, result
 
     async def async_process_packet(
-        self, tag: TagProtocol, packet: PacketProtocol
+        self,
+        tag: TagProtocol,
+        packet: PacketProtocol,
+        *,
+        logger: Any = None,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
         """Async counterpart of ``process_packet``."""
-        result, _captured = await self.packet_function.async_call(packet)
+        result = await self.packet_function.async_call(packet, logger=logger)
         return tag, result
-
-    def process_packet_with_capture(
-        self, tag: TagProtocol, packet: PacketProtocol
-    ) -> tuple[TagProtocol, PacketProtocol | None, "CapturedLogs"]:
-        """Process a single packet and return CapturedLogs alongside the result.
-
-        Used by FunctionNode to get logs without a ContextVar side-channel.
-        """
-        from orcapod.pipeline.logging_capture import CapturedLogs
-
-        result, captured = self.packet_function.call(packet)
-        return tag, result, captured
-
-    async def async_process_packet_with_capture(
-        self, tag: TagProtocol, packet: PacketProtocol
-    ) -> tuple[TagProtocol, PacketProtocol | None, "CapturedLogs"]:
-        """Async counterpart of ``process_packet_with_capture``."""
-        from orcapod.pipeline.logging_capture import CapturedLogs
-
-        result, captured = await self.packet_function.async_call(packet)
-        return tag, result, captured
 
     def handle_input_streams(self, *streams: StreamProtocol) -> StreamProtocol:
         """Handle multiple input streams by joining them if necessary.
@@ -378,6 +366,9 @@ class FunctionPod(_FunctionPodBase):
                     tag, result_packet = await self.async_process_packet(tag, packet)
                     if result_packet is not None:
                         await output.send((tag, result_packet))
+                except Exception:
+                    # Swallow packet-level errors so remaining packets continue.
+                    logger.debug("Packet processing failed, skipping", exc_info=True)
                 finally:
                     if sem is not None:
                         sem.release()

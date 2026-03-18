@@ -6,8 +6,8 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from orcapod.pipeline.logging_capture import CapturedLogs
     from orcapod.protocols.core_protocols import PacketFunctionProtocol, PacketProtocol
+    from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
 
 
 class PacketFunctionExecutorBase(ABC):
@@ -47,28 +47,33 @@ class PacketFunctionExecutorBase(ABC):
     @abstractmethod
     def execute(
         self,
-        packet_function: PacketFunctionProtocol,
-        packet: PacketProtocol,
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+        packet_function: "PacketFunctionProtocol",
+        packet: "PacketProtocol",
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> "PacketProtocol | None":
         """Synchronously execute *packet_function* on *packet*.
 
         Implementations should call ``packet_function.direct_call(packet)``
         to invoke the function's native computation, bypassing executor
-        routing, and pass through the ``(result, CapturedLogs)`` tuple.
+        routing. If a logger is provided, captured I/O is recorded to it.
+        On failure, the original exception is re-raised after recording.
         """
         ...
 
     async def async_execute(
         self,
-        packet_function: PacketFunctionProtocol,
-        packet: PacketProtocol,
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+        packet_function: "PacketFunctionProtocol",
+        packet: "PacketProtocol",
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> "PacketProtocol | None":
         """Asynchronous counterpart of ``execute``.
 
         The default implementation delegates to ``execute`` synchronously.
         Subclasses should override for truly async execution.
         """
-        return self.execute(packet_function, packet)
+        return self.execute(packet_function, packet, logger=logger)
 
     @property
     def supports_concurrent_execution(self) -> bool:
@@ -97,39 +102,41 @@ class PacketFunctionExecutorBase(ABC):
         fn: Callable[..., Any],
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
-    ) -> "tuple[Any, CapturedLogs]":
-        """Synchronously execute *fn* with *kwargs*, returning captured I/O.
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> Any:
+        """Synchronously execute *fn* with *kwargs*, returning the raw result.
 
-        Default implementation calls ``fn(**kwargs)`` with no capture and
-        returns empty :class:`~orcapod.pipeline.logging_capture.CapturedLogs`.
+        Default implementation calls ``fn(**kwargs)`` with no capture.
         Exceptions propagate to the caller.  Subclasses (e.g.
-        ``LocalExecutor``, ``RayExecutor``) override to add I/O capture and
-        exception swallowing.
+        ``LocalExecutor``, ``RayExecutor``) override to add I/O capture
+        and logger recording.
 
         Args:
             fn: The Python callable to execute.
             kwargs: Keyword arguments to pass to *fn*.
             executor_options: Optional per-call options.
+            logger: Optional logger to record captured I/O.
 
         Returns:
-            ``(raw_result, CapturedLogs)``
+            The raw return value of *fn*.
         """
-        from orcapod.pipeline.logging_capture import CapturedLogs
-
-        return fn(**kwargs), CapturedLogs()
+        return fn(**kwargs)
 
     async def async_execute_callable(
         self,
         fn: Callable[..., Any],
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
-    ) -> "tuple[Any, CapturedLogs]":
-        """Asynchronously execute *fn* with *kwargs*, returning captured I/O.
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> Any:
+        """Asynchronously execute *fn* with *kwargs*, returning the raw result.
 
         Default implementation delegates to ``execute_callable``
         synchronously.  Subclasses should override for truly async execution.
         """
-        return self.execute_callable(fn, kwargs, executor_options)
+        return self.execute_callable(fn, kwargs, executor_options, logger=logger)
 
     def get_execution_data(self) -> dict[str, Any]:
         """Return metadata describing the execution environment.

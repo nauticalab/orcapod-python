@@ -14,7 +14,6 @@ from orcapod.protocols.observability_protocols import (  # noqa: F401  (re-expor
 )
 
 if TYPE_CHECKING:
-    from orcapod.core.nodes import GraphNode
     from orcapod.pipeline.logging_capture import CapturedLogs
     from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
 
@@ -51,21 +50,26 @@ class NoOpObserver:
     ``create_packet_logger`` returns the shared :data:`_NOOP_LOGGER` singleton.
     """
 
+    def contextualize(
+        self, node_hash: str, node_label: str
+    ) -> "NoOpObserver":
+        return self
+
     def on_run_start(self, run_id: str) -> None:
         pass
 
     def on_run_end(self, run_id: str) -> None:
         pass
 
-    def on_node_start(self, node: "GraphNode") -> None:
+    def on_node_start(self, node_label: str, node_hash: str) -> None:
         pass
 
-    def on_node_end(self, node: "GraphNode") -> None:
+    def on_node_end(self, node_label: str, node_hash: str) -> None:
         pass
 
     def on_packet_start(
         self,
-        node: "GraphNode",
+        node_label: str,
         tag: "TagProtocol",
         packet: "PacketProtocol",
     ) -> None:
@@ -73,7 +77,7 @@ class NoOpObserver:
 
     def on_packet_end(
         self,
-        node: "GraphNode",
+        node_label: str,
         tag: "TagProtocol",
         input_packet: "PacketProtocol",
         output_packet: "PacketProtocol | None",
@@ -83,7 +87,7 @@ class NoOpObserver:
 
     def on_packet_crash(
         self,
-        node: "GraphNode",
+        node_label: str,
         tag: "TagProtocol",
         packet: "PacketProtocol",
         error: Exception,
@@ -92,7 +96,6 @@ class NoOpObserver:
 
     def create_packet_logger(
         self,
-        node: "GraphNode",
         tag: "TagProtocol",
         packet: "PacketProtocol",
         pipeline_path: tuple[str, ...] = (),

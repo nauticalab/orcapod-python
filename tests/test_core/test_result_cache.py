@@ -48,7 +48,7 @@ def _compute_and_store(
     cache: ResultCache, pf: PythonPacketFunction, input_packet: Packet
 ):
     """Helper: compute output and store in cache."""
-    output, _captured = pf.direct_call(input_packet)
+    output = pf.direct_call(input_packet)
     assert output is not None
     cache.store(
         input_packet,
@@ -105,7 +105,7 @@ class TestLookupHit:
         pf = _make_pf()
         input_pkt = Packet({"x": 10})
 
-        output, _captured = pf.direct_call(input_pkt)
+        output = pf.direct_call(input_pkt)
         cache_a.store(
             input_pkt,
             output,
@@ -130,7 +130,7 @@ class TestConflictResolution:
         time.sleep(0.01)  # ensure different timestamp
 
         # Store a second result for the same input (simulating recomputation)
-        output2, _captured = pf.direct_call(input_pkt)
+        output2 = pf.direct_call(input_pkt)
         cache.store(
             input_pkt,
             output2,

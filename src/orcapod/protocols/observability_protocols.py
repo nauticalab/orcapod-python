@@ -16,7 +16,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from orcapod.core.nodes import GraphNode
     from orcapod.pipeline.logging_capture import CapturedLogs
     from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
 
@@ -51,7 +50,26 @@ class ExecutionObserverProtocol(Protocol):
     ``on_packet_start`` / ``on_packet_end`` / ``on_packet_crash`` are invoked
     only for function nodes.  ``on_node_start`` / ``on_node_end`` are invoked
     for all node types.
+
+    Observers are *contextualized* per node via :meth:`contextualize`, which
+    returns a lightweight wrapper stamped with node identity. The contextualized
+    observer is used for all hooks and logger creation within that node.
     """
+
+    def contextualize(
+        self, node_hash: str, node_label: str
+    ) -> "ExecutionObserverProtocol":
+        """Return a contextualized copy stamped with node identity.
+
+        Args:
+            node_hash: The pipeline hash of the node (stable identity).
+            node_label: Human-readable label of the node.
+
+        Returns:
+            An observer (possibly a lightweight wrapper) that carries
+            node_hash and node_label context for all subsequent calls.
+        """
+        ...
 
     def on_run_start(self, run_id: str) -> None:
         """Called at the very start of an orchestrator ``run()`` call.
@@ -70,17 +88,17 @@ class ExecutionObserverProtocol(Protocol):
         """
         ...
 
-    def on_node_start(self, node: "GraphNode") -> None:
+    def on_node_start(self, node_label: str, node_hash: str) -> None:
         """Called before a node begins processing its packets."""
         ...
 
-    def on_node_end(self, node: "GraphNode") -> None:
+    def on_node_end(self, node_label: str, node_hash: str) -> None:
         """Called after a node finishes processing all packets."""
         ...
 
     def on_packet_start(
         self,
-        node: "GraphNode",
+        node_label: str,
         tag: "TagProtocol",
         packet: "PacketProtocol",
     ) -> None:
@@ -89,7 +107,7 @@ class ExecutionObserverProtocol(Protocol):
 
     def on_packet_end(
         self,
-        node: "GraphNode",
+        node_label: str,
         tag: "TagProtocol",
         input_packet: "PacketProtocol",
         output_packet: "PacketProtocol | None",
@@ -105,7 +123,7 @@ class ExecutionObserverProtocol(Protocol):
 
     def on_packet_crash(
         self,
-        node: "GraphNode",
+        node_label: str,
         tag: "TagProtocol",
         packet: "PacketProtocol",
         error: Exception,
@@ -120,7 +138,6 @@ class ExecutionObserverProtocol(Protocol):
 
     def create_packet_logger(
         self,
-        node: "GraphNode",
         tag: "TagProtocol",
         packet: "PacketProtocol",
         pipeline_path: tuple[str, ...] = (),
@@ -132,7 +149,6 @@ class ExecutionObserverProtocol(Protocol):
         without the executor needing to know anything about the pipeline.
 
         Args:
-            node: The graph node being executed.
             tag: The tag for the packet being processed.
             packet: The input packet being processed.
             pipeline_path: The node's pipeline path for log storage scoping.

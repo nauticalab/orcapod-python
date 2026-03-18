@@ -10,12 +10,15 @@ via :meth:`bind`.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from orcapod.core.packet_function import PacketFunctionBase
 from orcapod.errors import PacketFunctionUnavailableError
 from orcapod.protocols.core_protocols import PacketFunctionProtocol
 from orcapod.types import ContentHash, Schema
+
+if TYPE_CHECKING:
+    from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
 
 
 class PacketFunctionProxy(PacketFunctionBase):
@@ -55,8 +58,10 @@ class PacketFunctionProxy(PacketFunctionBase):
 
         # Call super().__init__ so that major_version and
         # output_packet_schema_hash are available for URI fallback.
+        # Skip auto-executor: the proxy delegates executor to the bound
+        # function (when one is bound).
         version = inner["version"]
-        super().__init__(version=version)
+        super().__init__(version=version, _skip_auto_executor=True)
 
         # URI: read from config if present, otherwise compute from metadata.
         uri_list = config.get("uri")
@@ -129,16 +134,26 @@ class PacketFunctionProxy(PacketFunctionBase):
             f"Use bind() to attach a real function, or access cached results only."
         )
 
-    def call(self, packet: "PacketProtocol") -> "PacketProtocol | None":
+    def call(
+        self,
+        packet: "PacketProtocol",
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> "PacketProtocol | None":
         """Process a single packet; delegates to bound function or raises."""
         if self._bound_function is not None:
-            return self._bound_function.call(packet)
+            return self._bound_function.call(packet, logger=logger)
         self._raise_unavailable()
 
-    async def async_call(self, packet: "PacketProtocol") -> "PacketProtocol | None":
+    async def async_call(
+        self,
+        packet: "PacketProtocol",
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> "PacketProtocol | None":
         """Async counterpart of ``call``."""
         if self._bound_function is not None:
-            return await self._bound_function.async_call(packet)
+            return await self._bound_function.async_call(packet, logger=logger)
         self._raise_unavailable()
 
     def direct_call(self, packet: "PacketProtocol") -> "PacketProtocol | None":

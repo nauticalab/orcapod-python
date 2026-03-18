@@ -12,7 +12,7 @@ from orcapod.protocols.hashing_protocols import (
 from orcapod.types import Schema
 
 if TYPE_CHECKING:
-    from orcapod.pipeline.logging_capture import CapturedLogs
+    from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
 
 
 @runtime_checkable
@@ -81,55 +81,59 @@ class PacketFunctionProtocol(
     def call(
         self,
         packet: PacketProtocol,
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> PacketProtocol | None:
         """Process a single packet, routing through the executor if one is set.
 
         Args:
             packet: The data payload to process.
+            logger: Optional logger for recording captured I/O.
 
         Returns:
-            A ``(output_packet, captured_logs)`` tuple.  ``output_packet``
-            is ``None`` when the function filters the packet out or when
-            the execution failed (check ``captured_logs.success``).
+            The output packet, or ``None`` when the function filters the
+            packet out or when execution failed (exception is re-raised).
         """
         ...
 
     async def async_call(
         self,
         packet: PacketProtocol,
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+        *,
+        logger: "PacketExecutionLoggerProtocol | None" = None,
+    ) -> PacketProtocol | None:
         """Asynchronously process a single packet, routing through the executor if set.
 
         Args:
             packet: The data payload to process.
+            logger: Optional logger for recording captured I/O.
 
         Returns:
-            A ``(output_packet, captured_logs)`` tuple.
+            The output packet, or ``None``.
         """
         ...
 
     def direct_call(
         self,
         packet: PacketProtocol,
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+    ) -> PacketProtocol | None:
         """Execute the function's native computation on *packet*.
 
         This is the method executors invoke, bypassing executor routing.
-        On user-function failure the exception is caught internally and
-        ``(None, captured_with_success=False)`` is returned — no re-raise.
+        On user-function failure the exception is re-raised.
 
         Args:
             packet: The data payload to process.
 
         Returns:
-            A ``(output_packet, captured_logs)`` tuple.
+            The output packet, or ``None`` if filtered.
         """
         ...
 
     async def direct_async_call(
         self,
         packet: PacketProtocol,
-    ) -> "tuple[PacketProtocol | None, CapturedLogs]":
+    ) -> PacketProtocol | None:
         """Asynchronous counterpart of ``direct_call``."""
         ...
 

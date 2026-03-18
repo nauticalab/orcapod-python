@@ -445,15 +445,17 @@ class OperatorNode(StreamBase):
         Returns:
             Materialized list of (tag, packet) pairs.
         """
+        node_label = self.label or "operator"
+        node_hash = ""
         if observer is not None:
-            observer.on_node_start(self)
+            observer.on_node_start(node_label, node_hash)
 
         # Check REPLAY cache first
         cached_output = self.get_cached_output()
         if cached_output is not None:
             output = list(cached_output.iter_packets())
             if observer is not None:
-                observer.on_node_end(self)
+                observer.on_node_end(node_label, node_hash)
             return output
 
         # Compute
@@ -481,7 +483,7 @@ class OperatorNode(StreamBase):
             self._store_output_stream(self._cached_output_stream)
 
         if observer is not None:
-            observer.on_node_end(self)
+            observer.on_node_end(node_label, node_hash)
         return output
 
     def _compute_and_store(self) -> None:
@@ -658,21 +660,23 @@ class OperatorNode(StreamBase):
             output: Writable channel for output (tag, packet) pairs.
             observer: Optional execution observer for hooks.
         """
+        node_label = self.label or "operator"
+        node_hash = ""
         if self._pipeline_database is None:
             # Simple delegation without DB
             if observer is not None:
-                observer.on_node_start(self)
+                observer.on_node_start(node_label, node_hash)
             hashes = [s.pipeline_hash() for s in self._input_streams]
             await self._operator.async_execute(
                 inputs, output, input_pipeline_hashes=hashes
             )
             if observer is not None:
-                observer.on_node_end(self)
+                observer.on_node_end(node_label, node_hash)
             return
 
         try:
             if observer is not None:
-                observer.on_node_start(self)
+                observer.on_node_start(node_label, node_hash)
 
             if self._cache_mode == CacheMode.REPLAY:
                 self._replay_from_cache()
@@ -712,7 +716,7 @@ class OperatorNode(StreamBase):
             self._update_modified_time()
 
             if observer is not None:
-                observer.on_node_end(self)
+                observer.on_node_end(node_label, node_hash)
         finally:
             await output.close()
 
