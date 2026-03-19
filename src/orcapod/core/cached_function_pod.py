@@ -14,11 +14,12 @@ from orcapod.protocols.core_protocols import (
     TagProtocol,
 )
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
+from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
 
 if TYPE_CHECKING:
     import pyarrow as pa
 
-logger = logging.getLogger(__name__)
+module_logger = logging.getLogger(__name__)
 
 
 class CachedFunctionPod(WrappedFunctionPod):
@@ -69,7 +70,7 @@ class CachedFunctionPod(WrappedFunctionPod):
         tag: TagProtocol,
         packet: PacketProtocol,
         *,
-        logger: Any = None,
+        logger: PacketExecutionLoggerProtocol | None = None,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
         """Process a packet with pod-level caching.
 
@@ -89,7 +90,7 @@ class CachedFunctionPod(WrappedFunctionPod):
         """
         cached = self._cache.lookup(packet)
         if cached is not None:
-            _logger.info("Pod-level cache hit")
+            module_logger.info("Pod-level cache hit")
             return tag, cached
 
         tag, output = self._function_pod.process_packet(tag, packet, logger=logger)
@@ -109,7 +110,7 @@ class CachedFunctionPod(WrappedFunctionPod):
         tag: TagProtocol,
         packet: PacketProtocol,
         *,
-        logger: Any = None,
+        logger: PacketExecutionLoggerProtocol | None = None,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
         """Async counterpart of ``process_packet``.
 
@@ -119,7 +120,7 @@ class CachedFunctionPod(WrappedFunctionPod):
         """
         cached = self._cache.lookup(packet)
         if cached is not None:
-            _logger.info("Pod-level cache hit")
+            module_logger.info("Pod-level cache hit")
             return tag, cached
 
         tag, output = await self._function_pod.async_process_packet(
@@ -163,7 +164,3 @@ class CachedFunctionPod(WrappedFunctionPod):
             input_stream=input_stream,
             label=label,
         )
-
-
-# Module-level logger alias to avoid conflict with `logger` kwarg
-_logger = logger

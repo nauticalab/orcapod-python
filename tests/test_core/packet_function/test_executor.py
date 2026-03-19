@@ -79,12 +79,8 @@ class PythonOnlyExecutor(PacketFunctionExecutorBase):
     def supported_function_type_ids(self) -> frozenset[str]:
         return frozenset({"python.function.v0"})
 
-    def execute(
-        self,
-        packet_function: PacketFunctionProtocol,
-        packet: PacketProtocol,
-    ) -> "PacketProtocol | None":
-        return packet_function.direct_call(packet)
+    def execute_callable(self, fn, kwargs, executor_options=None, **kw):
+        return fn(**kwargs)
 
 
 class NonPythonExecutor(PacketFunctionExecutorBase):
@@ -97,12 +93,8 @@ class NonPythonExecutor(PacketFunctionExecutorBase):
     def supported_function_type_ids(self) -> frozenset[str]:
         return frozenset({"wasm.function.v0"})
 
-    def execute(
-        self,
-        packet_function: PacketFunctionProtocol,
-        packet: PacketProtocol,
-    ) -> "PacketProtocol | None":
-        return packet_function.direct_call(packet)
+    def execute_callable(self, fn, kwargs, executor_options=None, **kw):
+        return fn(**kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -179,15 +171,12 @@ class TestLocalExecutor:
         assert local_executor.supports("python.function.v0")
         assert local_executor.supports("anything.v99")
 
-    def test_execute_delegates_to_direct_call(
+    def test_execute_callable_runs_function(
         self,
         local_executor: LocalExecutor,
-        add_pf: PythonPacketFunction,
-        add_packet: Packet,
     ):
-        result = local_executor.execute(add_pf, add_packet)
-        assert result is not None
-        assert result.as_dict()["result"] == 3
+        result = local_executor.execute_callable(add, {"x": 1, "y": 2})
+        assert result == 3
 
     def test_get_execution_data(self, local_executor: LocalExecutor):
         data = local_executor.get_execution_data()
@@ -205,8 +194,8 @@ class TestLocalExecutor:
 
 
 class TestExecutorProperty:
-    def test_default_executor_is_local(self, add_pf: PythonPacketFunction):
-        assert isinstance(add_pf.executor, LocalExecutor)
+    def test_default_executor_is_none(self, add_pf: PythonPacketFunction):
+        assert add_pf.executor is None
 
     def test_set_executor(
         self, add_pf: PythonPacketFunction, spy_executor: SpyExecutor
@@ -546,14 +535,14 @@ class TestFunctionPodDecoratorExecutor:
             def my_add(x: int, y: int) -> int:
                 return x + y
 
-    def test_decorator_without_executor_defaults_to_local(self):
+    def test_decorator_without_executor_defaults_to_none(self):
         from orcapod.core.function_pod import function_pod
 
         @function_pod(output_keys="result")
         def my_add(x: int, y: int) -> int:
             return x + y
 
-        assert isinstance(my_add.pod.executor, LocalExecutor)
+        assert my_add.pod.executor is None
 
 
 # ---------------------------------------------------------------------------

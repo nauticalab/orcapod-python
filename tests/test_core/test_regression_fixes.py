@@ -485,35 +485,37 @@ class TestRayExecutorInitialization:
 
 
 class TestExecutorProtocolTypeSafety:
-    """PacketFunctionExecutorProtocol.execute() and async_execute() should
-    accept PacketFunctionProtocol, not Any."""
+    """PythonFunctionExecutorProtocol.execute_callable() and
+    async_execute_callable() should have typed annotations."""
 
-    def test_protocol_execute_annotation_is_typed(self):
-        """The execute method's packet_function parameter should be
-        annotated with PacketFunctionProtocol, not Any."""
+    def test_protocol_execute_callable_annotation_is_typed(self):
+        """The execute_callable method's fn parameter should be
+        annotated with Callable, not Any."""
         import inspect
 
-        # With `from __future__ import annotations`, annotations are stored
-        # as strings. Check the raw annotation string.
+        from orcapod.protocols.core_protocols import PythonFunctionExecutorProtocol
+
         raw_hints = inspect.get_annotations(
-            PacketFunctionExecutorProtocol.execute, eval_str=False
+            PythonFunctionExecutorProtocol.execute_callable, eval_str=False
         )
-        pf_annotation = raw_hints.get("packet_function", "")
-        assert "PacketFunctionProtocol" in str(pf_annotation), (
-            f"execute() packet_function should reference PacketFunctionProtocol, "
-            f"got {pf_annotation!r}"
+        fn_annotation = raw_hints.get("fn", "")
+        assert "Callable" in str(fn_annotation), (
+            f"execute_callable() fn should reference Callable, "
+            f"got {fn_annotation!r}"
         )
 
-    def test_protocol_async_execute_annotation_is_typed(self):
-        """The async_execute method's packet_function parameter should be
-        annotated with PacketFunctionProtocol, not Any."""
+    def test_protocol_async_execute_callable_annotation_is_typed(self):
+        """The async_execute_callable method's fn parameter should be
+        annotated with Callable, not Any."""
         import inspect
 
+        from orcapod.protocols.core_protocols import PythonFunctionExecutorProtocol
+
         raw_hints = inspect.get_annotations(
-            PacketFunctionExecutorProtocol.async_execute, eval_str=False
+            PythonFunctionExecutorProtocol.async_execute_callable, eval_str=False
         )
-        pf_annotation = raw_hints.get("packet_function", "")
-        assert "PacketFunctionProtocol" in str(pf_annotation), (
-            f"async_execute() packet_function should reference PacketFunctionProtocol, "
-            f"got {pf_annotation!r}"
+        fn_annotation = raw_hints.get("fn", "")
+        assert "Callable" in str(fn_annotation), (
+            f"async_execute_callable() fn should reference Callable, "
+            f"got {fn_annotation!r}"
         )

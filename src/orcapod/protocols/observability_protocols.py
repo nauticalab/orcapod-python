@@ -2,9 +2,9 @@
 
 Defines:
 
-* :class:`PacketExecutionLoggerProtocol` — receives captured I/O from a single
+* ``PacketExecutionLoggerProtocol`` — receives captured I/O from a single
   packet execution and persists it to a configured sink.
-* :class:`ExecutionObserverProtocol` — lifecycle hooks for pipeline/node/packet
+* ``ExecutionObserverProtocol`` — lifecycle hooks for pipeline/node/packet
   events, plus a factory method for creating context-bound loggers.
 
 Both follow the same runtime-checkable Protocol pattern used throughout the
@@ -13,11 +13,9 @@ rest of the orcapod codebase.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
-if TYPE_CHECKING:
-    from orcapod.pipeline.logging_capture import CapturedLogs
-    from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
+from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
 
 
 @runtime_checkable
@@ -28,13 +26,22 @@ class PacketExecutionLoggerProtocol(Protocol):
     packet) when created by the Observer.  It knows the destination (e.g. a
     Delta Lake table) but does not know how the logs were collected — that is
     the executor's responsibility.
+
+    The ``record`` method accepts arbitrary keyword arguments so that
+    different executor types can log different fields without the protocol
+    being tied to a specific data structure.
     """
 
-    def record(self, captured: "CapturedLogs") -> None:
-        """Persist the captured logs from a packet function execution.
+    def record(self, **kwargs: Any) -> None:
+        """Persist captured execution output.
 
         Called after every packet execution (success or failure), except for
         cache hits when ``log_cache_hits=False`` (the default).
+
+        Args:
+            **kwargs: Arbitrary captured fields (e.g. ``stdout``, ``stderr``,
+                ``python_logs``, ``traceback``, ``success``).  The logger
+                implementation decides how to persist them.
         """
         ...
 
@@ -51,14 +58,14 @@ class ExecutionObserverProtocol(Protocol):
     only for function nodes.  ``on_node_start`` / ``on_node_end`` are invoked
     for all node types.
 
-    Observers are *contextualized* per node via :meth:`contextualize`, which
+    Observers are *contextualized* per node via ``contextualize()``, which
     returns a lightweight wrapper stamped with node identity. The contextualized
     observer is used for all hooks and logger creation within that node.
     """
 
     def contextualize(
         self, node_hash: str, node_label: str
-    ) -> "ExecutionObserverProtocol":
+    ) -> ExecutionObserverProtocol:
         """Return a contextualized copy stamped with node identity.
 
         Args:
@@ -99,8 +106,8 @@ class ExecutionObserverProtocol(Protocol):
     def on_packet_start(
         self,
         node_label: str,
-        tag: "TagProtocol",
-        packet: "PacketProtocol",
+        tag: TagProtocol,
+        packet: PacketProtocol,
     ) -> None:
         """Called before a packet is processed by a function node."""
         ...
@@ -108,9 +115,9 @@ class ExecutionObserverProtocol(Protocol):
     def on_packet_end(
         self,
         node_label: str,
-        tag: "TagProtocol",
-        input_packet: "PacketProtocol",
-        output_packet: "PacketProtocol | None",
+        tag: TagProtocol,
+        input_packet: PacketProtocol,
+        output_packet: PacketProtocol | None,
         cached: bool,
     ) -> None:
         """Called after a packet is successfully processed (or served from cache).
@@ -124,8 +131,8 @@ class ExecutionObserverProtocol(Protocol):
     def on_packet_crash(
         self,
         node_label: str,
-        tag: "TagProtocol",
-        packet: "PacketProtocol",
+        tag: TagProtocol,
+        packet: PacketProtocol,
         error: Exception,
     ) -> None:
         """Called when a packet's execution fails.
@@ -138,8 +145,8 @@ class ExecutionObserverProtocol(Protocol):
 
     def create_packet_logger(
         self,
-        tag: "TagProtocol",
-        packet: "PacketProtocol",
+        tag: TagProtocol,
+        packet: PacketProtocol,
         pipeline_path: tuple[str, ...] = (),
     ) -> PacketExecutionLoggerProtocol:
         """Create a context-bound logger for a single packet execution.

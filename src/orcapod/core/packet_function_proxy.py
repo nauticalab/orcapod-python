@@ -10,15 +10,14 @@ via :meth:`bind`.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from orcapod.core.packet_function import PacketFunctionBase
 from orcapod.errors import PacketFunctionUnavailableError
 from orcapod.protocols.core_protocols import PacketFunctionProtocol
 from orcapod.types import ContentHash, Schema
 
-if TYPE_CHECKING:
-    from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
+from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
 
 
 class PacketFunctionProxy(PacketFunctionBase):
@@ -58,10 +57,8 @@ class PacketFunctionProxy(PacketFunctionBase):
 
         # Call super().__init__ so that major_version and
         # output_packet_schema_hash are available for URI fallback.
-        # Skip auto-executor: the proxy delegates executor to the bound
-        # function (when one is bound).
         version = inner["version"]
-        super().__init__(version=version, _skip_auto_executor=True)
+        super().__init__(version=version)
 
         # URI: read from config if present, otherwise compute from metadata.
         uri_list = config.get("uri")

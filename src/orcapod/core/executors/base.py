@@ -3,22 +3,21 @@ from __future__ import annotations
 import copy
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from orcapod.protocols.core_protocols import PacketFunctionProtocol, PacketProtocol
-    from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
+from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
 
 
 class PacketFunctionExecutorBase(ABC):
-    """Abstract base class for packet function executors.
+    """Abstract base class for Python function executors.
 
     An executor defines *where* and *how* a packet function's computation
     runs (e.g. in-process, on a Ray cluster, in a container).  Executors
     are type-specific: each declares the ``packet_function_type_id`` values
     it supports.
 
-    Subclasses must implement ``execute`` and optionally ``async_execute``.
+    Subclasses must implement ``execute_callable`` and optionally
+    ``async_execute_callable``.
     """
 
     @property
@@ -44,37 +43,6 @@ class PacketFunctionExecutorBase(ABC):
         ids = self.supported_function_type_ids()
         return len(ids) == 0 or packet_function_type_id in ids
 
-    @abstractmethod
-    def execute(
-        self,
-        packet_function: "PacketFunctionProtocol",
-        packet: "PacketProtocol",
-        *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
-    ) -> "PacketProtocol | None":
-        """Synchronously execute *packet_function* on *packet*.
-
-        Implementations should call ``packet_function.direct_call(packet)``
-        to invoke the function's native computation, bypassing executor
-        routing. If a logger is provided, captured I/O is recorded to it.
-        On failure, the original exception is re-raised after recording.
-        """
-        ...
-
-    async def async_execute(
-        self,
-        packet_function: "PacketFunctionProtocol",
-        packet: "PacketProtocol",
-        *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
-    ) -> "PacketProtocol | None":
-        """Asynchronous counterpart of ``execute``.
-
-        The default implementation delegates to ``execute`` synchronously.
-        Subclasses should override for truly async execution.
-        """
-        return self.execute(packet_function, packet, logger=logger)
-
     @property
     def supports_concurrent_execution(self) -> bool:
         """Whether this executor can run multiple packets concurrently.
@@ -84,7 +52,7 @@ class PacketFunctionExecutorBase(ABC):
         """
         return False
 
-    def with_options(self, **opts: Any) -> "PacketFunctionExecutorBase":
+    def with_options(self, **opts: Any) -> PacketFunctionExecutorBase:
         """Return a **new** executor instance configured with the given per-node options.
 
         The default implementation returns a shallow copy of *self*.
@@ -97,20 +65,20 @@ class PacketFunctionExecutorBase(ABC):
     # Callable-level execution (PythonFunctionExecutorProtocol)
     # ------------------------------------------------------------------
 
+    @abstractmethod
     def execute_callable(
         self,
         fn: Callable[..., Any],
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
         *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
+        logger: PacketExecutionLoggerProtocol | None = None,
     ) -> Any:
         """Synchronously execute *fn* with *kwargs*, returning the raw result.
 
-        Default implementation calls ``fn(**kwargs)`` with no capture.
-        Exceptions propagate to the caller.  Subclasses (e.g.
-        ``LocalExecutor``, ``RayExecutor``) override to add I/O capture
-        and logger recording.
+        Subclasses must implement this to provide I/O capture and logger
+        recording.  On failure, the original exception must be re-raised
+        after recording to the logger.
 
         Args:
             fn: The Python callable to execute.
@@ -121,7 +89,7 @@ class PacketFunctionExecutorBase(ABC):
         Returns:
             The raw return value of *fn*.
         """
-        return fn(**kwargs)
+        ...
 
     async def async_execute_callable(
         self,
@@ -129,7 +97,7 @@ class PacketFunctionExecutorBase(ABC):
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
         *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
+        logger: PacketExecutionLoggerProtocol | None = None,
     ) -> Any:
         """Asynchronously execute *fn* with *kwargs*, returning the raw result.
 
