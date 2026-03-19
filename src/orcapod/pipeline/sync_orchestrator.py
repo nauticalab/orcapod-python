@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from orcapod.pipeline.result import OrchestratorResult
 from orcapod.protocols.node_protocols import (
@@ -42,15 +42,15 @@ class SyncPipelineOrchestrator:
 
     def __init__(
         self,
-        observer: "ExecutionObserverProtocol | None" = None,
-        error_policy: str = "continue",
+        observer: ExecutionObserverProtocol | None = None,
+        error_policy: Literal["continue", "fail_fast"] = "continue",
     ) -> None:
         self._observer = observer
         self._error_policy = error_policy
 
     def run(
         self,
-        graph: "nx.DiGraph",
+        graph: nx.DiGraph,
         materialize_results: bool = True,
         run_id: str | None = None,
     ) -> OrchestratorResult:
@@ -117,7 +117,7 @@ class SyncPipelineOrchestrator:
 
     @staticmethod
     def _gather_upstream(
-        node: Any, graph: "nx.DiGraph", buffers: dict[Any, list[tuple[Any, Any]]]
+        node: Any, graph: nx.DiGraph, buffers: dict[Any, list[tuple[Any, Any]]]
     ) -> list[tuple[Any, Any]]:
         """Gather a single upstream buffer (for function nodes)."""
         predecessors = list(graph.predecessors(node))
@@ -129,7 +129,7 @@ class SyncPipelineOrchestrator:
 
     @staticmethod
     def _gather_upstream_multi(
-        node: Any, graph: "nx.DiGraph", buffers: dict[Any, list[tuple[Any, Any]]]
+        node: Any, graph: nx.DiGraph, buffers: dict[Any, list[tuple[Any, Any]]]
     ) -> list[tuple[list[tuple[Any, Any]], Any]]:
         """Gather multiple upstream buffers with their nodes (for operators).
 
@@ -215,7 +215,7 @@ class SyncPipelineOrchestrator:
     @staticmethod
     def _gc_buffers(
         current_node: Any,
-        graph: "nx.DiGraph",
+        graph: nx.DiGraph,
         buffers: dict[Any, list[tuple[Any, Any]]],
         processed: set[Any],
     ) -> None:

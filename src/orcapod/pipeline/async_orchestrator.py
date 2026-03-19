@@ -11,7 +11,7 @@ import asyncio
 import uuid
 import logging
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from orcapod.channels import BroadcastChannel, Channel
 from orcapod.pipeline.result import OrchestratorResult
@@ -24,8 +24,8 @@ from orcapod.protocols.node_protocols import (
 if TYPE_CHECKING:
     import networkx as nx
 
-    from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
     from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
+    from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +49,9 @@ class AsyncPipelineOrchestrator:
 
     def __init__(
         self,
-        observer: "ExecutionObserverProtocol | None" = None,
+        observer: ExecutionObserverProtocol | None = None,
         buffer_size: int = 64,
-        error_policy: str = "continue",
+        error_policy: Literal["continue", "fail_fast"] = "continue",
     ) -> None:
         self._observer = observer
         self._buffer_size = buffer_size
@@ -59,7 +59,7 @@ class AsyncPipelineOrchestrator:
 
     def run(
         self,
-        graph: "nx.DiGraph",
+        graph: nx.DiGraph,
         materialize_results: bool = True,
         run_id: str | None = None,
     ) -> OrchestratorResult:
@@ -79,7 +79,7 @@ class AsyncPipelineOrchestrator:
 
     async def run_async(
         self,
-        graph: "nx.DiGraph",
+        graph: nx.DiGraph,
         materialize_results: bool = True,
         run_id: str | None = None,
     ) -> OrchestratorResult:
@@ -98,7 +98,7 @@ class AsyncPipelineOrchestrator:
 
     async def _run_async(
         self,
-        graph: "nx.DiGraph",
+        graph: nx.DiGraph,
         materialize_results: bool,
         run_id: str | None = None,
     ) -> OrchestratorResult:

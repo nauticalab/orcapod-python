@@ -3,18 +3,17 @@ from __future__ import annotations
 import copy
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
+if TYPE_CHECKING:
+    from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
 
 
-class PacketFunctionExecutorBase(ABC):
-    """Abstract base class for Python function executors.
+class PythonFunctionExecutorBase(ABC):
+    """Abstract base class for executors that run PythonPacketFunction callables.
 
-    An executor defines *where* and *how* a packet function's computation
-    runs (e.g. in-process, on a Ray cluster, in a container).  Executors
-    are type-specific: each declares the ``packet_function_type_id`` values
-    it supports.
+    An executor defines *where* and *how* a PythonPacketFunction's computation
+    runs (e.g. in-process, on a Ray cluster, in a container).
 
     Subclasses must implement ``execute_callable`` and optionally
     ``async_execute_callable``.
@@ -52,8 +51,8 @@ class PacketFunctionExecutorBase(ABC):
         """
         return False
 
-    def with_options(self, **opts: Any) -> PacketFunctionExecutorBase:
-        """Return a **new** executor instance configured with the given per-node options.
+    def with_options(self, **opts: Any) -> PythonFunctionExecutorBase:
+        """Return a **new** executor instance configured with the given options.
 
         The default implementation returns a shallow copy of *self*.
         Subclasses that carry mutable state (e.g. ``RayExecutor``) should

@@ -31,16 +31,16 @@ from orcapod.pipeline.logging_capture import (
 class TestCapturedLogs:
     def test_defaults(self):
         c = CapturedLogs()
-        assert c.stdout == ""
-        assert c.stderr == ""
+        assert c.stdout_log == ""
+        assert c.stderr_log == ""
         assert c.python_logs == ""
         assert c.traceback is None
         assert c.success is True
 
     def test_fields(self):
-        c = CapturedLogs(stdout="out", stderr="err", traceback="tb", success=False)
-        assert c.stdout == "out"
-        assert c.stderr == "err"
+        c = CapturedLogs(stdout_log="out", stderr_log="err", traceback="tb", success=False)
+        assert c.stdout_log == "out"
+        assert c.stderr_log == "err"
         assert c.traceback == "tb"
         assert c.success is False
 
@@ -144,7 +144,7 @@ class TestLocalCaptureContext:
             print("not captured")
         captured = ctx.get_captured(success=True)
         # Since streams are not installed, buffer is empty
-        assert captured.stdout == ""
+        assert captured.stdout_log == ""
         assert captured.success is True
 
     def test_captures_after_install(self):
@@ -153,7 +153,7 @@ class TestLocalCaptureContext:
         with ctx:
             print("captured output")
         captured = ctx.get_captured(success=True)
-        assert "captured output" in captured.stdout
+        assert "captured output" in captured.stdout_log
         assert captured.success is True
 
     def test_captures_stderr_after_install(self):
@@ -162,7 +162,7 @@ class TestLocalCaptureContext:
         with ctx:
             print("error output", file=sys.stderr)
         captured = ctx.get_captured(success=True)
-        assert "error output" in captured.stderr
+        assert "error output" in captured.stderr_log
 
     def test_exception_does_not_suppress(self):
         install_capture_streams()
@@ -182,7 +182,7 @@ class TestLocalCaptureContext:
         except ValueError:
             pass
         captured = ctx.get_captured(success=False, tb="traceback text")
-        assert "before error" in captured.stdout
+        assert "before error" in captured.stdout_log
         assert captured.success is False
         assert captured.traceback == "traceback text"
 
@@ -196,7 +196,7 @@ class TestLocalCaptureContext:
                 await asyncio.sleep(0)  # yield to other tasks
                 print(label)
                 await asyncio.sleep(0)
-            return ctx.get_captured(success=True).stdout
+            return ctx.get_captured(success=True).stdout_log
 
         async def main():
             results = await asyncio.gather(
@@ -219,7 +219,7 @@ class TestLocalCaptureContext:
             ctx = LocalCaptureContext()
             with ctx:
                 print(label)
-            results[label] = ctx.get_captured(success=True).stdout
+            results[label] = ctx.get_captured(success=True).stdout_log
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             futs = [pool.submit(worker, lbl) for lbl in ("thread-X", "thread-Y")]
@@ -267,23 +267,23 @@ class TestRayCaptureWrapper:
     @staticmethod
     def _call_wrapper(fn, kwargs):
         """Helper: call the Ray capture wrapper and return (raw, CapturedLogs)."""
-        from orcapod.core.executors.ray import RayExecutor
+        from orcapod.core.executors.capture_wrapper import make_capture_wrapper
 
-        wrapper = RayExecutor._make_capture_wrapper()
+        wrapper = make_capture_wrapper()
         try:
-            raw, stdout, stderr, python_logs = wrapper(fn, kwargs)
+            raw, stdout_log, stderr_log, python_logs = wrapper(fn, kwargs)
         except Exception as exc:
-            if hasattr(exc, "captured_stdout"):
+            if hasattr(exc, "captured_stdout_log"):
                 return None, CapturedLogs(
-                    stdout=exc.captured_stdout,
-                    stderr=exc.captured_stderr,
+                    stdout_log=exc.captured_stdout_log,
+                    stderr_log=exc.captured_stderr_log,
                     python_logs=exc.captured_python_logs,
                     traceback=exc.captured_traceback,
                     success=False,
                 )
             raise
         return raw, CapturedLogs(
-            stdout=stdout, stderr=stderr, python_logs=python_logs,
+            stdout_log=stdout_log, stderr_log=stderr_log, python_logs=python_logs,
             success=True,
         )
 
@@ -294,7 +294,7 @@ class TestRayCaptureWrapper:
 
         raw, captured = self._call_wrapper(fn, {"x": 3})
         assert raw == 6
-        assert "result=3" in captured.stdout
+        assert "result=3" in captured.stdout_log
         assert captured.success is True
         assert captured.traceback is None
 
@@ -306,7 +306,7 @@ class TestRayCaptureWrapper:
 
         raw, captured = self._call_wrapper(fn, {})
         assert raw == 1
-        assert "err line" in captured.stderr
+        assert "err line" in captured.stderr_log
 
     def test_captures_exception(self):
         def fn():

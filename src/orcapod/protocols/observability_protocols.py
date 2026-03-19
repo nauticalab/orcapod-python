@@ -39,7 +39,7 @@ class PacketExecutionLoggerProtocol(Protocol):
         cache hits when ``log_cache_hits=False`` (the default).
 
         Args:
-            **kwargs: Arbitrary captured fields (e.g. ``stdout``, ``stderr``,
+            **kwargs: Arbitrary captured fields (e.g. ``stdout_log``, ``stderr_log``,
                 ``python_logs``, ``traceback``, ``success``).  The logger
                 implementation decides how to persist them.
         """

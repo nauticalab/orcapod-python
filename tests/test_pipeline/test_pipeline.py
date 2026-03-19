@@ -15,7 +15,7 @@ from typing import Any, cast
 import pyarrow as pa
 import pytest
 
-from orcapod.core.executors import PacketFunctionExecutorBase
+from orcapod.core.executors import PythonFunctionExecutorBase
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import (
     FunctionNode,
@@ -1136,7 +1136,7 @@ class TestCompileDoesNotTriggerExecution:
 # ---------------------------------------------------------------------------
 
 
-class _MockExecutor(PacketFunctionExecutorBase):
+class _MockExecutor(PythonFunctionExecutorBase):
     """In-process executor that records sync vs async calls.
 
     Supports concurrent execution so the async pipeline orchestrator
