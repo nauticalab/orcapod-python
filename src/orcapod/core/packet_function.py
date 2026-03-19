@@ -33,16 +33,16 @@ from orcapod.utils import schema_utils
 from orcapod.utils.git_utils import get_git_info_for_python_object
 from orcapod.utils.lazy_module import LazyModule
 
+from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
+
 if TYPE_CHECKING:
     import pyarrow as pa
     import pyarrow.compute as pc
-
-    from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
 else:
     pa = LazyModule("pyarrow")
     pc = LazyModule("pyarrow.compute")
 
-logger = _logger = logging.getLogger(__name__)
+module_logger = logging.getLogger(__name__)
 
 error_handling_options = Literal["raise", "ignore", "warn"]
 
@@ -132,8 +132,6 @@ class PacketFunctionBase(TraceableBase, Generic[E]):
                     cls._resolved_executor_protocol = args[0]
                     return
 
-    _SKIP_AUTO_EXECUTOR = object()
-
     def __init__(
         self,
         version: str = "v0.0",
@@ -141,7 +139,6 @@ class PacketFunctionBase(TraceableBase, Generic[E]):
         data_context: str | DataContext | None = None,
         config: Config | None = None,
         executor: PacketFunctionExecutorProtocol | None = None,
-        _skip_auto_executor: bool = False,
     ):
         super().__init__(label=label, data_context=data_context, config=config)
         self._active = True
@@ -167,12 +164,6 @@ class PacketFunctionBase(TraceableBase, Generic[E]):
         # *after* super().__init__().
         if executor is not None:
             self.executor = executor
-        elif not _skip_auto_executor:
-            # Auto-assign LocalExecutor so all execution routes through
-            # the executor layer (ensuring capture is always available).
-            from orcapod.core.executors.local import LocalExecutor
-
-            self.executor = LocalExecutor()
 
     def computed_label(self) -> str | None:
         """Return the canonical function name as the label if no explicit label is given."""
@@ -300,28 +291,43 @@ class PacketFunctionBase(TraceableBase, Generic[E]):
         self,
         packet: PacketProtocol,
         *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
+        logger: PacketExecutionLoggerProtocol | None = None,
     ) -> PacketProtocol | None:
-        """Process a single packet, routing through the executor if one is set.
+        """Process a single packet.
 
-        Subclasses should override ``direct_call`` instead of this method.
+        Base implementation calls ``direct_call``.  Subclasses that support
+        executors (e.g. ``PythonPacketFunction``) override to route through
+        the executor's ``execute_callable``.
         """
-        if self._executor is not None:
-            return self._executor.execute(self, packet, logger=logger)
+        if logger is not None and self._executor is None:
+            import warnings
+
+            warnings.warn(
+                "A logger was passed but no executor is set — "
+                "capture will not occur. Set an executor to enable logging.",
+                stacklevel=2,
+            )
         return self.direct_call(packet)
 
     async def async_call(
         self,
         packet: PacketProtocol,
         *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
+        logger: PacketExecutionLoggerProtocol | None = None,
     ) -> PacketProtocol | None:
-        """Asynchronously process a single packet, routing through the executor if set.
+        """Asynchronously process a single packet.
 
-        Subclasses should override ``direct_async_call`` instead of this method.
+        Base implementation calls ``direct_async_call``.  Subclasses that
+        support executors override to route through the executor.
         """
-        if self._executor is not None:
-            return await self._executor.async_execute(self, packet, logger=logger)
+        if logger is not None and self._executor is None:
+            import warnings
+
+            warnings.warn(
+                "A logger was passed but no executor is set — "
+                "capture will not occur. Set an executor to enable logging.",
+                stacklevel=2,
+            )
         return await self.direct_async_call(packet)
 
     @abstractmethod
@@ -538,7 +544,7 @@ class PythonPacketFunction(PacketFunctionBase[PythonFunctionExecutorProtocol]):
         self,
         packet: PacketProtocol,
         *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
+        logger: PacketExecutionLoggerProtocol | None = None,
     ) -> PacketProtocol | None:
         """Process a single packet, routing through the executor if one is set.
 
@@ -553,13 +559,21 @@ class PythonPacketFunction(PacketFunctionBase[PythonFunctionExecutorProtocol]):
                 self._function, packet.as_dict(), logger=logger
             )
             return self._build_output_packet(raw)
+        if logger is not None:
+            import warnings
+
+            warnings.warn(
+                "A logger was passed but no executor is set — "
+                "capture will not occur. Set an executor to enable logging.",
+                stacklevel=2,
+            )
         return self.direct_call(packet)
 
     async def async_call(
         self,
         packet: PacketProtocol,
         *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
+        logger: PacketExecutionLoggerProtocol | None = None,
     ) -> PacketProtocol | None:
         """Async counterpart of ``call``."""
         if self._executor is not None:
@@ -569,6 +583,14 @@ class PythonPacketFunction(PacketFunctionBase[PythonFunctionExecutorProtocol]):
                 self._function, packet.as_dict(), logger=logger
             )
             return self._build_output_packet(raw)
+        if logger is not None:
+            import warnings
+
+            warnings.warn(
+                "A logger was passed but no executor is set — "
+                "capture will not occur. Set an executor to enable logging.",
+                stacklevel=2,
+            )
         return await self.direct_async_call(packet)
 
     def direct_call(
@@ -682,9 +704,7 @@ class PacketFunctionWrapper(PacketFunctionBase[E]):
 
     def __init__(self, packet_function: PacketFunctionProtocol, **kwargs) -> None:
         self._packet_function = packet_function
-        # Skip auto-executor assignment — wrappers delegate executor
-        # to the wrapped packet function which already has one.
-        super().__init__(_skip_auto_executor=True, **kwargs)
+        super().__init__(**kwargs)
 
     def computed_label(self) -> str | None:
         return self._packet_function.label
@@ -775,7 +795,7 @@ class PacketFunctionWrapper(PacketFunctionBase[E]):
         self,
         packet: PacketProtocol,
         *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
+        logger: PacketExecutionLoggerProtocol | None = None,
     ) -> PacketProtocol | None:
         return self._packet_function.call(packet, logger=logger)
 
@@ -783,7 +803,7 @@ class PacketFunctionWrapper(PacketFunctionBase[E]):
         self,
         packet: PacketProtocol,
         *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
+        logger: PacketExecutionLoggerProtocol | None = None,
     ) -> PacketProtocol | None:
         return await self._packet_function.async_call(packet, logger=logger)
 
@@ -837,16 +857,16 @@ class CachedPacketFunction(PacketFunctionWrapper):
         self,
         packet: PacketProtocol,
         *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
+        logger: PacketExecutionLoggerProtocol | None = None,
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
     ) -> PacketProtocol | None:
         output_packet = None
         if not skip_cache_lookup:
-            _logger.info("Checking for cache...")
+            module_logger.info("Checking for cache...")
             output_packet = self._cache.lookup(packet)
             if output_packet is not None:
-                _logger.info(f"Cache hit for {packet}!")
+                module_logger.info(f"Cache hit for {packet}!")
                 return output_packet
         output_packet = self._packet_function.call(packet, logger=logger)
         if output_packet is not None:
@@ -866,17 +886,17 @@ class CachedPacketFunction(PacketFunctionWrapper):
         self,
         packet: PacketProtocol,
         *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
+        logger: PacketExecutionLoggerProtocol | None = None,
         skip_cache_lookup: bool = False,
         skip_cache_insert: bool = False,
     ) -> PacketProtocol | None:
         """Async counterpart of ``call`` with cache check and recording."""
         output_packet = None
         if not skip_cache_lookup:
-            _logger.info("Checking for cache...")
+            module_logger.info("Checking for cache...")
             output_packet = self._cache.lookup(packet)
             if output_packet is not None:
-                _logger.info(f"Cache hit for {packet}!")
+                module_logger.info(f"Cache hit for {packet}!")
                 return output_packet
         output_packet = await self._packet_function.async_call(packet, logger=logger)
         if output_packet is not None:

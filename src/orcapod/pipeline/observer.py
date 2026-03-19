@@ -1,21 +1,18 @@
 """No-op implementations of the observability protocols.
 
-Provides :class:`NoOpLogger` and :class:`NoOpObserver` — the defaults used
+Provides ``NoOpLogger`` and ``NoOpObserver`` — the defaults used
 when no observability is configured.  Every method is a zero-cost no-op.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Any
 
+from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
 from orcapod.protocols.observability_protocols import (  # noqa: F401  (re-exported for convenience)
     ExecutionObserverProtocol,
     PacketExecutionLoggerProtocol,
 )
-
-if TYPE_CHECKING:
-    from orcapod.pipeline.logging_capture import CapturedLogs
-    from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
 
 
 # ---------------------------------------------------------------------------
@@ -26,10 +23,10 @@ if TYPE_CHECKING:
 class NoOpLogger:
     """Logger that discards all captured output.
 
-    Returned by :class:`NoOpObserver` when no logging sink is configured.
+    Returned by ``NoOpObserver`` when no logging sink is configured.
     """
 
-    def record(self, captured: "CapturedLogs") -> None:
+    def record(self, **kwargs: Any) -> None:
         pass
 
 
@@ -45,14 +42,14 @@ _NOOP_LOGGER = NoOpLogger()
 class NoOpObserver:
     """Observer that does nothing.
 
-    Satisfies :class:`~orcapod.protocols.observability_protocols.ExecutionObserverProtocol`
-    and is the default when no observability is configured.
-    ``create_packet_logger`` returns the shared :data:`_NOOP_LOGGER` singleton.
+    Satisfies ``ExecutionObserverProtocol`` and is the default when no
+    observability is configured.  ``create_packet_logger`` returns the
+    shared ``_NOOP_LOGGER`` singleton.
     """
 
     def contextualize(
         self, node_hash: str, node_label: str
-    ) -> "NoOpObserver":
+    ) -> NoOpObserver:
         return self
 
     def on_run_start(self, run_id: str) -> None:
@@ -70,17 +67,17 @@ class NoOpObserver:
     def on_packet_start(
         self,
         node_label: str,
-        tag: "TagProtocol",
-        packet: "PacketProtocol",
+        tag: TagProtocol,
+        packet: PacketProtocol,
     ) -> None:
         pass
 
     def on_packet_end(
         self,
         node_label: str,
-        tag: "TagProtocol",
-        input_packet: "PacketProtocol",
-        output_packet: "PacketProtocol | None",
+        tag: TagProtocol,
+        input_packet: PacketProtocol,
+        output_packet: PacketProtocol | None,
         cached: bool,
     ) -> None:
         pass
@@ -88,16 +85,16 @@ class NoOpObserver:
     def on_packet_crash(
         self,
         node_label: str,
-        tag: "TagProtocol",
-        packet: "PacketProtocol",
+        tag: TagProtocol,
+        packet: PacketProtocol,
         error: Exception,
     ) -> None:
         pass
 
     def create_packet_logger(
         self,
-        tag: "TagProtocol",
-        packet: "PacketProtocol",
+        tag: TagProtocol,
+        packet: PacketProtocol,
         pipeline_path: tuple[str, ...] = (),
     ) -> NoOpLogger:
         return _NOOP_LOGGER

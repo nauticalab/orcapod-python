@@ -278,6 +278,13 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                         pipeline_path_prefix=self._pipeline_path_prefix,
                     )
 
+                    # Default to LocalExecutor so capture/logging works
+                    # out of the box. Replaced if execution_engine is set.
+                    if node.executor is None:
+                        from orcapod.core.executors.local import LocalExecutor
+
+                        node.executor = LocalExecutor()
+
                 elif isinstance(node, OperatorNode):
                     # Rewire all input streams to persistent upstreams
                     rewired_inputs = tuple(

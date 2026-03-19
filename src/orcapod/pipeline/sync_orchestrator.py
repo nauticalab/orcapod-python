@@ -69,9 +69,9 @@ class SyncPipelineOrchestrator:
         """
         import networkx as nx
 
-        effective_run_id = run_id or str(uuid.uuid4())
+        run_id = run_id or str(uuid.uuid4())
         if self._observer is not None:
-            self._observer.on_run_start(effective_run_id)
+            self._observer.on_run_start(run_id)
 
         try:
             topo_order = list(nx.topological_sort(graph))
@@ -113,7 +113,7 @@ class SyncPipelineOrchestrator:
             return OrchestratorResult(node_outputs=buffers)
         finally:
             if self._observer is not None:
-                self._observer.on_run_end(effective_run_id)
+                self._observer.on_run_end(run_id)
 
     @staticmethod
     def _gather_upstream(

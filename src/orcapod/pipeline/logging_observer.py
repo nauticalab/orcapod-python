@@ -82,7 +82,7 @@ from typing import TYPE_CHECKING, Any
 
 from uuid_utils import uuid7
 
-from orcapod.pipeline.logging_capture import CapturedLogs, install_capture_streams
+from orcapod.pipeline.logging_capture import install_capture_streams
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -125,28 +125,40 @@ class PacketLogger:
         self._node_hash = node_hash
         self._tag_data = tag_data
 
-    def record(self, captured: CapturedLogs) -> None:
-        """Write one log row to the database."""
+    def record(self, **kwargs: Any) -> None:
+        """Write one log row to the database.
+
+        Args:
+            **kwargs: Captured execution fields (e.g. ``stdout``, ``stderr``,
+                ``python_logs``, ``traceback``, ``success``).  Each field is
+                stored as a ``__``-prefixed column in the log table.
+        """
         import pyarrow as pa
 
         log_id = str(uuid7())
         timestamp = datetime.now(timezone.utc).isoformat()
 
-        # Fixed columns — prefixed with "__" to avoid collision with user tag keys
+        # Context columns — prefixed with "__" to avoid collision with user tag keys
         columns: dict[str, pa.Array] = {
             "__log_id":      pa.array([log_id],               type=pa.large_utf8()),
             "__run_id":      pa.array([self._run_id],          type=pa.large_utf8()),
             "__node_label":  pa.array([self._node_label],      type=pa.large_utf8()),
             "__node_hash":   pa.array([self._node_hash],       type=pa.large_utf8()),
-            "__stdout":      pa.array([captured.stdout],        type=pa.large_utf8()),
-            "__stderr":      pa.array([captured.stderr],        type=pa.large_utf8()),
-            "__python_logs": pa.array([captured.python_logs],  type=pa.large_utf8()),
-            "__traceback":   pa.array([captured.traceback],    type=pa.large_utf8()),
-            "__success":     pa.array([captured.success],      type=pa.bool_()),
             "__timestamp":   pa.array([timestamp],             type=pa.large_utf8()),
         }
 
-        # Dynamic tag columns — each tag key becomes its own column
+        # Execution output columns from kwargs — prefixed with "__"
+        for key, value in kwargs.items():
+            col_name = f"__{key}"
+            if isinstance(value, bool):
+                columns[col_name] = pa.array([value], type=pa.bool_())
+            else:
+                columns[col_name] = pa.array(
+                    [str(value) if value is not None else None],
+                    type=pa.large_utf8(),
+                )
+
+        # Dynamic tag columns — each tag key becomes its own column (unprefixed)
         for key, value in self._tag_data.items():
             columns[key] = pa.array([str(value)], type=pa.large_utf8())
 

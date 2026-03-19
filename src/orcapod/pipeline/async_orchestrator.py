@@ -105,9 +105,9 @@ class AsyncPipelineOrchestrator:
         """Core async logic: wire channels, launch tasks, collect results."""
         import networkx as nx
 
-        effective_run_id = run_id or str(uuid.uuid4())
+        run_id = run_id or str(uuid.uuid4())
         if self._observer is not None:
-            self._observer.on_run_start(effective_run_id)
+            self._observer.on_run_start(run_id)
 
         try:
             topo_order = list(nx.topological_sort(graph))
@@ -206,7 +206,7 @@ class AsyncPipelineOrchestrator:
             )
         finally:
             if self._observer is not None:
-                self._observer.on_run_end(effective_run_id)
+                self._observer.on_run_end(run_id)
 
 
 class _CollectingWriter:

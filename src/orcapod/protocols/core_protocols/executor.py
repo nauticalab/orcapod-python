@@ -3,20 +3,18 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol, Self, runtime_checkable
 
-from orcapod.protocols.core_protocols.datagrams import PacketProtocol
-
 if TYPE_CHECKING:
-    from orcapod.protocols.core_protocols.packet_function import PacketFunctionProtocol
     from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
 
 
 @runtime_checkable
 class PacketFunctionExecutorProtocol(Protocol):
-    """Strategy for executing a packet function on a single packet.
+    """Base executor protocol — defines identity, compatibility, and lifecycle.
 
     Executors decouple *what* a packet function computes from *where/how* it
     runs.  Each executor declares which ``packet_function_type_id`` values it
-    supports.
+    supports.  Subtype protocols (e.g. ``PythonFunctionExecutorProtocol``)
+    add execution methods specific to the function type.
     """
 
     @property
@@ -35,37 +33,12 @@ class PacketFunctionExecutorProtocol(Protocol):
         """Return ``True`` if this executor can run functions of the given type."""
         ...
 
-    def execute(
-        self,
-        packet_function: "PacketFunctionProtocol",
-        packet: PacketProtocol,
-        *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
-    ) -> PacketProtocol | None:
-        """Synchronously execute *packet_function* on *packet*.
-
-        The executor should invoke ``packet_function.direct_call(packet)``
-        in the appropriate execution environment and return the result.
-        If a logger is provided, the executor records captured I/O to it.
-        """
-        ...
-
-    async def async_execute(
-        self,
-        packet_function: "PacketFunctionProtocol",
-        packet: PacketProtocol,
-        *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
-    ) -> PacketProtocol | None:
-        """Asynchronous counterpart of ``execute``."""
-        ...
-
     @property
     def supports_concurrent_execution(self) -> bool:
         """Whether this executor can meaningfully run multiple packets concurrently.
 
         When ``True``, iteration machinery may submit all packets via
-        ``async_execute`` concurrently and collect results before yielding.
+        async execution concurrently and collect results before yielding.
         """
         ...
 
@@ -105,7 +78,7 @@ class PythonFunctionExecutorProtocol(PacketFunctionExecutorProtocol, Protocol):
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
         *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
+        logger: PacketExecutionLoggerProtocol | None = None,
     ) -> Any:
         """Synchronously execute *fn* with *kwargs*, capturing I/O.
 
@@ -114,7 +87,8 @@ class PythonFunctionExecutorProtocol(PacketFunctionExecutorProtocol, Protocol):
             kwargs: Keyword arguments to pass to *fn*.
             executor_options: Optional per-call options (e.g. resource
                 overrides).
-            logger: Optional logger to record captured I/O.
+            logger: Optional logger to record captured I/O via
+                ``logger.record(**captured_fields)``.
 
         Returns:
             The raw return value of *fn* (or ``None`` on failure).
@@ -129,7 +103,7 @@ class PythonFunctionExecutorProtocol(PacketFunctionExecutorProtocol, Protocol):
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
         *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
+        logger: PacketExecutionLoggerProtocol | None = None,
     ) -> Any:
         """Asynchronously execute *fn* with *kwargs*, capturing I/O.
 

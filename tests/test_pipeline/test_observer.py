@@ -57,9 +57,7 @@ class TestNoOpLogger:
         assert isinstance(NoOpLogger(), PacketExecutionLoggerProtocol)
 
     def test_record_noop(self):
-        from orcapod.pipeline.logging_capture import CapturedLogs
-
-        NoOpLogger().record(CapturedLogs(stdout="hello", success=True))
+        NoOpLogger().record(stdout="hello", success=True)
 
     def test_noop_logger_singleton_identity(self):
         # The singleton returned by create_packet_logger is always the same object.

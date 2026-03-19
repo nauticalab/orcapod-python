@@ -46,6 +46,16 @@ class CapturedLogs:
     traceback: str | None = None
     success: bool = True
 
+    def as_dict(self) -> dict[str, Any]:
+        """Return fields as a plain dict (for passing to ``logger.record(**d)``)."""
+        return {
+            "stdout": self.stdout,
+            "stderr": self.stderr,
+            "python_logs": self.python_logs,
+            "traceback": self.traceback,
+            "success": self.success,
+        }
+
 
 # ---------------------------------------------------------------------------
 # Context variables

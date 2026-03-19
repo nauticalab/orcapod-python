@@ -7,8 +7,6 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.executors.base import PacketFunctionExecutorBase
 
 if TYPE_CHECKING:
-    from orcapod.core.packet_function import PythonPacketFunction
-    from orcapod.protocols.core_protocols import PacketFunctionProtocol, PacketProtocol
     from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
 
 
@@ -130,57 +128,6 @@ class RayExecutor(PacketFunctionExecutorBase):
     def _build_remote_opts(self) -> dict[str, Any]:
         """Return a copy of the Ray remote options dict."""
         return dict(self._remote_opts)
-
-    def _as_python_packet_function(
-        self, packet_function: "PacketFunctionProtocol"
-    ) -> "PythonPacketFunction":
-        """Return *packet_function* cast to ``PythonPacketFunction``, or raise.
-
-        Raises:
-            TypeError: If *packet_function* is not a ``PythonPacketFunction``
-                instance and therefore does not expose the attributes required
-                for remote execution.
-        """
-        from orcapod.core.packet_function import PythonPacketFunction
-
-        if not isinstance(packet_function, PythonPacketFunction):
-            raise TypeError(
-                f"RayExecutor only supports PythonPacketFunction, "
-                f"got {type(packet_function).__name__}"
-            )
-        return packet_function
-
-    def execute(
-        self,
-        packet_function: "PacketFunctionProtocol",
-        packet: "PacketProtocol",
-        *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
-    ) -> "PacketProtocol | None":
-        pf = self._as_python_packet_function(packet_function)
-        if not pf.is_active():
-            return None
-
-        raw = self.execute_callable(pf._function, packet.as_dict(), logger=logger)
-        return pf._build_output_packet(raw)
-
-    async def async_execute(
-        self,
-        packet_function: "PacketFunctionProtocol",
-        packet: "PacketProtocol",
-        *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
-    ) -> "PacketProtocol | None":
-        pf = self._as_python_packet_function(packet_function)
-        if not pf.is_active():
-            return None
-
-        raw = await self.async_execute_callable(
-            pf._function, packet.as_dict(), logger=logger
-        )
-        return pf._build_output_packet(raw)
-
-    # -- PythonFunctionExecutorProtocol --
 
     @staticmethod
     def _make_capture_wrapper() -> Callable[..., Any]:
@@ -375,11 +322,10 @@ class RayExecutor(PacketFunctionExecutorBase):
         """Record a successful execution to the logger."""
         if logger is None:
             return
-        from orcapod.pipeline.logging_capture import CapturedLogs
-
-        logger.record(CapturedLogs(
-            stdout=stdout, stderr=stderr, python_logs=python_logs, success=True,
-        ))
+        logger.record(
+            stdout=stdout, stderr=stderr, python_logs=python_logs,
+            traceback=None, success=True,
+        )
 
     @staticmethod
     def _handle_worker_error(
@@ -397,20 +343,17 @@ class RayExecutor(PacketFunctionExecutorBase):
         If the exception is not from our wrapper (e.g. a Ray system error),
         it is re-raised as-is.
         """
-        from orcapod.pipeline.logging_capture import CapturedLogs
-
         # Ray wraps worker exceptions: exc.cause is the _CapturedTaskError
         task_err = getattr(exc, "cause", None)
         if task_err is not None and hasattr(task_err, "captured_stdout"):
-            captured = CapturedLogs(
-                stdout=task_err.captured_stdout,
-                stderr=task_err.captured_stderr,
-                python_logs=task_err.captured_python_logs,
-                traceback=task_err.captured_traceback,
-                success=False,
-            )
             if logger is not None:
-                logger.record(captured)
+                logger.record(
+                    stdout=task_err.captured_stdout,
+                    stderr=task_err.captured_stderr,
+                    python_logs=task_err.captured_python_logs,
+                    traceback=task_err.captured_traceback,
+                    success=False,
+                )
             # Re-raise the original user exception
             raise task_err.cause from exc
         # Not our wrapper error (Ray system error, etc.) — propagate as-is

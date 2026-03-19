@@ -26,6 +26,7 @@ from orcapod.protocols.core_protocols import (
     TrackerManagerProtocol,
 )
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
+from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
 from orcapod.system_constants import constants
 from orcapod.types import (
     ColumnConfig,
@@ -146,7 +147,7 @@ class _FunctionPodBase(TraceableBase):
         tag: TagProtocol,
         packet: PacketProtocol,
         *,
-        logger: Any = None,
+        logger: PacketExecutionLoggerProtocol | None = None,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
         """Process a single packet using the pod's packet function.
 
@@ -168,7 +169,7 @@ class _FunctionPodBase(TraceableBase):
         tag: TagProtocol,
         packet: PacketProtocol,
         *,
-        logger: Any = None,
+        logger: PacketExecutionLoggerProtocol | None = None,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
         """Async counterpart of ``process_packet``."""
         result = await self.packet_function.async_call(packet, logger=logger)
