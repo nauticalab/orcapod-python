@@ -457,7 +457,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
 
         Args:
             execution_engine: Executor to apply (must implement
-                ``PacketFunctionExecutorBase`` or at minimum expose
+                ``PythonFunctionExecutorBase`` or at minimum expose
                 ``with_options``).
             execution_engine_opts: Pipeline-level options dict, or
                 ``None`` for no defaults.

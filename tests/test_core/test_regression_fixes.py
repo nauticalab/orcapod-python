@@ -22,7 +22,7 @@ import pytest
 
 from orcapod.channels import Channel
 from orcapod.core.datagrams import Packet
-from orcapod.core.executors import LocalExecutor, PacketFunctionExecutorBase
+from orcapod.core.executors import LocalExecutor, PythonFunctionExecutorBase
 from orcapod.core.function_pod import FunctionPod, FunctionPodStream
 from orcapod.core.operators import SelectPacketColumns
 from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
@@ -61,7 +61,7 @@ async def feed_stream_to_channel(stream: ArrowTableStream, ch: Channel) -> None:
     await ch.writer.close()
 
 
-class SpyExecutor(PacketFunctionExecutorBase):
+class SpyExecutor(PythonFunctionExecutorBase):
     """Records all calls and delegates to direct_call."""
 
     def __init__(self) -> None:

@@ -2,7 +2,7 @@
 Tests for the packet function executor system.
 
 Covers:
-- PacketFunctionExecutorBase (supports, get_execution_data)
+- PythonFunctionExecutorBase (supports, get_execution_data)
 - LocalExecutor (in-process execution)
 - Executor as property on PacketFunctionBase (get/set/validation)
 - Executor routing in call() / direct_call()
@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from orcapod.core.datagrams import Packet
-from orcapod.core.executors import LocalExecutor, PacketFunctionExecutorBase
+from orcapod.core.executors import LocalExecutor, PythonFunctionExecutorBase
 from orcapod.core.packet_function import (
     PacketFunctionWrapper,
     PythonPacketFunction,
@@ -42,7 +42,7 @@ def noop(x: int) -> int:
     return x
 
 
-class SpyExecutor(PacketFunctionExecutorBase):
+class SpyExecutor(PythonFunctionExecutorBase):
     """Executor that records calls for testing."""
 
     def __init__(self, supported_types: frozenset[str] | None = None) -> None:
@@ -69,7 +69,7 @@ class SpyExecutor(PacketFunctionExecutorBase):
         return fn(**kwargs)
 
 
-class PythonOnlyExecutor(PacketFunctionExecutorBase):
+class PythonOnlyExecutor(PythonFunctionExecutorBase):
     """Executor that only supports python.function.v0."""
 
     @property
@@ -83,7 +83,7 @@ class PythonOnlyExecutor(PacketFunctionExecutorBase):
         return fn(**kwargs)
 
 
-class NonPythonExecutor(PacketFunctionExecutorBase):
+class NonPythonExecutor(PythonFunctionExecutorBase):
     """Executor that explicitly does NOT support python.function.v0."""
 
     @property
@@ -123,11 +123,11 @@ def local_executor() -> LocalExecutor:
 
 
 # ---------------------------------------------------------------------------
-# 1. PacketFunctionExecutorBase
+# 1. PythonFunctionExecutorBase
 # ---------------------------------------------------------------------------
 
 
-class TestPacketFunctionExecutorBase:
+class TestPythonFunctionExecutorBase:
     def test_supports_all_when_empty_frozenset(self):
         executor = SpyExecutor(supported_types=frozenset())
         assert executor.supports("python.function.v0")
@@ -567,7 +567,7 @@ class TestConstructorValidation:
 # ---------------------------------------------------------------------------
 
 
-class ConcurrentSpyExecutor(PacketFunctionExecutorBase):
+class ConcurrentSpyExecutor(PythonFunctionExecutorBase):
     """Executor that supports concurrent execution and tracks sync vs async calls."""
 
     def __init__(self) -> None:

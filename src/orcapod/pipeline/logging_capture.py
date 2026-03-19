@@ -40,8 +40,8 @@ from typing import Any
 class CapturedLogs:
     """I/O captured from a single packet function execution."""
 
-    stdout: str = ""
-    stderr: str = ""
+    stdout_log: str = ""
+    stderr_log: str = ""
     python_logs: str = ""
     traceback: str | None = None
     success: bool = True
@@ -49,8 +49,8 @@ class CapturedLogs:
     def as_dict(self) -> dict[str, Any]:
         """Return fields as a plain dict (for passing to ``logger.record(**d)``)."""
         return {
-            "stdout": self.stdout,
-            "stderr": self.stderr,
+            "stdout_log": self.stdout_log,
+            "stderr_log": self.stderr_log,
             "python_logs": self.python_logs,
             "traceback": self.traceback,
             "success": self.success,
@@ -236,8 +236,8 @@ class LocalCaptureContext:
     ) -> CapturedLogs:
         """Return a :class:`CapturedLogs` from what was captured in this context."""
         return CapturedLogs(
-            stdout=self._stdout_buf.getvalue(),
-            stderr=self._stderr_buf.getvalue(),
+            stdout_log=self._stdout_buf.getvalue(),
+            stderr_log=self._stderr_buf.getvalue(),
             python_logs="\n".join(self._log_buf) if self._log_buf else "",
             traceback=tb,
             success=success,

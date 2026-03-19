@@ -279,14 +279,14 @@ class OperatorNode(StreamBase):
     # Read-only overrides (for deserialized nodes without live operator)
     # ------------------------------------------------------------------
 
-    def content_hash(self, hasher=None) -> "ContentHash":
+    def content_hash(self, hasher=None) -> ContentHash:
         """Return the content hash, using stored value in read-only mode."""
         stored = getattr(self, "_stored_content_hash", None)
         if self._operator is None and stored is not None:
             return ContentHash.from_string(stored)
         return super().content_hash(hasher)
 
-    def pipeline_hash(self, hasher=None) -> "ContentHash":
+    def pipeline_hash(self, hasher=None) -> ContentHash:
         """Return the pipeline hash, using stored value in read-only mode."""
         stored = getattr(self, "_stored_pipeline_hash", None)
         if self._operator is None and stored is not None:
@@ -417,7 +417,7 @@ class OperatorNode(StreamBase):
 
         self._cached_output_table = output_table.drop(self.HASH_COLUMN_NAME)
 
-    def get_cached_output(self) -> "StreamProtocol | None":
+    def get_cached_output(self) -> StreamProtocol | None:
         """Return cached output stream in REPLAY mode, else None.
 
         Returns:
@@ -434,7 +434,7 @@ class OperatorNode(StreamBase):
     def execute(
         self,
         *input_streams: StreamProtocol,
-        observer: "ExecutionObserver | None" = None,
+        observer: ExecutionObserverProtocol | None = None,
     ) -> list[tuple[TagProtocol, PacketProtocol]]:
         """Execute input streams: compute, persist, and cache.
 
@@ -445,7 +445,7 @@ class OperatorNode(StreamBase):
         Returns:
             Materialized list of (tag, packet) pairs.
         """
-        node_label = self.label or "operator"
+        node_label = self.label
         node_hash = ""
         if observer is not None:
             observer.on_node_start(node_label, node_hash)
@@ -558,7 +558,7 @@ class OperatorNode(StreamBase):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> "pa.Table":
+    ) -> pa.Table:
         self.run()
         assert self._cached_output_stream is not None
         return self._cached_output_stream.as_table(columns=columns, all_info=all_info)
@@ -571,7 +571,7 @@ class OperatorNode(StreamBase):
         self,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> "pa.Table | None":
+    ) -> pa.Table | None:
         """Retrieve all stored records from the pipeline database.
 
         Returns the stored output table with column filtering applied
@@ -643,7 +643,7 @@ class OperatorNode(StreamBase):
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
         *,
-        observer: "ExecutionObserver | None" = None,
+        observer: ExecutionObserverProtocol | None = None,
     ) -> None:
         """Async execution with cache mode handling when DB is attached.
 
@@ -660,7 +660,7 @@ class OperatorNode(StreamBase):
             output: Writable channel for output (tag, packet) pairs.
             observer: Optional execution observer for hooks.
         """
-        node_label = self.label or "operator"
+        node_label = self.label
         node_hash = ""
         if self._pipeline_database is None:
             # Simple delegation without DB

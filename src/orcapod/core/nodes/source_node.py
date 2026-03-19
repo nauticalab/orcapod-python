@@ -220,7 +220,7 @@ class SourceNode(StreamBase):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> "pa.Table":
+    ) -> pa.Table:
         if self.stream is None:
             raise RuntimeError(
                 "SourceNode in read-only mode has no stream data available"
@@ -239,7 +239,7 @@ class SourceNode(StreamBase):
     def execute(
         self,
         *,
-        observer: "ExecutionObserver | None" = None,
+        observer: ExecutionObserverProtocol | None = None,
     ) -> list[tuple[cp.TagProtocol, cp.PacketProtocol]]:
         """Execute this source: materialize packets and return.
 
@@ -253,7 +253,7 @@ class SourceNode(StreamBase):
             raise RuntimeError(
                 "SourceNode in read-only mode has no stream data available"
             )
-        node_label = self.label or "source"
+        node_label = self.label
         node_hash = ""
         if observer is not None:
             observer.on_node_start(node_label, node_hash)
@@ -270,7 +270,7 @@ class SourceNode(StreamBase):
         self,
         output: WritableChannel[tuple[cp.TagProtocol, cp.PacketProtocol]],
         *,
-        observer: "ExecutionObserver | None" = None,
+        observer: ExecutionObserverProtocol | None = None,
     ) -> None:
         """Push all (tag, packet) pairs from the wrapped stream to the output channel.
 
@@ -282,7 +282,7 @@ class SourceNode(StreamBase):
             raise RuntimeError(
                 "SourceNode in read-only mode has no stream data available"
             )
-        node_label = self.label or "source"
+        node_label = self.label
         node_hash = ""
         try:
             if observer is not None:

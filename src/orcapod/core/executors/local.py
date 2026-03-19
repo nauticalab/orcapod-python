@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import traceback as _traceback_module
+import traceback
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from orcapod.core.executors.base import PacketFunctionExecutorBase
-from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
+from orcapod.core.executors.base import PythonFunctionExecutorBase
+
+if TYPE_CHECKING:
+    from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
 
 
-class LocalExecutor(PacketFunctionExecutorBase):
+class LocalExecutor(PythonFunctionExecutorBase):
     """Default executor -- runs the packet function directly in the current process.
 
     Supports all packet function types (``supported_function_type_ids``
@@ -42,7 +44,7 @@ class LocalExecutor(PacketFunctionExecutorBase):
                 else:
                     raw_result = fn(**kwargs)
             except Exception:
-                tb = _traceback_module.format_exc()
+                tb = traceback.format_exc()
                 captured = ctx.get_captured(success=False, tb=tb)
                 if logger is not None:
                     logger.record(**captured.as_dict())
@@ -91,7 +93,7 @@ class LocalExecutor(PacketFunctionExecutorBase):
                         functools.partial(task_ctx.run, fn, **kwargs),
                     )
             except Exception:
-                tb = _traceback_module.format_exc()
+                tb = traceback.format_exc()
                 captured = ctx.get_captured(success=False, tb=tb)
                 if logger is not None:
                     logger.record(**captured.as_dict())

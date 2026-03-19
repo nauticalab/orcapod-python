@@ -12,7 +12,7 @@ are internal. Orchestrators are topology schedulers.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Protocol, TypeGuard, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, TypeGuard, runtime_checkable
 
 if TYPE_CHECKING:
     from orcapod.channels import ReadableChannel, WritableChannel
@@ -34,14 +34,14 @@ class SourceNodeProtocol(Protocol):
     def execute(
         self,
         *,
-        observer: "ExecutionObserverProtocol | None" = None,
-    ) -> list[tuple["TagProtocol", "PacketProtocol"]]: ...
+        observer: ExecutionObserverProtocol | None = None,
+    ) -> list[tuple[TagProtocol, PacketProtocol]]: ...
 
     async def async_execute(
         self,
-        output: "WritableChannel[tuple[TagProtocol, PacketProtocol]]",
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
         *,
-        observer: "ExecutionObserverProtocol | None" = None,
+        observer: ExecutionObserverProtocol | None = None,
     ) -> None: ...
 
 
@@ -53,18 +53,18 @@ class FunctionNodeProtocol(Protocol):
 
     def execute(
         self,
-        input_stream: "StreamProtocol",
+        input_stream: StreamProtocol,
         *,
-        observer: "ExecutionObserverProtocol | None" = None,
-        error_policy: str = "continue",
-    ) -> list[tuple["TagProtocol", "PacketProtocol"]]: ...
+        observer: ExecutionObserverProtocol | None = None,
+        error_policy: Literal["continue", "fail_fast"] = "continue",
+    ) -> list[tuple[TagProtocol, PacketProtocol]]: ...
 
     async def async_execute(
         self,
-        input_channel: "ReadableChannel[tuple[TagProtocol, PacketProtocol]]",
-        output: "WritableChannel[tuple[TagProtocol, PacketProtocol]]",
+        input_channel: ReadableChannel[tuple[TagProtocol, PacketProtocol]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
         *,
-        observer: "ExecutionObserverProtocol | None" = None,
+        observer: ExecutionObserverProtocol | None = None,
     ) -> None: ...
 
 
@@ -76,29 +76,29 @@ class OperatorNodeProtocol(Protocol):
 
     def execute(
         self,
-        *input_streams: "StreamProtocol",
-        observer: "ExecutionObserverProtocol | None" = None,
-    ) -> list[tuple["TagProtocol", "PacketProtocol"]]: ...
+        *input_streams: StreamProtocol,
+        observer: ExecutionObserverProtocol | None = None,
+    ) -> list[tuple[TagProtocol, PacketProtocol]]: ...
 
     async def async_execute(
         self,
-        inputs: "Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]]",
-        output: "WritableChannel[tuple[TagProtocol, PacketProtocol]]",
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
         *,
-        observer: "ExecutionObserverProtocol | None" = None,
+        observer: ExecutionObserverProtocol | None = None,
     ) -> None: ...
 
 
-def is_source_node(node: "GraphNode") -> TypeGuard[SourceNodeProtocol]:
+def is_source_node(node: GraphNode) -> TypeGuard[SourceNodeProtocol]:
     """Check if a node is a source node."""
     return node.node_type == "source"
 
 
-def is_function_node(node: "GraphNode") -> TypeGuard[FunctionNodeProtocol]:
+def is_function_node(node: GraphNode) -> TypeGuard[FunctionNodeProtocol]:
     """Check if a node is a function node."""
     return node.node_type == "function"
 
 
-def is_operator_node(node: "GraphNode") -> TypeGuard[OperatorNodeProtocol]:
+def is_operator_node(node: GraphNode) -> TypeGuard[OperatorNodeProtocol]:
     """Check if a node is an operator node."""
     return node.node_type == "operator"

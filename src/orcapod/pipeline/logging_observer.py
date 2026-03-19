@@ -1,11 +1,11 @@
 """Concrete logging observer for orcapod pipelines.
 
-Provides :class:`LoggingObserver`, a drop-in observer that captures stdout,
+Provides ``LoggingObserver``, a drop-in observer that captures stdout,
 stderr, Python logging, and tracebacks from every packet execution and writes
-structured log rows to any :class:`~orcapod.protocols.database_protocols.ArrowDatabaseProtocol`
+structured log rows to any ``ArrowDatabaseProtocol`` implementation
 (in-memory, Delta Lake, etc.).
 
-Typical usage::
+Example::
 
     from orcapod.pipeline.logging_observer import LoggingObserver
     from orcapod.pipeline import SyncPipelineOrchestrator
@@ -18,60 +18,32 @@ Typical usage::
     logs = obs.get_logs()           # pyarrow.Table
     logs.to_pandas()                # pandas DataFrame
 
-Log schema (fixed columns)
---------------------------
-Fixed columns are prefixed with ``__`` to avoid collision with user-defined
-tag column names.
+Log schema (fixed columns):
+    Fixed columns are prefixed with ``_log_`` to follow system column conventions
+    and avoid collision with user-defined tag column names.
 
-.. list-table::
-   :header-rows: 1
+    - ``_log_id`` (large_utf8): UUID unique to this log entry.
+    - ``_log_run_id`` (large_utf8): UUID of the pipeline run (from ``on_run_start``).
+    - ``_log_node_label`` (large_utf8): Label of the function node.
+    - ``_log_node_hash`` (large_utf8): Content hash of the function node.
+    - ``_log_stdout_log`` (large_utf8): Captured standard output.
+    - ``_log_stderr_log`` (large_utf8): Captured standard error.
+    - ``_log_python_logs`` (large_utf8): Python logging output captured during execution.
+    - ``_log_traceback`` (large_utf8): Full traceback on failure; ``None`` on success.
+    - ``_log_success`` (bool): ``True`` if the packet function returned normally.
+    - ``_log_timestamp`` (large_utf8): ISO-8601 UTC timestamp when ``record()`` was called.
 
-   * - Column
-     - Type
-     - Description
-   * - ``__log_id``
-     - ``large_utf8``
-     - UUID unique to this log entry
-   * - ``__run_id``
-     - ``large_utf8``
-     - UUID of the pipeline run (from ``on_run_start``)
-   * - ``__node_label``
-     - ``large_utf8``
-     - Label of the function node
-   * - ``__node_hash``
-     - ``large_utf8``
-     - Pipeline hash of the function node
-   * - ``__stdout``
-     - ``large_utf8``
-     - Captured standard output
-   * - ``__stderr``
-     - ``large_utf8``
-     - Captured standard error
-   * - ``__python_logs``
-     - ``large_utf8``
-     - Python ``logging`` output captured during execution
-   * - ``__traceback``
-     - ``large_utf8``
-     - Full traceback on failure; ``None`` on success
-   * - ``__success``
-     - ``bool_``
-     - ``True`` if the packet function returned normally
-   * - ``__timestamp``
-     - ``large_utf8``
-     - ISO-8601 UTC timestamp when ``record()`` was called
+    In addition, each tag key from the packet's tag becomes a separate
+    ``large_utf8`` column (queryable, not JSON-encoded).  Tag columns use
+    bare names (no prefix), so they are always distinguishable from fixed
+    columns.
 
-In addition, each tag key from the packet's tag becomes a separate
-``large_utf8`` column (queryable, not JSON-encoded).  Tag columns use
-bare names (no prefix), so they are always distinguishable from fixed
-columns.
-
-Log storage
------------
-Logs are stored at a pipeline-path-mirrored location:
-``pipeline_path[:1] + ("logs",) + pipeline_path[1:]``.
-Each function node gets its own log table.  Use
-``get_logs(pipeline_path=node.pipeline_path)`` to retrieve
-node-specific logs.
+Log storage:
+    Logs are stored at a pipeline-path-mirrored location:
+    ``pipeline_path[:1] + ("logs",) + pipeline_path[1:]``.
+    Each function node gets its own log table.  Use
+    ``get_logs(pipeline_path=node.pipeline_path)`` to retrieve
+    node-specific logs.
 """
 
 from __future__ import annotations
@@ -111,12 +83,12 @@ class PacketLogger:
 
     def __init__(
         self,
-        db: "ArrowDatabaseProtocol",
+        db: ArrowDatabaseProtocol,
         log_path: tuple[str, ...],
         run_id: str,
-        node_label: str,
-        node_hash: str,
         tag_data: dict[str, Any],
+        node_label: str = "",
+        node_hash: str = "",
     ) -> None:
         self._db = db
         self._log_path = log_path
@@ -129,27 +101,27 @@ class PacketLogger:
         """Write one log row to the database.
 
         Args:
-            **kwargs: Captured execution fields (e.g. ``stdout``, ``stderr``,
+            **kwargs: Captured execution fields (e.g. ``stdout_log``, ``stderr_log``,
                 ``python_logs``, ``traceback``, ``success``).  Each field is
-                stored as a ``__``-prefixed column in the log table.
+                stored as a ``_log_``-prefixed column in the log table.
         """
         import pyarrow as pa
 
         log_id = str(uuid7())
         timestamp = datetime.now(timezone.utc).isoformat()
 
-        # Context columns — prefixed with "__" to avoid collision with user tag keys
+        # Context columns — prefixed with "_log_" to follow system column conventions
         columns: dict[str, pa.Array] = {
-            "__log_id":      pa.array([log_id],               type=pa.large_utf8()),
-            "__run_id":      pa.array([self._run_id],          type=pa.large_utf8()),
-            "__node_label":  pa.array([self._node_label],      type=pa.large_utf8()),
-            "__node_hash":   pa.array([self._node_hash],       type=pa.large_utf8()),
-            "__timestamp":   pa.array([timestamp],             type=pa.large_utf8()),
+            "_log_id":         pa.array([log_id],               type=pa.large_utf8()),
+            "_log_run_id":     pa.array([self._run_id],          type=pa.large_utf8()),
+            "_log_node_label": pa.array([self._node_label],      type=pa.large_utf8()),
+            "_log_node_hash":  pa.array([self._node_hash],       type=pa.large_utf8()),
+            "_log_timestamp":  pa.array([timestamp],             type=pa.large_utf8()),
         }
 
-        # Execution output columns from kwargs — prefixed with "__"
+        # Execution output columns from kwargs — prefixed with "_log_"
         for key, value in kwargs.items():
-            col_name = f"__{key}"
+            col_name = f"_log_{key}"
             if isinstance(value, bool):
                 columns[col_name] = pa.array([value], type=pa.bool_())
             else:
@@ -285,7 +257,7 @@ class LoggingObserver:
 
     def __init__(
         self,
-        log_database: "ArrowDatabaseProtocol",
+        log_database: ArrowDatabaseProtocol,
         log_path: tuple[str, ...] | None = None,
     ) -> None:
         self._db = log_database
@@ -363,8 +335,6 @@ class LoggingObserver:
             db=self._db,
             log_path=log_path,
             run_id=self._current_run_id,
-            node_label="unknown",
-            node_hash="unknown",
             tag_data=tag_data,
         )
 
@@ -372,7 +342,7 @@ class LoggingObserver:
 
     def get_logs(
         self, pipeline_path: tuple[str, ...] | None = None
-    ) -> "pa.Table | None":
+    ) -> pa.Table | None:
         """Read log rows from the database as a :class:`pyarrow.Table`.
 
         Args:

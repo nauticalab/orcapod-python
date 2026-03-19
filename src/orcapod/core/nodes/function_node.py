@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from orcapod import contexts
 from orcapod.channels import ReadableChannel, WritableChannel
@@ -500,7 +500,7 @@ class FunctionNode(StreamBase):
         input_stream: StreamProtocol,
         *,
         observer: ExecutionObserverProtocol | None = None,
-        error_policy: str = "continue",
+        error_policy: Literal["continue", "fail_fast"] = "continue",
     ) -> list[tuple[TagProtocol, PacketProtocol]]:
         """Execute all packets from a stream: compute, persist, and cache.
 
@@ -517,12 +517,11 @@ class FunctionNode(StreamBase):
         from orcapod.pipeline.observer import NoOpObserver
 
         node_label = self.label
-        node_hash = self.pipeline_hash().to_string()
+        node_hash = self.content_hash().to_string()
 
         obs = observer if observer is not None else NoOpObserver()
-        ctx_observer = obs.contextualize(node_hash, node_label)
 
-        ctx_observer.on_node_start(node_label, node_hash)
+        obs.on_node_start(node_label, node_hash)
 
         # Gather entry IDs and check cache
         upstream_entries = [
@@ -536,16 +535,17 @@ class FunctionNode(StreamBase):
 
         output: list[tuple[TagProtocol, PacketProtocol]] = []
         for tag, packet, entry_id in upstream_entries:
-            ctx_observer.on_packet_start(node_label, tag, packet)
+            obs.on_packet_start(node_label, tag, packet)
 
             if entry_id in cached:
                 tag_out, result = cached[entry_id]
-                ctx_observer.on_packet_end(
+                obs.on_packet_end(
                     node_label, tag, packet, result, cached=True
                 )
                 output.append((tag_out, result))
             else:
-                pkt_logger = ctx_observer.create_packet_logger(
+                ctx_obs = obs.contextualize(node_hash, node_label)
+                pkt_logger = ctx_obs.create_packet_logger(
                     tag, packet, pipeline_path=pp
                 )
                 try:
@@ -553,18 +553,22 @@ class FunctionNode(StreamBase):
                         tag, packet, logger=pkt_logger
                     )
                 except Exception as exc:
-                    ctx_observer.on_packet_crash(node_label, tag, packet, exc)
+                    logger.warning(
+                        "Packet execution failed in %s: %s", node_label, exc,
+                        exc_info=True,
+                    )
+                    obs.on_packet_crash(node_label, tag, packet, exc)
                     if error_policy == "fail_fast":
-                        ctx_observer.on_node_end(node_label, node_hash)
+                        obs.on_node_end(node_label, node_hash)
                         raise
                 else:
-                    ctx_observer.on_packet_end(
+                    obs.on_packet_end(
                         node_label, tag, packet, result, cached=False
                     )
                     if result is not None:
                         output.append((tag_out, result))
 
-        ctx_observer.on_node_end(node_label, node_hash)
+        obs.on_node_end(node_label, node_hash)
         return output
 
     def _process_packet_internal(
@@ -869,7 +873,7 @@ class FunctionNode(StreamBase):
         self,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> "pa.Table | None":
+    ) -> pa.Table | None:
         """Return all computed results joined with their pipeline tag records.
 
         Args:
@@ -1116,7 +1120,7 @@ class FunctionNode(StreamBase):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> "pa.Table":
+    ) -> pa.Table:
         if self._cached_output_table is None:
             all_tags = []
             all_packets = []
@@ -1235,13 +1239,12 @@ class FunctionNode(StreamBase):
         from orcapod.pipeline.observer import NoOpObserver
 
         node_label = self.label
-        node_hash = self.pipeline_hash().to_string()
+        node_hash = self.content_hash().to_string()
 
         obs = observer if observer is not None else NoOpObserver()
-        ctx_observer = obs.contextualize(node_hash, node_label)
 
         try:
-            ctx_observer.on_node_start(node_label, node_hash)
+            obs.on_node_start(node_label, node_hash)
 
             if self._cached_function_pod is not None:
                 # DB-backed async execution:
@@ -1297,15 +1300,15 @@ class FunctionNode(StreamBase):
                     entry_id = self.compute_pipeline_entry_id(tag, packet)
                     if entry_id in cached_by_entry_id:
                         tag_out, result_packet = cached_by_entry_id[entry_id]
-                        ctx_observer.on_packet_start(node_label, tag, packet)
-                        ctx_observer.on_packet_end(
+                        obs.on_packet_start(node_label, tag, packet)
+                        obs.on_packet_end(
                             node_label, tag, packet, result_packet, cached=True
                         )
                         await output.send((tag_out, result_packet))
                     else:
                         await self._async_execute_one_packet(
                             tag, packet, output,
-                            ctx_observer=ctx_observer,
+                            observer=obs,
                             node_label=node_label,
                             node_hash=node_hash,
                         )
@@ -1314,12 +1317,12 @@ class FunctionNode(StreamBase):
                 async for tag, packet in input_channel:
                     await self._async_execute_one_packet(
                         tag, packet, output,
-                        ctx_observer=ctx_observer,
+                        observer=obs,
                         node_label=node_label,
                         node_hash=node_hash,
                     )
 
-            ctx_observer.on_node_end(node_label, node_hash)
+            obs.on_node_end(node_label, node_hash)
         finally:
             await output.close()
 
@@ -1329,24 +1332,29 @@ class FunctionNode(StreamBase):
         packet: PacketProtocol,
         output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
         *,
-        ctx_observer: ExecutionObserverProtocol,
+        observer: ExecutionObserverProtocol,
         node_label: str,
         node_hash: str,
     ) -> None:
         """Process one non-cached packet in the async execute path."""
         pp = self.pipeline_path if self._pipeline_database is not None else ()
 
-        ctx_observer.on_packet_start(node_label, tag, packet)
-        pkt_logger = ctx_observer.create_packet_logger(tag, packet, pipeline_path=pp)
+        observer.on_packet_start(node_label, tag, packet)
+        ctx_obs = observer.contextualize(node_hash, node_label)
+        pkt_logger = ctx_obs.create_packet_logger(tag, packet, pipeline_path=pp)
 
         try:
             tag_out, result_packet = await self._async_process_packet_internal(
                 tag, packet, logger=pkt_logger
             )
         except Exception as exc:
-            ctx_observer.on_packet_crash(node_label, tag, packet, exc)
+            logger.warning(
+                "Packet execution failed in %s: %s", node_label, exc,
+                exc_info=True,
+            )
+            observer.on_packet_crash(node_label, tag, packet, exc)
         else:
-            ctx_observer.on_packet_end(
+            observer.on_packet_end(
                 node_label, tag, packet, result_packet, cached=False
             )
             if result_packet is not None:

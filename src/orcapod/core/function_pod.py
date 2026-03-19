@@ -154,7 +154,7 @@ class _FunctionPodBase(TraceableBase):
         Args:
             tag: The tag associated with the packet.
             packet: The input packet to process.
-            logger: Optional :class:`PacketExecutionLoggerProtocol` for
+            logger: Optional PacketExecutionLoggerProtocol for
                 recording captured I/O.
 
         Returns:
@@ -367,9 +367,9 @@ class FunctionPod(_FunctionPodBase):
                     tag, result_packet = await self.async_process_packet(tag, packet)
                     if result_packet is not None:
                         await output.send((tag, result_packet))
-                except Exception:
+                except Exception as e:
                     # Swallow packet-level errors so remaining packets continue.
-                    logger.debug("Packet processing failed, skipping", exc_info=True)
+                    logger.debug("Packet processing failed, skipping: %s", e, exc_info=True)
                 finally:
                     if sem is not None:
                         sem.release()
@@ -569,7 +569,7 @@ class FunctionPodStream(StreamBase):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> "pa.Table":
+    ) -> pa.Table:
         if self._cached_output_table is None:
             all_tags = []
             all_packets = []
