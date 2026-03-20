@@ -19,7 +19,7 @@ dependencies = [
     "deltalake>=1.0.2",
     "graphviz>=0.21",
     "gitpython>=3.1.45",
-    "starfix>=0.1.3",
+    "starfix",
     "pygraphviz>=1.14",
     "tzdata>=2024.1",
     "uuid-utils>=0.11.1",
@@ -50,6 +50,9 @@ where = ["src"]
 
 [tool.setuptools_scm]
 version_file = "src/orcapod/_version.py"
+
+[tool.uv.sources]
+starfix = { git = "https://github.com/nauticalab/starfix-python.git" }
 
 
 [dependency-groups]

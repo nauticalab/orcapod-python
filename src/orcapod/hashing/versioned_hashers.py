@@ -123,7 +123,7 @@ def get_versioned_semantic_arrow_hasher(
     ArrowHasherProtocol
         A fully configured SemanticArrowHasher instance.
     """
-    from orcapod.hashing.arrow_hashers import SemanticArrowHasher
+    from orcapod.hashing.arrow_hashers import StarfixArrowHasher
     from orcapod.hashing.file_hashers import BasicFileHasher
     from orcapod.semantic_types.semantic_registry import SemanticTypeRegistry
     from orcapod.semantic_types.semantic_struct_converters import PathStructConverter
@@ -138,11 +138,11 @@ def get_versioned_semantic_arrow_hasher(
     registry.register_converter("path", path_converter)
 
     logger.debug(
-        "get_versioned_semantic_arrow_hasher: creating SemanticArrowHasher "
+        "get_versioned_semantic_arrow_hasher: creating StarfixArrowHasher "
         "(hasher_id=%r)",
         hasher_id,
     )
-    hasher: Any = SemanticArrowHasher(
+    hasher: Any = StarfixArrowHasher(
         hasher_id=hasher_id,
         semantic_registry=registry,
     )
