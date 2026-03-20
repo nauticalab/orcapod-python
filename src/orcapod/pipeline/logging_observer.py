@@ -153,7 +153,7 @@ class _ContextualizedLoggingObserver:
 
     def __init__(
         self,
-        parent: "LoggingObserver",
+        parent: LoggingObserver,
         node_hash: str,
         node_label: str,
     ) -> None:
@@ -163,7 +163,7 @@ class _ContextualizedLoggingObserver:
 
     def contextualize(
         self, node_hash: str, node_label: str
-    ) -> "_ContextualizedLoggingObserver":
+    ) -> _ContextualizedLoggingObserver:
         """Re-contextualize (returns a new wrapper with updated identity)."""
         return _ContextualizedLoggingObserver(self._parent, node_hash, node_label)
 
