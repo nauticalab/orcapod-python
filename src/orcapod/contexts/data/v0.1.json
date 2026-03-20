@@ -22,12 +22,9 @@
         }
     },
     "arrow_hasher": {
-        "_class": "orcapod.hashing.arrow_hashers.SemanticArrowHasher",
+        "_class": "orcapod.hashing.arrow_hashers.StarfixArrowHasher",
         "_config": {
             "hasher_id": "arrow_v0.1",
-            "hash_algorithm": "sha256",
-            "chunk_size": 8192,
-            "serialization_method": "logical",
             "semantic_registry": {
                 "_ref": "semantic_registry"
             }
@@ -83,7 +80,8 @@
         "changelog": [
             "Initial release with Path semantic type support",
             "Basic SHA-256 hashing for files and objects",
-            "Arrow logical serialization method"
+            "Arrow logical serialization method",
+            "arrow_v0.1: replaced custom IPC serialisation+hashlib with starfix ArrowDigester for cross-language-compatible Arrow hashing"
         ]
     }
 }
