@@ -213,7 +213,7 @@ class LocalCaptureContext:
         self._log_buf: list[str] = []
         self._tokens: list[contextvars.Token] = []
 
-    def __enter__(self) -> "LocalCaptureContext":
+    def __enter__(self) -> LocalCaptureContext:
         self._tokens = [
             _stdout_capture.set(self._stdout_buf),
             _stderr_capture.set(self._stderr_buf),
