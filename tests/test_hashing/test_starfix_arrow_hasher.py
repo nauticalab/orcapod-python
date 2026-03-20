@@ -7,14 +7,19 @@ Coverage
 - hash_table / hash_record_batch: returns ContentHash, digest is 35 bytes
 - Column-order independence: reordering columns does not change the hash
 - Batch-split independence: splitting a table across batches does not change
-  the hash (verified via RecordBatch round-trip)
-- Type normalisation: Utf8 and LargeUtf8 columns hash identically
+  the hash (verified via single-batch and multi-batch RecordBatch round-trips)
+- Row-order sensitivity: reordering rows changes the hash
+- Type normalisation: Utf8/LargeUtf8 and Binary/LargeBinary hash identically
+- Integer width sensitivity: int32 and int64 with the same values differ
+- Null handling: null position matters; a null changes the hash vs no-null
+- Field nullability: nullable=True and nullable=False produce different schema hashes
 - Empty table: hash_table handles a table with zero rows
 - Schema-only vs data hash: hash_schema and hash_table differ for the same schema
 - versioned_hashers factory: get_versioned_semantic_arrow_hasher returns a
   StarfixArrowHasher with hasher_id == _CURRENT_ARROW_HASHER_ID
 - Context integration: the v0.1 context wires up StarfixArrowHasher
-- Stability (golden values): hard-coded digests catch accidental algorithm changes
+- Stability (golden values): fully-pinned 35-byte digests catch accidental
+  algorithm changes in both schema and table hashing
 """
 
 from __future__ import annotations
@@ -90,7 +95,7 @@ class TestHashSchema:
         assert h1.digest == h2.digest
 
     def test_golden_value(self):
-        """Pin the digest so unintentional algorithm changes are caught."""
+        """Pin the full 35-byte digest so any algorithm change is caught."""
         schema = pa.schema(
             [
                 pa.field("id", pa.int32(), nullable=False),
@@ -98,9 +103,28 @@ class TestHashSchema:
             ]
         )
         h = _make_hasher().hash_schema(schema)
-        # First 6 hex chars encode the 3-byte starfix version prefix (000001)
-        assert h.digest.hex().startswith("000001"), (
-            f"Unexpected version prefix in digest: {h.digest.hex()}"
+        assert h.digest.hex() == "000001d676ef0263a8e0e7500b1c97033993dbe445172ca0f9e7577b3994bfa6224b4c", (
+            f"Schema golden digest changed — was the starfix algorithm updated? "
+            f"Got: {h.digest.hex()}"
+        )
+
+    def test_nullability_affects_schema_hash(self):
+        """nullable=True and nullable=False must produce different schema hashes."""
+        s_nullable     = pa.schema([pa.field("x", pa.int32(), nullable=True)])
+        s_non_nullable = pa.schema([pa.field("x", pa.int32(), nullable=False)])
+        h_nullable     = _make_hasher().hash_schema(s_nullable)
+        h_non_nullable = _make_hasher().hash_schema(s_non_nullable)
+        assert h_nullable.digest != h_non_nullable.digest
+
+    def test_nullability_golden_values(self):
+        """Pin nullable and non-nullable schema digests independently."""
+        s_nullable     = pa.schema([pa.field("x", pa.int32(), nullable=True)])
+        s_non_nullable = pa.schema([pa.field("x", pa.int32(), nullable=False)])
+        assert _make_hasher().hash_schema(s_nullable).digest.hex() == (
+            "000001b8005339e69df64cda60f9ff9c98caa264092a7b666c3f7f85a2bfed20bae3db"
+        )
+        assert _make_hasher().hash_schema(s_non_nullable).digest.hex() == (
+            "00000179353568a71430411e8108ee02d425800f6d5054d9b2baa871cad90f3e06422a"
         )
 
 
@@ -168,6 +192,49 @@ class TestHashTable:
         h2 = _make_hasher().hash_table(t_large)
         assert h1.digest == h2.digest
 
+    def test_binary_largebinary_normalised(self):
+        """Binary and LargeBinary columns should hash identically (starfix normalises)."""
+        t_bin  = pa.table({"b": pa.array([b"hello", b"world"], type=pa.binary())})
+        t_lbin = pa.table({"b": pa.array([b"hello", b"world"], type=pa.large_binary())})
+        assert _make_hasher().hash_table(t_bin).digest == _make_hasher().hash_table(t_lbin).digest
+
+    def test_row_order_matters(self):
+        """Reordering rows must produce a different hash (rows carry positional semantics)."""
+        t_orig     = pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
+        t_reversed = pa.table({"x": pa.array([3, 2, 1], type=pa.int64())})
+        assert _make_hasher().hash_table(t_orig).digest != _make_hasher().hash_table(t_reversed).digest
+
+    def test_null_position_matters(self):
+        """A null in a different row position must produce a different hash."""
+        t_null_first  = pa.table({"x": pa.array([None, 2, 3], type=pa.int32())})
+        t_null_second = pa.table({"x": pa.array([1, None, 3], type=pa.int32())})
+        assert _make_hasher().hash_table(t_null_first).digest != _make_hasher().hash_table(t_null_second).digest
+
+    def test_null_differs_from_no_null(self):
+        """A table with a null value must hash differently from one without."""
+        t_with_null = pa.table({"x": pa.array([1, None, 3], type=pa.int32())})
+        t_no_null   = pa.table({"x": pa.array([1, 2, 3],    type=pa.int32())})
+        assert _make_hasher().hash_table(t_with_null).digest != _make_hasher().hash_table(t_no_null).digest
+
+    def test_int32_differs_from_int64(self):
+        """Same values stored as int32 and int64 must hash differently."""
+        t_i32 = pa.table({"x": pa.array([1, 2, 3], type=pa.int32())})
+        t_i64 = pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
+        assert _make_hasher().hash_table(t_i32).digest != _make_hasher().hash_table(t_i64).digest
+
+    def test_golden_value_table(self):
+        """Pin the full 35-byte table digest so any algorithm change is caught."""
+        table = pa.table({
+            "id":    pa.array([1, 2, 3], type=pa.int32()),
+            "score": pa.array([0.1, 0.2, 0.3], type=pa.float64()),
+            "label": pa.array(["a", "b", "c"], type=pa.utf8()),
+        })
+        h = _make_hasher().hash_table(table)
+        assert h.digest.hex() == "0000010cd7fe5462420b84f03a06925374e528817a3b72319e679a17e7380964878791", (
+            f"Table golden digest changed — was the starfix algorithm updated? "
+            f"Got: {h.digest.hex()}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # RecordBatch (batch-split independence)
@@ -187,6 +254,17 @@ class TestHashRecordBatch:
         batch = pa.record_batch({"x": [1, 2]})
         h = _make_hasher().hash_table(batch)
         assert h.method == HASHER_ID
+
+    def test_multi_batch_table_matches_single_batch(self):
+        """A Table built from multiple RecordBatches must hash the same as
+        an equivalent single-batch Table (chunked arrays are transparent)."""
+        b1 = pa.record_batch({"x": pa.array([1, 2], type=pa.int64())})
+        b2 = pa.record_batch({"x": pa.array([3, 4], type=pa.int64())})
+        t_multi  = pa.Table.from_batches([b1, b2])
+        t_single = pa.table({"x": pa.array([1, 2, 3, 4], type=pa.int64())})
+        h_multi  = _make_hasher().hash_table(t_multi)
+        h_single = _make_hasher().hash_table(t_single)
+        assert h_multi.digest == h_single.digest
 
 
 # ---------------------------------------------------------------------------
