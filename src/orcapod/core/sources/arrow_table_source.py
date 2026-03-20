@@ -28,6 +28,12 @@ class ArrowTableSource(RootSource):
     ) -> None:
         super().__init__(**kwargs)
 
+        if len(table) == 0:
+            raise ValueError(
+                "ArrowTableSource requires a non-empty table; "
+                "the provided table has zero rows."
+            )
+
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(
             table,
