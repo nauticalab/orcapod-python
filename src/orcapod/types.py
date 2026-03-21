@@ -11,7 +11,6 @@ throughout the OrcaPod framework, including:
 
 from __future__ import annotations
 
-import functools
 import logging
 import os
 import uuid
@@ -31,24 +30,6 @@ else:
     pa = LazyModule("pyarrow")
 
 logger = logging.getLogger(__name__)
-
-
-@functools.cache
-def _python_to_arrow() -> dict[type, pa.DataType]:
-    """Lazily-built Python-type → Arrow-type mapping (populated on first call)."""
-    return {
-        int: pa.int64(),
-        float: pa.float64(),
-        str: pa.string(),
-        bool: pa.bool_(),
-        bytes: pa.binary(),
-    }
-
-
-@functools.cache
-def _arrow_to_python() -> dict[pa.DataType, type]:
-    """Lazily-built Arrow-type → Python-type mapping (populated on first call)."""
-    return {v: k for k, v in _python_to_arrow().items()}
 
 # TODO: revisit and consider a way to incorporate older Union type
 DataType: TypeAlias = type | UnionType  # | type[Union]
