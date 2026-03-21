@@ -13,9 +13,9 @@ Example::
     obs = StatusObserver(status_database=InMemoryArrowDatabase())
     pipeline.run(orchestrator=SyncPipelineOrchestrator(observer=obs))
 
-    # Inspect run status
-    status = obs.get_status()           # pyarrow.Table
-    status.to_pandas()                  # pandas DataFrame
+    # Inspect run status for a specific node
+    status = obs.get_status(pipeline_path=node.pipeline_path)  # pyarrow.Table
+    status.to_pandas()                                         # pandas DataFrame
 
 Status schema (fixed columns):
     Fixed columns are prefixed with ``_status_`` to follow system column
@@ -115,9 +115,10 @@ class StatusObserver:
 
     def on_run_start(self, run_id: str) -> None:
         self._current_run_id = run_id
+        self._node_context.clear()
 
     def on_run_end(self, run_id: str) -> None:
-        pass
+        self._node_context.clear()
 
     def on_node_start(
         self,
