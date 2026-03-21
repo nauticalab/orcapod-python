@@ -45,16 +45,17 @@ class TestArrowTableSourceConstruction:
         source = ArrowTableSource(_simple_table(), tag_columns=["name"])
         assert source is not None
 
-    def test_empty_table_raises(self):
-        """An empty table raises an error during construction."""
+    def test_empty_table_constructs_successfully(self):
+        """An empty table constructs successfully and produces zero output rows."""
         empty = pa.table(
             {
                 "name": pa.array([], type=pa.large_string()),
                 "age": pa.array([], type=pa.int64()),
             }
         )
-        with pytest.raises(Exception):
-            ArrowTableSource(empty, tag_columns=["name"])
+        source = ArrowTableSource(empty, tag_columns=["name"])
+        assert source is not None
+        assert source.as_table().num_rows == 0
 
     def test_missing_tag_columns_raises_value_error(self):
         """Specifying tag columns not in the table raises ValueError."""
