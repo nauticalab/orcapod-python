@@ -67,6 +67,10 @@ class ConnectorArrowDatabase:
         self.max_hierarchy_depth = max_hierarchy_depth
         self._pending_batches: dict[str, pa.Table] = {}
         self._pending_record_ids: dict[str, set[str]] = defaultdict(set)
+        # Per-batch flag: True when the batch was added with skip_duplicates=True,
+        # so flush() can pass skip_existing=True to the connector and let it use
+        # native INSERT-OR-IGNORE semantics rather than Python-side prefiltering.
+        self._pending_skip_existing: dict[str, bool] = {}
 
     # ── Path helpers ──────────────────────────────────────────────────────────
 
@@ -98,6 +102,14 @@ class ConnectorArrowDatabase:
             if not component or not isinstance(component, str):
                 raise ValueError(
                     f"record_path component {i} is invalid: {repr(component)}"
+                )
+            # "/" is the separator used by _get_record_key; "\0" is a common
+            # string-boundary sentinel. Both would corrupt key round-tripping
+            # in flush() where record_path is reconstructed via split("/").
+            if "/" in component or "\0" in component:
+                raise ValueError(
+                    f"record_path component {repr(component)} contains an "
+                    "invalid character ('/' or '\\0')"
                 )
 
     # ── Record-ID column helpers ──────────────────────────────────────────────
@@ -216,24 +228,23 @@ class ConnectorArrowDatabase:
         input_ids = set(cast(list[str], records[self.RECORD_ID_COLUMN].to_pylist()))
 
         if skip_duplicates:
-            committed = self._get_committed_table(record_path)
-            committed_ids: set[str] = set()
-            if committed is not None:
-                committed_ids = set(
-                    cast(list[str], committed[self.RECORD_ID_COLUMN].to_pylist())
-                )
-            all_existing = (input_ids & self._pending_record_ids[record_key]) | (
-                input_ids & committed_ids
-            )
-            if all_existing:
+            # Only filter records that conflict with the in-flight pending batch.
+            # Committed duplicates are handled at flush time via
+            # upsert_records(skip_existing=True), which lets the connector use
+            # native INSERT-OR-IGNORE semantics — no full-table read needed here.
+            pending_conflicts = input_ids & self._pending_record_ids[record_key]
+            if pending_conflicts:
                 mask = pc.invert(
                     pc.is_in(
-                        records[self.RECORD_ID_COLUMN], pa.array(list(all_existing))
+                        records[self.RECORD_ID_COLUMN],
+                        pa.array(list(pending_conflicts)),
                     )
                 )
                 records = records.filter(mask)
             if records.num_rows == 0:
                 return
+            # Mark this pending slot so flush() uses skip_existing=True.
+            self._pending_skip_existing[record_key] = True
         else:
             conflicts = input_ids & self._pending_record_ids[record_key]
             if conflicts:
@@ -266,8 +277,29 @@ class ConnectorArrowDatabase:
             table_name = self._path_to_table_name(record_path)
             pending = self._pending_batches.pop(record_key)
             self._pending_record_ids.pop(record_key, None)
+            skip_existing = self._pending_skip_existing.pop(record_key, False)
 
             columns = _arrow_schema_to_column_infos(pending.schema)
+
+            # Schema validation: if the table already exists, confirm the column
+            # names and Arrow types match before writing.  Schema evolution is
+            # intentionally out of scope; a clear ValueError is preferable to a
+            # cryptic DB-level error or a silent partial write.
+            existing_table_names = self._connector.get_table_names()
+            if table_name in existing_table_names:
+                existing_cols = {
+                    c.name: c.arrow_type
+                    for c in self._connector.get_column_info(table_name)
+                }
+                pending_cols = {c.name: c.arrow_type for c in columns}
+                if existing_cols != pending_cols:
+                    raise ValueError(
+                        f"Schema mismatch for table {table_name!r}: "
+                        f"existing columns {sorted(existing_cols)} differ from "
+                        f"pending columns {sorted(pending_cols)}. "
+                        "Schema evolution is not supported."
+                    )
+
             self._connector.create_table_if_not_exists(
                 table_name, columns, pk_column=self.RECORD_ID_COLUMN
             )
@@ -275,7 +307,7 @@ class ConnectorArrowDatabase:
                 table_name,
                 pending,
                 id_column=self.RECORD_ID_COLUMN,
-                skip_existing=False,
+                skip_existing=skip_existing,
             )
 
     # ── Read methods ──────────────────────────────────────────────────────────
