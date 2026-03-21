@@ -22,7 +22,8 @@ import pytest
 
 from orcapod.core.sources import DBTableSource
 from orcapod.protocols.core_protocols import SourceProtocol, StreamProtocol
-from orcapod.protocols.db_connector_protocol import ColumnInfo, DBConnectorProtocol
+from orcapod.protocols.db_connector_protocol import DBConnectorProtocol
+from orcapod.types import ColumnInfo
 from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 
 

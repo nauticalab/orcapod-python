@@ -12,29 +12,16 @@ Planned implementations:
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import dataclass
 from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
+
+from orcapod.types import ColumnInfo
 
 if TYPE_CHECKING:
     import pyarrow as pa
 
-
-@dataclass(frozen=True)
-class ColumnInfo:
-    """Metadata for a single database column with its Arrow-mapped type.
-
-    Type mapping (DB-native → Arrow) is the connector's responsibility.
-    Consumers of ``DBConnectorProtocol`` always see Arrow types.
-
-    Args:
-        name: Column name.
-        arrow_type: Arrow data type (already mapped from the DB-native type).
-        nullable: Whether the column accepts NULL values.
-    """
-
-    name: str
-    arrow_type: "pa.DataType"
-    nullable: bool = True
+# Re-export so existing ``from orcapod.protocols.db_connector_protocol import ColumnInfo``
+# imports continue to work while the canonical definition lives in orcapod.types.
+__all__ = ["ColumnInfo", "DBConnectorProtocol"]
 
 
 @runtime_checkable
@@ -82,7 +69,7 @@ class DBConnectorProtocol(Protocol):
         query: str,
         params: Any = None,
         batch_size: int = 1000,
-    ) -> Iterator["pa.RecordBatch"]:
+    ) -> Iterator[pa.RecordBatch]:
         """Execute a query and yield results as Arrow RecordBatches.
 
         Args:
@@ -114,7 +101,7 @@ class DBConnectorProtocol(Protocol):
     def upsert_records(
         self,
         table_name: str,
-        records: "pa.Table",
+        records: pa.Table,
         id_column: str,
         skip_existing: bool = False,
     ) -> None:
@@ -136,7 +123,7 @@ class DBConnectorProtocol(Protocol):
         """Release the database connection and any associated resources."""
         ...
 
-    def __enter__(self) -> "DBConnectorProtocol":
+    def __enter__(self) -> DBConnectorProtocol:
         ...
 
     def __exit__(self, *args: Any) -> None:
@@ -155,6 +142,6 @@ class DBConnectorProtocol(Protocol):
         ...
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "DBConnectorProtocol":
+    def from_config(cls, config: dict[str, Any]) -> DBConnectorProtocol:
         """Reconstruct a connector instance from a config dict."""
         ...

@@ -33,7 +33,7 @@ else:
     pc = LazyModule("pyarrow.compute")
 
 
-def _arrow_schema_to_column_infos(schema: "pa.Schema") -> list[ColumnInfo]:
+def _arrow_schema_to_column_infos(schema: pa.Schema) -> list[ColumnInfo]:
     """Convert a PyArrow schema to a list of ColumnInfo."""
     return [
         ColumnInfo(name=field.name, arrow_type=field.type, nullable=field.nullable)
@@ -115,8 +115,8 @@ class ConnectorArrowDatabase:
     # ── Record-ID column helpers ──────────────────────────────────────────────
 
     def _ensure_record_id_column(
-        self, arrow_data: "pa.Table", record_id: str
-    ) -> "pa.Table":
+        self, arrow_data: pa.Table, record_id: str
+    ) -> pa.Table:
         if self.RECORD_ID_COLUMN not in arrow_data.column_names:
             key_array = pa.array(
                 [record_id] * len(arrow_data), type=pa.large_string()
@@ -124,14 +124,14 @@ class ConnectorArrowDatabase:
             arrow_data = arrow_data.add_column(0, self.RECORD_ID_COLUMN, key_array)
         return arrow_data
 
-    def _remove_record_id_column(self, arrow_data: "pa.Table") -> "pa.Table":
+    def _remove_record_id_column(self, arrow_data: pa.Table) -> pa.Table:
         if self.RECORD_ID_COLUMN in arrow_data.column_names:
             arrow_data = arrow_data.drop([self.RECORD_ID_COLUMN])
         return arrow_data
 
     def _handle_record_id_column(
-        self, arrow_data: "pa.Table", record_id_column: str | None
-    ) -> "pa.Table":
+        self, arrow_data: pa.Table, record_id_column: str | None
+    ) -> pa.Table:
         if not record_id_column:
             return self._remove_record_id_column(arrow_data)
         if self.RECORD_ID_COLUMN in arrow_data.column_names:
@@ -146,7 +146,7 @@ class ConnectorArrowDatabase:
 
     # ── Deduplication ─────────────────────────────────────────────────────────
 
-    def _deduplicate_within_table(self, table: "pa.Table") -> "pa.Table":
+    def _deduplicate_within_table(self, table: pa.Table) -> pa.Table:
         """Keep the last occurrence of each record ID within a single table."""
         if table.num_rows <= 1:
             return table
@@ -163,7 +163,7 @@ class ConnectorArrowDatabase:
 
     def _get_committed_table(
         self, record_path: tuple[str, ...]
-    ) -> "pa.Table | None":
+    ) -> pa.Table | None:
         """Fetch all committed records for a path from the connector."""
         table_name = self._path_to_table_name(record_path)
         if table_name not in self._connector.get_table_names():
@@ -181,7 +181,7 @@ class ConnectorArrowDatabase:
         self,
         record_path: tuple[str, ...],
         record_id: str,
-        record: "pa.Table",
+        record: pa.Table,
         skip_duplicates: bool = False,
         flush: bool = False,
     ) -> None:
@@ -198,7 +198,7 @@ class ConnectorArrowDatabase:
     def add_records(
         self,
         record_path: tuple[str, ...],
-        records: "pa.Table",
+        records: pa.Table,
         record_id_column: str | None = None,
         skip_duplicates: bool = False,
         flush: bool = False,
@@ -318,7 +318,7 @@ class ConnectorArrowDatabase:
         record_id: str,
         record_id_column: str | None = None,
         flush: bool = False,
-    ) -> "pa.Table | None":
+    ) -> pa.Table | None:
         if flush:
             self.flush()
         record_key = self._get_record_key(record_path)
@@ -343,7 +343,7 @@ class ConnectorArrowDatabase:
         self,
         record_path: tuple[str, ...],
         record_id_column: str | None = None,
-    ) -> "pa.Table | None":
+    ) -> pa.Table | None:
         record_key = self._get_record_key(record_path)
         parts: list[pa.Table] = []
 
@@ -365,7 +365,7 @@ class ConnectorArrowDatabase:
         record_ids: Collection[str],
         record_id_column: str | None = None,
         flush: bool = False,
-    ) -> "pa.Table | None":
+    ) -> pa.Table | None:
         if flush:
             self.flush()
         ids_list = list(record_ids)
@@ -389,7 +389,7 @@ class ConnectorArrowDatabase:
         column_values: Collection[tuple[str, Any]] | Mapping[str, Any],
         record_id_column: str | None = None,
         flush: bool = False,
-    ) -> "pa.Table | None":
+    ) -> pa.Table | None:
         if flush:
             self.flush()
         all_records = self.get_all_records(
@@ -424,7 +424,7 @@ class ConnectorArrowDatabase:
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "ConnectorArrowDatabase":
+    def from_config(cls, config: dict[str, Any]) -> ConnectorArrowDatabase:
         """Reconstruct a ConnectorArrowDatabase from config.
 
         Raises:
