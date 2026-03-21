@@ -52,7 +52,7 @@ where = ["src"]
 version_file = "src/orcapod/_version.py"
 
 [tool.uv.sources]
-starfix = { git = "https://github.com/nauticalab/starfix-python.git" }
+starfix = { git = "https://github.com/nauticalab/starfix-python.git", rev = "344617bc6f7fcabab5c011d5774ed47de33f21de" }
 
 
 [dependency-groups]

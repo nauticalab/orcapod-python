@@ -81,7 +81,7 @@
             "Initial release with Path semantic type support",
             "Basic SHA-256 hashing for files and objects",
             "Arrow logical serialization method",
-            "arrow_v0.1: replaced custom IPC serialisation+hashlib with starfix ArrowDigester for cross-language-compatible Arrow hashing"
+            "Introduced arrow_v0.1 StarfixArrowHasher using starfix ArrowDigester for cross-language-compatible Arrow hashing"
         ]
     }
 }
