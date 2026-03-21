@@ -577,6 +577,16 @@ class TestHierarchicalPath:
         with pytest.raises(ValueError, match="exceeds maximum"):
             db.add_record(path, "id-1", make_table(v=[1]))
 
+    def test_path_component_with_slash_raises(self, db):
+        # "/" is the _get_record_key separator; allowing it would corrupt
+        # flush()'s record_path reconstruction via split("/").
+        with pytest.raises(ValueError, match="invalid character"):
+            db.add_record(("bad/path",), "id-1", make_table(v=[1]))
+
+    def test_path_component_with_null_byte_raises(self, db):
+        with pytest.raises(ValueError, match="invalid character"):
+            db.add_record(("bad\x00path",), "id-1", make_table(v=[1]))
+
 
 class TestPathToTableName:
     def test_simple_single_component(self, db):
@@ -651,6 +661,32 @@ class TestFlushBehaviour:
     def test_noop_flush_does_not_raise(self, db):
         """Flushing with nothing pending should be a no-op."""
         db.flush()  # no error
+
+    def test_flush_with_skip_duplicates_passes_skip_existing_to_connector(
+        self, db, connector
+    ):
+        """skip_duplicates=True must translate to skip_existing=True at flush,
+        so connectors can use native INSERT-OR-IGNORE without a Python-side
+        full-table read."""
+        db.add_record(("t",), "a", make_table(v=[1]), flush=True)
+        # Second add with skip_duplicates=True should not overwrite v=1
+        db.add_record(("t",), "a", make_table(v=[99]), skip_duplicates=True, flush=True)
+        result = db.get_record_by_id(("t",), "a", flush=True)
+        assert result is not None
+        assert result["v"][0].as_py() == 1  # original preserved via skip_existing=True
+
+    def test_flush_schema_mismatch_raises_value_error(self, db):
+        """flush() must raise ValueError when the pending schema differs from
+        the table already in the connector — before any data is written."""
+        db.add_record(("t",), "a", make_table(v=[1]), flush=True)
+        # Now try to flush a batch with a different column name
+        db.add_records(
+            ("t",),
+            pa.table({"__record_id": pa.array(["b"]), "x": pa.array([2])}),
+            record_id_column="__record_id",
+        )
+        with pytest.raises(ValueError, match="Schema mismatch"):
+            db.flush()
 
 
 # ===========================================================================
