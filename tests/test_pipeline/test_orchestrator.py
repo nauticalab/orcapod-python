@@ -496,9 +496,9 @@ class TestAsyncOrchestratorObserverInjection:
         class RecordingObserver:
             def on_run_start(self, run_id): pass
             def on_run_end(self, run_id): pass
-            def on_node_start(self, node_label, node_hash):
+            def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
-            def on_node_end(self, node_label, node_hash):
+            def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
             def on_packet_start(self, node_label, tag, packet):
                 events.append(("packet_start", node_label))
@@ -553,9 +553,9 @@ class TestAsyncOrchestratorObserverInjection:
         class RecordingObserver:
             def on_run_start(self, run_id): pass
             def on_run_end(self, run_id): pass
-            def on_node_start(self, node_label, node_hash):
+            def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
-            def on_node_end(self, node_label, node_hash):
+            def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
             def on_packet_start(self, node_label, tag, packet):
                 events.append(("packet_start", node_label))

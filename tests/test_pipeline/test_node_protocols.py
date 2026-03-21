@@ -157,9 +157,9 @@ class TestSourceNodeExecute:
         events = []
 
         class Obs:
-            def on_node_start(self, node_label, node_hash):
+            def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("start", node_label))
-            def on_node_end(self, node_label, node_hash):
+            def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("end", node_label))
             def on_packet_start(self, node_label, t, p):
                 pass
@@ -207,9 +207,9 @@ class TestSourceNodeAsyncExecuteProtocol:
         events = []
 
         class Obs:
-            def on_node_start(self, node_label, node_hash):
+            def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append("start")
-            def on_node_end(self, node_label, node_hash):
+            def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append("end")
             def on_packet_start(self, node_label, t, p):
                 pass
@@ -252,9 +252,9 @@ class TestFunctionNodeExecute:
         class Obs:
             def contextualize(self, node_hash, node_label):
                 return self
-            def on_node_start(self, node_label, node_hash):
+            def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
-            def on_node_end(self, node_label, node_hash):
+            def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
             def on_packet_start(self, node_label, t, p):
                 events.append(("packet_start",))
@@ -331,9 +331,9 @@ class TestFunctionNodeAsyncExecute:
         class Obs:
             def contextualize(self, node_hash, node_label):
                 return self
-            def on_node_start(self, node_label, node_hash):
+            def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append("node_start")
-            def on_node_end(self, node_label, node_hash):
+            def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append("node_end")
             def on_packet_start(self, node_label, t, p):
                 events.append("pkt_start")
@@ -383,9 +383,9 @@ class TestOperatorNodeExecute:
         events = []
 
         class Obs:
-            def on_node_start(self, node_label, node_hash):
+            def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
-            def on_node_end(self, node_label, node_hash):
+            def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
             def on_packet_start(self, node_label, t, p):
                 pass
@@ -424,9 +424,9 @@ class TestOperatorNodeAsyncExecute:
         events = []
 
         class Obs:
-            def on_node_start(self, node_label, node_hash):
+            def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append("start")
-            def on_node_end(self, node_label, node_hash):
+            def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append("end")
             def on_packet_start(self, node_label, t, p):
                 pass
