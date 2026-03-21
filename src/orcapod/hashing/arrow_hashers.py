@@ -287,6 +287,19 @@ class StarfixArrowHasher:
         new_fields: list[pa.Field] = []
 
         for i, field in enumerate(table.schema):
+            # Short-circuit: primitive columns cannot contain semantic types, so skip
+            # the costly Python round-trip and reuse the original Arrow array directly.
+            if not (
+                pa.types.is_struct(field.type)
+                or pa.types.is_list(field.type)
+                or pa.types.is_large_list(field.type)
+                or pa.types.is_fixed_size_list(field.type)
+                or pa.types.is_map(field.type)
+            ):
+                new_columns.append(table.column(i))
+                new_fields.append(field)
+                continue
+
             column_data = table.column(i).to_pylist()
             visitor = SemanticHashingVisitor(self.semantic_registry)
 
@@ -295,23 +308,30 @@ class StarfixArrowHasher:
                 processed_data: list[Any] = []
                 for value in column_data:
                     processed_type, processed_value = visitor.visit(field.type, value)
-                    if new_type is None:
+                    # Infer the output type from the first non-null processed value.
+                    # When the first row is null, visit_struct returns the original
+                    # struct type rather than the converted type (e.g. large_string),
+                    # which would cause pa.array() to fail for subsequent non-null rows.
+                    if new_type is None and processed_value is not None:
                         new_type = processed_type
                     processed_data.append(processed_value)
 
-                # For empty columns there are no values to infer the type from;
-                # fall back to the field's declared type.
+                # For empty or all-null columns there are no non-null values to infer
+                # the type from; fall back to the field's declared type.
                 if new_type is None:
                     new_type = field.type
                 new_columns.append(pa.array(processed_data, type=new_type))
-                new_fields.append(pa.field(field.name, new_type))
+                # Preserve original field attributes (nullable, metadata) while
+                # updating only the type, so the schema fed to starfix remains faithful.
+                new_fields.append(field.with_type(new_type))
 
             except Exception as exc:
                 raise RuntimeError(
                     f"Failed to process column '{field.name}': {exc}"
                 ) from exc
 
-        return pa.table(new_columns, schema=pa.schema(new_fields))
+        # Preserve the original schema-level metadata while using updated fields.
+        return pa.table(new_columns, schema=pa.schema(new_fields, metadata=table.schema.metadata))
 
     def hash_schema(self, schema: pa.Schema) -> ContentHash:
         """Hash an Arrow schema using the starfix canonical algorithm.
