@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
+from orcapod.types import SchemaLike
 from orcapod.protocols.observability_protocols import (  # noqa: F401  (re-exported for convenience)
     ExecutionObserverProtocol,
     PacketExecutionLoggerProtocol,
@@ -59,7 +60,7 @@ class NoOpObserver:
         pass
 
     def on_node_start(
-        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = (), tag_keys: tuple[str, ...] = ()
+        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = (), tag_schema: SchemaLike | None = None
     ) -> None:
         pass
 

@@ -56,6 +56,7 @@ from uuid_utils import uuid7
 
 from orcapod.pipeline.logging_capture import install_capture_streams
 from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
+from orcapod.types import SchemaLike
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -175,9 +176,9 @@ class _ContextualizedLoggingObserver:
         self._parent.on_run_end(run_id)
 
     def on_node_start(
-        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = (), tag_keys: tuple[str, ...] = ()
+        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = (), tag_schema: SchemaLike | None = None
     ) -> None:
-        self._parent.on_node_start(node_label, node_hash, pipeline_path=pipeline_path, tag_keys=tag_keys)
+        self._parent.on_node_start(node_label, node_hash, pipeline_path=pipeline_path, tag_schema=tag_schema)
 
     def on_node_end(
         self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = ()
@@ -288,7 +289,7 @@ class LoggingObserver:
         pass
 
     def on_node_start(
-        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = (), tag_keys: tuple[str, ...] = ()
+        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = (), tag_schema: SchemaLike | None = None
     ) -> None:
         pass
 
