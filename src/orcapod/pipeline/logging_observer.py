@@ -169,8 +169,17 @@ class _ContextualizedLoggingObserver:
         """Re-contextualize (returns a new wrapper with updated identity)."""
         return _ContextualizedLoggingObserver(self._parent, node_hash, node_label)
 
-    def on_run_start(self, run_id: str) -> None:
-        self._parent.on_run_start(run_id)
+    def on_run_start(
+        self,
+        run_id: str,
+        pipeline_path: tuple[str, ...] = (),
+        pipeline_snapshot_hash: str | None = None,
+    ) -> None:
+        self._parent.on_run_start(
+            run_id,
+            pipeline_path=pipeline_path,
+            pipeline_snapshot_hash=pipeline_snapshot_hash,
+        )
 
     def on_run_end(self, run_id: str) -> None:
         self._parent.on_run_end(run_id)
@@ -282,7 +291,12 @@ class LoggingObserver:
 
     # -- lifecycle hooks --
 
-    def on_run_start(self, run_id: str) -> None:
+    def on_run_start(
+        self,
+        run_id: str,
+        pipeline_path: tuple[str, ...] = (),
+        pipeline_snapshot_hash: str | None = None,
+    ) -> None:
         self._current_run_id = run_id
 
     def on_run_end(self, run_id: str) -> None:
