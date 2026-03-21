@@ -11,6 +11,7 @@ throughout the OrcaPod framework, including:
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import uuid
@@ -21,23 +22,33 @@ from types import UnionType
 from typing import TYPE_CHECKING, Any, Self, TypeAlias
 
 if TYPE_CHECKING:
-    from orcapod.protocols.core_protocols import PacketFunctionExecutorProtocol
+    import pyarrow as pa
 
-import pyarrow as pa
+    from orcapod.protocols.core_protocols import PacketFunctionExecutorProtocol
+else:
+    from orcapod.utils.lazy_module import LazyModule
+
+    pa = LazyModule("pyarrow")
 
 logger = logging.getLogger(__name__)
 
-# Mapping from Python types to Arrow types.
-_PYTHON_TO_ARROW: dict[type, pa.DataType] = {
-    int: pa.int64(),
-    float: pa.float64(),
-    str: pa.string(),
-    bool: pa.bool_(),
-    bytes: pa.binary(),
-}
 
-# Reverse mapping from Arrow types back to Python types.
-_ARROW_TO_PYTHON: dict[pa.DataType, type] = {v: k for k, v in _PYTHON_TO_ARROW.items()}
+@functools.cache
+def _python_to_arrow() -> dict[type, pa.DataType]:
+    """Lazily-built Python-type → Arrow-type mapping (populated on first call)."""
+    return {
+        int: pa.int64(),
+        float: pa.float64(),
+        str: pa.string(),
+        bool: pa.bool_(),
+        bytes: pa.binary(),
+    }
+
+
+@functools.cache
+def _arrow_to_python() -> dict[pa.DataType, type]:
+    """Lazily-built Arrow-type → Python-type mapping (populated on first call)."""
+    return {v: k for k, v in _python_to_arrow().items()}
 
 # TODO: revisit and consider a way to incorporate older Union type
 DataType: TypeAlias = type | UnionType  # | type[Union]
