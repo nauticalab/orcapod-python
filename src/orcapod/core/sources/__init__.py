@@ -3,6 +3,7 @@ from .arrow_table_source import ArrowTableSource
 from .cached_source import CachedSource
 from .csv_source import CSVSource
 from .data_frame_source import DataFrameSource
+from .db_table_source import DBTableSource
 from .delta_table_source import DeltaTableSource
 from .derived_source import DerivedSource
 from .dict_source import DictSource
@@ -16,6 +17,7 @@ __all__ = [
     "CachedSource",
     "CSVSource",
     "DataFrameSource",
+    "DBTableSource",
     "DeltaTableSource",
     "DerivedSource",
     "DictSource",
