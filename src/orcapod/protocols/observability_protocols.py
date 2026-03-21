@@ -100,6 +100,7 @@ class ExecutionObserverProtocol(Protocol):
         node_label: str,
         node_hash: str,
         pipeline_path: tuple[str, ...] = (),
+        tag_keys: tuple[str, ...] = (),
     ) -> None:
         """Called before a node begins processing its packets.
 
@@ -107,6 +108,7 @@ class ExecutionObserverProtocol(Protocol):
             node_label: Human-readable label of the node.
             node_hash: Content hash of the node.
             pipeline_path: The node's pipeline path for storage scoping.
+            tag_keys: The tag column names for this node's input stream.
         """
         ...
 

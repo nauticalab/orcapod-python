@@ -25,7 +25,7 @@ Status schema (fixed columns):
     - ``_status_run_id`` (large_utf8): UUID of the pipeline run (from ``on_run_start``).
     - ``_status_node_label`` (large_utf8): Label of the function node.
     - ``_status_node_hash`` (large_utf8): Content hash of the function node.
-    - ``_status_state`` (large_utf8): ``RUNNING``, ``SUCCESS``, or ``FAILED``.
+    - ``_status_state`` (large_utf8): ``RUNNING``, ``SUCCESS``, ``FAILED``, or ``CACHED``.
     - ``_status_timestamp`` (large_utf8): ISO-8601 UTC timestamp.
     - ``_status_error_summary`` (large_utf8): Brief error on ``FAILED``; ``None`` otherwise.
 
@@ -57,6 +57,7 @@ from typing import TYPE_CHECKING, Any
 from uuid_utils import uuid7
 
 from orcapod.pipeline.observer import NoOpLogger
+from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -98,10 +99,11 @@ class StatusObserver:
         self._db = status_database
         self._status_path = status_path or DEFAULT_STATUS_PATH
         self._current_run_id: str = ""
-        # Tracks (node_hash, pipeline_path) per node_label, populated by
-        # on_node_start.  Allows packet-level hooks (which only receive
-        # node_label) to look up the node's identity and storage path.
-        self._node_context: dict[str, tuple[str, tuple[str, ...]]] = {}
+        # Tracks (node_hash, pipeline_path, tag_keys) per node_label,
+        # populated by on_node_start.  Allows packet-level hooks (which
+        # only receive node_label) to look up the node's identity,
+        # storage path, and tag schema.
+        self._node_context: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {}
 
     # -- contextualize --
 
@@ -125,8 +127,9 @@ class StatusObserver:
         node_label: str,
         node_hash: str,
         pipeline_path: tuple[str, ...] = (),
+        tag_keys: tuple[str, ...] = (),
     ) -> None:
-        self._node_context[node_label] = (node_hash, pipeline_path)
+        self._node_context[node_label] = (node_hash, pipeline_path, tag_keys)
 
     def on_node_end(
         self,
@@ -137,22 +140,22 @@ class StatusObserver:
         self._node_context.pop(node_label, None)
 
     def on_packet_start(
-        self, node_label: str, tag: Any, packet: Any
+        self, node_label: str, tag: TagProtocol, packet: PacketProtocol
     ) -> None:
         self._write_event(node_label, tag, state="RUNNING")
 
     def on_packet_end(
         self,
         node_label: str,
-        tag: Any,
-        input_packet: Any,
-        output_packet: Any,
+        tag: TagProtocol,
+        input_packet: PacketProtocol,
+        output_packet: PacketProtocol | None,
         cached: bool,
     ) -> None:
-        self._write_event(node_label, tag, state="SUCCESS")
+        self._write_event(node_label, tag, state="CACHED" if cached else "SUCCESS")
 
     def on_packet_crash(
-        self, node_label: str, tag: Any, packet: Any, error: Exception
+        self, node_label: str, tag: TagProtocol, packet: PacketProtocol, error: Exception
     ) -> None:
         self._write_event(
             node_label, tag, state="FAILED", error=error
@@ -160,8 +163,8 @@ class StatusObserver:
 
     def create_packet_logger(
         self,
-        tag: Any,
-        packet: Any,
+        tag: TagProtocol,
+        packet: PacketProtocol,
         pipeline_path: tuple[str, ...] = (),
     ) -> NoOpLogger:
         """Return a no-op logger.
@@ -197,15 +200,15 @@ class StatusObserver:
     def _write_event(
         self,
         node_label: str,
-        tag: Any,
+        tag: TagProtocol,
         state: str,
         error: Exception | None = None,
     ) -> None:
         """Build and write a single status event row."""
         import pyarrow as pa
 
-        node_hash, pipeline_path = self._node_context.get(
-            node_label, ("", ())
+        node_hash, pipeline_path, tag_keys = self._node_context.get(
+            node_label, ("", (), ())
         )
 
         # Compute mirrored status path
@@ -230,10 +233,13 @@ class StatusObserver:
             ),
         }
 
-        # Dynamic tag columns — each tag key becomes its own column (unprefixed)
-        tag_data = dict(tag)
-        for key, value in tag_data.items():
-            columns[key] = pa.array([str(value)], type=pa.large_utf8())
+        # Tag columns — use statically-known keys from on_node_start
+        for key in tag_keys:
+            value = tag.get(key, None)
+            columns[key] = pa.array(
+                [str(value) if value is not None else None],
+                type=pa.large_utf8(),
+            )
 
         row = pa.table(columns)
         try:
@@ -260,8 +266,6 @@ class _ContextualizedStatusObserver:
         node_label: str,
     ) -> None:
         self._parent = parent
-        self._node_hash = node_hash
-        self._node_label = node_label
 
     def contextualize(
         self, node_hash: str, node_label: str
@@ -276,9 +280,9 @@ class _ContextualizedStatusObserver:
         self._parent.on_run_end(run_id)
 
     def on_node_start(
-        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = ()
+        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = (), tag_keys: tuple[str, ...] = ()
     ) -> None:
-        self._parent.on_node_start(node_label, node_hash, pipeline_path=pipeline_path)
+        self._parent.on_node_start(node_label, node_hash, pipeline_path=pipeline_path, tag_keys=tag_keys)
 
     def on_node_end(
         self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = ()
@@ -286,16 +290,16 @@ class _ContextualizedStatusObserver:
         self._parent.on_node_end(node_label, node_hash, pipeline_path=pipeline_path)
 
     def on_packet_start(
-        self, node_label: str, tag: Any, packet: Any
+        self, node_label: str, tag: TagProtocol, packet: PacketProtocol
     ) -> None:
         self._parent.on_packet_start(node_label, tag, packet)
 
     def on_packet_end(
         self,
         node_label: str,
-        tag: Any,
-        input_packet: Any,
-        output_packet: Any,
+        tag: TagProtocol,
+        input_packet: PacketProtocol,
+        output_packet: PacketProtocol | None,
         cached: bool,
     ) -> None:
         self._parent.on_packet_end(
@@ -303,14 +307,14 @@ class _ContextualizedStatusObserver:
         )
 
     def on_packet_crash(
-        self, node_label: str, tag: Any, packet: Any, error: Exception
+        self, node_label: str, tag: TagProtocol, packet: PacketProtocol, error: Exception
     ) -> None:
         self._parent.on_packet_crash(node_label, tag, packet, error)
 
     def create_packet_logger(
         self,
-        tag: Any,
-        packet: Any,
+        tag: TagProtocol,
+        packet: PacketProtocol,
         pipeline_path: tuple[str, ...] = (),
     ) -> NoOpLogger:
         return _NOOP_LOGGER

@@ -24,6 +24,7 @@ from __future__ import annotations
 from typing import Any
 
 from orcapod.pipeline.observer import NoOpLogger
+from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
 
 _NOOP_LOGGER = NoOpLogger()
 
@@ -56,10 +57,10 @@ class CompositeObserver:
             obs.on_run_end(run_id)
 
     def on_node_start(
-        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = ()
+        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = (), tag_keys: tuple[str, ...] = ()
     ) -> None:
         for obs in self._observers:
-            obs.on_node_start(node_label, node_hash, pipeline_path=pipeline_path)
+            obs.on_node_start(node_label, node_hash, pipeline_path=pipeline_path, tag_keys=tag_keys)
 
     def on_node_end(
         self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = ()
@@ -68,7 +69,7 @@ class CompositeObserver:
             obs.on_node_end(node_label, node_hash, pipeline_path=pipeline_path)
 
     def on_packet_start(
-        self, node_label: str, tag: Any, packet: Any
+        self, node_label: str, tag: TagProtocol, packet: PacketProtocol
     ) -> None:
         for obs in self._observers:
             obs.on_packet_start(node_label, tag, packet)
@@ -76,24 +77,24 @@ class CompositeObserver:
     def on_packet_end(
         self,
         node_label: str,
-        tag: Any,
-        input_packet: Any,
-        output_packet: Any,
+        tag: TagProtocol,
+        input_packet: PacketProtocol,
+        output_packet: PacketProtocol | None,
         cached: bool,
     ) -> None:
         for obs in self._observers:
             obs.on_packet_end(node_label, tag, input_packet, output_packet, cached)
 
     def on_packet_crash(
-        self, node_label: str, tag: Any, packet: Any, error: Exception
+        self, node_label: str, tag: TagProtocol, packet: PacketProtocol, error: Exception
     ) -> None:
         for obs in self._observers:
             obs.on_packet_crash(node_label, tag, packet, error)
 
     def create_packet_logger(
         self,
-        tag: Any,
-        packet: Any,
+        tag: TagProtocol,
+        packet: PacketProtocol,
         pipeline_path: tuple[str, ...] = (),
     ) -> Any:
         """Return the first non-no-op logger from children.

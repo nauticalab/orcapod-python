@@ -59,7 +59,7 @@ class NoOpObserver:
         pass
 
     def on_node_start(
-        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = ()
+        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = (), tag_keys: tuple[str, ...] = ()
     ) -> None:
         pass
 

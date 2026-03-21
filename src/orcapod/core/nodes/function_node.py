@@ -433,18 +433,13 @@ class FunctionNode(StreamBase):
     def pipeline_path(self) -> tuple[str, ...]:
         """Return the pipeline path for DB record scoping.
 
-        Raises:
-            RuntimeError: If no database is attached and this is not a
-                read-only deserialized node.
+        Returns ``()`` when no pipeline database is attached.
         """
         stored = getattr(self, "_stored_pipeline_path", None)
         if self._packet_function is None and stored is not None:
             return stored
         if self._pipeline_database is None:
-            raise RuntimeError(
-                "Cannot compute pipeline_path without an attached database. "
-                "Call attach_databases() first."
-            )
+            return ()
         return (
             self._pipeline_path_prefix
             + self._packet_function.uri
@@ -521,8 +516,9 @@ class FunctionNode(StreamBase):
 
         obs = observer if observer is not None else NoOpObserver()
 
-        pp = self.pipeline_path if self._pipeline_database is not None else ()
-        obs.on_node_start(node_label, node_hash, pipeline_path=pp)
+        pp = self.pipeline_path
+        tag_keys = input_stream.keys()[0]
+        obs.on_node_start(node_label, node_hash, pipeline_path=pp, tag_keys=tag_keys)
 
         # Gather entry IDs and check cache
         upstream_entries = [
@@ -1242,10 +1238,11 @@ class FunctionNode(StreamBase):
 
         obs = observer if observer is not None else NoOpObserver()
 
-        pp = self.pipeline_path if self._pipeline_database is not None else ()
+        pp = self.pipeline_path
 
         try:
-            obs.on_node_start(node_label, node_hash, pipeline_path=pp)
+            tag_keys = self._input_stream.keys()[0]
+            obs.on_node_start(node_label, node_hash, pipeline_path=pp, tag_keys=tag_keys)
 
             if self._cached_function_pod is not None:
                 # DB-backed async execution:
@@ -1338,7 +1335,7 @@ class FunctionNode(StreamBase):
         node_hash: str,
     ) -> None:
         """Process one non-cached packet in the async execute path."""
-        pp = self.pipeline_path if self._pipeline_database is not None else ()
+        pp = self.pipeline_path
 
         observer.on_packet_start(node_label, tag, packet)
         ctx_obs = observer.contextualize(node_hash, node_label)
