@@ -51,6 +51,14 @@ class FunctionNodeProtocol(Protocol):
 
     node_type: str
 
+    @property
+    def pipeline_path(self) -> tuple[str, ...]:
+        """The node's pipeline path for storage scoping.
+
+        Returns ``()`` when no pipeline database is attached.
+        """
+        ...
+
     def execute(
         self,
         input_stream: StreamProtocol,

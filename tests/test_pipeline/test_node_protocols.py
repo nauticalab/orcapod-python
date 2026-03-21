@@ -48,6 +48,10 @@ class TestFunctionNodeProtocol:
         class GoodFunction:
             node_type = "function"
 
+            @property
+            def pipeline_path(self):
+                return ()
+
             def execute(self, input_stream, *, observer=None):
                 return []
 
