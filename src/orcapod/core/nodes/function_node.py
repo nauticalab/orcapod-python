@@ -517,8 +517,8 @@ class FunctionNode(StreamBase):
         obs = observer if observer is not None else NoOpObserver()
 
         pp = self.pipeline_path
-        tag_keys = input_stream.keys()[0]
-        obs.on_node_start(node_label, node_hash, pipeline_path=pp, tag_keys=tag_keys)
+        tag_schema = input_stream.output_schema(columns={"system_tags": True})[0]
+        obs.on_node_start(node_label, node_hash, pipeline_path=pp, tag_schema=tag_schema)
 
         # Gather entry IDs and check cache
         upstream_entries = [
@@ -1241,8 +1241,8 @@ class FunctionNode(StreamBase):
         pp = self.pipeline_path
 
         try:
-            tag_keys = self._input_stream.keys()[0]
-            obs.on_node_start(node_label, node_hash, pipeline_path=pp, tag_keys=tag_keys)
+            tag_schema = self._input_stream.output_schema(columns={"system_tags": True})[0]
+            obs.on_node_start(node_label, node_hash, pipeline_path=pp, tag_schema=tag_schema)
 
             if self._cached_function_pod is not None:
                 # DB-backed async execution:

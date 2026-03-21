@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any, Protocol, runtime_checkable
 
 from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
+from orcapod.types import SchemaLike
 
 
 @runtime_checkable
@@ -100,7 +101,7 @@ class ExecutionObserverProtocol(Protocol):
         node_label: str,
         node_hash: str,
         pipeline_path: tuple[str, ...] = (),
-        tag_keys: tuple[str, ...] = (),
+        tag_schema: SchemaLike | None = None,
     ) -> None:
         """Called before a node begins processing its packets.
 
@@ -108,7 +109,8 @@ class ExecutionObserverProtocol(Protocol):
             node_label: Human-readable label of the node.
             node_hash: Content hash of the node.
             pipeline_path: The node's pipeline path for storage scoping.
-            tag_keys: The tag column names for this node's input stream.
+            tag_schema: The tag schema (including system tags) for this
+                node's input stream.
         """
         ...
 

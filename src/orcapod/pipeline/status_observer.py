@@ -58,6 +58,7 @@ from uuid_utils import uuid7
 
 from orcapod.pipeline.observer import NoOpLogger
 from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
+from orcapod.types import SchemaLike
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -99,11 +100,11 @@ class StatusObserver:
         self._db = status_database
         self._status_path = status_path or DEFAULT_STATUS_PATH
         self._current_run_id: str = ""
-        # Tracks (node_hash, pipeline_path, tag_keys) per node_label,
+        # Tracks (node_hash, pipeline_path, tag_schema) per node_label,
         # populated by on_node_start.  Allows packet-level hooks (which
         # only receive node_label) to look up the node's identity,
         # storage path, and tag schema.
-        self._node_context: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {}
+        self._node_context: dict[str, tuple[str, tuple[str, ...], SchemaLike]] = {}
 
     # -- contextualize --
 
@@ -127,9 +128,9 @@ class StatusObserver:
         node_label: str,
         node_hash: str,
         pipeline_path: tuple[str, ...] = (),
-        tag_keys: tuple[str, ...] = (),
+        tag_schema: SchemaLike | None = None,
     ) -> None:
-        self._node_context[node_label] = (node_hash, pipeline_path, tag_keys)
+        self._node_context[node_label] = (node_hash, pipeline_path, tag_schema or {})
 
     def on_node_end(
         self,
@@ -207,8 +208,8 @@ class StatusObserver:
         """Build and write a single status event row."""
         import pyarrow as pa
 
-        node_hash, pipeline_path, tag_keys = self._node_context.get(
-            node_label, ("", (), ())
+        node_hash, pipeline_path, tag_schema = self._node_context.get(
+            node_label, ("", (), {})
         )
 
         # Compute mirrored status path
@@ -233,8 +234,8 @@ class StatusObserver:
             ),
         }
 
-        # Tag columns — use statically-known keys from on_node_start
-        for key in tag_keys:
+        # Tag columns — use statically-known schema from on_node_start
+        for key in tag_schema:
             value = tag.get(key, None)
             columns[key] = pa.array(
                 [str(value) if value is not None else None],
@@ -280,9 +281,9 @@ class _ContextualizedStatusObserver:
         self._parent.on_run_end(run_id)
 
     def on_node_start(
-        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = (), tag_keys: tuple[str, ...] = ()
+        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = (), tag_schema: SchemaLike | None = None
     ) -> None:
-        self._parent.on_node_start(node_label, node_hash, pipeline_path=pipeline_path, tag_keys=tag_keys)
+        self._parent.on_node_start(node_label, node_hash, pipeline_path=pipeline_path, tag_schema=tag_schema)
 
     def on_node_end(
         self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = ()

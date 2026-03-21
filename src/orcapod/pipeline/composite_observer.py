@@ -25,6 +25,7 @@ from typing import Any
 
 from orcapod.pipeline.observer import NoOpLogger
 from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
+from orcapod.types import SchemaLike
 
 _NOOP_LOGGER = NoOpLogger()
 
@@ -57,10 +58,10 @@ class CompositeObserver:
             obs.on_run_end(run_id)
 
     def on_node_start(
-        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = (), tag_keys: tuple[str, ...] = ()
+        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = (), tag_schema: SchemaLike | None = None
     ) -> None:
         for obs in self._observers:
-            obs.on_node_start(node_label, node_hash, pipeline_path=pipeline_path, tag_keys=tag_keys)
+            obs.on_node_start(node_label, node_hash, pipeline_path=pipeline_path, tag_schema=tag_schema)
 
     def on_node_end(
         self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = ()
