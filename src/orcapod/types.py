@@ -432,6 +432,26 @@ class ColumnConfig:
         return column_config
 
 
+@dataclass(frozen=True)
+class ColumnInfo:
+    """Metadata for a single relational database column with its Arrow-mapped type.
+
+    ``ColumnInfo`` is produced by ``DBConnectorProtocol.get_column_info()`` and
+    consumed by ``ConnectorArrowDatabase`` and ``DBTableSource``.  Type mapping
+    (DB-native → Arrow) is always the connector's responsibility; callers always
+    receive Arrow types.
+
+    Args:
+        name: Column name.
+        arrow_type: Arrow data type (already mapped from the DB-native type).
+        nullable: Whether the column accepts NULL values.  Defaults to ``True``.
+    """
+
+    name: str
+    arrow_type: pa.DataType
+    nullable: bool = True
+
+
 @dataclass(frozen=True, slots=True)
 class ContentHash:
     """Content-addressable hash pairing a hashing method with a raw digest.

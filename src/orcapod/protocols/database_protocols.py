@@ -1,5 +1,9 @@
-from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
+from __future__ import annotations
+
 from collections.abc import Collection, Mapping
+from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
+
+from orcapod.protocols.db_connector_protocol import ColumnInfo, DBConnectorProtocol
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -11,7 +15,7 @@ class ArrowDatabaseProtocol(Protocol):
         self,
         record_path: tuple[str, ...],
         record_id: str,
-        record: "pa.Table",
+        record: pa.Table,
         skip_duplicates: bool = False,
         flush: bool = False,
     ) -> None: ...
@@ -19,7 +23,7 @@ class ArrowDatabaseProtocol(Protocol):
     def add_records(
         self,
         record_path: tuple[str, ...],
-        records: "pa.Table",
+        records: pa.Table,
         record_id_column: str | None = None,
         skip_duplicates: bool = False,
         flush: bool = False,
@@ -31,13 +35,13 @@ class ArrowDatabaseProtocol(Protocol):
         record_id: str,
         record_id_column: str | None = None,
         flush: bool = False,
-    ) -> "pa.Table | None": ...
+    ) -> pa.Table | None: ...
 
     def get_all_records(
         self,
         record_path: tuple[str, ...],
         record_id_column: str | None = None,
-    ) -> "pa.Table | None":
+    ) -> pa.Table | None:
         """Retrieve all records for a given path as a stream."""
         ...
 
@@ -47,7 +51,7 @@ class ArrowDatabaseProtocol(Protocol):
         record_ids: Collection[str],
         record_id_column: str | None = None,
         flush: bool = False,
-    ) -> "pa.Table | None": ...
+    ) -> pa.Table | None: ...
 
     def get_records_with_column_value(
         self,
@@ -55,13 +59,13 @@ class ArrowDatabaseProtocol(Protocol):
         column_values: Collection[tuple[str, Any]] | Mapping[str, Any],
         record_id_column: str | None = None,
         flush: bool = False,
-    ) -> "pa.Table | None": ...
+    ) -> pa.Table | None: ...
 
     def flush(self) -> None:
         """Flush any buffered writes to the underlying storage."""
         ...
 
-    def to_config(self) -> "dict[str, Any]":
+    def to_config(self) -> dict[str, Any]:
         """Serialize database configuration to a JSON-compatible dict.
 
         The returned dict must include a ``"type"`` key identifying the
@@ -70,7 +74,7 @@ class ArrowDatabaseProtocol(Protocol):
         ...
 
     @classmethod
-    def from_config(cls, config: "dict[str, Any]") -> "ArrowDatabaseProtocol":
+    def from_config(cls, config: dict[str, Any]) -> ArrowDatabaseProtocol:
         """Reconstruct a database instance from a config dict."""
         ...
 
@@ -103,10 +107,6 @@ class ArrowDatabaseWithMetadataProtocol(
 
     pass
 
-
-# Re-export connector abstractions so callers can import everything DB-related
-# from one place: ``from orcapod.protocols.database_protocols import ...``
-from orcapod.protocols.db_connector_protocol import ColumnInfo, DBConnectorProtocol  # noqa: E402
 
 __all__ = [
     "ArrowDatabaseProtocol",

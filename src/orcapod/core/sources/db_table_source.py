@@ -21,6 +21,8 @@ from orcapod.utils.lazy_module import LazyModule
 if TYPE_CHECKING:
     import pyarrow as pa
 
+    from orcapod import contexts
+    from orcapod.config import Config
     from orcapod.protocols.db_connector_protocol import DBConnectorProtocol
 else:
     pa = LazyModule("pyarrow")
@@ -47,8 +49,9 @@ class DBTableSource(RootSource):
             strings.  If ``None``, row indices are used.
         source_id: Canonical source name for the registry and provenance tokens.
             Defaults to ``table_name``.
-        **kwargs: Forwarded to ``RootSource`` (``label``, ``data_context``,
-            ``config``).
+        label: Human-readable label for this source node.
+        data_context: Data context governing type conversion and hashing.
+        config: Orcapod configuration (controls hash character counts, etc.).
 
     Raises:
         ValueError: If the table is not found, has no PK columns and none are
@@ -57,17 +60,24 @@ class DBTableSource(RootSource):
 
     def __init__(
         self,
-        connector: "DBConnectorProtocol",
+        connector: DBConnectorProtocol,
         table_name: str,
         tag_columns: Collection[str] | None = None,
         system_tag_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
-        **kwargs: Any,
+        label: str | None = None,
+        data_context: str | contexts.DataContext | None = None,
+        config: Config | None = None,
     ) -> None:
         if source_id is None:
             source_id = table_name
-        super().__init__(source_id=source_id, **kwargs)
+        super().__init__(
+            source_id=source_id,
+            label=label,
+            data_context=data_context,
+            config=config,
+        )
 
         self._connector = connector
         self._table_name = table_name
@@ -125,7 +135,7 @@ class DBTableSource(RootSource):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "DBTableSource":
+    def from_config(cls, config: dict[str, Any]) -> DBTableSource:
         """Not yet implemented — requires a connector factory registry.
 
         Raises:

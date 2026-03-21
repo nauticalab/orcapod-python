@@ -33,7 +33,8 @@ import pytest
 # Imports under test — all of these will fail until the modules are created
 # ---------------------------------------------------------------------------
 
-from orcapod.protocols.db_connector_protocol import ColumnInfo, DBConnectorProtocol
+from orcapod.protocols.db_connector_protocol import DBConnectorProtocol
+from orcapod.types import ColumnInfo
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.databases import ConnectorArrowDatabase
 
