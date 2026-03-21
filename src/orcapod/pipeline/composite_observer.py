@@ -49,9 +49,18 @@ class CompositeObserver:
             *(obs.contextualize(node_hash, node_label) for obs in self._observers)
         )
 
-    def on_run_start(self, run_id: str) -> None:
+    def on_run_start(
+        self,
+        run_id: str,
+        pipeline_path: tuple[str, ...] = (),
+        pipeline_snapshot_hash: str | None = None,
+    ) -> None:
         for obs in self._observers:
-            obs.on_run_start(run_id)
+            obs.on_run_start(
+                run_id,
+                pipeline_path=pipeline_path,
+                pipeline_snapshot_hash=pipeline_snapshot_hash,
+            )
 
     def on_run_end(self, run_id: str) -> None:
         for obs in self._observers:

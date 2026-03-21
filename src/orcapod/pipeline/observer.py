@@ -53,7 +53,12 @@ class NoOpObserver:
     ) -> NoOpObserver:
         return self
 
-    def on_run_start(self, run_id: str) -> None:
+    def on_run_start(
+        self,
+        run_id: str,
+        pipeline_path: tuple[str, ...] = (),
+        pipeline_snapshot_hash: str | None = None,
+    ) -> None:
         pass
 
     def on_run_end(self, run_id: str) -> None:

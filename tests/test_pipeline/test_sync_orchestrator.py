@@ -130,7 +130,7 @@ class TestSyncOrchestratorObserver:
         events = []
 
         class RecordingObserver:
-            def on_run_start(self, run_id): pass
+            def on_run_start(self, run_id, pipeline_path=(), pipeline_snapshot_hash=None): pass
             def on_run_end(self, run_id): pass
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
@@ -211,7 +211,7 @@ class TestPipelineRunIntegration:
         events = []
 
         class RecordingObserver:
-            def on_run_start(self, run_id): pass
+            def on_run_start(self, run_id, pipeline_path=(), pipeline_snapshot_hash=None): pass
             def on_run_end(self, run_id): pass
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
@@ -421,7 +421,7 @@ class TestSyncObserverInjection:
         events = []
 
         class RecordingObserver:
-            def on_run_start(self, run_id): pass
+            def on_run_start(self, run_id, pipeline_path=(), pipeline_snapshot_hash=None): pass
             def on_run_end(self, run_id): pass
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
@@ -467,7 +467,7 @@ class TestSyncObserverInjection:
         events1 = []
 
         class Obs1:
-            def on_run_start(self, run_id): pass
+            def on_run_start(self, run_id, pipeline_path=(), pipeline_snapshot_hash=None): pass
             def on_run_end(self, run_id): pass
             def on_node_start(self, node_label, node_hash, **kwargs): pass
             def on_node_end(self, node_label, node_hash, **kwargs): pass
@@ -489,7 +489,7 @@ class TestSyncObserverInjection:
         events2 = []
 
         class Obs2:
-            def on_run_start(self, run_id): pass
+            def on_run_start(self, run_id, pipeline_path=(), pipeline_snapshot_hash=None): pass
             def on_run_end(self, run_id): pass
             def on_node_start(self, node_label, node_hash, **kwargs): pass
             def on_node_end(self, node_label, node_hash, **kwargs): pass
@@ -522,7 +522,7 @@ class TestSyncObserverInjection:
         node_order = []
 
         class OrderObserver:
-            def on_run_start(self, run_id): pass
+            def on_run_start(self, run_id, pipeline_path=(), pipeline_snapshot_hash=None): pass
             def on_run_end(self, run_id): pass
             def on_node_start(self, node_label, node_hash, **kwargs):
                 node_order.append(("start", node_label))

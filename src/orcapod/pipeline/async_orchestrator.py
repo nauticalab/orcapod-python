@@ -62,6 +62,8 @@ class AsyncPipelineOrchestrator:
         graph: nx.DiGraph,
         materialize_results: bool = True,
         run_id: str | None = None,
+        pipeline_path: tuple[str, ...] = (),
+        pipeline_snapshot_hash: str | None = None,
     ) -> OrchestratorResult:
         """Synchronous entry point — runs the async pipeline to completion.
 
@@ -71,17 +73,31 @@ class AsyncPipelineOrchestrator:
                 the result. If False, return empty node_outputs.
             run_id: Optional run identifier.  If not provided, a UUID is
                 generated automatically.
+            pipeline_path: Canonical pipeline identity path (e.g.
+                ``("my_pipeline",)``).  Stable across pipeline evolution.
+            pipeline_snapshot_hash: Content hash of the compiled pipeline
+                structure at the time of this run.
 
         Returns:
             OrchestratorResult with node outputs.
         """
-        return asyncio.run(self._run_async(graph, materialize_results, run_id=run_id))
+        return asyncio.run(
+            self._run_async(
+                graph,
+                materialize_results,
+                run_id=run_id,
+                pipeline_path=pipeline_path,
+                pipeline_snapshot_hash=pipeline_snapshot_hash,
+            )
+        )
 
     async def run_async(
         self,
         graph: nx.DiGraph,
         materialize_results: bool = True,
         run_id: str | None = None,
+        pipeline_path: tuple[str, ...] = (),
+        pipeline_snapshot_hash: str | None = None,
     ) -> OrchestratorResult:
         """Async entry point for callers already inside an event loop.
 
@@ -90,24 +106,40 @@ class AsyncPipelineOrchestrator:
             materialize_results: If True, collect all node outputs.
             run_id: Optional run identifier.  If not provided, a UUID is
                 generated automatically.
+            pipeline_path: Canonical pipeline identity path (e.g.
+                ``("my_pipeline",)``).  Stable across pipeline evolution.
+            pipeline_snapshot_hash: Content hash of the compiled pipeline
+                structure at the time of this run.
 
         Returns:
             OrchestratorResult with node outputs.
         """
-        return await self._run_async(graph, materialize_results, run_id=run_id)
+        return await self._run_async(
+            graph,
+            materialize_results,
+            run_id=run_id,
+            pipeline_path=pipeline_path,
+            pipeline_snapshot_hash=pipeline_snapshot_hash,
+        )
 
     async def _run_async(
         self,
         graph: nx.DiGraph,
         materialize_results: bool,
         run_id: str | None = None,
+        pipeline_path: tuple[str, ...] = (),
+        pipeline_snapshot_hash: str | None = None,
     ) -> OrchestratorResult:
         """Core async logic: wire channels, launch tasks, collect results."""
         import networkx as nx
 
         run_id = run_id or str(uuid.uuid4())
         if self._observer is not None:
-            self._observer.on_run_start(run_id)
+            self._observer.on_run_start(
+                run_id,
+                pipeline_path=pipeline_path,
+                pipeline_snapshot_hash=pipeline_snapshot_hash,
+            )
 
         try:
             topo_order = list(nx.topological_sort(graph))

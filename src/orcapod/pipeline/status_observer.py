@@ -100,6 +100,8 @@ class StatusObserver:
         self._db = status_database
         self._status_path = status_path or DEFAULT_STATUS_PATH
         self._current_run_id: str = ""
+        self._current_pipeline_path: tuple[str, ...] = ()
+        self._current_pipeline_snapshot_hash: str | None = None
         # Tracks (node_hash, pipeline_path, tag_schema) per node_label,
         # populated by on_node_start.  Allows packet-level hooks (which
         # only receive node_label) to look up the node's identity,
@@ -116,8 +118,15 @@ class StatusObserver:
 
     # -- lifecycle hooks --
 
-    def on_run_start(self, run_id: str) -> None:
+    def on_run_start(
+        self,
+        run_id: str,
+        pipeline_path: tuple[str, ...] = (),
+        pipeline_snapshot_hash: str | None = None,
+    ) -> None:
         self._current_run_id = run_id
+        self._current_pipeline_path = pipeline_path
+        self._current_pipeline_snapshot_hash = pipeline_snapshot_hash
         self._node_context.clear()
 
     def on_run_end(self, run_id: str) -> None:
@@ -274,8 +283,17 @@ class _ContextualizedStatusObserver:
         """Re-contextualize (returns a new wrapper with updated identity)."""
         return _ContextualizedStatusObserver(self._parent, node_hash, node_label)
 
-    def on_run_start(self, run_id: str) -> None:
-        self._parent.on_run_start(run_id)
+    def on_run_start(
+        self,
+        run_id: str,
+        pipeline_path: tuple[str, ...] = (),
+        pipeline_snapshot_hash: str | None = None,
+    ) -> None:
+        self._parent.on_run_start(
+            run_id,
+            pipeline_path=pipeline_path,
+            pipeline_snapshot_hash=pipeline_snapshot_hash,
+        )
 
     def on_run_end(self, run_id: str) -> None:
         self._parent.on_run_end(run_id)

@@ -494,7 +494,7 @@ class TestAsyncOrchestratorObserverInjection:
         events = []
 
         class RecordingObserver:
-            def on_run_start(self, run_id): pass
+            def on_run_start(self, run_id, pipeline_path=(), pipeline_snapshot_hash=None): pass
             def on_run_end(self, run_id): pass
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
@@ -551,7 +551,7 @@ class TestAsyncOrchestratorObserverInjection:
         events = []
 
         class RecordingObserver:
-            def on_run_start(self, run_id): pass
+            def on_run_start(self, run_id, pipeline_path=(), pipeline_snapshot_hash=None): pass
             def on_run_end(self, run_id): pass
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))

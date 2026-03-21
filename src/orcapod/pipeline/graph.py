@@ -416,8 +416,14 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         if effective_engine is not None:
             self._apply_execution_engine(effective_engine, effective_opts)
 
+        pipeline_snapshot_hash = self._compute_pipeline_snapshot_hash()
+
         if orchestrator is not None:
-            orchestrator.run(self._node_graph)
+            orchestrator.run(
+                self._node_graph,
+                pipeline_path=self._name,
+                pipeline_snapshot_hash=pipeline_snapshot_hash,
+            )
         else:
             # Default to async when an execution engine is provided, unless
             # the caller explicitly supplied a config — in which case
@@ -432,13 +438,21 @@ class Pipeline(AutoRegisteringContextBasedTracker):
 
                 AsyncPipelineOrchestrator(
                     buffer_size=config.channel_buffer_size,
-                ).run(self._node_graph)
+                ).run(
+                    self._node_graph,
+                    pipeline_path=self._name,
+                    pipeline_snapshot_hash=pipeline_snapshot_hash,
+                )
             else:
                 from orcapod.pipeline.sync_orchestrator import (
                     SyncPipelineOrchestrator,
                 )
 
-                SyncPipelineOrchestrator().run(self._node_graph)
+                SyncPipelineOrchestrator().run(
+                    self._node_graph,
+                    pipeline_path=self._name,
+                    pipeline_snapshot_hash=pipeline_snapshot_hash,
+                )
 
         self.flush()
 
@@ -478,6 +492,28 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 node.label,
                 opts or None,
             )
+
+    def _compute_pipeline_snapshot_hash(self) -> str:
+        """Compute a content hash of the compiled pipeline structure.
+
+        Collects the ``pipeline_hash`` of every node in the hash graph,
+        sorts them for determinism, and returns a SHA-256 hex digest
+        (first 16 characters).  Changes whenever nodes are added,
+        removed, or modified; stable for identical graph structures.
+
+        Returns:
+            A 16-character hex string, or ``""`` if the graph is empty.
+        """
+        import hashlib
+
+        node_hashes = sorted(
+            attrs.get("pipeline_hash", node_hash)
+            for node_hash, attrs in self._hash_graph.nodes(data=True)
+        )
+        if not node_hashes:
+            return ""
+        combined = "\n".join(node_hashes)
+        return hashlib.sha256(combined.encode()).hexdigest()[:16]
 
     def flush(self) -> None:
         """Flush all databases."""
