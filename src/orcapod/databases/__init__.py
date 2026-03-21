@@ -1,21 +1,26 @@
+from .connector_arrow_database import ConnectorArrowDatabase
 from .delta_lake_databases import DeltaTableDatabase
 from .in_memory_databases import InMemoryArrowDatabase
 from .noop_database import NoOpArrowDatabase
 
 __all__ = [
+    "ConnectorArrowDatabase",
     "DeltaTableDatabase",
     "InMemoryArrowDatabase",
     "NoOpArrowDatabase",
 ]
 
-# Future ArrowDatabaseProtocol backends to implement:
+# Relational DB connector implementations satisfy DBConnectorProtocol
+# (orcapod.protocols.db_connector_protocol) and can be passed to either
+# ConnectorArrowDatabase (read+write ArrowDatabaseProtocol) or
+# DBTableSource (read-only Source):
 #
-#   ParquetArrowDatabase    -- stores each record_path as a partitioned Parquet
-#                              directory; simpler, no Delta Lake dependency,
-#                              suitable for write-once / read-heavy workloads.
+#   SQLiteConnector      -- PLT-1076 (stdlib sqlite3, zero extra deps)
+#   PostgreSQLConnector  -- PLT-1075 (psycopg3)
+#   SpiralDBConnector    -- PLT-1074
 #
-#   IcebergArrowDatabase    -- Apache Iceberg backend for cloud-native /
-#                              object-store deployments.
+# ArrowDatabaseProtocol backends (existing, not connector-based):
 #
-# All backends must satisfy the ArrowDatabaseProtocol protocol defined in
-# orcapod.protocols.database_protocols.
+#   DeltaTableDatabase    -- Delta Lake (deltalake package)
+#   InMemoryArrowDatabase -- pure in-memory, for tests
+#   NoOpArrowDatabase     -- no-op, for dry-runs / benchmarks

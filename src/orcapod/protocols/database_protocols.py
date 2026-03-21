@@ -102,3 +102,16 @@ class ArrowDatabaseWithMetadataProtocol(
     """A protocol that combines ArrowDatabaseProtocol with metadata capabilities."""
 
     pass
+
+
+# Re-export connector abstractions so callers can import everything DB-related
+# from one place: ``from orcapod.protocols.database_protocols import ...``
+from orcapod.protocols.db_connector_protocol import ColumnInfo, DBConnectorProtocol  # noqa: E402
+
+__all__ = [
+    "ArrowDatabaseProtocol",
+    "ArrowDatabaseWithMetadataProtocol",
+    "ColumnInfo",
+    "DBConnectorProtocol",
+    "MetadataCapableProtocol",
+]
