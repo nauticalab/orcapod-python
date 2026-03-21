@@ -144,22 +144,24 @@ Implements `RootSource` on top of any `DBConnectorProtocol`. Read-only.
 DBTableSource(
     connector: DBConnectorProtocol,
     table_name: str,
-    tag_columns: Collection[str] | None = None,   # None → use PK columns
+    tag_columns: Collection[str] | None = None,        # None → use PK columns
+    system_tag_columns: Collection[str] = (),          # consistent with DeltaTableSource
     record_id_column: str | None = None,
-    source_id: str | None = None,                 # None → defaults to table_name
+    source_id: str | None = None,                      # None → defaults to table_name
     **kwargs,  # passed to RootSource (label, data_context, config)
 )
 ```
 
 Construction flow:
-1. Resolve `tag_columns`: if `None`, call `connector.get_pk_columns(table_name)`.
-2. Fetch full table: `list(connector.iter_batches(f'SELECT * FROM "{table_name}"'))` → `pa.Table.from_batches(...)`.
-3. Feed into `SourceStreamBuilder.build(table, tag_columns=..., source_id=..., record_id_column=...)`.
-4. Store result stream, tag_columns, source_id.
+1. Resolve `tag_columns`: if `None`, call `connector.get_pk_columns(table_name)`. Raise `ValueError` if the result is empty (table has no primary key and no explicit tag columns were provided).
+2. Validate the table exists: if `table_name not in connector.get_table_names()`, raise `ValueError(f"Table {table_name!r} not found in database.")`. This distinguishes "not found" from "empty".
+3. Fetch full table: `list(connector.iter_batches(f'SELECT * FROM "{table_name}"'))` → `pa.Table.from_batches(...)`. If the result is empty, raise `ValueError(f"Table {table_name!r} is empty.")` — consistent with `ArrowTableSource`'s behaviour (via `SourceStreamBuilder`) which also rejects empty tables. The `table_name` is always double-quoted in the query string (`f'SELECT * FROM "{table_name}"'`); connectors must support ANSI-standard double-quoted identifiers.
+4. Feed into `SourceStreamBuilder.build(table, tag_columns=..., source_id=..., record_id_column=...)`.
+5. Store result stream, tag_columns, source_id.
 
-`to_config()` serializes `connector.to_config()`, `table_name`, `tag_columns`, `record_id_column`, `source_id` plus identity fields from `_identity_config()`.
+`to_config()` serializes `connector.to_config()`, `table_name`, `tag_columns`, `system_tag_columns`, `record_id_column`, `source_id` plus identity fields from `_identity_config()`.
 
-`from_config()` calls a `build_db_connector_from_config(config["connector"])` registry helper (to be implemented alongside connectors in PLT-1074/1075/1076).
+`from_config()` raises `NotImplementedError` until connector implementations land in PLT-1074/1075/1076. A `build_db_connector_from_config(config)` registry helper will be added as part of those issues; implementing the registry is **out of scope** for this spike. The config shape uses a `"connector_type"` discriminator key (e.g., `"sqlite"`, `"postgresql"`, `"spiraldb"`) so the registry can dispatch to the correct `from_config` classmethod.
 
 ---
 
@@ -198,7 +200,7 @@ tests/
     └── test_db_table_source.py            # NEW: DBTableSource via mock connector
 ```
 
-Both test files use a `MockDBConnector` (defined in the test file) that holds data in-memory, enabling tests with zero external dependencies.
+Both test files use a `MockDBConnector` defined in `tests/conftest.py` or inline in the test module. The mock holds data as a `dict[str, pa.Table]` keyed by table name; `iter_batches` slices rows into batches, `get_pk_columns` returns a pre-configured list, `create_table_if_not_exists` is a no-op, and `upsert_records` applies insert-or-replace semantics in memory. This shared mock shape ensures the two test suites use compatible fixtures.
 
 ---
 
@@ -213,3 +215,4 @@ Both test files use a `MockDBConnector` (defined in the test file) that holds da
 | `record_path → table_name`? | `"__".join(sanitized_parts)` — double underscore separator avoids collisions |
 | Upsert abstraction? | `upsert_records(table, id_column, skip_existing)` on connector — hides SQLite/PostgreSQL/SpiralDB dialect differences (INSERT OR IGNORE vs ON CONFLICT DO NOTHING, etc.) |
 | Pending-batch location? | In `ConnectorArrowDatabase` (Python-side) — mirrors existing `DeltaTableDatabase`/`InMemoryArrowDatabase` pattern |
+| Schema evolution on existing tables? | **Out of scope for this spike.** `DBConnectorProtocol` has no `alter_table` method. `ConnectorArrowDatabase` raises `ValueError` if a flush encounters a schema mismatch with an existing table. Schema evolution can be added in a follow-up. |
