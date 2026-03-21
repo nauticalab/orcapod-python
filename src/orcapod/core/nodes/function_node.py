@@ -521,7 +521,8 @@ class FunctionNode(StreamBase):
 
         obs = observer if observer is not None else NoOpObserver()
 
-        obs.on_node_start(node_label, node_hash)
+        pp = self.pipeline_path if self._pipeline_database is not None else ()
+        obs.on_node_start(node_label, node_hash, pipeline_path=pp)
 
         # Gather entry IDs and check cache
         upstream_entries = [
@@ -530,8 +531,6 @@ class FunctionNode(StreamBase):
         ]
         entry_ids = [eid for _, _, eid in upstream_entries]
         cached = self.get_cached_results(entry_ids=entry_ids)
-
-        pp = self.pipeline_path if self._pipeline_database is not None else ()
 
         output: list[tuple[TagProtocol, PacketProtocol]] = []
         for tag, packet, entry_id in upstream_entries:
@@ -559,7 +558,7 @@ class FunctionNode(StreamBase):
                     )
                     obs.on_packet_crash(node_label, tag, packet, exc)
                     if error_policy == "fail_fast":
-                        obs.on_node_end(node_label, node_hash)
+                        obs.on_node_end(node_label, node_hash, pipeline_path=pp)
                         raise
                 else:
                     obs.on_packet_end(
@@ -568,7 +567,7 @@ class FunctionNode(StreamBase):
                     if result is not None:
                         output.append((tag_out, result))
 
-        obs.on_node_end(node_label, node_hash)
+        obs.on_node_end(node_label, node_hash, pipeline_path=pp)
         return output
 
     def _process_packet_internal(
@@ -1243,8 +1242,10 @@ class FunctionNode(StreamBase):
 
         obs = observer if observer is not None else NoOpObserver()
 
+        pp = self.pipeline_path if self._pipeline_database is not None else ()
+
         try:
-            obs.on_node_start(node_label, node_hash)
+            obs.on_node_start(node_label, node_hash, pipeline_path=pp)
 
             if self._cached_function_pod is not None:
                 # DB-backed async execution:
@@ -1322,7 +1323,7 @@ class FunctionNode(StreamBase):
                         node_hash=node_hash,
                     )
 
-            obs.on_node_end(node_label, node_hash)
+            obs.on_node_end(node_label, node_hash, pipeline_path=pp)
         finally:
             await output.close()
 

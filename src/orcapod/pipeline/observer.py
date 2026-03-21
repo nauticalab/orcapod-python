@@ -58,10 +58,14 @@ class NoOpObserver:
     def on_run_end(self, run_id: str) -> None:
         pass
 
-    def on_node_start(self, node_label: str, node_hash: str) -> None:
+    def on_node_start(
+        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = ()
+    ) -> None:
         pass
 
-    def on_node_end(self, node_label: str, node_hash: str) -> None:
+    def on_node_end(
+        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = ()
+    ) -> None:
         pass
 
     def on_packet_start(

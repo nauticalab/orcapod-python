@@ -173,11 +173,15 @@ class _ContextualizedLoggingObserver:
     def on_run_end(self, run_id: str) -> None:
         self._parent.on_run_end(run_id)
 
-    def on_node_start(self, node_label: str, node_hash: str) -> None:
-        self._parent.on_node_start(node_label, node_hash)
+    def on_node_start(
+        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = ()
+    ) -> None:
+        self._parent.on_node_start(node_label, node_hash, pipeline_path=pipeline_path)
 
-    def on_node_end(self, node_label: str, node_hash: str) -> None:
-        self._parent.on_node_end(node_label, node_hash)
+    def on_node_end(
+        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = ()
+    ) -> None:
+        self._parent.on_node_end(node_label, node_hash, pipeline_path=pipeline_path)
 
     def on_packet_start(
         self, node_label: str, tag: Any, packet: Any
@@ -282,10 +286,14 @@ class LoggingObserver:
     def on_run_end(self, run_id: str) -> None:
         pass
 
-    def on_node_start(self, node_label: str, node_hash: str) -> None:
+    def on_node_start(
+        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = ()
+    ) -> None:
         pass
 
-    def on_node_end(self, node_label: str, node_hash: str) -> None:
+    def on_node_end(
+        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = ()
+    ) -> None:
         pass
 
     def on_packet_start(self, node_label: str, tag: Any, packet: Any) -> None:

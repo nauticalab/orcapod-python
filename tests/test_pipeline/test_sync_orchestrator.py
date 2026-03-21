@@ -132,9 +132,9 @@ class TestSyncOrchestratorObserver:
         class RecordingObserver:
             def on_run_start(self, run_id): pass
             def on_run_end(self, run_id): pass
-            def on_node_start(self, node_label, node_hash):
+            def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
-            def on_node_end(self, node_label, node_hash):
+            def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
             def on_packet_start(self, node_label, tag, packet):
                 events.append(("packet_start",))
@@ -213,9 +213,9 @@ class TestPipelineRunIntegration:
         class RecordingObserver:
             def on_run_start(self, run_id): pass
             def on_run_end(self, run_id): pass
-            def on_node_start(self, node_label, node_hash):
+            def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
-            def on_node_end(self, node_label, node_hash):
+            def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
             def on_packet_start(self, node_label, tag, packet):
                 events.append(("packet_start",))
@@ -423,9 +423,9 @@ class TestSyncObserverInjection:
         class RecordingObserver:
             def on_run_start(self, run_id): pass
             def on_run_end(self, run_id): pass
-            def on_node_start(self, node_label, node_hash):
+            def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
-            def on_node_end(self, node_label, node_hash):
+            def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
             def on_packet_start(self, node_label, tag, packet):
                 events.append(("packet_start", node_label))
@@ -469,8 +469,8 @@ class TestSyncObserverInjection:
         class Obs1:
             def on_run_start(self, run_id): pass
             def on_run_end(self, run_id): pass
-            def on_node_start(self, node_label, node_hash): pass
-            def on_node_end(self, node_label, node_hash): pass
+            def on_node_start(self, node_label, node_hash, **kwargs): pass
+            def on_node_end(self, node_label, node_hash, **kwargs): pass
             def on_packet_start(self, node_label, tag, packet): pass
             def on_packet_end(self, node_label, tag, input_pkt, output_pkt, cached):
                 if node_label == "doubler":
@@ -491,8 +491,8 @@ class TestSyncObserverInjection:
         class Obs2:
             def on_run_start(self, run_id): pass
             def on_run_end(self, run_id): pass
-            def on_node_start(self, node_label, node_hash): pass
-            def on_node_end(self, node_label, node_hash): pass
+            def on_node_start(self, node_label, node_hash, **kwargs): pass
+            def on_node_end(self, node_label, node_hash, **kwargs): pass
             def on_packet_start(self, node_label, tag, packet): pass
             def on_packet_end(self, node_label, tag, input_pkt, output_pkt, cached):
                 if node_label == "doubler":
@@ -524,9 +524,9 @@ class TestSyncObserverInjection:
         class OrderObserver:
             def on_run_start(self, run_id): pass
             def on_run_end(self, run_id): pass
-            def on_node_start(self, node_label, node_hash):
+            def on_node_start(self, node_label, node_hash, **kwargs):
                 node_order.append(("start", node_label))
-            def on_node_end(self, node_label, node_hash):
+            def on_node_end(self, node_label, node_hash, **kwargs):
                 node_order.append(("end", node_label))
             def on_packet_start(self, node_label, tag, packet): pass
             def on_packet_end(self, node_label, tag, input_pkt, output_pkt, cached): pass

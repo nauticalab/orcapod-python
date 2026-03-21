@@ -95,12 +95,34 @@ class ExecutionObserverProtocol(Protocol):
         """
         ...
 
-    def on_node_start(self, node_label: str, node_hash: str) -> None:
-        """Called before a node begins processing its packets."""
+    def on_node_start(
+        self,
+        node_label: str,
+        node_hash: str,
+        pipeline_path: tuple[str, ...] = (),
+    ) -> None:
+        """Called before a node begins processing its packets.
+
+        Args:
+            node_label: Human-readable label of the node.
+            node_hash: Content hash of the node.
+            pipeline_path: The node's pipeline path for storage scoping.
+        """
         ...
 
-    def on_node_end(self, node_label: str, node_hash: str) -> None:
-        """Called after a node finishes processing all packets."""
+    def on_node_end(
+        self,
+        node_label: str,
+        node_hash: str,
+        pipeline_path: tuple[str, ...] = (),
+    ) -> None:
+        """Called after a node finishes processing all packets.
+
+        Args:
+            node_label: Human-readable label of the node.
+            node_hash: Content hash of the node.
+            pipeline_path: The node's pipeline path for storage scoping.
+        """
         ...
 
     def on_packet_start(
