@@ -2093,7 +2093,7 @@ requires-dist = [
     { name = "ray", extras = ["default"], marker = "extra == 'ray'", specifier = "==2.48.0" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=6.2.0" },
     { name = "s3fs", specifier = ">=2025.12.0" },
-    { name = "starfix", git = "https://github.com/nauticalab/starfix-python.git" },
+    { name = "starfix", git = "https://github.com/nauticalab/starfix-python.git?rev=344617bc6f7fcabab5c011d5774ed47de33f21de" },
     { name = "typing-extensions" },
     { name = "tzdata", specifier = ">=2024.1" },
     { name = "uuid-utils", specifier = ">=0.11.1" },
@@ -3441,7 +3441,7 @@ wheels = [
 [[package]]
 name = "starfix"
 version = "0.0.2"
-source = { git = "https://github.com/nauticalab/starfix-python.git#344617bc6f7fcabab5c011d5774ed47de33f21de" }
+source = { git = "https://github.com/nauticalab/starfix-python.git?rev=344617bc6f7fcabab5c011d5774ed47de33f21de#344617bc6f7fcabab5c011d5774ed47de33f21de" }
 dependencies = [
     { name = "pyarrow" },
 ]
