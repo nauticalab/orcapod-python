@@ -53,8 +53,7 @@ class SyncPipelineOrchestrator:
         graph: nx.DiGraph,
         materialize_results: bool = True,
         run_id: str | None = None,
-        pipeline_path: tuple[str, ...] = (),
-        pipeline_snapshot_hash: str | None = None,
+        pipeline_uri: str = "",
     ) -> OrchestratorResult:
         """Execute the node graph synchronously.
 
@@ -65,11 +64,9 @@ class SyncPipelineOrchestrator:
                 consumption (only DB-persisted results survive).
             run_id: Optional run identifier.  If not provided, a UUID is
                 generated automatically.
-            pipeline_path: Canonical pipeline identity path (e.g.
-                ``("my_pipeline",)``).  Stable across pipeline evolution.
-            pipeline_snapshot_hash: Content hash of the compiled pipeline
-                structure at the time of this run.  Changes whenever nodes
-                are added, removed, or modified.
+            pipeline_uri: Opaque URI string identifying this pipeline run
+                (e.g. ``"my_pipeline@a1b2c3d4e5f6a1b2"``).  Forwarded
+                verbatim to ``observer.on_run_start``.
 
         Returns:
             OrchestratorResult with node outputs.
@@ -78,11 +75,7 @@ class SyncPipelineOrchestrator:
 
         run_id = run_id or str(uuid.uuid4())
         if self._observer is not None:
-            self._observer.on_run_start(
-                run_id,
-                pipeline_path=pipeline_path,
-                pipeline_snapshot_hash=pipeline_snapshot_hash,
-            )
+            self._observer.on_run_start(run_id, pipeline_uri=pipeline_uri)
 
         try:
             topo_order = list(nx.topological_sort(graph))

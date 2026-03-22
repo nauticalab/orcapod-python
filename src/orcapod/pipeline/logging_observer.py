@@ -172,14 +172,9 @@ class _ContextualizedLoggingObserver:
     def on_run_start(
         self,
         run_id: str,
-        pipeline_path: tuple[str, ...] = (),
-        pipeline_snapshot_hash: str | None = None,
+        pipeline_uri: str = "",
     ) -> None:
-        self._parent.on_run_start(
-            run_id,
-            pipeline_path=pipeline_path,
-            pipeline_snapshot_hash=pipeline_snapshot_hash,
-        )
+        self._parent.on_run_start(run_id, pipeline_uri=pipeline_uri)
 
     def on_run_end(self, run_id: str) -> None:
         self._parent.on_run_end(run_id)
@@ -294,8 +289,7 @@ class LoggingObserver:
     def on_run_start(
         self,
         run_id: str,
-        pipeline_path: tuple[str, ...] = (),
-        pipeline_snapshot_hash: str | None = None,
+        pipeline_uri: str = "",
     ) -> None:
         self._current_run_id = run_id
 
