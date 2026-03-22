@@ -116,22 +116,26 @@ class UPathContentHandler:
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         from upath import UPath
 
-        path = UPath(obj) if not isinstance(obj, UPath) else obj
+        if not isinstance(obj, UPath):
+            raise TypeError(
+                f"UPathContentHandler: expected a UPath, got {type(obj)!r}. "
+                "Use PathContentHandler for pathlib.Path objects."
+            )
 
-        if not path.exists():
+        if not obj.exists():
             raise FileNotFoundError(
-                f"UPathContentHandler: path does not exist: {path!r}. "
+                f"UPathContentHandler: path does not exist: {obj!r}. "
                 "Paths must refer to existing files for content-based hashing."
             )
 
-        if path.is_dir():
+        if obj.is_dir():
             raise IsADirectoryError(
-                f"UPathContentHandler: path is a directory: {path!r}. "
+                f"UPathContentHandler: path is a directory: {obj!r}. "
                 "Only regular files are supported for content-based hashing."
             )
 
-        logger.debug("UPathContentHandler: hashing file content at %s", path)
-        return self.file_hasher.hash_file(path)
+        logger.debug("UPathContentHandler: hashing file content at %s", obj)
+        return self.file_hasher.hash_file(obj)
 
 
 class UUIDHandler:

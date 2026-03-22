@@ -404,13 +404,15 @@ class UniversalTypeConverter:
 
         # Handle Union/Optional types
         elif origin is typing.Union or origin is types.UnionType:
-            if len(args) == 2 and type(None) in args:
+            non_none_types = [t for t in args if t is not type(None)]
+            if len(non_none_types) == 1:
                 # Optional[T] → just T (nullability handled at field level)
-                non_none_type = args[0] if args[1] is type(None) else args[1]
-                return self.python_type_to_arrow_type(non_none_type)
+                return self.python_type_to_arrow_type(non_none_types[0])
             else:
-                # Complex unions → use first type as fallback
-                return self.python_type_to_arrow_type(args[0])
+                raise ValueError(
+                    f"Complex unions with multiple non-None types are not supported: {python_type}. "
+                    f"Only Optional[T] (i.e., T | None) is allowed."
+                )
 
         # Handle set types → lists
         elif origin is set:

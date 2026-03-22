@@ -67,6 +67,9 @@ def test_complex_union_raises_error():
     with pytest.raises(ValueError, match="Complex unions"):
         universal_converter.get_conversion_functions(UPath | Path)
 
+    with pytest.raises(ValueError, match="Complex unions"):
+        universal_converter.python_type_to_arrow_type(UPath | Path)
+
 
 def test_python_type_to_arrow_type_context():
     ctx = get_default_context()

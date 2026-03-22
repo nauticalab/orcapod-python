@@ -123,3 +123,26 @@ def test_path_and_upath_struct_types_differ():
     assert path_conv.arrow_struct_type != upath_conv.arrow_struct_type
     assert path_conv.arrow_struct_type[0].name == "path"
     assert upath_conv.arrow_struct_type[0].name == "upath"
+
+
+def test_path_converter_rejects_upath():
+    """PathStructConverter rejects UPath instances to avoid ambiguity."""
+    from orcapod.semantic_types.semantic_struct_converters import PathStructConverter
+
+    file_hasher = BasicFileHasher(algorithm="sha256")
+    path_conv = PathStructConverter(file_hasher=file_hasher)
+
+    upath_val = UPath("/tmp/test.txt")
+    with pytest.raises(TypeError, match="not UPath"):
+        path_conv.python_to_struct_dict(upath_val)
+
+
+def test_path_converter_cannot_handle_upath_type():
+    """PathStructConverter.can_handle_python_type returns False for UPath."""
+    from orcapod.semantic_types.semantic_struct_converters import PathStructConverter
+
+    file_hasher = BasicFileHasher(algorithm="sha256")
+    path_conv = PathStructConverter(file_hasher=file_hasher)
+
+    assert not path_conv.can_handle_python_type(UPath)
+    assert path_conv.can_handle_python_type(Path)
