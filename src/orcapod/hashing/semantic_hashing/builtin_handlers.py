@@ -5,6 +5,7 @@ This module provides handlers for all Python types that the SemanticHasherProtoc
 knows how to process out of the box:
 
   - PathContentHandler    -- pathlib.Path: returns ContentHash of file content
+  - UPathContentHandler   -- upath.UPath: returns ContentHash of file content (remote-aware)
   - UUIDHandler           -- uuid.UUID: canonical string representation
   - BytesHandler          -- bytes / bytearray: hex string representation
   - FunctionHandler       -- callable with __code__: via FunctionInfoExtractorProtocol
@@ -93,6 +94,43 @@ class PathContentHandler:
             )
 
         logger.debug("PathContentHandler: hashing file content at %s", path)
+        return self.file_hasher.hash_file(path)
+
+
+class UPathContentHandler:
+    """
+    Handler for universal_pathlib.UPath objects.
+
+    Behaves identically to ``PathContentHandler`` but preserves the UPath
+    instance so that remote filesystem semantics (e.g. S3, GCS) are retained
+    during file content hashing.
+
+    Args:
+        file_hasher: Any object with a ``hash_file(path) -> ContentHash``
+                     method (satisfies the FileContentHasherProtocol protocol).
+    """
+
+    def __init__(self, file_hasher: FileContentHasherProtocol) -> None:
+        self.file_hasher = file_hasher
+
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
+        from upath import UPath
+
+        path = UPath(obj) if not isinstance(obj, UPath) else obj
+
+        if not path.exists():
+            raise FileNotFoundError(
+                f"UPathContentHandler: path does not exist: {path!r}. "
+                "Paths must refer to existing files for content-based hashing."
+            )
+
+        if path.is_dir():
+            raise IsADirectoryError(
+                f"UPathContentHandler: path is a directory: {path!r}. "
+                "Only regular files are supported for content-based hashing."
+            )
+
+        logger.debug("UPathContentHandler: hashing file content at %s", path)
         return self.file_hasher.hash_file(path)
 
 
