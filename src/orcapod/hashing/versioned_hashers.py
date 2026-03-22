@@ -126,7 +126,7 @@ def get_versioned_semantic_arrow_hasher(
     from orcapod.hashing.arrow_hashers import StarfixArrowHasher
     from orcapod.hashing.file_hashers import BasicFileHasher
     from orcapod.semantic_types.semantic_registry import SemanticTypeRegistry
-    from orcapod.semantic_types.semantic_struct_converters import PathStructConverter
+    from orcapod.semantic_types.semantic_struct_converters import PythonPathStructConverter
 
     # Build a default semantic registry populated with the standard converters.
     # We use Any-typed locals here to side-step type-checker false positives
@@ -134,7 +134,7 @@ def get_versioned_semantic_arrow_hasher(
     # a slightly different hash_struct_dict signature than the concrete class.
     registry: Any = SemanticTypeRegistry()
     file_hasher = BasicFileHasher(algorithm="sha256")
-    path_converter: Any = PathStructConverter(file_hasher=file_hasher)
+    path_converter: Any = PythonPathStructConverter(file_hasher=file_hasher)
     registry.register_converter("path", path_converter)
 
     logger.debug(

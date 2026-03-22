@@ -19,7 +19,7 @@
                     }
                 },
                 "path": {
-                    "_class": "orcapod.semantic_types.semantic_struct_converters.PathStructConverter",
+                    "_class": "orcapod.semantic_types.semantic_struct_converters.PythonPathStructConverter",
                     "_config": {
                         "file_hasher": {"_ref": "file_hasher"}
                     }

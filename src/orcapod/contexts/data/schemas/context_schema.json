@@ -175,7 +175,7 @@
                 "_config": {
                     "converters": [
                         {
-                            "_class": "orcapod.types.semantic_types.PathStructConverter",
+                            "_class": "orcapod.types.semantic_types.PythonPathStructConverter",
                             "_config": {}
                         }
                     ]

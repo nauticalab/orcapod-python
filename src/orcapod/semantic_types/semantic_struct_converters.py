@@ -76,7 +76,7 @@ class SemanticStructConverterBase:
         return ContentHash(method=f"{self.semantic_type_name}:sha256", digest=digest)
 
 
-class FilePathStructConverterBase(SemanticStructConverterBase, ABC):
+class PathStructConverterBase(SemanticStructConverterBase, ABC):
     """Base converter for file path types (Path and UPath).
 
     Extracts the shared conversion logic since Path and UPath have
@@ -175,7 +175,7 @@ class FilePathStructConverterBase(SemanticStructConverterBase, ABC):
         return self._format_hash_string(content_hash.digest, add_prefix=add_prefix)
 
 
-class PathStructConverter(FilePathStructConverterBase):
+class PythonPathStructConverter(PathStructConverterBase):
     """Converter for pathlib.Path objects to/from semantic structs.
 
     Rejects ``UPath`` instances to avoid ambiguity with
@@ -211,7 +211,7 @@ class PathStructConverter(FilePathStructConverterBase):
         return issubclass(python_type, Path)
 
 
-class UPathStructConverter(FilePathStructConverterBase):
+class UPathStructConverter(PathStructConverterBase):
     """Converter for universal_pathlib.UPath objects to/from semantic structs."""
 
     def __init__(self, file_hasher: "FileContentHasherProtocol"):

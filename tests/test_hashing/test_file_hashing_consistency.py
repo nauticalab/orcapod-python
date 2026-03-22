@@ -2,7 +2,7 @@
 Integration tests verifying that file hashing is consistent across both paths:
 
 1. **Arrow hasher path**: SemanticArrowHasher processes an Arrow table containing a
-   path struct column → calls PathStructConverter.hash_struct_dict → file_hasher.
+   path struct column → calls PythonPathStructConverter.hash_struct_dict → file_hasher.
 2. **Semantic hasher path**: BaseSemanticHasher hashes a Python Path object →
    calls PathContentHandler.handle → file_hasher.
 
@@ -23,7 +23,7 @@ from orcapod.hashing.semantic_hashing.builtin_handlers import (
 from orcapod.hashing.semantic_hashing.semantic_hasher import BaseSemanticHasher
 from orcapod.hashing.semantic_hashing.type_handler_registry import TypeHandlerRegistry
 from orcapod.semantic_types.semantic_registry import SemanticTypeRegistry
-from orcapod.semantic_types.semantic_struct_converters import PathStructConverter
+from orcapod.semantic_types.semantic_struct_converters import PythonPathStructConverter
 
 
 # ---------------------------------------------------------------------------
@@ -39,12 +39,12 @@ def file_hasher():
 
 @pytest.fixture
 def path_converter(file_hasher):
-    return PathStructConverter(file_hasher=file_hasher)
+    return PythonPathStructConverter(file_hasher=file_hasher)
 
 
 @pytest.fixture
 def arrow_hasher(path_converter):
-    """SemanticArrowHasher wired with the shared file_hasher via PathStructConverter."""
+    """SemanticArrowHasher wired with the shared file_hasher via PythonPathStructConverter."""
     registry = SemanticTypeRegistry()
     registry.register_converter("path", path_converter)
     return SemanticArrowHasher(semantic_registry=registry)
@@ -180,7 +180,7 @@ class TestCrossPathConsistency:
     def test_arrow_and_semantic_hash_same_file_content(
         self, path_converter, semantic_hasher, file_hasher, tmp_path
     ):
-        """The file content hash extracted by PathStructConverter.hash_struct_dict
+        """The file content hash extracted by PythonPathStructConverter.hash_struct_dict
         must match the ContentHash produced by PathContentHandler.handle (which
         the semantic hasher uses internally for Path objects).
 
@@ -190,7 +190,7 @@ class TestCrossPathConsistency:
         file = tmp_path / "shared.txt"
         file.write_text("shared content for both paths")
 
-        # Arrow path: PathStructConverter.hash_struct_dict (no prefix)
+        # Arrow path: PythonPathStructConverter.hash_struct_dict (no prefix)
         arrow_hash_hex = path_converter.hash_struct_dict({"path": str(file)})
 
         # Semantic path: file_hasher.hash_file directly (same as PathContentHandler)
