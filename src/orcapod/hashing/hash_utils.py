@@ -46,15 +46,12 @@ def combine_hashes(
 def _to_path(file_path: PathLike) -> Path:
     """Convert a path-like to a Path, preserving UPath instances.
 
-    If ``file_path`` is already a ``Path`` (or a path-like with ``is_file``
-    and ``open`` methods, such as a remote ``UPath``), return it as-is so
-    that remote-filesystem semantics are retained.  Otherwise wrap it in
-    ``Path()``.
+    If ``file_path`` is already a ``Path`` (including ``UPath`` subclasses),
+    return it as-is so that remote-filesystem semantics are retained.
+    Otherwise wrap it in ``Path()``.
     """
     if isinstance(file_path, Path):
         return file_path
-    if hasattr(file_path, "is_file") and hasattr(file_path, "open"):
-        return file_path  # type: ignore[return-value]
     return Path(file_path)
 
 
