@@ -494,40 +494,43 @@ class Pipeline(AutoRegisteringContextBasedTracker):
     def _compute_pipeline_snapshot_hash(self) -> str:
         """Compute a content hash of the compiled pipeline structure.
 
-        Uses a deterministic topological ordering (Kahn's algorithm with
-        content-hash tie-breaking) over the ``_hash_graph``, whose node
-        keys are content-hash strings.  Produces a stable SHA-256 digest
-        that changes whenever nodes are added, removed, or modified, and
-        is stable for identical graph structures regardless of insertion
-        order.
+        Uses a deterministic topological ordering (Kahn's algorithm with a
+        min-heap frontier for O((n+e) log n) content-hash tie-breaking) over
+        the ``_hash_graph``, whose node keys are content-hash strings.
+        The canonical input to SHA-256 includes both the ordered node
+        sequence *and* all edges (sorted ``u->v`` pairs), so the digest
+        changes whenever nodes or edges are added, removed, or modified.
 
         Returns:
-            A 16-character hex string, or ``""`` if the graph is empty.
+            A 16-character hex string (truncated SHA-256 prefix), or
+            ``""`` if the graph is empty.
         """
-        import bisect
         import hashlib
+        import heapq
 
         g = self._hash_graph
         if not g or len(g) == 0:
             return ""
 
-        # Kahn's algorithm: maintain a sorted frontier so that nodes at
-        # the same topological level are visited in content-hash order.
+        # Kahn's algorithm with min-heap frontier for deterministic ordering.
         in_degree: dict[str, int] = {n: g.in_degree(n) for n in g}
-        frontier: list[str] = sorted(
-            n for n, deg in in_degree.items() if deg == 0
-        )
+        frontier: list[str] = [n for n, deg in in_degree.items() if deg == 0]
+        heapq.heapify(frontier)
         ordered: list[str] = []
 
         while frontier:
-            node = frontier.pop(0)
+            node = heapq.heappop(frontier)
             ordered.append(node)
             for successor in g.successors(node):
                 in_degree[successor] -= 1
                 if in_degree[successor] == 0:
-                    bisect.insort(frontier, successor)
+                    heapq.heappush(frontier, successor)
 
-        combined = "\n".join(ordered)
+        # Include both nodes (topo order) and edges (sorted) so topology
+        # changes that preserve node identity still change the hash.
+        node_lines = [f"N:{n}" for n in ordered]
+        edge_lines = [f"E:{u}->{v}" for u, v in sorted(g.edges())]
+        combined = "\n".join(node_lines + edge_lines)
         return hashlib.sha256(combined.encode()).hexdigest()[:16]
 
     def flush(self) -> None:
