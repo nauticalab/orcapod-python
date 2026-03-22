@@ -114,10 +114,10 @@ def test_upath_arrow_struct_type(converter):
 
 def test_path_and_upath_struct_types_differ():
     """Path and UPath converters produce distinct Arrow struct types."""
-    from orcapod.semantic_types.semantic_struct_converters import PathStructConverter
+    from orcapod.semantic_types.semantic_struct_converters import PythonPathStructConverter
 
     file_hasher = BasicFileHasher(algorithm="sha256")
-    path_conv = PathStructConverter(file_hasher=file_hasher)
+    path_conv = PythonPathStructConverter(file_hasher=file_hasher)
     upath_conv = UPathStructConverter(file_hasher=file_hasher)
 
     assert path_conv.arrow_struct_type != upath_conv.arrow_struct_type
@@ -126,11 +126,11 @@ def test_path_and_upath_struct_types_differ():
 
 
 def test_path_converter_rejects_upath():
-    """PathStructConverter rejects UPath instances to avoid ambiguity."""
-    from orcapod.semantic_types.semantic_struct_converters import PathStructConverter
+    """PythonPathStructConverter rejects UPath instances to avoid ambiguity."""
+    from orcapod.semantic_types.semantic_struct_converters import PythonPathStructConverter
 
     file_hasher = BasicFileHasher(algorithm="sha256")
-    path_conv = PathStructConverter(file_hasher=file_hasher)
+    path_conv = PythonPathStructConverter(file_hasher=file_hasher)
 
     upath_val = UPath("/tmp/test.txt")
     with pytest.raises(TypeError, match="not UPath"):
@@ -138,11 +138,11 @@ def test_path_converter_rejects_upath():
 
 
 def test_path_converter_cannot_handle_upath_type():
-    """PathStructConverter.can_handle_python_type returns False for UPath."""
-    from orcapod.semantic_types.semantic_struct_converters import PathStructConverter
+    """PythonPathStructConverter.can_handle_python_type returns False for UPath."""
+    from orcapod.semantic_types.semantic_struct_converters import PythonPathStructConverter
 
     file_hasher = BasicFileHasher(algorithm="sha256")
-    path_conv = PathStructConverter(file_hasher=file_hasher)
+    path_conv = PythonPathStructConverter(file_hasher=file_hasher)
 
     assert not path_conv.can_handle_python_type(UPath)
     assert path_conv.can_handle_python_type(Path)

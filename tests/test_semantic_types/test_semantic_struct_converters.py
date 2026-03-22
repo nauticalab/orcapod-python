@@ -62,7 +62,7 @@ def test_compute_content_hash():
     assert result.digest == hashlib.sha256(data).digest()
 
 
-# --- PathStructConverter tests ---
+# --- PythonPathStructConverter tests ---
 
 
 def test_extensibility_with_new_converter():

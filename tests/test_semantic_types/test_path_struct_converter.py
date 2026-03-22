@@ -4,7 +4,7 @@ from typing import cast
 import pytest
 
 from orcapod.hashing.file_hashers import BasicFileHasher
-from orcapod.semantic_types.semantic_struct_converters import PathStructConverter
+from orcapod.semantic_types.semantic_struct_converters import PythonPathStructConverter
 
 
 @pytest.fixture
@@ -14,7 +14,7 @@ def file_hasher():
 
 @pytest.fixture
 def converter(file_hasher):
-    return PathStructConverter(file_hasher=file_hasher)
+    return PythonPathStructConverter(file_hasher=file_hasher)
 
 
 def test_path_to_struct_and_back(converter):

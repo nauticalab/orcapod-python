@@ -50,6 +50,15 @@ def _to_path(file_path: PathLike) -> Path:
     return it as-is so that remote-filesystem semantics are retained.
     Otherwise wrap it in ``Path()``.
     """
+    # Check UPath first to preserve remote-filesystem semantics even if
+    # the inheritance relationship with pathlib.Path ever changes.
+    try:
+        from upath import UPath
+
+        if isinstance(file_path, UPath):
+            return file_path  # type: ignore[return-value]
+    except ImportError:
+        pass
     if isinstance(file_path, Path):
         return file_path
     return Path(file_path)
