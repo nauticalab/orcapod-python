@@ -56,8 +56,7 @@ class NoOpObserver:
     def on_run_start(
         self,
         run_id: str,
-        pipeline_path: tuple[str, ...] = (),
-        pipeline_snapshot_hash: str | None = None,
+        pipeline_uri: str = "",
     ) -> None:
         pass
 

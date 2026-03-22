@@ -1015,6 +1015,84 @@ class TestHashGraph:
 
 
 # ---------------------------------------------------------------------------
+# Tests: _compute_pipeline_snapshot_hash
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineSnapshotHash:
+    """Tests for Pipeline._compute_pipeline_snapshot_hash().
+
+    Verifies determinism, sensitivity to node changes, and sensitivity to
+    edge changes (since edges are included in the canonical hash input).
+    """
+
+    def test_hash_is_deterministic_for_same_graph(self, pipeline_db):
+        """Compiling the same pipeline twice yields the same snapshot hash."""
+        src_a, src_b = _make_two_sources()
+        pipeline = Pipeline(name="snap", pipeline_database=pipeline_db)
+        with pipeline:
+            Join()(src_a, src_b, label="joiner")
+
+        hash1 = pipeline._compute_pipeline_snapshot_hash()
+        hash2 = pipeline._compute_pipeline_snapshot_hash()
+        assert hash1 == hash2
+        assert len(hash1) == 16  # 16-char truncated SHA-256 prefix
+
+    def test_hash_changes_when_node_added(self, pipeline_db):
+        """Adding a new node to the pipeline changes the snapshot hash."""
+        src_a, src_b = _make_two_sources()
+        pipeline = Pipeline(name="snap2", pipeline_database=pipeline_db)
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        with pipeline:
+            joined = Join()(src_a, src_b, label="joiner")
+
+        hash_before = pipeline._compute_pipeline_snapshot_hash()
+
+        with pipeline:
+            pod(joined, label="adder")
+
+        hash_after = pipeline._compute_pipeline_snapshot_hash()
+        assert hash_before != hash_after
+
+    def test_hash_changes_when_topology_differs(self, pipeline_db):
+        """Two pipelines that apply the same transformation but with different
+        DAG topologies (one extra hop vs direct) produce different hashes,
+        because edges are included in the canonical SHA-256 input alongside
+        the node ordering."""
+        src_a, src_b = _make_two_sources()
+        pf_add = PythonPacketFunction(add_values, output_keys="total")
+        pf_double = PythonPacketFunction(double_value, output_keys="value")
+        pod_add = FunctionPod(packet_function=pf_add)
+        pod_double = FunctionPod(packet_function=pf_double)
+
+        # Pipeline 1: join → add (two nodes, one edge between them)
+        db1 = InMemoryArrowDatabase()
+        pipeline1 = Pipeline(name="topo_test", pipeline_database=db1)
+        with pipeline1:
+            joined = Join()(src_a, src_b, label="joiner")
+            pod_add(joined, label="adder")
+        hash1 = pipeline1._compute_pipeline_snapshot_hash()
+
+        # Pipeline 2: source → double → (different terminal node, different edge)
+        src_c = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
+        db2 = InMemoryArrowDatabase()
+        pipeline2 = Pipeline(name="topo_test", pipeline_database=db2)
+        with pipeline2:
+            pod_double(src_c, label="doubler")
+        hash2 = pipeline2._compute_pipeline_snapshot_hash()
+
+        assert hash1 != hash2
+
+    def test_empty_graph_returns_empty_string(self, pipeline_db):
+        """A freshly-constructed (uncompiled) pipeline returns '' because
+        the hash graph has no nodes."""
+        pipeline = Pipeline(name="empty", pipeline_database=pipeline_db)
+        assert pipeline._compute_pipeline_snapshot_hash() == ""
+
+
+# ---------------------------------------------------------------------------
 # Tests: incremental compile preserves existing nodes
 # ---------------------------------------------------------------------------
 

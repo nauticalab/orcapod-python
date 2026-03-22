@@ -82,24 +82,23 @@ class ExecutionObserverProtocol(Protocol):
     def on_run_start(
         self,
         run_id: str,
-        pipeline_path: tuple[str, ...] = (),
-        pipeline_snapshot_hash: str | None = None,
+        pipeline_uri: str = "",
     ) -> None:
         """Called at the very start of an orchestrator ``run()`` call.
 
         Args:
             run_id: A UUID string unique to this execution run.  All loggers
                 created during the run will be stamped with this ID.
-            pipeline_path: The canonical pipeline identity derived from the
-                pipeline name (e.g. ``("my_pipeline",)``).  Stable across
-                pipeline evolution — the same pipeline retains the same path
-                as nodes are added or modified over time.  The path components
-                join to a ``"/"``-separated storage key.
-            pipeline_snapshot_hash: A content hash of the compiled pipeline
-                structure at the moment this run was started.  Changes whenever
-                nodes are added, removed, or modified.  Useful as a historical
-                record of exactly which pipeline version produced a given run,
-                even as the canonical ``pipeline_path`` stays constant.
+            pipeline_uri: An opaque URI string that the pipeline formats to
+                describe itself for this run.  ``Pipeline`` sets this to
+                ``"<name>@<snapshot_hash>"`` by default (e.g.
+                ``"my_pipeline@a1b2c3d4e5f6a1b2"``), but the observer may
+                treat it as an arbitrary correlation token.  The snapshot hash
+                component changes whenever nodes are added, removed, or
+                modified; the name component remains stable.  Observers that
+                need node-level storage scoping should use the ``pipeline_path``
+                supplied per-node via ``on_node_start`` — those paths already
+                embed the pipeline name as their first component.
         """
         ...
 

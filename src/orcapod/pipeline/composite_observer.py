@@ -52,15 +52,10 @@ class CompositeObserver:
     def on_run_start(
         self,
         run_id: str,
-        pipeline_path: tuple[str, ...] = (),
-        pipeline_snapshot_hash: str | None = None,
+        pipeline_uri: str = "",
     ) -> None:
         for obs in self._observers:
-            obs.on_run_start(
-                run_id,
-                pipeline_path=pipeline_path,
-                pipeline_snapshot_hash=pipeline_snapshot_hash,
-            )
+            obs.on_run_start(run_id, pipeline_uri=pipeline_uri)
 
     def on_run_end(self, run_id: str) -> None:
         for obs in self._observers:
