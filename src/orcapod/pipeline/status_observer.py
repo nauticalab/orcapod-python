@@ -23,6 +23,10 @@ Status schema (fixed columns):
 
     - ``_status_id`` (large_utf8): UUID7 unique to this status event.
     - ``_status_run_id`` (large_utf8): UUID of the pipeline run (from ``on_run_start``).
+    - ``_status_pipeline_uri`` (large_utf8): Opaque URI identifying the pipeline version
+      that produced this event (e.g. ``"my_pipeline@a1b2c3d4e5f6a1b2"``).  Set to ``""``
+      when the pipeline URI is unknown (e.g. observer used outside a ``Pipeline.run()``
+      context).
     - ``_status_node_label`` (large_utf8): Label of the function node.
     - ``_status_node_hash`` (large_utf8): Content hash of the function node.
     - ``_status_state`` (large_utf8): ``RUNNING``, ``SUCCESS``, ``FAILED``, or ``CACHED``.
@@ -100,8 +104,7 @@ class StatusObserver:
         self._db = status_database
         self._status_path = status_path or DEFAULT_STATUS_PATH
         self._current_run_id: str = ""
-        self._current_pipeline_path: tuple[str, ...] = ()
-        self._current_pipeline_snapshot_hash: str | None = None
+        self._current_pipeline_uri: str = ""
         # Tracks (node_hash, pipeline_path, tag_schema) per node_label,
         # populated by on_node_start.  Allows packet-level hooks (which
         # only receive node_label) to look up the node's identity,
@@ -121,12 +124,10 @@ class StatusObserver:
     def on_run_start(
         self,
         run_id: str,
-        pipeline_path: tuple[str, ...] = (),
-        pipeline_snapshot_hash: str | None = None,
+        pipeline_uri: str = "",
     ) -> None:
         self._current_run_id = run_id
-        self._current_pipeline_path = pipeline_path
-        self._current_pipeline_snapshot_hash = pipeline_snapshot_hash
+        self._current_pipeline_uri = pipeline_uri
         self._node_context.clear()
 
     def on_run_end(self, run_id: str) -> None:
@@ -233,6 +234,7 @@ class StatusObserver:
         columns: dict[str, pa.Array] = {
             "_status_id":            pa.array([status_id],       type=pa.large_utf8()),
             "_status_run_id":        pa.array([self._current_run_id], type=pa.large_utf8()),
+            "_status_pipeline_uri":  pa.array([self._current_pipeline_uri], type=pa.large_utf8()),
             "_status_node_label":    pa.array([node_label],      type=pa.large_utf8()),
             "_status_node_hash":     pa.array([node_hash],       type=pa.large_utf8()),
             "_status_state":         pa.array([state],           type=pa.large_utf8()),
@@ -286,14 +288,9 @@ class _ContextualizedStatusObserver:
     def on_run_start(
         self,
         run_id: str,
-        pipeline_path: tuple[str, ...] = (),
-        pipeline_snapshot_hash: str | None = None,
+        pipeline_uri: str = "",
     ) -> None:
-        self._parent.on_run_start(
-            run_id,
-            pipeline_path=pipeline_path,
-            pipeline_snapshot_hash=pipeline_snapshot_hash,
-        )
+        self._parent.on_run_start(run_id, pipeline_uri=pipeline_uri)
 
     def on_run_end(self, run_id: str) -> None:
         self._parent.on_run_end(run_id)
