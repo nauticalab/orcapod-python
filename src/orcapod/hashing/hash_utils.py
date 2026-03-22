@@ -7,7 +7,7 @@ from pathlib import Path
 
 import xxhash
 
-from orcapod.types import ContentHash
+from orcapod.types import ContentHash, PathLike
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +43,25 @@ def combine_hashes(
     return combined_hash
 
 
-def hash_file(file_path, algorithm="sha256", buffer_size=65536) -> ContentHash:
+def _to_path(file_path: PathLike) -> Path:
+    """Convert a path-like to a Path, preserving UPath instances.
+
+    If ``file_path`` is already a ``Path`` (or a path-like with ``is_file``
+    and ``open`` methods, such as a remote ``UPath``), return it as-is so
+    that remote-filesystem semantics are retained.  Otherwise wrap it in
+    ``Path()``.
+    """
+    if isinstance(file_path, Path):
+        return file_path
+    if hasattr(file_path, "is_file") and hasattr(file_path, "open"):
+        return file_path  # type: ignore[return-value]
+    return Path(file_path)
+
+
+def hash_file(file_path: PathLike, algorithm="sha256", buffer_size=65536) -> ContentHash:
     """Calculate the hash of a file using the specified algorithm.
+
+    Supports both local ``pathlib.Path`` and remote ``UPath`` objects.
 
     Args:
         file_path: Path to the file to hash.
@@ -56,7 +73,9 @@ def hash_file(file_path, algorithm="sha256", buffer_size=65536) -> ContentHash:
         A ContentHash with method set to the algorithm name and digest
         containing the raw hash bytes.
     """
-    if not Path(file_path).is_file():
+    path = _to_path(file_path)
+
+    if not path.is_file():
         raise FileNotFoundError(f"The file {file_path} does not exist")
 
     # Hash the path string itself rather than file content
@@ -67,7 +86,7 @@ def hash_file(file_path, algorithm="sha256", buffer_size=65536) -> ContentHash:
 
     if algorithm == "xxh64":
         hasher = xxhash.xxh64()
-        with open(file_path, "rb") as file:
+        with path.open("rb") as file:
             while True:
                 data = file.read(buffer_size)
                 if not data:
@@ -77,7 +96,7 @@ def hash_file(file_path, algorithm="sha256", buffer_size=65536) -> ContentHash:
 
     if algorithm == "crc32":
         crc = 0
-        with open(file_path, "rb") as file:
+        with path.open("rb") as file:
             while True:
                 data = file.read(buffer_size)
                 if not data:
@@ -96,7 +115,7 @@ def hash_file(file_path, algorithm="sha256", buffer_size=65536) -> ContentHash:
             f"Invalid algorithm: {algorithm}. Available algorithms: {valid_algorithms}, xxh64, crc32"
         )
 
-    with open(file_path, "rb") as file:
+    with path.open("rb") as file:
         while True:
             data = file.read(buffer_size)
             if not data:

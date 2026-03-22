@@ -19,6 +19,7 @@ dependencies = [
     "deltalake>=1.0.2",
     "graphviz>=0.21",
     "gitpython>=3.1.45",
+    "universal-pathlib>=0.3.8",
     "starfix @ git+https://github.com/nauticalab/starfix-python.git@344617bc6f7fcabab5c011d5774ed47de33f21de",
     "pygraphviz>=1.14",
     "tzdata>=2024.1",

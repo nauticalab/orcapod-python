@@ -12,6 +12,12 @@
         "_class": "orcapod.semantic_types.semantic_registry.SemanticTypeRegistry",
         "_config": {
             "converters": {
+                "upath": {
+                    "_class": "orcapod.semantic_types.semantic_struct_converters.UPathStructConverter",
+                    "_config": {
+                        "file_hasher": {"_ref": "file_hasher"}
+                    }
+                },
                 "path": {
                     "_class": "orcapod.semantic_types.semantic_struct_converters.PathStructConverter",
                     "_config": {
@@ -52,6 +58,7 @@
                 [{"_type": "builtins.bytes"},    {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.BytesHandler",    "_config": {}}],
                 [{"_type": "builtins.bytearray"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.BytesHandler",    "_config": {}}],
                 [{"_type": "pathlib.Path"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.PathContentHandler", "_config": {"file_hasher": {"_ref": "file_hasher"}}}],
+                [{"_type": "upath.core.UPath"},    {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UPathContentHandler", "_config": {"file_hasher": {"_ref": "file_hasher"}}}],
                 [{"_type": "uuid.UUID"},           {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UUIDHandler",         "_config": {}}],
                 [{"_type": "types.FunctionType"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler", "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
                 [{"_type": "types.BuiltinFunctionType"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler", "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
