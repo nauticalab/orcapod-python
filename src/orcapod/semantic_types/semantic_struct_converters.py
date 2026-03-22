@@ -9,12 +9,13 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from upath import UPath
+
 from orcapod.types import ContentHash
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import pyarrow as pa
-    from upath import UPath
 
     from orcapod.protocols.hashing_protocols import FileContentHasherProtocol
 else:
@@ -190,8 +191,6 @@ class PythonPathStructConverter(PathStructConverterBase):
 
     def python_to_struct_dict(self, value: Any) -> dict[str, Any]:
         """Convert Path to struct dictionary, rejecting UPath instances."""
-        from upath import UPath
-
         if isinstance(value, UPath):
             raise TypeError(
                 f"Expected Path (not UPath), got {type(value)}. "
@@ -204,8 +203,6 @@ class PythonPathStructConverter(PathStructConverterBase):
 
         Returns False for UPath (and its subclasses) to avoid ambiguity.
         """
-        from upath import UPath
-
         if issubclass(python_type, UPath):
             return False
         return issubclass(python_type, Path)
@@ -215,11 +212,7 @@ class UPathStructConverter(PathStructConverterBase):
     """Converter for universal_pathlib.UPath objects to/from semantic structs."""
 
     def __init__(self, file_hasher: "FileContentHasherProtocol"):
-        from upath import UPath
-
         super().__init__("upath", UPath, file_hasher)
 
-    def _make_path(self, path_str: str) -> "UPath":
-        from upath import UPath
-
+    def _make_path(self, path_str: str) -> UPath:
         return UPath(path_str)

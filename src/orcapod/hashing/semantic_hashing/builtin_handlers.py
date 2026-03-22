@@ -34,6 +34,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from upath import UPath
+
 from orcapod.types import PathLike, Schema
 
 if TYPE_CHECKING:
@@ -114,8 +116,6 @@ class UPathContentHandler:
         self.file_hasher = file_hasher
 
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
-        from upath import UPath
-
         if not isinstance(obj, UPath):
             raise TypeError(
                 f"UPathContentHandler: expected a UPath, got {type(obj)!r}. "

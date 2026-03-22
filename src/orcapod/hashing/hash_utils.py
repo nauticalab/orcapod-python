@@ -6,6 +6,7 @@ from collections.abc import Callable, Collection
 from pathlib import Path
 
 import xxhash
+from upath import UPath
 
 from orcapod.types import ContentHash, PathLike
 
@@ -43,7 +44,7 @@ def combine_hashes(
     return combined_hash
 
 
-def _to_path(file_path: PathLike) -> Path:
+def _to_path(file_path: PathLike) -> Path | UPath:
     """Convert a path-like to a Path, preserving UPath instances.
 
     If ``file_path`` is already a ``Path`` (including ``UPath`` subclasses),
@@ -52,13 +53,8 @@ def _to_path(file_path: PathLike) -> Path:
     """
     # Check UPath first to preserve remote-filesystem semantics even if
     # the inheritance relationship with pathlib.Path ever changes.
-    try:
-        from upath import UPath
-
-        if isinstance(file_path, UPath):
-            return file_path  # type: ignore[return-value]
-    except ImportError:
-        pass
+    if isinstance(file_path, UPath):
+        return file_path
     if isinstance(file_path, Path):
         return file_path
     return Path(file_path)
