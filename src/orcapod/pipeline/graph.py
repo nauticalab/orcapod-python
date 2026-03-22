@@ -416,13 +416,13 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         if effective_engine is not None:
             self._apply_execution_engine(effective_engine, effective_opts)
 
-        pipeline_snapshot_hash = self._compute_pipeline_snapshot_hash()
+        snapshot_hash = self._compute_pipeline_snapshot_hash()
+        pipeline_uri = "/".join(self._name) + "@" + snapshot_hash
 
         if orchestrator is not None:
             orchestrator.run(
                 self._node_graph,
-                pipeline_path=self._name,
-                pipeline_snapshot_hash=pipeline_snapshot_hash,
+                pipeline_uri=pipeline_uri,
             )
         else:
             # Default to async when an execution engine is provided, unless
@@ -440,8 +440,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     buffer_size=config.channel_buffer_size,
                 ).run(
                     self._node_graph,
-                    pipeline_path=self._name,
-                    pipeline_snapshot_hash=pipeline_snapshot_hash,
+                    pipeline_uri=pipeline_uri,
                 )
             else:
                 from orcapod.pipeline.sync_orchestrator import (
@@ -450,8 +449,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
 
                 SyncPipelineOrchestrator().run(
                     self._node_graph,
-                    pipeline_path=self._name,
-                    pipeline_snapshot_hash=pipeline_snapshot_hash,
+                    pipeline_uri=pipeline_uri,
                 )
 
         self.flush()
@@ -496,23 +494,40 @@ class Pipeline(AutoRegisteringContextBasedTracker):
     def _compute_pipeline_snapshot_hash(self) -> str:
         """Compute a content hash of the compiled pipeline structure.
 
-        Collects the ``pipeline_hash`` of every node in the hash graph,
-        sorts them for determinism, and returns a SHA-256 hex digest
-        (first 16 characters).  Changes whenever nodes are added,
-        removed, or modified; stable for identical graph structures.
+        Uses a deterministic topological ordering (Kahn's algorithm with
+        content-hash tie-breaking) over the ``_hash_graph``, whose node
+        keys are content-hash strings.  Produces a stable SHA-256 digest
+        that changes whenever nodes are added, removed, or modified, and
+        is stable for identical graph structures regardless of insertion
+        order.
 
         Returns:
             A 16-character hex string, or ``""`` if the graph is empty.
         """
+        import bisect
         import hashlib
 
-        node_hashes = sorted(
-            attrs.get("pipeline_hash", node_hash)
-            for node_hash, attrs in self._hash_graph.nodes(data=True)
-        )
-        if not node_hashes:
+        g = self._hash_graph
+        if not g or len(g) == 0:
             return ""
-        combined = "\n".join(node_hashes)
+
+        # Kahn's algorithm: maintain a sorted frontier so that nodes at
+        # the same topological level are visited in content-hash order.
+        in_degree: dict[str, int] = {n: g.in_degree(n) for n in g}
+        frontier: list[str] = sorted(
+            n for n, deg in in_degree.items() if deg == 0
+        )
+        ordered: list[str] = []
+
+        while frontier:
+            node = frontier.pop(0)
+            ordered.append(node)
+            for successor in g.successors(node):
+                in_degree[successor] -= 1
+                if in_degree[successor] == 0:
+                    bisect.insort(frontier, successor)
+
+        combined = "\n".join(ordered)
         return hashlib.sha256(combined.encode()).hexdigest()[:16]
 
     def flush(self) -> None:
