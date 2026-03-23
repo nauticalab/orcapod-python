@@ -28,7 +28,10 @@ from orcapod.system_constants import constants
 from orcapod.types import (
     ColumnConfig,
     ContentHash,
+    NodeConfig,
+    PipelineConfig,
     Schema,
+    resolve_concurrency,
 )
 from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
@@ -1230,7 +1233,6 @@ class FunctionNode(StreamBase):
             output: Writable channel for output (tag, packet) pairs.
             observer: Optional execution observer for hooks.
         """
-        # TODO(PLT-930): Restore concurrency limiting (semaphore) via node-level config.
         from orcapod.pipeline.observer import NoOpObserver
 
         node_label = self.label
@@ -1239,6 +1241,17 @@ class FunctionNode(StreamBase):
         obs = observer if observer is not None else NoOpObserver()
 
         pp = self.pipeline_path
+
+        # Resolve concurrency limit from node config (pipeline config is not
+        # threaded through the orchestrator, so we fall back to defaults).
+        node_config = getattr(self._function_pod, "node_config", NodeConfig())
+        max_concurrency = resolve_concurrency(node_config, PipelineConfig())
+
+        sem = (
+            asyncio.Semaphore(max_concurrency)
+            if max_concurrency is not None
+            else None
+        )
 
         try:
             tag_schema = self._input_stream.output_schema(columns={"system_tags": True})[0]
@@ -1294,7 +1307,9 @@ class FunctionNode(StreamBase):
                             cached_by_entry_id[eid] = (tag_out, pkt_out)
 
                 # Phase 2: drive output from input channel — cached or compute
-                async for tag, packet in input_channel:
+                async def _process_one_db(
+                    tag: TagProtocol, packet: PacketProtocol
+                ) -> None:
                     entry_id = self.compute_pipeline_entry_id(tag, packet)
                     if entry_id in cached_by_entry_id:
                         tag_out, result_packet = cached_by_entry_id[entry_id]
@@ -1310,15 +1325,42 @@ class FunctionNode(StreamBase):
                             node_label=node_label,
                             node_hash=node_hash,
                         )
+
+                async with asyncio.TaskGroup() as tg:
+                    async for tag, packet in input_channel:
+                        async def _guarded_db(
+                            t: TagProtocol = tag, p: PacketProtocol = packet
+                        ) -> None:
+                            try:
+                                await _process_one_db(t, p)
+                            finally:
+                                if sem is not None:
+                                    sem.release()
+
+                        if sem is not None:
+                            await sem.acquire()
+                        tg.create_task(_guarded_db())
             else:
                 # Simple async execution without DB
-                async for tag, packet in input_channel:
-                    await self._async_execute_one_packet(
-                        tag, packet, output,
-                        observer=obs,
-                        node_label=node_label,
-                        node_hash=node_hash,
-                    )
+                async with asyncio.TaskGroup() as tg:
+                    async for tag, packet in input_channel:
+                        async def _guarded_simple(
+                            t: TagProtocol = tag, p: PacketProtocol = packet
+                        ) -> None:
+                            try:
+                                await self._async_execute_one_packet(
+                                    t, p, output,
+                                    observer=obs,
+                                    node_label=node_label,
+                                    node_hash=node_hash,
+                                )
+                            finally:
+                                if sem is not None:
+                                    sem.release()
+
+                        if sem is not None:
+                            await sem.acquire()
+                        tg.create_task(_guarded_simple())
 
             obs.on_node_end(node_label, node_hash, pipeline_path=pp)
         finally:
