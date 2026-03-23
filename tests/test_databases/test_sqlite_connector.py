@@ -128,3 +128,23 @@ class TestLifecycle:
         connector.close()
         with pytest.raises(RuntimeError, match="closed"):
             connector._require_open()
+
+
+# ---------------------------------------------------------------------------
+# Schema introspection
+# ---------------------------------------------------------------------------
+
+
+class TestGetTableNames:
+    def test_empty_database(self, connector: SQLiteConnector) -> None:
+        assert connector.get_table_names() == []
+
+    def test_returns_table_names(self, connector: SQLiteConnector) -> None:
+        connector._conn.execute('CREATE TABLE "foo" (id INTEGER PRIMARY KEY)')
+        connector._conn.execute('CREATE TABLE "bar" (id INTEGER PRIMARY KEY)')
+        assert connector.get_table_names() == ["bar", "foo"]  # sorted
+
+    def test_excludes_views(self, connector: SQLiteConnector) -> None:
+        connector._conn.execute('CREATE TABLE "base" (id INTEGER PRIMARY KEY)')
+        connector._conn.execute('CREATE VIEW "v_base" AS SELECT * FROM "base"')
+        assert connector.get_table_names() == ["base"]
