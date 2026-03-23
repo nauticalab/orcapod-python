@@ -289,6 +289,10 @@ class TestCreateTableIfNotExists:
         with pytest.raises(ValueError, match="double-quote"):
             connector.create_table_if_not_exists('table"name', self._make_columns(), "__record_id")
 
+    def test_raises_when_pk_column_not_in_columns(self, connector: SQLiteConnector) -> None:
+        with pytest.raises(ValueError, match="not found in columns"):
+            connector.create_table_if_not_exists("t", self._make_columns(), "nonexistent_pk")
+
 
 class TestUpsertRecords:
     def _setup_table(self, connector: SQLiteConnector) -> None:
