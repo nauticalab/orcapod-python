@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pyarrow as pa
 import pytest
@@ -130,6 +131,20 @@ async def slow_async_double(x: int) -> int:
 
 
 _EXPECTED = [x * 2 for x in range(_N_PACKETS)]  # [0, 2, 4, 6, 8]
+
+# ---------------------------------------------------------------------------
+# Constants for thread-pool saturation test (async+sync vs async+async)
+# ---------------------------------------------------------------------------
+
+# Use a deliberately small thread pool so the sync path is forced into
+# multiple rounds while the async path runs all coroutines concurrently.
+_POOL_WORKERS = 2
+_POOL_N_PACKETS = 6          # 3× the pool size → at least 3 rounds for sync
+_POOL_SLEEP_S = 0.1          # per-packet sleep
+# async+async: all 6 run at once → ~0.1 s
+# async+sync:  2 threads × 3 rounds → ~0.3 s
+_POOL_ASYNC_MAX = _POOL_SLEEP_S * 2.0    # generous upper bound for async path
+_POOL_SYNC_MIN = _POOL_SLEEP_S * 2.5    # conservative lower bound for sync path
 
 
 # ===========================================================================
@@ -365,4 +380,108 @@ class TestConcurrencyBenefitAcrossMatrix:
         assert elapsed < _CONCURRENT_MAX, (
             f"Unlimited concurrency should be fast (< {_CONCURRENT_MAX:.2f}s) "
             f"but took {elapsed:.2f}s"
+        )
+
+
+# ===========================================================================
+# Thread-pool saturation: async+async vs async+sync
+# ===========================================================================
+
+
+def _loop_sleep_double(x: int) -> int:
+    """Sync function: sleeps via a for-loop of time.sleep calls.
+
+    A plain ``for`` loop of blocking sleeps makes it unambiguously clear this
+    function has no way to cooperate with an asyncio event loop.  It occupies
+    exactly one thread-pool slot for its entire duration.
+    """
+    steps = 5
+    for _ in range(steps):
+        time.sleep(_POOL_SLEEP_S / steps)
+    return x * 2
+
+
+async def _coro_sleep_double(x: int) -> int:
+    """Async function: same total sleep, but via a single asyncio.sleep.
+
+    Suspends the coroutine cooperatively so the event loop can run other
+    coroutines during the wait — no thread needed.
+    """
+    await asyncio.sleep(_POOL_SLEEP_S)
+    return x * 2
+
+
+async def _run_async_with_limited_pool(
+    pipeline: Pipeline, pool_workers: int
+) -> tuple[list[int], float]:
+    """Run pipeline async on an event loop whose thread pool is capped.
+
+    Temporarily installs a ``ThreadPoolExecutor`` with *pool_workers* threads
+    as the running loop's default executor, ensuring the sync path cannot
+    exceed that concurrency even if the machine has many CPUs.
+    """
+    loop = asyncio.get_running_loop()
+    limited_pool = ThreadPoolExecutor(max_workers=pool_workers)
+    loop.set_default_executor(limited_pool)
+    # asyncio.run() creates a fresh loop each call, so no need to restore.
+    t0 = time.perf_counter()
+    await AsyncPipelineOrchestrator().run_async(pipeline._node_graph)
+    elapsed = time.perf_counter() - t0
+    limited_pool.shutdown(wait=False)
+
+    pipeline.flush()
+    records = pipeline.node.get_all_records()
+    assert records is not None
+    return sorted(records.column("result").to_pylist()), elapsed
+
+
+class TestAsyncAsyncVsAsyncSync:
+    """Verify that async+async outperforms async+sync when the thread pool
+    is smaller than the number of concurrent packets.
+
+    The sync function sleeps via a ``for`` loop of ``time.sleep`` calls —
+    unambiguously blocking with no event-loop cooperation.  With only
+    ``_POOL_WORKERS`` thread slots available and ``_POOL_N_PACKETS`` packets,
+    the async+sync path must serialise into multiple rounds.  The async+async
+    path runs all coroutines concurrently regardless of the thread pool size.
+    """
+
+    def test_async_async_faster_than_async_sync_under_pool_saturation(self):
+        """async+async finishes in ~1 sleep period; async+sync needs multiple rounds."""
+        expected = [x * 2 for x in range(_POOL_N_PACKETS)]
+
+        # async+sync: for-loop sleep, thread pool capped at _POOL_WORKERS
+        p_sync = _build_pipeline(
+            _loop_sleep_double, n=_POOL_N_PACKETS, max_concurrency=None
+        )
+        results_sync, elapsed_sync = asyncio.run(
+            _run_async_with_limited_pool(p_sync, pool_workers=_POOL_WORKERS)
+        )
+        assert results_sync == expected
+
+        # async+async: asyncio.sleep, all coroutines run concurrently
+        p_async = _build_pipeline(
+            _coro_sleep_double, n=_POOL_N_PACKETS, max_concurrency=None
+        )
+        results_async, elapsed_async = asyncio.run(
+            _run_async_with_limited_pool(p_async, pool_workers=_POOL_WORKERS)
+        )
+        assert results_async == expected
+
+        # async+async should complete in ~1 sleep period (all concurrent)
+        assert elapsed_async < _POOL_ASYNC_MAX, (
+            f"async+async ({elapsed_async:.2f}s) should complete in ~1 sleep "
+            f"period (< {_POOL_ASYNC_MAX:.2f}s)"
+        )
+
+        # async+sync must take at least 2.5 sleep periods (pool saturated)
+        assert elapsed_sync >= _POOL_SYNC_MIN, (
+            f"async+sync ({elapsed_sync:.2f}s) should be throttled by the "
+            f"thread pool to >= {_POOL_SYNC_MIN:.2f}s"
+        )
+
+        # and async+async must be clearly faster
+        assert elapsed_async < elapsed_sync * 0.6, (
+            f"async+async ({elapsed_async:.2f}s) should be >40% faster than "
+            f"async+sync ({elapsed_sync:.2f}s) under pool saturation"
         )
