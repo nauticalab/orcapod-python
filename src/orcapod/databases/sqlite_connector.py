@@ -166,9 +166,13 @@ class SQLiteConnector:
             table_name: Name of the table to introspect.
 
         Returns:
-            List of PK column names, empty if no primary key.
+            List of PK column names, empty if no primary key or table doesn't exist.
         """
-        raise NotImplementedError
+        with self._lock:
+            conn = self._require_open()
+            cursor = conn.execute(f'PRAGMA table_info("{table_name}")')
+            rows = [row for row in cursor if row["pk"] > 0]
+            return [row["name"] for row in sorted(rows, key=lambda r: r["pk"])]
 
     def get_column_info(self, table_name: str) -> list[ColumnInfo]:
         """Return column metadata with Arrow-mapped types.
@@ -179,7 +183,17 @@ class SQLiteConnector:
         Returns:
             List of ColumnInfo objects; empty list if table doesn't exist.
         """
-        raise NotImplementedError
+        with self._lock:
+            conn = self._require_open()
+            cursor = conn.execute(f'PRAGMA table_info("{table_name}")')
+            return [
+                ColumnInfo(
+                    name=row["name"],
+                    arrow_type=_sqlite_type_to_arrow(row["type"]),
+                    nullable=not bool(row["notnull"]),
+                )
+                for row in cursor
+            ]
 
     # ── Read ──────────────────────────────────────────────────────────────────
 
