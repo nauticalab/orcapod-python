@@ -384,6 +384,84 @@ class TestConcurrencyBenefitAcrossMatrix:
 
 
 # ===========================================================================
+# Regression guard: async fn concurrency under async orchestrator
+# ===========================================================================
+
+# With a single-worker thread pool, sync functions are forced to run one at a
+# time (only 1 thread). Async functions are unaffected — they don't use threads.
+# This creates a clear performance split between the two function types under
+# the *same* async orchestrator, directly mirroring the PLT-930 regression:
+# if async_execute loses its TaskGroup concurrency, async functions would also
+# become sequential and this test would fail.
+_SINGLE_N_PACKETS = 5
+_SINGLE_SLEEP_S = 0.15
+_SINGLE_ASYNC_MAX = _SINGLE_SLEEP_S * 2.0       # async fn: 1 concurrent round
+_SINGLE_SYNC_MIN = _SINGLE_N_PACKETS * _SINGLE_SLEEP_S * 0.8  # sync fn: serial
+
+
+def _blocking_fn(x: int) -> int:
+    """Sync fn: for-loop of time.sleep — holds its thread slot the whole time.
+
+    One thread-pool slot occupied per packet for the full duration.  With only
+    one worker available, packets are forced to run one-at-a-time.
+    """
+    for _ in range(5):
+        time.sleep(_SINGLE_SLEEP_S / 5)
+    return x * 2
+
+
+async def _cooperative_fn(x: int) -> int:
+    """Async fn: asyncio.sleep — suspends cooperatively, no thread needed.
+
+    All N packets can be suspended simultaneously in the event loop regardless
+    of thread pool size.
+    """
+    await asyncio.sleep(_SINGLE_SLEEP_S)
+    return x * 2
+
+
+class TestAsyncOrchestratorFunctionTypeDifference:
+    """Async orchestrator: sync fn is sequential (GIL+pool), async fn is concurrent.
+
+    Uses a single-worker thread pool so the sync function cannot run more than
+    one packet at a time, while the async function is unaffected.  If
+    async_execute ever loses its TaskGroup concurrency (the PLT-930 regression),
+    the async function would also serialize and the fast-path assertion fails.
+    """
+
+    def test_async_fn_concurrent_sync_fn_sequential_under_single_worker(self):
+        """async fn completes in ~1 sleep period; sync fn needs N sequential rounds."""
+        expected = [x * 2 for x in range(_SINGLE_N_PACKETS)]
+
+        # async+sync: one thread → packets run one-at-a-time
+        p_sync = _build_pipeline(
+            _blocking_fn, n=_SINGLE_N_PACKETS, max_concurrency=None
+        )
+        results_sync, elapsed_sync = asyncio.run(
+            _run_async_with_limited_pool(p_sync, pool_workers=1)
+        )
+        assert results_sync == expected
+        assert elapsed_sync >= _SINGLE_SYNC_MIN, (
+            f"async+sync with 1 worker should be sequential "
+            f"(>= {_SINGLE_SYNC_MIN:.2f}s) but took {elapsed_sync:.2f}s"
+        )
+
+        # async+async: asyncio.sleep, all packets concurrent regardless of pool
+        p_async = _build_pipeline(
+            _cooperative_fn, n=_SINGLE_N_PACKETS, max_concurrency=None
+        )
+        results_async, elapsed_async = asyncio.run(
+            _run_async_with_limited_pool(p_async, pool_workers=1)
+        )
+        assert results_async == expected
+        assert elapsed_async < _SINGLE_ASYNC_MAX, (
+            f"async+async should be concurrent (< {_SINGLE_ASYNC_MAX:.2f}s) "
+            f"but took {elapsed_async:.2f}s — "
+            f"possible regression: async_execute may have lost TaskGroup concurrency"
+        )
+
+
+# ===========================================================================
 # Thread-pool saturation: async+async vs async+sync
 # ===========================================================================
 
