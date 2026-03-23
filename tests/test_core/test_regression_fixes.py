@@ -462,6 +462,110 @@ class TestRayExecutorInitialization:
 
             mock_ray.init.assert_not_called()
 
+    def test_ensure_ray_initialized_passes_runtime_env(self):
+        """When runtime_env is set, ray.init() receives it."""
+        mock_ray = MagicMock()
+        mock_ray.is_initialized.return_value = False
+
+        with patch.dict("sys.modules", {"ray": mock_ray}):
+            from orcapod.core.executors.ray import RayExecutor
+
+            executor = RayExecutor.__new__(RayExecutor)
+            executor._ray_address = None
+            executor._runtime_env = {"py_modules": ["my_module"]}
+            executor._num_cpus = None
+            executor._num_gpus = None
+            executor._resources = None
+
+            executor._ensure_ray_initialized()
+
+            mock_ray.init.assert_called_once_with(
+                runtime_env={"py_modules": ["my_module"]}
+            )
+
+    def test_ensure_ray_initialized_passes_address_and_runtime_env(self):
+        """When both ray_address and runtime_env are set, both are passed."""
+        mock_ray = MagicMock()
+        mock_ray.is_initialized.return_value = False
+
+        with patch.dict("sys.modules", {"ray": mock_ray}):
+            from orcapod.core.executors.ray import RayExecutor
+
+            executor = RayExecutor.__new__(RayExecutor)
+            executor._ray_address = "ray://cluster:10001"
+            executor._runtime_env = {"pip": ["numpy"]}
+            executor._num_cpus = None
+            executor._num_gpus = None
+            executor._resources = None
+
+            executor._ensure_ray_initialized()
+
+            mock_ray.init.assert_called_once_with(
+                address="ray://cluster:10001",
+                runtime_env={"pip": ["numpy"]},
+            )
+
+    def test_with_options_preserves_runtime_env(self):
+        """with_options() should carry forward runtime_env."""
+        mock_ray = MagicMock()
+
+        with patch.dict("sys.modules", {"ray": mock_ray}):
+            from orcapod.core.executors.ray import RayExecutor
+
+            executor = RayExecutor(
+                ray_address="ray://host:10001",
+                runtime_env={"pip": ["pandas"]},
+                num_cpus=2,
+            )
+            new_exec = executor.with_options(num_gpus=1)
+
+            assert new_exec._runtime_env == {"pip": ["pandas"]}
+            assert new_exec._ray_address == "ray://host:10001"
+            assert new_exec._remote_opts["num_gpus"] == 1
+
+    def test_with_options_allows_overriding_runtime_env(self):
+        """with_options() should allow overriding runtime_env via opts."""
+        mock_ray = MagicMock()
+
+        with patch.dict("sys.modules", {"ray": mock_ray}):
+            from orcapod.core.executors.ray import RayExecutor
+
+            executor = RayExecutor(
+                ray_address="ray://host:10001",
+                runtime_env={"pip": ["pandas"]},
+            )
+            new_exec = executor.with_options(runtime_env={"pip": ["numpy"]})
+
+            assert new_exec._runtime_env == {"pip": ["numpy"]}
+
+    def test_get_execution_data_without_runtime_env(self):
+        """get_execution_data() omits runtime_env when not set."""
+        mock_ray = MagicMock()
+
+        with patch.dict("sys.modules", {"ray": mock_ray}):
+            from orcapod.core.executors.ray import RayExecutor
+
+            executor = RayExecutor(ray_address="ray://host:10001")
+            data = executor.get_execution_data()
+
+            assert "runtime_env" not in data
+            assert data["ray_address"] == "ray://host:10001"
+
+    def test_get_execution_data_with_runtime_env(self):
+        """get_execution_data() flags runtime_env presence as True."""
+        mock_ray = MagicMock()
+
+        with patch.dict("sys.modules", {"ray": mock_ray}):
+            from orcapod.core.executors.ray import RayExecutor
+
+            executor = RayExecutor(
+                runtime_env={"py_modules": ["my_mod"]},
+            )
+            data = executor.get_execution_data()
+
+            assert data["runtime_env"] is True
+            assert data["ray_address"] == "auto"
+
     def test_async_execute_uses_wrap_future(self):
         """async_execute_callable should use ref.future() + asyncio.wrap_future,
         not bare 'await ref'.  async_execute delegates to async_execute_callable."""
