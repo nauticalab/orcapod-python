@@ -217,3 +217,41 @@ class TestGetColumnInfo:
     def test_raises_on_invalid_table_name(self, connector: SQLiteConnector) -> None:
         with pytest.raises(ValueError, match="double-quote"):
             connector.get_column_info('table"name')
+
+
+# ---------------------------------------------------------------------------
+# Write path
+# ---------------------------------------------------------------------------
+
+
+class TestCreateTableIfNotExists:
+    def _make_columns(self) -> list[ColumnInfo]:
+        return [
+            ColumnInfo("__record_id", pa.large_string(), nullable=False),
+            ColumnInfo("value", pa.float64(), nullable=True),
+        ]
+
+    def test_creates_table(self, connector: SQLiteConnector) -> None:
+        connector.create_table_if_not_exists("my_table", self._make_columns(), "__record_id")
+        assert "my_table" in connector.get_table_names()
+
+    def test_idempotent(self, connector: SQLiteConnector) -> None:
+        cols = self._make_columns()
+        connector.create_table_if_not_exists("my_table", cols, "__record_id")
+        connector.create_table_if_not_exists("my_table", cols, "__record_id")  # must not raise
+
+    def test_pk_column_set(self, connector: SQLiteConnector) -> None:
+        connector.create_table_if_not_exists("t", self._make_columns(), "__record_id")
+        assert connector.get_pk_columns("t") == ["__record_id"]
+
+    def test_column_types_match(self, connector: SQLiteConnector) -> None:
+        connector.create_table_if_not_exists("t", self._make_columns(), "__record_id")
+        infos = {ci.name: ci for ci in connector.get_column_info("t")}
+        assert infos["__record_id"].arrow_type == pa.large_string()
+        assert infos["value"].arrow_type == pa.float64()
+
+    def test_not_null_respected(self, connector: SQLiteConnector) -> None:
+        connector.create_table_if_not_exists("t", self._make_columns(), "__record_id")
+        infos = {ci.name: ci for ci in connector.get_column_info("t")}
+        assert infos["__record_id"].nullable is False
+        assert infos["value"].nullable is True
