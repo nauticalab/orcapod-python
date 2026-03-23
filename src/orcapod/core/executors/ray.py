@@ -16,10 +16,11 @@ class RayExecutor(PythonFunctionExecutorBase):
 
     Only supports ``packet_function_type_id == "python.function.v0"``.
 
-    The caller is responsible for calling ``ray.init(...)`` before using
-    this executor.  If ``ray_address`` is provided and Ray has not been
-    initialized yet, this executor will call ``ray.init(address=...)``
-    lazily on first use.
+    If Ray has not been initialized yet, this executor will call
+    ``ray.init()`` lazily on first use, passing ``ray_address`` and
+    ``runtime_env`` if provided.  Callers can also call ``ray.init()``
+    themselves before creating the executor — in that case the executor
+    will detect the existing session and skip initialization.
 
     Note:
         ``ray`` is an optional dependency.  Import errors surface at
@@ -32,6 +33,7 @@ class RayExecutor(PythonFunctionExecutorBase):
         self,
         *,
         ray_address: str | None = None,
+        runtime_env: dict[str, Any] | None = None,
         num_cpus: int | None = None,
         num_gpus: int | None = None,
         resources: dict[str, float] | None = None,
@@ -44,6 +46,12 @@ class RayExecutor(PythonFunctionExecutorBase):
                 ``"ray://host:10001"``).  If ``None`` and Ray is not yet
                 initialised, ``ray.init()`` is called without an address,
                 which starts a local cluster.
+            runtime_env: Runtime environment configuration passed to
+                ``ray.init()``.  Supports ``py_modules`` (as module
+                objects or paths), ``pip``, ``working_dir``, ``env_vars``,
+                etc.  Applied cluster-wide at init time — not per-task —
+                so that dependencies are set up once rather than on every
+                remote call.
             num_cpus: Number of CPUs to request per remote task.  Passed
                 directly to ``ray.remote(num_cpus=...)``.
             num_gpus: Number of GPUs to request per remote task.  Passed
@@ -52,7 +60,7 @@ class RayExecutor(PythonFunctionExecutorBase):
                 ``ray.remote(resources=...)``.
             **ray_remote_opts: Any additional keyword arguments accepted by
                 ``ray.remote()`` (e.g. ``memory``, ``max_calls``,
-                ``runtime_env``, ``accelerator_type``).
+                ``accelerator_type``).
         """
         try:
             import ray  # noqa: F401
@@ -63,6 +71,7 @@ class RayExecutor(PythonFunctionExecutorBase):
             ) from exc
 
         self._ray_address = ray_address
+        self._runtime_env = runtime_env
 
         # Collect all remote opts into a single dict so that arbitrary Ray
         # options (memory, max_calls, accelerator_type, label_selector, …)
@@ -110,10 +119,12 @@ class RayExecutor(PythonFunctionExecutorBase):
             pass  # cloudpickle not available or API changed — best effort
 
         if not ray.is_initialized():
+            init_kwargs: dict[str, Any] = {}
             if self._ray_address is not None:
-                ray.init(address=self._ray_address)
-            else:
-                ray.init()
+                init_kwargs["address"] = self._ray_address
+            if self._runtime_env is not None:
+                init_kwargs["runtime_env"] = self._runtime_env
+            ray.init(**init_kwargs)
 
     @property
     def executor_type_id(self) -> str:
@@ -242,19 +253,27 @@ class RayExecutor(PythonFunctionExecutorBase):
     def with_options(self, **opts: Any) -> RayExecutor:
         """Return a new ``RayExecutor`` with the given options merged in.
 
-        The returned executor shares the same ``ray_address``.  All opts are
-        passed through to ``ray.remote()``/``.options()`` as-is — no keys are
-        hardcoded, so any option Ray supports (``num_cpus``, ``num_gpus``,
-        ``memory``, ``max_calls``, ``accelerator_type``, ``label_selector``,
-        ``runtime_env``, …) can be used.  Node-level opts override
+        The returned executor shares the same ``ray_address`` and
+        ``runtime_env``.  All opts are passed through to
+        ``ray.remote()``/``.options()`` as-is — no keys are hardcoded,
+        so any option Ray supports (``num_cpus``, ``num_gpus``,
+        ``memory``, ``max_calls``, ``accelerator_type``,
+        ``label_selector``, …) can be used.  Node-level opts override
         pipeline-level defaults.
         """
         merged = {**self._remote_opts, **opts}
-        return RayExecutor(ray_address=self._ray_address, **merged)
+        return RayExecutor(
+            ray_address=self._ray_address,
+            runtime_env=self._runtime_env,
+            **merged,
+        )
 
     def get_execution_data(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "executor_type": self.executor_type_id,
             "ray_address": self._ray_address or "auto",
             **self._remote_opts,
         }
+        if self._runtime_env is not None:
+            data["runtime_env"] = True  # flag presence without dumping contents
+        return data
