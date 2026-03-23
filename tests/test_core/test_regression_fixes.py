@@ -415,6 +415,7 @@ class TestRayExecutorInitialization:
 
             executor = RayExecutor.__new__(RayExecutor)
             executor._ray_address = "ray://my-cluster:10001"
+            executor._runtime_env = None
             executor._num_cpus = None
             executor._num_gpus = None
             executor._resources = None
@@ -433,6 +434,7 @@ class TestRayExecutorInitialization:
 
             executor = RayExecutor.__new__(RayExecutor)
             executor._ray_address = None
+            executor._runtime_env = None
             executor._num_cpus = None
             executor._num_gpus = None
             executor._resources = None
@@ -451,6 +453,7 @@ class TestRayExecutorInitialization:
 
             executor = RayExecutor.__new__(RayExecutor)
             executor._ray_address = "ray://my-cluster:10001"
+            executor._runtime_env = None
             executor._num_cpus = None
             executor._num_gpus = None
             executor._resources = None

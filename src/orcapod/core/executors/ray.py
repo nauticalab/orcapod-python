@@ -262,9 +262,13 @@ class RayExecutor(PythonFunctionExecutorBase):
         pipeline-level defaults.
         """
         merged = {**self._remote_opts, **opts}
+        # Pop constructor-level keys so they don't collide with the explicit
+        # keyword arguments below.
+        ray_address = merged.pop("ray_address", self._ray_address)
+        runtime_env = merged.pop("runtime_env", self._runtime_env)
         return RayExecutor(
-            ray_address=self._ray_address,
-            runtime_env=self._runtime_env,
+            ray_address=ray_address,
+            runtime_env=runtime_env,
             **merged,
         )
 
