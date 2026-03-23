@@ -65,6 +65,7 @@
                 [{"_type": "types.MethodType"},          {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.FunctionHandler", "_config": {"function_info_extractor": {"_ref": "function_info_extractor"}}}],
                 [{"_type": "builtins.type"},       {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.TypeObjectHandler",   "_config": {}}],
                 [{"_type": "types.GenericAlias"},   {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.GenericAliasHandler",  "_config": {}}],
+                [{"_type": "types.UnionType"},     {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.UnionTypeHandler",    "_config": {}}],
                 [{"_type": "typing._GenericAlias"}, {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.GenericAliasHandler",  "_config": {}}],
                 [{"_type": "typing._SpecialForm"},  {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.SpecialFormHandler",   "_config": {}}],
                 [{"_type": "pyarrow.Table"},        {"_class": "orcapod.hashing.semantic_hashing.builtin_handlers.ArrowTableHandler",  "_config": {"arrow_hasher": {"_ref": "arrow_hasher"}}}],

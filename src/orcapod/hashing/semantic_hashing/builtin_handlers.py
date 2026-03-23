@@ -239,17 +239,56 @@ class GenericAliasHandler:
     Produces a stable dict containing the origin type and a list of hashed
     argument types so that structurally identical generic annotations always
     yield the same hash, and structurally different ones yield different hashes.
+
+    When the origin is ``typing.Union`` (i.e. ``typing.Optional[X]`` or
+    ``typing.Union[X, Y]``), the handler produces a canonical ``"union"``
+    form with sorted args — identical to :class:`UnionTypeHandler` — so that
+    ``typing.Optional[int]`` and ``int | None`` hash equivalently.
     """
 
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
+        import typing
+
         origin = getattr(obj, "__origin__", None)
         args = getattr(obj, "__args__", None) or ()
         if origin is None:
             return f"generic_alias:{obj!r}"
+
+        # Normalize typing.Union / typing.Optional to the canonical union
+        # form so that typing.Optional[int] ≡ typing.Union[int, None] ≡ int | None.
+        if origin is typing.Union:
+            hashed_args = sorted(hasher.hash_object(arg).to_string() for arg in args)
+            return {
+                "__type__": "union",
+                "args": hashed_args,
+            }
+
         return {
             "__type__": "generic_alias",
             "origin": hasher.hash_object(origin).to_string(),
             "args": [hasher.hash_object(arg).to_string() for arg in args],
+        }
+
+
+class UnionTypeHandler:
+    """
+    Handler for ``types.UnionType`` objects (Python 3.10+ ``X | Y`` syntax).
+
+    ``str | None``, ``int | float``, etc. produce a ``types.UnionType`` at
+    runtime, which is distinct from ``typing.Union[str, None]``
+    (a ``typing._GenericAlias``).  This handler normalises union types into
+    a canonical ``"union"`` form with sorted args — identical to the union
+    branch in :class:`GenericAliasHandler` — so that ``int | None``,
+    ``typing.Optional[int]``, and ``typing.Union[int, None]`` all hash
+    equivalently.
+    """
+
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
+        args = getattr(obj, "__args__", None) or ()
+        hashed_args = sorted(hasher.hash_object(arg).to_string() for arg in args)
+        return {
+            "__type__": "union",
+            "args": hashed_args,
         }
 
 
@@ -401,6 +440,9 @@ def register_builtin_handlers(
 
     # type objects (classes used as values, e.g. passed in a dict)
     registry.register(type, TypeObjectHandler())
+
+    # types.UnionType (Python 3.10+ X | Y syntax, e.g. str | None)
+    registry.register(_types.UnionType, UnionTypeHandler())
 
     # generic alias type annotations: dict[int, str], list[str], etc.
     generic_alias_handler = GenericAliasHandler()

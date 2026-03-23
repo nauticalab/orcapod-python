@@ -580,17 +580,66 @@ class TestGenericAliasHandler:
             typing.Union[int, None]
         )
 
-    def test_union_arg_order_matters(self, hasher):
-        """Union[int, str] and Union[str, int] hash differently.
+    def test_union_arg_order_independent(self, hasher):
+        """Union[int, str] and Union[str, int] hash identically.
 
-        Python's type system considers them equivalent, but orcapod hashes
-        args in declaration order — users should be consistent.
+        Union args are sorted before hashing so that declaration order
+        does not affect the hash — these are semantically equivalent.
         """
         import typing
 
-        assert hasher.hash_object(typing.Union[int, str]) != hasher.hash_object(
+        assert hasher.hash_object(typing.Union[int, str]) == hasher.hash_object(
             typing.Union[str, int]
         )
+
+
+# ---------------------------------------------------------------------------
+# 12b. UnionTypeHandler (PEP 604 unions: X | Y)
+# ---------------------------------------------------------------------------
+
+
+class TestUnionTypeHandler:
+    """Tests for types.UnionType (Python 3.10+ ``X | Y`` syntax)."""
+
+    def test_pep604_union_hashed(self, hasher):
+        """int | None produces a ContentHash in strict mode."""
+        assert isinstance(hasher.hash_object(int | None), ContentHash)
+
+    def test_pep604_union_two_types(self, hasher):
+        """int | str produces a ContentHash."""
+        assert isinstance(hasher.hash_object(int | str), ContentHash)
+
+    def test_pep604_order_independent(self, hasher):
+        """int | str and str | int hash identically (sorted args)."""
+        assert hasher.hash_object(int | str) == hasher.hash_object(str | int)
+
+    def test_pep604_equals_typing_optional(self, hasher):
+        """int | None hashes identically to typing.Optional[int]."""
+        import typing
+
+        assert hasher.hash_object(int | None) == hasher.hash_object(
+            typing.Optional[int]
+        )
+
+    def test_pep604_equals_typing_union(self, hasher):
+        """int | None hashes identically to typing.Union[int, None]."""
+        import typing
+
+        assert hasher.hash_object(int | None) == hasher.hash_object(
+            typing.Union[int, None]
+        )
+
+    def test_pep604_str_none_equals_optional_str(self, hasher):
+        """str | None hashes identically to Optional[str]."""
+        import typing
+
+        assert hasher.hash_object(str | None) == hasher.hash_object(
+            typing.Optional[str]
+        )
+
+    def test_pep604_different_unions_differ(self, hasher):
+        """int | None and str | None produce different hashes."""
+        assert hasher.hash_object(int | None) != hasher.hash_object(str | None)
 
 
 # ---------------------------------------------------------------------------
@@ -1032,6 +1081,7 @@ class TestGlobalSingletons:
         assert reg.has_handler(_types.FunctionType)
         assert reg.has_handler(type)
         assert reg.has_handler(_types.GenericAlias)
+        assert reg.has_handler(_types.UnionType)
         assert reg.has_handler(_typing._GenericAlias)  # type: ignore[attr-defined]
         assert reg.has_handler(_typing._SpecialForm)  # type: ignore[attr-defined]
 
