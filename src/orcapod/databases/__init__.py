@@ -2,12 +2,14 @@ from .connector_arrow_database import ConnectorArrowDatabase
 from .delta_lake_databases import DeltaTableDatabase
 from .in_memory_databases import InMemoryArrowDatabase
 from .noop_database import NoOpArrowDatabase
+from .sqlite_connector import SQLiteConnector
 
 __all__ = [
     "ConnectorArrowDatabase",
     "DeltaTableDatabase",
     "InMemoryArrowDatabase",
     "NoOpArrowDatabase",
+    "SQLiteConnector",
 ]
 
 # Relational DB connector implementations satisfy DBConnectorProtocol

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 
 import pyarrow as pa
 import pytest
@@ -89,6 +90,34 @@ class TestSQLiteConnectorScaffold:
         connector = SQLiteConnector(":memory:")
         assert isinstance(connector, DBConnectorProtocol)
         connector.close()
+
+
+class TestConfig:
+    def test_to_config_roundtrip(self) -> None:
+        connector = SQLiteConnector(":memory:")
+        config = connector.to_config()
+        assert config["connector_type"] == "sqlite"
+        assert config["db_path"] == ":memory:"
+        connector.close()
+
+    def test_to_config_with_path(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "test.db"
+        connector = SQLiteConnector(db_path)
+        config = connector.to_config()
+        assert config["connector_type"] == "sqlite"
+        assert config["db_path"] == str(db_path)
+        connector.close()
+
+    def test_from_config_memory(self) -> None:
+        config = {"connector_type": "sqlite", "db_path": ":memory:"}
+        connector = SQLiteConnector.from_config(config)
+        assert isinstance(connector, SQLiteConnector)
+        connector.close()
+
+    def test_from_config_wrong_type_raises(self) -> None:
+        config = {"connector_type": "postgresql", "db_path": ":memory:"}
+        with pytest.raises(ValueError, match="sqlite"):
+            SQLiteConnector.from_config(config)
 
 
 class TestCoerceColumn:
