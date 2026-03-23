@@ -243,7 +243,10 @@ class SQLiteConnector:
 
         import pyarrow as _pa
 
-        collected: list[_pa.RecordBatch] = []
+        # Execute the query and resolve the schema under the lock, then fetch
+        # the first batch while still holding it.  Subsequent batches re-acquire
+        # the lock only for the duration of each fetchmany call so that other
+        # connector operations are not blocked during Arrow construction or yield.
         with self._lock:
             conn = self._require_open()
             cursor = conn.execute(query, [] if params is None else params)
@@ -269,20 +272,21 @@ class SQLiteConnector:
                 [_pa.field(name, atype) for name, atype in zip(col_names, arrow_types)]
             )
 
-            while True:
-                chunk = cursor.fetchmany(batch_size)
-                if not chunk:
-                    break
-                arrays = [
-                    _pa.array(
-                        _coerce_column([row[i] for row in chunk], arrow_types[i]),
-                        type=arrow_types[i],
-                    )
-                    for i in range(len(col_names))
-                ]
-                collected.append(_pa.RecordBatch.from_arrays(arrays, schema=schema))
+            chunk = cursor.fetchmany(batch_size)
 
-        yield from collected
+        # Build and yield batches outside the lock; re-acquire briefly per fetchmany.
+        while chunk:
+            arrays = [
+                _pa.array(
+                    _coerce_column([row[i] for row in chunk], arrow_types[i]),
+                    type=arrow_types[i],
+                )
+                for i in range(len(col_names))
+            ]
+            yield _pa.RecordBatch.from_arrays(arrays, schema=schema)
+            with self._lock:
+                self._require_open()  # guard: raise RuntimeError if closed mid-iteration
+                chunk = cursor.fetchmany(batch_size)
 
     # ── Write ─────────────────────────────────────────────────────────────────
 
@@ -299,6 +303,11 @@ class SQLiteConnector:
             columns: Column definitions with Arrow-mapped types.
             pk_column: Name of the column to use as the primary key.
         """
+        col_names = [col.name for col in columns]
+        if pk_column not in col_names:
+            raise ValueError(
+                f"pk_column {pk_column!r} not found in columns: {col_names}"
+            )
         with self._lock:
             conn = self._require_open()
             self._validate_table_name(table_name)
@@ -340,7 +349,7 @@ class SQLiteConnector:
             placeholders = ", ".join("?" for _ in cols)
             verb = "INSERT OR IGNORE" if skip_existing else "INSERT OR REPLACE"
             sql = f'{verb} INTO "{table_name}" ({col_list}) VALUES ({placeholders})'
-            rows = [tuple(row[c] for c in cols) for row in records.to_pylist()]
+            rows = (tuple(row[c] for c in cols) for row in records.to_pylist())
             conn.executemany(sql, rows)
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
