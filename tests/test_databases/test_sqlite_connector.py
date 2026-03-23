@@ -110,9 +110,8 @@ class TestCoerceColumn:
 
 class TestLifecycle:
     def test_constructor_opens_connection(self, connector: SQLiteConnector) -> None:
-        # Verify _conn is not None and the raw connection is usable
-        assert connector._conn is not None
-        connector._conn.execute("SELECT 1")  # must not raise
+        # Verify connection is open via the internal guard (does not raise = open)
+        connector._require_open()  # must not raise
 
     def test_close_is_idempotent(self, connector: SQLiteConnector) -> None:
         connector.close()
@@ -120,9 +119,10 @@ class TestLifecycle:
 
     def test_context_manager_closes_on_exit(self) -> None:
         with SQLiteConnector(":memory:") as c:
-            assert c._conn is not None  # open inside block
-        # After exit, _conn must be None
-        assert c._conn is None
+            c._require_open()  # must not raise inside block
+        # After __exit__, the connection must be closed
+        with pytest.raises(RuntimeError, match="closed"):
+            c._require_open()
 
     def test_require_open_raises_after_close(self, connector: SQLiteConnector) -> None:
         connector.close()
