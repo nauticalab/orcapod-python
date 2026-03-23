@@ -255,3 +255,7 @@ class TestCreateTableIfNotExists:
         infos = {ci.name: ci for ci in connector.get_column_info("t")}
         assert infos["__record_id"].nullable is False
         assert infos["value"].nullable is True
+
+    def test_raises_on_invalid_table_name(self, connector: SQLiteConnector) -> None:
+        with pytest.raises(ValueError, match="double-quote"):
+            connector.create_table_if_not_exists('table"name', self._make_columns(), "__record_id")

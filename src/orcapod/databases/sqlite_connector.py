@@ -247,18 +247,18 @@ class SQLiteConnector:
             columns: Column definitions with Arrow-mapped types.
             pk_column: Name of the column to use as the primary key.
         """
-        self._validate_table_name(table_name)
-        col_defs = []
-        for col in columns:
-            sql_type = _arrow_type_to_sqlite_sql(col.arrow_type)
-            not_null = " NOT NULL" if not col.nullable else ""
-            pk = " PRIMARY KEY" if col.name == pk_column else ""
-            col_defs.append(f'    "{col.name}" {sql_type}{not_null}{pk}')
-        ddl = f'CREATE TABLE IF NOT EXISTS "{table_name}" (\n'
-        ddl += ",\n".join(col_defs)
-        ddl += "\n)"
         with self._lock:
             conn = self._require_open()
+            self._validate_table_name(table_name)
+            col_defs = []
+            for col in columns:
+                sql_type = _arrow_type_to_sqlite_sql(col.arrow_type)
+                not_null = " NOT NULL" if not col.nullable else ""
+                pk = " PRIMARY KEY" if col.name == pk_column else ""
+                col_defs.append(f'    "{col.name}" {sql_type}{not_null}{pk}')
+            ddl = f'CREATE TABLE IF NOT EXISTS "{table_name}" (\n'
+            ddl += ",\n".join(col_defs)
+            ddl += "\n)"
             conn.execute(ddl)
 
     def upsert_records(
