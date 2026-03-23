@@ -222,6 +222,9 @@ class SQLiteConnector:
     ) -> Iterator[pa.RecordBatch]:
         """Execute a query and yield results as Arrow RecordBatches.
 
+        Collects all batches inside the lock to avoid holding the lock across
+        yield points (which would deadlock any concurrent caller).
+
         Args:
             query: SQL query string. Table names should be double-quoted.
             params: Optional query parameters.
@@ -230,7 +233,44 @@ class SQLiteConnector:
         Yields:
             Arrow RecordBatch objects.
         """
-        raise NotImplementedError
+        import pyarrow as _pa
+
+        collected: list[_pa.RecordBatch] = []
+        with self._lock:
+            conn = self._require_open()
+            cursor = conn.execute(query, params or [])
+            if cursor.description is None:
+                return
+            col_names = [d[0] for d in cursor.description]
+
+            # Build a type lookup from all tables in this database.
+            # For each column name, find its Arrow type via get_column_info.
+            # Fallback to large_string() for computed/unknown columns.
+            type_lookup: dict[str, _pa.DataType] = {}
+            for table_name in self.get_table_names():
+                for ci in self.get_column_info(table_name):
+                    if ci.name not in type_lookup:
+                        type_lookup[ci.name] = ci.arrow_type
+
+            arrow_types = [type_lookup.get(name, _pa.large_string()) for name in col_names]
+            schema = _pa.schema(
+                [_pa.field(name, atype) for name, atype in zip(col_names, arrow_types)]
+            )
+
+            while True:
+                chunk = cursor.fetchmany(batch_size)
+                if not chunk:
+                    break
+                arrays = [
+                    _pa.array(
+                        _coerce_column([row[i] for row in chunk], arrow_types[i]),
+                        type=arrow_types[i],
+                    )
+                    for i in range(len(col_names))
+                ]
+                collected.append(_pa.RecordBatch.from_arrays(arrays, schema=schema))
+
+        yield from collected
 
     # ── Write ─────────────────────────────────────────────────────────────────
 

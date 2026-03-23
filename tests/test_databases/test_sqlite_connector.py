@@ -305,3 +305,63 @@ class TestUpsertRecords:
         records = self._make_table(["a"], [1.0])
         with pytest.raises(ValueError, match="double-quote"):
             connector.upsert_records('table"name', records, "__record_id")
+
+
+# ---------------------------------------------------------------------------
+# iter_batches
+# ---------------------------------------------------------------------------
+
+
+class TestIterBatches:
+    def _setup_data(self, connector: SQLiteConnector) -> None:
+        cols = [
+            ColumnInfo("id", pa.large_string(), nullable=False),
+            ColumnInfo("name", pa.large_string(), nullable=True),
+            ColumnInfo("score", pa.float64(), nullable=True),
+            ColumnInfo("count", pa.int64(), nullable=True),
+            ColumnInfo("active", pa.bool_(), nullable=True),
+        ]
+        connector.create_table_if_not_exists("data", cols, "id")
+        records = pa.table({
+            "id": pa.array(["a", "b", "c"], type=pa.large_string()),
+            "name": pa.array(["Alice", "Bob", "Carol"], type=pa.large_string()),
+            "score": pa.array([1.5, 2.5, 3.5], type=pa.float64()),
+            "count": pa.array([10, 20, 30], type=pa.int64()),
+            "active": pa.array([True, False, True], type=pa.bool_()),
+        })
+        connector.upsert_records("data", records, "id")
+
+    def test_returns_all_rows(self, connector: SQLiteConnector) -> None:
+        self._setup_data(connector)
+        batches = list(connector.iter_batches('SELECT * FROM "data"'))
+        total_rows = sum(b.num_rows for b in batches)
+        assert total_rows == 3
+
+    def test_correct_types_roundtrip(self, connector: SQLiteConnector) -> None:
+        self._setup_data(connector)
+        batches = list(connector.iter_batches('SELECT * FROM "data"'))
+        table = pa.Table.from_batches(batches)
+        schema = {field.name: field.type for field in table.schema}
+        assert schema["id"] == pa.large_string()
+        assert schema["score"] == pa.float64()
+        assert schema["count"] == pa.int64()
+        assert schema["active"] == pa.bool_()
+
+    def test_bool_roundtrip(self, connector: SQLiteConnector) -> None:
+        self._setup_data(connector)
+        batches = list(connector.iter_batches('SELECT * FROM "data" WHERE id = \'a\''))
+        table = pa.Table.from_batches(batches)
+        active_col = table.column("active")
+        assert active_col[0].as_py() is True
+
+    def test_batch_size(self, connector: SQLiteConnector) -> None:
+        self._setup_data(connector)
+        batches = list(connector.iter_batches('SELECT * FROM "data"', batch_size=2))
+        assert len(batches) == 2  # 3 rows split into batches of 2 and 1
+        assert batches[0].num_rows == 2
+        assert batches[1].num_rows == 1
+
+    def test_empty_result(self, connector: SQLiteConnector) -> None:
+        self._setup_data(connector)
+        batches = list(connector.iter_batches('SELECT * FROM "data" WHERE 1=0'))
+        assert batches == []
