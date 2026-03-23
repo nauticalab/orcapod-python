@@ -199,13 +199,17 @@ ensures `bool → BOOLEAN → bool` round-trips correctly.
 ```python
 self._db_path = db_path
 self._conn: sqlite3.Connection | None = sqlite3.connect(
-    str(db_path), check_same_thread=False
+    str(db_path), check_same_thread=False, isolation_level=None  # autocommit
 )
+self._conn.row_factory = sqlite3.Row
 self._lock = threading.RLock()
 ```
 
 `check_same_thread=False` disables Python's conservative single-thread guard;
 the `RLock` provides correct synchronization above the SQLite layer.
+`isolation_level=None` enables SQLite autocommit mode — every DDL and DML
+statement is committed immediately. This ensures writes are durable on
+file-based databases without explicit `conn.commit()` calls in write methods.
 `self._conn` is set to `None` on `close()` to prevent use-after-close.
 
 ### `get_table_names()`
@@ -272,12 +276,29 @@ Batching loop:
 cursor.execute(query, params or [])
 # build schema from column name lookup …
 while chunk := cursor.fetchmany(batch_size):
-    arrays = [pa.array([row[i] for row in chunk], type=arrow_type)
-              for i, arrow_type in enumerate(arrow_types)]
+    arrays = [
+        pa.array(_coerce_column(raw_col, arrow_type), type=arrow_type)
+        for raw_col, arrow_type in zip(
+            ([row[i] for row in chunk] for i in range(len(arrow_types))),
+            arrow_types,
+        )
+    ]
     yield pa.RecordBatch.from_arrays(arrays, schema=schema)
 ```
 
-`None` values in a column are handled correctly by `pa.array()` (they become
+**`BOOLEAN` coercion:** SQLite stores boolean values as integers (`1`/`0`).
+Python's `sqlite3` returns them as `int`, and `pa.array([1, 0], type=pa.bool_())`
+raises `ArrowInvalid`. The `_coerce_column` helper must convert `int` values to
+`bool` when the target Arrow type is `pa.bool_()`:
+
+```python
+def _coerce_column(values: list, arrow_type: pa.DataType) -> list:
+    if arrow_type == pa.bool_():
+        return [bool(v) if v is not None else None for v in values]
+    return values
+```
+
+`None` values in any column are handled correctly by `pa.array()` (they become
 Arrow null values).
 
 ### `create_table_if_not_exists(table_name, columns, pk_column)`
@@ -353,7 +374,7 @@ All tests use `SQLiteConnector(":memory:")`. No external service required.
 | 1 | Protocol conformance | `isinstance(connector, DBConnectorProtocol)` passes |
 | 2 | `get_table_names` | Empty DB → `[]`; after `CREATE TABLE` → name present; views excluded |
 | 3 | `get_pk_columns` | Single PK; composite PK (declaration order preserved); no PK → `[]` |
-| 4 | `get_column_info` | All five SQLite affinities + `BOOLEAN` map to correct Arrow types; `nullable` from `notnull`; empty table → `[]` |
+| 4 | `get_column_info` | All five SQLite affinities + `BOOLEAN` map to correct Arrow types; `nullable` from `notnull`; table with zero rows still returns full column metadata; non-existent table returns `[]` |
 | 5 | `iter_batches` | Empty table → no batches; single batch; multi-batch (`batch_size=2`); parameterized query; `NULL` values in all column types; schema Arrow types match `get_column_info()` for all affinities |
 | 6 | `create_table_if_not_exists` | Idempotent (second call is no-op); PK constraint present; column types match declared SQL types; column names are double-quoted |
 | 7 | `upsert_records` | `skip_existing=False` overwrites existing row; `skip_existing=True` ignores duplicate; column order in Arrow table differs from SQL table order |
