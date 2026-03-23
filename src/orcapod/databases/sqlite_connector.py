@@ -152,7 +152,12 @@ class SQLiteConnector:
         Returns:
             Sorted list of table name strings.
         """
-        raise NotImplementedError
+        with self._lock:
+            conn = self._require_open()
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+            )
+            return [row["name"] for row in cursor]
 
     def get_pk_columns(self, table_name: str) -> list[str]:
         """Return primary-key column names in key-sequence order.
