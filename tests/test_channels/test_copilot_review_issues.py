@@ -97,9 +97,9 @@ class TestDeterministicConcurrencyTracking:
         values = sorted(pkt.as_dict()["result"] for _, pkt in results)
         assert values == [0, 2, 4, 6, 8]
 
-        # Concurrency limiting was removed in PLT-922 (deferred to PLT-930).
-        # Packets are now processed sequentially, so peak should be 1.
-        assert peak == 1, f"Expected sequential execution (peak=1) but peak was {peak}"
+        # With concurrency restored (PLT-930), peak should match max_concurrency.
+        assert peak > 1, f"Expected concurrent execution but peak was {peak}"
+        assert peak <= 5, f"Peak {peak} exceeded max_concurrency=5"
 
 
 # ---------------------------------------------------------------------------
@@ -265,13 +265,8 @@ class TestSemaphoreZeroDeadlock:
         assert resolve_concurrency(node_config, pipeline_config) is None
 
     @pytest.mark.asyncio
-    async def test_max_concurrency_zero_no_deadlock(self):
-        """max_concurrency=0 no longer causes deadlock after PLT-922.
-
-        Semaphore/concurrency limiting was removed from async_execute
-        (deferred to PLT-930). Packets are processed sequentially regardless
-        of max_concurrency settings.
-        """
+    async def test_max_concurrency_zero_raises(self):
+        """max_concurrency=0 should raise ValueError via resolve_concurrency."""
 
         async def double(x: int) -> int:
             return x * 2
@@ -286,13 +281,8 @@ class TestSemaphoreZeroDeadlock:
 
         await feed_stream_to_channel(make_stream(1), input_ch)
 
-        # With concurrency removed, this completes without deadlock.
-        await asyncio.wait_for(
-            node.async_execute(input_ch.reader, output_ch.writer),
-            timeout=2.0,
-        )
-        results = await output_ch.reader.collect()
-        assert len(results) == 1
+        with pytest.raises(ValueError, match="max_concurrency must be >= 1"):
+            await node.async_execute(input_ch.reader, output_ch.writer)
 
 
 # ---------------------------------------------------------------------------
