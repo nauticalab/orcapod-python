@@ -39,12 +39,22 @@ class TestConnectorArrowDatabaseWithSQLite:
         assert all_records.num_rows == 2
 
     def test_skip_duplicates(self, db: ConnectorArrowDatabase) -> None:
-        record = pa.table({"x": pa.array([1], type=pa.int64())})
-        db.add_record(("fn", "test"), record_id="r1", record=record, flush=True)
-        # Second add with skip_duplicates=True should not raise
-        db.add_record(("fn", "test"), record_id="r1", record=record, skip_duplicates=True, flush=True)
+        record_v1 = pa.table({"x": pa.array([1], type=pa.int64())})
+        record_v2 = pa.table({"x": pa.array([99], type=pa.int64())})
+        db.add_record(("fn", "test"), record_id="r1", record=record_v1, flush=True)
+
+        # skip_duplicates=True: must not raise, original value must be preserved
+        db.add_record(("fn", "test"), record_id="r1", record=record_v2, skip_duplicates=True, flush=True)
         result = db.get_record_by_id(("fn", "test"), "r1")
         assert result is not None
+        assert result.column("x")[0].as_py() == 1  # original preserved, not overwritten
+
+        # skip_duplicates=False (default): must raise ValueError on duplicate pending batch
+        db2 = ConnectorArrowDatabase(SQLiteConnector(":memory:"))
+        db2.add_record(("fn", "test"), record_id="r1", record=record_v1)
+        with pytest.raises(ValueError):
+            db2.add_record(("fn", "test"), record_id="r1", record=record_v2)
+        db2._connector.close()
 
     def test_second_flush_schema_consistency(self, db: ConnectorArrowDatabase) -> None:
         """ConnectorArrowDatabase validates schema on second flush — must match exactly."""
@@ -72,6 +82,17 @@ class TestConnectorArrowDatabaseWithSQLite:
         assert flag_col.type == pa.bool_()
         assert result.num_rows == 1
         assert flag_col[0].as_py() is True  # last row kept
+
+    def test_second_flush_schema_mismatch_raises(self, db: ConnectorArrowDatabase) -> None:
+        """ConnectorArrowDatabase.flush() raises ValueError on schema mismatch."""
+        r1 = pa.table({"x": pa.array([1], type=pa.int64())})
+        db.add_record(("fn", "test"), record_id="r1", record=r1, flush=True)
+
+        # Incompatible schema: different column type for 'x'
+        r2 = pa.table({"x": pa.array([2.0], type=pa.float64())})
+        db.add_record(("fn", "test"), record_id="r2", record=r2)
+        with pytest.raises(ValueError, match="Schema mismatch"):
+            db.flush()
 
     def test_get_records_by_ids(self, db: ConnectorArrowDatabase) -> None:
         for i in range(5):
