@@ -67,6 +67,13 @@ class TestArrowTypeToSqliteSql:
         assert _arrow_type_to_sqlite_sql(pa.bool_()) == "BOOLEAN"
 
 
+class TestSQLiteConnectorScaffold:
+    def test_isinstance_dbconnector_protocol(self) -> None:
+        connector = SQLiteConnector(":memory:")
+        assert isinstance(connector, DBConnectorProtocol)
+        connector.close()
+
+
 class TestCoerceColumn:
     def test_bool_coercion(self):
         assert _coerce_column([1, 0, 1], pa.bool_()) == [True, False, True]

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import sqlite3
 import threading
 from collections.abc import Iterator
@@ -76,6 +75,8 @@ def _arrow_type_to_sqlite_sql(arrow_type: pa.DataType) -> str:
     """
     import pyarrow as _pa  # noqa: PLC0415 — needed at call time
 
+    if arrow_type == _pa.bool_():
+        return "BOOLEAN"
     if _pa.types.is_integer(arrow_type):
         return "INTEGER"
     if _pa.types.is_floating(arrow_type):
@@ -84,8 +85,6 @@ def _arrow_type_to_sqlite_sql(arrow_type: pa.DataType) -> str:
         return "TEXT"
     if _pa.types.is_binary(arrow_type) or _pa.types.is_large_binary(arrow_type):
         return "BLOB"
-    if arrow_type == _pa.bool_():
-        return "BOOLEAN"
     logger.warning("Unsupported Arrow type %r; mapping to TEXT", arrow_type)
     return "TEXT"
 
@@ -238,7 +237,10 @@ class SQLiteConnector:
 
     def close(self) -> None:
         """Close the database connection. Idempotent."""
-        raise NotImplementedError
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
 
     def __enter__(self) -> SQLiteConnector:
         return self
