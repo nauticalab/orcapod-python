@@ -1242,18 +1242,18 @@ class FunctionNode(StreamBase):
 
         pp = self.pipeline_path
 
-        # Resolve concurrency limit from node config (pipeline config is not
-        # threaded through the orchestrator, so we fall back to defaults).
-        node_config = getattr(self._function_pod, "node_config", NodeConfig())
-        max_concurrency = resolve_concurrency(node_config, PipelineConfig())
-
-        sem = (
-            asyncio.Semaphore(max_concurrency)
-            if max_concurrency is not None
-            else None
-        )
-
         try:
+            # Resolve concurrency limit from node config (pipeline config is not
+            # threaded through the orchestrator, so we fall back to defaults).
+            node_config = getattr(self._function_pod, "node_config", NodeConfig())
+            max_concurrency = resolve_concurrency(node_config, PipelineConfig())
+
+            sem = (
+                asyncio.Semaphore(max_concurrency)
+                if max_concurrency is not None
+                else None
+            )
+
             tag_schema = self._input_stream.output_schema(columns={"system_tags": True})[0]
             obs.on_node_start(node_label, node_hash, pipeline_path=pp, tag_schema=tag_schema)
 
