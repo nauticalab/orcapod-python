@@ -305,13 +305,21 @@ class TestFunctionNodeAsyncExecute:
     @pytest.mark.asyncio
     async def test_concurrent_execution_with_async_function(self):
         """Async packets should run concurrently when max_concurrency > 1."""
-        import time
+        peak = 0
+        current = 0
+        lock = asyncio.Lock()
 
-        async def slow_double(x: int) -> int:
-            await asyncio.sleep(0.2)
+        async def tracked_double(x: int) -> int:
+            nonlocal peak, current
+            async with lock:
+                current += 1
+                peak = max(peak, current)
+            await asyncio.sleep(0.05)
+            async with lock:
+                current -= 1
             return x * 2
 
-        pf = PythonPacketFunction(slow_double, output_keys="result")
+        pf = PythonPacketFunction(tracked_double, output_keys="result")
         pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=5))
         db = InMemoryArrowDatabase()
         stream = make_stream(5)
@@ -321,29 +329,34 @@ class TestFunctionNodeAsyncExecute:
         output_ch = Channel(buffer_size=16)
 
         await feed_stream_to_channel(make_stream(5), input_ch)
-
-        t0 = time.perf_counter()
         await node.async_execute(input_ch.reader, output_ch.writer)
-        elapsed = time.perf_counter() - t0
 
         results = await output_ch.reader.collect()
         assert len(results) == 5
         values = sorted(pkt.as_dict()["result"] for _, pkt in results)
         assert values == [0, 2, 4, 6, 8]
 
-        # 5 packets × 0.2s each should complete well under 1s with concurrency=5
-        assert elapsed < 0.5, f"Expected concurrent execution but took {elapsed:.2f}s"
+        assert peak > 1, f"Expected concurrent execution but peak was {peak}"
+        assert peak <= 5, f"Peak {peak} exceeded max_concurrency=5"
 
     @pytest.mark.asyncio
     async def test_concurrency_limiting(self):
         """max_concurrency=1 should force sequential execution."""
-        import time
+        peak = 0
+        current = 0
+        lock = asyncio.Lock()
 
-        async def slow_double(x: int) -> int:
-            await asyncio.sleep(0.2)
+        async def tracked_double(x: int) -> int:
+            nonlocal peak, current
+            async with lock:
+                current += 1
+                peak = max(peak, current)
+            await asyncio.sleep(0.05)
+            async with lock:
+                current -= 1
             return x * 2
 
-        pf = PythonPacketFunction(slow_double, output_keys="result")
+        pf = PythonPacketFunction(tracked_double, output_keys="result")
         pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=1))
         db = InMemoryArrowDatabase()
         stream = make_stream(5)
@@ -353,29 +366,33 @@ class TestFunctionNodeAsyncExecute:
         output_ch = Channel(buffer_size=16)
 
         await feed_stream_to_channel(make_stream(5), input_ch)
-
-        t0 = time.perf_counter()
         await node.async_execute(input_ch.reader, output_ch.writer)
-        elapsed = time.perf_counter() - t0
 
         results = await output_ch.reader.collect()
         assert len(results) == 5
         values = sorted(pkt.as_dict()["result"] for _, pkt in results)
         assert values == [0, 2, 4, 6, 8]
 
-        # 5 packets × 0.2s each, sequential = ~1.0s minimum
-        assert elapsed >= 0.9, f"Expected sequential execution but took {elapsed:.2f}s"
+        assert peak == 1, f"Expected sequential execution (peak=1) but peak was {peak}"
 
     @pytest.mark.asyncio
     async def test_concurrent_execution_simple_path(self):
         """Concurrency should also work without a DB (simple path)."""
-        import time
+        peak = 0
+        current = 0
+        lock = asyncio.Lock()
 
-        async def slow_double(x: int) -> int:
-            await asyncio.sleep(0.2)
+        async def tracked_double(x: int) -> int:
+            nonlocal peak, current
+            async with lock:
+                current += 1
+                peak = max(peak, current)
+            await asyncio.sleep(0.05)
+            async with lock:
+                current -= 1
             return x * 2
 
-        pf = PythonPacketFunction(slow_double, output_keys="result")
+        pf = PythonPacketFunction(tracked_double, output_keys="result")
         pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=5))
         stream = make_stream(5)
         # No pipeline_database — exercises the simple (non-DB) path
@@ -385,18 +402,15 @@ class TestFunctionNodeAsyncExecute:
         output_ch = Channel(buffer_size=16)
 
         await feed_stream_to_channel(make_stream(5), input_ch)
-
-        t0 = time.perf_counter()
         await node.async_execute(input_ch.reader, output_ch.writer)
-        elapsed = time.perf_counter() - t0
 
         results = await output_ch.reader.collect()
         assert len(results) == 5
         values = sorted(pkt.as_dict()["result"] for _, pkt in results)
         assert values == [0, 2, 4, 6, 8]
 
-        # 5 packets × 0.2s each should complete well under 1s with concurrency=5
-        assert elapsed < 0.5, f"Expected concurrent execution but took {elapsed:.2f}s"
+        assert peak > 1, f"Expected concurrent execution but peak was {peak}"
+        assert peak <= 5, f"Peak {peak} exceeded max_concurrency=5"
 
     @pytest.mark.asyncio
     async def test_db_records_created(self):
