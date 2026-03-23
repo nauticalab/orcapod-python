@@ -50,11 +50,12 @@ class TestConnectorArrowDatabaseWithSQLite:
         assert result.column("x")[0].as_py() == 1  # original preserved, not overwritten
 
         # skip_duplicates=False (default): must raise ValueError on duplicate pending batch
-        db2 = ConnectorArrowDatabase(SQLiteConnector(":memory:"))
+        connector2 = SQLiteConnector(":memory:")
+        db2 = ConnectorArrowDatabase(connector2)
         db2.add_record(("fn", "test"), record_id="r1", record=record_v1)
         with pytest.raises(ValueError):
             db2.add_record(("fn", "test"), record_id="r1", record=record_v2)
-        db2._connector.close()
+        connector2.close()
 
     def test_second_flush_schema_consistency(self, db: ConnectorArrowDatabase) -> None:
         """ConnectorArrowDatabase validates schema on second flush — must match exactly."""

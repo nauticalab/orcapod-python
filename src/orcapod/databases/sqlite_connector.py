@@ -162,7 +162,7 @@ class SQLiteConnector:
     # ── Schema introspection ──────────────────────────────────────────────────
 
     def get_table_names(self) -> list[str]:
-        """Return all table names in this database (excludes views).
+        """Return all user table names in this database (excludes views and SQLite internals).
 
         Returns:
             Sorted list of table name strings.
@@ -170,7 +170,9 @@ class SQLiteConnector:
         with self._lock:
             conn = self._require_open()
             cursor = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name NOT LIKE 'sqlite_%' "
+                "ORDER BY name"
             )
             return [row["name"] for row in cursor]
 
@@ -225,6 +227,10 @@ class SQLiteConnector:
         Collects all batches inside the lock to avoid holding the lock across
         yield points (which would deadlock any concurrent caller).
 
+        Column types are resolved from the table referenced in the FROM clause
+        of the query (double-quoted or unquoted identifier). For computed or
+        otherwise unknown columns the fallback is ``pa.large_string()``.
+
         Args:
             query: SQL query string. Table names should be double-quoted.
             params: Optional query parameters.
@@ -233,24 +239,30 @@ class SQLiteConnector:
         Yields:
             Arrow RecordBatch objects.
         """
+        import re as _re
+
         import pyarrow as _pa
 
         collected: list[_pa.RecordBatch] = []
         with self._lock:
             conn = self._require_open()
-            cursor = conn.execute(query, params or [])
+            cursor = conn.execute(query, [] if params is None else params)
             if cursor.description is None:
                 return
             col_names = [d[0] for d in cursor.description]
 
-            # Build a type lookup from all tables in this database.
-            # For each column name, find its Arrow type via get_column_info.
-            # Fallback to large_string() for computed/unknown columns.
+            # Resolve column types from the specific table named in the FROM
+            # clause.  Using only the queried table avoids cross-table
+            # column-name collisions that would arise from scanning all tables.
+            # Fallback to large_string() for computed/aliased/unknown columns.
             type_lookup: dict[str, _pa.DataType] = {}
-            for table_name in self.get_table_names():
-                for ci in self.get_column_info(table_name):
-                    if ci.name not in type_lookup:
-                        type_lookup[ci.name] = ci.arrow_type
+            table_match = _re.search(r'FROM\s+"([^"]+)"', query, _re.IGNORECASE)
+            if not table_match:
+                table_match = _re.search(r'FROM\s+(\w+)', query, _re.IGNORECASE)
+            if table_match:
+                queried_table = table_match.group(1)
+                for ci in self.get_column_info(queried_table):
+                    type_lookup[ci.name] = ci.arrow_type
 
             arrow_types = [type_lookup.get(name, _pa.large_string()) for name in col_names]
             schema = _pa.schema(
@@ -295,7 +307,8 @@ class SQLiteConnector:
                 sql_type = _arrow_type_to_sqlite_sql(col.arrow_type)
                 not_null = " NOT NULL" if not col.nullable else ""
                 pk = " PRIMARY KEY" if col.name == pk_column else ""
-                col_defs.append(f'    "{col.name}" {sql_type}{not_null}{pk}')
+                escaped = col.name.replace('"', '""')
+                col_defs.append(f'    "{escaped}" {sql_type}{not_null}{pk}')
             ddl = f'CREATE TABLE IF NOT EXISTS "{table_name}" (\n'
             ddl += ",\n".join(col_defs)
             ddl += "\n)"
@@ -322,12 +335,13 @@ class SQLiteConnector:
         with self._lock:
             conn = self._require_open()
             self._validate_table_name(table_name)
-            cols = records.column_names
-            col_list = ", ".join(f'"{c}"' for c in cols)
-            placeholders = ", ".join(f":{c}" for c in cols)
+            cols = list(records.column_names)
+            col_list = ", ".join('"' + c.replace('"', '""') + '"' for c in cols)
+            placeholders = ", ".join("?" for _ in cols)
             verb = "INSERT OR IGNORE" if skip_existing else "INSERT OR REPLACE"
             sql = f'{verb} INTO "{table_name}" ({col_list}) VALUES ({placeholders})'
-            conn.executemany(sql, records.to_pylist())
+            rows = [tuple(row[c] for c in cols) for row in records.to_pylist()]
+            conn.executemany(sql, rows)
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
