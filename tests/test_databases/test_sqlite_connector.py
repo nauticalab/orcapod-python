@@ -148,3 +148,64 @@ class TestGetTableNames:
         connector._conn.execute('CREATE TABLE "base" (id INTEGER PRIMARY KEY)')
         connector._conn.execute('CREATE VIEW "v_base" AS SELECT * FROM "base"')
         assert connector.get_table_names() == ["base"]
+
+
+class TestGetPkColumns:
+    def test_single_pk(self, connector: SQLiteConnector) -> None:
+        connector._conn.execute(
+            'CREATE TABLE "t" (id TEXT PRIMARY KEY, val REAL)'
+        )
+        assert connector.get_pk_columns("t") == ["id"]
+
+    def test_composite_pk_order_preserved(self, connector: SQLiteConnector) -> None:
+        connector._conn.execute(
+            'CREATE TABLE "t" (a TEXT, b INTEGER, c REAL, PRIMARY KEY (a, b))'
+        )
+        assert connector.get_pk_columns("t") == ["a", "b"]
+
+    def test_no_pk_returns_empty(self, connector: SQLiteConnector) -> None:
+        connector._conn.execute('CREATE TABLE "t" (val TEXT)')
+        assert connector.get_pk_columns("t") == []
+
+    def test_nonexistent_table_returns_empty(self, connector: SQLiteConnector) -> None:
+        assert connector.get_pk_columns("no_such_table") == []
+
+
+class TestGetColumnInfo:
+    def test_all_affinities(self, connector: SQLiteConnector) -> None:
+        connector._conn.execute(
+            """CREATE TABLE "t" (
+                a TEXT,
+                b INTEGER,
+                c REAL,
+                d BLOB,
+                e NUMERIC,
+                f BOOLEAN
+            )"""
+        )
+        infos = {ci.name: ci for ci in connector.get_column_info("t")}
+        assert infos["a"].arrow_type == pa.large_string()
+        assert infos["b"].arrow_type == pa.int64()
+        assert infos["c"].arrow_type == pa.float64()
+        assert infos["d"].arrow_type == pa.large_binary()
+        assert infos["e"].arrow_type == pa.float64()
+        assert infos["f"].arrow_type == pa.bool_()
+
+    def test_nullable_from_notnull(self, connector: SQLiteConnector) -> None:
+        connector._conn.execute(
+            'CREATE TABLE "t" (a TEXT NOT NULL, b TEXT)'
+        )
+        infos = {ci.name: ci for ci in connector.get_column_info("t")}
+        assert infos["a"].nullable is False
+        assert infos["b"].nullable is True
+
+    def test_table_with_zero_rows_returns_column_metadata(self, connector: SQLiteConnector) -> None:
+        connector._conn.execute(
+            'CREATE TABLE "t" (id INTEGER PRIMARY KEY, val TEXT)'
+        )
+        infos = connector.get_column_info("t")
+        assert len(infos) == 2
+        assert infos[0].name == "id"
+
+    def test_nonexistent_table_returns_empty(self, connector: SQLiteConnector) -> None:
+        assert connector.get_column_info("no_such_table") == []
