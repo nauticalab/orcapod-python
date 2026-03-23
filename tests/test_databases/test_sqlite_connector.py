@@ -289,7 +289,7 @@ class TestUpsertRecords:
         connector.upsert_records("t", records_v1, "__record_id")
         records_v2 = self._make_table(["a"], [99.0])
         connector.upsert_records("t", records_v2, "__record_id", skip_existing=False)
-        cursor = connector._conn.execute('SELECT value FROM "t" WHERE "__record_id" = "a"')
+        cursor = connector._conn.execute("SELECT value FROM \"t\" WHERE \"__record_id\" = 'a'")
         assert cursor.fetchone()[0] == 99.0
 
     def test_skip_existing_keeps_original(self, connector: SQLiteConnector) -> None:
@@ -298,7 +298,7 @@ class TestUpsertRecords:
         connector.upsert_records("t", records_v1, "__record_id")
         records_v2 = self._make_table(["a"], [99.0])
         connector.upsert_records("t", records_v2, "__record_id", skip_existing=True)
-        cursor = connector._conn.execute('SELECT value FROM "t" WHERE "__record_id" = "a"')
+        cursor = connector._conn.execute("SELECT value FROM \"t\" WHERE \"__record_id\" = 'a'")
         assert cursor.fetchone()[0] == 1.0
 
     def test_raises_on_invalid_table_name(self, connector: SQLiteConnector) -> None:
