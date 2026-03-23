@@ -1,6 +1,8 @@
 """Tests for SQLiteConnector — DBConnectorProtocol backed by sqlite3."""
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pyarrow as pa
 import pytest
 
@@ -12,6 +14,21 @@ from orcapod.databases.sqlite_connector import (
 )
 from orcapod.protocols.db_connector_protocol import DBConnectorProtocol
 from orcapod.types import ColumnInfo
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def connector() -> Iterator[SQLiteConnector]:
+    c = SQLiteConnector(":memory:")
+    yield c
+    try:
+        c.close()
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -84,3 +101,30 @@ class TestCoerceColumn:
     def test_non_bool_passthrough(self):
         vals = [1, 2, 3]
         assert _coerce_column(vals, pa.int64()) is vals
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle
+# ---------------------------------------------------------------------------
+
+
+class TestLifecycle:
+    def test_constructor_opens_connection(self, connector: SQLiteConnector) -> None:
+        # Verify _conn is not None and the raw connection is usable
+        assert connector._conn is not None
+        connector._conn.execute("SELECT 1")  # must not raise
+
+    def test_close_is_idempotent(self, connector: SQLiteConnector) -> None:
+        connector.close()
+        connector.close()  # must not raise
+
+    def test_context_manager_closes_on_exit(self) -> None:
+        with SQLiteConnector(":memory:") as c:
+            assert c._conn is not None  # open inside block
+        # After exit, _conn must be None
+        assert c._conn is None
+
+    def test_require_open_raises_after_close(self, connector: SQLiteConnector) -> None:
+        connector.close()
+        with pytest.raises(RuntimeError, match="closed"):
+            connector._require_open()
