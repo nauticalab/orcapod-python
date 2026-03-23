@@ -352,7 +352,10 @@ class SQLiteConnector:
         Returns:
             Dict with ``connector_type`` and ``db_path`` keys.
         """
-        raise NotImplementedError
+        return {
+            "connector_type": "sqlite",
+            "db_path": str(self._db_path),
+        }
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> SQLiteConnector:
@@ -367,4 +370,8 @@ class SQLiteConnector:
         Raises:
             ValueError: If ``connector_type`` is not ``"sqlite"``.
         """
-        raise NotImplementedError
+        if config.get("connector_type") != "sqlite":
+            raise ValueError(
+                f"Expected connector_type 'sqlite', got {config.get('connector_type')!r}"
+            )
+        return cls(db_path=config["db_path"])
