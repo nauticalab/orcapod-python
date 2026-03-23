@@ -170,6 +170,10 @@ class TestGetPkColumns:
     def test_nonexistent_table_returns_empty(self, connector: SQLiteConnector) -> None:
         assert connector.get_pk_columns("no_such_table") == []
 
+    def test_raises_on_invalid_table_name(self, connector: SQLiteConnector) -> None:
+        with pytest.raises(ValueError, match="double-quote"):
+            connector.get_pk_columns('table"name')
+
 
 class TestGetColumnInfo:
     def test_all_affinities(self, connector: SQLiteConnector) -> None:
@@ -209,3 +213,7 @@ class TestGetColumnInfo:
 
     def test_nonexistent_table_returns_empty(self, connector: SQLiteConnector) -> None:
         assert connector.get_column_info("no_such_table") == []
+
+    def test_raises_on_invalid_table_name(self, connector: SQLiteConnector) -> None:
+        with pytest.raises(ValueError, match="double-quote"):
+            connector.get_column_info('table"name')

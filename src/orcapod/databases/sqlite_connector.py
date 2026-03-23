@@ -144,6 +144,21 @@ class SQLiteConnector:
             raise RuntimeError("SQLiteConnector is closed")
         return self._conn
 
+    @staticmethod
+    def _validate_table_name(table_name: str) -> None:
+        """Validate that a table name is safe for use in a double-quoted SQL identifier.
+
+        Args:
+            table_name: The table name to validate.
+
+        Raises:
+            ValueError: If the table name contains a double-quote character.
+        """
+        if '"' in table_name:
+            raise ValueError(
+                f"Table name {table_name!r} contains an invalid double-quote character."
+            )
+
     # ── Schema introspection ──────────────────────────────────────────────────
 
     def get_table_names(self) -> list[str]:
@@ -170,6 +185,7 @@ class SQLiteConnector:
         """
         with self._lock:
             conn = self._require_open()
+            self._validate_table_name(table_name)
             cursor = conn.execute(f'PRAGMA table_info("{table_name}")')
             rows = [row for row in cursor if row["pk"] > 0]
             return [row["name"] for row in sorted(rows, key=lambda r: r["pk"])]
@@ -185,6 +201,7 @@ class SQLiteConnector:
         """
         with self._lock:
             conn = self._require_open()
+            self._validate_table_name(table_name)
             cursor = conn.execute(f'PRAGMA table_info("{table_name}")')
             return [
                 ColumnInfo(
