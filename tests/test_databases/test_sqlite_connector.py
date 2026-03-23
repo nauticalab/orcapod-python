@@ -259,3 +259,49 @@ class TestCreateTableIfNotExists:
     def test_raises_on_invalid_table_name(self, connector: SQLiteConnector) -> None:
         with pytest.raises(ValueError, match="double-quote"):
             connector.create_table_if_not_exists('table"name', self._make_columns(), "__record_id")
+
+
+class TestUpsertRecords:
+    def _setup_table(self, connector: SQLiteConnector) -> None:
+        cols = [
+            ColumnInfo("__record_id", pa.large_string(), nullable=False),
+            ColumnInfo("value", pa.float64(), nullable=True),
+        ]
+        connector.create_table_if_not_exists("t", cols, "__record_id")
+
+    def _make_table(self, ids: list[str], values: list[float | None]) -> pa.Table:
+        import pyarrow as pa
+        return pa.table({
+            "__record_id": pa.array(ids, type=pa.large_string()),
+            "value": pa.array(values, type=pa.float64()),
+        })
+
+    def test_insert_new_records(self, connector: SQLiteConnector) -> None:
+        self._setup_table(connector)
+        records = self._make_table(["a", "b"], [1.0, 2.0])
+        connector.upsert_records("t", records, "__record_id")
+        cursor = connector._conn.execute('SELECT COUNT(*) FROM "t"')
+        assert cursor.fetchone()[0] == 2
+
+    def test_replace_existing_records(self, connector: SQLiteConnector) -> None:
+        self._setup_table(connector)
+        records_v1 = self._make_table(["a"], [1.0])
+        connector.upsert_records("t", records_v1, "__record_id")
+        records_v2 = self._make_table(["a"], [99.0])
+        connector.upsert_records("t", records_v2, "__record_id", skip_existing=False)
+        cursor = connector._conn.execute('SELECT value FROM "t" WHERE "__record_id" = "a"')
+        assert cursor.fetchone()[0] == 99.0
+
+    def test_skip_existing_keeps_original(self, connector: SQLiteConnector) -> None:
+        self._setup_table(connector)
+        records_v1 = self._make_table(["a"], [1.0])
+        connector.upsert_records("t", records_v1, "__record_id")
+        records_v2 = self._make_table(["a"], [99.0])
+        connector.upsert_records("t", records_v2, "__record_id", skip_existing=True)
+        cursor = connector._conn.execute('SELECT value FROM "t" WHERE "__record_id" = "a"')
+        assert cursor.fetchone()[0] == 1.0
+
+    def test_raises_on_invalid_table_name(self, connector: SQLiteConnector) -> None:
+        records = self._make_table(["a"], [1.0])
+        with pytest.raises(ValueError, match="double-quote"):
+            connector.upsert_records('table"name', records, "__record_id")

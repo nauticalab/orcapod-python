@@ -279,7 +279,15 @@ class SQLiteConnector:
             skip_existing: If True, skip rows whose id already exists
                 (INSERT OR IGNORE). If False, overwrite (INSERT OR REPLACE).
         """
-        raise NotImplementedError
+        with self._lock:
+            conn = self._require_open()
+            self._validate_table_name(table_name)
+            cols = records.column_names
+            col_list = ", ".join(f'"{c}"' for c in cols)
+            placeholders = ", ".join(f":{c}" for c in cols)
+            verb = "INSERT OR IGNORE" if skip_existing else "INSERT OR REPLACE"
+            sql = f'{verb} INTO "{table_name}" ({col_list}) VALUES ({placeholders})'
+            conn.executemany(sql, records.to_pylist())
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
