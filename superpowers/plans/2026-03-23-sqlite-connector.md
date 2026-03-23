@@ -459,8 +459,10 @@ def connector() -> Iterator[SQLiteConnector]:
 
 class TestLifecycle:
     def test_constructor_opens_connection(self, connector):
-        # Should not raise — connection is open
-        assert connector.get_table_names() == []
+        # Probe the raw connection directly — get_table_names is not yet implemented
+        # at this task; this just verifies _conn is not None and is usable.
+        assert connector._conn is not None
+        connector._conn.execute("SELECT 1")  # must not raise
 
     def test_close_is_idempotent(self, connector):
         connector.close()
@@ -618,6 +620,9 @@ class TestGetPkColumns:
     def test_no_pk_returns_empty(self, connector):
         connector._conn.execute('CREATE TABLE "t" (val TEXT)')
         assert connector.get_pk_columns("t") == []
+
+    def test_nonexistent_table_returns_empty(self, connector):
+        assert connector.get_pk_columns("no_such_table") == []
 
 
 # ---------------------------------------------------------------------------
@@ -849,7 +854,11 @@ def _setup_table(connector: SQLiteConnector) -> None:
 
 
 def _read_all(connector: SQLiteConnector) -> list[dict]:
-    """Read all rows from 'scores' as a list of dicts."""
+    """Read all rows from 'scores' as a list of dicts.
+
+    Uses connector._conn directly because iter_batches is not yet implemented
+    at this task. This is acceptable in test helpers for assertion-only reads.
+    """
     cursor = connector._conn.execute('SELECT id, score FROM "scores" ORDER BY id')
     return [dict(row) for row in cursor]
 
@@ -1030,7 +1039,8 @@ class TestIterBatches:
     def test_schema_arrow_types_match_column_info(self, connector):
         self._make_table(connector)
         connector._conn.execute(
-            'INSERT INTO "data" VALUES ("a", "Alice", 1.5, 10, b"raw", 1)'
+            'INSERT INTO "data" VALUES (?, ?, ?, ?, ?, ?)',
+            ("a", "Alice", 1.5, 10, b"raw", 1),
         )
         batches = list(connector.iter_batches('SELECT * FROM "data"'))
         schema = batches[0].schema
@@ -1081,6 +1091,11 @@ def iter_batches(
     """
     import pyarrow as _pa  # noqa: PLC0415
 
+    # All DB access (execute + fetchmany) happens under the lock.
+    # Batches are collected into a list first; yielding happens outside the lock
+    # so the connector is not blocked for the duration of the caller's iteration.
+    collected: list[_pa.RecordBatch] = []
+
     with self._lock:
         conn = self._require_open()
         cursor = conn.execute(query, params or [])
@@ -1088,7 +1103,9 @@ def iter_batches(
             return
         col_names = [d[0] for d in cursor.description]
 
-        # Resolve Arrow types via get_column_info on the first table referenced
+        # Resolve Arrow types via get_column_info on the first table referenced.
+        # cursor.description[i][1] is always None in Python's sqlite3, so we
+        # cannot derive types from the cursor itself.
         match = re.search(r'FROM\s+"([^"]+)"', query, re.IGNORECASE)
         type_lookup: dict[str, _pa.DataType] = {}
         if match:
@@ -1123,7 +1140,11 @@ def iter_batches(
                 )
                 for i in range(len(col_names))
             ]
-            yield _pa.RecordBatch.from_arrays(arrays, schema=schema)
+            collected.append(_pa.RecordBatch.from_arrays(arrays, schema=schema))
+
+    # Yield after releasing the lock so other threads can use the connector
+    # while the caller processes each batch.
+    yield from collected
 ```
 
 - [ ] **Step 7.4: Run — expect PASS**
