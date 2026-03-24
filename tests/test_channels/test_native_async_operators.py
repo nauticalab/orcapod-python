@@ -14,7 +14,7 @@ Covers:
 - MapPackets streaming: per-row packet column renaming
 - Batch streaming: accumulate-and-emit full batches, partial batch handling
 - SemiJoin build-probe: collect right, stream left through hash lookup
-- Join: single-input passthrough, streaming N-way MJoin
+- Join: single-input passthrough, staggered pairwise streaming join
 - Sync / async equivalence for every operator
 - Empty input handling
 - Multi-stage pipeline integration
@@ -955,7 +955,7 @@ class TestSemiJoinBuildProbe:
 
 
 class TestJoinNativeAsync:
-    """Tests for Join.async_execute (N-way streaming MJoin)."""
+    """Tests for Join.async_execute (staggered pairwise streaming join)."""
 
     @pytest.mark.asyncio
     async def test_single_input_passthrough(self):
@@ -1105,7 +1105,7 @@ class TestJoinNativeAsync:
 
     @pytest.mark.asyncio
     async def test_matches_sync_three_way(self):
-        """Three-way MJoin must produce the same data as sync static_process."""
+        """Three-way Staggered join must produce the same data as sync static_process."""
         t1 = pa.table(
             {"id": pa.array([1, 2, 3], type=pa.int64()), "a": pa.array([10, 20, 30], type=pa.int64())}
         )
@@ -1143,7 +1143,7 @@ class TestJoinNativeAsync:
 
     @pytest.mark.asyncio
     async def test_three_way_streams_before_all_closed(self):
-        """MJoin emits matched rows before all input channels are closed.
+        """Staggered join emits matched rows before all input channels are closed.
 
         This is the key behavioral difference from the old collect-based
         fallback: downstream can start work as soon as all N sides have
@@ -1180,7 +1180,7 @@ class TestJoinNativeAsync:
 
     @pytest.mark.asyncio
     async def test_four_way_join(self):
-        """Four-input MJoin produces correct results."""
+        """Four-input Staggered join produces correct results."""
         tables = [
             pa.table({"id": pa.array([1, 2], type=pa.int64()), f"v{i}": pa.array([i * 10, i * 20], type=pa.int64())})
             for i in range(4)
@@ -1223,7 +1223,7 @@ class TestJoinNativeAsync:
 
         # Output should be empty — side 3 hasn't contributed yet
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(out.reader.receive(), timeout=0.05)
+            await asyncio.wait_for(out.reader.receive(), timeout=0.5)
 
         # Now send the third side — match should complete
         await ch3.writer.send((Tag({"id": 1}), Packet({"c": 1000})))
@@ -1484,8 +1484,8 @@ class TestJoinNativeAsync:
         await ch1.writer.send((Tag({"id": 1}), Packet({"a": 10})))
         await ch1.writer.send((Tag({"id": 2}), Packet({"a": 20})))
 
-        # Give the event loop a chance to process
-        await asyncio.sleep(0.01)
+        # Yield to event loop so drain tasks process the sends
+        await asyncio.sleep(0)
 
         # Now side 1 sends — triggers shared_keys computation and re-index
         await ch2.writer.send((Tag({"id": 1}), Packet({"b": 100})))
@@ -1799,7 +1799,7 @@ class TestJoinSystemTagEquivalence:
 
     @pytest.mark.asyncio
     async def test_three_way_system_tags_match_sync(self):
-        """N-way MJoin should produce the same system tags as sync."""
+        """N-way Staggered join should produce the same system tags as sync."""
         s1 = _make_source("id", "a", {"id": ["m", "n"], "a": [1, 2]})
         s2 = _make_source("id", "b", {"id": ["m", "n"], "b": [10, 20]})
         s3 = _make_source("id", "c", {"id": ["m", "n"], "c": [100, 200]})
@@ -1809,7 +1809,7 @@ class TestJoinSystemTagEquivalence:
         sync_result = op.static_process(s1, s2, s3)
         sync_rows = list(sync_result.iter_packets())
 
-        # Async (N-way MJoin path)
+        # Async (N-way Staggered join path)
         op.validate_inputs(s1, s2, s3)
         ch1 = Channel(buffer_size=64)
         ch2 = Channel(buffer_size=64)
