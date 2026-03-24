@@ -336,10 +336,18 @@ class LoggingObserver:
         ``pipeline_path[:1] + ("logs",) + pipeline_path[1:]``.  This gives
         each function node its own log table in the database.
 
-        Note:
-            When called directly on ``LoggingObserver`` (not a contextualized
-            wrapper), node_label and node_hash default to "unknown".  Prefer
-            calling via a contextualized observer.
+        Warning:
+            This method **must** be called on a *contextualized* observer
+            (the object returned by :meth:`contextualize`), not on the root
+            ``LoggingObserver`` directly.  Calling it on the root observer
+            produces a ``PacketLogger`` where ``_log_node_label`` and
+            ``_log_node_hash`` are both written as ``""`` (empty string),
+            because no node identity has been stamped yet.
+
+            Correct usage (mirrors how ``FunctionNode`` calls it)::
+
+                ctx_obs = observer.contextualize(node_hash, node_label)
+                pkt_logger = ctx_obs.create_packet_logger(tag, packet, pipeline_path=pp)
         """
         tag_data = dict(tag)
 
