@@ -14,7 +14,7 @@ Covers:
 - MapPackets streaming: per-row packet column renaming
 - Batch streaming: accumulate-and-emit full batches, partial batch handling
 - SemiJoin build-probe: collect right, stream left through hash lookup
-- Join: single-input passthrough, concurrent binary/N-ary collection
+- Join: single-input passthrough, streaming N-way MJoin
 - Sync / async equivalence for every operator
 - Empty input handling
 - Multi-stage pipeline integration
@@ -955,7 +955,7 @@ class TestSemiJoinBuildProbe:
 
 
 class TestJoinNativeAsync:
-    """Tests for Join.async_execute (symmetric hash join + N>2 barrier)."""
+    """Tests for Join.async_execute (N-way streaming MJoin)."""
 
     @pytest.mark.asyncio
     async def test_single_input_passthrough(self):
@@ -1100,6 +1100,283 @@ class TestJoinNativeAsync:
         )
         sync_data = sorted(
             (t.as_dict()["animal"], p.as_dict()) for t, p in sync_results
+        )
+        assert async_data == sync_data
+
+    @pytest.mark.asyncio
+    async def test_matches_sync_three_way(self):
+        """Three-way MJoin must produce the same data as sync static_process."""
+        t1 = pa.table(
+            {"id": pa.array([1, 2, 3], type=pa.int64()), "a": pa.array([10, 20, 30], type=pa.int64())}
+        )
+        t2 = pa.table(
+            {"id": pa.array([1, 2, 3], type=pa.int64()), "b": pa.array([100, 200, 300], type=pa.int64())}
+        )
+        t3 = pa.table(
+            {"id": pa.array([1, 2, 3], type=pa.int64()), "c": pa.array([1000, 2000, 3000], type=pa.int64())}
+        )
+        s1 = ArrowTableStream(t1, tag_columns=["id"])
+        s2 = ArrowTableStream(t2, tag_columns=["id"])
+        s3 = ArrowTableStream(t3, tag_columns=["id"])
+
+        op = Join()
+        sync_results = sync_process_to_rows(op, s1, s2, s3)
+
+        ch1 = Channel(buffer_size=64)
+        ch2 = Channel(buffer_size=64)
+        ch3 = Channel(buffer_size=64)
+        out = Channel(buffer_size=64)
+        await feed(s1, ch1)
+        await feed(s2, ch2)
+        await feed(s3, ch3)
+        await op.async_execute([ch1.reader, ch2.reader, ch3.reader], out.writer)
+        async_results = await out.reader.collect()
+
+        assert len(async_results) == len(sync_results)
+        async_data = sorted(
+            (t.as_dict()["id"], p.as_dict()) for t, p in async_results
+        )
+        sync_data = sorted(
+            (t.as_dict()["id"], p.as_dict()) for t, p in sync_results
+        )
+        assert async_data == sync_data
+
+    @pytest.mark.asyncio
+    async def test_three_way_streams_before_all_closed(self):
+        """MJoin emits matched rows before all input channels are closed.
+
+        This is the key behavioral difference from the old collect-based
+        fallback: downstream can start work as soon as all N sides have
+        contributed a matching row for a tag key.
+        """
+        op = Join()
+        ch1 = Channel(buffer_size=64)
+        ch2 = Channel(buffer_size=64)
+        ch3 = Channel(buffer_size=64)
+        out = Channel(buffer_size=64)
+
+        from orcapod.core.datagrams import Packet, Tag
+
+        # Start the join in the background
+        join_task = asyncio.create_task(
+            op.async_execute([ch1.reader, ch2.reader, ch3.reader], out.writer)
+        )
+
+        # Send one matching row from each side
+        await ch1.writer.send((Tag({"id": 1}), Packet({"a": 10})))
+        await ch2.writer.send((Tag({"id": 1}), Packet({"b": 100})))
+        await ch3.writer.send((Tag({"id": 1}), Packet({"c": 1000})))
+
+        # The match should be emitted while channels are still open
+        tag, pkt = await asyncio.wait_for(out.reader.receive(), timeout=2.0)
+        assert tag.as_dict()["id"] == 1
+        assert pkt.as_dict() == {"a": 10, "b": 100, "c": 1000}
+
+        # Close all inputs and let join finish
+        await ch1.writer.close()
+        await ch2.writer.close()
+        await ch3.writer.close()
+        await join_task
+
+    @pytest.mark.asyncio
+    async def test_four_way_join(self):
+        """Four-input MJoin produces correct results."""
+        tables = [
+            pa.table({"id": pa.array([1, 2], type=pa.int64()), f"v{i}": pa.array([i * 10, i * 20], type=pa.int64())})
+            for i in range(4)
+        ]
+        streams = [ArrowTableStream(t, tag_columns=["id"]) for t in tables]
+
+        op = Join()
+        channels = [Channel(buffer_size=64) for _ in range(4)]
+        out = Channel(buffer_size=64)
+        for s, ch in zip(streams, channels):
+            await feed(s, ch)
+        await op.async_execute(
+            [ch.reader for ch in channels], out.writer
+        )
+        results = await out.reader.collect()
+
+        assert len(results) == 2
+        result_map = {tag.as_dict()["id"]: pkt.as_dict() for tag, pkt in results}
+        assert result_map[1] == {"v0": 0, "v1": 10, "v2": 20, "v3": 30}
+        assert result_map[2] == {"v0": 0, "v1": 20, "v2": 40, "v3": 60}
+
+    @pytest.mark.asyncio
+    async def test_three_way_partial_match_no_premature_emit(self):
+        """Rows should not be emitted until all N sides have a match."""
+        op = Join()
+        ch1 = Channel(buffer_size=64)
+        ch2 = Channel(buffer_size=64)
+        ch3 = Channel(buffer_size=64)
+        out = Channel(buffer_size=64)
+
+        from orcapod.core.datagrams import Packet, Tag
+
+        join_task = asyncio.create_task(
+            op.async_execute([ch1.reader, ch2.reader, ch3.reader], out.writer)
+        )
+
+        # Send matching rows from only 2 of 3 sides
+        await ch1.writer.send((Tag({"id": 1}), Packet({"a": 10})))
+        await ch2.writer.send((Tag({"id": 1}), Packet({"b": 100})))
+
+        # Output should be empty — side 3 hasn't contributed yet
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(out.reader.receive(), timeout=0.05)
+
+        # Now send the third side — match should complete
+        await ch3.writer.send((Tag({"id": 1}), Packet({"c": 1000})))
+        tag, pkt = await asyncio.wait_for(out.reader.receive(), timeout=2.0)
+        assert pkt.as_dict() == {"a": 10, "b": 100, "c": 1000}
+
+        await ch1.writer.close()
+        await ch2.writer.close()
+        await ch3.writer.close()
+        await join_task
+
+    @pytest.mark.asyncio
+    async def test_three_way_empty_side_produces_nothing(self):
+        """If any input channel is empty, join produces no output."""
+        t1 = pa.table({"id": pa.array([1], type=pa.int64()), "a": pa.array([10], type=pa.int64())})
+        t2 = pa.table({"id": pa.array([1], type=pa.int64()), "b": pa.array([100], type=pa.int64())})
+        s1 = ArrowTableStream(t1, tag_columns=["id"])
+        s2 = ArrowTableStream(t2, tag_columns=["id"])
+
+        op = Join()
+        ch1 = Channel(buffer_size=64)
+        ch2 = Channel(buffer_size=64)
+        ch3 = Channel(buffer_size=64)
+        out = Channel(buffer_size=64)
+        await feed(s1, ch1)
+        await feed(s2, ch2)
+        await ch3.writer.close()  # empty third input
+        await op.async_execute([ch1.reader, ch2.reader, ch3.reader], out.writer)
+        results = await out.reader.collect()
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_three_way_no_shared_tags_cartesian(self):
+        """Three-way join with disjoint tag keys produces cartesian product."""
+        t1 = pa.table({"a": pa.array([1, 2], type=pa.int64()), "x": pa.array([10, 20], type=pa.int64())})
+        t2 = pa.table({"b": pa.array([3], type=pa.int64()), "y": pa.array([30], type=pa.int64())})
+        t3 = pa.table({"c": pa.array([5, 6], type=pa.int64()), "z": pa.array([50, 60], type=pa.int64())})
+        s1 = ArrowTableStream(t1, tag_columns=["a"])
+        s2 = ArrowTableStream(t2, tag_columns=["b"])
+        s3 = ArrowTableStream(t3, tag_columns=["c"])
+
+        op = Join()
+        ch1 = Channel(buffer_size=64)
+        ch2 = Channel(buffer_size=64)
+        ch3 = Channel(buffer_size=64)
+        out_ch = Channel(buffer_size=64)
+        await feed(s1, ch1)
+        await feed(s2, ch2)
+        await feed(s3, ch3)
+        await op.async_execute([ch1.reader, ch2.reader, ch3.reader], out_ch.writer)
+        results = await out_ch.reader.collect()
+
+        # 2 × 1 × 2 = 4 cartesian product
+        assert len(results) == 4
+
+    @pytest.mark.asyncio
+    async def test_duplicate_tag_keys_cross_product(self):
+        """Multiple rows per tag key per side should produce a cross-product.
+
+        Side 0 has 2 rows with id=1, side 1 has 3 rows with id=1.
+        The join should emit 2 × 3 = 6 rows.
+        """
+        t1 = pa.table(
+            {
+                "id": pa.array([1, 1], type=pa.int64()),
+                "a": pa.array([10, 11], type=pa.int64()),
+            }
+        )
+        t2 = pa.table(
+            {
+                "id": pa.array([1, 1, 1], type=pa.int64()),
+                "b": pa.array([100, 101, 102], type=pa.int64()),
+            }
+        )
+        s1 = ArrowTableStream(t1, tag_columns=["id"])
+        s2 = ArrowTableStream(t2, tag_columns=["id"])
+
+        op = Join()
+
+        # Sync reference
+        sync_results = sync_process_to_rows(op, s1, s2)
+
+        # Async
+        ch1 = Channel(buffer_size=64)
+        ch2 = Channel(buffer_size=64)
+        out = Channel(buffer_size=64)
+        await feed(s1, ch1)
+        await feed(s2, ch2)
+        await op.async_execute([ch1.reader, ch2.reader], out.writer)
+        async_results = await out.reader.collect()
+
+        assert len(async_results) == 6
+        assert len(async_results) == len(sync_results)
+
+        async_data = sorted(
+            (p.as_dict()["a"], p.as_dict()["b"]) for _, p in async_results
+        )
+        sync_data = sorted(
+            (p.as_dict()["a"], p.as_dict()["b"]) for _, p in sync_results
+        )
+        assert async_data == sync_data
+
+    @pytest.mark.asyncio
+    async def test_three_way_duplicate_keys_cross_product(self):
+        """Three-way join with duplicate tag keys produces correct cross-product.
+
+        Side 0: 2 rows, side 1: 1 row, side 2: 2 rows → 2 × 1 × 2 = 4 rows.
+        """
+        t1 = pa.table(
+            {
+                "id": pa.array([1, 1], type=pa.int64()),
+                "a": pa.array([10, 11], type=pa.int64()),
+            }
+        )
+        t2 = pa.table(
+            {
+                "id": pa.array([1], type=pa.int64()),
+                "b": pa.array([100], type=pa.int64()),
+            }
+        )
+        t3 = pa.table(
+            {
+                "id": pa.array([1, 1], type=pa.int64()),
+                "c": pa.array([1000, 1001], type=pa.int64()),
+            }
+        )
+        s1 = ArrowTableStream(t1, tag_columns=["id"])
+        s2 = ArrowTableStream(t2, tag_columns=["id"])
+        s3 = ArrowTableStream(t3, tag_columns=["id"])
+
+        op = Join()
+        sync_results = sync_process_to_rows(op, s1, s2, s3)
+
+        ch1 = Channel(buffer_size=64)
+        ch2 = Channel(buffer_size=64)
+        ch3 = Channel(buffer_size=64)
+        out = Channel(buffer_size=64)
+        await feed(s1, ch1)
+        await feed(s2, ch2)
+        await feed(s3, ch3)
+        await op.async_execute([ch1.reader, ch2.reader, ch3.reader], out.writer)
+        async_results = await out.reader.collect()
+
+        assert len(async_results) == 4
+        assert len(async_results) == len(sync_results)
+
+        async_data = sorted(
+            (p.as_dict()["a"], p.as_dict()["b"], p.as_dict()["c"])
+            for _, p in async_results
+        )
+        sync_data = sorted(
+            (p.as_dict()["a"], p.as_dict()["b"], p.as_dict()["c"])
+            for _, p in sync_results
         )
         assert async_data == sync_data
 
@@ -1400,7 +1677,7 @@ class TestJoinSystemTagEquivalence:
 
     @pytest.mark.asyncio
     async def test_three_way_system_tags_match_sync(self):
-        """N>2 barrier fallback should produce the same system tags as sync."""
+        """N-way MJoin should produce the same system tags as sync."""
         s1 = _make_source("id", "a", {"id": ["m", "n"], "a": [1, 2]})
         s2 = _make_source("id", "b", {"id": ["m", "n"], "b": [10, 20]})
         s3 = _make_source("id", "c", {"id": ["m", "n"], "c": [100, 200]})
@@ -1410,7 +1687,7 @@ class TestJoinSystemTagEquivalence:
         sync_result = op.static_process(s1, s2, s3)
         sync_rows = list(sync_result.iter_packets())
 
-        # Async (N>2 barrier path)
+        # Async (N-way MJoin path)
         op.validate_inputs(s1, s2, s3)
         ch1 = Channel(buffer_size=64)
         ch2 = Channel(buffer_size=64)
