@@ -649,7 +649,7 @@ class PythonPacketFunction(PacketFunctionBase[PythonFunctionExecutorProtocol]):
         Returns:
             A dict with ``packet_function_type_id`` and a nested ``config``
             containing enough information to reconstruct this instance via
-            :meth:`from_config`.
+            `from_config`.
         """
         return {
             "packet_function_type_id": self.packet_function_type_id,
@@ -673,7 +673,7 @@ class PythonPacketFunction(PacketFunctionBase[PythonFunctionExecutorProtocol]):
         """Reconstruct a PythonPacketFunction by importing the callable.
 
         Args:
-            config: A dict as produced by :meth:`to_config`.
+            config: A dict as produced by `to_config`.
 
         Returns:
             A new ``PythonPacketFunction`` wrapping the imported callable.
@@ -748,7 +748,7 @@ class PacketFunctionWrapper(PacketFunctionBase[E]):
         """Reconstruct by delegating to the wrapped function type.
 
         Args:
-            config: A dict as produced by :meth:`to_config`.
+            config: A dict as produced by `to_config`.
 
         Returns:
             A new instance reconstructed from *config*.
@@ -763,7 +763,7 @@ class PacketFunctionWrapper(PacketFunctionBase[E]):
         override this to handle additional types.
 
         Args:
-            config: A config dict as produced by :meth:`to_config`.
+            config: A config dict as produced by `to_config`.
 
         Returns:
             The class to call ``from_config`` on.

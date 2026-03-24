@@ -698,7 +698,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
           function pods are reconstructed.
 
         Args:
-            path: Path to the JSON file produced by :meth:`save`.
+            path: Path to the JSON file produced by `save`.
             mode: ``"full"`` (default) or ``"read_only"``.
 
         Returns:
