@@ -5,7 +5,7 @@ its serialized config (e.g. an in-memory ``ArrowTableSource`` or ``DictSource``)
 It returns the same ``content_hash``, ``pipeline_hash``, ``source_id``, and
 ``output_schema`` as the original, so downstream hash chains remain
 consistent.  Any attempt to iterate or materialize data raises an error
-unless a live source has been bound via :meth:`bind`.
+unless a live source has been bound via `bind`.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ class SourceProxy(RootSource):
 
     When created without a bound source, ``SourceProxy`` returns stored hashes
     and schemas but raises on data access.  A live source can be substituted
-    in later via :meth:`bind` — if the source's identity matches, all data
+    in later via `bind` — if the source's identity matches, all data
     methods delegate to it.
 
     Args:
@@ -41,7 +41,7 @@ class SourceProxy(RootSource):
         packet_schema: The original source's packet schema.
         expected_class_name: Class name of the original source (e.g.
             ``"ArrowTableSource"``).  Informational and used for validation
-            in :meth:`bind`.
+            in `bind`.
         source_config: The original source's serialized config (for to_config).
         label: Optional label.
     """
@@ -82,7 +82,7 @@ class SourceProxy(RootSource):
 
     @property
     def is_bound(self) -> bool:
-        """``True`` if a live source has been bound via :meth:`bind`."""
+        """``True`` if a live source has been bound via `bind`."""
         return self._delegate is not None
 
     def bind(self, source: SourceProtocol) -> None:

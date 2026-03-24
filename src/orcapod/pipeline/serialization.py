@@ -401,7 +401,7 @@ def serialize_schema(schema: Any, type_converter: Any | None = None) -> dict[str
     The result contains human-readable Arrow type strings for each field
     (e.g. ``"int64"``, ``"large_string"``, ``"list<item: int64>"``).
     These strings follow Arrow's canonical format and can be parsed back
-    by :func:`deserialize_schema` in any language that implements the
+    by `deserialize_schema` in any language that implements the
     Arrow type grammar.
 
     Args:
@@ -439,7 +439,7 @@ def deserialize_schema(
 
     Args:
         schema_dict: Dict mapping field names to Arrow type strings, as
-            produced by :func:`serialize_schema`.
+            produced by `serialize_schema`.
         type_converter: Optional type converter for Arrow→Python conversion.
             When ``None``, the default data context's converter is used.
 

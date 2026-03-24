@@ -70,17 +70,17 @@ DEFAULT_LOG_PATH: tuple[str, ...] = ("execution_logs",)
 
 
 class PacketLogger:
-    """Context-bound logger created by :class:`LoggingObserver` per packet.
+    """Context-bound logger created by `LoggingObserver` per packet.
 
     Holds all context needed to write a structured log row
     (run_id, node_label, node_hash, tag data) so the caller only needs to
-    pass the :class:`~orcapod.pipeline.logging_capture.CapturedLogs` payload.
+    pass the `CapturedLogs` payload.
 
     Tag data is stored as individual queryable columns (not JSON) alongside
     the fixed log columns.
 
     This class is not intended to be instantiated directly — use
-    :meth:`LoggingObserver.create_packet_logger` instead.
+    `LoggingObserver.create_packet_logger` instead.
     """
 
     def __init__(
@@ -149,7 +149,7 @@ class PacketLogger:
 class _ContextualizedLoggingObserver:
     """Lightweight wrapper holding parent observer + node identity context.
 
-    Created by :meth:`LoggingObserver.contextualize`. All lifecycle hooks
+    Created by `LoggingObserver.contextualize`. All lifecycle hooks
     and logger creation use the stamped ``node_hash`` and ``node_label``.
     """
 
@@ -246,21 +246,21 @@ class LoggingObserver:
         # After the run, read back captured logs:
         logs_table = obs.get_logs()   # pyarrow.Table
 
-    For async / Ray pipelines use :class:`~orcapod.pipeline.AsyncPipelineOrchestrator`
+    For async / Ray pipelines use `AsyncPipelineOrchestrator`
     with the same observer::
 
         orch = AsyncPipelineOrchestrator(observer=obs)
         pipeline.run(orchestrator=orch)
 
     Args:
-        log_database: Any :class:`~orcapod.protocols.database_protocols.ArrowDatabaseProtocol`
-            instance — :class:`~orcapod.databases.InMemoryArrowDatabase`,
+        log_database: Any `ArrowDatabaseProtocol`
+            instance — `InMemoryArrowDatabase`,
             a Delta Lake database, etc.
         log_path: Tuple of strings identifying the table within the database.
             Defaults to ``("execution_logs",)``.
 
     Note:
-        Construction calls :func:`~orcapod.pipeline.logging_capture.install_capture_streams`
+        Construction calls `install_capture_streams`
         so that stdout/stderr tee-capture is active from the moment the observer
         is created.
     """
@@ -330,7 +330,7 @@ class LoggingObserver:
         packet: PacketProtocol,
         pipeline_path: tuple[str, ...] = (),
     ) -> PacketLogger:
-        """Return a :class:`PacketLogger` bound to *tag* context.
+        """Return a `PacketLogger` bound to *tag* context.
 
         Log rows are stored at a pipeline-path-mirrored location:
         ``pipeline_path[:1] + ("logs",) + pipeline_path[1:]``.  This gives
@@ -338,7 +338,7 @@ class LoggingObserver:
 
         Warning:
             This method **must** be called on a *contextualized* observer
-            (the object returned by :meth:`contextualize`), not on the root
+            (the object returned by `contextualize`), not on the root
             ``LoggingObserver`` directly.  Calling it on the root observer
             produces a ``PacketLogger`` where ``_log_node_label`` and
             ``_log_node_hash`` are both written as ``""`` (empty string),
@@ -369,7 +369,7 @@ class LoggingObserver:
     def get_logs(
         self, pipeline_path: tuple[str, ...] | None = None
     ) -> pa.Table | None:
-        """Read log rows from the database as a :class:`pyarrow.Table`.
+        """Read log rows from the database as a `pyarrow.Table`.
 
         Args:
             pipeline_path: If provided, reads logs for a specific node

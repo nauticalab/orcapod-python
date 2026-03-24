@@ -242,7 +242,7 @@ class GenericAliasHandler:
 
     When the origin is ``typing.Union`` (i.e. ``typing.Optional[X]`` or
     ``typing.Union[X, Y]``), the handler produces a canonical ``"union"``
-    form with sorted args — identical to :class:`UnionTypeHandler` — so that
+    form with sorted args — identical to `UnionTypeHandler` — so that
     ``typing.Optional[int]`` and ``int | None`` hash equivalently.
     """
 
@@ -278,7 +278,7 @@ class UnionTypeHandler:
     runtime, which is distinct from ``typing.Union[str, None]``
     (a ``typing._GenericAlias``).  This handler normalises union types into
     a canonical ``"union"`` form with sorted args — identical to the union
-    branch in :class:`GenericAliasHandler` — so that ``int | None``,
+    branch in `GenericAliasHandler` — so that ``int | None``,
     ``typing.Optional[int]``, and ``typing.Union[int, None]`` all hash
     equivalently.
     """
@@ -323,7 +323,7 @@ class ArrowTableHandler:
 
 class SchemaHandler:
     """
-    Handler for :class:`~orcapod.types.Schema` objects.
+    Handler for `Schema` objects.
 
     Produces a stable dict containing both the field-type mapping and the
     sorted list of optional field names, so that two schemas differing only

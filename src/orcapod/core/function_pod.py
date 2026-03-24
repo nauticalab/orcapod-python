@@ -317,7 +317,7 @@ class FunctionPod(_FunctionPodBase):
         """Reconstruct a FunctionPod from a config dict.
 
         Args:
-            config: A dict as produced by :meth:`to_config`.
+            config: A dict as produced by `to_config`.
             fallback_to_proxy: If ``True`` and the packet function cannot be
                 resolved, use a ``PacketFunctionProxy`` instead of raising.
 

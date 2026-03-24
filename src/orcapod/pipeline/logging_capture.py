@@ -152,7 +152,7 @@ def install_capture_streams() -> None:
     * The root logger gains a ``ContextVarLoggingHandler`` that captures
       records to per-context buffers (covering Python ``logging`` calls).
 
-    .. note::
+    Note:
         Subprocess and C-extension output bypasses Python's stream objects and
         goes directly to file descriptors 1/2.  For local execution these are
         *not* captured (but are still visible in the terminal).  Ray remote
@@ -234,7 +234,7 @@ class LocalCaptureContext:
         success: bool,
         tb: str | None = None,
     ) -> CapturedLogs:
-        """Return a :class:`CapturedLogs` from what was captured in this context."""
+        """Return a `CapturedLogs` from what was captured in this context."""
         return CapturedLogs(
             stdout_log=self._stdout_buf.getvalue(),
             stderr_log=self._stderr_buf.getvalue(),

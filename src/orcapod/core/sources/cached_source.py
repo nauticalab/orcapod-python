@@ -107,7 +107,7 @@ class CachedSource(RootSource):
         CachedSource can still serve data from its cache database.
 
         Args:
-            config: Dict as produced by :meth:`to_config`.
+            config: Dict as produced by `to_config`.
 
         Returns:
             A new CachedSource constructed from the config.

@@ -185,7 +185,7 @@ class RayExecutor(PythonFunctionExecutorBase):
         *,
         logger: PacketExecutionLoggerProtocol | None = None,
     ) -> Any:
-        """Async counterpart of :meth:`execute_callable`."""
+        """Async counterpart of `execute_callable`."""
         import ray
 
         self._ensure_ray_initialized()

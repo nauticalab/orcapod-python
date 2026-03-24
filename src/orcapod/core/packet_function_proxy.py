@@ -5,7 +5,7 @@ function cannot be imported, ``PacketFunctionProxy`` stands in so that
 ``FunctionPod``, ``FunctionNode``, and ``CachedFunctionPod`` can still be
 constructed and cached data can be accessed.  Invoking the proxy raises
 ``PacketFunctionUnavailableError`` unless a real function has been bound
-via :meth:`bind`.
+via `bind`.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ class PacketFunctionProxy(PacketFunctionBase):
 
     Satisfies ``PacketFunctionProtocol`` so pipeline construction succeeds.
     All execution methods raise ``PacketFunctionUnavailableError`` until a
-    real function is attached via :meth:`bind`.
+    real function is attached via `bind`.
 
     Args:
         config: Serialized packet function config dict (as produced by
