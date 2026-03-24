@@ -972,13 +972,12 @@ class FunctionNode(StreamBase):
 
     def _load_all_cached_records(
         self,
-    ) -> "tuple[tuple[str, ...], pa.Table] | None":
+    ) -> "tuple[tuple[str, ...], Any] | None":
         """Join pipeline DB and result DB; return (tag_keys, data_table).
 
         Returns ``None`` when either database is empty or unavailable.
         Does not access ``_input_stream``.
         """
-        import pyarrow as pa
         import polars as pl
 
         if self._cached_function_pod is None or self._pipeline_database is None:

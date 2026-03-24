@@ -1,6 +1,5 @@
 """End-to-end tests for Pipeline.save() and Pipeline.load()."""
 
-import asyncio
 import csv
 import json
 
