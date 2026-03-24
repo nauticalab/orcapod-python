@@ -93,16 +93,26 @@ class FunctionNode(StreamBase):
         self._function_pod = function_pod
         super().__init__(label=label, config=config)
 
-        # validate the input stream
-        _, incoming_packet_types = input_stream.output_schema()
-        expected_packet_schema = self._packet_function.input_packet_schema
-        if not schema_utils.check_schema_compatibility(
-            incoming_packet_types, expected_packet_schema
-        ):
-            raise ValueError(
-                f"Incoming packet data type {incoming_packet_types} from {input_stream} "
-                f"is not compatible with expected input schema {expected_packet_schema}"
-            )
+        # validate the input stream — skip for UNAVAILABLE streams because their
+        # stored schema uses serialized type strings (e.g. 'int64') that the
+        # schema-compatibility checker cannot handle, and we will never actually
+        # iterate such a stream (CACHE_ONLY mode reads directly from the DB).
+        from orcapod.pipeline.serialization import LoadStatus
+
+        _stream_unavailable = (
+            hasattr(input_stream, "load_status")
+            and input_stream.load_status == LoadStatus.UNAVAILABLE
+        )
+        if not _stream_unavailable:
+            _, incoming_packet_types = input_stream.output_schema()
+            expected_packet_schema = self._packet_function.input_packet_schema
+            if not schema_utils.check_schema_compatibility(
+                incoming_packet_types, expected_packet_schema
+            ):
+                raise ValueError(
+                    f"Incoming packet data type {incoming_packet_types} from {input_stream} "
+                    f"is not compatible with expected input schema {expected_packet_schema}"
+                )
 
         self._input_stream = input_stream
 
@@ -226,7 +236,7 @@ class FunctionNode(StreamBase):
         result_db = databases.get("result", pipeline_db)
 
         if function_pod is not None and input_stream is not None:
-            # Full mode: construct normally
+            # Full / READ_ONLY / CACHE_ONLY mode: construct normally via __init__.
             pipeline_path = tuple(descriptor.get("pipeline_path", ()))
             # Derive pipeline_path_prefix by stripping the suffix that
             # __init__ appends (packet_function.uri + node hash element).
@@ -258,7 +268,20 @@ class FunctionNode(StreamBase):
                 label=descriptor.get("label"),
             )
             node._descriptor = descriptor
-            node._load_status = LoadStatus.FULL
+
+            # Determine mode based on upstream availability and function type.
+            from orcapod.core.packet_function_proxy import PacketFunctionProxy
+
+            input_unavailable = (
+                hasattr(input_stream, "load_status")
+                and input_stream.load_status == LoadStatus.UNAVAILABLE
+            )
+            if input_unavailable:
+                node._load_status = LoadStatus.CACHE_ONLY
+            elif isinstance(function_pod.packet_function, PacketFunctionProxy):
+                node._load_status = LoadStatus.READ_ONLY
+            else:
+                node._load_status = LoadStatus.FULL
             return node
 
         # Read-only mode: bypass __init__, set minimum required state
@@ -944,10 +967,137 @@ class FunctionNode(StreamBase):
         )
 
     # ------------------------------------------------------------------
+    # Cache-only helpers (PLT-1156)
+    # ------------------------------------------------------------------
+
+    def _load_all_cached_records(
+        self,
+    ) -> "tuple[tuple[str, ...], pa.Table] | None":
+        """Join pipeline DB and result DB; return (tag_keys, data_table).
+
+        Returns ``None`` when either database is empty or unavailable.
+        Does not access ``_input_stream``.
+        """
+        import pyarrow as pa
+        import polars as pl
+
+        if self._cached_function_pod is None or self._pipeline_database is None:
+            return None
+
+        PIPELINE_ENTRY_ID_COL = "__pipeline_entry_id"
+
+        taginfo = self._pipeline_database.get_all_records(
+            self.pipeline_path,
+            record_id_column=PIPELINE_ENTRY_ID_COL,
+        )
+        results = self._cached_function_pod._result_database.get_all_records(
+            self._cached_function_pod.record_path,
+            record_id_column=constants.PACKET_RECORD_ID,
+        )
+
+        if taginfo is None or results is None:
+            return None
+
+        joined = (
+            pl.DataFrame(taginfo)
+            .join(
+                pl.DataFrame(results),
+                on=constants.PACKET_RECORD_ID,
+                how="inner",
+            )
+            .to_arrow()
+        )
+
+        if joined.num_rows == 0:
+            return None
+
+        # Tag keys are the user-facing tag columns from the pipeline DB table.
+        # Exclude: meta columns (__*), source columns (_source_*),
+        # system-tag columns (e.g. __tag_*), and the entry-ID column.
+        tag_keys = tuple(
+            c
+            for c in taginfo.column_names
+            if not c.startswith(constants.META_PREFIX)
+            and not c.startswith(constants.SOURCE_PREFIX)
+            and not c.startswith(constants.SYSTEM_TAG_PREFIX)
+            and c != PIPELINE_ENTRY_ID_COL
+        )
+
+        drop_cols = [
+            c
+            for c in joined.column_names
+            if c.startswith(constants.META_PREFIX) or c == PIPELINE_ENTRY_ID_COL
+        ]
+        data_table = joined.drop([c for c in drop_cols if c in joined.column_names])
+        return tag_keys, data_table
+
+    def _iter_all_from_database(
+        self,
+    ) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
+        """Yield all cached (tag, packet) pairs from the DB.
+
+        Used in ``CACHE_ONLY`` mode when the upstream is unavailable.
+        Does not access ``_input_stream``.
+        """
+        result = self._load_all_cached_records()
+        if result is None:
+            return
+        tag_keys, data_table = result
+        stream = ArrowTableStream(data_table, tag_columns=tag_keys)
+        for i, (tag, packet) in enumerate(stream.iter_packets()):
+            self._cached_output_packets[i] = (tag, packet)
+            yield tag, packet
+
+    async def _async_execute_cache_only(
+        self,
+        output: "WritableChannel[tuple[TagProtocol, PacketProtocol]]",
+        *,
+        observer: Any | None = None,
+    ) -> None:
+        """Send all DB-cached (tag, packet) pairs to *output*.
+
+        Used in ``CACHE_ONLY`` mode when the upstream is unavailable.
+        Does not access ``_input_stream``.
+        """
+        from orcapod.pipeline.observer import NoOpObserver
+
+        obs = observer if observer is not None else NoOpObserver()
+        node_label = self.label
+        node_hash = self.content_hash().to_string()
+        pp = self.pipeline_path
+
+        obs.on_node_start(node_label, node_hash, pipeline_path=pp, tag_schema=None)
+        try:
+            result = self._load_all_cached_records()
+            if result is not None:
+                tag_keys, data_table = result
+                stream = ArrowTableStream(data_table, tag_columns=tag_keys)
+                for tag, packet in stream.iter_packets():
+                    obs.on_packet_start(node_label, tag, packet)
+                    obs.on_packet_end(node_label, tag, packet, packet, cached=True)
+                    await output.send((tag, packet))
+            obs.on_node_end(node_label, node_hash, pipeline_path=pp)
+        finally:
+            await output.close()
+
+    # ------------------------------------------------------------------
     # Iteration
     # ------------------------------------------------------------------
 
     def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
+        from orcapod.pipeline.serialization import LoadStatus
+
+        status = self.load_status
+        if status == LoadStatus.CACHE_ONLY:
+            yield from self._iter_all_from_database()
+            return
+
+        if status == LoadStatus.UNAVAILABLE:
+            raise RuntimeError(
+                f"FunctionNode {self.label!r} is unavailable: "
+                "no function pod and no database attached."
+            )
+
         if self.is_stale:
             self.clear_cache()
         self._ensure_iterator()
@@ -1228,11 +1378,29 @@ class FunctionNode(StreamBase):
         results first, then compute missing packets concurrently.  Otherwise,
         routes each packet through ``async_process_packet`` directly.
 
+        In ``CACHE_ONLY`` mode the upstream is unavailable; all cached results
+        are served directly from persistent storage without touching the input
+        channel.
+
         Args:
             input_channel: Single readable channel of (tag, packet) pairs.
             output: Writable channel for output (tag, packet) pairs.
             observer: Optional execution observer for hooks.
         """
+        from orcapod.pipeline.serialization import LoadStatus
+
+        status = self.load_status
+        if status == LoadStatus.CACHE_ONLY:
+            await self._async_execute_cache_only(output, observer=observer)
+            return
+
+        if status == LoadStatus.UNAVAILABLE:
+            await output.close()
+            raise RuntimeError(
+                f"FunctionNode {self.label!r} is unavailable: "
+                "no function pod and no database attached."
+            )
+
         from orcapod.pipeline.observer import NoOpObserver
 
         node_label = self.label

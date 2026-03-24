@@ -924,9 +924,12 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         When the upstream is usable and mode is not ``"read_only"``, attempts
         to reconstruct the function pod with ``fallback_to_proxy=True`` so
         that a ``PacketFunctionProxy`` is used when the original function
-        cannot be imported.  Nodes backed by a proxy get
-        ``LoadStatus.READ_ONLY`` — they can read cached results but cannot
-        compute new ones.
+        cannot be imported.
+
+        When the upstream is UNAVAILABLE (but exists), still builds the proxy
+        pod and wires it up — ``from_descriptor`` will detect the unavailable
+        stream and set ``LoadStatus.CACHE_ONLY`` so the node can serve all
+        cached results from persistent storage without touching the upstream.
 
         Args:
             descriptor: The serialized node descriptor.
@@ -940,7 +943,6 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             A ``FunctionNode`` instance.
         """
         from orcapod.core.function_pod import FunctionPod
-        from orcapod.core.packet_function_proxy import PacketFunctionProxy
         from orcapod.pipeline.serialization import LoadStatus
 
         if mode != "read_only" and upstream_usable:
@@ -954,18 +956,33 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     input_stream=upstream_node,
                     databases=databases,
                 )
-
-                # Determine load status: proxies can only read cached data.
-                if isinstance(pod.packet_function, PacketFunctionProxy):
-                    node._load_status = LoadStatus.READ_ONLY
-                else:
-                    node._load_status = LoadStatus.FULL
-
+                # load_status is set inside from_descriptor based on
+                # upstream availability and function proxy status.
                 return node
             except Exception:
                 logger.warning(
                     "Failed to reconstruct function node %r, "
                     "falling back to read-only.",
+                    descriptor.get("label"),
+                )
+        elif mode != "read_only" and not upstream_usable and upstream_node is not None:
+            # Upstream exists but is UNAVAILABLE — build a proxy pod so the
+            # node can serve cached results in CACHE_ONLY mode.
+            try:
+                pod = FunctionPod.from_config(
+                    descriptor["function_pod"], fallback_to_proxy=True
+                )
+                node = FunctionNode.from_descriptor(
+                    descriptor,
+                    function_pod=pod,
+                    input_stream=upstream_node,
+                    databases=databases,
+                )
+                return node
+            except Exception:
+                logger.warning(
+                    "Failed to reconstruct function node %r in cache-only mode, "
+                    "falling back to unavailable.",
                     descriptor.get("label"),
                 )
         elif mode != "read_only" and not upstream_usable:
