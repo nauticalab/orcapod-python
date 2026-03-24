@@ -97,7 +97,8 @@ class TestDeterministicConcurrencyTracking:
         values = sorted(pkt.as_dict()["result"] for _, pkt in results)
         assert values == [0, 2, 4, 6, 8]
 
-        # With concurrency restored (PLT-930), peak should match max_concurrency.
+        # With concurrency restored (PLT-930), peak should demonstrate
+        # concurrent execution and must not exceed max_concurrency.
         assert peak > 1, f"Expected concurrent execution but peak was {peak}"
         assert peak <= 5, f"Peak {peak} exceeded max_concurrency=5"
 
