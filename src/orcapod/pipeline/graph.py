@@ -784,7 +784,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     upstream_node is not None
                     and hasattr(upstream_node, "load_status")
                     and upstream_node.load_status
-                    in (LoadStatus.FULL, LoadStatus.READ_ONLY)
+                    in (LoadStatus.FULL, LoadStatus.READ_ONLY, LoadStatus.CACHE_ONLY)
                 )
 
                 # Build databases dict
@@ -965,9 +965,14 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     "falling back to read-only.",
                     descriptor.get("label"),
                 )
-        elif mode != "read_only" and not upstream_usable and upstream_node is not None:
-            # Upstream exists but is UNAVAILABLE — build a proxy pod so the
-            # node can serve cached results in CACHE_ONLY mode.
+        elif (
+            mode != "read_only"
+            and upstream_node is not None
+            and hasattr(upstream_node, "load_status")
+            and upstream_node.load_status == LoadStatus.UNAVAILABLE
+        ):
+            # Upstream exists but is explicitly UNAVAILABLE — build a proxy pod
+            # so the node can serve cached results in CACHE_ONLY mode.
             try:
                 pod = FunctionPod.from_config(
                     descriptor["function_pod"], fallback_to_proxy=True
