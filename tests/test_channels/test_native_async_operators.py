@@ -1380,6 +1380,128 @@ class TestJoinNativeAsync:
         )
         assert async_data == sync_data
 
+    @pytest.mark.asyncio
+    async def test_partially_overlapping_tags_matches_sync(self):
+        """Staggered join with partially overlapping tags matches sync.
+
+        S0: tag={a}, S1: tag={b}, S2: tag={a}.
+        static_process joins iteratively: (S0 ⋈ S1) cartesian, then
+        result ⋈ S2 on shared tag 'a'.  The async staggered chain must
+        produce the same 2 rows (not 4 from a full cartesian).
+        """
+        t1 = pa.table(
+            {
+                "a": pa.array([1, 2], type=pa.int64()),
+                "x": pa.array([10, 20], type=pa.int64()),
+            }
+        )
+        t2 = pa.table(
+            {
+                "b": pa.array([5], type=pa.int64()),
+                "y": pa.array([50], type=pa.int64()),
+            }
+        )
+        t3 = pa.table(
+            {
+                "a": pa.array([1, 2], type=pa.int64()),
+                "z": pa.array([100, 200], type=pa.int64()),
+            }
+        )
+        s1 = ArrowTableStream(t1, tag_columns=["a"])
+        s2 = ArrowTableStream(t2, tag_columns=["b"])
+        s3 = ArrowTableStream(t3, tag_columns=["a"])
+
+        op = Join()
+        sync_results = sync_process_to_rows(op, s1, s2, s3)
+
+        ch1 = Channel(buffer_size=64)
+        ch2 = Channel(buffer_size=64)
+        ch3 = Channel(buffer_size=64)
+        out = Channel(buffer_size=64)
+        await feed(s1, ch1)
+        await feed(s2, ch2)
+        await feed(s3, ch3)
+        hashes = [s1.pipeline_hash(), s2.pipeline_hash(), s3.pipeline_hash()]
+        await op.async_execute(
+            [ch1.reader, ch2.reader, ch3.reader],
+            out.writer,
+            input_pipeline_hashes=hashes,
+        )
+        async_results = await out.reader.collect()
+
+        # Sync produces 2 rows (constrained on 'a'); async must match
+        assert len(sync_results) == 2
+        assert len(async_results) == len(sync_results)
+
+        async_data = sorted(
+            (t.as_dict()["a"], p.as_dict()) for t, p in async_results
+        )
+        sync_data = sorted(
+            (t.as_dict()["a"], p.as_dict()) for t, p in sync_results
+        )
+        assert async_data == sync_data
+
+    @pytest.mark.asyncio
+    async def test_input_pipeline_hashes_length_mismatch(self):
+        """async_execute raises ValueError if input_pipeline_hashes length != inputs."""
+        t1 = pa.table({"id": pa.array([1], type=pa.int64()), "a": pa.array([10], type=pa.int64())})
+        t2 = pa.table({"id": pa.array([1], type=pa.int64()), "b": pa.array([20], type=pa.int64())})
+        s1 = ArrowTableStream(t1, tag_columns=["id"])
+        s2 = ArrowTableStream(t2, tag_columns=["id"])
+
+        op = Join()
+        ch1 = Channel(buffer_size=64)
+        ch2 = Channel(buffer_size=64)
+        out = Channel(buffer_size=64)
+        await feed(s1, ch1)
+        await feed(s2, ch2)
+        with pytest.raises(ValueError, match="must match inputs length"):
+            await op.async_execute(
+                [ch1.reader, ch2.reader],
+                out.writer,
+                input_pipeline_hashes=[s1.pipeline_hash()],  # only 1, need 2
+            )
+
+    @pytest.mark.asyncio
+    async def test_buffered_rows_both_sides_emit_on_reindex(self):
+        """Matches buffered on both sides are emitted when shared_keys is first computed.
+
+        Sends multiple rows to one side before any row from the other,
+        so both sides have buffered rows when shared_keys is determined.
+        """
+        op = Join()
+        ch1 = Channel(buffer_size=64)
+        ch2 = Channel(buffer_size=64)
+        out = Channel(buffer_size=64)
+
+        from orcapod.core.datagrams import Packet, Tag
+
+        join_task = asyncio.create_task(
+            op.async_execute([ch1.reader, ch2.reader], out.writer)
+        )
+
+        # Buffer 2 rows on side 0 before side 1 sends anything
+        await ch1.writer.send((Tag({"id": 1}), Packet({"a": 10})))
+        await ch1.writer.send((Tag({"id": 2}), Packet({"a": 20})))
+
+        # Give the event loop a chance to process
+        await asyncio.sleep(0.01)
+
+        # Now side 1 sends — triggers shared_keys computation and re-index
+        await ch2.writer.send((Tag({"id": 1}), Packet({"b": 100})))
+        await ch2.writer.send((Tag({"id": 2}), Packet({"b": 200})))
+
+        # Close and collect
+        await ch1.writer.close()
+        await ch2.writer.close()
+        await join_task
+        results = await out.reader.collect()
+
+        assert len(results) == 2
+        result_map = {t.as_dict()["id"]: p.as_dict() for t, p in results}
+        assert result_map[1] == {"a": 10, "b": 100}
+        assert result_map[2] == {"a": 20, "b": 200}
+
 
 # ===================================================================
 # Multi-stage pipeline integration
@@ -1713,6 +1835,48 @@ class TestJoinSystemTagEquivalence:
         sync_sys = _extract_system_tags(sync_rows)
         async_sys = _extract_system_tags(async_rows)
         assert sync_sys == async_sys
+
+
+class TestSortMergedSystemTags:
+    """Unit tests for Join._sort_merged_system_tags."""
+
+    def test_sorts_same_provenance_path_by_value(self):
+        """System tag values at different positions within the same provenance
+        path should be sorted by (source_id, record_id) tuple."""
+        merged_sys = {
+            # Provenance path "abc123", position 0 — higher values
+            "_tag_source_id::abc123:0": "z_source",
+            "_tag_record_id::abc123:0": "z_record",
+            # Provenance path "abc123", position 1 — lower values
+            "_tag_source_id::abc123:1": "a_source",
+            "_tag_record_id::abc123:1": "a_record",
+        }
+        result = Join._sort_merged_system_tags(merged_sys)
+
+        # After sorting, position 0 should have the smaller values
+        assert result["_tag_source_id::abc123:0"] == "a_source"
+        assert result["_tag_record_id::abc123:0"] == "a_record"
+        assert result["_tag_source_id::abc123:1"] == "z_source"
+        assert result["_tag_record_id::abc123:1"] == "z_record"
+
+    def test_single_position_unchanged(self):
+        """Groups with only one position should not be modified."""
+        merged_sys = {
+            "_tag_source_id::abc123:0": "only_source",
+            "_tag_record_id::abc123:0": "only_record",
+        }
+        result = Join._sort_merged_system_tags(merged_sys)
+        assert result == merged_sys
+
+    def test_non_system_tag_keys_ignored(self):
+        """Non-system-tag keys should pass through unchanged."""
+        merged_sys = {
+            "regular_key": "value",
+            "_tag_source_id::abc123:0": "src0",
+            "_tag_record_id::abc123:0": "rec0",
+        }
+        result = Join._sort_merged_system_tags(merged_sys)
+        assert result["regular_key"] == "value"
 
 
 class TestSemiJoinSystemTagEquivalence:
