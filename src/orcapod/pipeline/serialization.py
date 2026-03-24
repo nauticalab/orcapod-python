@@ -25,6 +25,7 @@ class LoadStatus(Enum):
 
     FULL = "full"
     READ_ONLY = "read_only"
+    CACHE_ONLY = "cache_only"
     UNAVAILABLE = "unavailable"
 
 

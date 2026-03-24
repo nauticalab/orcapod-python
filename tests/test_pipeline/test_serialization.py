@@ -1,11 +1,13 @@
 """End-to-end tests for Pipeline.save() and Pipeline.load()."""
 
+import asyncio
 import csv
 import json
 
 import pyarrow as pa
 import pytest
 
+from orcapod.channels import Channel
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import Join
 from orcapod.core.packet_function import PythonPacketFunction
@@ -756,7 +758,12 @@ class TestFullMode:
         assert source_nodes[0].load_status == LoadStatus.UNAVAILABLE
 
     def test_full_mode_function_degrades_when_source_unavailable(self, simple_pipeline):
-        """Function node degrades to READ_ONLY when its source is UNAVAILABLE."""
+        """Function node degrades to CACHE_ONLY when its source is UNAVAILABLE.
+
+        The node still has a wired-up proxy pod and DB access so it can
+        serve all previously cached results (CACHE_ONLY), rather than being
+        completely inert (READ_ONLY was the pre-PLT-1156 incorrect behaviour).
+        """
         pipeline, tmp_path = simple_pipeline
         pipeline.run()
         pipeline.flush()
@@ -765,9 +772,9 @@ class TestFullMode:
         loaded = Pipeline.load(str(path), mode="full")
 
         fn = loaded.compiled_nodes["transform"]
-        # Source is DictSource (UNAVAILABLE), so function node can't have
-        # a live input stream and should degrade
-        assert fn.load_status == LoadStatus.READ_ONLY
+        # Source is DictSource (UNAVAILABLE), function node should be CACHE_ONLY
+        # so it can still serve cached results from persistent storage.
+        assert fn.load_status == LoadStatus.CACHE_ONLY
 
     def test_full_mode_operator_degrades_when_sources_unavailable(self, tmp_path):
         """Operator degrades to READ_ONLY when upstream sources are UNAVAILABLE."""
@@ -969,9 +976,10 @@ class TestLoadEdgeCases:
         path = tmp_path / "pipeline.json"
         pipeline.save(str(path))
         loaded = Pipeline.load(str(path))
-        # Default is full, so with DictSource the function degrades
+        # Default is full mode; with DictSource (UNAVAILABLE) the function node
+        # degrades to CACHE_ONLY (has DB access but no live stream).
         fn = loaded.compiled_nodes["transform"]
-        assert fn.load_status in (LoadStatus.FULL, LoadStatus.READ_ONLY)
+        assert fn.load_status in (LoadStatus.FULL, LoadStatus.READ_ONLY, LoadStatus.CACHE_ONLY)
 
     def test_load_multi_source_operator_pipeline_read_only(self, tmp_path):
         """Multi-source pipeline with operator loads in read_only with correct status."""
@@ -1254,3 +1262,177 @@ class TestPipelineLoadWithUnavailableFunction:
 
         doubled_ages = sorted(table.column("doubled_age").to_pylist())
         assert doubled_ages == [50, 60]
+
+
+# ---------------------------------------------------------------------------
+# PLT-1156: CACHE_ONLY mode — function node with unavailable upstream source
+# ---------------------------------------------------------------------------
+
+
+class TestCacheOnlyMode:
+    """FunctionNode with an UNAVAILABLE upstream serves all cached results."""
+
+    def _build_run_save(self, tmp_path, function, source_data=None):
+        """Helper: build pipeline, run it, flush DB, save descriptor.
+
+        Returns (json_path, original_results) where original_results is a
+        sorted list of output dicts from the original run.
+        """
+        if source_data is None:
+            source_data = [{"x": 1, "y": 2}, {"x": 3, "y": 4}]
+
+        db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
+        source = DictSource(
+            data=source_data,
+            tag_columns=["x"],
+            source_id="test_source",
+        )
+        pf = PythonPacketFunction(
+            function=function,
+            output_keys=["result"],
+            function_name=function.__name__,
+        )
+        pod = FunctionPod(packet_function=pf)
+        pipeline = Pipeline(name="test", pipeline_database=db)
+        with pipeline:
+            pod.process(source, label="transform")
+        pipeline.run()
+        db.flush()
+
+        # Capture original results for later comparison
+        fn_node = pipeline.compiled_nodes["transform"]
+        original = sorted(
+            [{"x": t.as_dict()["x"], "result": p.as_dict()["result"]}
+             for t, p in fn_node.iter_packets()],
+            key=lambda r: r["x"],
+        )
+
+        json_path = str(tmp_path / "pipeline.json")
+        pipeline.save(json_path)
+        return json_path, original
+
+    def test_function_node_gets_cache_only_status_when_source_unavailable(
+        self, tmp_path
+    ):
+        """Loading a pipeline whose source is UNAVAILABLE yields CACHE_ONLY status."""
+        json_path, _ = self._build_run_save(tmp_path, transform_func)
+        loaded = Pipeline.load(json_path, mode="full")
+
+        fn = loaded.compiled_nodes["transform"]
+        assert fn.load_status == LoadStatus.CACHE_ONLY
+
+    def test_cache_only_mode_iter_packets_returns_all_cached_data(self, tmp_path):
+        """iter_packets() on a CACHE_ONLY node returns all previously cached results."""
+        json_path, original = self._build_run_save(tmp_path, transform_func)
+        loaded = Pipeline.load(json_path, mode="full")
+
+        fn = loaded.compiled_nodes["transform"]
+        assert fn.load_status == LoadStatus.CACHE_ONLY
+
+        packets = list(fn.iter_packets())
+        assert len(packets) == len(original)
+
+        recovered = sorted(
+            [{"x": t.as_dict()["x"], "result": p.as_dict()["result"]}
+             for t, p in packets],
+            key=lambda r: r["x"],
+        )
+        assert recovered == original
+
+    def test_cache_only_mode_with_transient_function_yields_cached_data(
+        self, tmp_path
+    ):
+        """Transient (locally-scoped) function + UNAVAILABLE source → CACHE_ONLY,
+        and iter_packets() still returns all cached results via the DB.
+        """
+        # Define the function locally so it cannot be resolved by module path
+        # on reload (simulating a transient function → PacketFunctionProxy).
+        def local_double(y: int) -> int:
+            return y * 2
+
+        json_path, original = self._build_run_save(tmp_path, local_double)
+        loaded = Pipeline.load(json_path, mode="full")
+
+        fn = loaded.compiled_nodes["transform"]
+        assert fn.load_status == LoadStatus.CACHE_ONLY
+
+        packets = list(fn.iter_packets())
+        assert len(packets) == len(original)
+
+        recovered = sorted(
+            [{"x": t.as_dict()["x"], "result": p.as_dict()["result"]}
+             for t, p in packets],
+            key=lambda r: r["x"],
+        )
+        assert recovered == original
+
+    def test_cache_only_data_context_does_not_raise(self, tmp_path):
+        """data_context is accessible on a CACHE_ONLY function node."""
+        json_path, _ = self._build_run_save(tmp_path, transform_func)
+        loaded = Pipeline.load(json_path, mode="full")
+
+        fn = loaded.compiled_nodes["transform"]
+        assert fn.load_status == LoadStatus.CACHE_ONLY
+        # Should not raise AttributeError
+        _ = fn.data_context
+
+    def test_live_stream_does_not_trigger_cache_only_mode(self, tmp_path):
+        """A reconstructable live source produces FULL status, not CACHE_ONLY.
+
+        Guards against CACHE_ONLY being incorrectly triggered for sources that
+        CAN be reconstructed (i.e. are not UNAVAILABLE).
+        """
+        csv_path = str(tmp_path / "data.csv")
+        _write_csv(csv_path, [{"x": "1", "y": "2"}, {"x": "3", "y": "4"}])
+
+        db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
+        source = CSVSource(
+            file_path=csv_path,
+            tag_columns=["x"],
+            source_id="csv_source",
+        )
+        pf = PythonPacketFunction(
+            function=transform_func,
+            output_keys=["result"],
+            function_name="transform_func",
+        )
+        pod = FunctionPod(packet_function=pf)
+        pipeline = Pipeline(name="test", pipeline_database=db)
+        with pipeline:
+            pod.process(source, label="transform")
+        pipeline.run()
+        db.flush()
+        pipeline.save(str(tmp_path / "pipeline.json"))
+
+        loaded = Pipeline.load(str(tmp_path / "pipeline.json"), mode="full")
+        fn = loaded.compiled_nodes["transform"]
+
+        # Source is reconstructable (CSV), upstream is FULL → function node FULL
+        assert fn.load_status == LoadStatus.FULL
+        # CACHE_ONLY must NOT be set for a live stream
+        assert fn.load_status != LoadStatus.CACHE_ONLY
+
+    @pytest.mark.asyncio
+    async def test_cache_only_mode_async_execute_yields_cached_data(self, tmp_path):
+        """async_execute on a CACHE_ONLY node streams all cached results to output."""
+        json_path, original = self._build_run_save(tmp_path, transform_func)
+        loaded = Pipeline.load(json_path, mode="full")
+
+        fn = loaded.compiled_nodes["transform"]
+        assert fn.load_status == LoadStatus.CACHE_ONLY
+
+        # In CACHE_ONLY mode the input channel is empty (source is unavailable)
+        input_ch = Channel(buffer_size=16)
+        await input_ch.writer.close()
+        output_ch = Channel(buffer_size=16)
+
+        await fn.async_execute(input_ch.reader, output_ch.writer)
+        rows = await output_ch.reader.collect()
+
+        assert len(rows) == len(original)
+        recovered = sorted(
+            [{"x": t.as_dict()["x"], "result": p.as_dict()["result"]}
+             for t, p in rows],
+            key=lambda r: r["x"],
+        )
+        assert recovered == original
