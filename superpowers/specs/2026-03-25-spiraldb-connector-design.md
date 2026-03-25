@@ -269,6 +269,7 @@ def iter_batches(self, query, params=None, batch_size=1000):
     self._require_open()
     table_name = _parse_table_name(query)
     tbl = self._project.table(self._table_id(table_name))
+    # tbl.select() with no args selects all columns; verified in PLT-1163 exploration.
     reader = self._spiral.scan(tbl.select()).to_record_batches(batch_size=batch_size)
     yield from reader
 ```
@@ -364,7 +365,9 @@ def upsert_records(self, table_name, records, id_column, skip_existing=False):
     tbl = self._project.table(self._table_id(table_name))
     pk_cols = list(tbl.key_schema.names)
 
-    # Guard: id_column must be in the key schema (covers both branches)
+    # Single guard: id_column must appear in the table's key schema.
+    # This implicitly handles the empty-key-schema case too (nothing is ever
+    # `in []`, so an empty key schema always raises here).
     if id_column not in pk_cols:
         raise ValueError(
             f"id_column {id_column!r} is not in the table key schema {pk_cols}. "
@@ -377,11 +380,7 @@ def upsert_records(self, table_name, records, id_column, skip_existing=False):
         return
 
     # skip_existing=True: scan + client-side filter + write novel rows only.
-    if not pk_cols:
-        raise ValueError(
-            f"Table {table_name!r} has no key schema; "
-            "skip_existing=True requires a key schema to identify duplicates."
-        )
+    # `tbl.select()` (no-arg) selects all columns; verified in PLT-1163 exploration.
     existing = self._spiral.scan(tbl.select()).to_table()  # pyspiral Scan.to_table()
     existing_keys = {
         tuple(row[k] for k in pk_cols)
@@ -395,11 +394,6 @@ def upsert_records(self, table_name, records, id_column, skip_existing=False):
     if len(novel) > 0:
         tbl.write(novel)
 ```
-
-Note: the `if not pk_cols` guard in the `skip_existing=True` branch is
-technically unreachable given that the `id_column not in pk_cols` guard above
-already raises when `pk_cols` is empty (since nothing can be `in []`). It is
-kept for clarity and defensive programming.
 
 **Performance caveat (documented in docstring):** `skip_existing=True` reads
 the entire table into memory to build the key set. Use `skip_existing=False`
@@ -449,8 +443,9 @@ not suppress exceptions). This is consistent with `SQLiteConnector`.
 | Timezone silently dropped from `timestamp` columns at storage level | `get_column_info` and `iter_batches` both return `timestamp[us]` where the original was `timestamp[us, tz=X]` |
 | No native `skip_existing=True` | `upsert_records(skip_existing=True)` requires a full table scan; O(n) in table size |
 | Single-column PK only via `create_table_if_not_exists` | Composite-PK tables must be created outside this connector; they can still be read and written |
-| No SQL support beyond `SELECT * FROM "table"` | `iter_batches` parses only the table name; WHERE clauses and projections are not supported |
+| No SQL support beyond `SELECT * FROM "table"` | `iter_batches` parses only the table name; WHERE clauses and projections are not supported; query must use plain (non-qualified) table name |
 | Newly-created table schema is key-column-only until first write | `get_column_info` on a table created via `create_table_if_not_exists` but never written returns only the key column, not the full `columns` list passed at creation (Spiral infers value columns from the first write) |
+| `skip_existing=True` unreliable for timestamp PK columns | SpiralDB strips timezone at storage; if the caller's `records` contains timezone-aware `datetime` PK values, they will never match the timezone-naive values returned by the existing-row scan, causing all rows to appear novel and be written unconditionally |
 
 ---
 
