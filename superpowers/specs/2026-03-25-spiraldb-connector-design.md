@@ -365,13 +365,21 @@ def upsert_records(self, table_name, records, id_column, skip_existing=False):
     tbl = self._project.table(self._table_id(table_name))
     pk_cols = list(tbl.key_schema.names)
 
-    # Single guard: id_column must appear in the table's key schema.
+    # Guard 1: id_column must appear in the table's key schema.
     # This implicitly handles the empty-key-schema case too (nothing is ever
     # `in []`, so an empty key schema always raises here).
     if id_column not in pk_cols:
         raise ValueError(
             f"id_column {id_column!r} is not in the table key schema {pk_cols}. "
             "SpiralDB uses the table key schema for conflict detection."
+        )
+
+    # Guard 2: all PK columns must be present in the records table.
+    missing = [k for k in pk_cols if k not in records.schema.names]
+    if missing:
+        raise ValueError(
+            f"records is missing key column(s) {missing} required by the "
+            f"table key schema {pk_cols}."
         )
 
     if not skip_existing:
@@ -446,6 +454,7 @@ not suppress exceptions). This is consistent with `SQLiteConnector`.
 | No SQL support beyond `SELECT * FROM "table"` | `iter_batches` parses only the table name; WHERE clauses and projections are not supported; query must use plain (non-qualified) table name |
 | Newly-created table schema is key-column-only until first write | `get_column_info` on a table created via `create_table_if_not_exists` but never written returns only the key column, not the full `columns` list passed at creation (Spiral infers value columns from the first write) |
 | `skip_existing=True` unreliable for timestamp PK columns | SpiralDB strips timezone at storage; if the caller's `records` contains timezone-aware `datetime` PK values, they will never match the timezone-naive values returned by the existing-row scan, causing all rows to appear novel and be written unconditionally |
+| Keyless tables are not writable via `upsert_records` | A table with an empty key schema always causes `upsert_records` to raise `ValueError` (since `id_column` can never be in an empty key schema), regardless of `skip_existing`. Such tables can be read via `get_column_info` and `iter_batches`. |
 
 ---
 
@@ -484,8 +493,8 @@ All tests use a `MockProject` / `MockTable` defined inline. No network access.
 | 4 | `get_column_info` | Arrow types pass through unchanged; `nullable` from Arrow field; propagates pyspiral exception for non-existent table (no empty-list fallback) |
 | 5 | `iter_batches` | Full table scan; double-quoted table name parsed correctly; unquoted fallback; non-`None` `params` emits `logging.warning`; **empty table → zero batches, no error**; propagates pyspiral exception for non-existent table |
 | 6 | `create_table_if_not_exists` | Idempotent (`exist_ok=True` always passed); correct single-entry `key_schema` tuple passed; raises `ValueError` if `pk_column` not in `columns`; empty `columns` list also raises `ValueError`; non-PK `columns` entries are entirely ignored |
-| 7 | `upsert_records(skip_existing=False)` | `table.write()` called with full records; raises `ValueError` if `id_column` not in `tbl.key_schema.names` |
-| 8 | `upsert_records(skip_existing=True)` | Raises `ValueError` if `id_column` not in key schema; raises `ValueError` if key schema is empty; existing keys filtered using `key_schema.names`; only novel rows written; no-op write skipped when all rows exist |
+| 7 | `upsert_records(skip_existing=False)` | `table.write()` called with full records; raises `ValueError` if `id_column` not in `tbl.key_schema.names`; raises `ValueError` if a PK column is absent from `records` |
+| 8 | `upsert_records(skip_existing=True)` | Raises `ValueError` if `id_column` not in key schema (including empty schema); raises `ValueError` if a PK column is absent from `records`; existing keys filtered using `key_schema.names`; only novel rows written; no-op write skipped when all rows exist |
 | 9 | Lifecycle | Context manager calls `close()`; double-close is safe; all public methods — including `upsert_records` and `to_config` — raise `RuntimeError` after `close()`; `__exit__` does not suppress exceptions |
 | 10 | `to_config` / `from_config` | Round-trips `project_id`, `dataset`, `overrides`; `connector_type` is `"spiraldb"`; `from_config` raises on wrong `connector_type`; `to_config` raises after `close()` |
 
