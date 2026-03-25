@@ -242,8 +242,72 @@ class SpiralDBConnector:
         id_column: str,
         skip_existing: bool = False,
     ) -> None:
+        """Write records to a SpiralDB table.
+
+        SpiralDB uses the table's key schema for conflict detection. ``id_column``
+        is accepted for protocol compliance; it must appear in the table's key
+        schema (``tbl.key_schema.names``), but SpiralDB always uses the full
+        composite key schema — not just ``id_column`` — for conflict resolution.
+
+        When ``skip_existing=False`` (default), all rows are written and existing
+        rows with matching keys are overwritten (upsert-by-key). When
+        ``skip_existing=True``, the entire table is scanned first and only rows
+        whose composite key is absent from the existing table are written. This
+        is O(n) in table size.
+
+        Args:
+            table_name: Plain table name (no dataset prefix).
+            records: Arrow table to write.
+            id_column: Must be one of the table's key-schema columns. Validated
+                for correctness; the full composite key schema is used for
+                conflict detection.
+            skip_existing: If False (default), overwrite on key conflict. If
+                True, skip rows with already-existing composite keys (requires
+                full table scan).
+
+        Raises:
+            ValueError: If ``id_column`` is not in the table key schema (including
+                empty key schema), or if any key-schema column is absent from
+                ``records``.
+        """
         self._require_open()
-        raise NotImplementedError
+        tbl = self._project.table(self._table_id(table_name))
+        pk_cols = list(tbl.key_schema.names)
+
+        # Guard 1: id_column must appear in the table's key schema.
+        # Also handles empty-key-schema tables: nothing is ever `in []`.
+        if id_column not in pk_cols:
+            raise ValueError(
+                f"id_column {id_column!r} is not in the table key schema {pk_cols}. "
+                "SpiralDB uses the table key schema for conflict detection."
+            )
+
+        # Guard 2: all PK columns must be present in the records table.
+        missing = [k for k in pk_cols if k not in records.schema.names]
+        if missing:
+            raise ValueError(
+                f"records is missing key column(s) {missing} required by the "
+                f"table key schema {pk_cols}."
+            )
+
+        if not skip_existing:
+            # Always upsert-by-key: existing rows overwritten, novel rows inserted.
+            tbl.write(records)
+            return
+
+        # skip_existing=True: full scan → client-side key filter → write novel rows.
+        existing = self._spiral.scan(tbl.select()).to_table()
+        existing_keys = {
+            tuple(row[k] for k in pk_cols)
+            for row in existing.to_pylist()
+        }
+        mask = pa.array([
+            tuple(row[k] for k in pk_cols) not in existing_keys
+            for row in records.to_pylist()
+        ])
+        novel = records.filter(mask)
+        if len(novel) > 0:
+            tbl.write(novel)
 
     def close(self) -> None:
         """Mark this connector as closed. Idempotent. No network teardown needed."""
