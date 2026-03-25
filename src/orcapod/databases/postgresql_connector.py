@@ -200,7 +200,7 @@ class PostgreSQLConnector:
     def __init__(self, dsn: str) -> None:
         self._dsn = dsn
         self._conn: Any = psycopg.connect(dsn, autocommit=False)
-        self._lock = threading.RLock()
+        self._lock = threading.RLock()  # RLock required: iter_batches → _resolve_column_type_lookup → get_column_info re-enters the lock
         self._cursor_seq = itertools.count()
 
     # ── Internal helpers ──────────────────────────────────────────────────────
@@ -239,9 +239,9 @@ class PostgreSQLConnector:
 
     def get_pk_columns(self, table_name: str) -> list[str]:
         """Return primary-key column names in key-sequence order."""
-        self._validate_table_name(table_name)
         with self._lock:
             conn = self._require_open()
+            self._validate_table_name(table_name)
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -262,9 +262,9 @@ class PostgreSQLConnector:
 
     def get_column_info(self, table_name: str) -> list[ColumnInfo]:
         """Return column metadata with Arrow-mapped types."""
-        self._validate_table_name(table_name)
         with self._lock:
             conn = self._require_open()
+            self._validate_table_name(table_name)
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -296,25 +296,35 @@ class PostgreSQLConnector:
         """Execute a query and yield results as Arrow RecordBatches."""
         import pyarrow as _pa
 
+        # Execute the query and resolve the schema under the lock, then fetch
+        # the first batch while still holding it.  Subsequent batches re-acquire
+        # the lock only for the duration of each fetchmany call so that other
+        # connector operations are not blocked during Arrow construction or yield.
+        #
+        # NOTE: Named server-side cursors hold an open portal on the PostgreSQL server
+        # until explicitly closed. The `finally: cur.close()` handles normal exhaustion
+        # and explicit `.close()` on the generator. However, if callers abandon the
+        # generator without calling `.close()`, the portal persists until Python GC
+        # runs. To avoid accumulating open portals, callers should exhaust the iterator
+        # or use: `with contextlib.closing(connector.iter_batches(...)) as it: ...`
         with self._lock:
             conn = self._require_open()
             cursor_name = f"orcapod_{next(self._cursor_seq)}"
             cur = conn.cursor(name=cursor_name)
+            cur.execute(query, params)
+            if cur.description is None:
+                cur.close()
+                return
+            col_names = [d.name for d in cur.description]
+            type_lookup = _resolve_column_type_lookup(query, self)
+            arrow_types = [type_lookup.get(n, _pa.large_string()) for n in col_names]
+            schema = _pa.schema(
+                [_pa.field(n, t) for n, t in zip(col_names, arrow_types)]
+            )
+            rows = cur.fetchmany(batch_size)
 
+        # Build and yield batches outside the lock; re-acquire briefly per fetchmany.
         try:
-            with self._lock:
-                self._require_open()
-                cur.execute(query, params)
-                if cur.description is None:
-                    return
-                col_names = [d.name for d in cur.description]
-                type_lookup = _resolve_column_type_lookup(query, self)
-                arrow_types = [type_lookup.get(n, _pa.large_string()) for n in col_names]
-                schema = _pa.schema(
-                    [_pa.field(n, t) for n, t in zip(col_names, arrow_types)]
-                )
-                rows = cur.fetchmany(batch_size)
-
             while rows:
                 arrays = [
                     _pa.array([r[i] for r in rows], type=t)
@@ -322,7 +332,7 @@ class PostgreSQLConnector:
                 ]
                 yield _pa.RecordBatch.from_arrays(arrays, schema=schema)
                 with self._lock:
-                    self._require_open()
+                    self._require_open()  # guard: raise RuntimeError if closed mid-iteration
                     rows = cur.fetchmany(batch_size)
         finally:
             cur.close()
@@ -341,9 +351,9 @@ class PostgreSQLConnector:
             raise ValueError(
                 f"pk_column {pk_column!r} not found in columns: {col_names}"
             )
-        self._validate_table_name(table_name)
         with self._lock:
             conn = self._require_open()
+            self._validate_table_name(table_name)
             col_defs = []
             for col in columns:
                 pg_type = _arrow_type_to_pg_sql(col.arrow_type)
@@ -366,9 +376,9 @@ class PostgreSQLConnector:
         skip_existing: bool = False,
     ) -> None:
         """Write records to a table using upsert semantics."""
-        self._validate_table_name(table_name)
         with self._lock:
             conn = self._require_open()
+            self._validate_table_name(table_name)
             cols = list(records.column_names)
             col_list = ", ".join('"' + c.replace('"', '""') + '"' for c in cols)
             placeholders = ", ".join("%s" for _ in cols)
