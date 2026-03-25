@@ -178,3 +178,63 @@ class TestGetColumnInfo:
         mock_project.table.side_effect = RuntimeError("table not found")
         with pytest.raises(RuntimeError, match="table not found"):
             connector.get_column_info("nonexistent")
+
+
+# ---------------------------------------------------------------------------
+# iter_batches
+# ---------------------------------------------------------------------------
+
+
+class TestIterBatches:
+    def _wire_scan(self, mock_sp, mock_project, batches: list) -> None:
+        """Wire mock_sp so that scan().to_record_batches() returns ``batches``."""
+        mock_project.table.return_value.select.return_value = MagicMock()
+        mock_sp.Spiral.return_value.scan.return_value.to_record_batches.return_value = iter(
+            batches
+        )
+
+    def test_full_scan_yields_batches(self, connector, mock_sp, mock_project):
+        batch = pa.record_batch(
+            {"id": pa.array(["a", "b"]), "v": pa.array([1, 2])}
+        )
+        self._wire_scan(mock_sp, mock_project, [batch])
+        result = list(connector.iter_batches('SELECT * FROM "my_table"'))
+        assert len(result) == 1
+        assert result[0] == batch
+        mock_project.table.assert_called_once_with("default.my_table")
+
+    def test_empty_table_yields_no_batches(self, connector, mock_sp, mock_project):
+        self._wire_scan(mock_sp, mock_project, [])
+        result = list(connector.iter_batches('SELECT * FROM "empty_table"'))
+        assert result == []
+
+    def test_multiple_batches_all_yielded(self, connector, mock_sp, mock_project):
+        b1 = pa.record_batch({"id": pa.array(["a"])})
+        b2 = pa.record_batch({"id": pa.array(["b"])})
+        self._wire_scan(mock_sp, mock_project, [b1, b2])
+        result = list(connector.iter_batches('SELECT * FROM "t"'))
+        assert len(result) == 2
+
+    def test_params_not_none_emits_warning(self, connector, mock_sp, mock_project, caplog):
+        import logging
+        self._wire_scan(mock_sp, mock_project, [])
+        with caplog.at_level(logging.WARNING):
+            list(connector.iter_batches('SELECT * FROM "t"', params={"x": 1}))
+        assert any("params" in msg.lower() for msg in caplog.messages)
+
+    def test_batch_size_passed_to_spiral(self, connector, mock_sp, mock_project):
+        self._wire_scan(mock_sp, mock_project, [])
+        list(connector.iter_batches('SELECT * FROM "t"', batch_size=500))
+        mock_sp.Spiral.return_value.scan.return_value.to_record_batches.assert_called_with(
+            batch_size=500
+        )
+
+    def test_nonexistent_table_propagates_exception(self, connector, mock_sp, mock_project):
+        mock_project.table.side_effect = RuntimeError("table not found")
+        with pytest.raises(RuntimeError, match="table not found"):
+            list(connector.iter_batches('SELECT * FROM "missing"'))
+
+    def test_tbl_select_called_for_full_scan(self, connector, mock_sp, mock_project):
+        self._wire_scan(mock_sp, mock_project, [])
+        list(connector.iter_batches('SELECT * FROM "t"'))
+        mock_project.table.return_value.select.assert_called_once_with()
