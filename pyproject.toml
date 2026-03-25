@@ -44,6 +44,9 @@ Homepage = "https://github.com/walkerlab/orcapod-python"
 redis = ["redis>=6.2.0"]
 ray = ["ray[default]==2.48.0", "ipywidgets>=8.1.7"]
 all = ["orcapod[redis]", "orcapod[ray]"]
+spiraldb = [
+    "pyspiral>=0.11.0",
+]
 
 
 [tool.setuptools.packages.find]
