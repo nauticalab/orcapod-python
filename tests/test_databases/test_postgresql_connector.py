@@ -137,3 +137,126 @@ class TestArrowTypeToPgSql:
         # pa.null() is an unusual type not in the mapping
         result = _arrow_type_to_pg_sql(pa.null())
         assert result == "TEXT"
+
+
+class TestPostgreSQLConnectorScaffold:
+    def test_isinstance_dbconnector_protocol(self) -> None:
+        with patch("psycopg.connect") as mock_connect:
+            mock_connect.return_value = MagicMock()
+            connector = PostgreSQLConnector("postgresql://localhost/test")
+            assert isinstance(connector, DBConnectorProtocol)
+            connector._conn = None  # skip actual close
+
+
+class TestConfig:
+    def test_to_config(self) -> None:
+        with patch("psycopg.connect") as mock_connect:
+            mock_connect.return_value = MagicMock()
+            connector = PostgreSQLConnector("postgresql://user:pass@localhost:5432/mydb")
+            config = connector.to_config()
+            assert config["connector_type"] == "postgresql"
+            assert config["dsn"] == "postgresql://user:pass@localhost:5432/mydb"
+            connector._conn = None
+
+    def test_from_config_roundtrip(self) -> None:
+        with patch("psycopg.connect") as mock_connect:
+            mock_connect.return_value = MagicMock()
+            config = {"connector_type": "postgresql", "dsn": "postgresql://localhost/test"}
+            connector = PostgreSQLConnector.from_config(config)
+            assert isinstance(connector, PostgreSQLConnector)
+            connector._conn = None
+
+    def test_from_config_wrong_type_raises(self) -> None:
+        with pytest.raises(ValueError, match="postgresql"):
+            PostgreSQLConnector.from_config({"connector_type": "sqlite", "dsn": "x"})
+
+    def test_from_config_missing_type_raises(self) -> None:
+        with pytest.raises(ValueError, match="postgresql"):
+            PostgreSQLConnector.from_config({"dsn": "postgresql://localhost/test"})
+
+
+class TestLifecycleUnit:
+    def test_close_is_idempotent(self) -> None:
+        with patch("psycopg.connect") as mock_connect:
+            mock_conn = MagicMock()
+            mock_connect.return_value = mock_conn
+            connector = PostgreSQLConnector("postgresql://localhost/test")
+            connector.close()
+            connector.close()  # must not raise
+            assert mock_conn.close.call_count == 1
+
+    def test_require_open_raises_after_close(self) -> None:
+        with patch("psycopg.connect") as mock_connect:
+            mock_connect.return_value = MagicMock()
+            connector = PostgreSQLConnector("postgresql://localhost/test")
+            connector.close()
+            with pytest.raises(RuntimeError, match="closed"):
+                connector._require_open()
+
+    def test_context_manager(self) -> None:
+        with patch("psycopg.connect") as mock_connect:
+            mock_conn = MagicMock()
+            mock_connect.return_value = mock_conn
+            with PostgreSQLConnector("postgresql://localhost/test") as c:
+                c._require_open()  # must not raise
+            with pytest.raises(RuntimeError, match="closed"):
+                c._require_open()
+
+
+class TestValidateTableName:
+    def test_raises_on_double_quote(self) -> None:
+        with patch("psycopg.connect") as mock_connect:
+            mock_connect.return_value = MagicMock()
+            connector = PostgreSQLConnector("postgresql://localhost/test")
+            with pytest.raises(ValueError, match="double-quote"):
+                connector._validate_table_name('bad"name')
+            connector._conn = None
+
+    def test_valid_name_does_not_raise(self) -> None:
+        with patch("psycopg.connect") as mock_connect:
+            mock_connect.return_value = MagicMock()
+            connector = PostgreSQLConnector("postgresql://localhost/test")
+            connector._validate_table_name("valid_table_name")  # must not raise
+            connector._conn = None
+
+
+class TestSchemaIntrospectionUnit:
+    """Unit tests for get_table_names and get_pk_columns using mocked cursor."""
+
+    def _make_connector(self) -> PostgreSQLConnector:
+        with patch("psycopg.connect") as mock_connect:
+            mock_connect.return_value = MagicMock()
+            return PostgreSQLConnector("postgresql://localhost/test")
+
+    def test_get_table_names_returns_sorted_list(self) -> None:
+        connector = self._make_connector()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = lambda s: s
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_cursor.fetchall.return_value = [("alpha",), ("beta",)]  # ORDER BY in SQL
+        connector._conn.cursor.return_value = mock_cursor
+        result = connector.get_table_names()
+        assert result == ["alpha", "beta"]
+        connector._conn = None
+
+    def test_get_pk_columns_single_pk(self) -> None:
+        connector = self._make_connector()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = lambda s: s
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_cursor.fetchall.return_value = [("id",)]
+        connector._conn.cursor.return_value = mock_cursor
+        result = connector.get_pk_columns("my_table")
+        assert result == ["id"]
+        connector._conn = None
+
+    def test_get_pk_columns_no_pk(self) -> None:
+        connector = self._make_connector()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = lambda s: s
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_cursor.fetchall.return_value = []
+        connector._conn.cursor.return_value = mock_cursor
+        result = connector.get_pk_columns("my_table")
+        assert result == []
+        connector._conn = None
