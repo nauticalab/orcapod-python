@@ -201,8 +201,39 @@ class SpiralDBConnector:
         columns: list[ColumnInfo],
         pk_column: str,
     ) -> None:
+        """Create a SpiralDB table with a single-column key schema, idempotently.
+
+        Only the primary-key column's type is registered with Spiral at creation
+        time (via ``key_schema``). Non-PK columns in ``columns`` are ignored —
+        Spiral infers value column schemas from the first write. A second call
+        with the same table name is a no-op (``exist_ok=True``).
+
+        Only single-column primary keys are supported via this method. Tables
+        with composite primary keys must be created outside this connector but
+        can be read and written through it.
+
+        Args:
+            table_name: Plain table name (no dataset prefix).
+            columns: Full column list; must include ``pk_column``. Non-PK entries
+                are accepted but not used at creation time.
+            pk_column: Name of the single primary-key column.
+
+        Raises:
+            ValueError: If ``pk_column`` is not found in ``columns`` (including
+                when ``columns`` is empty).
+        """
         self._require_open()
-        raise NotImplementedError
+        col_names = [c.name for c in columns]
+        if pk_column not in col_names:
+            raise ValueError(
+                f"pk_column {pk_column!r} not found in columns: {col_names}"
+            )
+        pk_arrow_type = next(c.arrow_type for c in columns if c.name == pk_column)
+        self._project.create_table(
+            self._table_id(table_name),
+            key_schema=[(pk_column, pk_arrow_type)],
+            exist_ok=True,
+        )
 
     def upsert_records(
         self,
