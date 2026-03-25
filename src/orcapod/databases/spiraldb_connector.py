@@ -65,7 +65,7 @@ def _parse_table_name(query: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# SpiralDBConnector (stub — methods implemented task by task)
+# SpiralDBConnector
 # ---------------------------------------------------------------------------
 
 
@@ -263,7 +263,11 @@ class SpiralDBConnector:
                 conflict detection.
             skip_existing: If False (default), overwrite on key conflict. If
                 True, skip rows with already-existing composite keys (requires
-                full table scan).
+                full table scan). Note: unreliable when PK columns contain
+                timezone-aware timestamps — SpiralDB strips timezone at storage
+                time, so timezone-aware values in ``records`` will never match
+                the timezone-naive values returned by the existing-row scan,
+                causing all rows to appear novel and be re-written.
 
         Raises:
             ValueError: If ``id_column`` is not in the table key schema (including
