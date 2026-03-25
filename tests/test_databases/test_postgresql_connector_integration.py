@@ -29,7 +29,6 @@ import pyarrow as pa
 import pytest
 
 from orcapod.databases import ConnectorArrowDatabase, PostgreSQLConnector
-from orcapod.protocols.db_connector_protocol import DBConnectorProtocol
 from orcapod.types import ColumnInfo
 
 
