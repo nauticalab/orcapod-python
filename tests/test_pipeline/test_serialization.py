@@ -1536,9 +1536,8 @@ class TestPLT1158UncachedOperatorStatus:
         json_path, _ = self._build_pipeline(tmp_path)
         loaded = Pipeline.load(json_path, mode="full")
 
-        # The implicit join operator has no DB caching → UNAVAILABLE
-        join_node = loaded.compiled_nodes["adder"]
-        # The join is upstream of the function node; find operator nodes
+        # The implicit join operator has no DB caching → UNAVAILABLE.
+        # Find operator nodes via node type (the join is upstream of the function node).
         op_nodes = [
             n for n in loaded._persistent_node_map.values()
             if n.node_type == "operator"
