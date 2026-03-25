@@ -93,9 +93,9 @@ class SpiralDBConnector:
         self._project_id = project_id
         self._dataset = dataset
         self._overrides = overrides
+        self._closed = False
         self._spiral = sp.Spiral(overrides=overrides)
         self._project = self._spiral.project(project_id)
-        self._closed = False
 
     def _require_open(self) -> None:
         """Raise RuntimeError if this connector has been closed."""
