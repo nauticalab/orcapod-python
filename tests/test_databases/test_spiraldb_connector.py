@@ -238,3 +238,49 @@ class TestIterBatches:
         self._wire_scan(mock_sp, mock_project, [])
         list(connector.iter_batches('SELECT * FROM "t"'))
         mock_project.table.return_value.select.assert_called_once_with()
+
+
+# ---------------------------------------------------------------------------
+# create_table_if_not_exists
+# ---------------------------------------------------------------------------
+
+
+class TestCreateTableIfNotExists:
+    def test_creates_table_with_pk_key_schema(self, connector, mock_project):
+        columns = [
+            ColumnInfo("id", pa.string(), nullable=False),
+            ColumnInfo("value", pa.float64(), nullable=True),
+        ]
+        connector.create_table_if_not_exists("my_table", columns, pk_column="id")
+        mock_project.create_table.assert_called_once_with(
+            "default.my_table",
+            key_schema=[("id", pa.string())],
+            exist_ok=True,
+        )
+
+    def test_exist_ok_always_true(self, connector, mock_project):
+        columns = [ColumnInfo("id", pa.int64(), nullable=False)]
+        connector.create_table_if_not_exists("t", columns, pk_column="id")
+        connector.create_table_if_not_exists("t", columns, pk_column="id")
+        assert mock_project.create_table.call_count == 2
+        for call_args in mock_project.create_table.call_args_list:
+            assert call_args.kwargs.get("exist_ok") is True
+
+    def test_raises_if_pk_column_not_in_columns(self, connector, mock_project):
+        columns = [ColumnInfo("id", pa.string(), nullable=False)]
+        with pytest.raises(ValueError, match="pk_column"):
+            connector.create_table_if_not_exists("t", columns, pk_column="missing_col")
+
+    def test_raises_if_columns_empty(self, connector, mock_project):
+        with pytest.raises(ValueError, match="pk_column"):
+            connector.create_table_if_not_exists("t", columns=[], pk_column="id")
+
+    def test_non_pk_columns_not_included_in_key_schema(self, connector, mock_project):
+        columns = [
+            ColumnInfo("id", pa.string(), nullable=False),
+            ColumnInfo("value", pa.float64()),
+            ColumnInfo("label", pa.string()),
+        ]
+        connector.create_table_if_not_exists("t", columns, pk_column="id")
+        call_kwargs = mock_project.create_table.call_args.kwargs
+        assert call_kwargs["key_schema"] == [("id", pa.string())]
