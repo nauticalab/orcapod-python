@@ -108,3 +108,73 @@ class TestLifecycle:
             connector.upsert_records("t", pa.table({"id": pa.array([], type=pa.string())}), "id")
         with pytest.raises(RuntimeError, match="closed"):
             connector.to_config()
+
+
+# ---------------------------------------------------------------------------
+# Schema introspection
+# ---------------------------------------------------------------------------
+
+
+class TestGetTableNames:
+    def test_returns_sorted_plain_names_for_dataset(self, connector, mock_project):
+        r1 = MagicMock(dataset="default", table="signals")
+        r2 = MagicMock(dataset="other", table="signals")  # excluded — wrong dataset
+        r3 = MagicMock(dataset="default", table="events")
+        mock_project.list_tables.return_value = [r1, r2, r3]
+        assert connector.get_table_names() == ["events", "signals"]
+
+    def test_empty_project_returns_empty_list(self, connector, mock_project):
+        mock_project.list_tables.return_value = []
+        assert connector.get_table_names() == []
+
+    def test_all_tables_in_other_dataset_returns_empty(self, connector, mock_project):
+        r1 = MagicMock(dataset="other", table="foo")
+        mock_project.list_tables.return_value = [r1]
+        assert connector.get_table_names() == []
+
+
+class TestGetPkColumns:
+    def test_single_pk(self, connector, mock_project):
+        mock_table = MagicMock()
+        mock_table.key_schema.names = ["id"]
+        mock_project.table.return_value = mock_table
+        assert connector.get_pk_columns("my_table") == ["id"]
+        mock_project.table.assert_called_once_with("default.my_table")
+
+    def test_composite_pk_preserves_order(self, connector, mock_project):
+        mock_table = MagicMock()
+        mock_table.key_schema.names = ["session_id", "timestamp", "probe_id"]
+        mock_project.table.return_value = mock_table
+        assert connector.get_pk_columns("spike_data") == [
+            "session_id", "timestamp", "probe_id"
+        ]
+
+    def test_empty_key_schema_returns_empty_list(self, connector, mock_project):
+        mock_table = MagicMock()
+        mock_table.key_schema.names = []
+        mock_project.table.return_value = mock_table
+        assert connector.get_pk_columns("no_key_table") == []
+
+
+class TestGetColumnInfo:
+    def test_arrow_types_pass_through_unchanged(self, connector, mock_project):
+        arrow_schema = pa.schema([
+            pa.field("id", pa.string(), nullable=False),
+            pa.field("value", pa.float64(), nullable=True),
+            pa.field("count", pa.int64(), nullable=True),
+        ])
+        mock_table = MagicMock()
+        mock_table.schema.return_value.to_arrow.return_value = arrow_schema
+        mock_project.table.return_value = mock_table
+        result = connector.get_column_info("my_table")
+        assert result == [
+            ColumnInfo("id", pa.string(), nullable=False),
+            ColumnInfo("value", pa.float64(), nullable=True),
+            ColumnInfo("count", pa.int64(), nullable=True),
+        ]
+        mock_project.table.assert_called_once_with("default.my_table")
+
+    def test_nonexistent_table_propagates_pyspiral_exception(self, connector, mock_project):
+        mock_project.table.side_effect = RuntimeError("table not found")
+        with pytest.raises(RuntimeError, match="table not found"):
+            connector.get_column_info("nonexistent")

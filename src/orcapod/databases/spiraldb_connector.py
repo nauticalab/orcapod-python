@@ -107,16 +107,54 @@ class SpiralDBConnector:
         return f"{self._dataset}.{table_name}"
 
     def get_table_names(self) -> list[str]:
+        """Return all table names in this connector's dataset, sorted alphabetically.
+
+        Filters ``project.list_tables()`` to the connector's dataset. Only the
+        plain ``.table`` field is returned; the opaque ``.id`` handle is never
+        exposed.
+
+        Returns:
+            Sorted list of plain table name strings (no ``dataset.`` prefix).
+        """
         self._require_open()
-        raise NotImplementedError
+        resources = self._project.list_tables()
+        return sorted(r.table for r in resources if r.dataset == self._dataset)
 
     def get_pk_columns(self, table_name: str) -> list[str]:
+        """Return primary-key column names in declaration order.
+
+        Args:
+            table_name: Plain table name (no dataset prefix).
+
+        Returns:
+            List of PK column names; empty list if the table has no key schema.
+        """
         self._require_open()
-        raise NotImplementedError
+        return list(self._project.table(self._table_id(table_name)).key_schema.names)
 
     def get_column_info(self, table_name: str) -> list[ColumnInfo]:
+        """Return column metadata with Arrow types.
+
+        SpiralDB is Arrow-native; no type mapping layer is needed. Types are
+        taken directly from the table's Arrow schema. Note: SpiralDB silently
+        drops timezone information from timestamp columns at storage time —
+        ``timestamp[us, tz=UTC]`` is returned as ``timestamp[us]``.
+
+        Args:
+            table_name: Plain table name (no dataset prefix).
+
+        Returns:
+            List of ColumnInfo objects. Propagates pyspiral exception if the
+            table does not exist (no empty-list fallback).
+        """
         self._require_open()
-        raise NotImplementedError
+        arrow_schema = (
+            self._project.table(self._table_id(table_name)).schema().to_arrow()
+        )
+        return [
+            ColumnInfo(name=field.name, arrow_type=field.type, nullable=field.nullable)
+            for field in arrow_schema
+        ]
 
     def iter_batches(
         self,
