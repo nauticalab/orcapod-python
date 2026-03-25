@@ -1,10 +1,10 @@
 """Integration tests for SpiralDBConnector against the live dev project.
 
-These tests are skipped unless ``SPIRAL_INTEGRATION_TESTS=1`` env var is set
-AND valid credentials are present in ``~/.config/pyspiral/auth.json``
-(obtained via ``spiral login``). If the env var is set but credentials are
-absent, the tests fail rather than skip — the operator is expected to ensure
-auth is in place when enabling integration tests.
+These tests are skipped unless the ``SPIRAL_INTEGRATION_TESTS=1`` env var is set.
+They require valid credentials in ``~/.config/pyspiral/auth.json`` (obtained via
+``spiral login``). If the env var is set but credentials are absent, the tests
+fail rather than skip — the operator is expected to ensure auth is in place
+when enabling integration tests.
 
 Dev project: ``test-orcapod-362211``  (api.spiraldb.dev)
 """
