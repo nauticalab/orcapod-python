@@ -1,4 +1,4 @@
-name: Run Tests
+name: Run PostgreSQL Tests
 
 on:
   push:
@@ -13,6 +13,21 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.11", "3.12"]
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: testdb
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - uses: actions/checkout@v4
@@ -31,8 +46,14 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-extras --dev
 
-      - name: Run tests
-        run: uv run pytest -v -m "not postgres" --cov=src --cov-report=term-missing --cov-report=xml
+      - name: Run PostgreSQL tests
+        run: uv run pytest -v -m postgres --cov=src --cov-report=term-missing --cov-report=xml
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: testdb
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5

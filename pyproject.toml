@@ -43,10 +43,11 @@ Homepage = "https://github.com/walkerlab/orcapod-python"
 [project.optional-dependencies]
 redis = ["redis>=6.2.0"]
 ray = ["ray[default]==2.48.0", "ipywidgets>=8.1.7"]
-all = ["orcapod[redis]", "orcapod[ray]"]
+postgresql = ["psycopg[binary]>=3.0"]
 spiraldb = [
     "pyspiral>=0.11.0",
 ]
+all = ["orcapod[redis]", "orcapod[ray]", "orcapod[postgresql]", "orcapod[spiraldb]"]
 
 
 [tool.setuptools.packages.find]
@@ -74,6 +75,7 @@ dev = [
     "pytest>=8.3.5",
     "pytest-asyncio>=1.3.0",
     "pytest-cov>=6.1.1",
+    "psycopg[binary]>=3.0",
     "ray[default]==2.48.0",
     "redis>=6.2.0",
     "ruff>=0.14.4",
