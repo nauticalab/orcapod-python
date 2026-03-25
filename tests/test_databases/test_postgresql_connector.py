@@ -13,7 +13,6 @@ from orcapod.databases.postgresql_connector import (
     _pg_type_to_arrow,
 )
 from orcapod.protocols.db_connector_protocol import DBConnectorProtocol
-from orcapod.types import ColumnInfo
 
 
 class TestPgTypeToArrow:

@@ -167,13 +167,42 @@ def _resolve_column_type_lookup(
     Returns:
         Dict mapping column name to Arrow DataType.
     """
-    # Match FROM "table_name" or FROM table_name (case-insensitive)
-    match = re.search(r'FROM\s+"([^"]+)"', query, re.IGNORECASE)
-    if not match:
-        match = re.search(r'FROM\s+(\w+)', query, re.IGNORECASE)
-    if not match:
+    # Be conservative: only resolve types when we can unambiguously identify
+    # a single source table. For multi-table queries (JOINs, comma-separated
+    # tables, multiple FROM clauses, subqueries, etc.) return {} so callers
+    # fall back to treating all columns as pa.large_string().
+
+    # Fast path: any JOIN keyword means multi-table.
+    if re.search(r"\bJOIN\b", query, re.IGNORECASE):
         return {}
-    table_name = match.group(1)
+
+    # Find all FROM <table> occurrences.  We only proceed when there is
+    # exactly one (multiple FROMs indicate subqueries or CTEs).
+    from_pattern = re.compile(
+        r'\bFROM\b\s+(?:"([^"]+)"|(\w+))',
+        re.IGNORECASE,
+    )
+    from_matches = list(from_pattern.finditer(query))
+    if len(from_matches) != 1:
+        return {}
+
+    match = from_matches[0]
+    table_name = match.group(1) or match.group(2)
+
+    # Inspect the text after the table name up to the next major SQL clause.
+    # A comma before the clause boundary means comma-joined tables ("FROM a, b").
+    from_tail = query[match.end():]
+    clause_boundary = re.search(
+        r"\b(WHERE|GROUP\s+BY|ORDER\s+BY|LIMIT|OFFSET|HAVING|UNION|EXCEPT|INTERSECT)\b",
+        from_tail,
+        re.IGNORECASE,
+    )
+    if clause_boundary:
+        from_tail = from_tail[: clause_boundary.start()]
+
+    if "," in from_tail:
+        return {}
+
     return {ci.name: ci.arrow_type for ci in connector.get_column_info(table_name)}
 
 
@@ -296,10 +325,11 @@ class PostgreSQLConnector:
         """Execute a query and yield results as Arrow RecordBatches."""
         import pyarrow as _pa
 
-        # Open the named server-side cursor under the lock, then execute the
-        # query inside a try/finally so the cursor is always closed (and the
-        # implicit read transaction always rolled back) regardless of how the
-        # generator is consumed or abandoned.
+        # Open a *dedicated* connection for this generator so that concurrent
+        # writes on self._conn (which commit/rollback their own transactions)
+        # cannot invalidate the server-side cursor portal mid-stream.  The
+        # dedicated connection is fully closed in the finally block regardless
+        # of how the generator is consumed or abandoned.
         #
         # NOTE: Named server-side cursors hold an open portal on the PostgreSQL
         # server until explicitly closed. The `finally: cur.close()` handles
@@ -309,46 +339,39 @@ class PostgreSQLConnector:
         # portals, callers should exhaust the iterator or use:
         # `with contextlib.closing(connector.iter_batches(...)) as it: ...`
         with self._lock:
-            conn = self._require_open()
-            cursor_name = f"orcapod_{next(self._cursor_seq)}"
-            cur = conn.cursor(name=cursor_name)
+            self._require_open()  # raise early if the connector is already closed
+            dsn = self._dsn
 
-        # cur.execute() is inside the try block so the cursor is always closed
-        # (and the transaction always ended) even if execute raises.
+        read_conn = psycopg.connect(dsn, autocommit=False)
+        cursor_name = f"orcapod_{next(self._cursor_seq)}"
+        cur = read_conn.cursor(name=cursor_name)
+
         try:
-            with self._lock:
-                self._require_open()
-                cur.execute(query, params)
-                if cur.description is None:
-                    return
-                col_names = [d.name for d in cur.description]
-                type_lookup = _resolve_column_type_lookup(query, self)
-                arrow_types = [type_lookup.get(n, _pa.large_string()) for n in col_names]
-                schema = _pa.schema(
-                    [_pa.field(n, t) for n, t in zip(col_names, arrow_types)]
-                )
-                rows = cur.fetchmany(batch_size)
+            cur.execute(query, params)
+            if cur.description is None:
+                return
+            col_names = [d.name for d in cur.description]
+            type_lookup = _resolve_column_type_lookup(query, self)
+            arrow_types = [type_lookup.get(n, _pa.large_string()) for n in col_names]
+            schema = _pa.schema(
+                [_pa.field(n, t) for n, t in zip(col_names, arrow_types)]
+            )
+            rows = cur.fetchmany(batch_size)
 
-            # Build and yield batches outside the lock; re-acquire briefly per fetchmany.
             while rows:
                 arrays = [
                     _pa.array([r[i] for r in rows], type=t)
                     for i, t in enumerate(arrow_types)
                 ]
                 yield _pa.RecordBatch.from_arrays(arrays, schema=schema)
-                with self._lock:
-                    self._require_open()  # guard: raise RuntimeError if closed mid-iteration
-                    rows = cur.fetchmany(batch_size)
+                rows = cur.fetchmany(batch_size)
         finally:
             cur.close()
-            # Roll back the implicit read transaction so the connection is not
-            # left "idle in transaction" holding a snapshot and blocking vacuum.
-            with self._lock:
-                if self._conn is not None:
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
+            try:
+                read_conn.rollback()
+            except Exception:
+                pass
+            read_conn.close()
 
     # ── Write ─────────────────────────────────────────────────────────────────
 
