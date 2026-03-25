@@ -241,9 +241,13 @@ class OperatorNode(StreamBase):
         node._stored_pipeline_hash = descriptor.get("pipeline_hash")
         node._stored_pipeline_path = tuple(descriptor.get("pipeline_path", ()))
 
-        # Determine load status based on DB availability
+        # Determine load status based on DB availability and cache mode.
+        # An uncached operator (cache_mode=OFF) never writes records to the
+        # database, so even when a pipeline_db exists there is nothing to
+        # read back.  Only operators that actively persist results
+        # (LOG or REPLAY mode) can legitimately serve data in read-only mode.
         node._load_status = LoadStatus.UNAVAILABLE
-        if pipeline_db is not None:
+        if pipeline_db is not None and cache_mode != CacheMode.OFF:
             node._load_status = LoadStatus.READ_ONLY
 
         return node
