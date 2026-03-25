@@ -320,9 +320,44 @@ class SpiralDBConnector:
         self.close()
 
     def to_config(self) -> dict[str, Any]:
+        """Serialize connection configuration to a JSON-compatible dict.
+
+        Returns:
+            Dict with ``connector_type``, ``project_id``, ``dataset``, and
+            ``overrides`` keys.
+
+        Raises:
+            RuntimeError: If this connector has been closed.
+        """
         self._require_open()
-        raise NotImplementedError
+        return {
+            "connector_type": "spiraldb",
+            "project_id": self._project_id,
+            "dataset": self._dataset,
+            "overrides": self._overrides,
+        }
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> SpiralDBConnector:
-        raise NotImplementedError
+        """Reconstruct a SpiralDBConnector from a config dict.
+
+        Args:
+            config: Dict with ``connector_type``, ``project_id``, and optionally
+                ``dataset`` and ``overrides`` keys.
+
+        Returns:
+            A new, open SpiralDBConnector instance.
+
+        Raises:
+            ValueError: If ``connector_type`` is not ``"spiraldb"``.
+        """
+        if config.get("connector_type") != "spiraldb":
+            raise ValueError(
+                f"Expected connector_type 'spiraldb', "
+                f"got {config.get('connector_type')!r}"
+            )
+        return cls(
+            project_id=config["project_id"],
+            dataset=config.get("dataset", "default"),
+            overrides=config.get("overrides"),
+        )

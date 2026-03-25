@@ -378,3 +378,56 @@ class TestUpsertRecords:
         records = pa.table({"id": ["a"]})  # missing ts
         with pytest.raises(ValueError, match="missing key column"):
             connector.upsert_records("t", records, id_column="id", skip_existing=True)
+
+
+# ---------------------------------------------------------------------------
+# to_config / from_config
+# ---------------------------------------------------------------------------
+
+
+class TestConfigSerialization:
+    def test_to_config_round_trip(self, mock_sp, mock_project):
+        c = SpiralDBConnector(
+            project_id="my-project-123",
+            dataset="prod",
+            overrides={"server.url": "http://api.spiraldb.dev"},
+        )
+        cfg = c.to_config()
+        assert cfg == {
+            "connector_type": "spiraldb",
+            "project_id": "my-project-123",
+            "dataset": "prod",
+            "overrides": {"server.url": "http://api.spiraldb.dev"},
+        }
+
+    def test_to_config_none_overrides(self, connector):
+        cfg = connector.to_config()
+        assert cfg["overrides"] is None
+
+    def test_from_config_constructs_connector(self, mock_sp, mock_project):
+        cfg = {
+            "connector_type": "spiraldb",
+            "project_id": "my-project-123",
+            "dataset": "prod",
+            "overrides": None,
+        }
+        c = SpiralDBConnector.from_config(cfg)
+        assert c._project_id == "my-project-123"
+        assert c._dataset == "prod"
+        assert c._overrides is None
+
+    def test_from_config_default_dataset_when_absent(self, mock_sp, mock_project):
+        cfg = {"connector_type": "spiraldb", "project_id": "p"}
+        c = SpiralDBConnector.from_config(cfg)
+        assert c._dataset == "default"
+
+    def test_from_config_raises_on_wrong_connector_type(self):
+        with pytest.raises(ValueError, match="connector_type"):
+            SpiralDBConnector.from_config(
+                {"connector_type": "sqlite", "project_id": "p"}
+            )
+
+    def test_to_config_raises_after_close(self, connector):
+        connector.close()
+        with pytest.raises(RuntimeError, match="closed"):
+            connector.to_config()
