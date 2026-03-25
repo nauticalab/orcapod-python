@@ -6,7 +6,7 @@
 
 **Architecture:** `SpiralDBConnector` bridges the SQL-style `DBConnectorProtocol` interface to SpiralDB's expression-based scan/write API. It is dataset-scoped — a `(project_id, dataset)` pair is fixed at construction. All other layers (`ConnectorArrowDatabase`, `DBTableSource`) are unmodified; only the connector varies. `pyspiral` (`spiral` module) is lazy-loaded so `import orcapod` does not fail without it.
 
-**Tech Stack:** Python ≥ 3.10, `pyspiral >= 0.11.6` (optional extra `orcapod[spiraldb]`), `pyarrow`, `orcapod.utils.lazy_module.LazyModule`, `pytest`, `unittest.mock`
+**Tech Stack:** Python ≥ 3.11, `pyspiral >= 0.11.0` (optional extra `orcapod[spiraldb]`), `pyarrow`, `orcapod.utils.lazy_module.LazyModule`, `pytest`, `unittest.mock`
 
 ---
 

@@ -9,7 +9,7 @@
 ## Overview
 
 Implement `SpiralDBConnector`, a concrete implementation of `DBConnectorProtocol`
-backed by [pyspiral](https://pypi.org/project/pyspiral/) (`spiral` module, `>=0.11.6`).
+backed by [pyspiral](https://pypi.org/project/pyspiral/) (`spiral` module, `>=0.11.0`).
 
 SpiralDB is Arrow-native and expression-based (no SQL). The connector bridges
 `DBConnectorProtocol`'s SQL-style interface to Spiral's scan/write API, hiding
@@ -43,7 +43,7 @@ In scope:
 - Export from `src/orcapod/databases/__init__.py`
 - Unit tests in `tests/test_databases/test_spiraldb_connector.py`
 - Integration tests in `tests/test_databases/test_spiraldb_connector_integration.py`
-- `pyspiral>=0.11.6` already added as optional extra `orcapod[spiraldb]` in `pyproject.toml` (PLT-1163)
+- `pyspiral>=0.11.0` already added as optional extra `orcapod[spiraldb]` in `pyproject.toml` (PLT-1163)
 
 Out of scope:
 - Dataset-routing connector (PLT-1167)

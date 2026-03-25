@@ -305,10 +305,13 @@ class SpiralDBConnector:
             tuple(row[k] for k in pk_cols)
             for row in existing.to_pylist()
         }
-        mask = pa.array([
-            tuple(row[k] for k in pk_cols) not in existing_keys
-            for row in records.to_pylist()
-        ])
+        mask = pa.array(
+            [
+                tuple(row[k] for k in pk_cols) not in existing_keys
+                for row in records.to_pylist()
+            ],
+            type=pa.bool_(),
+        )
         novel = records.filter(mask)
         if len(novel) > 0:
             tbl.write(novel)
