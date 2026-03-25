@@ -135,10 +135,19 @@ class SpiralDBConnector:
     def get_column_info(self, table_name: str) -> list[ColumnInfo]:
         """Return column metadata with Arrow types.
 
-        SpiralDB is Arrow-native; no type mapping layer is needed. Types are
-        taken directly from the table's Arrow schema. Note: SpiralDB silently
-        drops timezone information from timestamp columns at storage time —
-        ``timestamp[us, tz=UTC]`` is returned as ``timestamp[us]``.
+        SpiralDB is Arrow-native; types are taken directly from the table's
+        Arrow schema with two normalizations applied for consistency with
+        other connectors (SQLite, PostgreSQL):
+
+        - ``pa.string()`` → ``pa.large_string()``: SpiralDB stores all string
+          columns as ``string`` regardless of whether they were written as
+          ``large_string``. Normalizing to ``large_string`` matches the
+          convention used by the other connectors and by ``ConnectorArrowDatabase``.
+        - ``pa.binary()`` → ``pa.large_binary()``: same reasoning.
+
+        Note: SpiralDB also silently drops timezone information from timestamp
+        columns at storage time — ``timestamp[us, tz=UTC]`` is returned as
+        ``timestamp[us]``.
 
         Args:
             table_name: Plain table name (no dataset prefix).
@@ -147,12 +156,26 @@ class SpiralDBConnector:
             List of ColumnInfo objects. Propagates pyspiral exception if the
             table does not exist (no empty-list fallback).
         """
+        import pyarrow as _pa  # noqa: PLC0415
+
         self._require_open()
         arrow_schema = (
             self._project.table(self._table_id(table_name)).schema().to_arrow()
         )
+
+        def _normalize(arrow_type: _pa.DataType) -> _pa.DataType:
+            if arrow_type == _pa.string():
+                return _pa.large_string()
+            if arrow_type == _pa.binary():
+                return _pa.large_binary()
+            return arrow_type
+
         return [
-            ColumnInfo(name=field.name, arrow_type=field.type, nullable=field.nullable)
+            ColumnInfo(
+                name=field.name,
+                arrow_type=_normalize(field.type),
+                nullable=field.nullable,
+            )
             for field in arrow_schema
         ]
 
@@ -177,8 +200,10 @@ class SpiralDBConnector:
             params: Accepted for protocol compliance. SpiralDB has no parameterised
                 interface — if not ``None``, a warning is logged and params are
                 not used.
-            batch_size: Passed to ``Scan.to_record_batches()``; actual batch
-                sizing is controlled by the Spiral execution engine.
+            batch_size: Accepted for protocol compliance. SpiralDB does not
+                support caller-controlled batch sizing — the Spiral execution
+                engine determines batch sizes. A warning is logged if a
+                non-default value is passed.
 
         Yields:
             Arrow RecordBatch objects. Yields nothing for an empty table.
@@ -190,9 +215,16 @@ class SpiralDBConnector:
                 "ignoring params=%r",
                 params,
             )
+        if batch_size != 1000:
+            logger.warning(
+                "SpiralDBConnector does not support batch_size; "
+                "batch sizing is controlled by the Spiral execution engine. "
+                "Ignoring batch_size=%r",
+                batch_size,
+            )
         table_name = _parse_table_name(query)
         tbl = self._project.table(self._table_id(table_name))
-        reader = self._spiral.scan(tbl.select()).to_record_batches(batch_size=batch_size)
+        reader = self._spiral.scan(tbl.select()).to_record_batches()
         yield from reader
 
     def create_table_if_not_exists(
