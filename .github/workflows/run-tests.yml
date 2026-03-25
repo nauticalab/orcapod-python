@@ -38,3 +38,39 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  spiral-integration:
+    runs-on: ubuntu-latest
+    # Only run on push/manual trigger — not on PRs — to avoid consuming SpiralDB
+    # resources on every review cycle. The workload work_fbjjcy is bound to
+    # nauticalab/orcapod-python via GitHub OIDC (policy work_policy_p9cxfh).
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: test
+    permissions:
+      id-token: write  # required to request a GitHub OIDC token for SpiralDB auth
+      contents: read
+    env:
+      SPIRAL_WORKLOAD_ID: ${{ secrets.SPIRAL_WORKLOAD_ID }}
+      SPIRAL_INTEGRATION_TESTS: "1"
+      SPIRAL_PROJECT_ID: ${{ vars.SPIRAL_PROJECT_ID }}
+      SPIRAL_SERVER_URL: ${{ vars.SPIRAL_SERVER_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y graphviz libgraphviz-dev
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras --dev
+
+      - name: Run SpiralDB integration tests
+        run: uv run pytest tests/test_databases/test_spiraldb_connector_integration.py -v

@@ -1,12 +1,21 @@
 """Integration tests for SpiralDBConnector against the live dev project.
 
 These tests are skipped unless the ``SPIRAL_INTEGRATION_TESTS=1`` env var is set.
-They require valid credentials in ``~/.config/pyspiral/auth.json`` (obtained via
-``spiral login``). If the env var is set but credentials are absent, the tests
-fail rather than skip — the operator is expected to ensure auth is in place
-when enabling integration tests.
+They require a valid auth mechanism, either:
 
-Dev project: ``test-orcapod-362211``  (api.spiraldb.dev)
+- Local dev: ``~/.config/pyspiral/auth.json`` (obtained via ``spiral login``)
+- CI (GitHub Actions): ``SPIRAL_WORKLOAD_ID=work_fbjjcy`` env var — workload
+  ``work_fbjjcy`` (policy ``work_policy_p9cxfh``) has editor access on the dev
+  project and is bound to ``nauticalab/orcapod-python`` via GitHub OIDC.
+
+If the env var is set but credentials are absent, the tests fail rather than
+skip — the operator is expected to ensure auth is in place when enabling
+integration tests.
+
+Project and server URL are configurable via env vars:
+
+- ``SPIRAL_PROJECT_ID`` (default: ``test-orcapod-362211``)
+- ``SPIRAL_SERVER_URL`` (default: ``http://api.spiraldb.dev``)
 """
 from __future__ import annotations
 
@@ -21,8 +30,8 @@ from orcapod.databases import ConnectorArrowDatabase, SpiralDBConnector
 from orcapod.types import ColumnInfo
 
 INTEGRATION = os.environ.get("SPIRAL_INTEGRATION_TESTS") == "1"
-DEV_PROJECT = "test-orcapod-362211"
-DEV_OVERRIDES = {"server.url": "http://api.spiraldb.dev"}
+DEV_PROJECT = os.environ.get("SPIRAL_PROJECT_ID", "test-orcapod-362211")
+DEV_OVERRIDES = {"server.url": os.environ.get("SPIRAL_SERVER_URL", "http://api.spiraldb.dev")}
 
 pytestmark = pytest.mark.skipif(
     not INTEGRATION,
