@@ -4,9 +4,9 @@ These tests are skipped unless the ``SPIRAL_INTEGRATION_TESTS=1`` env var is set
 They require a valid auth mechanism, either:
 
 - Local dev: ``~/.config/pyspiral/auth.json`` (obtained via ``spiral login``)
-- CI (GitHub Actions): ``SPIRAL_WORKLOAD_ID=work_fbjjcy`` env var — workload
-  ``work_fbjjcy`` (policy ``work_policy_p9cxfh``) has editor access on the dev
-  project and is bound to ``nauticalab/orcapod-python`` via GitHub OIDC.
+- CI (GitHub Actions): ``SPIRAL_WORKLOAD_ID`` env var pointing to a workload
+  that has editor access on the dev project and is bound to this repository via
+  GitHub OIDC (see internal CI/runbook docs for the exact workload/policy IDs).
 
 If the env var is set but credentials are absent, the tests fail rather than
 skip — the operator is expected to ensure auth is in place when enabling

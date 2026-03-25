@@ -42,9 +42,11 @@ jobs:
   spiral-integration:
     runs-on: ubuntu-latest
     # Only run on push/manual trigger — not on PRs — to avoid consuming SpiralDB
-    # resources on every review cycle. The workload work_fbjjcy is bound to
-    # nauticalab/orcapod-python via GitHub OIDC (policy work_policy_p9cxfh).
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # resources on every review cycle.
+    # Requires SPIRAL_WORKLOAD_ID secret to be configured; skips gracefully if absent.
+    if: >
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      secrets.SPIRAL_WORKLOAD_ID != ''
     needs: test
     permissions:
       id-token: write  # required to request a GitHub OIDC token for SpiralDB auth
@@ -52,8 +54,8 @@ jobs:
     env:
       SPIRAL_WORKLOAD_ID: ${{ secrets.SPIRAL_WORKLOAD_ID }}
       SPIRAL_INTEGRATION_TESTS: "1"
-      SPIRAL_PROJECT_ID: ${{ vars.SPIRAL_PROJECT_ID }}
-      SPIRAL_SERVER_URL: ${{ vars.SPIRAL_SERVER_URL }}
+      SPIRAL_PROJECT_ID: ${{ vars.SPIRAL_PROJECT_ID || 'test-orcapod-362211' }}
+      SPIRAL_SERVER_URL: ${{ vars.SPIRAL_SERVER_URL || 'http://api.spiraldb.dev' }}
 
     steps:
       - uses: actions/checkout@v4
