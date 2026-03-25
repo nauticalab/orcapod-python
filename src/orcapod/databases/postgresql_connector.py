@@ -296,35 +296,40 @@ class PostgreSQLConnector:
         """Execute a query and yield results as Arrow RecordBatches."""
         import pyarrow as _pa
 
-        # Execute the query and resolve the schema under the lock, then fetch
-        # the first batch while still holding it.  Subsequent batches re-acquire
-        # the lock only for the duration of each fetchmany call so that other
-        # connector operations are not blocked during Arrow construction or yield.
+        # Open the named server-side cursor under the lock, then execute the
+        # query inside a try/finally so the cursor is always closed (and the
+        # implicit read transaction always rolled back) regardless of how the
+        # generator is consumed or abandoned.
         #
-        # NOTE: Named server-side cursors hold an open portal on the PostgreSQL server
-        # until explicitly closed. The `finally: cur.close()` handles normal exhaustion
-        # and explicit `.close()` on the generator. However, if callers abandon the
-        # generator without calling `.close()`, the portal persists until Python GC
-        # runs. To avoid accumulating open portals, callers should exhaust the iterator
-        # or use: `with contextlib.closing(connector.iter_batches(...)) as it: ...`
+        # NOTE: Named server-side cursors hold an open portal on the PostgreSQL
+        # server until explicitly closed. The `finally: cur.close()` handles
+        # normal exhaustion and explicit `.close()` on the generator. However,
+        # if callers abandon the generator without calling `.close()`, the
+        # portal persists until Python GC runs. To avoid accumulating open
+        # portals, callers should exhaust the iterator or use:
+        # `with contextlib.closing(connector.iter_batches(...)) as it: ...`
         with self._lock:
             conn = self._require_open()
             cursor_name = f"orcapod_{next(self._cursor_seq)}"
             cur = conn.cursor(name=cursor_name)
-            cur.execute(query, params)
-            if cur.description is None:
-                cur.close()
-                return
-            col_names = [d.name for d in cur.description]
-            type_lookup = _resolve_column_type_lookup(query, self)
-            arrow_types = [type_lookup.get(n, _pa.large_string()) for n in col_names]
-            schema = _pa.schema(
-                [_pa.field(n, t) for n, t in zip(col_names, arrow_types)]
-            )
-            rows = cur.fetchmany(batch_size)
 
-        # Build and yield batches outside the lock; re-acquire briefly per fetchmany.
+        # cur.execute() is inside the try block so the cursor is always closed
+        # (and the transaction always ended) even if execute raises.
         try:
+            with self._lock:
+                self._require_open()
+                cur.execute(query, params)
+                if cur.description is None:
+                    return
+                col_names = [d.name for d in cur.description]
+                type_lookup = _resolve_column_type_lookup(query, self)
+                arrow_types = [type_lookup.get(n, _pa.large_string()) for n in col_names]
+                schema = _pa.schema(
+                    [_pa.field(n, t) for n, t in zip(col_names, arrow_types)]
+                )
+                rows = cur.fetchmany(batch_size)
+
+            # Build and yield batches outside the lock; re-acquire briefly per fetchmany.
             while rows:
                 arrays = [
                     _pa.array([r[i] for r in rows], type=t)
@@ -336,6 +341,14 @@ class PostgreSQLConnector:
                     rows = cur.fetchmany(batch_size)
         finally:
             cur.close()
+            # Roll back the implicit read transaction so the connection is not
+            # left "idle in transaction" holding a snapshot and blocking vacuum.
+            with self._lock:
+                if self._conn is not None:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
 
     # ── Write ─────────────────────────────────────────────────────────────────
 
@@ -364,9 +377,13 @@ class PostgreSQLConnector:
             ddl = f'CREATE TABLE IF NOT EXISTS "{table_name}" (\n'
             ddl += ",\n".join(col_defs)
             ddl += "\n)"
-            with conn.cursor() as cur:
-                cur.execute(ddl)
-            conn.commit()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(ddl)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     def upsert_records(
         self,
@@ -383,28 +400,35 @@ class PostgreSQLConnector:
             col_list = ", ".join('"' + c.replace('"', '""') + '"' for c in cols)
             placeholders = ", ".join("%s" for _ in cols)
 
+            escaped_id = id_column.replace('"', '""')
             if skip_existing:
-                conflict_clause = f'ON CONFLICT ("{id_column}") DO NOTHING'
+                conflict_clause = f'ON CONFLICT ("{escaped_id}") DO NOTHING'
             else:
                 non_pk_cols = [c for c in cols if c != id_column]
                 if non_pk_cols:
-                    set_clause = ", ".join(
-                        f'"{c}" = EXCLUDED."{c}"' for c in non_pk_cols
-                    )
+                    set_parts = []
+                    for c in non_pk_cols:
+                        ec = c.replace('"', '""')
+                        set_parts.append(f'"{ec}" = EXCLUDED."{ec}"')
+                    set_clause = ", ".join(set_parts)
                     conflict_clause = (
-                        f'ON CONFLICT ("{id_column}") DO UPDATE SET {set_clause}'
+                        f'ON CONFLICT ("{escaped_id}") DO UPDATE SET {set_clause}'
                     )
                 else:
-                    conflict_clause = f'ON CONFLICT ("{id_column}") DO NOTHING'
+                    conflict_clause = f'ON CONFLICT ("{escaped_id}") DO NOTHING'
 
             sql = (
                 f'INSERT INTO "{table_name}" ({col_list}) VALUES ({placeholders}) '
                 f'{conflict_clause}'
             )
-            rows = [tuple(row[c] for c in cols) for row in records.to_pylist()]
-            with conn.cursor() as cur:
-                cur.executemany(sql, rows)
-            conn.commit()
+            rows_iter = (tuple(row[c] for c in cols) for row in records.to_pylist())
+            try:
+                with conn.cursor() as cur:
+                    cur.executemany(sql, rows_iter)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
