@@ -114,7 +114,6 @@ class SpiralDBConnector:
         batch_size: int = 1000,
     ) -> Iterator[pa.RecordBatch]:
         raise NotImplementedError
-        yield  # make this a generator for type-checking
 
     def create_table_if_not_exists(
         self,
