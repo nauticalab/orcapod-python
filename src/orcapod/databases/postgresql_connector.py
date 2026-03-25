@@ -178,20 +178,254 @@ def _resolve_column_type_lookup(
 
 
 # ---------------------------------------------------------------------------
-# PostgreSQLConnector (stub — full implementation added in Task 5)
+# PostgreSQLConnector
 # ---------------------------------------------------------------------------
 
 
 class PostgreSQLConnector:
-    """DBConnectorProtocol implementation backed by psycopg3.
+    """DBConnectorProtocol implementation backed by psycopg3 (psycopg).
 
-    Full implementation is added in Task 5. This stub exists so that
-    type-mapping helpers and tests can be imported without a live database.
+    Holds a single psycopg.Connection opened at construction time.
+    Thread-safe via an internal threading.RLock.
+
+    Uses named server-side cursors in iter_batches so PostgreSQL streams
+    results row-by-row rather than buffering the full result set.
+
+    Args:
+        dsn: libpq connection string.
+            URI form: ``"postgresql://user:pass@host:5432/dbname"``
+            Keyword form: ``"host=localhost dbname=mydb user=alice"``
     """
 
-    def __init__(self, dsn: str, **connect_kwargs: Any) -> None:
+    def __init__(self, dsn: str) -> None:
         self._dsn = dsn
-        self._connect_kwargs = connect_kwargs
+        self._conn: Any = psycopg.connect(dsn, autocommit=False)
+        self._lock = threading.RLock()
+        self._cursor_seq = itertools.count()
+
+    # ── Internal helpers ──────────────────────────────────────────────────────
+
+    def _require_open(self) -> Any:
+        """Return the open connection or raise RuntimeError if closed."""
+        if self._conn is None:
+            raise RuntimeError("PostgreSQLConnector is closed")
+        return self._conn
+
+    @staticmethod
+    def _validate_table_name(table_name: str) -> None:
+        """Raise ValueError if table_name contains a double-quote character."""
+        if '"' in table_name:
+            raise ValueError(
+                f"Table name {table_name!r} contains an invalid double-quote character."
+            )
+
+    # ── Schema introspection ──────────────────────────────────────────────────
+
+    def get_table_names(self) -> list[str]:
+        """Return all user table names in this database (sorted, excludes views)."""
+        with self._lock:
+            conn = self._require_open()
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT table_name
+                    FROM information_schema.tables
+                    WHERE table_schema = current_schema()
+                      AND table_type = 'BASE TABLE'
+                    ORDER BY table_name
+                    """
+                )
+                return [row[0] for row in cur.fetchall()]
+
+    def get_pk_columns(self, table_name: str) -> list[str]:
+        """Return primary-key column names in key-sequence order."""
+        self._validate_table_name(table_name)
+        with self._lock:
+            conn = self._require_open()
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT kcu.column_name
+                    FROM information_schema.key_column_usage kcu
+                    JOIN information_schema.table_constraints tc
+                      ON kcu.constraint_name = tc.constraint_name
+                     AND kcu.table_schema    = tc.table_schema
+                     AND kcu.table_name      = tc.table_name
+                    WHERE tc.constraint_type = 'PRIMARY KEY'
+                      AND kcu.table_schema   = current_schema()
+                      AND kcu.table_name     = %s
+                    ORDER BY kcu.ordinal_position
+                    """,
+                    (table_name,),
+                )
+                return [row[0] for row in cur.fetchall()]
 
     def get_column_info(self, table_name: str) -> list[ColumnInfo]:
-        raise NotImplementedError("PostgreSQLConnector.get_column_info not yet implemented")
+        """Return column metadata with Arrow-mapped types."""
+        self._validate_table_name(table_name)
+        with self._lock:
+            conn = self._require_open()
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT column_name, data_type, udt_name, is_nullable
+                    FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name   = %s
+                    ORDER BY ordinal_position
+                    """,
+                    (table_name,),
+                )
+                return [
+                    ColumnInfo(
+                        name=row[0],
+                        arrow_type=_pg_type_to_arrow(row[1], row[2]),
+                        nullable=(row[3].upper() == "YES"),
+                    )
+                    for row in cur.fetchall()
+                ]
+
+    # ── Read ──────────────────────────────────────────────────────────────────
+
+    def iter_batches(
+        self,
+        query: str,
+        params: Any = None,
+        batch_size: int = 1000,
+    ) -> Iterator[pa.RecordBatch]:
+        """Execute a query and yield results as Arrow RecordBatches."""
+        import pyarrow as _pa
+
+        with self._lock:
+            conn = self._require_open()
+            cursor_name = f"orcapod_{next(self._cursor_seq)}"
+            cur = conn.cursor(name=cursor_name)
+
+        try:
+            with self._lock:
+                self._require_open()
+                cur.execute(query, params)
+                if cur.description is None:
+                    return
+                col_names = [d.name for d in cur.description]
+                type_lookup = _resolve_column_type_lookup(query, self)
+                arrow_types = [type_lookup.get(n, _pa.large_string()) for n in col_names]
+                schema = _pa.schema(
+                    [_pa.field(n, t) for n, t in zip(col_names, arrow_types)]
+                )
+                rows = cur.fetchmany(batch_size)
+
+            while rows:
+                arrays = [
+                    _pa.array([r[i] for r in rows], type=t)
+                    for i, t in enumerate(arrow_types)
+                ]
+                yield _pa.RecordBatch.from_arrays(arrays, schema=schema)
+                with self._lock:
+                    self._require_open()
+                    rows = cur.fetchmany(batch_size)
+        finally:
+            cur.close()
+
+    # ── Write ─────────────────────────────────────────────────────────────────
+
+    def create_table_if_not_exists(
+        self,
+        table_name: str,
+        columns: list[ColumnInfo],
+        pk_column: str,
+    ) -> None:
+        """Create a table with the given columns if it does not already exist."""
+        col_names = [col.name for col in columns]
+        if pk_column not in col_names:
+            raise ValueError(
+                f"pk_column {pk_column!r} not found in columns: {col_names}"
+            )
+        self._validate_table_name(table_name)
+        with self._lock:
+            conn = self._require_open()
+            col_defs = []
+            for col in columns:
+                pg_type = _arrow_type_to_pg_sql(col.arrow_type)
+                not_null = " NOT NULL" if not col.nullable else ""
+                pk = " PRIMARY KEY" if col.name == pk_column else ""
+                escaped = col.name.replace('"', '""')
+                col_defs.append(f'    "{escaped}" {pg_type}{not_null}{pk}')
+            ddl = f'CREATE TABLE IF NOT EXISTS "{table_name}" (\n'
+            ddl += ",\n".join(col_defs)
+            ddl += "\n)"
+            with conn.cursor() as cur:
+                cur.execute(ddl)
+            conn.commit()
+
+    def upsert_records(
+        self,
+        table_name: str,
+        records: pa.Table,
+        id_column: str,
+        skip_existing: bool = False,
+    ) -> None:
+        """Write records to a table using upsert semantics."""
+        self._validate_table_name(table_name)
+        with self._lock:
+            conn = self._require_open()
+            cols = list(records.column_names)
+            col_list = ", ".join('"' + c.replace('"', '""') + '"' for c in cols)
+            placeholders = ", ".join("%s" for _ in cols)
+
+            if skip_existing:
+                conflict_clause = f'ON CONFLICT ("{id_column}") DO NOTHING'
+            else:
+                non_pk_cols = [c for c in cols if c != id_column]
+                if non_pk_cols:
+                    set_clause = ", ".join(
+                        f'"{c}" = EXCLUDED."{c}"' for c in non_pk_cols
+                    )
+                    conflict_clause = (
+                        f'ON CONFLICT ("{id_column}") DO UPDATE SET {set_clause}'
+                    )
+                else:
+                    conflict_clause = f'ON CONFLICT ("{id_column}") DO NOTHING'
+
+            sql = (
+                f'INSERT INTO "{table_name}" ({col_list}) VALUES ({placeholders}) '
+                f'{conflict_clause}'
+            )
+            rows = [tuple(row[c] for c in cols) for row in records.to_pylist()]
+            with conn.cursor() as cur:
+                cur.executemany(sql, rows)
+            conn.commit()
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    def close(self) -> None:
+        """Close the database connection. Idempotent."""
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
+
+    def __enter__(self) -> PostgreSQLConnector:
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        self.close()
+
+    # ── Serialization ─────────────────────────────────────────────────────────
+
+    def to_config(self) -> dict[str, Any]:
+        """Serialize connection configuration to a JSON-compatible dict."""
+        return {
+            "connector_type": "postgresql",
+            "dsn": self._dsn,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> PostgreSQLConnector:
+        """Reconstruct a PostgreSQLConnector from a config dict."""
+        if config.get("connector_type") != "postgresql":
+            raise ValueError(
+                f"Expected connector_type 'postgresql', got "
+                f"{config.get('connector_type')!r}"
+            )
+        return cls(dsn=config["dsn"])
