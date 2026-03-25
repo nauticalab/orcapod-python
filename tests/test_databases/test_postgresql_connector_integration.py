@@ -3,14 +3,28 @@
 
 Run with: pytest -m postgres tests/test_databases/test_postgresql_connector_integration.py
 
-Uses pytest-postgresql to spawn a temporary PostgreSQL process. Requires
-PostgreSQL binaries (pg_ctl, initdb) to be installed:
-    sudo apt-get install postgresql
+Connects to a running PostgreSQL instance via standard PG* environment variables:
+
+    PGHOST      (default: localhost)
+    PGPORT      (default: 5432)
+    PGDATABASE  (default: testdb)
+    PGUSER      (default: postgres)
+    PGPASSWORD  (default: postgres)
+
+In CI, a PostgreSQL service container is started by the GitHub Actions workflow
+and these variables are set automatically. Locally, point them at any running
+PostgreSQL instance (e.g. `docker run -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16`).
+
+Each test gets an isolated schema (created fresh, dropped after), so tests can
+share a single database without interfering with each other.
 """
 from __future__ import annotations
 
+import os
+import uuid
 from collections.abc import Iterator
 
+import psycopg
 import pyarrow as pa
 import pytest
 
@@ -24,30 +38,36 @@ from orcapod.types import ColumnInfo
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(scope="session")
-def pg_connector(postgresql) -> Iterator[PostgreSQLConnector]:
-    """Session-scoped PostgreSQLConnector backed by a pytest-postgresql instance."""
-    info = postgresql.info
-    dsn = (
-        f"host={info.host} port={info.port} "
-        f"dbname={info.dbname} user={info.user}"
-    )
-    c = PostgreSQLConnector(dsn)
-    yield c
-    c.close()
+def _base_dsn() -> str:
+    """Build a DSN from standard PG* environment variables."""
+    host = os.environ.get("PGHOST", "localhost")
+    port = os.environ.get("PGPORT", "5432")
+    dbname = os.environ.get("PGDATABASE", "testdb")
+    user = os.environ.get("PGUSER", "postgres")
+    password = os.environ.get("PGPASSWORD", "postgres")
+    return f"host={host} port={port} dbname={dbname} user={user} password={password}"
 
 
 @pytest.fixture
-def connector(postgresql) -> Iterator[PostgreSQLConnector]:
-    """Function-scoped connector — fresh DB per test."""
-    info = postgresql.info
-    dsn = (
-        f"host={info.host} port={info.port} "
-        f"dbname={info.dbname} user={info.user}"
-    )
+def connector() -> Iterator[PostgreSQLConnector]:
+    """Function-scoped connector with per-test schema isolation.
+
+    Creates a fresh schema for each test and drops it on teardown, so every
+    test starts with an empty namespace without needing a dedicated database.
+    """
+    base_dsn = _base_dsn()
+    schema = f"test_{uuid.uuid4().hex[:12]}"
+    dsn = f"{base_dsn} options=-csearch_path={schema}"
+
+    with psycopg.connect(base_dsn, autocommit=True) as admin:
+        admin.execute(f"CREATE SCHEMA {schema}")
+
     c = PostgreSQLConnector(dsn)
     yield c
     c.close()
+
+    with psycopg.connect(base_dsn, autocommit=True) as admin:
+        admin.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
 
 
 def _make_columns() -> list[ColumnInfo]:
@@ -81,9 +101,8 @@ class TestLifecycle:
         connector.close()
         connector.close()  # must not raise
 
-    def test_context_manager(self, postgresql) -> None:
-        info = postgresql.info
-        dsn = f"host={info.host} port={info.port} dbname={info.dbname} user={info.user}"
+    def test_context_manager(self) -> None:
+        dsn = _base_dsn()
         with PostgreSQLConnector(dsn) as c:
             c._require_open()
         with pytest.raises(RuntimeError, match="closed"):
