@@ -206,8 +206,15 @@ class SpiralDBConnector:
                 non-default value is passed.
 
         Yields:
-            Arrow RecordBatch objects. Yields nothing for an empty table.
+            Arrow RecordBatch objects, with ``pa.string()`` normalized to
+            ``pa.large_string()`` and ``pa.binary()`` to ``pa.large_binary()``.
+            This matches the types reported by ``get_column_info`` and those
+            used by ``ConnectorArrowDatabase`` for pending records, preventing
+            schema mismatches in ``pa.concat_tables`` calls. Yields nothing for
+            an empty table.
         """
+        import pyarrow as _pa  # noqa: PLC0415
+
         self._require_open()
         if params is not None:
             logger.warning(
@@ -225,7 +232,28 @@ class SpiralDBConnector:
         table_name = _parse_table_name(query)
         tbl = self._project.table(self._table_id(table_name))
         reader = self._spiral.scan(tbl.select()).to_record_batches()
-        yield from reader
+        for batch in reader:
+            schema = batch.schema
+            new_fields = []
+            needs_cast = False
+            for field in schema:
+                ftype = field.type
+                if ftype == _pa.string():
+                    new_fields.append(
+                        _pa.field(field.name, _pa.large_string(), field.nullable, field.metadata)
+                    )
+                    needs_cast = True
+                elif ftype == _pa.binary():
+                    new_fields.append(
+                        _pa.field(field.name, _pa.large_binary(), field.nullable, field.metadata)
+                    )
+                    needs_cast = True
+                else:
+                    new_fields.append(field)
+            if needs_cast:
+                target_schema = _pa.schema(new_fields, metadata=schema.metadata)
+                batch = batch.cast(target_schema)
+            yield batch
 
     def create_table_if_not_exists(
         self,

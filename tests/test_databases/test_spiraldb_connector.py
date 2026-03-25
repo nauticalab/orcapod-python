@@ -199,14 +199,40 @@ class TestIterBatches:
         )
 
     def test_full_scan_yields_batches(self, connector, mock_sp, mock_project):
-        batch = pa.record_batch(
-            {"id": pa.array(["a", "b"]), "v": pa.array([1, 2])}
+        # SpiralDB returns pa.string() at the wire; iter_batches must normalize
+        # to pa.large_string() so ConnectorArrowDatabase can concat with pending
+        # records (which always use large_string).
+        raw_batch = pa.record_batch(
+            {"id": pa.array(["a", "b"], type=pa.string()), "v": pa.array([1, 2])}
         )
-        self._wire_scan(mock_sp, mock_project, [batch])
+        self._wire_scan(mock_sp, mock_project, [raw_batch])
         result = list(connector.iter_batches('SELECT * FROM "my_table"'))
         assert len(result) == 1
-        assert result[0] == batch
+        # Type is promoted to large_string; data values are preserved.
+        assert result[0].schema.field("id").type == pa.large_string()
+        assert result[0].column("id").to_pylist() == ["a", "b"]
+        assert result[0].column("v").to_pylist() == [1, 2]
         mock_project.table.assert_called_once_with("default.my_table")
+
+    def test_string_and_binary_normalized_to_large(self, connector, mock_sp, mock_project):
+        # SpiralDB (Vortex) stores utf8 → pa.string() and binary → pa.binary().
+        # iter_batches must cast those to large_string / large_binary so they
+        # match the types used by ConnectorArrowDatabase for pending records,
+        # preventing pa.concat_tables schema mismatches.
+        raw_batch = pa.record_batch({
+            "label": pa.array(["x"], type=pa.string()),
+            "payload": pa.array([b"\x00"], type=pa.binary()),
+            "score": pa.array([1.0], type=pa.float64()),
+        })
+        self._wire_scan(mock_sp, mock_project, [raw_batch])
+        result = list(connector.iter_batches('SELECT * FROM "t"'))
+        assert len(result) == 1
+        batch = result[0]
+        assert batch.schema.field("label").type == pa.large_string()
+        assert batch.schema.field("payload").type == pa.large_binary()
+        assert batch.schema.field("score").type == pa.float64()  # unchanged
+        assert batch.column("label").to_pylist() == ["x"]
+        assert batch.column("payload").to_pylist() == [b"\x00"]
 
     def test_empty_table_yields_no_batches(self, connector, mock_sp, mock_project):
         self._wire_scan(mock_sp, mock_project, [])
