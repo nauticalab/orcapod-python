@@ -286,12 +286,13 @@ def _parse_table_name(query: str) -> str:
     return m.group(1)
 ```
 
-`params` is accepted for protocol compliance but **silently ignored** — Spiral
-has no parameterised query interface. Non-`None` values are not warned about;
-callers are expected never to pass params to this connector.
+`params` is accepted for protocol compliance. Spiral has no parameterised query
+interface. If `params` is not `None`, the connector emits a `logging.warning`
+and proceeds; the params are not used in the query.
 
 `batch_size` is passed to `to_record_batches()`; the actual batch sizing is
-controlled by the Spiral execution engine.
+controlled by the Spiral execution engine. The pyspiral `Scan.to_record_batches()`
+wrapper implements `__iter__`, so `yield from reader` works correctly.
 
 If the table exists but contains no rows, `to_record_batches()` returns an
 empty reader and `yield from reader` produces zero batches without error.
@@ -309,8 +310,8 @@ schema; value columns are inferred by Spiral from the first write. This means
 (via `get_pk_columns`, `iter_batches`) and written to (via `upsert_records`)
 if they were created outside this connector, but cannot be created through it.
 
-The non-key entries in `columns` are **advisory/unused at creation time** — they
-are validated only to the extent that `pk_column` must appear in the list. Any
+The non-key entries in `columns` are **entirely ignored at creation time** —
+their names, types, and nullability are not registered with Spiral. Any
 inconsistency between the declared `columns` and the actual Arrow schema of
 records passed to `upsert_records` later will surface as an error at write time
 (from Spiral), not at table-creation time.
@@ -339,12 +340,25 @@ name is a no-op (Spiral returns 409 Conflict without `exist_ok`).
 
 ### `upsert_records(table_name, records, id_column, skip_existing)`
 
-`id_column` is accepted for protocol compliance but **ignored**. In SpiralDB,
-the key schema is intrinsic to the table (set at creation via `key_schema`) and
-is the authoritative source for conflict detection. `tbl.key_schema.names` is
-used instead, which is always correct regardless of the `id_column` value passed
-by the caller (for tables created via `create_table_if_not_exists`, `id_column`
-will always equal the single key column anyway).
+`id_column` is accepted for protocol compliance but **not used as the conflict
+key**. In SpiralDB, the key schema is intrinsic to the table and is the
+authoritative source for conflict detection. `tbl.key_schema.names` is used
+instead.
+
+To guard against silent mismatches, the implementation validates that
+`id_column` is present in `tbl.key_schema.names` and raises `ValueError` if not:
+
+```python
+pk_cols = list(tbl.key_schema.names)
+if id_column not in pk_cols:
+    raise ValueError(
+        f"id_column {id_column!r} is not in the table key schema {pk_cols}. "
+        "SpiralDB uses the table key schema for conflict detection."
+    )
+```
+
+If the table does not exist, `project.table()` raises a pyspiral exception
+which propagates to the caller.
 
 **`skip_existing=False` (default, overwrite):**
 
@@ -364,12 +378,18 @@ match existing rows are overwritten; rows with novel keys are inserted.
 **`skip_existing=True` (skip if key already exists):**
 
 SpiralDB has no native skip-existing equivalent. The approximation:
-1. Full scan to retrieve all existing rows (key-only scans are not supported).
-2. Client-side filter to keep only rows with novel key tuples.
-3. Write the filtered batch (no-op if empty).
+1. Validate that the table has a non-empty key schema (raises `ValueError` otherwise).
+2. Full scan to retrieve all existing rows (key-only scans are not supported).
+3. Client-side filter to keep only rows with novel key tuples.
+4. Write the filtered batch (no-op if empty).
 
 ```python
     pk_cols = list(tbl.key_schema.names)
+    if not pk_cols:
+        raise ValueError(
+            f"Table {table_name!r} has no key schema; "
+            "skip_existing=True requires a key schema to identify duplicates."
+        )
     existing = self._spiral.scan(tbl.select()).to_table()  # pyspiral Scan.to_table()
     existing_keys = {
         tuple(row[k] for k in pk_cols)
@@ -469,10 +489,10 @@ All tests use a `MockProject` / `MockTable` defined inline. No network access.
 | 2 | `get_table_names` | Returns sorted plain names; filters to correct dataset; excludes tables in other datasets; `list_tables()` returns tables from multiple datasets |
 | 3 | `get_pk_columns` | Single PK; composite PK (declaration order preserved); empty list for table with no key |
 | 4 | `get_column_info` | Arrow types pass through unchanged; `nullable` from Arrow field; propagates pyspiral exception for non-existent table (no empty-list fallback) |
-| 5 | `iter_batches` | Full table scan; double-quoted table name parsed correctly; unquoted fallback; `params` silently ignored; **empty table → zero batches, no error**; propagates pyspiral exception for non-existent table |
-| 6 | `create_table_if_not_exists` | Idempotent (`exist_ok=True` always passed); correct single-entry `key_schema` tuple passed; raises `ValueError` if `pk_column` not in `columns`; non-PK `columns` entries are unused at creation time |
-| 7 | `upsert_records(skip_existing=False)` | `table.write()` called with full records; `id_column` accepted but ignored |
-| 8 | `upsert_records(skip_existing=True)` | Existing keys filtered using `key_schema.names`; only novel rows written; no-op write skipped when all rows exist; `id_column` accepted but ignored |
+| 5 | `iter_batches` | Full table scan; double-quoted table name parsed correctly; unquoted fallback; non-`None` `params` emits `logging.warning`; **empty table → zero batches, no error**; propagates pyspiral exception for non-existent table |
+| 6 | `create_table_if_not_exists` | Idempotent (`exist_ok=True` always passed); correct single-entry `key_schema` tuple passed; raises `ValueError` if `pk_column` not in `columns`; empty `columns` list also raises `ValueError`; non-PK `columns` entries are entirely ignored |
+| 7 | `upsert_records(skip_existing=False)` | `table.write()` called with full records; raises `ValueError` if `id_column` not in `tbl.key_schema.names` |
+| 8 | `upsert_records(skip_existing=True)` | Raises `ValueError` if `id_column` not in key schema; raises `ValueError` if key schema is empty; existing keys filtered using `key_schema.names`; only novel rows written; no-op write skipped when all rows exist |
 | 9 | Lifecycle | Context manager calls `close()`; double-close is safe; all public methods — including `upsert_records` and `to_config` — raise `RuntimeError` after `close()`; `__exit__` does not suppress exceptions |
 | 10 | `to_config` / `from_config` | Round-trips `project_id`, `dataset`, `overrides`; `connector_type` is `"spiraldb"`; `from_config` raises on wrong `connector_type`; `to_config` raises after `close()` |
 
