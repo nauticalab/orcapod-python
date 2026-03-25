@@ -3,6 +3,7 @@ from .delta_lake_databases import DeltaTableDatabase
 from .in_memory_databases import InMemoryArrowDatabase
 from .noop_database import NoOpArrowDatabase
 from .sqlite_connector import SQLiteConnector
+from .postgresql_connector import PostgreSQLConnector
 
 __all__ = [
     "ConnectorArrowDatabase",
@@ -10,6 +11,7 @@ __all__ = [
     "InMemoryArrowDatabase",
     "NoOpArrowDatabase",
     "SQLiteConnector",
+    "PostgreSQLConnector",
 ]
 
 # Relational DB connector implementations satisfy DBConnectorProtocol
@@ -17,8 +19,8 @@ __all__ = [
 # ConnectorArrowDatabase (read+write ArrowDatabaseProtocol) or
 # DBTableSource (read-only Source):
 #
-#   SQLiteConnector      -- PLT-1076 (stdlib sqlite3, zero extra deps)
-#   PostgreSQLConnector  -- PLT-1075 (psycopg3)
+#   SQLiteConnector      -- PLT-1076 (stdlib sqlite3, zero extra deps)  ✓
+#   PostgreSQLConnector  -- PLT-1075 (psycopg3)                          ✓
 #   SpiralDBConnector    -- PLT-1074
 #
 # ArrowDatabaseProtocol backends (existing, not connector-based):
