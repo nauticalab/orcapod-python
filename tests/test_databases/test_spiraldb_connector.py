@@ -284,3 +284,97 @@ class TestCreateTableIfNotExists:
         connector.create_table_if_not_exists("t", columns, pk_column="id")
         call_kwargs = mock_project.create_table.call_args.kwargs
         assert call_kwargs["key_schema"] == [("id", pa.string())]
+
+
+# ---------------------------------------------------------------------------
+# upsert_records
+# ---------------------------------------------------------------------------
+
+
+class TestUpsertRecords:
+    def _make_mock_table(self, mock_project, pk_cols: list[str]) -> MagicMock:
+        mock_table = MagicMock()
+        mock_table.key_schema.names = pk_cols
+        mock_project.table.return_value = mock_table
+        return mock_table
+
+    # --- skip_existing=False (default: always upsert-by-key) ----------------
+
+    def test_write_called_with_full_records(self, connector, mock_project):
+        mock_table = self._make_mock_table(mock_project, ["id"])
+        records = pa.table({"id": ["a", "b"], "value": [1.0, 2.0]})
+        connector.upsert_records("my_table", records, id_column="id")
+        mock_table.write.assert_called_once_with(records)
+
+    def test_raises_if_id_column_not_in_key_schema(self, connector, mock_project):
+        self._make_mock_table(mock_project, ["id"])
+        records = pa.table({"id": ["a"], "value": [1.0]})
+        with pytest.raises(ValueError, match="id_column"):
+            connector.upsert_records("my_table", records, id_column="wrong_col")
+
+    def test_raises_if_pk_column_missing_from_records(self, connector, mock_project):
+        self._make_mock_table(mock_project, ["id", "session_id"])
+        records = pa.table({"id": ["a"]})  # missing session_id
+        with pytest.raises(ValueError, match="missing key column"):
+            connector.upsert_records("my_table", records, id_column="id")
+
+    def test_raises_if_empty_key_schema(self, connector, mock_project):
+        # id_column can never be `in []`, so this always raises ValueError
+        self._make_mock_table(mock_project, [])
+        records = pa.table({"id": ["a"]})
+        with pytest.raises(ValueError, match="id_column"):
+            connector.upsert_records("my_table", records, id_column="id")
+
+    # --- skip_existing=True (scan + filter + write novel rows only) ----------
+
+    def test_skip_existing_writes_only_novel_rows(self, connector, mock_sp, mock_project):
+        mock_table = self._make_mock_table(mock_project, ["id"])
+        existing = pa.table({"id": ["a"], "value": [1.0]})
+        new_records = pa.table({"id": ["a", "b"], "value": [1.0, 2.0]})
+        mock_sp.Spiral.return_value.scan.return_value.to_table.return_value = existing
+
+        connector.upsert_records("my_table", new_records, id_column="id", skip_existing=True)
+
+        written = mock_table.write.call_args[0][0]
+        assert written.column("id").to_pylist() == ["b"]
+
+    def test_skip_existing_noop_when_all_rows_exist(self, connector, mock_sp, mock_project):
+        mock_table = self._make_mock_table(mock_project, ["id"])
+        existing = pa.table({"id": ["a", "b"], "value": [1.0, 2.0]})
+        new_records = pa.table({"id": ["a", "b"], "value": [10.0, 20.0]})
+        mock_sp.Spiral.return_value.scan.return_value.to_table.return_value = existing
+
+        connector.upsert_records("my_table", new_records, id_column="id", skip_existing=True)
+
+        mock_table.write.assert_not_called()
+
+    def test_skip_existing_composite_pk(self, connector, mock_sp, mock_project):
+        mock_table = self._make_mock_table(mock_project, ["session_id", "ts"])
+        existing = pa.table({
+            "session_id": pa.array(["s1"]),
+            "ts": pa.array([1], type=pa.int64()),
+            "v": pa.array([10.0]),
+        })
+        new_records = pa.table({
+            "session_id": pa.array(["s1", "s1"]),
+            "ts": pa.array([1, 2], type=pa.int64()),  # (s1,1) exists; (s1,2) is novel
+            "v": pa.array([99.0, 5.0]),
+        })
+        mock_sp.Spiral.return_value.scan.return_value.to_table.return_value = existing
+
+        connector.upsert_records("my_table", new_records, id_column="session_id", skip_existing=True)
+
+        written = mock_table.write.call_args[0][0]
+        assert written.column("ts").to_pylist() == [2]
+
+    def test_skip_existing_raises_if_id_column_not_in_key_schema(self, connector, mock_project):
+        self._make_mock_table(mock_project, ["id"])
+        records = pa.table({"id": ["a"]})
+        with pytest.raises(ValueError, match="id_column"):
+            connector.upsert_records("t", records, id_column="wrong", skip_existing=True)
+
+    def test_skip_existing_raises_if_pk_missing_from_records(self, connector, mock_project):
+        self._make_mock_table(mock_project, ["id", "ts"])
+        records = pa.table({"id": ["a"]})  # missing ts
+        with pytest.raises(ValueError, match="missing key column"):
+            connector.upsert_records("t", records, id_column="id", skip_existing=True)
