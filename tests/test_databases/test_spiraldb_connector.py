@@ -157,9 +157,13 @@ class TestGetPkColumns:
 
 
 class TestGetColumnInfo:
-    def test_arrow_types_pass_through_unchanged(self, connector, mock_project):
+    def test_arrow_types_returned_with_string_normalization(self, connector, mock_project):
+        # SpiralDB normalizes large_string → string at storage time.
+        # get_column_info maps string → large_string (and binary → large_binary)
+        # to stay consistent with SQLiteConnector and PostgreSQLConnector.
         arrow_schema = pa.schema([
-            pa.field("id", pa.string(), nullable=False),
+            pa.field("id", pa.string(), nullable=False),       # SpiralDB returns string
+            pa.field("data", pa.binary(), nullable=True),      # SpiralDB returns binary
             pa.field("value", pa.float64(), nullable=True),
             pa.field("count", pa.int64(), nullable=True),
         ])
@@ -168,7 +172,8 @@ class TestGetColumnInfo:
         mock_project.table.return_value = mock_table
         result = connector.get_column_info("my_table")
         assert result == [
-            ColumnInfo("id", pa.string(), nullable=False),
+            ColumnInfo("id", pa.large_string(), nullable=False),   # normalized
+            ColumnInfo("data", pa.large_binary(), nullable=True),  # normalized
             ColumnInfo("value", pa.float64(), nullable=True),
             ColumnInfo("count", pa.int64(), nullable=True),
         ]
@@ -222,12 +227,17 @@ class TestIterBatches:
             list(connector.iter_batches('SELECT * FROM "t"', params={"x": 1}))
         assert any("params" in msg.lower() for msg in caplog.messages)
 
-    def test_batch_size_passed_to_spiral(self, connector, mock_sp, mock_project):
+    def test_batch_size_logs_warning_and_is_ignored(self, connector, mock_sp, mock_project, caplog):
+        # SpiralDB does not support caller-controlled batch sizing; the SDK
+        # controls batch sizes internally.  A warning should be logged when a
+        # non-default value is passed, and to_record_batches() must be called
+        # with no arguments.
+        import logging  # noqa: PLC0415
         self._wire_scan(mock_sp, mock_project, [])
-        list(connector.iter_batches('SELECT * FROM "t"', batch_size=500))
-        mock_sp.Spiral.return_value.scan.return_value.to_record_batches.assert_called_with(
-            batch_size=500
-        )
+        with caplog.at_level(logging.WARNING):
+            list(connector.iter_batches('SELECT * FROM "t"', batch_size=500))
+        assert any("batch_size" in msg.lower() for msg in caplog.messages)
+        mock_sp.Spiral.return_value.scan.return_value.to_record_batches.assert_called_with()
 
     def test_nonexistent_table_propagates_exception(self, connector, mock_sp, mock_project):
         mock_project.table.side_effect = RuntimeError("table not found")
