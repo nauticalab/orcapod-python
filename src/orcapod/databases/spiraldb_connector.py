@@ -90,21 +90,32 @@ class SpiralDBConnector:
         dataset: str = "default",
         overrides: dict[str, str] | None = None,
     ) -> None:
-        raise NotImplementedError
+        self._project_id = project_id
+        self._dataset = dataset
+        self._overrides = overrides
+        self._spiral = sp.Spiral(overrides=overrides)
+        self._project = self._spiral.project(project_id)
+        self._closed = False
 
     def _require_open(self) -> None:
-        raise NotImplementedError
+        """Raise RuntimeError if this connector has been closed."""
+        if self._closed:
+            raise RuntimeError("SpiralDBConnector is closed")
 
     def _table_id(self, table_name: str) -> str:
-        raise NotImplementedError
+        """Return the dataset-qualified table identifier for a plain table name."""
+        return f"{self._dataset}.{table_name}"
 
     def get_table_names(self) -> list[str]:
+        self._require_open()
         raise NotImplementedError
 
     def get_pk_columns(self, table_name: str) -> list[str]:
+        self._require_open()
         raise NotImplementedError
 
     def get_column_info(self, table_name: str) -> list[ColumnInfo]:
+        self._require_open()
         raise NotImplementedError
 
     def iter_batches(
@@ -113,6 +124,7 @@ class SpiralDBConnector:
         params: Any = None,
         batch_size: int = 1000,
     ) -> Iterator[pa.RecordBatch]:
+        self._require_open()
         raise NotImplementedError
 
     def create_table_if_not_exists(
@@ -121,6 +133,7 @@ class SpiralDBConnector:
         columns: list[ColumnInfo],
         pk_column: str,
     ) -> None:
+        self._require_open()
         raise NotImplementedError
 
     def upsert_records(
@@ -130,18 +143,21 @@ class SpiralDBConnector:
         id_column: str,
         skip_existing: bool = False,
     ) -> None:
+        self._require_open()
         raise NotImplementedError
 
     def close(self) -> None:
-        raise NotImplementedError
+        """Mark this connector as closed. Idempotent. No network teardown needed."""
+        self._closed = True
 
     def __enter__(self) -> SpiralDBConnector:
-        raise NotImplementedError
+        return self
 
     def __exit__(self, *args: Any) -> None:
-        raise NotImplementedError
+        self.close()
 
     def to_config(self) -> dict[str, Any]:
+        self._require_open()
         raise NotImplementedError
 
     @classmethod
