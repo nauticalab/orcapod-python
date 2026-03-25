@@ -162,8 +162,38 @@ class SpiralDBConnector:
         params: Any = None,
         batch_size: int = 1000,
     ) -> Iterator[pa.RecordBatch]:
+        """Execute a full-table scan and yield results as Arrow RecordBatches.
+
+        SpiralDB has no SQL engine. The table name is parsed from the query's
+        FROM clause (double-quoted or unquoted). Only ``SELECT * FROM "table"``
+        patterns are supported; WHERE clauses and projections are silently ignored.
+
+        The query must use a plain (non-qualified) table name — not
+        ``"dataset.table"``. Passing a qualified name would cause a pyspiral
+        lookup failure.
+
+        Args:
+            query: SQL-style query. Must contain ``FROM "table_name"``.
+            params: Accepted for protocol compliance. SpiralDB has no parameterised
+                interface — if not ``None``, a warning is logged and params are
+                not used.
+            batch_size: Passed to ``Scan.to_record_batches()``; actual batch
+                sizing is controlled by the Spiral execution engine.
+
+        Yields:
+            Arrow RecordBatch objects. Yields nothing for an empty table.
+        """
         self._require_open()
-        raise NotImplementedError
+        if params is not None:
+            logger.warning(
+                "SpiralDBConnector does not support query parameters; "
+                "ignoring params=%r",
+                params,
+            )
+        table_name = _parse_table_name(query)
+        tbl = self._project.table(self._table_id(table_name))
+        reader = self._spiral.scan(tbl.select()).to_record_batches(batch_size=batch_size)
+        yield from reader
 
     def create_table_if_not_exists(
         self,
