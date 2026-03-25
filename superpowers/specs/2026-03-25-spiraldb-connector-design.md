@@ -286,6 +286,14 @@ def _parse_table_name(query: str) -> str:
     return m.group(1)
 ```
 
+The `query` string **must contain only the plain table name** (not the
+`dataset.table`-qualified form) inside the SQL `FROM` clause. Callers
+(`ConnectorArrowDatabase`, `DBTableSource`) always generate plain names like
+`SELECT * FROM "my_table"`. If a caller were to pass a qualified name
+(`SELECT * FROM "default.my_table"`), the regex would capture
+`"default.my_table"` and `_table_id` would produce `"default.default.my_table"`,
+causing a pyspiral lookup failure. This is documented in the method docstring.
+
 `params` is accepted for protocol compliance. Spiral has no parameterised query
 interface. If `params` is not `None`, the connector emits a `logging.warning`
 and proceeds; the params are not used in the query.
@@ -345,46 +353,30 @@ key**. In SpiralDB, the key schema is intrinsic to the table and is the
 authoritative source for conflict detection. `tbl.key_schema.names` is used
 instead.
 
-To guard against silent mismatches, the implementation validates that
-`id_column` is present in `tbl.key_schema.names` and raises `ValueError` if not:
-
-```python
-pk_cols = list(tbl.key_schema.names)
-if id_column not in pk_cols:
-    raise ValueError(
-        f"id_column {id_column!r} is not in the table key schema {pk_cols}. "
-        "SpiralDB uses the table key schema for conflict detection."
-    )
-```
-
 If the table does not exist, `project.table()` raises a pyspiral exception
 which propagates to the caller.
 
-**`skip_existing=False` (default, overwrite):**
+The full method — including shared preamble guards and both branches:
 
 ```python
 def upsert_records(self, table_name, records, id_column, skip_existing=False):
     self._require_open()
     tbl = self._project.table(self._table_id(table_name))
+    pk_cols = list(tbl.key_schema.names)
+
+    # Guard: id_column must be in the key schema (covers both branches)
+    if id_column not in pk_cols:
+        raise ValueError(
+            f"id_column {id_column!r} is not in the table key schema {pk_cols}. "
+            "SpiralDB uses the table key schema for conflict detection."
+        )
+
     if not skip_existing:
+        # Always upsert-by-key: existing rows overwritten, novel rows inserted.
         tbl.write(records)
         return
-    ...
-```
 
-`table.write()` is always upsert-by-key in SpiralDB: rows whose key columns
-match existing rows are overwritten; rows with novel keys are inserted.
-
-**`skip_existing=True` (skip if key already exists):**
-
-SpiralDB has no native skip-existing equivalent. The approximation:
-1. Validate that the table has a non-empty key schema (raises `ValueError` otherwise).
-2. Full scan to retrieve all existing rows (key-only scans are not supported).
-3. Client-side filter to keep only rows with novel key tuples.
-4. Write the filtered batch (no-op if empty).
-
-```python
-    pk_cols = list(tbl.key_schema.names)
+    # skip_existing=True: scan + client-side filter + write novel rows only.
     if not pk_cols:
         raise ValueError(
             f"Table {table_name!r} has no key schema; "
@@ -403,6 +395,11 @@ SpiralDB has no native skip-existing equivalent. The approximation:
     if len(novel) > 0:
         tbl.write(novel)
 ```
+
+Note: the `if not pk_cols` guard in the `skip_existing=True` branch is
+technically unreachable given that the `id_column not in pk_cols` guard above
+already raises when `pk_cols` is empty (since nothing can be `in []`). It is
+kept for clarity and defensive programming.
 
 **Performance caveat (documented in docstring):** `skip_existing=True` reads
 the entire table into memory to build the key set. Use `skip_existing=False`
@@ -453,6 +450,7 @@ not suppress exceptions). This is consistent with `SQLiteConnector`.
 | No native `skip_existing=True` | `upsert_records(skip_existing=True)` requires a full table scan; O(n) in table size |
 | Single-column PK only via `create_table_if_not_exists` | Composite-PK tables must be created outside this connector; they can still be read and written |
 | No SQL support beyond `SELECT * FROM "table"` | `iter_batches` parses only the table name; WHERE clauses and projections are not supported |
+| Newly-created table schema is key-column-only until first write | `get_column_info` on a table created via `create_table_if_not_exists` but never written returns only the key column, not the full `columns` list passed at creation (Spiral infers value columns from the first write) |
 
 ---
 
