@@ -5,30 +5,47 @@ Orcapod's Python library for developing reproducbile scientific pipelines.
 
 This project uses GitHub Actions for continuous integration:
 
-- **Run Tests**: A workflow that runs tests on Ubuntu with multiple Python versions.
+- **Run Tests**: Runs the full unit test suite on Ubuntu with Python 3.11 and 3.12. PostgreSQL integration tests are excluded.
+- **Run PostgreSQL Tests**: Runs only the `@pytest.mark.postgres` integration tests against a PostgreSQL 16 service container.
 
 ### Running Tests Locally
 
-To run tests locally:
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
 
 ```bash
-# Install the package with test dependencies
-pip install -e ".[test]"
+# Install all dependencies
+uv sync --all-extras --dev
 
-# Run tests with coverage
-pytest -v --cov=src --cov-report=term-missing
+# Run the standard test suite (no PostgreSQL required)
+uv run pytest -m "not postgres"
+
+# Run with coverage
+uv run pytest -m "not postgres" --cov=src --cov-report=term-missing
 ```
 
-### Development Setup
+### Running PostgreSQL Integration Tests Locally
 
-For development, you can install all optional dependencies:
+The PostgreSQL integration tests require a running PostgreSQL instance. The easiest way is Docker:
 
 ```bash
-# Install all development dependencies 
-pip install -e ".[test,dev]"
-# or
-pip install -r requirements-dev.txt
+docker run --rm -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
 ```
+
+Then in another terminal:
+
+```bash
+PGPASSWORD=postgres uv run pytest -m postgres -v
+```
+
+The tests connect via standard `PG*` environment variables — override any of these defaults as needed:
+
+| Variable     | Default     |
+|--------------|-------------|
+| `PGHOST`     | `localhost`  |
+| `PGPORT`     | `5432`       |
+| `PGDATABASE` | `testdb`     |
+| `PGUSER`     | `postgres`   |
+| `PGPASSWORD` | `postgres`   |
 
 ## Lower-level details on pipeline workflow (tentative)
 
