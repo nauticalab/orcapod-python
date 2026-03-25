@@ -240,10 +240,20 @@ returned in declaration order. Returns `[]` if the table has no key schema.
 
 ```python
 def get_column_info(self, table_name: str) -> list[ColumnInfo]:
+    import pyarrow as _pa
+
     self._require_open()
     arrow_schema = self._project.table(self._table_id(table_name)).schema().to_arrow()
+
+    def _normalize(arrow_type):
+        if arrow_type == _pa.string():
+            return _pa.large_string()
+        if arrow_type == _pa.binary():
+            return _pa.large_binary()
+        return arrow_type
+
     return [
-        ColumnInfo(name=field.name, arrow_type=field.type, nullable=field.nullable)
+        ColumnInfo(name=field.name, arrow_type=_normalize(field.type), nullable=field.nullable)
         for field in arrow_schema
     ]
 ```
@@ -252,11 +262,28 @@ If the table does not exist, `project.table()` or `.schema()` will raise a
 pyspiral exception. No try/except is applied — the exception propagates to the
 caller. This is consistent with `get_pk_columns` and `iter_batches`.
 
-**Timezone note:** SpiralDB silently drops timezone information from
-`timestamp` columns at the storage level. Both `get_column_info` (schema
-introspection) and `iter_batches` (scan results) return `timestamp[us]` when
-the stored type was `timestamp[us, tz=UTC]`. This affects both methods equally
-and is a known SpiralDB limitation. See also the "Known Limitations" section.
+**String/binary type normalization (discovered during live integration testing):**
+SpiralDB's Vortex storage engine stores all string data as `utf8` (`pa.string()`),
+regardless of whether the caller wrote `pa.large_string()`. When `schema().to_arrow()`
+is called, it returns `pa.string()` for those columns. However, `ConnectorArrowDatabase`
+and the other connectors (`SQLiteConnector`, `PostgreSQLConnector`) use `pa.large_string()`
+throughout — `_arrow_schema_to_column_infos` always produces `large_string` for string
+columns. Without normalization, `ConnectorArrowDatabase.flush()` raises a false schema
+mismatch error (`ValueError: Schema mismatch`) even when column names and logical types
+match perfectly. The same issue applies to `pa.binary()` → `pa.large_binary()`.
+
+The normalization is applied **only in `get_column_info`** (schema introspection). Scan
+results from `iter_batches` return whatever Arrow types pyspiral produces natively; no
+normalization is applied there. This means that `get_column_info` and `iter_batches`
+may return differing string types for the same column — `large_string` from
+`get_column_info`, `string` from scan batches. This is intentional: `get_column_info`
+is used for schema comparison, not for decoding scan results.
+
+**Timezone note:** SpiralDB also silently drops timezone information from `timestamp`
+columns at the storage level. Both `get_column_info` (schema introspection) and
+`iter_batches` (scan results) return `timestamp[us]` when the stored type was
+`timestamp[us, tz=UTC]`. This affects both methods equally and is a known SpiralDB
+limitation. See also the "Known Limitations" section.
 
 ### `iter_batches(query, params, batch_size)`
 
@@ -270,7 +297,7 @@ def iter_batches(self, query, params=None, batch_size=1000):
     table_name = _parse_table_name(query)
     tbl = self._project.table(self._table_id(table_name))
     # tbl.select() with no args selects all columns; verified in PLT-1163 exploration.
-    reader = self._spiral.scan(tbl.select()).to_record_batches(batch_size=batch_size)
+    reader = self._spiral.scan(tbl.select()).to_record_batches()
     yield from reader
 ```
 
@@ -299,8 +326,12 @@ causing a pyspiral lookup failure. This is documented in the method docstring.
 interface. If `params` is not `None`, the connector emits a `logging.warning`
 and proceeds; the params are not used in the query.
 
-`batch_size` is passed to `to_record_batches()`; the actual batch sizing is
-controlled by the Spiral execution engine. The pyspiral `Scan.to_record_batches()`
+`batch_size` is **not forwarded** to `to_record_batches()` — confirmed during live
+integration testing that `Plan.to_record_batches()` does not accept a `batch_size`
+keyword argument at all (raises `TypeError`). The Spiral execution engine controls
+batch sizing internally. `batch_size` is accepted by `iter_batches` for protocol
+compliance only; a `logging.warning` is emitted if a non-default value (anything
+other than the default of `1000`) is passed. The pyspiral `Scan.to_record_batches()`
 wrapper implements `__iter__`, so `yield from reader` works correctly.
 
 If the table exists but contains no rows, `to_record_batches()` returns an
@@ -446,6 +477,8 @@ not suppress exceptions). This is consistent with `SQLiteConnector`.
 
 ## Known Limitations
 
+### Discovered during design / initial implementation
+
 | Limitation | Impact |
 |---|---|
 | Timezone silently dropped from `timestamp` columns at storage level | `get_column_info` and `iter_batches` both return `timestamp[us]` where the original was `timestamp[us, tz=X]` |
@@ -456,17 +489,28 @@ not suppress exceptions). This is consistent with `SQLiteConnector`.
 | `skip_existing=True` unreliable for timestamp PK columns | SpiralDB strips timezone at storage; if the caller's `records` contains timezone-aware `datetime` PK values, they will never match the timezone-naive values returned by the existing-row scan, causing all rows to appear novel and be written unconditionally |
 | Keyless tables are not writable via `upsert_records` | A table with an empty key schema always causes `upsert_records` to raise `ValueError` (since `id_column` can never be in an empty key schema), regardless of `skip_existing`. Such tables can be read via `get_column_info` and `iter_batches`. |
 
+### Discovered during live integration testing (PLT-1074)
+
+| Limitation | Affected method | Root cause | Fix applied |
+|---|---|---|---|
+| `string` / `large_string` mismatch between SpiralDB schema and `ConnectorArrowDatabase` | `get_column_info` | SpiralDB's Vortex engine normalizes all string columns to `utf8` (`pa.string()`) at storage time, regardless of whether `pa.large_string()` was written. `ConnectorArrowDatabase.flush()` compares the existing schema from `get_column_info` against the pending record schema (which always uses `large_string`), and raised `ValueError: Schema mismatch` even when names and logical types matched. | `get_column_info` now normalizes `pa.string()` → `pa.large_string()` and `pa.binary()` → `pa.large_binary()`. This normalization is **not** applied to scan results from `iter_batches`. |
+| `batch_size` kwarg not accepted by `Plan.to_record_batches()` | `iter_batches` | The pyspiral `Plan.to_record_batches()` method does not accept a `batch_size` keyword argument (confirmed against `pyspiral>=0.11.0`). Passing it raises `TypeError: Plan.to_record_batches() got an unexpected keyword argument 'batch_size'`. Batch sizing is controlled entirely by the Spiral execution engine. | `iter_batches` no longer passes `batch_size` to `to_record_batches()`. It is accepted by the connector method for protocol compliance only, and a `logging.warning` is emitted if a non-default value is passed. |
+
 ---
 
 ## Type Notes
 
 SpiralDB is Arrow-native. `table.schema().to_arrow()` and scan results
-(`scan.to_table()` / `scan.to_record_batches()`) return identical Arrow types.
-No secondary type-mapping layer is needed.
+(`scan.to_table()` / `scan.to_record_batches()`) return Arrow types directly.
+No secondary type-mapping layer is needed, with the two normalizations described
+below applied only in `get_column_info`.
 
-| Vortex internal type                           | Arrow type from `schema().to_arrow()` |
+### Raw types from SpiralDB (`schema().to_arrow()` and scan results)
+
+| Vortex internal type                           | Arrow type returned                   |
 |------------------------------------------------|---------------------------------------|
-| `utf8?`                                        | `string`                              |
+| `utf8?`                                        | `pa.string()`                         |
+| `binary?`                                      | `pa.binary()`                         |
 | `i16? / i32? / i64?`                           | `int16 / int32 / int64`               |
 | `u16? / u32?`                                  | `uint16 / uint32`                     |
 | `f32?`                                         | `float32`                             |
@@ -474,8 +518,23 @@ No secondary type-mapping layer is needed.
 | `bool?`                                        | `bool_`                               |
 | `list(T?)?`                                    | `list<item: T>`                       |
 | `fixed_size_list(T?)[N]?`                      | `fixed_size_list<item: T>[N]`         |
-| `vortex.timestamp[us, tz=America/Los_Angeles]` | `timestamp[us]` ⚠️ **tz dropped**    |
+| `vortex.timestamp[us, tz=America/Los_Angeles]` | `timestamp[us]` ⚠️ **tz stripped**   |
 | struct                                         | Arrow struct                          |
+
+### Normalization applied in `get_column_info` only
+
+`get_column_info` applies two additional mappings on top of the raw SpiralDB types,
+for consistency with `SQLiteConnector`, `PostgreSQLConnector`, and `ConnectorArrowDatabase`:
+
+| Raw type from SpiralDB | Normalized type returned by `get_column_info` | Reason |
+|---|---|---|
+| `pa.string()` | `pa.large_string()` | SpiralDB always stores `utf8` regardless of whether `large_string` was written. Without normalization, `ConnectorArrowDatabase.flush()` raises a false `ValueError: Schema mismatch` even when column names and logical types match. |
+| `pa.binary()` | `pa.large_binary()` | Same reason — SpiralDB normalizes to `binary` at storage; `ConnectorArrowDatabase` uses `large_binary`. |
+
+⚠️ **Important:** scan results from `iter_batches` are **not** normalized — they return
+`pa.string()` / `pa.binary()` as SpiralDB produces them. Only `get_column_info` applies
+the normalization, because that method is used for schema comparison. Code that consumes
+scan results directly will receive `string`, not `large_string`.
 
 ---
 
@@ -490,7 +549,7 @@ All tests use a `MockProject` / `MockTable` defined inline. No network access.
 | 1 | Protocol conformance | `isinstance(connector, DBConnectorProtocol)` passes |
 | 2 | `get_table_names` | Returns sorted plain names; filters to correct dataset; excludes tables in other datasets; `list_tables()` returns tables from multiple datasets |
 | 3 | `get_pk_columns` | Single PK; composite PK (declaration order preserved); empty list for table with no key |
-| 4 | `get_column_info` | Arrow types pass through unchanged; `nullable` from Arrow field; propagates pyspiral exception for non-existent table (no empty-list fallback) |
+| 4 | `get_column_info` | `pa.string()` normalized to `pa.large_string()`; `pa.binary()` normalized to `pa.large_binary()`; other types pass through unchanged; `nullable` from Arrow field; propagates pyspiral exception for non-existent table (no empty-list fallback) |
 | 5 | `iter_batches` | Full table scan; double-quoted table name parsed correctly; unquoted fallback; non-`None` `params` emits `logging.warning`; **empty table → zero batches, no error**; propagates pyspiral exception for non-existent table |
 | 6 | `create_table_if_not_exists` | Idempotent (`exist_ok=True` always passed); correct single-entry `key_schema` tuple passed; raises `ValueError` if `pk_column` not in `columns`; empty `columns` list also raises `ValueError`; non-PK `columns` entries are entirely ignored |
 | 7 | `upsert_records(skip_existing=False)` | `table.write()` called with full records; raises `ValueError` if `id_column` not in `tbl.key_schema.names`; raises `ValueError` if a PK column is absent from `records` |
@@ -500,12 +559,22 @@ All tests use a `MockProject` / `MockTable` defined inline. No network access.
 
 ### Integration tests (`test_spiraldb_connector_integration.py`)
 
-Skipped unless `SPIRAL_INTEGRATION_TESTS=1` env var is set **and** valid
-credentials are present in `~/.config/pyspiral/auth.json` (obtained via
-`spiral login`). If the env var is set but credentials are absent, the tests
-fail rather than skip — the operator is expected to ensure auth is in place
-when enabling integration tests. Uses dev project `test-orcapod-362211`
-(hits `api.spiraldb.dev`).
+Skipped unless `SPIRAL_INTEGRATION_TESTS=1` env var is set. Auth is handled by
+one of two mechanisms:
+
+- **Local dev:** `~/.config/pyspiral/auth.json` (obtained via `spiral login`)
+- **CI (GitHub Actions):** `SPIRAL_WORKLOAD_ID=work_fbjjcy` — workload
+  `work_fbjjcy` (policy `work_policy_p9cxfh`) has editor access on project
+  `test-orcapod-362211` and is bound to `nauticalab/orcapod-python` via
+  GitHub OIDC. The CI job sets `permissions.id-token: write` so GitHub can
+  issue an OIDC token that pyspiral exchanges for a Spiral JWT automatically.
+
+Project and server URL are configurable via `SPIRAL_PROJECT_ID` and
+`SPIRAL_SERVER_URL` env vars (defaults: `test-orcapod-362211` / `http://api.spiraldb.dev`).
+
+These tests were run against the live dev project during PLT-1074 implementation
+and revealed the two bugs documented in the "Known Limitations — Discovered during
+live integration testing" table above.
 
 - Full round-trip: create table → write records → scan → verify values
 - `skip_existing=True`: write once, write again with overlapping keys, verify no duplication
