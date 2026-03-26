@@ -413,3 +413,16 @@ class TestRowidTyping:
         assert "rowid" in batch.schema.names
         assert batch.schema.field("rowid").type == pa.int64()
         assert batch.column("rowid")[0].as_py() == 1  # first rowid is always 1
+
+    def test_declared_rowid_column_keeps_declared_type(self, connector):
+        """A table with an explicit 'rowid TEXT' column should not be overwritten to int64."""
+        conn = connector._conn
+        conn.execute("CREATE TABLE with_rowid_col (rowid TEXT, val INTEGER)")
+        conn.execute("INSERT INTO with_rowid_col VALUES ('abc', 42)")
+
+        batches = list(connector.iter_batches('SELECT * FROM "with_rowid_col"'))
+        assert len(batches) == 1
+        batch = batches[0]
+        assert "rowid" in batch.schema.names
+        # Should remain large_string (declared type), not int64
+        assert batch.schema.field("rowid").type == pa.large_string()
