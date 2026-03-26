@@ -115,6 +115,7 @@ class ContentIdentifiableBase(DataContextMixin, ABC):
         self,
         data_context: str | contexts.DataContext | None = None,
         config: Config | None = None,
+        **kwargs: Any,
     ) -> None:
         """
         Initialize the ContentHashable with an optional ObjectHasher.
@@ -122,7 +123,7 @@ class ContentIdentifiableBase(DataContextMixin, ABC):
         Args:
             identity_structure_hasher (ObjectHasher | None): An instance of ObjectHasher to use for hashing.
         """
-        super().__init__(data_context=data_context, config=config)
+        super().__init__(data_context=data_context, config=config, **kwargs)
         self._content_hash_cache: dict[str, ContentHash] = {}
         self._cached_int_hash: int | None = None
 

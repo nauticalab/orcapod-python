@@ -25,6 +25,8 @@ def make_capture_wrapper() -> Callable[..., Any]:
     """
 
     def _capture(fn: Any, kwargs: dict) -> tuple:
+        import asyncio
+        import inspect
         import io
         import logging
         import os
@@ -90,7 +92,14 @@ def make_capture_wrapper() -> Callable[..., Any]:
             sys.stdout = sys_stdout_buf
             sys.stderr = sys_stderr_buf
             try:
-                raw_result = fn(**kwargs)
+                result = fn(**kwargs)
+                # If fn is async, run the returned coroutine to completion.
+                # asyncio.run() is safe here: Ray workers run in fresh
+                # processes with no existing event loop.
+                if inspect.iscoroutine(result):
+                    raw_result = asyncio.run(result)
+                else:
+                    raw_result = result
             except Exception as e:
                 exc_info = (e, _tb.format_exc())
         finally:

@@ -566,9 +566,13 @@ class TestRayExecutorInitialization:
             assert data["runtime_env"] is True
             assert data["ray_address"] == "auto"
 
-    def test_async_execute_uses_wrap_future(self):
-        """async_execute_callable should use ref.future() + asyncio.wrap_future,
-        not bare 'await ref'.  async_execute delegates to async_execute_callable."""
+    def test_async_execute_uses_ref_future(self):
+        """async_execute_callable should await ref.future() directly.
+
+        Ray's ObjectRef.future() returns an asyncio.Future; awaiting it
+        directly is simpler and avoids the unnecessary asyncio.wrap_future
+        indirection that only handles concurrent.futures.Future.
+        """
         import inspect
 
         from orcapod.core.executors.ray import RayExecutor
@@ -577,8 +581,8 @@ class TestRayExecutorInitialization:
         assert "ref.future()" in source, (
             "async_execute_callable should use ref.future() for asyncio compatibility"
         )
-        assert "wrap_future" in source, (
-            "async_execute_callable should use asyncio.wrap_future"
+        assert "wrap_future" not in source, (
+            "asyncio.wrap_future is unnecessary; Ray's ref.future() is already an asyncio.Future"
         )
         # Should NOT do bare 'await ref'
         assert "return await ref\n" not in source, (
