@@ -47,7 +47,7 @@ jobs:
         run: uv sync --locked --all-extras --dev
 
       - name: Run PostgreSQL tests
-        run: uv run pytest -v -m postgres --cov=src --cov-report=term-missing --cov-report=xml
+        run: uv run pytest -v -m postgres --postgres --cov=src --cov-report=term-missing --cov-report=xml
         env:
           PGHOST: localhost
           PGPORT: 5432
