@@ -64,6 +64,7 @@ def _build_source_registry() -> dict[str, type]:
     from orcapod.core.sources.delta_table_source import DeltaTableSource
     from orcapod.core.sources.dict_source import DictSource
     from orcapod.core.sources.list_source import ListSource
+    from orcapod.core.sources.sqlite_table_source import SQLiteTableSource
 
     return {
         "csv": CSVSource,
@@ -73,6 +74,7 @@ def _build_source_registry() -> dict[str, type]:
         "data_frame": DataFrameSource,
         "arrow_table": ArrowTableSource,
         "cached": CachedSource,
+        "sqlite_table": SQLiteTableSource,
     }
 
 
