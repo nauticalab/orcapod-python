@@ -373,3 +373,99 @@ class TestDeterministicHashing:
             mock_cls.return_value = _make_mock_connector()
             src2 = PostgreSQLTableSource(DSN, "measurements", tag_columns=["trial"])
         assert src1.pipeline_hash() != src2.pipeline_hash()
+
+
+# ===========================================================================
+# 9. to_config shape
+# ===========================================================================
+
+
+class TestToConfig:
+    def _make_src(self):
+        from orcapod.core.sources import PostgreSQLTableSource
+
+        with patch(_PATCH) as mock_cls:
+            mock_cls.return_value = _make_mock_connector()
+            return PostgreSQLTableSource(DSN, "measurements")
+
+    def test_has_source_type_postgresql_table(self):
+        assert self._make_src().to_config()["source_type"] == "postgresql_table"
+
+    def test_has_dsn(self):
+        assert self._make_src().to_config()["dsn"] == DSN
+
+    def test_has_table_name(self):
+        assert self._make_src().to_config()["table_name"] == "measurements"
+
+    def test_has_tag_columns(self):
+        assert "session_id" in self._make_src().to_config()["tag_columns"]
+
+    def test_has_source_id(self):
+        assert self._make_src().to_config()["source_id"] == "measurements"
+
+    def test_has_content_hash(self):
+        assert "content_hash" in self._make_src().to_config()
+
+    def test_has_pipeline_hash(self):
+        assert "pipeline_hash" in self._make_src().to_config()
+
+    def test_no_connector_key(self):
+        assert "connector" not in self._make_src().to_config()
+
+    def test_no_label_key(self):
+        # label is not serialised (consistent with SQLiteTableSource)
+        assert "label" not in self._make_src().to_config()
+
+
+# ===========================================================================
+# 10. from_config round-trip
+# ===========================================================================
+
+
+class TestFromConfig:
+    def _make_src(self):
+        from orcapod.core.sources import PostgreSQLTableSource
+
+        with patch(_PATCH) as mock_cls:
+            mock_cls.return_value = _make_mock_connector()
+            return PostgreSQLTableSource(DSN, "measurements")
+
+    def test_from_config_reconstructs_source_id(self):
+        from orcapod.core.sources import PostgreSQLTableSource
+
+        src = self._make_src()
+        config = src.to_config()
+        with patch(_PATCH) as mock_cls:
+            mock_cls.return_value = _make_mock_connector()
+            src2 = PostgreSQLTableSource.from_config(config)
+        assert src2.source_id == src.source_id
+
+    def test_from_config_hashes_match(self):
+        from orcapod.core.sources import PostgreSQLTableSource
+
+        src = self._make_src()
+        config = src.to_config()
+        with patch(_PATCH) as mock_cls:
+            mock_cls.return_value = _make_mock_connector()
+            src2 = PostgreSQLTableSource.from_config(config)
+        assert src2.content_hash() == src.content_hash()
+        assert src2.pipeline_hash() == src.pipeline_hash()
+
+    def test_from_config_with_explicit_tag_columns(self):
+        from orcapod.core.sources import PostgreSQLTableSource
+
+        with patch(_PATCH) as mock_cls:
+            mock_cls.return_value = _make_mock_connector()
+            src = PostgreSQLTableSource(DSN, "measurements", tag_columns=["trial"])
+        config = src.to_config()
+        with patch(_PATCH) as mock_cls:
+            mock_cls.return_value = _make_mock_connector()
+            src2 = PostgreSQLTableSource.from_config(config)
+        tag_schema, _ = src2.output_schema()
+        assert "trial" in tag_schema
+
+    def test_from_config_missing_dsn_raises(self):
+        from orcapod.core.sources import PostgreSQLTableSource
+
+        with pytest.raises(KeyError):
+            PostgreSQLTableSource.from_config({"table_name": "measurements"})

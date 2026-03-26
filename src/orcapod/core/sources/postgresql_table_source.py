@@ -92,8 +92,28 @@ class PostgreSQLTableSource(DBTableSource):
                 pass  # suppress close errors; don't mask original __init__ failure
 
     def to_config(self) -> dict[str, Any]:
-        raise NotImplementedError("TODO: implement in Task 4")
+        """Serialize source configuration to a JSON-compatible dict."""
+        base = super().to_config()
+        base.pop("connector", None)
+        return {**base, "source_type": "postgresql_table", "dsn": self._dsn}
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> PostgreSQLTableSource:
-        raise NotImplementedError("TODO: implement in Task 4")
+        """Reconstruct a PostgreSQLTableSource from a config dict.
+
+        Args:
+            config: Dict as produced by ``to_config()``.
+
+        Returns:
+            A new ``PostgreSQLTableSource`` instance.
+        """
+        return cls(
+            dsn=config["dsn"],
+            table_name=config["table_name"],
+            tag_columns=config.get("tag_columns"),
+            system_tag_columns=config.get("system_tag_columns", ()),
+            record_id_column=config.get("record_id_column"),
+            source_id=config.get("source_id"),
+            label=config.get("label"),
+            data_context=config.get("data_context"),
+        )
