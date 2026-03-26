@@ -10,6 +10,7 @@ from .dict_source import DictSource
 from .list_source import ListSource
 from .source_registry import GLOBAL_SOURCE_REGISTRY, SourceRegistry
 from .source_proxy import SourceProxy
+from .spiraldb_table_source import SpiralDBTableSource
 from .sqlite_table_source import SQLiteTableSource
 
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     "ListSource",
     "SourceRegistry",
     "SourceProxy",
+    "SpiralDBTableSource",
     "SQLiteTableSource",
     "GLOBAL_SOURCE_REGISTRY",
 ]
