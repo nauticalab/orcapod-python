@@ -61,7 +61,12 @@ class PostgreSQLTableSource(DBTableSource):
 
 Unlike `SQLiteTableSource`, **no pre-`super()` introspection is needed** — there is no ROWID fallback to detect. The subclass stores `self._dsn`, creates the connector, and immediately delegates to `DBTableSource` inside a `try/finally` block.
 
-`self._dsn` **must be stored before the `try/finally` block** so that `to_config()` can access it even if `super().__init__()` raises. Likewise, `connector = PostgreSQLConnector(dsn)` is created **outside** the `try` block (matching `SQLiteTableSource`) so that a failed `psycopg.connect` does not leave an unbound name referenced in `finally`.
+`self._dsn` **must be stored before the `try/finally` block** so that `to_config()` can access it even if `super().__init__()` raises. Likewise, `connector = PostgreSQLConnector(dsn)` is created **outside** the `try` block (matching `SQLiteTableSource`). There are two cases:
+
+- If `PostgreSQLConnector(dsn)` **raises** (e.g., bad DSN, connection refused): the exception propagates out of `__init__` directly; Python never enters the `try` block; `finally` never runs. `connector` was never successfully bound, but that's fine because `finally` is never reached.
+- If `PostgreSQLConnector(dsn)` **succeeds**: `connector` is bound before `try` is entered; `finally` is guaranteed to run and `connector.close()` is safe.
+
+Placing the connector creation inside the `try` would mean Python enters the `finally` block even when the constructor fails, and `connector.close()` would raise `NameError` (though suppressed by `except Exception: pass` — still unclean).
 
 The `finally` block wraps the `close()` call in a `try/except Exception: pass` to suppress connector close errors and avoid masking the real `__init__` failure — identical to `SQLiteTableSource`.
 
@@ -143,7 +148,7 @@ Note: stripping `"connector"` is both a schema concern (callers should not see t
 | `record_id_column` | `"record_id_column"` |
 | `source_id` | `"source_id"` |
 | `label` | `"label"` |
-| `data_context` | `"data_context"` |
+| `data_context` | `"data_context"` (always `None` on genuine round-trips — neither `DBTableSource.to_config()` nor `_identity_config()` serialises this field) |
 
 The `config` kwarg is not passed (reconstruction does not need the OrcaPod config object).
 
