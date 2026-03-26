@@ -269,7 +269,7 @@ class SQLiteConnector:
 
             # rowid is an implicit SQLite integer column; it does not appear in
             # PRAGMA table_info, so it would otherwise fall back to large_string.
-            if "rowid" in col_names:
+            if "rowid" in col_names and "rowid" not in type_lookup:
                 type_lookup["rowid"] = _pa.int64()
 
             arrow_types = [type_lookup.get(name, _pa.large_string()) for name in col_names]
