@@ -100,6 +100,14 @@ class _ChannelReader(Generic[T]):
         item = await self._channel._queue.get()
         if isinstance(item, _Sentinel):
             self._channel._drained = True
+            # Wake any other coroutine already suspended in queue.get().
+            # put_nowait succeeds immediately because the queue just lost an
+            # item; if the queue is somehow full (shouldn't happen once closed)
+            # we silently skip — the _drained flag will cover those callers.
+            try:
+                self._channel._queue.put_nowait(_CLOSED)
+            except asyncio.QueueFull:
+                pass
             raise ChannelClosed()
         return item  # type: ignore[return-value]
 
