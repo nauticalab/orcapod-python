@@ -71,7 +71,25 @@ class PostgreSQLTableSource(DBTableSource):
         data_context: str | contexts.DataContext | None = None,
         config: Config | None = None,
     ) -> None:
-        raise NotImplementedError("TODO: implement in Task 2")
+        self._dsn = dsn  # store before try — needed by to_config even if super() raises
+        connector = PostgreSQLConnector(dsn)  # outside try — if this raises, finally never runs
+        try:
+            super().__init__(
+                connector,
+                table_name,
+                tag_columns=tag_columns,
+                system_tag_columns=system_tag_columns,
+                record_id_column=record_id_column,
+                source_id=source_id,
+                label=label,
+                data_context=data_context,
+                config=config,
+            )
+        finally:
+            try:
+                connector.close()
+            except Exception:
+                pass  # suppress close errors; don't mask original __init__ failure
 
     def to_config(self) -> dict[str, Any]:
         raise NotImplementedError("TODO: implement in Task 4")
