@@ -469,3 +469,24 @@ class TestFromConfig:
 
         with pytest.raises(KeyError):
             PostgreSQLTableSource.from_config({"table_name": "measurements"})
+
+
+# ===========================================================================
+# 11. resolve_source_from_config dispatch
+# ===========================================================================
+
+
+def test_resolve_source_from_config_dispatches_to_postgresql_table_source():
+    from orcapod.core.sources import PostgreSQLTableSource
+    from orcapod.pipeline.serialization import resolve_source_from_config
+
+    with patch(_PATCH) as mock_cls:
+        mock_cls.return_value = _make_mock_connector()
+        src = PostgreSQLTableSource(DSN, "measurements")
+    config = src.to_config()
+
+    with patch(_PATCH) as mock_cls:
+        mock_cls.return_value = _make_mock_connector()
+        src2 = resolve_source_from_config(config)
+
+    assert isinstance(src2, PostgreSQLTableSource)
