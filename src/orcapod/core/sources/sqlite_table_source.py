@@ -47,6 +47,8 @@ class SQLiteTableSource(DBTableSource):
        ``"rowid"`` is a resolved tag column and not a normal table column
        (handles both auto-detection and ``from_config`` reconstruction).
     5. Delegates to ``DBTableSource.__init__`` for fetching and stream building.
+    6. Closes the connector — all data is eagerly loaded into memory, so the
+       connection is released immediately to avoid holding file locks.
 
     Args:
         db_path: Path to the SQLite database file, or ``":memory:"`` for an
@@ -82,35 +84,42 @@ class SQLiteTableSource(DBTableSource):
         self._db_path = db_path
         connector = SQLiteConnector(db_path)
 
-        # Step 3: Resolve tag columns.
-        if tag_columns is None:
-            pk_cols = connector.get_pk_columns(table_name)
-            resolved_tags: list[str] = pk_cols if pk_cols else ["rowid"]
-        else:
-            resolved_tags = list(tag_columns)
+        try:
+            # Step 3: Resolve tag columns.
+            if tag_columns is None:
+                pk_cols = connector.get_pk_columns(table_name)
+                resolved_tags: list[str] = pk_cols if pk_cols else ["rowid"]
+            else:
+                resolved_tags = list(tag_columns)
 
-        # Step 4: Determine the fetch query.
-        # If "rowid" is in resolved_tags but not a real column, we need
-        # SELECT rowid, * to include it.  This also handles from_config
-        # reconstruction where tag_columns=["rowid"] is passed explicitly.
-        normal_cols = {ci.name for ci in connector.get_column_info(table_name)}
-        if "rowid" in resolved_tags and "rowid" not in normal_cols:
-            _query: str | None = f'SELECT rowid, * FROM "{table_name}"'
-        else:
-            _query = None
+            # Step 4: Determine the fetch query.
+            # If "rowid" is in resolved_tags but not a real column, we need
+            # SELECT rowid, * to include it.  This also handles from_config
+            # reconstruction where tag_columns=["rowid"] is passed explicitly.
+            normal_cols = {ci.name for ci in connector.get_column_info(table_name)}
+            if "rowid" in resolved_tags and "rowid" not in normal_cols:
+                _query: str | None = f'SELECT rowid, * FROM "{table_name}"'
+            else:
+                _query = None
 
-        super().__init__(
-            connector,
-            table_name,
-            tag_columns=resolved_tags,
-            system_tag_columns=system_tag_columns,
-            record_id_column=record_id_column,
-            source_id=source_id,
-            label=label,
-            data_context=data_context,
-            config=config,
-            _query=_query,
-        )
+            super().__init__(
+                connector,
+                table_name,
+                tag_columns=resolved_tags,
+                system_tag_columns=system_tag_columns,
+                record_id_column=record_id_column,
+                source_id=source_id,
+                label=label,
+                data_context=data_context,
+                config=config,
+                _query=_query,
+            )
+        finally:
+            try:
+                connector.close()
+            except Exception:
+                # Suppress connector close errors to avoid masking __init__ failures.
+                pass
 
     def to_config(self) -> dict[str, Any]:
         """Serialize source configuration to a JSON-compatible dict."""
