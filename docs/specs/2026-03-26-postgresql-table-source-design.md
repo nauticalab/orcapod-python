@@ -59,19 +59,33 @@ class PostgreSQLTableSource(DBTableSource):
 
 ### Construction sequence
 
-Unlike `SQLiteTableSource`, **no pre-`super()` introspection is needed** — there is no ROWID fallback to detect. The subclass creates the connector and delegates immediately to `DBTableSource`, which internally handles all table validation and PK resolution.
+Unlike `SQLiteTableSource`, **no pre-`super()` introspection is needed** — there is no ROWID fallback to detect. The subclass stores `self._dsn`, creates the connector, and immediately delegates to `DBTableSource` inside a `try/finally` block.
+
+`self._dsn` **must be stored before the `try/finally` block** so that `to_config()` can access it even if `super().__init__()` raises.
+
+```python
+# Pseudocode — required structure
+self._dsn = dsn
+connector = PostgreSQLConnector(dsn)
+try:
+    super().__init__(connector, table_name, tag_columns=tag_columns, ...)
+finally:
+    connector.close()
+```
 
 ```
 PostgreSQLTableSource.__init__(dsn, table_name)
-  → PostgreSQLConnector(dsn)                   # open connection
-  → DBTableSource.__init__(connector, ...)     # full source initialisation
-      [inside DBTableSource]:
-        → connector.get_table_names()          # validate table exists
-        → connector.get_pk_columns(table)      # resolve default tag columns (if tag_columns=None)
-        → connector.iter_batches(SELECT * FROM "table")
-        → pa.Table.from_batches(...)           # assemble Arrow table
-        → SourceStreamBuilder.build(...)       # attach tags, source-info, schema hash
-  → connector.close()                          # release connection (finally block)
+  → self._dsn = dsn                              # store before try (needed by to_config)
+  → PostgreSQLConnector(dsn)                     # open connection
+  → [try]
+      → DBTableSource.__init__(connector, ...)   # full source initialisation
+          [inside DBTableSource]:
+            → connector.get_table_names()        # validate table exists
+            → connector.get_pk_columns(table)    # resolve default tag columns (if tag_columns=None)
+            → connector.iter_batches(SELECT * FROM "table")
+            → pa.Table.from_batches(...)         # assemble Arrow table
+            → SourceStreamBuilder.build(...)     # attach tags, source-info, schema hash
+  → [finally] connector.close()                  # release connection unconditionally
 ```
 
 After construction the source holds all data in-memory as an `ArrowTableStream`. The PostgreSQL connection is fully released; subsequent `iter_packets()` / `as_table()` calls read from memory.
@@ -100,9 +114,31 @@ After construction the source holds all data in-memory as an `ArrowTableStream`.
 
 Notes:
 - The generic `"connector"` key emitted by `DBTableSource.to_config()` is stripped (same technique as `SQLiteTableSource`).
-- `"label"` is **not** included in `to_config()` output (consistent with `SQLiteTableSource` and `DBTableSource` — none of them serialise `label` today). `from_config()` accepts `config.get("label")` for forward-compatibility but round-trips will not preserve a label set at construction time.
+- `"label"` is **not** included in `to_config()` output (consistent with `SQLiteTableSource` and `DBTableSource` — none of them serialise `label` today). `from_config()` passes `config.get("label")` for forward-compatibility, but round-trips will not preserve a label set at construction time.
 
-`from_config()` reconstructs by passing `dsn`, `table_name`, and the stored optional fields directly to `__init__`. It does **not** go through `PostgreSQLConnector.from_config()` — the DSN is passed straight to `__init__`.
+Concrete `to_config()` implementation pattern (mirrors `SQLiteTableSource`):
+
+```python
+def to_config(self) -> dict[str, Any]:
+    base = super().to_config()        # DBTableSource handles all other fields
+    base.pop("connector", None)       # strip the generic connector blob
+    return {**base, "source_type": "postgresql_table", "dsn": self._dsn}
+```
+
+`from_config()` passes the following keyword arguments to `__init__` (all sourced from `config.get(...)`):
+
+| Argument | Key in config |
+|---|---|
+| `dsn` | `"dsn"` (required) |
+| `table_name` | `"table_name"` (required) |
+| `tag_columns` | `"tag_columns"` |
+| `system_tag_columns` | `"system_tag_columns"` (default `()`) |
+| `record_id_column` | `"record_id_column"` |
+| `source_id` | `"source_id"` |
+| `label` | `"label"` |
+| `data_context` | `"data_context"` |
+
+The `config` kwarg is not passed (reconstruction does not need the OrcaPod config object).
 
 ---
 
@@ -111,7 +147,7 @@ Notes:
 Three places to update, identical to the `SQLiteTableSource` rollout:
 
 1. **`src/orcapod/core/sources/__init__.py`** — import `PostgreSQLTableSource` and add `"PostgreSQLTableSource"` to `__all__`. The `__all__` list is explicit (not auto-generated), so both steps are required. Adding it to `__all__` is what makes the `orcapod.sources` re-export work automatically.
-2. **`src/orcapod/pipeline/serialization.py`** — add `"postgresql_table": PostgreSQLTableSource` to `_build_source_registry()`
+2. **`src/orcapod/pipeline/serialization.py`** — add `"postgresql_table": PostgreSQLTableSource` to `_build_source_registry()`. The import must be placed **inside** the function body (deferred local import), matching the existing pattern used for all other entries in that function — not at the module level.
 3. **`src/orcapod/sources/__init__.py`** — no direct change needed; the re-export via `from orcapod.core.sources import *` picks up whatever is in `__all__` (step 1 must be done first)
 
 ---
@@ -120,7 +156,7 @@ Three places to update, identical to the `SQLiteTableSource` rollout:
 
 | Situation | Behaviour |
 |---|---|
-| Table does not exist | `ValueError: Table 'x' not found in database` (from `DBTableSource`) |
+| Table does not exist | `ValueError: Table 'x' not found in database.` (from `DBTableSource`) |
 | Table is empty | `ValueError: Table 'x' is empty` (from `DBTableSource`) |
 | No PK and no `tag_columns` given | `ValueError: Table 'x' has no primary key columns. Provide explicit tag_columns.` (from `DBTableSource`) |
 | NULL values in tag columns | Passed through as-is — Arrow supports nulls natively; PostgreSQL PK columns are always `NOT NULL` so this can only arise with an explicit `tag_columns` override |
