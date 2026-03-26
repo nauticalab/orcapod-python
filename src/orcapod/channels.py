@@ -78,7 +78,16 @@ class WritableChannel(Protocol[T_contra]):
 
 
 class _ChannelReader(Generic[T]):
-    """Concrete ReadableChannel backed by a Channel."""
+    """Concrete ReadableChannel backed by a Channel.
+
+    ``Channel`` is intentionally single-consumer.  Fan-out (multiple readers)
+    is handled by ``BroadcastChannel``, which gives every reader its own
+    independent queue.  Sentinel re-enqueuing is avoided because it can
+    deadlock when the queue buffer is small.  Instead the channel-level
+    ``_drained`` flag is set once the sentinel has been consumed, so any
+    subsequent ``receive()`` call (even from a freshly created reader) raises
+    ``ChannelClosed`` immediately without touching the queue.
+    """
 
     __slots__ = ("_channel",)
 
@@ -86,10 +95,11 @@ class _ChannelReader(Generic[T]):
         self._channel = channel
 
     async def receive(self) -> T:
+        if self._channel._drained:
+            raise ChannelClosed()
         item = await self._channel._queue.get()
         if isinstance(item, _Sentinel):
-            # Put sentinel back so other readers (broadcast) also see it
-            await self._channel._queue.put(item)
+            self._channel._drained = True
             raise ChannelClosed()
         return item  # type: ignore[return-value]
 
@@ -145,6 +155,7 @@ class Channel(Generic[T]):
     buffer_size: int = 64
     _queue: asyncio.Queue[T | _Sentinel] = field(init=False)
     _closed: asyncio.Event = field(init=False, default_factory=asyncio.Event)
+    _drained: bool = field(init=False, default=False)
 
     def __post_init__(self) -> None:
         self._queue = asyncio.Queue(maxsize=self.buffer_size)

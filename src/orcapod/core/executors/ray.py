@@ -9,6 +9,9 @@ from orcapod.core.executors.capture_wrapper import make_capture_wrapper
 if TYPE_CHECKING:
     from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
 
+# Guard flag: cloudpickle Logger dispatch is registered at most once per process.
+_cloudpickle_dispatch_registered = False
+
 
 class RayExecutor(PythonFunctionExecutorBase):
     """Executor that dispatches Python packet functions to a Ray cluster.
@@ -84,6 +87,11 @@ class RayExecutor(PythonFunctionExecutorBase):
             self._remote_opts["resources"] = resources
         self._remote_opts.update(ray_remote_opts)
 
+        # Cache for Ray remote-function objects keyed by serialised remote opts.
+        # The capture wrapper closure has identical bytecode for every call, so
+        # it only needs to be remotized once per distinct option set.
+        self._remote_fn_cache: dict[str, Any] = {}
+
     def _ensure_ray_initialized(self) -> None:
         """Initialize Ray if it has not been initialized yet.
 
@@ -104,18 +112,23 @@ class RayExecutor(PythonFunctionExecutorBase):
         import logging
         import ray
 
-        try:
-            import cloudpickle
+        global _cloudpickle_dispatch_registered
+        if not _cloudpickle_dispatch_registered:
+            try:
+                import cloudpickle
 
-            def _pickle_logger(l: logging.Logger) -> tuple:
-                # Root logger has name "root" but must be fetched as ""
-                name = "" if isinstance(l, logging.RootLogger) else l.name
-                return logging.getLogger, (name,)
+                def _pickle_logger(l: logging.Logger) -> tuple:
+                    # Root logger has name "root" but must be fetched as ""
+                    name = "" if isinstance(l, logging.RootLogger) else l.name
+                    return logging.getLogger, (name,)
 
-            cloudpickle.CloudPickler.dispatch[logging.Logger] = _pickle_logger
-            cloudpickle.CloudPickler.dispatch[logging.RootLogger] = _pickle_logger
-        except (ImportError, AttributeError, KeyError):
-            pass  # cloudpickle not available or API changed — best effort
+                if logging.Logger not in cloudpickle.CloudPickler.dispatch:
+                    cloudpickle.CloudPickler.dispatch[logging.Logger] = _pickle_logger
+                if logging.RootLogger not in cloudpickle.CloudPickler.dispatch:
+                    cloudpickle.CloudPickler.dispatch[logging.RootLogger] = _pickle_logger
+                _cloudpickle_dispatch_registered = True
+            except (ImportError, AttributeError, KeyError):
+                pass  # cloudpickle not available or API changed — best effort
 
         if not ray.is_initialized():
             init_kwargs: dict[str, Any] = {}
@@ -162,16 +175,16 @@ class RayExecutor(PythonFunctionExecutorBase):
         import ray
 
         self._ensure_ray_initialized()
-        wrapper = make_capture_wrapper()
-        wrapper.__name__ = fn.__name__
-        wrapper.__qualname__ = fn.__qualname__
-        remote_fn = ray.remote(**self._build_remote_opts())(wrapper)
+        remote_fn = self._get_remote_fn(ray)
         ref = remote_fn.remote(fn, kwargs)
 
         try:
             raw, stdout_log, stderr_log, python_logs = ray.get(ref)
         except Exception as exc:
-            raise self._handle_worker_error(exc, logger) from exc
+            handled = self._handle_worker_error(exc, logger)
+            if handled is exc:
+                raise
+            raise handled from exc
 
         self._record_success(stdout_log, stderr_log, python_logs, logger)
         return raw
@@ -188,19 +201,34 @@ class RayExecutor(PythonFunctionExecutorBase):
         import ray
 
         self._ensure_ray_initialized()
-        wrapper = make_capture_wrapper()
-        wrapper.__name__ = fn.__name__
-        wrapper.__qualname__ = fn.__qualname__
-        remote_fn = ray.remote(**self._build_remote_opts())(wrapper)
+        remote_fn = self._get_remote_fn(ray)
         ref = remote_fn.remote(fn, kwargs)
 
         try:
             raw, stdout_log, stderr_log, python_logs = await ref.future()
         except Exception as exc:
-            raise self._handle_worker_error(exc, logger) from exc
+            handled = self._handle_worker_error(exc, logger)
+            if handled is exc:
+                raise
+            raise handled from exc
 
         self._record_success(stdout_log, stderr_log, python_logs, logger)
         return raw
+
+    def _get_remote_fn(self, ray: Any) -> Any:
+        """Return a cached Ray remote wrapper for the capture closure.
+
+        The capture wrapper's bytecode is identical on every invocation, so
+        it only needs to be remotized once per distinct set of remote options.
+        Caching avoids the non-trivial overhead of ``ray.remote()`` on every
+        packet.
+        """
+        opts = self._build_remote_opts()
+        cache_key = repr(sorted(opts.items()))
+        if cache_key not in self._remote_fn_cache:
+            wrapper = make_capture_wrapper()
+            self._remote_fn_cache[cache_key] = ray.remote(**opts)(wrapper)
+        return self._remote_fn_cache[cache_key]
 
     @staticmethod
     def _record_success(

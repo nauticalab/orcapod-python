@@ -115,8 +115,12 @@ class TestCloseSemantics:
         await ch.writer.close()  # Should not raise
 
     @pytest.mark.asyncio
-    async def test_reader_sentinel_re_enqueued_for_repeated_receive(self):
-        """After close, repeated receive() calls all raise ChannelClosed."""
+    async def test_repeated_receive_after_close_raises_channel_closed(self):
+        """After close, repeated receive() calls all raise ChannelClosed.
+
+        Uses channel-level _drained flag (not sentinel re-enqueue) to avoid
+        deadlock when buffer_size is small.
+        """
         ch = Channel[int](buffer_size=4)
         await ch.writer.close()
         for _ in range(3):
