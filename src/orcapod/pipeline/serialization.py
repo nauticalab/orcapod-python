@@ -66,6 +66,7 @@ def _build_source_registry() -> dict[str, type]:
     from orcapod.core.sources.list_source import ListSource
     from orcapod.core.sources.spiraldb_table_source import SpiralDBTableSource
     from orcapod.core.sources.sqlite_table_source import SQLiteTableSource
+    from orcapod.core.sources.postgresql_table_source import PostgreSQLTableSource
 
     return {
         "csv": CSVSource,
@@ -77,6 +78,7 @@ def _build_source_registry() -> dict[str, type]:
         "cached": CachedSource,
         "spiraldb_table": SpiralDBTableSource,
         "sqlite_table": SQLiteTableSource,
+        "postgresql_table": PostgreSQLTableSource,
     }
 
 
