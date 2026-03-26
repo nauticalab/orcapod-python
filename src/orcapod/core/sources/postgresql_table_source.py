@@ -68,8 +68,8 @@ class PostgreSQLTableSource(DBTableSource):
         record_id_column: str | None = None,
         source_id: str | None = None,
         label: str | None = None,
-        data_context: "str | contexts.DataContext | None" = None,
-        config: "Config | None" = None,
+        data_context: str | contexts.DataContext | None = None,
+        config: Config | None = None,
     ) -> None:
         raise NotImplementedError("TODO: implement in Task 2")
 
@@ -77,5 +77,5 @@ class PostgreSQLTableSource(DBTableSource):
         raise NotImplementedError("TODO: implement in Task 4")
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "PostgreSQLTableSource":
+    def from_config(cls, config: dict[str, Any]) -> PostgreSQLTableSource:
         raise NotImplementedError("TODO: implement in Task 4")
