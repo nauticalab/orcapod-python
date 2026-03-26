@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -196,9 +195,7 @@ class RayExecutor(PythonFunctionExecutorBase):
         ref = remote_fn.remote(fn, kwargs)
 
         try:
-            raw, stdout_log, stderr_log, python_logs = await asyncio.wrap_future(
-                ref.future()
-            )
+            raw, stdout_log, stderr_log, python_logs = await ref.future()
         except Exception as exc:
             raise self._handle_worker_error(exc, logger) from exc
 

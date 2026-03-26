@@ -91,6 +91,7 @@ class CachedFunctionPod(WrappedFunctionPod):
         cached = self._cache.lookup(packet)
         if cached is not None:
             module_logger.info("Pod-level cache hit")
+            cached = cached.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: False})
             return tag, cached
 
         tag, output = self._function_pod.process_packet(tag, packet, logger=logger)
@@ -121,6 +122,7 @@ class CachedFunctionPod(WrappedFunctionPod):
         cached = self._cache.lookup(packet)
         if cached is not None:
             module_logger.info("Pod-level cache hit")
+            cached = cached.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: False})
             return tag, cached
 
         tag, output = await self._function_pod.async_process_packet(
