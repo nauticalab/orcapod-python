@@ -138,15 +138,26 @@ class SpiralDBTableSource(DBTableSource):
                 pass
 
     def to_config(self) -> dict[str, Any]:
-        """Serialize source configuration to a JSON-compatible dict."""
-        base = super().to_config()
-        base.pop("connector", None)
+        """Serialize source configuration to a JSON-compatible dict.
+
+        Note:
+            Does **not** call ``super().to_config()`` (i.e. ``DBTableSource.to_config()``)
+            because that would invoke ``self._connector.to_config()``, which raises
+            ``RuntimeError`` once the connector has been closed. The connector is always
+            closed during ``__init__`` after the eager data load, so the full dict is
+            built from the already-captured instance attributes instead.
+        """
         return {
-            **base,
             "source_type": "spiraldb_table",
             "project_id": self._project_id,
             "dataset": self._dataset,
             "overrides": self._overrides,
+            "table_name": self._table_name,
+            "tag_columns": list(self._tag_columns),
+            "system_tag_columns": list(self._system_tag_columns),
+            "record_id_column": self._record_id_column,
+            "source_id": self.source_id,
+            **self._identity_config(),
         }
 
     @classmethod

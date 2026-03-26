@@ -38,7 +38,12 @@ def _make_mock_connector(
     pk_columns: list[str] | None = None,
     batches: list[pa.RecordBatch] | None = None,
 ) -> MagicMock:
-    """Return a MagicMock that satisfies DBConnectorProtocol for the given data.
+    """Return a MagicMock that faithfully simulates SpiralDBConnector lifecycle.
+
+    Specifically, ``close()`` flips a closed flag and ``to_config()`` raises
+    ``RuntimeError`` once closed — matching the real ``SpiralDBConnector``
+    behaviour.  This ensures tests catch bugs where ``to_config()`` (or any
+    other post-close call) is accidentally delegated to the connector.
 
     Args:
         table_names: Tables reported by ``get_table_names()``.
@@ -63,6 +68,27 @@ def _make_mock_connector(
     connector.get_table_names.return_value = table_names
     connector.get_pk_columns.return_value = pk_columns
     connector.iter_batches.return_value = iter(batches)
+
+    # Simulate the closed-connector lifecycle: close() flips the flag and
+    # to_config() raises RuntimeError afterwards, exactly as the real
+    # SpiralDBConnector does.
+    connector._closed = False
+
+    def _close():
+        connector._closed = True
+
+    def _to_config():
+        if connector._closed:
+            raise RuntimeError("SpiralDBConnector is closed")
+        return {
+            "connector_type": "spiraldb",
+            "project_id": _PROJECT_ID,
+            "dataset": _DATASET,
+            "overrides": None,
+        }
+
+    connector.close.side_effect = _close
+    connector.to_config.side_effect = _to_config
     return connector
 
 
@@ -606,6 +632,26 @@ class TestConfigSerialization:
         cfg = src.to_config()
         assert "content_hash" in cfg
         assert "pipeline_hash" in cfg
+
+    def test_to_config_works_after_connector_is_closed(self):
+        """to_config() must not call the connector — it is closed after __init__.
+
+        Regression test: the mock connector's to_config() raises RuntimeError
+        when closed (matching SpiralDBConnector's behaviour).  If
+        SpiralDBTableSource.to_config() delegates to the connector, this test
+        will raise RuntimeError and fail.
+        """
+        from orcapod.core.sources import SpiralDBTableSource
+
+        connector = _make_mock_connector()
+        with _patch_connector(connector):
+            src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
+        # Connector is closed at this point; calling to_config() must not
+        # raise.
+        assert connector._closed, "connector should be closed after __init__"
+        cfg = src.to_config()  # must not raise RuntimeError
+        assert cfg["source_type"] == "spiraldb_table"
+        assert cfg["project_id"] == _PROJECT_ID
 
     def test_from_config_reconstructs_successfully(self):
         from orcapod.core.sources import SpiralDBTableSource
