@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
 import inspect
 import traceback
 from collections.abc import Callable
@@ -68,7 +69,16 @@ class LocalExecutor(PythonFunctionExecutorBase):
             cls._async_bridge_pool = ThreadPoolExecutor(
                 1, thread_name_prefix="orcapod-async-bridge"
             )
+            atexit.register(cls._shutdown_async_bridge_pool)
         return cls._async_bridge_pool
+
+    @classmethod
+    def _shutdown_async_bridge_pool(cls) -> None:
+        """Shut down the shared async-bridge thread pool at interpreter exit."""
+        pool = cls._async_bridge_pool
+        if pool is not None:
+            pool.shutdown(wait=False)
+            cls._async_bridge_pool = None
 
     @classmethod
     def _run_async_sync(cls, fn: Callable[..., Any], kwargs: dict[str, Any]) -> Any:

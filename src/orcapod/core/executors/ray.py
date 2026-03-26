@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -87,10 +88,13 @@ class RayExecutor(PythonFunctionExecutorBase):
             self._remote_opts["resources"] = resources
         self._remote_opts.update(ray_remote_opts)
 
-        # Cache for Ray remote-function objects keyed by serialised remote opts.
+        # Cache for Ray remote-function objects keyed by normalised remote opts.
         # The capture wrapper closure has identical bytecode for every call, so
         # it only needs to be remotized once per distinct option set.
-        self._remote_fn_cache: dict[str, Any] = {}
+        self._remote_fn_cache: dict[Any, Any] = {}
+        # Lock guards cache population under concurrent execute_callable() calls
+        # (supports_concurrent_execution = True, so callers may use threads).
+        self._remote_fn_cache_lock = threading.Lock()
 
     def _ensure_ray_initialized(self) -> None:
         """Initialize Ray if it has not been initialized yet.
@@ -176,7 +180,7 @@ class RayExecutor(PythonFunctionExecutorBase):
 
         self._ensure_ray_initialized()
         remote_fn = self._get_remote_fn(ray)
-        ref = remote_fn.remote(fn, kwargs)
+        ref = remote_fn.options(name=fn.__name__).remote(fn, kwargs)
 
         try:
             raw, stdout_log, stderr_log, python_logs = ray.get(ref)
@@ -202,7 +206,7 @@ class RayExecutor(PythonFunctionExecutorBase):
 
         self._ensure_ray_initialized()
         remote_fn = self._get_remote_fn(ray)
-        ref = remote_fn.remote(fn, kwargs)
+        ref = remote_fn.options(name=fn.__name__).remote(fn, kwargs)
 
         try:
             raw, stdout_log, stderr_log, python_logs = await ref.future()
@@ -222,13 +226,39 @@ class RayExecutor(PythonFunctionExecutorBase):
         it only needs to be remotized once per distinct set of remote options.
         Caching avoids the non-trivial overhead of ``ray.remote()`` on every
         packet.
+
+        A ``threading.Lock`` guards population so that concurrent calls
+        (``supports_concurrent_execution = True``) never redundantly call
+        ``ray.remote()`` for the same option set.
         """
         opts = self._build_remote_opts()
-        cache_key = repr(sorted(opts.items()))
+        cache_key = self._normalize_opts(opts)
         if cache_key not in self._remote_fn_cache:
-            wrapper = make_capture_wrapper()
-            self._remote_fn_cache[cache_key] = ray.remote(**opts)(wrapper)
+            with self._remote_fn_cache_lock:
+                # Double-checked: another thread may have filled the slot
+                # while we waited for the lock.
+                if cache_key not in self._remote_fn_cache:
+                    wrapper = make_capture_wrapper()
+                    self._remote_fn_cache[cache_key] = ray.remote(**opts)(wrapper)
         return self._remote_fn_cache[cache_key]
+
+    @staticmethod
+    def _normalize_opts(value: Any) -> Any:
+        """Recursively normalize option values to produce stable cache keys.
+
+        Dicts with different insertion orders but identical contents
+        (common for ``resources`` / ``runtime_env``) produce the same key.
+        """
+        if isinstance(value, dict):
+            return tuple(
+                (k, RayExecutor._normalize_opts(v))
+                for k, v in sorted(value.items())
+            )
+        if isinstance(value, (list, tuple)):
+            return tuple(RayExecutor._normalize_opts(v) for v in value)
+        if isinstance(value, set):
+            return tuple(sorted((RayExecutor._normalize_opts(v) for v in value), key=repr))
+        return value
 
     @staticmethod
     def _record_success(
