@@ -366,3 +366,28 @@ class TestDeterministicHashing:
             pk_db, "measurements", tag_columns=["trial"]
         )
         assert src1.pipeline_hash() != src2.pipeline_hash()
+
+
+# ===========================================================================
+# 9. to_config / from_config (basic serialization shape)
+# ===========================================================================
+
+
+class TestConfigSerialization:
+    def test_to_config_has_no_connector_key(self, pk_db):
+        from orcapod.core.sources import SQLiteTableSource
+        src = SQLiteTableSource(pk_db, "measurements")
+        cfg = src.to_config()
+        assert "connector" not in cfg
+
+    def test_to_config_has_source_type_sqlite_table(self, pk_db):
+        from orcapod.core.sources import SQLiteTableSource
+        src = SQLiteTableSource(pk_db, "measurements")
+        cfg = src.to_config()
+        assert cfg["source_type"] == "sqlite_table"
+
+    def test_to_config_has_db_path(self, pk_db):
+        from orcapod.core.sources import SQLiteTableSource
+        src = SQLiteTableSource(pk_db, "measurements")
+        cfg = src.to_config()
+        assert cfg["db_path"] == str(pk_db)
