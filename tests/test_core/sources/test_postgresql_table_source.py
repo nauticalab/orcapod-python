@@ -324,6 +324,16 @@ class TestStreamBehaviour:
             PostgreSQLTableSource(DSN, "measurements")
         mock_connector.close.assert_called_once()
 
+    def test_connector_is_closed_even_when_super_raises(self):
+        from orcapod.core.sources import PostgreSQLTableSource
+
+        with patch(_PATCH) as mock_cls:
+            mock_connector = _make_mock_connector(table_names=[])
+            mock_cls.return_value = mock_connector
+            with pytest.raises(ValueError):
+                PostgreSQLTableSource(DSN, "nonexistent")
+        mock_connector.close.assert_called_once()
+
 
 # ===========================================================================
 # 8. Deterministic hashing
