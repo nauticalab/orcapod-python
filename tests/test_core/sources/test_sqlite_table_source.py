@@ -391,3 +391,104 @@ class TestConfigSerialization:
         src = SQLiteTableSource(pk_db, "measurements")
         cfg = src.to_config()
         assert cfg["db_path"] == str(pk_db)
+
+
+# ===========================================================================
+# 10. Config round-trip — PK table
+# ===========================================================================
+
+
+class TestConfigRoundTripPKTable:
+    @pytest.fixture
+    def file_db_path(self, tmp_path: Path) -> str:
+        db_path = str(tmp_path / "test.db")
+        conn = sqlite3.connect(db_path)
+        _create_table_with_pk(conn)
+        conn.close()
+        return db_path
+
+    def test_to_config_has_source_type(self, file_db_path):
+        from orcapod.core.sources import SQLiteTableSource
+        src = SQLiteTableSource(file_db_path, "measurements")
+        assert src.to_config()["source_type"] == "sqlite_table"
+
+    def test_to_config_has_db_path(self, file_db_path):
+        from orcapod.core.sources import SQLiteTableSource
+        src = SQLiteTableSource(file_db_path, "measurements")
+        assert src.to_config()["db_path"] == file_db_path
+
+    def test_to_config_has_table_name(self, file_db_path):
+        from orcapod.core.sources import SQLiteTableSource
+        src = SQLiteTableSource(file_db_path, "measurements")
+        assert src.to_config()["table_name"] == "measurements"
+
+    def test_to_config_has_tag_columns(self, file_db_path):
+        from orcapod.core.sources import SQLiteTableSource
+        src = SQLiteTableSource(file_db_path, "measurements")
+        assert "session_id" in src.to_config()["tag_columns"]
+
+    def test_to_config_has_identity_fields(self, file_db_path):
+        from orcapod.core.sources import SQLiteTableSource
+        src = SQLiteTableSource(file_db_path, "measurements")
+        config = src.to_config()
+        assert "content_hash" in config
+        assert "pipeline_hash" in config
+
+    def test_from_config_reconstructs_successfully(self, file_db_path):
+        from orcapod.core.sources import SQLiteTableSource
+        src = SQLiteTableSource(file_db_path, "measurements")
+        config = src.to_config()
+        src2 = SQLiteTableSource.from_config(config)
+        assert src2.source_id == src.source_id
+
+    def test_from_config_hashes_match(self, file_db_path):
+        from orcapod.core.sources import SQLiteTableSource
+        src = SQLiteTableSource(file_db_path, "measurements")
+        config = src.to_config()
+        src2 = SQLiteTableSource.from_config(config)
+        assert src2.content_hash() == src.content_hash()
+        assert src2.pipeline_hash() == src.pipeline_hash()
+
+    def test_resolve_source_from_config_works(self, file_db_path):
+        from orcapod.core.sources import SQLiteTableSource
+        from orcapod.pipeline.serialization import resolve_source_from_config
+        src = SQLiteTableSource(file_db_path, "measurements")
+        config = src.to_config()
+        src2 = resolve_source_from_config(config)
+        assert isinstance(src2, SQLiteTableSource)
+
+
+# ===========================================================================
+# 11. Config round-trip — ROWID-only table
+# ===========================================================================
+
+
+class TestConfigRoundTripRowidTable:
+    @pytest.fixture
+    def rowid_file_db_path(self, tmp_path: Path) -> str:
+        db_path = str(tmp_path / "rowid_test.db")
+        conn = sqlite3.connect(db_path)
+        _create_table_without_pk(conn)
+        conn.close()
+        return db_path
+
+    def test_to_config_has_rowid_as_tag_column(self, rowid_file_db_path):
+        from orcapod.core.sources import SQLiteTableSource
+        src = SQLiteTableSource(rowid_file_db_path, "logs")
+        assert src.to_config()["tag_columns"] == ["rowid"]
+
+    def test_from_config_reconstructs_rowid_table(self, rowid_file_db_path):
+        from orcapod.core.sources import SQLiteTableSource
+        src = SQLiteTableSource(rowid_file_db_path, "logs")
+        config = src.to_config()
+        src2 = SQLiteTableSource.from_config(config)
+        tag_schema, _ = src2.output_schema()
+        assert "rowid" in tag_schema
+
+    def test_from_config_rowid_hashes_match(self, rowid_file_db_path):
+        from orcapod.core.sources import SQLiteTableSource
+        src = SQLiteTableSource(rowid_file_db_path, "logs")
+        config = src.to_config()
+        src2 = SQLiteTableSource.from_config(config)
+        assert src2.content_hash() == src.content_hash()
+        assert src2.pipeline_hash() == src.pipeline_hash()
