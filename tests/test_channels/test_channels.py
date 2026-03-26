@@ -118,8 +118,9 @@ class TestCloseSemantics:
     async def test_repeated_receive_after_close_raises_channel_closed(self):
         """After close, repeated receive() calls all raise ChannelClosed.
 
-        Uses channel-level _drained flag (not sentinel re-enqueue) to avoid
-        deadlock when buffer_size is small.
+        Implementation uses a channel-level _drained flag together with
+        re-enqueuing the _CLOSED sentinel to avoid deadlock and wake
+        concurrent waiters when buffer_size is small.
         """
         ch = Channel[int](buffer_size=4)
         await ch.writer.close()
