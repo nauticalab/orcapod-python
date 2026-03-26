@@ -61,22 +61,27 @@ class PostgreSQLTableSource(DBTableSource):
 
 Unlike `SQLiteTableSource`, **no pre-`super()` introspection is needed** — there is no ROWID fallback to detect. The subclass stores `self._dsn`, creates the connector, and immediately delegates to `DBTableSource` inside a `try/finally` block.
 
-`self._dsn` **must be stored before the `try/finally` block** so that `to_config()` can access it even if `super().__init__()` raises.
+`self._dsn` **must be stored before the `try/finally` block** so that `to_config()` can access it even if `super().__init__()` raises. Likewise, `connector = PostgreSQLConnector(dsn)` is created **outside** the `try` block (matching `SQLiteTableSource`) so that a failed `psycopg.connect` does not leave an unbound name referenced in `finally`.
+
+The `finally` block wraps the `close()` call in a `try/except Exception: pass` to suppress connector close errors and avoid masking the real `__init__` failure — identical to `SQLiteTableSource`.
 
 ```python
 # Pseudocode — required structure
 self._dsn = dsn
-connector = PostgreSQLConnector(dsn)
+connector = PostgreSQLConnector(dsn)    # outside try — must succeed before entering try
 try:
     super().__init__(connector, table_name, tag_columns=tag_columns, ...)
 finally:
-    connector.close()
+    try:
+        connector.close()
+    except Exception:
+        pass    # suppress close errors; don't mask original failure
 ```
 
 ```
 PostgreSQLTableSource.__init__(dsn, table_name)
   → self._dsn = dsn                              # store before try (needed by to_config)
-  → PostgreSQLConnector(dsn)                     # open connection
+  → connector = PostgreSQLConnector(dsn)         # open connection (outside try)
   → [try]
       → DBTableSource.__init__(connector, ...)   # full source initialisation
           [inside DBTableSource]:
@@ -85,7 +90,7 @@ PostgreSQLTableSource.__init__(dsn, table_name)
             → connector.iter_batches(SELECT * FROM "table")
             → pa.Table.from_batches(...)         # assemble Arrow table
             → SourceStreamBuilder.build(...)     # attach tags, source-info, schema hash
-  → [finally] connector.close()                  # release connection unconditionally
+  → [finally] try: connector.close() except Exception: pass
 ```
 
 After construction the source holds all data in-memory as an `ArrowTableStream`. The PostgreSQL connection is fully released; subsequent `iter_packets()` / `as_table()` calls read from memory.
@@ -125,6 +130,8 @@ def to_config(self) -> dict[str, Any]:
     return {**base, "source_type": "postgresql_table", "dsn": self._dsn}
 ```
 
+Note: stripping `"connector"` is both a schema concern (callers should not see the internal connector config) and a **correctness** concern — `DBTableSource.to_config()` calls `self._connector.to_config()` to produce the `"connector"` entry, and `self._connector` holds a reference to the already-closed connector. Stripping it in the subclass avoids calling any method on the closed connector beyond that single call inside `super().to_config()`.
+
 `from_config()` passes the following keyword arguments to `__init__` (all sourced from `config.get(...)`):
 
 | Argument | Key in config |
@@ -147,7 +154,7 @@ The `config` kwarg is not passed (reconstruction does not need the OrcaPod confi
 Three places to update, identical to the `SQLiteTableSource` rollout:
 
 1. **`src/orcapod/core/sources/__init__.py`** — import `PostgreSQLTableSource` and add `"PostgreSQLTableSource"` to `__all__`. The `__all__` list is explicit (not auto-generated), so both steps are required. Adding it to `__all__` is what makes the `orcapod.sources` re-export work automatically.
-2. **`src/orcapod/pipeline/serialization.py`** — add `"postgresql_table": PostgreSQLTableSource` to `_build_source_registry()`. The import must be placed **inside** the function body (deferred local import), matching the existing pattern used for all other entries in that function — not at the module level.
+2. **`src/orcapod/pipeline/serialization.py`** — add `"postgresql_table": PostgreSQLTableSource` to `_build_source_registry()`. The import must be placed **inside** the function body (deferred local import), matching the existing pattern used for all other entries in that function — not at the module level. The purpose of the deferral is to avoid circular imports at module load time (not lazy loading — `_build_source_registry()` is called immediately at module level on line 132).
 3. **`src/orcapod/sources/__init__.py`** — no direct change needed; the re-export via `from orcapod.core.sources import *` picks up whatever is in `__all__` (step 1 must be done first)
 
 ---
@@ -157,7 +164,7 @@ Three places to update, identical to the `SQLiteTableSource` rollout:
 | Situation | Behaviour |
 |---|---|
 | Table does not exist | `ValueError: Table 'x' not found in database.` (from `DBTableSource`) |
-| Table is empty | `ValueError: Table 'x' is empty` (from `DBTableSource`) |
+| Table is empty | `ValueError: Table 'x' is empty.` (from `DBTableSource`) |
 | No PK and no `tag_columns` given | `ValueError: Table 'x' has no primary key columns. Provide explicit tag_columns.` (from `DBTableSource`) |
 | NULL values in tag columns | Passed through as-is — Arrow supports nulls natively; PostgreSQL PK columns are always `NOT NULL` so this can only arise with an explicit `tag_columns` override |
 | Connection failure | `psycopg` exception propagates naturally |
