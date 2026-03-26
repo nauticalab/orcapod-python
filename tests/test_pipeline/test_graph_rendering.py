@@ -6,6 +6,9 @@ StyleRuleSets, and Pipeline.show_graph.
 
 from __future__ import annotations
 
+import os
+from unittest.mock import patch
+
 import networkx as nx
 import pyarrow as pa
 import pytest
@@ -327,6 +330,125 @@ class TestPipelineShowGraph:
         )
 
         assert "lime" in dot_text
+
+
+# ---------------------------------------------------------------------------
+# Tests: style merging
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Tests: full rendering paths (non-raw_output)
+# ---------------------------------------------------------------------------
+
+
+class TestRenderGraphFullPath:
+    """Exercise the graphviz rendering code paths (not just raw DOT output)."""
+
+    def test_render_no_show_no_output(self, node_graph: nx.DiGraph) -> None:
+        """render_graph with show=False exercises graphviz build without display."""
+        renderer = GraphRenderer()
+        result = renderer.render_graph(node_graph, show=False)
+
+        assert isinstance(result, str)
+        assert "digraph" in result
+
+    def test_render_with_output_path(
+        self, node_graph: nx.DiGraph, tmp_path
+    ) -> None:
+        output_file = str(tmp_path / "graph.png")
+        renderer = GraphRenderer()
+        result = renderer.render_graph(
+            node_graph, show=False, output_path=output_file
+        )
+
+        assert isinstance(result, str)
+        assert os.path.exists(output_file)
+
+    def test_render_with_show_mocked(self, node_graph: nx.DiGraph) -> None:
+        """Exercise the show=True path with matplotlib mocked."""
+        renderer = GraphRenderer()
+        with (
+            patch("matplotlib.pyplot.figure"),
+            patch("matplotlib.pyplot.imshow"),
+            patch("matplotlib.pyplot.axis"),
+            patch("matplotlib.pyplot.tight_layout"),
+            patch("matplotlib.pyplot.show"),
+        ):
+            result = renderer.render_graph(node_graph, show=True)
+
+        assert isinstance(result, str)
+        assert "digraph" in result
+
+    def test_render_with_label_lut_full_path(
+        self, node_graph: nx.DiGraph
+    ) -> None:
+        first_node = next(iter(node_graph.nodes()))
+        label_lut = {first_node: "FullPathLabel"}
+        renderer = GraphRenderer()
+        result = renderer.render_graph(
+            node_graph, label_lut=label_lut, show=False
+        )
+
+        assert isinstance(result, str)
+
+    def test_render_with_style_rules_full_path(
+        self, node_graph: nx.DiGraph
+    ) -> None:
+        custom = StyleRuleSets.create_custom_rules(source_bg="coral")
+        renderer = GraphRenderer()
+        result = renderer.render_graph(
+            node_graph, style_rules=custom, show=False
+        )
+
+        assert isinstance(result, str)
+
+    def test_render_with_style_overrides(self, node_graph: nx.DiGraph) -> None:
+        renderer = GraphRenderer()
+        result = renderer.render_graph(
+            node_graph, show=False, dpi=72, rankdir="LR"
+        )
+
+        assert isinstance(result, str)
+
+
+class TestConvenienceFunctionsFullPath:
+    def test_render_graph_no_show(self, node_graph: nx.DiGraph) -> None:
+        result = render_graph(node_graph, show=False)
+
+        assert isinstance(result, str)
+        assert "digraph" in result
+
+    def test_render_graph_dark_theme_no_show(
+        self, node_graph: nx.DiGraph
+    ) -> None:
+        result = render_graph_dark_theme(node_graph, show=False)
+
+        assert isinstance(result, str)
+        assert "digraph" in result
+
+
+class TestPipelineShowGraphFullPath:
+    def test_show_graph_no_show(self, compiled_pipeline: Pipeline) -> None:
+        result = compiled_pipeline.show_graph(show=False)
+
+        assert isinstance(result, str)
+        assert "digraph" in result
+
+    def test_show_graph_with_show_mocked(
+        self, compiled_pipeline: Pipeline
+    ) -> None:
+        with (
+            patch("matplotlib.pyplot.figure"),
+            patch("matplotlib.pyplot.imshow"),
+            patch("matplotlib.pyplot.axis"),
+            patch("matplotlib.pyplot.tight_layout"),
+            patch("matplotlib.pyplot.show"),
+        ):
+            result = compiled_pipeline.show_graph(show=True)
+
+        assert isinstance(result, str)
+        assert "digraph" in result
 
 
 # ---------------------------------------------------------------------------
