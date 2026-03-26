@@ -82,11 +82,13 @@ class _ChannelReader(Generic[T]):
 
     ``Channel`` is intentionally single-consumer.  Fan-out (multiple readers)
     is handled by ``BroadcastChannel``, which gives every reader its own
-    independent queue.  Sentinel re-enqueuing is avoided because it can
-    deadlock when the queue buffer is small.  Instead the channel-level
-    ``_drained`` flag is set once the sentinel has been consumed, so any
-    subsequent ``receive()`` call (even from a freshly created reader) raises
-    ``ChannelClosed`` immediately without touching the queue.
+    independent queue.  To avoid deadlocks with small queue buffers we avoid
+    *awaiting* any sentinel re-enqueue: once the closure sentinel has been
+    consumed the channel-level ``_drained`` flag is set, and a best-effort
+    non-blocking re-enqueue of the sentinel is used only to wake any other
+    coroutines already suspended in ``queue.get()``.  After ``_drained`` is
+    set, any subsequent ``receive()`` call (even from a freshly created
+    reader) raises ``ChannelClosed`` immediately without touching the queue.
     """
 
     __slots__ = ("_channel",)
