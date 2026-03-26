@@ -93,6 +93,9 @@ class PostgreSQLTableSource(DBTableSource):
 
     def to_config(self) -> dict[str, Any]:
         """Serialize source configuration to a JSON-compatible dict."""
+        # super().to_config() calls self._connector.to_config(), which reads only
+        # self._connector._dsn (a stored string) — safe even though the connector
+        # was closed after construction.
         base = super().to_config()
         base.pop("connector", None)
         return {**base, "source_type": "postgresql_table", "dsn": self._dsn}

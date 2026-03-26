@@ -334,6 +334,28 @@ class TestStreamBehaviour:
                 PostgreSQLTableSource(DSN, "nonexistent")
         mock_connector.close.assert_called_once()
 
+    def test_close_exception_is_suppressed_on_success_path(self):
+        """close() errors are swallowed — construction still succeeds."""
+        from orcapod.core.sources import PostgreSQLTableSource
+
+        with patch(_PATCH) as mock_cls:
+            mock_connector = _make_mock_connector()
+            mock_connector.close.side_effect = RuntimeError("close failed")
+            mock_cls.return_value = mock_connector
+            src = PostgreSQLTableSource(DSN, "measurements")  # must not raise
+        assert src is not None
+
+    def test_close_exception_does_not_mask_super_init_failure(self):
+        """close() errors are swallowed — original super().__init__ error still propagates."""
+        from orcapod.core.sources import PostgreSQLTableSource
+
+        with patch(_PATCH) as mock_cls:
+            mock_connector = _make_mock_connector(table_names=[])
+            mock_connector.close.side_effect = RuntimeError("close failed")
+            mock_cls.return_value = mock_connector
+            with pytest.raises(ValueError, match="not found in database"):
+                PostgreSQLTableSource(DSN, "nonexistent")
+
 
 # ===========================================================================
 # 8. Deterministic hashing
