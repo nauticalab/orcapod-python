@@ -440,3 +440,34 @@ class TestConfig:
         )
         config = src.to_config()
         assert "system_tag_columns" in config
+
+
+class TestQueryOverride:
+    def test_custom_query_overrides_default_select(self, measurements_table):
+        """Passing _query to DBTableSource uses that query instead of SELECT *."""
+        import re
+
+        class CustomQueryConnector(MockDBConnector):
+            def iter_batches(self, query, params=None, batch_size=1000):
+                # Return only rows where trial > 1 when a custom query is given
+                match = re.search(r"trial > 1", query)
+                if match:
+                    import pyarrow.compute as pc
+                    filtered = measurements_table.filter(
+                        pc.greater(measurements_table.column("trial"), pa.scalar(1, pa.int64()))
+                    )
+                    for batch in filtered.to_batches():
+                        yield batch
+                else:
+                    yield from super().iter_batches(query, params, batch_size)
+
+        connector = CustomQueryConnector(
+            tables={"measurements": measurements_table},
+            pk_columns={"measurements": ["session_id"]},
+        )
+        src = DBTableSource(
+            connector,
+            "measurements",
+            _query='SELECT * FROM "measurements" WHERE trial > 1',
+        )
+        assert src.as_table().num_rows == 2  # only s2, s3 have trial > 1
