@@ -31,7 +31,10 @@ class LabelableMixin:
         Get the label of this object.
 
         Returns:
-            str | None: The label of the object, or None if not set.
+            str: The label of the object. In order of precedence: the
+                explicitly assigned label, the computed label (if any),
+                or the class name of the object as a fallback. Never
+                returns ``None``.
         """
         return self._label or self.computed_label() or self.__class__.__name__
 

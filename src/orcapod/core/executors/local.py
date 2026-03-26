@@ -54,18 +54,32 @@ class LocalExecutor(PythonFunctionExecutorBase):
             logger.record(**captured.as_dict())
         return raw_result
 
-    @staticmethod
-    def _run_async_sync(fn: Callable[..., Any], kwargs: dict[str, Any]) -> Any:
+    # Shared single-thread pool used when an event loop is already running and
+    # we need to bridge a sync call to an async function (nested-loop scenario).
+    # Reusing a pool avoids per-call thread creation/teardown overhead.
+    _async_bridge_pool: Any = None  # concurrent.futures.ThreadPoolExecutor | None
+
+    @classmethod
+    def _get_async_bridge_pool(cls) -> Any:
+        """Return (creating if needed) the shared async-bridge thread pool."""
+        if cls._async_bridge_pool is None:
+            from concurrent.futures import ThreadPoolExecutor
+
+            cls._async_bridge_pool = ThreadPoolExecutor(
+                1, thread_name_prefix="orcapod-async-bridge"
+            )
+        return cls._async_bridge_pool
+
+    @classmethod
+    def _run_async_sync(cls, fn: Callable[..., Any], kwargs: dict[str, Any]) -> Any:
         """Run an async function synchronously, handling nested event loops."""
         try:
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(fn(**kwargs))
         else:
-            from concurrent.futures import ThreadPoolExecutor
-
-            with ThreadPoolExecutor(1) as pool:
-                return pool.submit(lambda: asyncio.run(fn(**kwargs))).result()
+            pool = cls._get_async_bridge_pool()
+            return pool.submit(lambda: asyncio.run(fn(**kwargs))).result()
 
     async def async_execute_callable(
         self,
