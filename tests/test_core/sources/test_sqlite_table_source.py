@@ -17,12 +17,8 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Iterator
-
 import pyarrow as pa
 import pytest
-
-from orcapod.databases.sqlite_connector import SQLiteConnector
 
 
 # ---------------------------------------------------------------------------
@@ -123,46 +119,6 @@ def empty_db_path(tmp_path: Path) -> str:
     conn = sqlite3.connect(db_path)
     conn.close()
     return db_path
-
-
-# ---------------------------------------------------------------------------
-# Legacy connector-based fixtures for backward compat with in-memory usage
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def memory_connector() -> Iterator[SQLiteConnector]:
-    c = SQLiteConnector(":memory:")
-    yield c
-    c.close()
-
-
-@pytest.fixture
-def pk_connector(pk_db: str) -> Iterator[SQLiteConnector]:
-    c = SQLiteConnector(pk_db)
-    yield c
-    c.close()
-
-
-@pytest.fixture
-def composite_pk_connector(composite_pk_db: str) -> Iterator[SQLiteConnector]:
-    c = SQLiteConnector(composite_pk_db)
-    yield c
-    c.close()
-
-
-@pytest.fixture
-def rowid_connector(rowid_db: str) -> Iterator[SQLiteConnector]:
-    c = SQLiteConnector(rowid_db)
-    yield c
-    c.close()
-
-
-@pytest.fixture
-def empty_connector(empty_db: str) -> Iterator[SQLiteConnector]:
-    c = SQLiteConnector(empty_db)
-    yield c
-    c.close()
 
 
 # ===========================================================================
