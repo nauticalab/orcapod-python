@@ -28,29 +28,6 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Visualization helper (unrelated to pipeline node types)
-# ---------------------------------------------------------------------------
-
-
-class VizGraphNode:
-    def __init__(self, label: str, id: int, kernel_type: str):
-        self.label = label
-        self.id = id
-        self.kernel_type = kernel_type
-
-    def __hash__(self):
-        return hash((self.id, self.kernel_type))
-
-    def __eq__(self, other):
-        if not isinstance(other, VizGraphNode):
-            return NotImplemented
-        return (self.id, self.kernel_type) == (
-            other.id,
-            other.kernel_type,
-        )
-
-
-# ---------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------
 
@@ -532,6 +509,19 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         edge_lines = [f"E:{u}->{v}" for u, v in sorted(g.edges())]
         combined = "\n".join(node_lines + edge_lines)
         return hashlib.sha256(combined.encode()).hexdigest()[:16]
+
+    def show_graph(self, **kwargs) -> str | None:
+        """Render the pipeline's node graph.
+
+        Args:
+            **kwargs: Forwarded to ``render_graph``.
+
+        Raises:
+            RuntimeError: If the pipeline has not been compiled yet.
+        """
+        if self._node_graph is None:
+            raise RuntimeError("Pipeline must be compiled before showing the graph.")
+        return render_graph(self._node_graph, **kwargs)
 
     def flush(self) -> None:
         """Flush all databases."""
@@ -1153,26 +1143,22 @@ class GraphRenderer:
     def __init__(self):
         pass
 
-    def _sanitize_node_id(self, node_id: Any) -> str:
+    def _sanitize_node_id(self, node_id: GraphNode) -> str:
         return f"node_{hash(node_id)}"
 
-    def _create_default_html_label(self, node, node_attrs) -> str:
-        """
-        Create HTML for the label (text) section of the node
+    def _create_default_html_label(
+        self, node: GraphNode, node_attrs: dict[str, str]
+    ) -> str:
+        """Create HTML for the label (text) section of the node.
 
         Format:
-        kernel_type     (11pt, small text)
+        node_type      (11pt, small text)
         main_label     (14pt, normal text)
         """
+        main_label = str(node.label)
+        node_type = node.node_type
 
-        main_label = str(node.label) if hasattr(node, "label") else str(node)
-        kernel_type = str(node.kernel_type) if hasattr(node, "kernel_type") else ""
-
-        if not kernel_type:
-            # No kernel_type, just return main label
-            return f'<FONT POINT-SIZE="{self.DEFAULT_STYLES["main_font_size"]}">{main_label}</FONT>'
-
-        # Create HTML label: small kernel_type above, main label below
+        # Create HTML label: small node_type above, main label below
         main_size = self.DEFAULT_STYLES["main_font_size"]
         type_size = self.DEFAULT_STYLES["type_font_size"]
         font_name = self.DEFAULT_STYLES["font_name"]
@@ -1182,7 +1168,7 @@ class GraphRenderer:
 
         html_label = f'''<
         <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0">
-            <TR><TD ALIGN="CENTER"><FONT POINT-SIZE="{type_size}" COLOR="{type_font_color}" FACE="{font_name}, bold">{kernel_type}</FONT></TD></TR>
+            <TR><TD ALIGN="CENTER"><FONT POINT-SIZE="{type_size}" COLOR="{type_font_color}" FACE="{font_name}, bold">{node_type}</FONT></TD></TR>
             <TR><TD ALIGN="CENTER"><FONT POINT-SIZE="{main_size}">{main_label}</FONT></TD></TR>
         </TABLE>
         >'''
@@ -1190,22 +1176,22 @@ class GraphRenderer:
         return html_label
 
     def _get_node_label(
-        self, node_id: Any, label_lut: dict[Any, str] | None = None
+        self,
+        node: GraphNode,
+        label_lut: dict[GraphNode, str] | None = None,
     ) -> str:
-        if label_lut and node_id in label_lut:
-            return label_lut[node_id]
-        return str(node_id)
+        if label_lut and node in label_lut:
+            return label_lut[node]
+        return str(node.label)
 
     def _get_node_attributes(
-        self, node_id: Any, style_rules: dict | None = None
+        self,
+        node: GraphNode,
+        style_rules: dict[str, dict[str, str]] | None = None,
     ) -> dict[str, str]:
-        """
-        Get styling attributes for a specific node based on its properties
-        """
-        # Use provided rules or defaults
+        """Get styling attributes for a specific node based on its node_type."""
         rules = style_rules or self.DEFAULT_STYLE_RULES
 
-        # Default attributes
         default_attrs = {
             "fillcolor": self.DEFAULT_STYLES["node_color"],
             "shape": self.DEFAULT_STYLES["node_shape"],
@@ -1216,13 +1202,8 @@ class GraphRenderer:
             "typefontcolor": self.DEFAULT_STYLES["type_font_color"],
         }
 
-        # Check if node has kernel_type attribute
-        if hasattr(node_id, "kernel_type"):
-            kernel_type = node_id.kernel_type
-            if kernel_type in rules:
-                # Override defaults with rule-specific attributes
-                rule_attrs = rules[kernel_type].copy()
-                default_attrs.update(rule_attrs)
+        if node.node_type in rules:
+            default_attrs.update(rules[node.node_type])
 
         return default_attrs
 
@@ -1238,11 +1219,10 @@ class GraphRenderer:
     def generate_dot(
         self,
         graph: "nx.DiGraph",
-        label_lut: dict[Any, str] | None = None,
-        style_rules: dict | None = None,
+        label_lut: dict[GraphNode, str] | None = None,
+        style_rules: dict[str, dict[str, str]] | None = None,
         **style_overrides,
     ) -> str:
-        # Get final styles (defaults + overrides)
         styles = self._merge_styles(**style_overrides)
 
         import graphviz
@@ -1260,20 +1240,16 @@ class GraphRenderer:
         # Set default edge attributes
         dot.attr("edge", color=styles["edge_color"])
 
-        # Add nodes with default attribute specific styling
-        for node_id in graph.nodes():
-            sanitized_id = self._sanitize_node_id(node_id)
+        # Add nodes with styling based on node_type
+        for node in graph.nodes():
+            sanitized_id = self._sanitize_node_id(node)
+            node_attrs = self._get_node_attributes(node, style_rules)
 
-            node_attrs = self._get_node_attributes(node_id, style_rules)
-
-            if label_lut and node_id in label_lut:
-                # Use custom label if provided
-                label = label_lut[node_id]
+            if label_lut and node in label_lut:
+                label = label_lut[node]
             else:
-                # Use default HTML label with kernel_type above main label
-                label = self._create_default_html_label(node_id, node_attrs)
+                label = self._create_default_html_label(node, node_attrs)
 
-            # Add nodes with its specific attributes
             dot.node(sanitized_id, label=label, **node_attrs)
 
         # Add edges
@@ -1287,13 +1263,13 @@ class GraphRenderer:
     def render_graph(
         self,
         graph: "nx.DiGraph",
-        label_lut: dict[Any, str] | None = None,
+        label_lut: dict[GraphNode, str] | None = None,
         show: bool = True,
         output_path: str | None = None,
         raw_output: bool = False,
         figsize: tuple = (12, 8),
         dpi: int = 150,
-        style_rules: dict | None = None,
+        style_rules: dict[str, dict[str, str]] | None = None,
         **style_overrides,
     ) -> str | None:
         # Always generate DOT first
@@ -1321,14 +1297,14 @@ class GraphRenderer:
         dot.attr("edge", color=styles["edge_color"])
 
         # Add nodes with specific styling
-        for node_id in graph.nodes():
-            sanitized_id = self._sanitize_node_id(node_id)
-            node_attrs = self._get_node_attributes(node_id, style_rules)
+        for node in graph.nodes():
+            sanitized_id = self._sanitize_node_id(node)
+            node_attrs = self._get_node_attributes(node, style_rules)
 
-            if label_lut and node_id in label_lut:
-                label = label_lut[node_id]
+            if label_lut and node in label_lut:
+                label = label_lut[node]
             else:
-                label = self._create_default_html_label(node_id, node_attrs)
+                label = self._create_default_html_label(node, node_attrs)
 
             dot.node(sanitized_id, label=label, **node_attrs)
 
@@ -1367,30 +1343,28 @@ class GraphRenderer:
 # =====================
 def render_graph(
     graph: "nx.DiGraph",
-    label_lut: dict[Any, str] | None = None,
-    style_rules: dict | None = None,
+    label_lut: dict[GraphNode, str] | None = None,
+    style_rules: dict[str, dict[str, str]] | None = None,
     **kwargs,
 ) -> str | None:
-    """
-    Convenience function with conditional node styling
+    """Convenience function with conditional node styling.
 
     Args:
-        graph: NetworkX DiGraph
-        label_lut: Optional node labels
-        style_rules: Dict mapping node attributes to styling rules
-        **kwargs: Other styling arguments
+        graph: NetworkX DiGraph whose nodes are GraphNode instances.
+        label_lut: Optional mapping from node to custom display label.
+        style_rules: Mapping from node_type to graphviz attribute overrides.
+        **kwargs: Other styling arguments forwarded to GraphRenderer.
     """
     renderer = GraphRenderer()
     return renderer.render_graph(graph, label_lut, style_rules=style_rules, **kwargs)
 
 
 def render_graph_dark_theme(
-    graph: "nx.DiGraph", label_lut: dict[Any, str] | None = None, **kwargs
+    graph: "nx.DiGraph",
+    label_lut: dict[GraphNode, str] | None = None,
+    **kwargs,
 ) -> str | None:
-    """
-    Render with dark theme - all backgrounds dark, all pod type fonts light
-    Perfect for dark themed presentations or displays
-    """
+    """Render with dark theme — dark backgrounds, light fonts."""
     renderer = GraphRenderer()
     return renderer.render_graph(
         graph, label_lut, style_rules=renderer.DARK_THEME_RULES, **kwargs
@@ -1425,9 +1399,9 @@ class StyleRuleSets:
         pod_main_fcolor="white",
         source_type_fcolor="darkgray",
         operator_type_fcolor="darkgray",
-        kernel_type_fcolor="lightgray",
-    ):
-        """Create custom theme rules"""
+        node_type_fcolor="lightgray",
+    ) -> dict[str, dict[str, str]]:
+        """Create custom theme rules."""
         return {
             "source": {
                 "fillcolor": source_bg,
@@ -1448,6 +1422,6 @@ class StyleRuleSets:
                 "shape": "box",
                 "fontcolor": pod_main_fcolor,
                 "style": "filled,rounded",
-                "type_font_color": kernel_type_fcolor,
+                "type_font_color": node_type_fcolor,
             },
         }
