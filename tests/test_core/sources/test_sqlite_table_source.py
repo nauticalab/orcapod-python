@@ -492,3 +492,52 @@ class TestConfigRoundTripRowidTable:
         src2 = SQLiteTableSource.from_config(config)
         assert src2.content_hash() == src.content_hash()
         assert src2.pipeline_hash() == src.pipeline_hash()
+
+
+# ===========================================================================
+# 12. Integration: SQLiteTableSource in a pipeline
+# ===========================================================================
+
+
+@pytest.mark.integration
+class TestPipelineIntegration:
+    def test_sqlite_source_in_pipeline(self, pk_db):
+        """Verify SQLiteTableSource drives a full pipeline end-to-end."""
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.packet_function import PythonPacketFunction
+        from orcapod.core.sources import SQLiteTableSource
+        from orcapod.databases import InMemoryArrowDatabase
+        from orcapod.pipeline import Pipeline
+        from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
+
+        def double_response(trial: int, response: float) -> float:
+            return response * 2.0
+
+        src = SQLiteTableSource(pk_db, "measurements")
+        pf = PythonPacketFunction(double_response, output_keys="doubled")
+        pod = FunctionPod(pf)
+
+        pipeline = Pipeline(
+            name="sqlite_integration", pipeline_database=InMemoryArrowDatabase()
+        )
+        with pipeline:
+            pod(src, label="doubler")
+
+        orch = SyncPipelineOrchestrator()
+        result = orch.run(pipeline._node_graph)
+
+        fn_outputs = [
+            v for k, v in result.node_outputs.items() if k.node_type == "function"
+        ]
+        assert len(fn_outputs) == 1
+        assert len(fn_outputs[0]) == 3
+
+        # Verify tag column (session_id) flows through and results are correct
+        doubled_values = sorted(
+            [pkt.as_dict()["doubled"] for _, pkt in fn_outputs[0]]
+        )
+        assert doubled_values == pytest.approx([0.2, 0.4, 0.6])
+
+        # Verify tag values are present
+        tag_values = sorted([tags["session_id"] for tags, _ in fn_outputs[0]])
+        assert tag_values == ["s1", "s2", "s3"]
