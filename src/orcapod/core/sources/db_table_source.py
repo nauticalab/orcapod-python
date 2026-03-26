@@ -69,6 +69,8 @@ class DBTableSource(RootSource):
         label: str | None = None,
         data_context: str | contexts.DataContext | None = None,
         config: Config | None = None,
+        *,
+        _query: str | None = None,
     ) -> None:
         if source_id is None:
             source_id = table_name
@@ -99,8 +101,11 @@ class DBTableSource(RootSource):
         else:
             resolved_tag_columns = list(tag_columns)
 
-        # Step 3: Fetch the full table as Arrow
-        batches = list(connector.iter_batches(f'SELECT * FROM "{table_name}"'))
+        # Step 3: Fetch the full table as Arrow.
+        # _query allows subclasses (e.g. SQLiteTableSource) to inject a custom
+        # SELECT (e.g. SELECT rowid, * FROM "t") without duplicating the rest of init.
+        query = _query if _query is not None else f'SELECT * FROM "{table_name}"'
+        batches = list(connector.iter_batches(query))
         if not batches:
             raise ValueError(f"Table {table_name!r} is empty.")
         table: pa.Table = pa.Table.from_batches(batches)
