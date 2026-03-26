@@ -76,7 +76,7 @@ class SQLiteTableSource(DBTableSource):
         record_id_column: str | None = None,
         source_id: str | None = None,
         label: str | None = None,
-        data_context: str | "contexts.DataContext | None" = None,
+        data_context: str | contexts.DataContext | None = None,
         config: "Config | None" = None,
     ) -> None:
         self._db_path = db_path
@@ -115,12 +115,8 @@ class SQLiteTableSource(DBTableSource):
     def to_config(self) -> dict[str, Any]:
         """Serialize source configuration to a JSON-compatible dict."""
         base = super().to_config()
-        # Override source_type and replace connector dict with db_path.
-        return {
-            **base,
-            "source_type": "sqlite_table",
-            "db_path": str(self._db_path),
-        }
+        base.pop("connector", None)
+        return {**base, "source_type": "sqlite_table", "db_path": str(self._db_path)}
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> "SQLiteTableSource":
@@ -143,4 +139,6 @@ class SQLiteTableSource(DBTableSource):
             system_tag_columns=config.get("system_tag_columns", ()),
             record_id_column=config.get("record_id_column"),
             source_id=config.get("source_id"),
+            label=config.get("label"),
+            data_context=config.get("data_context"),
         )
