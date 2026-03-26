@@ -267,6 +267,11 @@ class SQLiteConnector:
                 for ci in self.get_column_info(queried_table):
                     type_lookup[ci.name] = ci.arrow_type
 
+            # rowid is an implicit SQLite integer column; it does not appear in
+            # PRAGMA table_info, so it would otherwise fall back to large_string.
+            if "rowid" in col_names:
+                type_lookup["rowid"] = _pa.int64()
+
             arrow_types = [type_lookup.get(name, _pa.large_string()) for name in col_names]
             schema = _pa.schema(
                 [_pa.field(name, atype) for name, atype in zip(col_names, arrow_types)]

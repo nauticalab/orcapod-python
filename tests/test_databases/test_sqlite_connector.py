@@ -398,3 +398,18 @@ class TestIterBatches:
         self._setup_data(connector)
         batches = list(connector.iter_batches('SELECT * FROM "data" WHERE 1=0'))
         assert batches == []
+
+
+class TestRowidTyping:
+    def test_rowid_column_typed_as_int64(self, connector):
+        """SELECT rowid, * should yield rowid as int64, not large_string."""
+        conn = connector._conn
+        conn.execute("CREATE TABLE nokey (val TEXT)")
+        conn.execute("INSERT INTO nokey VALUES ('hello')")
+
+        batches = list(connector.iter_batches('SELECT rowid, * FROM "nokey"'))
+        assert len(batches) == 1
+        batch = batches[0]
+        assert "rowid" in batch.schema.names
+        assert batch.schema.field("rowid").type == pa.int64()
+        assert batch.column("rowid")[0].as_py() == 1  # first rowid is always 1
