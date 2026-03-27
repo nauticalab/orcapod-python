@@ -796,8 +796,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 all_upstreams_usable = (
                     all(
                         hasattr(n, "load_status")
-                        and n.load_status
-                        in (LoadStatus.FULL, LoadStatus.READ_ONLY)
+                        and n.load_status in (LoadStatus.FULL, LoadStatus.READ_ONLY)
                         for n in upstream_nodes
                     )
                     if upstream_nodes
@@ -1131,7 +1130,7 @@ class GraphRenderer:
             "style": "filled",
             "typefontcolor": "lightgray",  # Light text for dark background
         },
-        "pod": {
+        "function": {
             "fillcolor": "#090271",  # darker navy blue
             "shape": "cylinder",
             "fontcolor": "white",
@@ -1232,8 +1231,8 @@ class GraphRenderer:
         # Apply global styles
         dot.attr(rankdir=styles["rankdir"], dpi=str(styles["dpi"]))
         dot.attr(fontname=styles["font_name"])
-        if styles.get("font_size"):
-            dot.attr(fontsize=styles["fontsize"])
+        if styles.get("fontsize"):
+            dot.attr(fontsize=str(styles["fontsize"]))
         if styles["font_path"]:
             dot.attr(fontpath=styles["font_path"])
 
@@ -1408,20 +1407,20 @@ class StyleRuleSets:
                 "shape": "ellipse",
                 "fontcolor": source_main_fcolor,
                 "style": "filled",
-                "type_font_color": source_type_fcolor,
+                "typefontcolor": source_type_fcolor,
             },
             "operator": {
                 "fillcolor": operator_bg,
                 "shape": "diamond",
                 "fontcolor": operator_main_fcolor,
                 "style": "filled",
-                "type_font_color": operator_type_fcolor,
+                "typefontcolor": operator_type_fcolor,
             },
             "function": {
                 "fillcolor": pod_bg,
                 "shape": "box",
                 "fontcolor": pod_main_fcolor,
                 "style": "filled,rounded",
-                "type_font_color": node_type_fcolor,
+                "typefontcolor": node_type_fcolor,
             },
         }
