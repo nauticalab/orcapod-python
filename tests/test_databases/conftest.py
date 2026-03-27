@@ -4,6 +4,9 @@ Installs a lightweight mock psycopg module into sys.modules so that:
   - ``patch("psycopg.connect")`` works even when libpq is not installed.
   - The LazyModule("psycopg") in postgresql_connector.py resolves without
     trying to load the real psycopg (which requires libpq).
+
+Note: ``@pytest.mark.postgres`` skip logic lives in the root conftest.py
+(opt-in via ``--postgres``).
 """
 from __future__ import annotations
 
