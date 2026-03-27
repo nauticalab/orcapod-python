@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from abc import abstractmethod
-from collections.abc import AsyncIterator, Collection, Iterator, Mapping
+from collections.abc import AsyncIterator, Collection, Iterator, Mapping, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -324,7 +324,7 @@ class StreamBase(TraceableBase):
 
     def flow(
         self,
-    ) -> Collection[tuple[TagProtocol, PacketProtocol]]:
+    ) -> list[tuple[TagProtocol, PacketProtocol]]:
         """Materialize the stream into a concrete collection of
         ``(TagProtocol, PacketProtocol)`` pairs.
 
