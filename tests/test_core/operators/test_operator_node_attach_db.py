@@ -36,6 +36,7 @@ class TestOperatorNodeWithoutDatabase:
             operator=Join(),
             input_streams=(_make_stream("a"), _make_stream("b")),
         )
+        node.run()                          # <-- add this line
         results = list(node.iter_packets())
         assert len(results) == 3
 
@@ -104,5 +105,6 @@ class TestOperatorNodeWithDatabase:
             input_streams=(_make_stream("a"), _make_stream("b")),
             pipeline_database=db,
         )
+        node.run()                          # <-- add this line
         results = list(node.iter_packets())
         assert len(results) == 3

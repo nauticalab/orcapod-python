@@ -332,6 +332,7 @@ class TestOperatorNodeRunAndStorage:
     def test_iter_packets(self, simple_stream, db):
         op = MapPackets({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,), db=db)
+        node.run()                          # <-- add this line
         packets = list(node.iter_packets())
         assert len(packets) == 3
         for tag, packet in packets:
@@ -340,6 +341,7 @@ class TestOperatorNodeRunAndStorage:
     def test_as_table(self, simple_stream, db):
         op = MapPackets({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,), db=db)
+        node.run()                          # <-- add this line
         table = node.as_table()
         assert table.num_rows == 3
         assert "renamed_x" in table.column_names

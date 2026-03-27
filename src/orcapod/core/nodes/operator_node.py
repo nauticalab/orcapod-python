@@ -591,19 +591,36 @@ class OperatorNode(StreamBase):
             self._update_modified_time()
 
     def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
-        self.run()
-        assert self._cached_output_stream is not None
-        return self._cached_output_stream.iter_packets()
+        """Return an iterator over (tag, packet) pairs.
+
+        Read-only: never triggers computation. Returns empty before ``run()``
+        or ``execute()`` populates the cache. Call ``node.is_stale`` before
+        iterating if you need to detect outdated cached data.
+        """
+        if self._cached_output_stream is not None:
+            return self._cached_output_stream.iter_packets()
+        db_stream = self._load_cached_stream_from_db()
+        if db_stream is not None:
+            return db_stream.iter_packets()
+        return iter([])
 
     def as_table(
         self,
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> pa.Table:
-        self.run()
-        assert self._cached_output_stream is not None
-        return self._cached_output_stream.as_table(columns=columns, all_info=all_info)
+    ) -> "pa.Table":
+        """Return the output as a PyArrow table.
+
+        Read-only: never triggers computation. Returns a zero-row table
+        with correct schema before ``run()`` or ``execute()`` is called.
+        """
+        if self._cached_output_stream is not None:
+            return self._cached_output_stream.as_table(columns=columns, all_info=all_info)
+        db_stream = self._load_cached_stream_from_db()
+        if db_stream is not None:
+            return db_stream.as_table(columns=columns, all_info=all_info)
+        return self._make_empty_table()
 
     # ------------------------------------------------------------------
     # DB retrieval
