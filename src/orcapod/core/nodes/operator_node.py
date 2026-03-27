@@ -421,6 +421,22 @@ class OperatorNode(StreamBase):
 
         self._cached_output_table = output_table.drop(self.HASH_COLUMN_NAME)
 
+    def _make_empty_table(self) -> "pa.Table":
+        """Build a zero-row PyArrow table matching this node's full output schema.
+
+        Uses ``output_schema()`` for column names/types and
+        ``data_context.type_converter`` for the Python → Arrow type mapping.
+        Requires ``self._operator is not None`` (pre-existing limitation shared
+        with ``_replay_from_cache``).
+        """
+        tag_schema, packet_schema = self.output_schema()
+        type_converter = self.data_context.type_converter
+        empty_fields: dict = {}
+        for name, py_type in {**tag_schema, **packet_schema}.items():
+            arrow_type = type_converter.python_type_to_arrow_type(py_type)
+            empty_fields[name] = pa.array([], type=arrow_type)
+        return pa.table(empty_fields)
+
     def get_cached_output(self) -> StreamProtocol | None:
         """Return cached output stream in REPLAY mode, else None.
 
@@ -511,14 +527,7 @@ class OperatorNode(StreamBase):
         """
         records = self._pipeline_database.get_all_records(self.pipeline_path)
         if records is None:
-            # Build an empty table with the correct schema
-            tag_schema, packet_schema = self.output_schema()
-            type_converter = self.data_context.type_converter
-            empty_fields = {}
-            for name, py_type in {**tag_schema, **packet_schema}.items():
-                arrow_type = type_converter.python_type_to_arrow_type(py_type)
-                empty_fields[name] = pa.array([], type=arrow_type)
-            records = pa.table(empty_fields)
+            records = self._make_empty_table()
 
         tag_keys = self.keys()[0]
         self._cached_output_stream = ArrowTableStream(records, tag_columns=tag_keys)
