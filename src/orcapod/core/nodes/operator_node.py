@@ -437,6 +437,35 @@ class OperatorNode(StreamBase):
             empty_fields[name] = pa.array([], type=arrow_type)
         return pa.table(empty_fields)
 
+    def _load_cached_stream_from_db(self) -> "ArrowTableStream | None":
+        """Read from DB in CacheMode.REPLAY only, without modifying node state.
+
+        Returns an ``ArrowTableStream`` (possibly wrapping zero rows) when
+        ``CacheMode.REPLAY`` is active and a database is attached; ``None``
+        otherwise.
+
+        This method is intentionally **state-free**: it never assigns to
+        ``_cached_output_stream`` and never calls ``_update_modified_time()``.
+        Repeated calls re-query the DB each time — in-memory caching is the
+        responsibility of the computation paths (``run()``, ``execute()``).
+
+        Guards:
+            - Returns ``None`` if ``_pipeline_database is None``.
+            - Returns ``None`` if ``_cache_mode != CacheMode.REPLAY``
+              (LOG/OFF modes may have stale historical records in the DB).
+        """
+        if self._pipeline_database is None:
+            return None
+        if self._cache_mode != CacheMode.REPLAY:
+            return None
+        records = self._pipeline_database.get_all_records(self.pipeline_path)
+        if records is None:
+            records_table = self._make_empty_table()
+        else:
+            records_table = records
+        tag_keys = self.keys()[0]
+        return ArrowTableStream(records_table, tag_columns=tag_keys)
+
     def get_cached_output(self) -> StreamProtocol | None:
         """Return cached output stream in REPLAY mode, else None.
 
