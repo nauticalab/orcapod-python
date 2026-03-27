@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
@@ -209,7 +210,12 @@ class RayExecutor(PythonFunctionExecutorBase):
         ref = remote_fn.options(name=fn.__name__).remote(fn, kwargs)
 
         try:
-            raw, stdout_log, stderr_log, python_logs = await ref.future()
+            # In Ray client mode (ray://) ClientObjectRef.future() returns a
+            # concurrent.futures.Future which cannot be directly awaited.
+            # asyncio.wrap_future() handles both Future types correctly.
+            raw, stdout_log, stderr_log, python_logs = await asyncio.wrap_future(
+                ref.future()
+            )
         except Exception as exc:
             handled = self._handle_worker_error(exc, logger)
             if handled is exc:

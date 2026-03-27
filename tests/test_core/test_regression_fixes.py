@@ -566,28 +566,67 @@ class TestRayExecutorInitialization:
             assert data["runtime_env"] is True
             assert data["ray_address"] == "auto"
 
-    def test_async_execute_uses_ref_future(self):
-        """async_execute_callable should await ref.future() directly.
+    def test_async_execute_uses_wrap_future(self):
+        """async_execute_callable must use asyncio.wrap_future(ref.future()).
 
-        Ray's ObjectRef.future() returns an asyncio.Future; awaiting it
-        directly is simpler and avoids the unnecessary asyncio.wrap_future
-        indirection that only handles concurrent.futures.Future.
+        In Ray client mode (ray:// addresses), ClientObjectRef.future()
+        returns a concurrent.futures.Future, NOT an asyncio.Future.
+        Directly awaiting it raises TypeError.  asyncio.wrap_future()
+        handles both Future types correctly and is required for Ray
+        client compatibility.
         """
         import inspect
 
         from orcapod.core.executors.ray import RayExecutor
 
         source = inspect.getsource(RayExecutor.async_execute_callable)
-        assert "ref.future()" in source, (
-            "async_execute_callable should use ref.future() for asyncio compatibility"
+        assert "wrap_future" in source, (
+            "async_execute_callable must use asyncio.wrap_future() for "
+            "Ray client mode compatibility — ClientObjectRef.future() "
+            "returns concurrent.futures.Future, not asyncio.Future"
         )
-        assert "wrap_future" not in source, (
-            "asyncio.wrap_future is unnecessary; Ray's ref.future() is already an asyncio.Future"
-        )
-        # Should NOT do bare 'await ref'
-        assert "return await ref\n" not in source, (
-            "async_execute_callable should not use bare 'await ref'"
-        )
+
+    def test_async_execute_handles_concurrent_futures_future(self):
+        """async_execute_callable must handle concurrent.futures.Future
+        returned by ClientObjectRef.future() in Ray client mode (ray://).
+
+        Uses a Future that resolves asynchronously (via a background thread)
+        to verify that wrap_future correctly bridges the concurrent.futures
+        and asyncio worlds — not just pre-resolved futures.
+        """
+        import asyncio
+        import threading
+        from concurrent.futures import Future
+        from unittest.mock import MagicMock, patch
+
+        from orcapod.core.executors.ray import RayExecutor
+
+        executor = RayExecutor(ray_address="ray://fake:10001")
+
+        # Create a Future that resolves after a short delay in a background
+        # thread, mimicking how Ray client mode delivers results.
+        cf_future = Future()
+
+        def resolve_later():
+            import time
+            time.sleep(0.05)
+            cf_future.set_result((42, "", "", []))
+
+        threading.Thread(target=resolve_later, daemon=True).start()
+
+        mock_ref = MagicMock()
+        mock_ref.future.return_value = cf_future
+
+        with patch.object(executor, '_ensure_ray_initialized'), \
+             patch.object(executor, '_get_remote_fn') as mock_get_fn:
+            mock_remote = MagicMock()
+            mock_remote.options.return_value.remote.return_value = mock_ref
+            mock_get_fn.return_value = mock_remote
+
+            result = asyncio.run(
+                executor.async_execute_callable(lambda **kw: kw, {})
+            )
+            assert result == 42
 
 
 # ===========================================================================
