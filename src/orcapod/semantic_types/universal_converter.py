@@ -9,6 +9,8 @@ This provides a comprehensive, self-contained system that:
 5. Integrates seamlessly with semantic type registries
 """
 
+from __future__ import annotations
+
 import hashlib
 import logging
 import types
@@ -33,59 +35,73 @@ else:
 logger = logging.getLogger(__name__)
 
 
-# Basic type mapping for Python -> Arrow conversion
-_PYTHON_TO_ARROW_MAP = {
-    # Python built-ins
-    int: pa.int64(),
-    float: pa.float64(),
-    str: pa.large_string(),  # Use large_string by default for Polars compatibility
-    bool: pa.bool_(),
-    bytes: pa.large_binary(),  # Use large_binary by default for Polars compatibility
-    # String representations (for when we get type names as strings)
-    "int": pa.int64(),
-    "float": pa.float64(),
-    "str": pa.large_string(),
-    "bool": pa.bool_(),
-    "bytes": pa.large_binary(),
-    # Specific integer types
-    "int8": pa.int8(),
-    "int16": pa.int16(),
-    "int32": pa.int32(),
-    "int64": pa.int64(),
-    "uint8": pa.uint8(),
-    "uint16": pa.uint16(),
-    "uint32": pa.uint32(),
-    "uint64": pa.uint64(),
-    # Specific float types
-    "float32": pa.float32(),
-    "float64": pa.float64(),
-    # Date/time types
-    "date": pa.date32(),
-    "datetime": pa.timestamp("us"),
-    "timestamp": pa.timestamp("us"),
-}
+# Basic type mapping for Python -> Arrow conversion.
+# Built lazily on first use so that importing this module does not trigger a
+# pyarrow (or numpy) import.  Call _get_python_to_arrow_map() instead of
+# referencing _PYTHON_TO_ARROW_MAP directly.
+_PYTHON_TO_ARROW_MAP: "dict | None" = None
 
-# Add numpy types if available
-try:
-    import numpy as np
 
-    _PYTHON_TO_ARROW_MAP.update(
-        {
-            np.int8: pa.int8(),
-            np.int16: pa.int16(),
-            np.int32: pa.int32(),
-            np.int64: pa.int64(),
-            np.uint8: pa.uint8(),
-            np.uint16: pa.uint16(),
-            np.uint32: pa.uint32(),
-            np.uint64: pa.uint64(),
-            np.float32: pa.float32(),
-            np.float64: pa.float64(),
-            np.bool_: pa.bool_(),
-        }
-    )
-except ImportError:
-    pass
+def _get_python_to_arrow_map() -> dict:
+    """Return the Python→Arrow type map, building it on first call."""
+    global _PYTHON_TO_ARROW_MAP
+    if _PYTHON_TO_ARROW_MAP is not None:
+        return _PYTHON_TO_ARROW_MAP
+
+    _PYTHON_TO_ARROW_MAP = {
+        # Python built-ins
+        int: pa.int64(),
+        float: pa.float64(),
+        str: pa.large_string(),  # Use large_string by default for Polars compatibility
+        bool: pa.bool_(),
+        bytes: pa.large_binary(),  # Use large_binary by default for Polars compatibility
+        # String representations (for when we get type names as strings)
+        "int": pa.int64(),
+        "float": pa.float64(),
+        "str": pa.large_string(),
+        "bool": pa.bool_(),
+        "bytes": pa.large_binary(),
+        # Specific integer types
+        "int8": pa.int8(),
+        "int16": pa.int16(),
+        "int32": pa.int32(),
+        "int64": pa.int64(),
+        "uint8": pa.uint8(),
+        "uint16": pa.uint16(),
+        "uint32": pa.uint32(),
+        "uint64": pa.uint64(),
+        # Specific float types
+        "float32": pa.float32(),
+        "float64": pa.float64(),
+        # Date/time types
+        "date": pa.date32(),
+        "datetime": pa.timestamp("us"),
+        "timestamp": pa.timestamp("us"),
+    }
+
+    # Add numpy types if available
+    try:
+        import numpy as np
+
+        _PYTHON_TO_ARROW_MAP.update(
+            {
+                np.int8: pa.int8(),
+                np.int16: pa.int16(),
+                np.int32: pa.int32(),
+                np.int64: pa.int64(),
+                np.uint8: pa.uint8(),
+                np.uint16: pa.uint16(),
+                np.uint32: pa.uint32(),
+                np.uint64: pa.uint64(),
+                np.float32: pa.float32(),
+                np.float64: pa.float64(),
+                np.bool_: pa.bool_(),
+            }
+        )
+    except ImportError:
+        pass
+
+    return _PYTHON_TO_ARROW_MAP
 
 
 class UniversalTypeConverter:
@@ -338,8 +354,9 @@ class UniversalTypeConverter:
     def _convert_python_to_arrow(self, python_type: DataType) -> pa.DataType:
         """Core Python → Arrow type conversion logic."""
 
-        if python_type in _PYTHON_TO_ARROW_MAP:
-            return _PYTHON_TO_ARROW_MAP[python_type]
+        type_map = _get_python_to_arrow_map()
+        if python_type in type_map:
+            return type_map[python_type]
 
         # Check semantic registry for registered types
         if self.semantic_registry:
@@ -361,8 +378,8 @@ class UniversalTypeConverter:
             # Handle string type names
             if hasattr(python_type, "__name__"):
                 type_name = getattr(python_type, "__name__")
-                if type_name in _PYTHON_TO_ARROW_MAP:
-                    return _PYTHON_TO_ARROW_MAP[type_name]
+                if type_name in type_map:
+                    return type_map[type_name]
             raise ValueError(f"Unsupported Python type: {python_type}")
 
         # Handle list types

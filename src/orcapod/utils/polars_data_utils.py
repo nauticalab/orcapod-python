@@ -1,4 +1,6 @@
 # Collection of functions to work with Arrow table data that underlies streams and/or datagrams
+from __future__ import annotations
+
 from collections.abc import Collection
 from typing import TYPE_CHECKING
 

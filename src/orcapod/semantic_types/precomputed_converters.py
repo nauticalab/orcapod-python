@@ -6,6 +6,8 @@ conversion functions for each column, eliminating runtime schema parsing
 and type detection overhead.
 """
 
+from __future__ import annotations
+
 from typing import Any, TYPE_CHECKING
 from collections.abc import Callable
 import pyarrow as pa

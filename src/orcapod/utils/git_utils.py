@@ -1,7 +1,10 @@
-import git
+from __future__ import annotations
+
 import inspect
 from typing import Any
-import git.exc
+from orcapod.utils.lazy_module import LazyModule
+
+git = LazyModule("git")
 
 
 def is_git_repo(path):

@@ -5,10 +5,15 @@ This module contains the core registry that loads and manages
 data contexts from JSON files with validation and caching.
 """
 
+from __future__ import annotations
+
+import importlib.util
 import json
 import logging
 from pathlib import Path
 from typing import Any
+
+_JSONSCHEMA_AVAILABLE = importlib.util.find_spec("jsonschema") is not None
 
 from orcapod.contexts.core import (
     ContextResolutionError,
@@ -18,12 +23,6 @@ from orcapod.contexts.core import (
 from orcapod.utils.object_spec import parse_objectspec
 
 logger = logging.getLogger(__name__)
-
-try:
-    import jsonschema
-except ImportError:
-    jsonschema = None
-    logger.info("jsonschema not available, skipping schema validation")
 
 
 class JSONDataContextRegistry:
@@ -153,11 +152,15 @@ class JSONDataContextRegistry:
             raise ContextValidationError(f"Missing required fields: {missing_fields}")
 
         # Validate against JSON schema if available
-        if self._schema and jsonschema is not None:
-            try:
-                jsonschema.validate(spec, self._schema)
-            except jsonschema.ValidationError as e:
-                raise ContextValidationError(f"Schema validation failed: {e.message}")
+        if self._schema:
+            if not _JSONSCHEMA_AVAILABLE:
+                logger.info("jsonschema not available, skipping schema validation")
+            else:
+                import jsonschema  # noqa: PLC0415 – deferred to keep startup fast
+                try:
+                    jsonschema.validate(spec, self._schema)
+                except jsonschema.ValidationError as e:
+                    raise ContextValidationError(f"Schema validation failed: {e.message}")
 
         # Store the validated spec
         self._specs[version] = spec
