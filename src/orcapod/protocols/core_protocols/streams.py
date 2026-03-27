@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator, Collection, Iterator, Mapping
+from collections.abc import AsyncIterator, Collection, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from orcapod.protocols.core_protocols.datagrams import PacketProtocol, TagProtocol
@@ -203,7 +203,7 @@ class StreamWithOperationsProtocol(StreamProtocol, Protocol):
 
     def flow(
         self,
-    ) -> Collection[tuple[TagProtocol, PacketProtocol]]:
+    ) -> Sequence[tuple[TagProtocol, PacketProtocol]]:
         """
         Return the entire stream as a collection of (tag, packet) pairs.
 
