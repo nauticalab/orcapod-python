@@ -199,17 +199,19 @@ class ResultsReader:
 
     # -- Public query methods --------------------------------------------------
 
-    def summary(self, group_by: list[str] | None = None) -> pl.DataFrame:
-        """Node-level summary with counts by execution state.
+    def status(self, group_by: list[str] | None = None) -> pl.DataFrame:
+        """Node-level status overview with counts by execution state.
+
+        CACHED results are counted as SUCCESS since they represent
+        previously computed successful results.
 
         Args:
             group_by: Optional tag columns to group by in addition to
                 ``node_label``. If ``None``, groups by ``node_label`` only.
 
         Returns:
-            DataFrame with columns: ``node_label``, state count columns
-            (``SUCCESS``, ``FAILED``, ``RUNNING``, ``CACHED``),
-            ``last_updated``, and any ``group_by`` columns.
+            DataFrame with columns: ``node_label``, ``SUCCESS``, ``FAILED``,
+            ``RUNNING``, ``last_updated``, and any ``group_by`` columns.
         """
         df = self._get_status_df()
         df = self._clean_status_df(df)
@@ -222,10 +224,9 @@ class ResultsReader:
         return (
             df.group_by(group_cols)
             .agg(
-                *[
-                    pl.col("state").eq(s).sum().alias(s)
-                    for s in ("SUCCESS", "FAILED", "RUNNING", "CACHED")
-                ],
+                pl.col("state").is_in(["SUCCESS", "CACHED"]).sum().alias("SUCCESS"),
+                pl.col("state").eq("FAILED").sum().alias("FAILED"),
+                pl.col("state").eq("RUNNING").sum().alias("RUNNING"),
                 pl.col("timestamp").max().alias("last_updated"),
             )
             .sort(group_cols)
