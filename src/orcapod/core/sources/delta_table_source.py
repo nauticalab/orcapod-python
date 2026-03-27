@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 else:
     pa = LazyModule("pyarrow")
     deltalake = LazyModule("deltalake")
+    _deltalake_exceptions = LazyModule("deltalake.exceptions")
 
 
 class DeltaTableSource(RootSource):
@@ -48,9 +49,9 @@ class DeltaTableSource(RootSource):
         self._delta_table_path = resolved
 
         try:
-            self._delta_table = deltalake.DeltaTable(str(resolved))
-        except deltalake.exceptions.TableNotFoundError:
-            raise ValueError(f"Delta table not found at {resolved}")
+            self._delta_table = deltalake.DeltaTable(str(self._delta_table_path))
+        except _deltalake_exceptions.TableNotFoundError:
+            raise ValueError(f"Delta table not found at {self._delta_table_path}")
 
         table: pa.Table = self._delta_table.to_pyarrow_dataset(as_large_types=True).to_table()
 

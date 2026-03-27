@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     import pyarrow.compute as pc
 else:
     deltalake = LazyModule("deltalake")
+    _deltalake_exceptions = LazyModule("deltalake.exceptions")
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")
     pc = LazyModule("pyarrow.compute")
@@ -161,7 +162,7 @@ class DeltaTableDatabase:
             self._delta_table_cache[record_key] = delta_table
             logger.debug(f"Loaded existing Delta table for {record_key}")
             return delta_table
-        except deltalake.exceptions.TableNotFoundError:
+        except _deltalake_exceptions.TableNotFoundError:
             # Table doesn't exist
             return None
         except Exception as e:

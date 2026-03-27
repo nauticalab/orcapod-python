@@ -24,6 +24,12 @@ from orcapod.utils.object_spec import parse_objectspec
 
 logger = logging.getLogger(__name__)
 
+# Check jsonschema availability once at import time so the "not available"
+# message is emitted at most once per process (not once per spec file).
+_JSONSCHEMA_AVAILABLE = importlib.util.find_spec("jsonschema") is not None
+if not _JSONSCHEMA_AVAILABLE:
+    logger.info("jsonschema not available, skipping schema validation")
+
 
 class JSONDataContextRegistry:
     """
@@ -152,15 +158,12 @@ class JSONDataContextRegistry:
             raise ContextValidationError(f"Missing required fields: {missing_fields}")
 
         # Validate against JSON schema if available
-        if self._schema:
-            if not _JSONSCHEMA_AVAILABLE:
-                logger.info("jsonschema not available, skipping schema validation")
-            else:
-                import jsonschema  # noqa: PLC0415 – deferred to keep startup fast
-                try:
-                    jsonschema.validate(spec, self._schema)
-                except jsonschema.ValidationError as e:
-                    raise ContextValidationError(f"Schema validation failed: {e.message}")
+        if self._schema and _JSONSCHEMA_AVAILABLE:
+            import jsonschema  # noqa: PLC0415 – deferred to keep startup fast
+            try:
+                jsonschema.validate(spec, self._schema)
+            except jsonschema.ValidationError as e:
+                raise ContextValidationError(f"Schema validation failed: {e.message}")
 
         # Store the validated spec
         self._specs[version] = spec
