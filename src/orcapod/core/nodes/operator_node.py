@@ -460,6 +460,11 @@ class OperatorNode(StreamBase):
             return None
         records = self._pipeline_database.get_all_records(self.pipeline_path)
         if records is None:
+            if self._operator is None:
+                # Read-only (deserialized) node with no operator: cannot derive
+                # schema without a live operator. Return None so callers fall
+                # back to iter([]) / _make_empty_table() guarded paths.
+                return None
             records_table = self._make_empty_table()
         else:
             records_table = records
@@ -620,7 +625,16 @@ class OperatorNode(StreamBase):
         db_stream = self._load_cached_stream_from_db()
         if db_stream is not None:
             return db_stream.as_table(columns=columns, all_info=all_info)
-        return self._make_empty_table()
+        # No cached or stored records yet: construct a zero-row table with the
+        # correct schema and route it through ArrowTableStream so that the
+        # ColumnConfig / all_info shaping is applied consistently.
+        # Requires a live operator for schema derivation (pre-existing limitation).
+        if self._operator is None:
+            return pa.table({})
+        empty_records = self._make_empty_table()
+        tag_keys = self.keys()[0]
+        empty_stream = ArrowTableStream(empty_records, tag_columns=tag_keys)
+        return empty_stream.as_table(columns=columns, all_info=all_info)
 
     # ------------------------------------------------------------------
     # DB retrieval

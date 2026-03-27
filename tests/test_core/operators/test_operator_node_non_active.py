@@ -9,7 +9,7 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.nodes import OperatorNode
-from orcapod.core.operators import Join, MapPackets
+from orcapod.core.operators import MapPackets
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.types import CacheMode

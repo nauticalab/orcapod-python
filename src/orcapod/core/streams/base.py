@@ -325,11 +325,12 @@ class StreamBase(TraceableBase):
     def flow(
         self,
     ) -> Collection[tuple[TagProtocol, PacketProtocol]]:
-        """
-        Returns the entire collection of (TagProtocol, PacketProtocol) as a list.
-        This is a read-only operation — results reflect whatever has been computed
-        by a prior ``run()`` or ``execute()`` call. If no computation has been
-        performed, returns an empty list.
+        """Materialize the stream into a concrete collection of
+        ``(TagProtocol, PacketProtocol)`` pairs.
+
+        This is implemented by iterating over :meth:`iter_packets`. Depending on
+        the concrete stream implementation, iterating may trigger computation or
+        upstream work, or it may simply materialize already-computed results.
         """
         return [e for e in self.iter_packets()]
 
