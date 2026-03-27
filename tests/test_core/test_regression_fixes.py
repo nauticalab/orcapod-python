@@ -580,10 +580,22 @@ class TestRayExecutorInitialization:
         from orcapod.core.executors.ray import RayExecutor
 
         source = inspect.getsource(RayExecutor.async_execute_callable)
-        assert "wrap_future" in source, (
-            "async_execute_callable must use asyncio.wrap_future() for "
+        # Ensure we actually await asyncio.wrap_future(...)
+        assert "await asyncio.wrap_future(" in source, (
+            "async_execute_callable must await asyncio.wrap_future(...) for "
             "Ray client mode compatibility — ClientObjectRef.future() "
             "returns concurrent.futures.Future, not asyncio.Future"
+        )
+        # Ensure ref.future() is also present (the object being wrapped)
+        assert "ref.future()" in source, (
+            "async_execute_callable must call ref.future() inside "
+            "asyncio.wrap_future() to bridge concurrent.futures.Future "
+            "returned by ClientObjectRef.future() into the asyncio world"
+        )
+        # Guard against the incorrect pattern of awaiting ref.future() directly
+        assert "await ref.future(" not in source, (
+            "async_execute_callable must not await ref.future() directly; "
+            "it must use await asyncio.wrap_future(ref.future()) instead"
         )
 
     def test_async_execute_handles_concurrent_futures_future(self):
