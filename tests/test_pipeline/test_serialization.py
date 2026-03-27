@@ -1264,7 +1264,9 @@ class TestPipelineLoadWithUnavailableFunction:
         op_node = loaded.compiled_nodes["select_col"]
         assert op_node.load_status == LoadStatus.FULL
 
-        # Operator should produce correct results
+        # Operator should produce correct results; must call run() explicitly
+        # (as_table() is now read-only per PLT-1182 — it never triggers computation)
+        op_node.run()
         table = op_node.as_table()
         assert table.num_rows == 2
         assert "doubled_age" in table.column_names
