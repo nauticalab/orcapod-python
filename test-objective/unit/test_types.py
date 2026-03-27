@@ -37,6 +37,50 @@ class TestSchemaImmutableMapping:
         assert a != b
 
 
+class TestSchemaRepr:
+    """Schema.__repr__ shows clean type names, not <class '...'> wrappers."""
+
+    def test_repr_builtin_types(self):
+        """Builtin types render as bare names, not <class 'bool'>."""
+        s = Schema({"c": bool, "d": float})
+        assert repr(s) == "Schema({'c': bool, 'd': float})"
+
+    def test_repr_does_not_contain_class_wrapper(self):
+        """repr must not contain the '<class' string for any builtin type."""
+        s = Schema({"a": int, "b": str, "c": float, "d": bool, "e": bytes})
+        assert "<class" not in repr(s)
+
+    def test_repr_union_type(self):
+        """UnionType values (e.g. int | str) are rendered without <class> wrapping."""
+        s = Schema({"x": int | str})
+        result = repr(s)
+        assert "<class" not in result
+        assert "int | str" in result
+
+    def test_repr_custom_class(self):
+        """Custom class types render using __name__."""
+        class MyCustomType:
+            pass
+
+        s = Schema({"field": MyCustomType})
+        assert repr(s) == "Schema({'field': MyCustomType})"
+
+    def test_repr_empty_schema(self):
+        """Empty schema repr is Schema({})."""
+        s = Schema.empty()
+        assert repr(s) == "Schema({})"
+
+    def test_repr_single_field(self):
+        """Single-field schema repr is correct."""
+        s = Schema({"x": int})
+        assert repr(s) == "Schema({'x': int})"
+
+    def test_repr_is_stable(self):
+        """repr() is deterministic for the same schema."""
+        s = Schema({"a": int, "b": str})
+        assert repr(s) == repr(s)
+
+
 class TestSchemaOptionalFields:
     """Schema supports optional_fields."""
 

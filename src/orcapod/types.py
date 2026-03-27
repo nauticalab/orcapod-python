@@ -113,7 +113,22 @@ class Schema(Mapping[str, DataType]):
         return len(self._data)
 
     def __repr__(self) -> str:
-        return f"Schema({self._data!r})"
+        def _fmt(t: DataType) -> str:
+            """Return a clean, copy-pasteable name for a DataType value.
+
+            - Plain ``type`` objects (e.g. ``int``, ``bool``) are rendered via
+              ``__name__`` so they appear as bare identifiers, not as
+              ``<class 'int'>``.
+            - ``UnionType`` objects (e.g. ``int | str``) already produce clean
+              output via ``str()``.
+            - Any other value falls back to ``repr()``.
+            """
+            if isinstance(t, type):
+                return t.__name__
+            return str(t)
+
+        inner = ", ".join(f"{k!r}: {_fmt(v)}" for k, v in self._data.items())
+        return f"Schema({{{inner}}})"
 
     # ==================== Value semantics ====================
 
