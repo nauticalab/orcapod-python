@@ -326,8 +326,10 @@ class StreamBase(TraceableBase):
         self,
     ) -> Collection[tuple[TagProtocol, PacketProtocol]]:
         """
-        Flow everything through the stream, returning the entire collection of
-        (TagProtocol, PacketProtocol) as a collection. This will tigger any upstream computation of the stream.
+        Returns the entire collection of (TagProtocol, PacketProtocol) as a list.
+        This is a read-only operation — results reflect whatever has been computed
+        by a prior ``run()`` or ``execute()`` call. If no computation has been
+        performed, returns an empty list.
         """
         return [e for e in self.iter_packets()]
 
