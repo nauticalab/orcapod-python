@@ -1,4 +1,5 @@
 # TODO: move this to a separate module
+from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping, Collection

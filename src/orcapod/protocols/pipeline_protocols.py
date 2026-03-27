@@ -1,4 +1,6 @@
 # Protocols for pipeline and nodes
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from orcapod.protocols import core_protocols as cp

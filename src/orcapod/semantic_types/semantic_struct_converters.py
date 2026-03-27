@@ -5,6 +5,8 @@ This replaces the metadata-based approach with explicit struct fields,
 making semantic types visible in schemas and preserved through operations.
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from abc import abstractmethod
+from collections.abc import Collection, Iterator
 from typing import TYPE_CHECKING, Any
 
 from orcapod import contexts

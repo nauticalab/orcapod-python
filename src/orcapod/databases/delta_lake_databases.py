@@ -1,19 +1,22 @@
+from __future__ import annotations
+
 import logging
 from collections import defaultdict
 from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from deltalake import DeltaTable, write_deltalake
-from deltalake.exceptions import TableNotFoundError
-
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
+    import deltalake
+    from deltalake import DeltaTable, write_deltalake
+    from deltalake.exceptions import TableNotFoundError
     import polars as pl
     import pyarrow as pa
     import pyarrow.compute as pc
 else:
+    deltalake = LazyModule("deltalake")
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")
     pc = LazyModule("pyarrow.compute")
@@ -154,11 +157,11 @@ class DeltaTableDatabase:
 
         try:
             # Try to load existing table
-            delta_table = DeltaTable(str(table_path))
+            delta_table = deltalake.DeltaTable(str(table_path))
             self._delta_table_cache[record_key] = delta_table
             logger.debug(f"Loaded existing Delta table for {record_key}")
             return delta_table
-        except TableNotFoundError:
+        except deltalake.exceptions.TableNotFoundError:
             # Table doesn't exist
             return None
         except Exception as e:
@@ -875,7 +878,7 @@ class DeltaTableDatabase:
 
             if delta_table is None:
                 # TODO: reconsider mode="overwrite" here
-                write_deltalake(
+                deltalake.write_deltalake(
                     table_path,
                     combined_table,
                     mode="overwrite",
@@ -898,7 +901,7 @@ class DeltaTableDatabase:
                 )
 
             # Update cache
-            self._delta_table_cache[record_key] = DeltaTable(str(table_path))
+            self._delta_table_cache[record_key] = deltalake.DeltaTable(str(table_path))
 
             # invalide record id cache
             self._invalidate_cache(record_path)
