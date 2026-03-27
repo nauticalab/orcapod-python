@@ -493,7 +493,7 @@ def parse_arrow_type_string(type_str: str) -> Any:
 
     # Primitive types — try direct lookup via pa.<name>()
     if "<" not in type_str:
-        factory = _ARROW_PRIMITIVE_TYPES.get(type_str)
+        factory = _get_arrow_primitive_types().get(type_str)
         if factory is not None:
             return factory()
         raise ValueError(f"Unknown Arrow type: {type_str!r}")
@@ -629,7 +629,15 @@ def _build_arrow_primitive_types() -> dict[str, Any]:
     return types
 
 
-_ARROW_PRIMITIVE_TYPES: dict[str, Any] = _build_arrow_primitive_types()
+_ARROW_PRIMITIVE_TYPES: dict[str, Any] | None = None
+
+
+def _get_arrow_primitive_types() -> dict[str, Any]:
+    """Return the Arrow primitive types map, building it on first call."""
+    global _ARROW_PRIMITIVE_TYPES
+    if _ARROW_PRIMITIVE_TYPES is None:
+        _ARROW_PRIMITIVE_TYPES = _build_arrow_primitive_types()
+    return _ARROW_PRIMITIVE_TYPES
 
 
 # ---------------------------------------------------------------------------
