@@ -761,6 +761,14 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 f"Supported versions: {sorted(SUPPORTED_FORMAT_VERSIONS)}"
             )
 
+        level = data.get("level", "standard")
+        if level == "minimal":
+            raise ValueError(
+                "Cannot load a 'minimal'-level save: it contains topology and identity "
+                "only, not enough to reconstruct the pipeline. "
+                "Save with level='standard' or higher."
+            )
+
         # 2. Reconstruct databases
         pipeline_meta = data["pipeline"]
 
@@ -972,6 +980,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
 
         reconstructable = descriptor.get("reconstructable", False)
         source_config = descriptor.get("source_config")
+        fallback_to_proxy = source_config is not None
 
         stream = None
         if reconstructable and mode != "read_only" and source_config is not None:
@@ -982,7 +991,11 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     "Failed to reconstruct source %r, falling back to read-only.",
                     descriptor.get("label"),
                 )
-                stream = None
+                if fallback_to_proxy and source_config:
+                    from orcapod.pipeline.serialization import _source_proxy_from_config
+                    stream = _source_proxy_from_config(source_config, node_descriptor=descriptor)
+                else:
+                    stream = None
 
         return SourceNode.from_descriptor(descriptor, stream=stream, databases={})
 

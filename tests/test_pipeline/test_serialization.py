@@ -1813,3 +1813,15 @@ def test_save_uses_function_config_not_function_pod(tmp_path):
     fn_node = next(v for v in data["nodes"].values() if v["node_type"] == "function")
     assert "function_config" in fn_node
     assert "function_pod" not in fn_node
+
+
+def test_save_full_level_equivalent_to_standard(tmp_path):
+    """full level saves without error and includes level field."""
+    pipeline = _make_simple_pipeline_for_level_tests(tmp_path)
+
+    path = tmp_path / "full.json"
+    pipeline.save(str(path), level="full")
+    with open(path) as f:
+        data = json.load(f)
+    assert data["level"] == "full"
+    assert "databases" in data

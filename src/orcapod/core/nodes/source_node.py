@@ -103,8 +103,30 @@ class SourceNode(StreamBase):
         node._stored_schema = descriptor.get("output_schema", {})
         node._stored_content_hash = descriptor.get("content_hash")
         node._stored_pipeline_hash = descriptor.get("pipeline_hash")
+        node._stored_node_uri = tuple(descriptor.get("node_uri") or [])
 
         return node
+
+    # ------------------------------------------------------------------
+    # node_uri
+    # ------------------------------------------------------------------
+
+    @property
+    def node_uri(self) -> tuple[str, ...]:
+        """Canonical URI tuple identifying this source.
+
+        At runtime: derives from stream config (source_type, source_id).
+        In read-only (deserialized) mode: returns stored value from descriptor.
+        """
+        if self.stream is None:
+            return tuple(getattr(self, "_stored_node_uri", ()))
+        stream = self.stream
+        if hasattr(stream, "to_config"):
+            cfg = stream.to_config()
+            stream_type = cfg.get("source_type", "unknown")
+            source_id = cfg.get("source_id") or getattr(stream, "source_id", "")
+            return (stream_type, str(source_id or ""))
+        return (type(stream).__name__,)
 
     # ------------------------------------------------------------------
     # load_status
