@@ -10,14 +10,11 @@ from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import deltalake
-    from deltalake import DeltaTable, write_deltalake
-    from deltalake.exceptions import TableNotFoundError
     import polars as pl
     import pyarrow as pa
     import pyarrow.compute as pc
 else:
     deltalake = LazyModule("deltalake")
-    _deltalake_exceptions = LazyModule("deltalake.exceptions")
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")
     pc = LazyModule("pyarrow.compute")
@@ -162,7 +159,7 @@ class DeltaTableDatabase:
             self._delta_table_cache[record_key] = delta_table
             logger.debug(f"Loaded existing Delta table for {record_key}")
             return delta_table
-        except _deltalake_exceptions.TableNotFoundError:
+        except deltalake.exceptions.TableNotFoundError:
             # Table doesn't exist
             return None
         except Exception as e:

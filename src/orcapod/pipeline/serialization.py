@@ -629,6 +629,10 @@ def _build_arrow_primitive_types() -> dict[str, Any]:
     return types
 
 
+# Initialized to None and built on first use by _get_arrow_primitive_types() so
+# that importing this module does not trigger an eager pyarrow import.  pyarrow
+# is only needed when actually deserializing an Arrow type string, not at module
+# load time.
 _ARROW_PRIMITIVE_TYPES: dict[str, Any] | None = None
 
 

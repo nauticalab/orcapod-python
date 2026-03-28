@@ -12,12 +12,9 @@ from orcapod.utils.lazy_module import LazyModule
 if TYPE_CHECKING:
     import pyarrow as pa
     import deltalake
-    from deltalake import DeltaTable
-    from deltalake.exceptions import TableNotFoundError
 else:
     pa = LazyModule("pyarrow")
     deltalake = LazyModule("deltalake")
-    _deltalake_exceptions = LazyModule("deltalake.exceptions")
 
 
 class DeltaTableSource(RootSource):
@@ -37,9 +34,6 @@ class DeltaTableSource(RootSource):
         source_id: str | None = None,
         **kwargs: Any,
     ) -> None:
-        from deltalake import DeltaTable
-        from deltalake.exceptions import TableNotFoundError
-
         resolved = Path(delta_table_path).resolve()
 
         if source_id is None:
@@ -50,7 +44,7 @@ class DeltaTableSource(RootSource):
 
         try:
             self._delta_table = deltalake.DeltaTable(str(self._delta_table_path))
-        except _deltalake_exceptions.TableNotFoundError:
+        except deltalake.exceptions.TableNotFoundError:
             raise ValueError(f"Delta table not found at {self._delta_table_path}")
 
         table: pa.Table = self._delta_table.to_pyarrow_dataset(as_large_types=True).to_table()
