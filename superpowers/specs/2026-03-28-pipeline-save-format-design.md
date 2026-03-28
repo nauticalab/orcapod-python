@@ -50,10 +50,10 @@ pipeline_hash = semantic_hash(tag_schema, packet_schema)
 
 For **non-source nodes**:
 ```
-pipeline_hash = semantic_hash(node_pipeline_identity, input_asymmetry(input_1.pipeline_hash, input_2.pipeline_hash, ...))
+pipeline_hash = semantic_hash(node_uri, input_asymmetry(input_1.pipeline_hash, input_2.pipeline_hash, ...))
 ```
 
-Where `node_pipeline_identity` is the node's own schema/type structure (e.g. operator class + config, function output schema) without any data-dependent fields.
+`node_uri` contains no data-dependent information — it encodes what the node IS (function name/version, operator class + config hash, etc.) purely structurally. The data-sensitivity in `content_hash` vs `pipeline_hash` comes entirely from what is chained in from upstream: `content_hash` chains upstream `content_hash`es; `pipeline_hash` chains upstream `pipeline_hash`es.
 
 Two nodes with the same `pipeline_hash` will share the same database tables for result storage — this is intentional for same-schema pipelines.
 
