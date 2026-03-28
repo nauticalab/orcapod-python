@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json as _json
 import logging
 from enum import Enum
 from typing import Any
@@ -27,6 +29,65 @@ class LoadStatus(Enum):
     READ_ONLY = "read_only"
     CACHE_ONLY = "cache_only"
     UNAVAILABLE = "unavailable"
+
+
+# ---------------------------------------------------------------------------
+# DatabaseRegistry
+# ---------------------------------------------------------------------------
+
+
+class DatabaseRegistry:
+    """Deduplicates database configs into a keyed registry at save time.
+
+    Keys are deterministic: same config → same key, cross-session stable.
+    Format: ``db_{sha256[:8]}`` with ``_2``, ``_3``... suffixes on collision.
+    """
+
+    def __init__(self) -> None:
+        self._entries: dict[str, dict] = {}
+
+    def register(self, config: dict) -> str:
+        """Register a database config and return its registry key.
+
+        If the config is already registered, returns the existing key.
+        On hash collision (different configs with same 8-char prefix),
+        appends ``_2``, ``_3``... to the key.
+        """
+        base_key = self._make_key(config)
+        # Already registered with same config?
+        if base_key in self._entries and self._entries[base_key] == config:
+            return base_key
+        # Collision or new entry
+        if base_key in self._entries:
+            i = 2
+            while f"{base_key}_{i}" in self._entries:
+                i += 1
+            key = f"{base_key}_{i}"
+        else:
+            key = base_key
+        self._entries[key] = config
+        return key
+
+    def resolve(self, key: str) -> dict:
+        """Return the config dict for a registry key."""
+        return self._entries[key]
+
+    def to_dict(self) -> dict[str, dict]:
+        """Return the full registry for JSON serialization."""
+        return dict(self._entries)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, dict]) -> "DatabaseRegistry":
+        """Reconstruct a registry from the saved ``databases`` block."""
+        registry = cls()
+        registry._entries = dict(data)
+        return registry
+
+    @staticmethod
+    def _make_key(config: dict) -> str:
+        canonical = _json.dumps(config, sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha256(canonical.encode()).hexdigest()[:8]
+        return f"db_{digest}"
 
 
 # ---------------------------------------------------------------------------

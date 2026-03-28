@@ -10,6 +10,7 @@ from orcapod.pipeline.serialization import (
     OPERATOR_REGISTRY,
     PACKET_FUNCTION_REGISTRY,
     SOURCE_REGISTRY,
+    DatabaseRegistry,
     LoadStatus,
     PIPELINE_FORMAT_VERSION,
     deserialize_schema,
@@ -21,6 +22,88 @@ from orcapod.pipeline.serialization import (
 from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
 from orcapod.core.operators import Join, Batch
 from orcapod.types import Schema
+
+
+def test_database_registry_register_returns_key():
+    reg = DatabaseRegistry()
+    config = {"type": "delta_table", "base_path": "/tmp/db"}
+    key = reg.register(config)
+    assert key.startswith("db_")
+    assert len(key) == len("db_") + 8  # db_ + 8 hex chars
+
+
+def test_database_registry_same_config_same_key():
+    reg = DatabaseRegistry()
+    config = {"type": "delta_table", "base_path": "/tmp/db"}
+    key1 = reg.register(config)
+    key2 = reg.register(config)
+    assert key1 == key2
+
+
+def test_database_registry_different_config_different_key():
+    reg = DatabaseRegistry()
+    key1 = reg.register({"type": "delta_table", "base_path": "/tmp/a"})
+    key2 = reg.register({"type": "delta_table", "base_path": "/tmp/b"})
+    assert key1 != key2
+
+
+def test_database_registry_collision_handling():
+    """Simulate a collision: same 8-char prefix, different configs."""
+    reg = DatabaseRegistry()
+    # Inject a config under a known key
+    reg._entries["db_aabbccdd"] = {"type": "delta_table", "base_path": "/a"}
+    # Patch _make_key to always return the same key prefix, simulating collision
+    original_make_key = staticmethod(DatabaseRegistry._make_key)
+    DatabaseRegistry._make_key = staticmethod(lambda config: "db_aabbccdd")
+    try:
+        key2 = reg.register({"type": "delta_table", "base_path": "/b"})
+        assert key2 == "db_aabbccdd_2"
+        key3 = reg.register({"type": "delta_table", "base_path": "/c"})
+        assert key3 == "db_aabbccdd_3"
+    finally:
+        DatabaseRegistry._make_key = original_make_key
+
+
+def test_database_registry_to_dict():
+    reg = DatabaseRegistry()
+    config = {"type": "in_memory"}
+    key = reg.register(config)
+    d = reg.to_dict()
+    assert key in d
+    assert d[key] == config
+
+
+def test_database_registry_from_dict():
+    data = {"db_abc12345": {"type": "delta_table", "base_path": "/x"}}
+    reg = DatabaseRegistry.from_dict(data)
+    assert reg.resolve("db_abc12345") == {"type": "delta_table", "base_path": "/x"}
+
+
+def test_database_registry_resolve_unknown_raises():
+    reg = DatabaseRegistry()
+    with pytest.raises(KeyError):
+        reg.resolve("db_nonexistent")
+
+
+def test_database_registry_key_is_deterministic():
+    """Same config always produces same key, even across fresh instances."""
+    config = {"type": "delta_table", "base_path": "/deterministic"}
+    reg1 = DatabaseRegistry()
+    reg2 = DatabaseRegistry()
+    key1 = reg1.register(config)
+    key2 = reg2.register(config)
+    assert key1 == key2
+
+
+def test_database_registry_key_is_content_based():
+    """Key depends on config content, not insertion order."""
+    config_a = {"b": 2, "a": 1}
+    config_b = {"a": 1, "b": 2}
+    reg = DatabaseRegistry()
+    key_a = reg.register(config_a)
+    key_b = reg.register(config_b)
+    # same logical content → same key
+    assert key_a == key_b
 
 
 class TestRegistries:
