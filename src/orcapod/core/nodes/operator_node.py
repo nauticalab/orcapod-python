@@ -168,11 +168,15 @@ class OperatorNode(StreamBase):
 
         pipeline_db = databases.get("pipeline")
         cache_mode_str = descriptor.get("cache_mode", "OFF")
-        cache_mode = (
-            CacheMode[cache_mode_str]
-            if isinstance(cache_mode_str, str)
-            else CacheMode.OFF
-        )
+        if isinstance(cache_mode_str, str):
+            # Support both uppercase names (old format: "OFF") and
+            # lowercase values (new format: "off")
+            try:
+                cache_mode = CacheMode[cache_mode_str.upper()]
+            except KeyError:
+                cache_mode = CacheMode(cache_mode_str)
+        else:
+            cache_mode = CacheMode.OFF
 
         if operator is not None and input_streams:
             # Full mode: construct normally

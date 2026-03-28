@@ -232,6 +232,12 @@ class FunctionNode(StreamBase):
 
         pipeline_db = databases.get("pipeline")
         result_db = databases.get("result", pipeline_db)
+        # pipeline_path_prefix may be passed explicitly (new-format loading)
+        # or derived from the stored pipeline_path (old-format loading).
+        hint_prefix: tuple[str, ...] | None = databases.get("pipeline_path_prefix")
+        # result_path_prefix_hint is passed explicitly for new-format loading
+        # where result_record_path is no longer stored.
+        result_prefix_hint: tuple[str, ...] | None = databases.get("result_path_prefix_hint")
 
         if function_pod is not None and input_stream is not None:
             # Full / READ_ONLY / CACHE_ONLY mode: construct normally via __init__.
@@ -243,19 +249,23 @@ class FunctionNode(StreamBase):
             # __init__. The suffix added is:
             #   pf.uri + (f"schema:{pipeline_hash}", f"instance:{content_hash}")
             pf_uri_len = len(function_pod.packet_function.uri) + 2  # +2 for schema/instance
-            if len(pipeline_path) > pf_uri_len:
-                prefix = pipeline_path[:-pf_uri_len]
-            elif len(pipeline_path) == pf_uri_len:
-                prefix = ()
+            if pipeline_path:
+                if len(pipeline_path) > pf_uri_len:
+                    prefix = pipeline_path[:-pf_uri_len]
+                elif len(pipeline_path) == pf_uri_len:
+                    prefix = ()
+                else:
+                    import logging as _logging
+                    _logging.getLogger(__name__).warning(
+                        "pipeline_path %r is shorter than expected (uri_len=%d); "
+                        "using empty prefix — DB path may be incorrect.",
+                        pipeline_path,
+                        pf_uri_len,
+                    )
+                    prefix = hint_prefix if hint_prefix is not None else ()
             else:
-                import logging as _logging
-                _logging.getLogger(__name__).warning(
-                    "pipeline_path %r is shorter than expected (uri_len=%d); "
-                    "using empty prefix — DB path may be incorrect.",
-                    pipeline_path,
-                    pf_uri_len,
-                )
-                prefix = ()
+                # New format: pipeline_path not stored; use hint_prefix if available
+                prefix = hint_prefix if hint_prefix is not None else ()
 
             # Derive result_path_prefix from the stored result_record_path
             # by stripping the URI suffix that CachedFunctionPod appends.
@@ -265,13 +275,28 @@ class FunctionNode(StreamBase):
             uri_len = len(function_pod.packet_function.uri)
             result_prefix: tuple[str, ...] | None = None
             if stored_result_path and len(stored_result_path) > uri_len:
+                # Old format: derive prefix from stored result_record_path
                 result_prefix = stored_result_path[:-uri_len]
+            elif not stored_result_path and result_prefix_hint is not None:
+                # New format: use the hint computed from pipeline context
+                result_prefix = result_prefix_hint
+
+            # Determine effective result_database.
+            # When result_prefix is known (old format stored path, or new format hint),
+            # pass result_db explicitly with the prefix.
+            # When neither is available, pass None so attach_database uses its default.
+            if result_prefix is not None:
+                effective_result_db = result_db
+            else:
+                effective_result_db = (
+                    None if result_db is pipeline_db else result_db
+                )
 
             node = cls(
                 function_pod=function_pod,
                 input_stream=input_stream,
                 pipeline_database=pipeline_db,
-                result_database=result_db,
+                result_database=effective_result_db,
                 result_path_prefix=result_prefix,
                 pipeline_path_prefix=prefix,
                 label=descriptor.get("label"),
