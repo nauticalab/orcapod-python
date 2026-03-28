@@ -172,7 +172,8 @@ class TestOperatorNodePipelinePath:
         op = MapPackets({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
         path = node.pipeline_path
-        assert path[-1].startswith("node:")
+        assert path[-2].startswith("schema:")
+        assert path[-1].startswith("instance:")
 
     def test_pipeline_path_prefix(self, simple_stream):
         op = MapPackets({"x": "renamed_x"})

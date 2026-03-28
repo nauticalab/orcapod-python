@@ -239,11 +239,12 @@ class FunctionNode(StreamBase):
             # Full / READ_ONLY / CACHE_ONLY mode: construct normally via __init__.
             pipeline_path = tuple(descriptor.get("pipeline_path", ()))
             # Derive pipeline_path_prefix by stripping the suffix that
-            # __init__ appends (packet_function.uri + node hash element).
+            # __init__ appends (packet_function.uri + two hash elements).
             # The descriptor stores the complete pipeline_path; we need
             # to reconstruct the prefix that was originally passed to
-            # __init__. The suffix added is: pf.uri + (f"node:{hash}",).
-            pf_uri_len = len(function_pod.packet_function.uri) + 1  # +1 for node:hash
+            # __init__. The suffix added is:
+            #   pf.uri + (f"schema:{pipeline_hash}", f"instance:{content_hash}")
+            pf_uri_len = len(function_pod.packet_function.uri) + 2  # +2 for schema/instance
             prefix = (
                 pipeline_path[:-pf_uri_len] if len(pipeline_path) > pf_uri_len else ()
             )
@@ -469,7 +470,10 @@ class FunctionNode(StreamBase):
         return (
             self._pipeline_path_prefix
             + self._packet_function.uri
-            + (f"node:{self._pipeline_node_hash}",)
+            + (
+                f"schema:{self.pipeline_hash().to_string()}",
+                f"instance:{self.content_hash().to_string()}",
+            )
         )
 
     # ------------------------------------------------------------------
