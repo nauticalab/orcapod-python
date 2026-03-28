@@ -14,6 +14,10 @@ if TYPE_CHECKING:
 class ResultsReader:
     """Auto-discovers and queries pipeline status and log Delta tables.
 
+    Provides two DataFrames: ``status()`` for execution state and
+    ``logs()`` for execution logs. Both return clean polars DataFrames
+    ready for further analysis with standard polars operations.
+
     Args:
         root: Path to the results output directory. Supports local paths,
             ``pathlib.Path``, and ``UPath`` for cloud storage.
@@ -132,10 +136,6 @@ class ResultsReader:
         "_log_id", "_log_run_id", "_log_node_hash",
     }
 
-    _LOG_TERSE_COLUMNS: ClassVar[tuple[str, ...]] = (
-        "node_label", "traceback", "success", "timestamp",
-    )
-
     # -- Internal helpers ------------------------------------------------------
 
     def _clean_status_df(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -170,142 +170,61 @@ class ResultsReader:
             {k: v for k, v in self._LOG_RENAMES.items() if k in df.columns}
         )
 
-    def _validate_node(self, node: str) -> None:
-        """Raise KeyError if node is not a known node."""
+    # -- Public query methods --------------------------------------------------
+
+    def status(self) -> pl.DataFrame:
+        """Latest execution status for every (node, input) combination.
+
+        Returns one row per (node, input) with the most recent status.
+        CACHED states are mapped to SUCCESS since they represent
+        previously computed successful results.
+
+        Returns:
+            DataFrame with columns: ``node_label``, tag columns,
+            ``state``, ``timestamp``, ``error_summary``.
+        """
+        df = self._get_status_df()
+        df = self._clean_status_df(df)
+
+        # Deduplicate to latest status per (node, input)
+        group_cols = ["node_label"] + self.tag_columns
+        group_cols = [c for c in group_cols if c in df.columns]
+        df = df.sort("timestamp").unique(subset=group_cols, keep="last")
+
+        # Map CACHED -> SUCCESS
+        df = df.with_columns(
+            pl.when(pl.col("state") == "CACHED")
+            .then(pl.lit("SUCCESS"))
+            .otherwise(pl.col("state"))
+            .alias("state")
+        )
+
+        return df
+
+    def logs(self, node: str) -> pl.DataFrame:
+        """Full log entries for a node.
+
+        Returns all log fields: stdout, stderr, python logs, traceback,
+        success status, and timestamp, alongside tag columns.
+
+        Args:
+            node: Node name to query. Use ``reader.nodes`` to see
+                available names.
+
+        Returns:
+            DataFrame with columns: ``node_label``, tag columns,
+            ``stdout_log``, ``stderr_log``, ``python_logs``,
+            ``traceback``, ``success``, ``timestamp``.
+
+        Raises:
+            KeyError: If ``node`` is not found.
+        """
         if node not in self._status_tables:
             raise KeyError(
                 f"Node {node!r} not found. Available nodes: {self.nodes}"
             )
-
-    def _apply_filters(
-        self, df: pl.DataFrame, filters: dict[str, str],
-    ) -> pl.DataFrame:
-        """Filter DataFrame by tag column values."""
-        tag_cols = self.tag_columns
-        for key, value in filters.items():
-            if key not in tag_cols:
-                raise KeyError(
-                    f"Filter column {key!r} is not a tag column. "
-                    f"Available tag columns: {tag_cols}"
-                )
-            df = df.filter(pl.col(key) == value)
-        return df
-
-    def _deduplicate_status(self, df: pl.DataFrame) -> pl.DataFrame:
-        """Keep only the latest status row per (node_label, tag_columns)."""
-        group_cols = ["node_label"] + self.tag_columns
-        group_cols = [c for c in group_cols if c in df.columns]
-        return df.sort("timestamp").unique(subset=group_cols, keep="last")
-
-    # -- Public query methods --------------------------------------------------
-
-    def status(self, group_by: list[str] | None = None) -> pl.DataFrame:
-        """Node-level status overview with counts by execution state.
-
-        CACHED results are counted as SUCCESS since they represent
-        previously computed successful results.
-
-        Args:
-            group_by: Optional tag columns to group by in addition to
-                ``node_label``. If ``None``, groups by ``node_label`` only.
-
-        Returns:
-            DataFrame with columns: ``node_label``, ``SUCCESS``, ``FAILED``,
-            ``RUNNING``, ``last_updated``, and any ``group_by`` columns.
-        """
-        df = self._get_status_df()
-        df = self._clean_status_df(df)
-        df = self._deduplicate_status(df)
-
-        group_cols = ["node_label"]
-        if group_by:
-            group_cols.extend(c for c in group_by if c != "node_label")
-
-        return (
-            df.group_by(group_cols)
-            .agg(
-                pl.col("state").is_in(["SUCCESS", "CACHED"]).sum().alias("SUCCESS"),
-                pl.col("state").eq("FAILED").sum().alias("FAILED"),
-                pl.col("state").eq("RUNNING").sum().alias("RUNNING"),
-                pl.col("timestamp").max().alias("last_updated"),
-            )
-            .sort(group_cols)
-        )
-
-    def details(
-        self, node: str | None = None, **filters: str,
-    ) -> pl.DataFrame:
-        """Per-input rows showing the latest state for each input.
-
-        Args:
-            node: Optional node name to filter to.
-            **filters: Tag column filters, e.g. ``subject="Goliath"``.
-
-        Returns:
-            DataFrame with columns: ``node_label``, tag columns, ``state``,
-            ``timestamp``, ``error_summary``.
-
-        Raises:
-            KeyError: If ``node`` is not found or a filter key is invalid.
-        """
-        df = self._get_status_df()
-        df = self._clean_status_df(df)
-        if node is not None:
-            self._validate_node(node)
-            df = df.filter(pl.col("node_label") == node)
-        df = self._apply_filters(df, filters)
-        return self._deduplicate_status(df)
-
-    def failures(
-        self, node: str | None = None, **filters: str,
-    ) -> pl.DataFrame:
-        """All failed rows across nodes.
-
-        Shorthand for ``details()`` filtered to ``state == "FAILED"``.
-
-        Args:
-            node: Optional node name to filter to.
-            **filters: Tag column filters, e.g. ``subject="Goliath"``.
-
-        Returns:
-            DataFrame with same columns as ``details()``, filtered to failures.
-        """
-        df = self.details(node=node, **filters)
-        return df.filter(pl.col("state") == "FAILED")
-
-    def logs(self, node: str, **filters: str) -> pl.DataFrame:
-        """Log entries for a node with terse output.
-
-        Returns ``node_label``, tag columns, ``traceback``, ``success``,
-        and ``timestamp``. Use ``full_logs()`` for stdout/stderr/python_logs.
-
-        Args:
-            node: Node name to query.
-            **filters: Tag column filters, e.g. ``subject="Goliath"``.
-
-        Raises:
-            KeyError: If ``node`` is not found or a filter key is invalid.
-        """
-        df = self.full_logs(node, **filters)
-        if df.is_empty():
-            return df
-        keep = list(self._LOG_TERSE_COLUMNS) + self.tag_columns
-        return df.select([c for c in keep if c in df.columns])
-
-    def full_logs(self, node: str, **filters: str) -> pl.DataFrame:
-        """Full log entries for a node including stdout/stderr/python_logs.
-
-        Args:
-            node: Node name to query.
-            **filters: Tag column filters, e.g. ``subject="Goliath"``.
-
-        Raises:
-            KeyError: If ``node`` is not found or a filter key is invalid.
-        """
-        self._validate_node(node)
         df = self._get_logs_df()
         if df.is_empty():
             return df
         df = self._clean_logs_df(df)
-        df = df.filter(pl.col("node_label") == node)
-        return self._apply_filters(df, filters)
+        return df.filter(pl.col("node_label") == node)
