@@ -533,15 +533,21 @@ class Pipeline(AutoRegisteringContextBasedTracker):
     # Serialization
     # ------------------------------------------------------------------
 
-    def save(self, path: str) -> None:
-        """Serialize the compiled pipeline to a JSON file.
+    def save(self, path: str, level: str = "standard") -> None:
+        """Serialize the pipeline to a JSON file.
 
         Args:
-            path: File path to write the JSON output to.
-
-        Raises:
-            ValueError: If the pipeline has not been compiled.
+            path: File path to write JSON output to.
+            level: Save detail level. One of:
+                - ``"minimal"``: topology + identity only. Not round-trippable.
+                - ``"definition"``: adds full pod/stream configs. No pipeline-level DBs.
+                - ``"standard"`` (default): adds pipeline-level DB registry. Round-trippable.
+                - ``"full"``: same as standard (observer serialization TBD).
         """
+        _VALID_LEVELS = ("minimal", "definition", "standard", "full")
+        if level not in _VALID_LEVELS:
+            raise ValueError(f"level must be one of {_VALID_LEVELS}, got {level!r}")
+
         if not self._compiled:
             raise ValueError(
                 "Pipeline is not compiled. Call compile() or use "
@@ -551,58 +557,89 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         from orcapod.core.nodes import OperatorNode
         from orcapod.pipeline.serialization import (
             PIPELINE_FORMAT_VERSION,
+            DatabaseRegistry,
             serialize_schema,
         )
 
-        # -- Pipeline metadata --
-        pipeline_meta: dict[str, Any] = {
-            "name": list(self._name),
-            "databases": {
-                "pipeline_database": self._pipeline_database.to_config(),
-                "function_database": (
-                    self._function_database.to_config()
-                    if self._function_database is not None
-                    else None
-                ),
-            },
-        }
+        include_configs = level in ("definition", "standard", "full")
+        include_pipeline_dbs = level in ("standard", "full")
+
+        # Registry populated as nodes serialize their embedded databases
+        db_registry = DatabaseRegistry()
 
         # -- Build node descriptors --
         nodes: dict[str, dict[str, Any]] = {}
         for content_hash_str, node in self._persistent_node_map.items():
             tag_schema, packet_schema = node.output_schema()
             type_converter = node.data_context.type_converter
+
             descriptor: dict[str, Any] = {
                 "node_type": node.node_type,
                 "label": node.label,
                 "content_hash": node.content_hash().to_string(),
                 "pipeline_hash": node.pipeline_hash().to_string(),
-                "data_context_key": node.data_context_key,
                 "output_schema": {
                     "tag": serialize_schema(tag_schema, type_converter),
                     "packet": serialize_schema(packet_schema, type_converter),
                 },
             }
 
+            # node_uri: at all levels
             if isinstance(node, SourceNode):
-                descriptor.update(self._build_source_descriptor(node))
-            elif isinstance(node, FunctionNode):
-                descriptor.update(self._build_function_descriptor(node))
-            elif isinstance(node, OperatorNode):
-                descriptor.update(self._build_operator_descriptor(node))
+                stream = node.stream
+                if isinstance(stream, cp.SourceProtocol):
+                    cfg = stream.to_config()
+                    stream_type = cfg.get("source_type", "unknown")
+                    source_id = cfg.get("source_id") or getattr(stream, "source_id", "")
+                else:
+                    stream_type = "stream"
+                    source_id = ""
+                descriptor["node_uri"] = [stream_type, str(source_id or "")]
+            else:
+                descriptor["node_uri"] = list(node.node_uri)
+
+            # data_context_key: definition+ only
+            if include_configs:
+                descriptor["data_context_key"] = node.data_context_key
+
+            # Node-type-specific fields: definition+ only
+            if include_configs:
+                if isinstance(node, SourceNode):
+                    descriptor.update(self._build_source_descriptor(node, db_registry))
+                elif isinstance(node, FunctionNode):
+                    descriptor.update(self._build_function_descriptor(node))
+                elif isinstance(node, OperatorNode):
+                    descriptor.update(self._build_operator_descriptor(node, level))
 
             nodes[content_hash_str] = descriptor
 
-        # -- Edges --
-        edges = [list(edge) for edge in self._graph_edges]
-
-        # -- Assemble top-level structure --
-        output = {
-            "orcapod_pipeline_version": PIPELINE_FORMAT_VERSION,
-            "pipeline": pipeline_meta,
-            "nodes": nodes,
-            "edges": edges,
+        # -- Pipeline block --
+        pipeline_block: dict[str, Any] = {
+            "name": list(self._name),
+            "run_id": None,
+            "snapshot_time": None,
         }
+        if include_pipeline_dbs:
+            pipeline_db_key = db_registry.register(self._pipeline_database.to_config())
+            pipeline_block["pipeline_database"] = pipeline_db_key
+            if self._function_database is not None:
+                fn_db_key = db_registry.register(self._function_database.to_config())
+                pipeline_block["function_database"] = fn_db_key
+            else:
+                pipeline_block["function_database"] = None
+
+        # -- Top-level output --
+        output: dict[str, Any] = {
+            "orcapod_pipeline_version": PIPELINE_FORMAT_VERSION,
+            "level": level,
+            "pipeline": pipeline_block,
+            "nodes": nodes,
+            "edges": [list(edge) for edge in self._graph_edges],
+        }
+        # Only include databases block if there's something in it
+        db_dict = db_registry.to_dict()
+        if db_dict:
+            output["databases"] = db_dict
 
         with open(path, "w") as f:
             json.dump(output, f, indent=2)
@@ -611,36 +648,40 @@ class Pipeline(AutoRegisteringContextBasedTracker):
     # rebuilt from config alone.
     _RECONSTRUCTABLE_SOURCE_TYPES = frozenset({"csv", "delta_table", "cached"})
 
-    def _build_source_descriptor(self, node: SourceNode) -> dict[str, Any]:
+    def _build_source_descriptor(self, node: SourceNode, db_registry=None) -> dict[str, Any]:
         """Build source-specific descriptor fields for a SourceNode.
 
         Args:
             node: The SourceNode to describe.
+            db_registry: Optional DatabaseRegistry to forward to CachedSource.
 
         Returns:
             Dict with source-specific fields.
         """
         stream = node.stream
 
-        # Determine if stream implements SourceProtocol and build descriptor accordingly
-        # TODO: revisit this logic
         if isinstance(stream, cp.SourceProtocol):
-            config = stream.to_config()
+            # Forward db_registry if the source supports it (e.g. CachedSource)
+            import inspect
+            to_config_sig = inspect.signature(stream.to_config)
+            if "db_registry" in to_config_sig.parameters:
+                config = stream.to_config(db_registry=db_registry)
+            else:
+                config = stream.to_config()
             stream_type = config.get("source_type", "stream")
-            source_config = config
+            # Remove identity fields — they live in the node descriptor
+            source_config = {
+                k: v for k, v in config.items()
+                if k not in ("content_hash", "pipeline_hash", "tag_schema", "packet_schema")
+            }
             reconstructable = stream_type in self._RECONSTRUCTABLE_SOURCE_TYPES
         else:
-            stream_type = "stream"
             source_config = None
             reconstructable = False
 
-        source_id = getattr(stream, "source_id", None)
-
         return {
-            "stream_type": stream_type,
-            "source_id": source_id,
-            "reconstructable": reconstructable,
             "source_config": source_config,
+            "reconstructable": reconstructable,
         }
 
     def _build_function_descriptor(self, node: "FunctionNode") -> dict[str, Any]:
@@ -650,28 +691,29 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             node: The FunctionNode to describe.
 
         Returns:
-            Dict with function-specific fields.
+            Dict with function-specific fields (uses function_config key).
         """
         return {
-            "function_pod": node._function_pod.to_config(),
-            "pipeline_path": list(node.pipeline_path),
-            "result_record_path": list(node._cached_function_pod.record_path),
+            "function_config": node._function_pod.to_config(),
         }
 
-    def _build_operator_descriptor(self, node: OperatorNode) -> dict[str, Any]:
+    def _build_operator_descriptor(self, node: OperatorNode, level: str = "standard") -> dict[str, Any]:
         """Build operator-specific descriptor fields for a OperatorNode.
 
         Args:
             node: The OperatorNode to describe.
+            level: Save detail level; cache_mode only included at standard+.
 
         Returns:
             Dict with operator-specific fields.
         """
-        return {
-            "operator": node._operator.to_config(),
-            "cache_mode": node._cache_mode.name,
-            "pipeline_path": list(node.pipeline_path),
+        result: dict[str, Any] = {
+            "operator_config": node._operator.to_config(),
         }
+        # cache_mode at standard+ only
+        if level in ("standard", "full"):
+            result["cache_mode"] = node._cache_mode.value
+        return result
 
     @classmethod
     def load(cls, path: str | Path, mode: str = "full") -> "Pipeline":
@@ -700,6 +742,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
 
         from orcapod.pipeline.serialization import (
             SUPPORTED_FORMAT_VERSIONS,
+            DatabaseRegistry,
             LoadStatus,
             resolve_database_from_config,
             resolve_operator_from_config,
@@ -720,14 +763,42 @@ class Pipeline(AutoRegisteringContextBasedTracker):
 
         # 2. Reconstruct databases
         pipeline_meta = data["pipeline"]
-        db_configs = pipeline_meta["databases"]
 
-        pipeline_db = resolve_database_from_config(db_configs["pipeline_database"])
-        function_db = (
-            resolve_database_from_config(db_configs["function_database"])
-            if db_configs.get("function_database") is not None
-            else None
-        )
+        # Support both old format (pipeline.databases.{pipeline_database: {...}})
+        # and new format (top-level databases registry + pipeline.pipeline_database key).
+        load_db_registry: DatabaseRegistry | None = None
+        if "databases" in data and "pipeline_database" in pipeline_meta:
+            # New format: top-level databases registry
+            db_registry_data = data["databases"]
+            load_db_registry = DatabaseRegistry.from_dict(db_registry_data)
+            pipeline_db_key = pipeline_meta["pipeline_database"]
+            pipeline_db_config = db_registry_data[pipeline_db_key]
+            pipeline_db = resolve_database_from_config(pipeline_db_config)
+            fn_db_key = pipeline_meta.get("function_database")
+            function_db = (
+                resolve_database_from_config(db_registry_data[fn_db_key])
+                if fn_db_key is not None and fn_db_key in db_registry_data
+                else None
+            )
+        elif "databases" in pipeline_meta:
+            # Old format: pipeline.databases.{pipeline_database: {...}}
+            db_configs = pipeline_meta["databases"]
+            pipeline_db = resolve_database_from_config(db_configs["pipeline_database"])
+            function_db = (
+                resolve_database_from_config(db_configs["function_database"])
+                if db_configs.get("function_database") is not None
+                else None
+            )
+        else:
+            raise ValueError(
+                "Cannot determine database configuration from pipeline JSON. "
+                "Missing 'databases' block."
+            )
+
+        # Determine pipeline_path_prefix for new-format loading
+        # (new format omits pipeline_path, so we reconstruct prefix from pipeline name)
+        name = tuple(pipeline_meta["name"])
+        pipeline_path_prefix = name  # same as Pipeline._pipeline_path_prefix
 
         # 3. Build edge graph and derive topological order
         nodes_data = data["nodes"]
@@ -760,7 +831,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
 
             if node_type == "source":
                 node = cls._load_source_node(
-                    descriptor, mode, resolve_source_from_config
+                    descriptor, mode, resolve_source_from_config, load_db_registry
                 )
                 reconstructed[node_hash] = node
 
@@ -779,7 +850,18 @@ class Pipeline(AutoRegisteringContextBasedTracker):
 
                 # Build databases dict
                 result_db = function_db if function_db is not None else pipeline_db
-                dbs = {"pipeline": pipeline_db, "result": result_db}
+                # When no separate function_database, result data is stored at
+                # pipeline_name + ("_results",) prefix (matching compile() behavior).
+                result_prefix_hint = (
+                    None if function_db is not None
+                    else pipeline_path_prefix + ("_results",)
+                )
+                dbs = {
+                    "pipeline": pipeline_db,
+                    "result": result_db,
+                    "pipeline_path_prefix": pipeline_path_prefix,
+                    "result_path_prefix_hint": result_prefix_hint,
+                }
 
                 node = cls._load_function_node(
                     descriptor, mode, upstream_node, upstream_usable, dbs
@@ -803,7 +885,10 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     else False
                 )
 
-                dbs = {"pipeline": pipeline_db}
+                dbs = {
+                    "pipeline": pipeline_db,
+                    "pipeline_path_prefix": pipeline_path_prefix,
+                }
 
                 node = cls._load_operator_node(
                     descriptor,
@@ -816,7 +901,6 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 reconstructed[node_hash] = node
 
         # 5. Build Pipeline instance
-        name = tuple(pipeline_meta["name"])
         pipeline = cls(
             name=name,
             pipeline_database=pipeline_db,
@@ -872,6 +956,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         descriptor: dict[str, Any],
         mode: str,
         resolve_source_from_config: Any,
+        db_registry: Any = None,
     ) -> SourceNode:
         """Reconstruct a SourceNode from a descriptor.
 
@@ -879,6 +964,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             descriptor: The serialized node descriptor.
             mode: Load mode (``"full"`` or ``"read_only"``).
             resolve_source_from_config: Callable to reconstruct a source.
+            db_registry: Optional DatabaseRegistry for resolving embedded DB keys.
 
         Returns:
             A ``SourceNode`` instance.
@@ -890,7 +976,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         stream = None
         if reconstructable and mode != "read_only" and source_config is not None:
             try:
-                stream = resolve_source_from_config(source_config)
+                stream = resolve_source_from_config(source_config, db_registry=db_registry)
             except Exception:
                 logger.warning(
                     "Failed to reconstruct source %r, falling back to read-only.",
@@ -934,10 +1020,13 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         from orcapod.core.function_pod import FunctionPod
         from orcapod.pipeline.serialization import LoadStatus
 
+        # Support both new key 'function_config' and old key 'function_pod'
+        fn_config = descriptor.get("function_config") or descriptor.get("function_pod")
+
         if mode != "read_only" and upstream_usable:
             try:
                 pod = FunctionPod.from_config(
-                    descriptor["function_pod"], fallback_to_proxy=True
+                    fn_config, fallback_to_proxy=True
                 )
                 node = FunctionNode.from_descriptor(
                     descriptor,
@@ -964,7 +1053,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             # so the node can serve cached results in CACHE_ONLY mode.
             try:
                 pod = FunctionPod.from_config(
-                    descriptor["function_pod"], fallback_to_proxy=True
+                    fn_config, fallback_to_proxy=True
                 )
                 node = FunctionNode.from_descriptor(
                     descriptor,
@@ -1017,6 +1106,9 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         """
         from orcapod.core.nodes import OperatorNode
 
+        # Support both new key 'operator_config' and old key 'operator'
+        op_config = descriptor.get("operator_config") or descriptor.get("operator")
+
         if mode != "read_only":
             if not all_upstreams_usable:
                 logger.warning(
@@ -1026,7 +1118,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 )
             else:
                 try:
-                    op = resolve_operator_from_config(descriptor["operator"])
+                    op = resolve_operator_from_config(op_config)
                     return OperatorNode.from_descriptor(
                         descriptor,
                         operator=op,

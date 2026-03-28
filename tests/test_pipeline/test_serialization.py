@@ -114,16 +114,19 @@ class TestPipelineSave:
         pipeline.save(str(path))
         data = json.loads(path.read_text())
         assert data["pipeline"]["name"] == ["test"]
-        assert (
-            data["pipeline"]["databases"]["pipeline_database"]["type"] == "delta_table"
-        )
+        # New format: databases at top level, pipeline_database is a registry key string
+        pipeline_db_key = data["pipeline"]["pipeline_database"]
+        assert isinstance(pipeline_db_key, str)
+        assert pipeline_db_key in data["databases"]
+        assert data["databases"][pipeline_db_key]["type"] == "delta_table"
 
     def test_save_function_database_null_when_not_set(self, simple_pipeline):
         pipeline, tmp_path = simple_pipeline
         path = tmp_path / "pipeline.json"
         pipeline.save(str(path))
         data = json.loads(path.read_text())
-        assert data["pipeline"]["databases"]["function_database"] is None
+        # New format: function_database is None in pipeline block when not set
+        assert data["pipeline"]["function_database"] is None
 
     def test_save_includes_nodes(self, simple_pipeline):
         pipeline, tmp_path = simple_pipeline
@@ -161,10 +164,12 @@ class TestPipelineSave:
         pipeline.save(str(path))
         data = json.loads(path.read_text())
 
+        # node_uri is present at all levels; data_context_key at definition+ (standard default)
         required_fields = {
             "node_type",
             "content_hash",
             "pipeline_hash",
+            "node_uri",
             "data_context_key",
             "output_schema",
         }
@@ -187,12 +192,13 @@ class TestPipelineSave:
         source_nodes = [n for n in data["nodes"].values() if n["node_type"] == "source"]
         assert len(source_nodes) == 1
         src = source_nodes[0]
-        assert "stream_type" in src
-        assert "source_id" in src
+        # New format: stream_type and source_id are in node_uri, not top-level
+        assert "node_uri" in src
+        assert src["node_uri"][0] == "dict"  # stream_type
         assert "reconstructable" in src
         # DictSource is in-memory, not reconstructable
         assert src["reconstructable"] is False
-        assert src["stream_type"] == "dict"
+        assert "source_config" in src
 
     def test_save_function_node_fields(self, simple_pipeline):
         """Function node descriptors have function-specific fields."""
@@ -204,11 +210,13 @@ class TestPipelineSave:
         fn_nodes = [n for n in data["nodes"].values() if n["node_type"] == "function"]
         assert len(fn_nodes) == 1
         fn = fn_nodes[0]
-        assert "function_pod" in fn
-        assert "pipeline_path" in fn
-        assert "result_record_path" in fn
-        assert isinstance(fn["pipeline_path"], list)
-        assert isinstance(fn["result_record_path"], list)
+        # New format: function_config key (not function_pod); no pipeline_path/result_record_path
+        assert "function_config" in fn
+        assert "function_pod" not in fn
+        assert "pipeline_path" not in fn
+        assert "result_record_path" not in fn
+        # node_uri present at all levels
+        assert "node_uri" in fn
 
     def test_save_multi_source_pipeline(self, multi_source_pipeline):
         """Pipeline with join and multiple sources serializes correctly."""
@@ -233,10 +241,13 @@ class TestPipelineSave:
         op_nodes = [n for n in data["nodes"].values() if n["node_type"] == "operator"]
         assert len(op_nodes) == 1
         op = op_nodes[0]
-        assert "operator" in op
+        # New format: operator_config (not operator); no pipeline_path
+        assert "operator_config" in op
+        assert "operator" not in op
         assert "cache_mode" in op
-        assert "pipeline_path" in op
-        assert isinstance(op["pipeline_path"], list)
+        assert "pipeline_path" not in op
+        # node_uri present at all levels
+        assert "node_uri" in op
 
     def test_save_edges_reference_valid_nodes(self, simple_pipeline):
         """All edge endpoints are valid node keys."""
@@ -277,10 +288,12 @@ class TestPipelineSave:
         path = tmp_path / "pipeline.json"
         pipeline.save(str(path))
         data = json.loads(path.read_text())
-        assert data["pipeline"]["databases"]["function_database"] is not None
-        assert (
-            data["pipeline"]["databases"]["function_database"]["type"] == "delta_table"
-        )
+        # New format: function_database is a registry key string in pipeline block
+        fn_db_key = data["pipeline"]["function_database"]
+        assert fn_db_key is not None
+        assert isinstance(fn_db_key, str)
+        assert fn_db_key in data["databases"]
+        assert data["databases"][fn_db_key]["type"] == "delta_table"
 
     def test_save_node_content_hash_matches_key(self, simple_pipeline):
         """Each node's content_hash field matches its key in the nodes dict."""
@@ -1104,8 +1117,11 @@ def _corrupt_function_module_path(save_path):
         data = json.load(f)
     for node in data["nodes"].values():
         if node.get("node_type") == "function":
-            pf_config = node["function_pod"]["packet_function"]["config"]
-            pf_config["module_path"] = "nonexistent.module.that.does.not.exist"
+            # Support both new key 'function_config' and old key 'function_pod'
+            fn_cfg = node.get("function_config") or node.get("function_pod")
+            if fn_cfg:
+                pf_config = fn_cfg["packet_function"]["config"]
+                pf_config["module_path"] = "nonexistent.module.that.does.not.exist"
     with open(save_path, "w") as f:
         json.dump(data, f)
 
@@ -1682,3 +1698,118 @@ def test_operator_node_pipeline_path_two_level(tmp_path):
     assert path[-1].startswith("instance:"), f"Expected instance:... got {path[-1]!r}"
     assert joined_node.pipeline_hash().to_string() in path[-2]
     assert joined_node.content_hash().to_string() in path[-1]
+
+
+# ---------------------------------------------------------------------------
+# Task 6: New save(level=) format tests
+# ---------------------------------------------------------------------------
+
+
+def test_save_level_field_present(simple_pipeline, tmp_path):
+    """Saved file must include a 'level' field."""
+    pipeline, _ = simple_pipeline
+    path = tmp_path / "p.json"
+    pipeline.save(str(path))
+    with open(path) as f:
+        data = json.load(f)
+    assert "level" in data
+    assert data["level"] == "standard"
+
+
+def _make_simple_pipeline_for_level_tests(tmp_path):
+    """Build a simple pipeline (DictSource -> FunctionPod) for level tests."""
+    db = InMemoryArrowDatabase()
+
+    pf = PythonPacketFunction(
+        function=transform_func,
+        output_keys="result",
+        function_name="transform_func",
+    )
+    pod = FunctionPod(packet_function=pf)
+    source = DictSource(data=[{"x": 1, "y": 2}], tag_columns=["x"], source_id="s")
+    pipeline = Pipeline(name="p", pipeline_database=db)
+    with pipeline:
+        pod.process(source, label="fn")
+    return pipeline
+
+
+def test_save_minimal_level_structure(tmp_path):
+    """minimal level: no databases block, node_uri present, no configs."""
+    pipeline = _make_simple_pipeline_for_level_tests(tmp_path)
+
+    path = tmp_path / "minimal.json"
+    pipeline.save(str(path), level="minimal")
+    with open(path) as f:
+        data = json.load(f)
+
+    assert data["level"] == "minimal"
+    assert "databases" not in data
+    assert "pipeline_database" not in data.get("pipeline", {})
+    for node in data["nodes"].values():
+        assert "node_uri" in node
+        assert "content_hash" in node
+        assert "pipeline_hash" in node
+        assert "output_schema" in node
+        assert "data_context_key" not in node
+        assert "function_config" not in node
+        assert "source_config" not in node
+        assert "pipeline_path" not in node
+        assert "result_record_path" not in node
+
+
+def test_save_standard_level_top_level_databases(tmp_path):
+    """standard level: databases at top level, pipeline has string keys."""
+    pipeline = _make_simple_pipeline_for_level_tests(tmp_path)
+
+    path = tmp_path / "standard.json"
+    pipeline.save(str(path), level="standard")
+    with open(path) as f:
+        data = json.load(f)
+
+    assert "databases" in data
+    assert isinstance(data["databases"], dict)
+    pipeline_db_key = data["pipeline"]["pipeline_database"]
+    assert isinstance(pipeline_db_key, str)
+    assert pipeline_db_key in data["databases"]
+
+
+def test_save_never_stores_pipeline_path(tmp_path):
+    """pipeline_path and result_record_path must not appear in any level."""
+    pipeline = _make_simple_pipeline_for_level_tests(tmp_path)
+
+    for level in ("minimal", "definition", "standard"):
+        path = tmp_path / f"{level}.json"
+        pipeline.save(str(path), level=level)
+        raw = path.read_text()
+        assert "pipeline_path" not in raw, f"pipeline_path leaked at {level}"
+        assert "result_record_path" not in raw, f"result_record_path leaked at {level}"
+
+
+def test_save_definition_level_has_configs_no_pipeline_db(tmp_path):
+    """definition level: function_config present, no pipeline_database key."""
+    pipeline = _make_simple_pipeline_for_level_tests(tmp_path)
+
+    path = tmp_path / "definition.json"
+    pipeline.save(str(path), level="definition")
+    with open(path) as f:
+        data = json.load(f)
+
+    assert data["level"] == "definition"
+    assert "pipeline_database" not in data.get("pipeline", {})
+    fn_node = next(v for v in data["nodes"].values() if v["node_type"] == "function")
+    assert "function_config" in fn_node
+    assert "cache_mode" not in fn_node  # cache_mode only at standard+
+
+
+def test_save_uses_function_config_not_function_pod(tmp_path):
+    """Key must be 'function_config', not 'function_pod'."""
+    pipeline = _make_simple_pipeline_for_level_tests(tmp_path)
+
+    path = tmp_path / "p.json"
+    pipeline.save(str(path))
+    with open(path) as f:
+        data = json.load(f)
+
+    fn_node = next(v for v in data["nodes"].values() if v["node_type"] == "function")
+    assert "function_config" in fn_node
+    assert "function_pod" not in fn_node

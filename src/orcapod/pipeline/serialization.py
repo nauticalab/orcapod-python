@@ -324,6 +324,7 @@ def resolve_source_from_config(
     config: dict[str, Any],
     *,
     fallback_to_proxy: bool = False,
+    db_registry: "DatabaseRegistry | None" = None,
 ) -> Any:
     """Reconstruct a source instance from a config dict.
 
@@ -335,6 +336,8 @@ def resolve_source_from_config(
             config.  Requires the config to contain ``content_hash``,
             ``pipeline_hash``, ``tag_schema``, and ``packet_schema`` fields
             (as written by ``RootSource._identity_config()``).
+        db_registry: Optional ``DatabaseRegistry`` forwarded to ``from_config``
+            for source types that embed database references (e.g. CachedSource).
 
     Returns:
         A new source instance constructed from the config, or a ``SourceProxy``
@@ -345,6 +348,8 @@ def resolve_source_from_config(
         Exception: Re-raised from ``from_config`` when *fallback_to_proxy* is
             ``False`` and reconstruction fails.
     """
+    import inspect
+
     _ensure_registries()
     source_type = config.get("source_type")
     if source_type not in SOURCE_REGISTRY:
@@ -356,6 +361,10 @@ def resolve_source_from_config(
         )
     cls = SOURCE_REGISTRY[source_type]
     try:
+        # Pass db_registry if the source's from_config accepts it
+        from_config_sig = inspect.signature(cls.from_config)
+        if "db_registry" in from_config_sig.parameters and db_registry is not None:
+            return cls.from_config(config, db_registry=db_registry)
         return cls.from_config(config)
     except Exception:
         if fallback_to_proxy:
