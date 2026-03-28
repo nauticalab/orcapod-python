@@ -340,6 +340,7 @@ class FunctionNode(StreamBase):
         node._stored_content_hash = descriptor.get("content_hash")
         node._stored_pipeline_hash = descriptor.get("pipeline_hash")
         node._stored_pipeline_path = tuple(descriptor.get("pipeline_path", ()))
+        node._stored_node_uri = tuple(descriptor.get("node_uri") or [])
         node._stored_result_record_path = tuple(
             descriptor.get("result_record_path", ())
         )

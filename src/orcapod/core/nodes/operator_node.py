@@ -248,6 +248,7 @@ class OperatorNode(StreamBase):
         node._stored_content_hash = descriptor.get("content_hash")
         node._stored_pipeline_hash = descriptor.get("pipeline_hash")
         node._stored_pipeline_path = tuple(descriptor.get("pipeline_path", ()))
+        node._stored_node_uri = tuple(descriptor.get("node_uri") or [])
 
         # Determine load status based on DB availability and cache mode.
         # An uncached operator (cache_mode=OFF) never writes records to the
