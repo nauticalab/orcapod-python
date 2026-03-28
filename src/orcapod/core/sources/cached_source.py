@@ -80,25 +80,36 @@ class CachedSource(RootSource):
     # Serialization
     # -------------------------------------------------------------------------
 
-    def to_config(self) -> dict[str, Any]:
+    def to_config(self, db_registry=None) -> dict[str, Any]:
         """Serialize this CachedSource configuration to a JSON-compatible dict.
+
+        Args:
+            db_registry: Optional DatabaseRegistry. When provided, the cache
+                database config is registered and replaced by its key string.
+                When None, the full database config is embedded inline.
 
         Returns:
             Dict containing the inner source config, cache database config,
             cache path prefix, and resolved cache path (for cache-only loading).
         """
+        db_config = self._cache_database.to_config()
+        if db_registry is not None:
+            cache_db_ref = db_registry.register(db_config)
+        else:
+            cache_db_ref = db_config
+
         return {
             "source_type": "cached",
             "inner_source": self._source.to_config(),
-            "cache_database": self._cache_database.to_config(),
+            "cache_database": cache_db_ref,
             "cache_path_prefix": list(self._cache_path_prefix),
             "cache_path": list(self.cache_path),
             "source_id": self.source_id,
-            **self._identity_config(),
+            # Note: identity fields (content_hash, pipeline_hash, etc.) intentionally omitted
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> CachedSource:
+    def from_config(cls, config: dict[str, Any], db_registry=None) -> "CachedSource":
         """Reconstruct a CachedSource from a config dict.
 
         If the inner source cannot be resolved (e.g. it requires live data
@@ -108,6 +119,9 @@ class CachedSource(RootSource):
 
         Args:
             config: Dict as produced by `to_config`.
+            db_registry: Optional DatabaseRegistry. When cache_database is a
+                string key, it is resolved via this registry. When None and
+                cache_database is a string, a ValueError is raised.
 
         Returns:
             A new CachedSource constructed from the config.
@@ -117,7 +131,17 @@ class CachedSource(RootSource):
             resolve_source_from_config,
         )
 
-        cache_db = resolve_database_from_config(config["cache_database"])
+        cache_db_ref = config["cache_database"]
+        if isinstance(cache_db_ref, str):
+            if db_registry is None:
+                raise ValueError(
+                    f"cache_database is a registry key {cache_db_ref!r} but no "
+                    "db_registry was provided."
+                )
+            cache_db = resolve_database_from_config(db_registry.resolve(cache_db_ref))
+        else:
+            cache_db = resolve_database_from_config(cache_db_ref)
+
         inner_source = resolve_source_from_config(
             config["inner_source"], fallback_to_proxy=True
         )

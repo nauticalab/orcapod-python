@@ -540,3 +540,178 @@ class TestSchemaRoundTripConsistency:
         assert original_hash == round_trip_hash, (
             f"Hash diverged: {original_hash} vs {round_trip_hash}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Task 3: CachedSource serialization with DatabaseRegistry
+# ---------------------------------------------------------------------------
+
+
+def test_cached_source_to_config_without_registry_embeds_db():
+    """Default: cache_database is an inline dict."""
+    from orcapod.core.sources.cached_source import CachedSource
+    from orcapod.core.sources.dict_source import DictSource
+
+    db = InMemoryArrowDatabase()
+    inner = DictSource([{"x": 1}, {"x": 2}], source_id="s")
+    src = CachedSource(source=inner, cache_database=db, cache_path_prefix=("cache",))
+    config = src.to_config()
+    assert isinstance(config["cache_database"], dict)
+
+
+def test_cached_source_to_config_with_registry_emits_key():
+    """With registry: cache_database is a string key."""
+    from orcapod.core.sources.cached_source import CachedSource
+    from orcapod.core.sources.dict_source import DictSource
+
+    db = InMemoryArrowDatabase()
+    inner = DictSource([{"x": 1}, {"x": 2}], source_id="s")
+    src = CachedSource(source=inner, cache_database=db, cache_path_prefix=("cache",))
+    registry = DatabaseRegistry()
+    config = src.to_config(db_registry=registry)
+    assert isinstance(config["cache_database"], str)
+    assert config["cache_database"].startswith("db_")
+    assert config["cache_database"] in registry.to_dict()
+
+
+def test_cached_source_to_config_no_identity_fields():
+    """source_config must NOT contain identity fields (content_hash, pipeline_hash, etc.)."""
+    from orcapod.core.sources.cached_source import CachedSource
+    from orcapod.core.sources.dict_source import DictSource
+
+    db = InMemoryArrowDatabase()
+    inner = DictSource([{"x": 1}], source_id="s")
+    src = CachedSource(source=inner, cache_database=db, cache_path_prefix=("cache",))
+    config = src.to_config()
+    for field in ("content_hash", "pipeline_hash", "tag_schema", "packet_schema"):
+        assert field not in config, f"Identity field {field!r} must not be in source_config"
+
+
+def test_cached_source_from_config_with_registry_resolves_key():
+    """from_config with registry resolves key back to database instance."""
+    from orcapod.core.sources.cached_source import CachedSource
+    from orcapod.core.sources.dict_source import DictSource
+
+    db = InMemoryArrowDatabase()
+    inner = DictSource([{"x": 1}, {"x": 2}], source_id="s")
+    src = CachedSource(source=inner, cache_database=db, cache_path_prefix=("cache",))
+    registry = DatabaseRegistry()
+    config = src.to_config(db_registry=registry)
+    # Round-trip
+    src2 = CachedSource.from_config(config, db_registry=registry)
+    assert src2._cache_database is not None
+
+
+def test_cached_source_from_config_without_registry_uses_inline():
+    """from_config without registry works with inline dict (default/old behavior)."""
+    from orcapod.core.sources.cached_source import CachedSource
+    from orcapod.core.sources.dict_source import DictSource
+
+    db = InMemoryArrowDatabase()
+    inner = DictSource([{"x": 1}], source_id="s")
+    src = CachedSource(source=inner, cache_database=db, cache_path_prefix=("cache",))
+    config = src.to_config()  # no registry → inline
+    src2 = CachedSource.from_config(config)
+    assert src2._cache_database is not None
+
+
+# ---------------------------------------------------------------------------
+# Task 4: _source_proxy_from_config with node_descriptor
+# ---------------------------------------------------------------------------
+
+
+def test_source_proxy_from_node_descriptor_fields():
+    """_source_proxy_from_config reads identity from node_descriptor when provided."""
+    from orcapod.pipeline.serialization import _source_proxy_from_config
+
+    source_config = {"source_type": "dict", "source_id": "my_src"}
+    node_descriptor = {
+        "content_hash": "semantic_v0.1:abc123",
+        "pipeline_hash": "semantic_v0.1:def456",
+        "output_schema": {
+            "tag": {"x": "int64"},
+            "packet": {"result": "int64"},
+        },
+    }
+    proxy = _source_proxy_from_config(source_config, node_descriptor=node_descriptor)
+    assert proxy.content_hash().to_string() == "semantic_v0.1:abc123"
+
+
+def test_source_proxy_from_config_backward_compat():
+    """Without node_descriptor, falls back to reading identity from source_config."""
+    from orcapod.pipeline.serialization import _source_proxy_from_config
+
+    source_config = {
+        "source_type": "dict",
+        "source_id": "my_src",
+        "content_hash": "semantic_v0.1:abc123",
+        "pipeline_hash": "semantic_v0.1:def456",
+        "tag_schema": {"x": "int64"},
+        "packet_schema": {"result": "int64"},
+    }
+    proxy = _source_proxy_from_config(source_config)
+    assert proxy.content_hash().to_string() == "semantic_v0.1:abc123"
+
+
+# ---------------------------------------------------------------------------
+# Task 5: node_uri property on FunctionNode and OperatorNode
+# ---------------------------------------------------------------------------
+
+
+def test_function_node_has_node_uri():
+    import pyarrow as pa
+
+    from orcapod.core.function_pod import FunctionPod
+    from orcapod.core.nodes import FunctionNode
+    from orcapod.core.packet_function import PythonPacketFunction
+    from orcapod.core.sources import ArrowTableSource
+    from orcapod.pipeline import Pipeline
+
+    db = InMemoryArrowDatabase()
+
+    def add_one(x: int) -> int:
+        return x + 1
+
+    table = pa.table({"id": pa.array(["a", "b"], type=pa.large_string()), "x": pa.array([1, 2], type=pa.int64())})
+    source = ArrowTableSource(table, tag_columns=["id"])
+    pf = PythonPacketFunction(add_one, output_keys="result")
+    pod = FunctionPod(packet_function=pf)
+
+    pipeline = Pipeline(name="test", pipeline_database=db)
+    with pipeline:
+        pod(source, label="fn")
+
+    fn_node = pipeline.compiled_nodes["fn"]
+    assert isinstance(fn_node, FunctionNode)
+    assert hasattr(fn_node, "node_uri")
+    uri = fn_node.node_uri
+    assert isinstance(uri, tuple)
+    assert len(uri) >= 1
+
+
+def test_operator_node_has_node_uri():
+    import pyarrow as pa
+
+    from orcapod.core.nodes import OperatorNode
+    from orcapod.core.operators import Join
+    from orcapod.core.sources import ArrowTableSource
+    from orcapod.pipeline import Pipeline
+
+    db = InMemoryArrowDatabase()
+    table_a = pa.table({"key": pa.array(["a"], type=pa.large_string()), "val_a": pa.array([10], type=pa.int64())})
+    table_b = pa.table(
+        {"key": pa.array(["a"], type=pa.large_string()), "val_b": pa.array([1], type=pa.int64())}
+    )
+    src_a = ArrowTableSource(table_a, tag_columns=["key"])
+    src_b = ArrowTableSource(table_b, tag_columns=["key"])
+
+    pipeline = Pipeline(name="test", pipeline_database=db)
+    with pipeline:
+        Join()(src_a, src_b, label="joined")
+
+    op_node = pipeline.compiled_nodes["joined"]
+    assert isinstance(op_node, OperatorNode)
+    assert hasattr(op_node, "node_uri")
+    uri = op_node.node_uri
+    assert isinstance(uri, tuple)
+    assert len(uri) >= 1

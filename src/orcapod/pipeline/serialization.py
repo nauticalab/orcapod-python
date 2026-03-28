@@ -367,13 +367,21 @@ def resolve_source_from_config(
         raise
 
 
-def _source_proxy_from_config(config: dict[str, Any]) -> Any:
-    """Create a ``SourceProxy`` from identity fields in a source config.
+def _source_proxy_from_config(
+    config: dict[str, Any],
+    node_descriptor: dict[str, Any] | None = None,
+) -> Any:
+    """Create a SourceProxy from identity fields.
+
+    Identity fields are read from node_descriptor if provided (new format),
+    falling back to config for backward compatibility with old saves that
+    embed them in source_config.
 
     Args:
-        config: Source config dict containing ``content_hash``,
-            ``pipeline_hash``, ``tag_schema``, ``packet_schema``, and
-            ``source_id`` fields.
+        config: Source config dict. In old format, also contains identity
+            fields. In new format, identity fields are in node_descriptor.
+        node_descriptor: Optional node descriptor dict (new format) containing
+            ``content_hash``, ``pipeline_hash``, and ``output_schema`` fields.
 
     Returns:
         A ``SourceProxy`` preserving the original source's identity.
@@ -384,27 +392,38 @@ def _source_proxy_from_config(config: dict[str, Any]) -> Any:
     from orcapod.core.sources.source_proxy import SourceProxy
     from orcapod.types import Schema
 
-    required = ("content_hash", "pipeline_hash", "tag_schema", "packet_schema")
-    missing = [k for k in required if k not in config]
-    if missing:
+    # New format: identity fields in node_descriptor with output_schema structure
+    if node_descriptor is not None:
+        content_hash = node_descriptor.get("content_hash")
+        pipeline_hash_val = node_descriptor.get("pipeline_hash")
+        output_schema = node_descriptor.get("output_schema", {})
+        tag_schema_dict = output_schema.get("tag", {})
+        packet_schema_dict = output_schema.get("packet", {})
+    else:
+        # Old format: identity fields embedded in source_config
+        content_hash = config.get("content_hash")
+        pipeline_hash_val = config.get("pipeline_hash")
+        tag_schema_dict = config.get("tag_schema", {})
+        packet_schema_dict = config.get("packet_schema", {})
+
+    if not content_hash or not pipeline_hash_val:
         raise ValueError(
-            f"Cannot create SourceProxy: config is missing required identity "
-            f"fields: {missing}"
+            "Cannot create SourceProxy: missing content_hash or pipeline_hash. "
+            "Provide node_descriptor with identity fields or use old-format source_config."
         )
 
-    # Derive expected class name from source_type via the registry.
     source_type = config.get("source_type")
     expected_class_name: str | None = None
     if source_type and source_type in SOURCE_REGISTRY:
         expected_class_name = SOURCE_REGISTRY[source_type].__name__
 
-    tag_schema = Schema(deserialize_schema(config["tag_schema"]))
-    packet_schema = Schema(deserialize_schema(config["packet_schema"]))
+    tag_schema = Schema(deserialize_schema(tag_schema_dict))
+    packet_schema = Schema(deserialize_schema(packet_schema_dict))
 
     return SourceProxy(
         source_id=config.get("source_id", "unknown"),
-        content_hash_str=config["content_hash"],
-        pipeline_hash_str=config["pipeline_hash"],
+        content_hash_str=content_hash,
+        pipeline_hash_str=pipeline_hash_val,
         tag_schema=tag_schema,
         packet_schema=packet_schema,
         expected_class_name=expected_class_name,
