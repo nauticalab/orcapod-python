@@ -219,9 +219,10 @@ dj_*_conf.json
 .pixi/*
 !.pixi/config.toml
 
-# Superpowers (Claude Code skill artifacts - ignore everything except specs)
+# Superpowers (Claude Code skill artifacts - ignore everything except specs/plans)
 superpowers/*
 !superpowers/specs
+!superpowers/plans
 
 # General JSON files at project root
 /*.json
