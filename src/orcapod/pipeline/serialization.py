@@ -49,22 +49,25 @@ class DatabaseRegistry:
     def register(self, config: dict) -> str:
         """Register a database config and return its registry key.
 
-        If the config is already registered, returns the existing key.
-        On hash collision (different configs with same 8-char prefix),
-        appends ``_2``, ``_3``... to the key.
+        If the config is already registered (under any key), returns the existing key.
+        On hash collision (different configs with same 8-char prefix), appends
+        ``_2``, ``_3``... to the key.
         """
+        # Check if already registered under any key (handles collision-suffix keys)
+        for existing_key, existing_config in self._entries.items():
+            if existing_config == config:
+                return existing_key
+
+        # Not registered yet — find the right key
         base_key = self._make_key(config)
-        # Already registered with same config?
-        if base_key in self._entries and self._entries[base_key] == config:
-            return base_key
-        # Collision or new entry
-        if base_key in self._entries:
+        if base_key not in self._entries:
+            key = base_key
+        else:
             i = 2
             while f"{base_key}_{i}" in self._entries:
                 i += 1
             key = f"{base_key}_{i}"
-        else:
-            key = base_key
+
         self._entries[key] = config
         return key
 

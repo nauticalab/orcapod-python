@@ -106,6 +106,25 @@ def test_database_registry_key_is_content_based():
     assert key_a == key_b
 
 
+def test_database_registry_collision_suffix_idempotent():
+    """Re-registering a collision-suffix config returns the existing key, not a new one."""
+    reg = DatabaseRegistry()
+    # Patch _make_key to always return same prefix, simulating collision
+    original_make_key = staticmethod(DatabaseRegistry._make_key)
+    DatabaseRegistry._make_key = staticmethod(lambda config: "db_aabbccdd")
+    try:
+        key1 = reg.register({"type": "delta_table", "base_path": "/a"})
+        assert key1 == "db_aabbccdd"
+        key2 = reg.register({"type": "delta_table", "base_path": "/b"})
+        assert key2 == "db_aabbccdd_2"
+        # Re-register config /b — must return db_aabbccdd_2, not db_aabbccdd_3
+        key2_again = reg.register({"type": "delta_table", "base_path": "/b"})
+        assert key2_again == "db_aabbccdd_2"
+        assert len(reg.to_dict()) == 2  # no duplicate created
+    finally:
+        DatabaseRegistry._make_key = original_make_key
+
+
 class TestRegistries:
     def test_database_registry_has_all_types(self):
         assert "delta_table" in DATABASE_REGISTRY
