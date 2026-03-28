@@ -255,9 +255,9 @@ class TestPhase1Phase2PipelineEntryId:
         assert result_values == [20, 40, 60]
 
     def test_same_packet_new_tag_triggers_phase2(self):
-        """Same packet data but new tag should trigger Phase 2 processing
-        because the pipeline entry_id (tag+system_tags+packet) is novel,
-        even though CachedFunctionPod has a cache hit for the packet."""
+        """With the two-level pipeline_path, nodes with different input data have
+        different pipeline_paths. node2 (id=1, x=10) has a different content_hash
+        than node1 (id=0, x=10), so each has its own pipeline DB path."""
         db = InMemoryArrowDatabase()
 
         # First run: tag=0, x=10
@@ -271,17 +271,23 @@ class TestPhase1Phase2PipelineEntryId:
         # Second run: tag=1, x=10 (same packet, different tag)
         stream2 = _make_stream([{"id": 1, "x": 10}])
         node2, _ = _make_node(stream2, db=db)
+
+        # Different data → different pipeline_path (different instance: component)
+        assert node1.pipeline_path != node2.pipeline_path
+        assert node1.pipeline_path[-2] == node2.pipeline_path[-2]  # same schema:
+
         results = list(node2.iter_packets())
 
-        # Should yield 1 result from Phase 1 (tag=0) + 1 from Phase 2 (tag=1)
-        assert len(results) == 2
+        # node2 has a different pipeline_path: Phase 1 finds no records for node2's path.
+        # Phase 2 processes the single row → 1 result
+        assert len(results) == 1
 
-        # Pipeline DB should now have 2 records
+        # node2's pipeline DB should have 1 record
         pipeline_records = db.get_all_records(node2.pipeline_path)
         assert pipeline_records is not None
-        assert pipeline_records.num_rows == 2
+        assert pipeline_records.num_rows == 1
 
-        # Result DB should still have only 1 record (same packet hash)
+        # Result DB should still have only 1 record (same packet hash, cache hit)
         result_records = node2._cached_function_pod._result_database.get_all_records(
             node2._cached_function_pod.record_path
         )

@@ -267,13 +267,12 @@ class TestTableStreamPipelineHash:
 
 class TestFunctionNodePipelineHashFix:
     """
-    The critical invariant: FunctionNode._pipeline_node_hash (and therefore
-    pipeline_path) is derived from pipeline_hash(), not content_hash().
+    The pipeline_path now uses a two-level formula:
+      prefix + pf.uri + (f"schema:{pipeline_hash}", f"instance:{content_hash}")
 
-    Before the fix: _pipeline_node_hash = self.content_hash().to_string()
-      → different data → different pipeline_path → DB not shared
-    After the fix:  _pipeline_node_hash = self.pipeline_hash().to_string()
-      → same schema  → same pipeline_path  → DB shared across nodes
+    Nodes with the same schema share the schema: component.
+    Nodes with different data have different instance: components, isolating
+    data-distinct runs in separate DB locations.
     """
 
     def test_different_data_same_schema_share_pipeline_path(self, double_pf):
@@ -288,10 +287,15 @@ class TestFunctionNodePipelineHashFix:
             input_stream=make_int_stream(n=5),
             pipeline_database=db,
         )
-        assert node1.pipeline_path == node2.pipeline_path
+        # Same schema → same schema: component
+        assert node1.pipeline_path[-2] == node2.pipeline_path[-2]
+        assert node1.pipeline_path[-2].startswith("schema:")
+        # Different data → different instance: component → different full path
+        assert node1.pipeline_path[-1] != node2.pipeline_path[-1]
+        assert node1.pipeline_path != node2.pipeline_path
 
     def test_different_data_same_schema_share_uri(self, double_pf):
-        """URI is also schema-based, so two nodes with same schema share it."""
+        """URI is schema-based; two nodes with same schema share URI prefix."""
         db = InMemoryArrowDatabase()
         node1 = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
@@ -311,7 +315,11 @@ class TestFunctionNodePipelineHashFix:
             ),
             pipeline_database=db,
         )
-        assert node1.pipeline_path == node2.pipeline_path
+        # URI (pf.uri) portion is identical for same function
+        pf_uri_len = len(node1._packet_function.uri)
+        assert node1.pipeline_path[:pf_uri_len] == node2.pipeline_path[:pf_uri_len]
+        # But full path differs (different instance: suffix)
+        assert node1.pipeline_path != node2.pipeline_path
 
     def test_different_data_yields_different_content_hash(self, double_pf):
         """Same schema, different actual data → content_hash must differ."""
@@ -370,7 +378,8 @@ class TestFunctionNodePipelineHashFix:
         )
         pf_uri = node._packet_function.uri
         assert node.pipeline_path[: len(pf_uri)] == pf_uri
-        assert node.pipeline_path[-1].startswith("node:")
+        assert node.pipeline_path[-2].startswith("schema:")
+        assert node.pipeline_path[-1].startswith("instance:")
 
 
 # ---------------------------------------------------------------------------
@@ -380,21 +389,19 @@ class TestFunctionNodePipelineHashFix:
 
 class TestPipelineDbScoping:
     """
-    The definitive end-to-end test for the pipeline DB scoping fix.
-
-    Two FunctionNode instances:
-      - Same packet function
-      - Same input schema
-      - DIFFERENT input data (overlapping subset)
-    must write to the SAME database table (shared pipeline_path) and
-    correctly reuse previously-computed entries.
+    With the two-level pipeline_path formula, each data-distinct FunctionNode
+    writes to its own DB table (different instance: suffix). Nodes with the same
+    data (identical content_hash) share a path; nodes with different data do not.
     """
 
     def test_shared_db_overlapping_inputs_avoids_recomputation(self, double_pf):
         """
         node1 processes {0,1,2}. node2 processes {0,1,2,3,4}.
-        After node1 fills the DB, node2 should only need to compute {3,4}.
-        Total function calls: 3 (node1) + 2 (node2) = 5, not 3+5=8.
+        With the two-level formula, node1 and node2 have different pipeline_paths
+        (different content hashes), so pipeline DB records are isolated per node.
+        However, the result DB (CachedFunctionPod) is shared by packet hash, so
+        node2 still avoids recomputing packets that node1 already computed.
+        Total function calls: 3 (node1) + 2 (node2, only x=3 and x=4 are new).
         """
         call_count = 0
 
@@ -417,14 +424,17 @@ class TestPipelineDbScoping:
             pipeline_database=db,
         )
 
-        # Sanity: they share the same DB table path
-        assert node1.pipeline_path == node2.pipeline_path
+        # Different data → different instance: component → different full path
+        assert node1.pipeline_path != node2.pipeline_path
+        assert node1.pipeline_path[-2] == node2.pipeline_path[-2]  # same schema:
 
         node1.run()
         assert call_count == 3
 
         node2.run()
-        # node2 only computes the 2 entries not yet in the DB
+        # node2 has a different pipeline_path but shares the result DB cache.
+        # Phase 2 calls execute_packet for all 5 entries; CachedFunctionPod
+        # only invokes the function for novel packets (x=3, x=4 → 2 calls).
         assert call_count == 5
 
     def test_shared_db_all_inputs_pre_computed_zero_recomputation(self, double_pf):
@@ -543,8 +553,8 @@ class TestPipelineDbScoping:
 
     def test_chained_nodes_share_pipeline_path(self, double_pf):
         """
-        Two independent two-node pipelines that are structurally identical
-        (same functions, same schemas) share pipeline_path at each level.
+        Two independent two-node pipelines with same schema but different data
+        have the same schema: component but different instance: components.
         """
         db = InMemoryArrowDatabase()
 
@@ -568,8 +578,10 @@ class TestPipelineDbScoping:
         node1_b.run()
         src_b = node1_b.as_source()
 
-        # At the first level, both nodes share pipeline_path
-        assert node1_a.pipeline_path == node1_b.pipeline_path
+        # Same schema → same schema: component; different data → different full path
+        assert node1_a.pipeline_path[-2] == node1_b.pipeline_path[-2]
+        assert node1_a.pipeline_path[-2].startswith("schema:")
+        assert node1_a.pipeline_path != node1_b.pipeline_path
 
         # At the DerivedSource level, pipeline_hash is schema-only
         assert src_a.pipeline_hash() == src_b.pipeline_hash()

@@ -110,7 +110,8 @@ class TestFunctionNodeConstruction:
 
     def test_pipeline_path_ends_with_node_hash(self, node):
         path = node.pipeline_path
-        assert path[-1].startswith("node:")
+        assert path[-2].startswith("schema:")
+        assert path[-1].startswith("instance:")
 
     def test_pipeline_path_contains_packet_function_uri(self, node):
         pf_uri = node._packet_function.uri
@@ -367,8 +368,8 @@ class TestFunctionNodePipelineIdentity:
         assert node.pipeline_hash() == node.pipeline_hash()
 
     def test_pipeline_node_hash_in_uri_is_schema_based(self, double_pf):
-        """pipeline_node_hash in uri must be derived from pipeline_hash (schema-only),
-        not content_hash (data-inclusive)."""
+        """pipeline_path uses schema:{pipeline_hash} and instance:{content_hash}.
+        Two nodes with same schema share the schema: component but differ in instance:."""
         db = InMemoryArrowDatabase()
         node1 = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
@@ -380,8 +381,12 @@ class TestFunctionNodePipelineIdentity:
             input_stream=make_int_stream(n=99),  # different data
             pipeline_database=db,
         )
-        # Both nodes must have identical pipeline_paths since they share schema
-        assert node1.pipeline_path == node2.pipeline_path
+        # Same schema → same schema: component
+        assert node1.pipeline_path[-2] == node2.pipeline_path[-2]
+        assert node1.pipeline_path[-2].startswith("schema:")
+        # Different data → different instance: component
+        assert node1.pipeline_path[-1] != node2.pipeline_path[-1]
+        assert node1.pipeline_path[-1].startswith("instance:")
 
 
 # ---------------------------------------------------------------------------
@@ -655,7 +660,8 @@ class TestFunctionNodePipelinePathPrefix:
         )
         pf_uri = node._packet_function.uri
         assert node.pipeline_path[: len(pf_uri)] == pf_uri
-        assert node.pipeline_path[-1].startswith("node:")
+        assert node.pipeline_path[-2].startswith("schema:")
+        assert node.pipeline_path[-1].startswith("instance:")
 
 
 # ---------------------------------------------------------------------------

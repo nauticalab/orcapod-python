@@ -1615,3 +1615,70 @@ class TestPLT1158UncachedOperatorStatus:
         assert len(op_nodes) >= 1
         for op in op_nodes:
             assert op.load_status == LoadStatus.UNAVAILABLE
+
+
+def test_function_node_pipeline_path_two_level(tmp_path):
+    """pipeline_path must end with schema:... and instance:... components."""
+    db = InMemoryArrowDatabase()
+
+    def add_one(y: int) -> int:
+        return y + 1
+
+    pf = PythonPacketFunction(
+        function=add_one,
+        output_keys="result",
+        function_name="add_one",
+    )
+    pod = FunctionPod(packet_function=pf)
+    source = DictSource(
+        data=[{"x": 1, "y": 2}, {"x": 3, "y": 4}],
+        tag_columns=["x"],
+        source_id="test_src",
+    )
+
+    pipeline = Pipeline(name="test", pipeline_database=db)
+    with pipeline:
+        pod.process(source, label="fn")
+    pipeline.compile()
+
+    fn_node = pipeline._nodes["fn"]
+    path = fn_node.pipeline_path
+
+    assert path[-2].startswith("schema:"), f"Expected schema:... got {path[-2]!r}"
+    assert path[-1].startswith("instance:"), f"Expected instance:... got {path[-1]!r}"
+    assert fn_node.pipeline_hash().to_string() in path[-2]
+    assert fn_node.content_hash().to_string() in path[-1]
+
+
+def test_operator_node_pipeline_path_two_level(tmp_path):
+    """OperatorNode pipeline_path must also use two-level schema/instance formula."""
+    db = InMemoryArrowDatabase()
+
+    table_a = pa.table(
+        {
+            "key": pa.array(["a", "b"], type=pa.large_string()),
+            "value": pa.array([10, 20], type=pa.int64()),
+        }
+    )
+    table_b = pa.table(
+        {
+            "key": pa.array(["a", "b"], type=pa.large_string()),
+            "score": pa.array([100, 200], type=pa.int64()),
+        }
+    )
+    src_a = ArrowTableSource(table_a, tag_columns=["key"], source_id="src_a")
+    src_b = ArrowTableSource(table_b, tag_columns=["key"], source_id="src_b")
+    join = Join()
+
+    pipeline = Pipeline(name="test", pipeline_database=db)
+    with pipeline:
+        join.process(src_a, src_b, label="joined")
+    pipeline.compile()
+
+    joined_node = pipeline._nodes["joined"]
+    path = joined_node.pipeline_path
+
+    assert path[-2].startswith("schema:"), f"Expected schema:... got {path[-2]!r}"
+    assert path[-1].startswith("instance:"), f"Expected instance:... got {path[-1]!r}"
+    assert joined_node.pipeline_hash().to_string() in path[-2]
+    assert joined_node.content_hash().to_string() in path[-1]

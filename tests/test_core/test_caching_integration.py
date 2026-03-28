@@ -295,7 +295,8 @@ class TestFunctionPodCaching:
     def test_cross_source_sharing_same_pipeline_path(
         self, clinic_a, clinic_b, source_db, pipeline_db, result_db, pod
     ):
-        """Different source identities, same schema → same pipeline_path."""
+        """Different source identities, same schema → same schema: component but
+        different instance: components (different data → different content_hash)."""
         patients_a, labs_a = clinic_a
         patients_b, labs_b = clinic_b
 
@@ -331,12 +332,17 @@ class TestFunctionPodCaching:
             result_database=result_db,
         )
 
-        assert fn_a.pipeline_path == fn_b.pipeline_path
+        # Same schema → same schema: component
+        assert fn_a.pipeline_path[-2] == fn_b.pipeline_path[-2]
+        assert fn_a.pipeline_path[-2].startswith("schema:")
+        # Different data → different full path
+        assert fn_a.pipeline_path != fn_b.pipeline_path
 
     def test_cross_source_records_accumulate_in_shared_table(
         self, clinic_a, clinic_b, source_db, pipeline_db, result_db, pod
     ):
-        """Records from both pipelines accumulate in the shared DB table."""
+        """With the two-level formula, each pipeline writes to its own DB path.
+        Records from pipeline A and B are stored separately."""
         patients_a, labs_a = clinic_a
         patients_b, labs_b = clinic_b
 
@@ -376,8 +382,8 @@ class TestFunctionPodCaching:
             result_database=result_db,
         )
         fn_b.run()
-        # Shared table: 3 from A + 2 from B = 5
-        assert fn_b.get_all_records().num_rows == 5
+        # Different pipeline_path: fn_b has its own 2 records
+        assert fn_b.get_all_records().num_rows == 2
 
 
 # ---------------------------------------------------------------------------
@@ -558,7 +564,7 @@ class TestEndToEndPipeline:
         op_replay.run()
         assert op_replay.as_table().num_rows == 3
 
-        # Step 5: Second clinic shares function pod cache
+        # Step 5: Second clinic uses same function but different data → own pipeline_path
         patients_b, labs_b = clinic_b
         fn_node_b = FunctionNode(
             function_pod=pod,
@@ -575,10 +581,12 @@ class TestEndToEndPipeline:
             pipeline_database=pipeline_db,
             result_database=result_db,
         )
-        assert fn_node.pipeline_path == fn_node_b.pipeline_path
+        # Same schema → same schema: component; different data → different full path
+        assert fn_node.pipeline_path[-2] == fn_node_b.pipeline_path[-2]
+        assert fn_node.pipeline_path != fn_node_b.pipeline_path
         fn_node_b.run()
-        # 3 from clinic A + 2 from clinic B = 5 in shared table
-        assert fn_node_b.get_all_records().num_rows == 5
+        # fn_node_b has its own path: 2 records from clinic B only
+        assert fn_node_b.get_all_records().num_rows == 2
 
         # Verify source caches are populated
         assert patients.get_all_records().num_rows == 3

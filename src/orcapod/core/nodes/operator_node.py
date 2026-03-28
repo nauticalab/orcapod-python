@@ -181,8 +181,8 @@ class OperatorNode(StreamBase):
             # Full mode: construct normally
             pipeline_path = tuple(descriptor.get("pipeline_path", ()))
             # Derive pipeline_path_prefix by stripping the suffix that
-            # __init__ appends: operator.uri (2 elements) + node:{hash} (1 element).
-            uri_len = len(operator.uri) + 1  # +1 for node:{hash}
+            # __init__ appends: operator.uri + schema:{hash} + instance:{hash} (2 elements).
+            uri_len = len(operator.uri) + 2  # +2 for schema/instance components
             prefix = pipeline_path[:-uri_len] if len(pipeline_path) > uri_len else ()
 
             node = cls(
@@ -377,7 +377,10 @@ class OperatorNode(StreamBase):
         return (
             self._pipeline_path_prefix
             + self._operator.uri
-            + (f"node:{self._pipeline_node_hash}",)
+            + (
+                f"schema:{self.pipeline_hash().to_string()}",
+                f"instance:{self.content_hash().to_string()}",
+            )
         )
 
     # ------------------------------------------------------------------
