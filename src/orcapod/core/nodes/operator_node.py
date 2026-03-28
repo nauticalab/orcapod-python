@@ -391,6 +391,17 @@ class OperatorNode(StreamBase):
             )
         )
 
+    @property
+    def node_uri(self) -> tuple[str, ...]:
+        """Canonical URI tuple identifying this computation.
+
+        Identical to ``operator.uri`` at runtime.
+        Returns stored value in read-only (deserialized) mode.
+        """
+        if self._operator is None:
+            return tuple(getattr(self, "_stored_node_uri", ()))
+        return self._operator.uri
+
     # ------------------------------------------------------------------
     # Computation and caching
     # ------------------------------------------------------------------

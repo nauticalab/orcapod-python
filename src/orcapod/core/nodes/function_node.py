@@ -483,6 +483,17 @@ class FunctionNode(StreamBase):
             )
         )
 
+    @property
+    def node_uri(self) -> tuple[str, ...]:
+        """Canonical URI tuple identifying this computation.
+
+        Identical to ``packet_function.uri`` at runtime.
+        Returns stored value in read-only (deserialized) mode.
+        """
+        if self._packet_function is None:
+            return tuple(getattr(self, "_stored_node_uri", ()))
+        return self._packet_function.uri
+
     # ------------------------------------------------------------------
     # Caching
     # ------------------------------------------------------------------
