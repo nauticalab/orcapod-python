@@ -208,7 +208,7 @@ class TestOperatorNodeFromDescriptor:
                 "config": {},
             },
             "cache_mode": "OFF",
-            "pipeline_path": ["test", "Join", "hash", "node:abc"],
+            "pipeline_path": ["test", "Join", "hash", "schema:fake_pipeline_hash", "instance:fake_content_hash"],
         }
         loaded = OperatorNode.from_descriptor(
             descriptor=descriptor,

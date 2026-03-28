@@ -131,7 +131,6 @@ class FunctionNode(StreamBase):
         self._pipeline_database: ArrowDatabaseProtocol | None = None
         self._cached_function_pod: CachedFunctionPod | None = None
         self._pipeline_path_prefix: tuple[str, ...] = ()
-        self._pipeline_node_hash: str | None = None
         self._output_schema_hash: str | None = None
 
         if pipeline_database is not None:
@@ -192,8 +191,7 @@ class FunctionNode(StreamBase):
         self._content_hash_cache.clear()
         self._pipeline_hash_cache.clear()
 
-        # Compute pipeline node hash
-        self._pipeline_node_hash = self.pipeline_hash().to_string()
+        # Compute output schema hash
         self._output_schema_hash = self.data_context.semantic_hasher.hash_object(
             self._packet_function.output_packet_schema
         ).to_string()
@@ -245,9 +243,19 @@ class FunctionNode(StreamBase):
             # __init__. The suffix added is:
             #   pf.uri + (f"schema:{pipeline_hash}", f"instance:{content_hash}")
             pf_uri_len = len(function_pod.packet_function.uri) + 2  # +2 for schema/instance
-            prefix = (
-                pipeline_path[:-pf_uri_len] if len(pipeline_path) > pf_uri_len else ()
-            )
+            if len(pipeline_path) > pf_uri_len:
+                prefix = pipeline_path[:-pf_uri_len]
+            elif len(pipeline_path) == pf_uri_len:
+                prefix = ()
+            else:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "pipeline_path %r is shorter than expected (uri_len=%d); "
+                    "using empty prefix — DB path may be incorrect.",
+                    pipeline_path,
+                    pf_uri_len,
+                )
+                prefix = ()
 
             # Derive result_path_prefix from the stored result_record_path
             # by stripping the URI suffix that CachedFunctionPod appends.
@@ -324,7 +332,6 @@ class FunctionNode(StreamBase):
         node._pipeline_database = pipeline_db
         node._cached_function_pod = None
         node._pipeline_path_prefix = ()
-        node._pipeline_node_hash = None
         node._output_schema_hash = None
 
         # Descriptor metadata for read-only access
