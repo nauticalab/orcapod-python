@@ -49,11 +49,12 @@ class OperatorNode(StreamBase):
 
     Pipeline path structure::
 
-        pipeline_path_prefix / operator.uri / node:{content_hash}
+        pipeline_path_prefix / operator.uri / schema:{pipeline_hash} / instance:{content_hash}
 
-    Where ``content_hash`` is the data-inclusive hash that encodes both
-    pipeline structure and upstream source identities, ensuring each
-    unique source combination gets its own cache table.
+    Where ``pipeline_hash`` encodes the pipeline structure (operator +
+    upstream topology) and ``instance:{content_hash}`` is the
+    data-inclusive hash that encodes upstream source identities, ensuring
+    each unique source combination gets its own cache table.
 
     Cache modes:
         - **OFF** (default): compute, don't write to DB.
@@ -97,7 +98,6 @@ class OperatorNode(StreamBase):
         self._pipeline_database: ArrowDatabaseProtocol | None = None
         self._pipeline_path_prefix: tuple[str, ...] = ()
         self._cache_mode = CacheMode.OFF
-        self._pipeline_node_hash: str | None = None
 
         if pipeline_database is not None:
             self.attach_databases(
@@ -131,9 +131,6 @@ class OperatorNode(StreamBase):
         self.clear_cache()
         self._content_hash_cache.clear()
         self._pipeline_hash_cache.clear()
-
-        # Use content_hash (data-inclusive) for pipeline node hash
-        self._pipeline_node_hash = self.content_hash().to_string()
 
     # ------------------------------------------------------------------
     # from_descriptor — reconstruct from a serialized pipeline descriptor
@@ -183,7 +180,19 @@ class OperatorNode(StreamBase):
             # Derive pipeline_path_prefix by stripping the suffix that
             # __init__ appends: operator.uri + schema:{hash} + instance:{hash} (2 elements).
             uri_len = len(operator.uri) + 2  # +2 for schema/instance components
-            prefix = pipeline_path[:-uri_len] if len(pipeline_path) > uri_len else ()
+            if len(pipeline_path) > uri_len:
+                prefix = pipeline_path[:-uri_len]
+            elif len(pipeline_path) == uri_len:
+                prefix = ()
+            else:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "pipeline_path %r is shorter than expected (uri_len=%d); "
+                    "using empty prefix — DB path may be incorrect.",
+                    pipeline_path,
+                    uri_len,
+                )
+                prefix = ()
 
             node = cls(
                 operator=operator,
@@ -232,7 +241,6 @@ class OperatorNode(StreamBase):
         node._pipeline_database = pipeline_db
         node._pipeline_path_prefix = ()
         node._cache_mode = cache_mode
-        node._pipeline_node_hash = None
 
         # Descriptor metadata for read-only access
         node._descriptor = descriptor
