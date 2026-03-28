@@ -689,6 +689,23 @@ def test_function_node_has_node_uri():
     assert len(uri) >= 1
 
 
+def test_function_node_stored_node_uri_from_descriptor():
+    """Deserialized FunctionNode must return node_uri from stored value."""
+    from orcapod.core.nodes.function_node import FunctionNode
+
+    descriptor = {
+        "node_type": "function",
+        "label": "fn",
+        "content_hash": "semantic_v0.1:abc",
+        "pipeline_hash": "semantic_v0.1:def",
+        "node_uri": ["add_one", "v0", "python.function.v0", "schema_repr"],
+        "output_schema": {"tag": {"x": "int64"}, "packet": {"result": "int64"}},
+        "data_context_key": "std:v0.1:default",
+    }
+    node = FunctionNode.from_descriptor(descriptor, function_pod=None, input_stream=None, databases={})
+    assert node.node_uri == ("add_one", "v0", "python.function.v0", "schema_repr")
+
+
 def test_operator_node_has_node_uri():
     import pyarrow as pa
 
