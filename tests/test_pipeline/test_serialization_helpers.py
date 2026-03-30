@@ -615,6 +615,71 @@ def test_cached_source_from_config_without_registry_uses_inline():
     assert src2._cache_database is not None
 
 
+def test_cached_source_to_config_forwards_db_registry_to_inner_source():
+    """CachedSource.to_config must forward db_registry to inner source's to_config.
+
+    If the inner source is itself a CachedSource, its cache_database should also
+    become a registry key string, not remain an inline dict.
+    """
+    from orcapod.core.sources.cached_source import CachedSource
+    from orcapod.core.sources.dict_source import DictSource
+
+    db_inner = InMemoryArrowDatabase()
+    db_outer = InMemoryArrowDatabase()
+    base_source = DictSource([{"x": 1}], source_id="base")
+    inner_cached = CachedSource(
+        source=base_source, cache_database=db_inner, cache_path_prefix=("inner",)
+    )
+    outer_cached = CachedSource(
+        source=inner_cached, cache_database=db_outer, cache_path_prefix=("outer",)
+    )
+
+    registry = DatabaseRegistry()
+    config = outer_cached.to_config(db_registry=registry)
+
+    assert isinstance(config["cache_database"], str), "outer cache_database should be a key"
+    # Inner source's cache_database must also use the registry key, not inline dict
+    assert isinstance(config["inner_source"]["cache_database"], str), (
+        "inner cache_database should be a registry key when db_registry is forwarded"
+    )
+
+
+def test_nested_cached_source_from_config_forwards_db_registry():
+    """CachedSource.from_config must forward db_registry to inner source resolution.
+
+    If the inner source is itself a CachedSource serialized with a registry key
+    for its cache_database, from_config must pass the registry through so the
+    inner source can resolve the key.  Without forwarding, from_config raises
+    ValueError('cache_database is a registry key ... but no db_registry was provided').
+    """
+    from orcapod.core.sources.cached_source import CachedSource
+    from orcapod.core.sources.dict_source import DictSource
+
+    db_inner = InMemoryArrowDatabase()
+    db_outer = InMemoryArrowDatabase()
+    base_source = DictSource([{"x": 1}], source_id="base")
+    inner_cached = CachedSource(
+        source=base_source, cache_database=db_inner, cache_path_prefix=("inner",)
+    )
+    outer_cached = CachedSource(
+        source=inner_cached, cache_database=db_outer, cache_path_prefix=("outer",)
+    )
+
+    registry = DatabaseRegistry()
+    config = outer_cached.to_config(db_registry=registry)
+    # Manually replace inner_source cache_database with a registry key to
+    # simulate a correctly serialized nested CachedSource config (testing
+    # from_config in isolation from the to_config bug).
+    inner_db_config = db_inner.to_config()
+    inner_key = registry.register(inner_db_config)
+    config["inner_source"]["cache_database"] = inner_key
+
+    # Round-trip: from_config must forward db_registry to resolve inner key
+    outer2 = CachedSource.from_config(config, db_registry=registry)
+    assert outer2._cache_database is not None
+    assert outer2._source._cache_database is not None
+
+
 # ---------------------------------------------------------------------------
 # Task 4: _source_proxy_from_config with node_descriptor
 # ---------------------------------------------------------------------------

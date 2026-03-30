@@ -1825,3 +1825,62 @@ def test_save_full_level_equivalent_to_standard(tmp_path):
         data = json.load(f)
     assert data["level"] == "full"
     assert "databases" in data
+
+
+# ---------------------------------------------------------------------------
+# Copilot review fixes (PR #120)
+# ---------------------------------------------------------------------------
+
+
+def test_load_definition_level_raises_clear_error(tmp_path):
+    """Loading a definition-level save raises a clear ValueError mentioning 'definition'.
+
+    Previously fell through to the generic "Missing 'databases' block" error.
+    """
+    pipeline = _make_simple_pipeline_for_level_tests(tmp_path)
+    path = tmp_path / "definition.json"
+    pipeline.save(str(path), level="definition")
+
+    with pytest.raises(ValueError, match="definition"):
+        Pipeline.load(str(path))
+
+
+def test_load_operator_node_pipeline_path_has_pipeline_name_prefix(tmp_path):
+    """Operator loaded from a new-format save must use the pipeline name as path prefix.
+
+    In the new format, pipeline_path is never stored in node descriptors.
+    OperatorNode.from_descriptor() must take the prefix from databases["pipeline_path_prefix"]
+    rather than deriving it from the missing stored pipeline_path.
+    """
+    from orcapod.core.operators import SelectPacketColumns
+
+    csv_path = str(tmp_path / "data.csv")
+    _write_csv(csv_path, [{"name": "alice", "y": 2}, {"name": "bob", "y": 4}])
+
+    db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
+    source = CSVSource(file_path=csv_path, tag_columns=["name"], source_id="people")
+    pf = PythonPacketFunction(
+        function=transform_func,
+        output_keys="result",
+        function_name="transform_func",
+    )
+    pod = FunctionPod(packet_function=pf)
+    select_op = SelectPacketColumns(columns=["result"])
+
+    pipeline = Pipeline(name="prefixtest", pipeline_database=db)
+    with pipeline:
+        fn_result = pod.process(source, label="fn")
+        select_op.process(fn_result, label="sel")
+    pipeline.run()
+
+    path = tmp_path / "pipeline.json"
+    pipeline.save(str(path))
+    loaded = Pipeline.load(str(path), mode="full")
+
+    sel_node = loaded.compiled_nodes["sel"]
+    pp = sel_node.pipeline_path
+    # The pipeline_path must start with the pipeline name, not be empty or start
+    # with the operator's own URI component
+    assert len(pp) > 0 and pp[0] == "prefixtest", (
+        f"Expected pipeline_path to start with 'prefixtest', got {pp!r}"
+    )

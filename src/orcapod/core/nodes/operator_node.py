@@ -179,24 +179,30 @@ class OperatorNode(StreamBase):
             cache_mode = CacheMode.OFF
 
         if operator is not None and input_streams:
-            # Full mode: construct normally
-            pipeline_path = tuple(descriptor.get("pipeline_path", ()))
-            # Derive pipeline_path_prefix by stripping the suffix that
-            # __init__ appends: operator.uri + schema:{hash} + instance:{hash} (2 elements).
-            uri_len = len(operator.uri) + 2  # +2 for schema/instance components
-            if len(pipeline_path) > uri_len:
-                prefix = pipeline_path[:-uri_len]
-            elif len(pipeline_path) == uri_len:
-                prefix = ()
+            # Full mode: construct normally.
+            # Prefer the pipeline_path_prefix hint from the databases dict (new format:
+            # pipeline_path is not stored in the descriptor). Fall back to deriving the
+            # prefix from a stored pipeline_path for backward compatibility with old saves.
+            if "pipeline_path_prefix" in databases:
+                prefix = tuple(databases["pipeline_path_prefix"])
             else:
-                import logging as _logging
-                _logging.getLogger(__name__).warning(
-                    "pipeline_path %r is shorter than expected (uri_len=%d); "
-                    "using empty prefix — DB path may be incorrect.",
-                    pipeline_path,
-                    uri_len,
-                )
-                prefix = ()
+                pipeline_path = tuple(descriptor.get("pipeline_path", ()))
+                # Derive pipeline_path_prefix by stripping the suffix that
+                # __init__ appends: operator.uri + schema:{hash} + instance:{hash} (2 elements).
+                uri_len = len(operator.uri) + 2  # +2 for schema/instance components
+                if len(pipeline_path) > uri_len:
+                    prefix = pipeline_path[:-uri_len]
+                elif len(pipeline_path) == uri_len:
+                    prefix = ()
+                else:
+                    import logging as _logging
+                    _logging.getLogger(__name__).warning(
+                        "pipeline_path %r is shorter than expected (uri_len=%d); "
+                        "using empty prefix — DB path may be incorrect.",
+                        pipeline_path,
+                        uri_len,
+                    )
+                    prefix = ()
 
             node = cls(
                 operator=operator,
