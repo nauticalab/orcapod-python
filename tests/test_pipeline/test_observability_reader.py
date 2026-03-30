@@ -172,3 +172,95 @@ class TestDiscovery:
         empty.mkdir()
         with pytest.raises(ValueError, match="No.*Delta.*tables"):
             ObservabilityReader(empty)
+
+
+class TestStatus:
+    def test_deduplicates_to_latest_state(self, results_root: Path):
+        reader = ObservabilityReader(results_root)
+        df = reader.status()
+        # node_a has RUNNING then SUCCESS for each input — only SUCCESS should remain
+        node_a = df.filter(pl.col("node_label") == "node_a")
+        assert len(node_a) == 2
+        assert all(s == "SUCCESS" for s in node_a["state"].to_list())
+
+    def test_maps_cached_to_success(self, tmp_path: Path):
+        root = tmp_path / "results_out" / "pipeline"
+        _write_status_table(root, "p", "cached_node", [
+            _status_row("cached_node", "RUNNING", timestamp="2026-01-01T00:00:01+00:00"),
+            _status_row("cached_node", "CACHED", timestamp="2026-01-01T00:00:02+00:00"),
+        ])
+        reader = ObservabilityReader(tmp_path / "results_out")
+        df = reader.status()
+        assert len(df) == 1
+        assert df["state"].item() == "SUCCESS"
+
+    def test_returns_clean_columns(self, results_root: Path):
+        reader = ObservabilityReader(results_root)
+        df = reader.status()
+        assert "node_label" in df.columns
+        assert "state" in df.columns
+        assert "timestamp" in df.columns
+        assert "error_summary" in df.columns
+        for col in df.columns:
+            assert not col.startswith("_status_")
+            assert not col.startswith("_tag::")
+            assert not col.startswith("_tag_")
+            assert not col.startswith("__")
+
+    def test_includes_failed_with_error_summary(self, results_root: Path):
+        reader = ObservabilityReader(results_root)
+        failed = reader.status().filter(pl.col("state") == "FAILED")
+        assert len(failed) == 1
+        assert failed["node_label"].item() == "node_b"
+        assert failed["subject"].item() == "subj_B"
+        assert "ValueError" in failed["error_summary"].item()
+
+    def test_empty_status_returns_empty_df(self, tmp_path: Path):
+        root = tmp_path / "results_out" / "pipeline"
+        _write_log_table(root, "p", "log_only_node", [
+            _log_row("log_only_node"),
+        ])
+        reader = ObservabilityReader(tmp_path / "results_out")
+        df = reader.status()
+        assert df.is_empty()
+
+
+class TestLogs:
+    def test_returns_clean_columns(self, results_root: Path):
+        reader = ObservabilityReader(results_root)
+        df = reader.logs("node_a")
+        assert "node_label" in df.columns
+        assert "traceback" in df.columns
+        assert "success" in df.columns
+        assert "stdout_log" in df.columns
+        assert "stderr_log" in df.columns
+        assert "timestamp" in df.columns
+        assert "subject" in df.columns
+        assert "session_date" in df.columns
+        for col in df.columns:
+            assert not col.startswith("_log_")
+            assert not col.startswith("_tag::")
+            assert not col.startswith("_tag_")
+            assert not col.startswith("__")
+
+    def test_filters_to_requested_node(self, results_root: Path):
+        reader = ObservabilityReader(results_root)
+        df = reader.logs("node_b")
+        assert all(n == "node_b" for n in df["node_label"].to_list())
+
+    def test_contains_failure_traceback(self, results_root: Path):
+        reader = ObservabilityReader(results_root)
+        df = reader.logs("node_b").filter(pl.col("success") == False)
+        assert len(df) == 1
+        assert "ValueError: bad input" in df["traceback"].item()
+        assert df["stderr_log"].item() == "Error processing subj_B"
+
+    def test_unknown_node_raises(self, results_root: Path):
+        reader = ObservabilityReader(results_root)
+        with pytest.raises(KeyError, match="not_a_node"):
+            reader.logs("not_a_node")
+
+    def test_node_with_no_logs_returns_empty(self, results_root: Path):
+        reader = ObservabilityReader(results_root)
+        df = reader.logs("node_c")
+        assert df.is_empty()
