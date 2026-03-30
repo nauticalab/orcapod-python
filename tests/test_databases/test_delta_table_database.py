@@ -362,3 +362,43 @@ class TestFlushBehaviour:
         result = db.get_all_records(self.PATH, retrieve_pending=False)
         assert result is not None
         assert result.num_rows == 2
+
+
+# ---------------------------------------------------------------------------
+# 11. S3-refactor compatibility: list_sources and UPath
+# ---------------------------------------------------------------------------
+
+
+def test_list_sources(tmp_path):
+    db = DeltaTableDatabase(tmp_path)
+    db.add_record(("alpha",), "r1", make_table(v=[1]), flush=True)
+    db.add_record(("beta", "sub"), "r1", make_table(v=[2]), flush=True)
+
+    sources = db.list_sources()
+    assert ("alpha",) in sources
+    assert ("beta", "sub") in sources
+
+
+def test_upath_local_accepted(tmp_path):
+    """UPath with a local path is accepted without errors."""
+    from upath import UPath
+
+    db = DeltaTableDatabase(UPath(tmp_path))
+    db.add_record(("src",), "r1", make_table(v=[1]), flush=True)
+    result = db.get_record_by_id(("src",), "r1")
+    assert result is not None
+
+
+def test_schema_evolution(tmp_path):
+    db = DeltaTableDatabase(tmp_path, allow_schema_evolution=True)
+    db.add_record(("src",), "r1", make_table(a=[1]), flush=True)
+    db.add_record(
+        ("src",),
+        "r2",
+        make_table(a=[2], b=["new-col"]),
+        schema_handling="merge",
+        flush=True,
+    )
+    result = db.get_all_records(("src",))
+    assert result is not None
+    assert "b" in result.column_names
