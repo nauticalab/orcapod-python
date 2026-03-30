@@ -106,7 +106,7 @@ def test_s3_upath_credentials(s3_base_uri, minio_server):
 
 def test_s3_list_sources_raises(s3_base_uri, s3_storage_options):
     db = DeltaTableDatabase(s3_base_uri, storage_options=s3_storage_options)
-    with pytest.raises(AttributeError):
+    with pytest.raises(NotImplementedError, match="not supported for cloud"):
         db.list_sources()
 
 

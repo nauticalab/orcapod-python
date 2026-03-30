@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import logging
 from collections import defaultdict
 from collections.abc import Collection, Mapping
@@ -7,12 +5,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from orcapod.utils.lazy_module import LazyModule
+from orcapod.databases.storage_utils import is_cloud_uri, parse_base_path
 
 if TYPE_CHECKING:
     import deltalake
     import polars as pl
     import pyarrow as pa
     import pyarrow.compute as pc
+    from upath import UPath
 else:
     deltalake = LazyModule("deltalake")
     pa = LazyModule("pyarrow")
@@ -42,32 +42,35 @@ class DeltaTableDatabase:
 
     def __init__(
         self,
-        base_path: str | Path,
+        base_path: "str | Path | UPath",
+        storage_options: "dict[str, str] | None" = None,
         create_base_path: bool = True,
         batch_size: int = 1000,
         max_hierarchy_depth: int = 10,
         allow_schema_evolution: bool = True,
     ):
-        self.base_path = Path(base_path)
+        self._base_uri, self._storage_options = parse_base_path(base_path, storage_options)
+        self._is_cloud: bool = is_cloud_uri(self._base_uri)
         self.batch_size = batch_size
         self.max_hierarchy_depth = max_hierarchy_depth
         self.allow_schema_evolution = allow_schema_evolution
 
-        if create_base_path:
-            self.base_path.mkdir(parents=True, exist_ok=True)
-        elif not self.base_path.exists():
-            raise ValueError(
-                f"Base path {self.base_path} does not exist and create_base_path=False"
-            )
+        if not self._is_cloud:
+            # Keep self.base_path for local-path operations (list_sources, etc.)
+            # NOTE: do NOT access self.base_path on cloud instances.
+            self.base_path = Path(self._base_uri)
+            if create_base_path:
+                self.base_path.mkdir(parents=True, exist_ok=True)
+            elif not self.base_path.exists():
+                raise ValueError(
+                    f"Base path {self.base_path} does not exist and create_base_path=False"
+                )
+        # For cloud paths: create_base_path is silently ignored (no directory needed).
 
-        # Cache for Delta tables to avoid repeated initialization
-        self._delta_table_cache: dict[str, DeltaTable] = {}
-
-        # Batch management
+        self._delta_table_cache: dict[str, "deltalake.DeltaTable"] = {}
         self._pending_batches: dict[str, pa.Table] = {}
         self._pending_record_ids: dict[str, set[str]] = defaultdict(set)
         self._existing_ids_cache: dict[str, set[str]] = defaultdict(set)
-        # TODO: reconsider this approach as this is NOT serializable
         self._cache_dirty: dict[str, bool] = defaultdict(lambda: True)
 
     def _clear_pending(self):
@@ -94,12 +97,15 @@ class DeltaTableDatabase:
             return component.replace(":", "!")
         return component
 
-    def _get_table_path(self, record_path: tuple[str, ...]) -> Path:
-        """Get the filesystem path for a given source path."""
-        path = self.base_path
-        for subpath in record_path:
-            path = path / self._sanitize_path_component(subpath)
-        return path
+    def _get_table_uri(self, record_path: tuple[str, ...]) -> str:
+        """Get the URI for a given record path (works for local and cloud)."""
+        if self._is_cloud:
+            return self._base_uri.rstrip("/") + "/" + "/".join(record_path)
+        else:
+            path = Path(self._base_uri)
+            for subpath in record_path:
+                path = path / self._sanitize_path_component(subpath)
+            return str(path)
 
     def _validate_record_path(self, record_path: tuple[str, ...]) -> None:
         # TODO: consider removing this as path creation can be tried directly
@@ -127,16 +133,14 @@ class DeltaTableDatabase:
                     f"Source path component {i} is invalid: {repr(component)}"
                 )
 
-            # Check for filesystem-unsafe characters.
-            # ':' is handled by _sanitize_path_component (replaced on Windows),
-            # so it is intentionally absent from this list.
-            unsafe_chars = ["/", "\\", "*", "?", '"', "<", ">", "|", "\0"]
+            # Check for filesystem-unsafe characters
+            unsafe_chars = ["/", "\\", ":", "*", "?", '"', "<", ">", "|", "\0"]
             if any(char in component for char in unsafe_chars):
                 raise ValueError(
                     f"Source path {record_path} component {component} contains invalid characters: {repr(component)}"
                 )
 
-    def _get_delta_table(self, record_path: tuple[str, ...]) -> DeltaTable | None:
+    def _get_delta_table(self, record_path: tuple[str, ...]) -> "deltalake.DeltaTable | None":
         """
         Get an existing Delta table, either from cache or by loading it.
 
@@ -144,10 +148,10 @@ class DeltaTableDatabase:
             record_path: Tuple of path components
 
         Returns:
-            DeltaTable instance or None if table doesn't exist
+            deltalake.DeltaTable instance or None if table doesn't exist
         """
         record_key = self._get_record_key(record_path)
-        table_path = self._get_table_path(record_path)
+        table_uri = self._get_table_uri(record_path)
 
         # Check cache first
         if dt := self._delta_table_cache.get(record_key):
@@ -155,7 +159,7 @@ class DeltaTableDatabase:
 
         try:
             # Try to load existing table
-            delta_table = deltalake.DeltaTable(str(table_path))
+            delta_table = deltalake.DeltaTable(table_uri, storage_options=self._storage_options or None)
             self._delta_table_cache[record_key] = delta_table
             logger.debug(f"Loaded existing Delta table for {record_key}")
             return delta_table
@@ -769,7 +773,7 @@ class DeltaTableDatabase:
 
     def _read_delta_table(
         self,
-        delta_table: DeltaTable,
+        delta_table: "deltalake.DeltaTable",
         filters: list | None = None,
         expression: "pc.Expression | None" = None,
     ) -> "pa.Table":
@@ -813,6 +817,31 @@ class DeltaTableDatabase:
 
         return dataset.to_table()
 
+    def to_config(self) -> dict[str, Any]:
+        """Serialize database configuration to a JSON-compatible dict."""
+        config: dict[str, Any] = {
+            "type": "delta_table",
+            "base_path": self._base_uri,
+            "batch_size": self.batch_size,
+            "max_hierarchy_depth": self.max_hierarchy_depth,
+            "allow_schema_evolution": self.allow_schema_evolution,
+        }
+        if self._storage_options:
+            config["storage_options"] = self._storage_options
+        return config
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "DeltaTableDatabase":
+        """Reconstruct a DeltaTableDatabase from a config dict."""
+        return cls(
+            base_path=config["base_path"],
+            storage_options=config.get("storage_options"),
+            create_base_path=True,
+            batch_size=config.get("batch_size", 1000),
+            max_hierarchy_depth=config.get("max_hierarchy_depth", 10),
+            allow_schema_evolution=config.get("allow_schema_evolution", True),
+        )
+
     def flush(self) -> None:
         """Flush all pending batches."""
         # TODO: capture and re-raise exceptions at the end
@@ -822,27 +851,6 @@ class DeltaTableDatabase:
                 self.flush_batch(record_path)
             except Exception as e:
                 logger.error(f"Error flushing batch for {record_key}: {e}")
-
-    def to_config(self) -> dict[str, Any]:
-        """Serialize database configuration to a JSON-compatible dict."""
-        return {
-            "type": "delta_table",
-            "base_path": str(self.base_path),
-            "batch_size": self.batch_size,
-            "max_hierarchy_depth": self.max_hierarchy_depth,
-            "allow_schema_evolution": self.allow_schema_evolution,
-        }
-
-    @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "DeltaTableDatabase":
-        """Reconstruct a DeltaTableDatabase from a config dict."""
-        return cls(
-            base_path=config["base_path"],
-            create_base_path=True,
-            batch_size=config.get("batch_size", 1000),
-            max_hierarchy_depth=config.get("max_hierarchy_depth", 10),
-            allow_schema_evolution=config.get("allow_schema_evolution", True),
-        )
 
     def flush_batch(self, record_path: tuple[str, ...]) -> None:
         """
@@ -868,8 +876,9 @@ class DeltaTableDatabase:
             # Combine all tables in the batch
             combined_table = pending_batch.combine_chunks()
 
-            table_path = self._get_table_path(record_path)
-            table_path.mkdir(parents=True, exist_ok=True)
+            table_uri = self._get_table_uri(record_path)
+            if not self._is_cloud:
+                Path(table_uri).mkdir(parents=True, exist_ok=True)
 
             # Check if table exists
             delta_table = self._get_delta_table(record_path)
@@ -877,10 +886,11 @@ class DeltaTableDatabase:
             if delta_table is None:
                 # TODO: reconsider mode="overwrite" here
                 deltalake.write_deltalake(
-                    table_path,
+                    table_uri,
                     combined_table,
                     mode="overwrite",
                     schema_mode="merge" if self.allow_schema_evolution else "overwrite",
+                    storage_options=self._storage_options or None,
                 )
                 logger.debug(
                     f"Created new Delta table for {record_key} with {len(combined_table)} records"
@@ -899,7 +909,7 @@ class DeltaTableDatabase:
                 )
 
             # Update cache
-            self._delta_table_cache[record_key] = deltalake.DeltaTable(str(table_path))
+            self._delta_table_cache[record_key] = deltalake.DeltaTable(table_uri, storage_options=self._storage_options or None)
 
             # invalide record id cache
             self._invalidate_cache(record_path)
@@ -910,3 +920,41 @@ class DeltaTableDatabase:
             self._pending_batches[record_key] = pending_batch
             self._pending_record_ids[record_key] = pending_ids
             raise
+
+    def list_sources(self) -> list[tuple[str, ...]]:
+        """
+        List all record paths that contain a valid Delta table under base_path.
+
+        Returns:
+            List of record_path tuples (e.g. [("alpha",), ("beta", "sub")]).
+
+        Raises:
+            NotImplementedError: For cloud base paths (filesystem walk not supported).
+        """
+        if self._is_cloud:
+            raise NotImplementedError(
+                "list_sources() is not supported for cloud storage paths"
+            )
+
+        sources: list[tuple[str, ...]] = []
+
+        def _scan(current_path: Path, path_components: tuple[str, ...]) -> None:
+            if len(path_components) >= self.max_hierarchy_depth:
+                return
+            try:
+                items = list(current_path.iterdir())
+            except OSError as e:
+                logger.warning("Could not list directory %s during list_sources scan: %s", current_path, e)
+                return
+            for item in items:
+                if not item.is_dir():
+                    continue
+                components = path_components + (item.name,)
+                try:
+                    deltalake.DeltaTable(str(item), storage_options=self._storage_options or None)
+                    sources.append(components)
+                except deltalake.exceptions.TableNotFoundError:
+                    _scan(item, components)
+
+        _scan(self.base_path, ())
+        return sources
