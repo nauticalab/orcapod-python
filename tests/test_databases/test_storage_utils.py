@@ -1,6 +1,4 @@
 """Unit tests for orcapod.databases.storage_utils."""
-from pathlib import Path
-
 import pytest
 from upath import UPath
 
@@ -45,6 +43,15 @@ def test_parse_base_path_local_path_object(tmp_path):
 
 def test_parse_base_path_local_string(tmp_path):
     uri, opts = parse_base_path(str(tmp_path))
+    assert uri == str(tmp_path)
+    assert opts == {}
+
+
+def test_parse_base_path_upath_local(tmp_path):
+    """A local UPath should yield empty opts (no cloud credentials to translate)."""
+    from upath import UPath
+    up = UPath(tmp_path)
+    uri, opts = parse_base_path(up)
     assert uri == str(tmp_path)
     assert opts == {}
 
