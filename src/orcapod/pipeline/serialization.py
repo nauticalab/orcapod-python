@@ -45,6 +45,8 @@ class DatabaseRegistry:
 
     def __init__(self) -> None:
         self._entries: dict[str, dict] = {}
+        # Reverse map: canonical JSON string → assigned key, for O(1) re-registration
+        self._reverse: dict[str, str] = {}
 
     def register(self, config: dict) -> str:
         """Register a database config and return its registry key.
@@ -53,10 +55,11 @@ class DatabaseRegistry:
         On hash collision (different configs with same 8-char prefix), appends
         ``_2``, ``_3``... to the key.
         """
-        # Check if already registered under any key (handles collision-suffix keys)
-        for existing_key, existing_config in self._entries.items():
-            if existing_config == config:
-                return existing_key
+        canonical = _json.dumps(config, sort_keys=True, separators=(",", ":"))
+
+        # O(1) lookup via reverse map
+        if canonical in self._reverse:
+            return self._reverse[canonical]
 
         # Not registered yet — find the right key
         base_key = self._make_key(config)
@@ -69,6 +72,7 @@ class DatabaseRegistry:
             key = f"{base_key}_{i}"
 
         self._entries[key] = config
+        self._reverse[canonical] = key
         return key
 
     def resolve(self, key: str) -> dict:
@@ -84,6 +88,10 @@ class DatabaseRegistry:
         """Reconstruct a registry from the saved ``databases`` block."""
         registry = cls()
         registry._entries = dict(data)
+        registry._reverse = {
+            _json.dumps(cfg, sort_keys=True, separators=(",", ":")): key
+            for key, cfg in data.items()
+        }
         return registry
 
     @staticmethod

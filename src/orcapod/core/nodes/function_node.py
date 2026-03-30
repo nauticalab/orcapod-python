@@ -241,15 +241,19 @@ class FunctionNode(StreamBase):
 
         if function_pod is not None and input_stream is not None:
             # Full / READ_ONLY / CACHE_ONLY mode: construct normally via __init__.
-            pipeline_path = tuple(descriptor.get("pipeline_path", ()))
-            # Derive pipeline_path_prefix by stripping the suffix that
-            # __init__ appends (packet_function.uri + two hash elements).
-            # The descriptor stores the complete pipeline_path; we need
-            # to reconstruct the prefix that was originally passed to
-            # __init__. The suffix added is:
-            #   pf.uri + (f"schema:{pipeline_hash}", f"instance:{content_hash}")
-            pf_uri_len = len(function_pod.packet_function.uri) + 2  # +2 for schema/instance
-            if pipeline_path:
+            # Prefer the pipeline_path_prefix hint from the databases dict (new-format
+            # loading: Pipeline.load() always passes this). Fall back to deriving the
+            # prefix from a stored pipeline_path only when no hint is available
+            # (direct from_descriptor calls without a loader hint).
+            if hint_prefix is not None:
+                prefix = hint_prefix
+            else:
+                pipeline_path = tuple(descriptor.get("pipeline_path", ()))
+                # Derive pipeline_path_prefix by stripping the suffix that
+                # __init__ appends (packet_function.uri + two hash elements).
+                # The suffix added is:
+                #   pf.uri + (f"schema:{pipeline_hash}", f"instance:{content_hash}")
+                pf_uri_len = len(function_pod.packet_function.uri) + 2  # +2 for schema/instance
                 if len(pipeline_path) > pf_uri_len:
                     prefix = pipeline_path[:-pf_uri_len]
                 elif len(pipeline_path) == pf_uri_len:
@@ -262,10 +266,7 @@ class FunctionNode(StreamBase):
                         pipeline_path,
                         pf_uri_len,
                     )
-                    prefix = hint_prefix if hint_prefix is not None else ()
-            else:
-                # New format: pipeline_path not stored; use hint_prefix if available
-                prefix = hint_prefix if hint_prefix is not None else ()
+                    prefix = ()
 
             # Derive result_path_prefix from the stored result_record_path
             # by stripping the URI suffix that CachedFunctionPod appends.

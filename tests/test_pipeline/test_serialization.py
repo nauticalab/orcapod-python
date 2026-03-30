@@ -1884,3 +1884,88 @@ def test_load_operator_node_pipeline_path_has_pipeline_name_prefix(tmp_path):
     assert len(pp) > 0 and pp[0] == "prefixtest", (
         f"Expected pipeline_path to start with 'prefixtest', got {pp!r}"
     )
+
+
+def test_load_raises_on_missing_function_database_registry_key(tmp_path):
+    """Loading raises ValueError when function_database key is not in the databases registry.
+
+    A non-null function_database key that cannot be resolved from the registry must
+    raise a clear ValueError rather than silently using None and mis-scoping function
+    records (or crashing later with a confusing error).
+    """
+    pipeline_db = DeltaTableDatabase(base_path=str(tmp_path / "pdb"))
+    function_db = DeltaTableDatabase(base_path=str(tmp_path / "fdb"))
+    source = DictSource(data=[{"x": 1, "y": 2}], tag_columns=["x"], source_id="s")
+    pf = PythonPacketFunction(
+        function=transform_func,
+        output_keys=["result"],
+        function_name="transform_func",
+    )
+    pod = FunctionPod(packet_function=pf)
+    pipeline = Pipeline(
+        name="test",
+        pipeline_database=pipeline_db,
+        function_database=function_db,
+    )
+    with pipeline:
+        pod.process(source, label="transform")
+
+    path = tmp_path / "pipeline.json"
+    pipeline.save(str(path))
+
+    # Corrupt: replace the function_database key with one that doesn't exist
+    with open(path) as f:
+        data = json.load(f)
+    data["pipeline"]["function_database"] = "db_nonexistent"
+    with open(path, "w") as f:
+        json.dump(data, f)
+
+    with pytest.raises(ValueError, match="db_nonexistent"):
+        Pipeline.load(str(path))
+
+
+def test_load_function_node_pipeline_path_prefers_hint_over_stored_pipeline_path(tmp_path):
+    """FunctionNode from_descriptor prefers the pipeline_path_prefix hint over derivation.
+
+    When a pipeline_path IS stored in the descriptor (old-format saves), but the loader
+    also provides a pipeline_path_prefix hint, the hint must take priority. Deriving from
+    a stored old-format path (ending with node:{hash}, 1 component) with the new +2 suffix
+    logic over-strips by 1 and loses the pipeline-name prefix.
+    """
+    csv_path = str(tmp_path / "data.csv")
+    _write_csv(csv_path, [{"name": "alice", "y": 2}, {"name": "bob", "y": 4}])
+
+    db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
+    source = CSVSource(file_path=csv_path, tag_columns=["name"], source_id="people")
+    pf = PythonPacketFunction(
+        function=transform_func,
+        output_keys="result",
+        function_name="transform_func",
+    )
+    pod = FunctionPod(packet_function=pf)
+
+    pipeline = Pipeline(name="prefixtest", pipeline_database=db)
+    with pipeline:
+        pod.process(source, label="fn")
+    pipeline.run()
+
+    path = tmp_path / "pipeline.json"
+    pipeline.save(str(path))
+
+    # Inject a fake old-format pipeline_path (node: suffix, 1 component) into the
+    # function node descriptor. The +2 derivation logic would over-strip this and lose
+    # "prefixtest" from the prefix.
+    with open(path) as f:
+        data = json.load(f)
+    fn_descriptor = next(v for v in data["nodes"].values() if v["node_type"] == "function")
+    node_uri = fn_descriptor.get("node_uri", ["transform_func"])
+    fn_descriptor["pipeline_path"] = ["prefixtest"] + list(node_uri) + ["node:oldhash"]
+    with open(path, "w") as f:
+        json.dump(data, f)
+
+    loaded = Pipeline.load(str(path), mode="full")
+    fn_node = loaded.compiled_nodes["fn"]
+    pp = fn_node.pipeline_path
+    assert len(pp) > 0 and pp[0] == "prefixtest", (
+        f"Expected pipeline_path to start with 'prefixtest', got {pp!r}"
+    )
