@@ -541,6 +541,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             level: Save detail level. One of:
                 - ``"minimal"``: topology + identity only. Not round-trippable.
                 - ``"definition"``: adds full pod/stream configs. No pipeline-level DBs.
+                  **Not loadable** via :meth:`Pipeline.load` (no database config included).
                 - ``"standard"`` (default): adds pipeline-level DB registry. Round-trippable.
                 - ``"full"``: same as standard (observer serialization TBD).
         """
@@ -584,19 +585,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 },
             }
 
-            # node_uri: at all levels
-            if isinstance(node, SourceNode):
-                stream = node.stream
-                if isinstance(stream, cp.SourceProtocol):
-                    cfg = stream.to_config()
-                    stream_type = cfg.get("source_type", "unknown")
-                    source_id = cfg.get("source_id") or getattr(stream, "source_id", "")
-                else:
-                    stream_type = "stream"
-                    source_id = ""
-                descriptor["node_uri"] = [stream_type, str(source_id or "")]
-            else:
-                descriptor["node_uri"] = list(node.node_uri)
+            # node_uri: at all levels — use node.node_uri property for all node types
+            descriptor["node_uri"] = list(node.node_uri)
 
             # data_context_key: definition+ only
             if include_configs:
@@ -789,11 +779,15 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             pipeline_db_config = db_registry_data[pipeline_db_key]
             pipeline_db = resolve_database_from_config(pipeline_db_config)
             fn_db_key = pipeline_meta.get("function_database")
-            function_db = (
-                resolve_database_from_config(db_registry_data[fn_db_key])
-                if fn_db_key is not None and fn_db_key in db_registry_data
-                else None
-            )
+            if fn_db_key is None:
+                function_db = None
+            elif fn_db_key not in db_registry_data:
+                raise ValueError(
+                    f"Function database key {fn_db_key!r} not found in databases registry. "
+                    f"Available keys: {sorted(db_registry_data.keys())}"
+                )
+            else:
+                function_db = resolve_database_from_config(db_registry_data[fn_db_key])
         elif "databases" in pipeline_meta:
             # Old format: pipeline.databases.{pipeline_database: {...}}
             db_configs = pipeline_meta["databases"]
