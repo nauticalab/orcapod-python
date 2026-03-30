@@ -92,15 +92,24 @@ class CachedSource(RootSource):
             Dict containing the inner source config, cache database config,
             cache path prefix, and resolved cache path (for cache-only loading).
         """
+        import inspect as _inspect
+
         db_config = self._cache_database.to_config()
         if db_registry is not None:
             cache_db_ref = db_registry.register(db_config)
         else:
             cache_db_ref = db_config
 
+        # Forward db_registry to inner source if it supports the parameter
+        inner_to_config = self._source.to_config
+        if "db_registry" in _inspect.signature(inner_to_config).parameters:
+            inner_source_config = inner_to_config(db_registry=db_registry)
+        else:
+            inner_source_config = inner_to_config()
+
         return {
             "source_type": "cached",
-            "inner_source": self._source.to_config(),
+            "inner_source": inner_source_config,
             "cache_database": cache_db_ref,
             "cache_path_prefix": list(self._cache_path_prefix),
             "cache_path": list(self.cache_path),
@@ -143,7 +152,7 @@ class CachedSource(RootSource):
             cache_db = resolve_database_from_config(cache_db_ref)
 
         inner_source = resolve_source_from_config(
-            config["inner_source"], fallback_to_proxy=True
+            config["inner_source"], fallback_to_proxy=True, db_registry=db_registry
         )
 
         return cls(

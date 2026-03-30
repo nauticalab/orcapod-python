@@ -768,6 +768,12 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 "only, not enough to reconstruct the pipeline. "
                 "Save with level='standard' or higher."
             )
+        if level == "definition":
+            raise ValueError(
+                "Cannot load a 'definition'-level save: it contains node configs but no "
+                "pipeline database configuration, so nodes cannot be attached to storage. "
+                "Save with level='standard' or higher."
+            )
 
         # 2. Reconstruct databases
         pipeline_meta = data["pipeline"]
