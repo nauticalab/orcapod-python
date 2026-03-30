@@ -1,4 +1,4 @@
-"""Tests for ResultsReader."""
+"""Tests for ObservabilityReader."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from orcapod.pipeline.results_reader import ResultsReader
+from orcapod.pipeline.results_reader import ObservabilityReader
 
 
 def _write_status_table(
@@ -156,19 +156,19 @@ def results_root(tmp_path: Path) -> Path:
 
 class TestDiscovery:
     def test_discovers_nodes(self, results_root: Path):
-        reader = ResultsReader(results_root)
+        reader = ObservabilityReader(results_root)
         assert reader.nodes == ["node_a", "node_b", "node_c"]
 
     def test_discovers_tag_columns(self, results_root: Path):
-        reader = ResultsReader(results_root)
+        reader = ObservabilityReader(results_root)
         assert reader.tag_columns == ["session_date", "subject"]
 
     def test_raises_on_missing_root(self, tmp_path: Path):
         with pytest.raises(ValueError, match="does not exist"):
-            ResultsReader(tmp_path / "nonexistent")
+            ObservabilityReader(tmp_path / "nonexistent")
 
     def test_raises_on_empty_root(self, tmp_path: Path):
         empty = tmp_path / "empty"
         empty.mkdir()
         with pytest.raises(ValueError, match="No.*Delta.*tables"):
-            ResultsReader(empty)
+            ObservabilityReader(empty)
