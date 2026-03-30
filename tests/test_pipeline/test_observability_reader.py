@@ -7,7 +7,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from orcapod.pipeline.results_reader import ObservabilityReader
+from orcapod.pipeline.observability_reader import ObservabilityReader
 
 
 def _write_status_table(
