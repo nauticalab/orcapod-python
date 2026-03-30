@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from upath import UPath
 
 
-class ResultsReader:
+class ObservabilityReader:
     """Auto-discovers and queries pipeline status and log Delta tables.
 
     Provides two DataFrames: ``status()`` for execution state and
