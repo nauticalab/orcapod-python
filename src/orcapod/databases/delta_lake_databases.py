@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from collections import defaultdict
 from collections.abc import Collection, Mapping
@@ -42,8 +44,8 @@ class DeltaTableDatabase:
 
     def __init__(
         self,
-        base_path: "str | Path | UPath",
-        storage_options: "dict[str, str] | None" = None,
+        base_path: str | Path | UPath,
+        storage_options: dict[str, str] | None = None,
         create_base_path: bool = True,
         batch_size: int = 1000,
         max_hierarchy_depth: int = 10,
@@ -67,7 +69,7 @@ class DeltaTableDatabase:
                 )
         # For cloud paths: create_base_path is silently ignored (no directory needed).
 
-        self._delta_table_cache: dict[str, "deltalake.DeltaTable"] = {}
+        self._delta_table_cache: dict[str, deltalake.DeltaTable] = {}
         self._pending_batches: dict[str, pa.Table] = {}
         self._pending_record_ids: dict[str, set[str]] = defaultdict(set)
         self._existing_ids_cache: dict[str, set[str]] = defaultdict(set)
@@ -97,14 +99,21 @@ class DeltaTableDatabase:
             return component.replace(":", "!")
         return component
 
-    def _get_table_uri(self, record_path: tuple[str, ...]) -> str:
-        """Get the URI for a given record path (works for local and cloud)."""
+    def _get_table_uri(self, record_path: tuple[str, ...], create_dir: bool = False) -> str:
+        """Get the URI for a given record path (works for local and cloud).
+
+        Args:
+            record_path: Tuple of path components.
+            create_dir: If True, create the local directory (no-op for cloud paths).
+        """
         if self._is_cloud:
             return self._base_uri.rstrip("/") + "/" + "/".join(record_path)
         else:
             path = Path(self._base_uri)
             for subpath in record_path:
                 path = path / self._sanitize_path_component(subpath)
+            if create_dir:
+                path.mkdir(parents=True, exist_ok=True)
             return str(path)
 
     def _validate_record_path(self, record_path: tuple[str, ...]) -> None:
@@ -143,7 +152,7 @@ class DeltaTableDatabase:
                     f"Source path {record_path} component {component} contains invalid characters: {repr(component)}"
                 )
 
-    def _get_delta_table(self, record_path: tuple[str, ...]) -> "deltalake.DeltaTable | None":
+    def _get_delta_table(self, record_path: tuple[str, ...]) -> deltalake.DeltaTable | None:
         """
         Get an existing Delta table, either from cache or by loading it.
 
@@ -177,8 +186,8 @@ class DeltaTableDatabase:
             raise
 
     def _ensure_record_id_column(
-        self, arrow_data: "pa.Table", record_id: str
-    ) -> "pa.Table":
+        self, arrow_data: pa.Table, record_id: str
+    ) -> pa.Table:
         """Ensure the table has an record id column."""
         if self.RECORD_ID_COLUMN not in arrow_data.column_names:
             # Add record_id column at the beginning
@@ -186,15 +195,15 @@ class DeltaTableDatabase:
             arrow_data = arrow_data.add_column(0, self.RECORD_ID_COLUMN, key_array)
         return arrow_data
 
-    def _remove_record_id_column(self, arrow_data: "pa.Table") -> "pa.Table":
+    def _remove_record_id_column(self, arrow_data: pa.Table) -> pa.Table:
         """Remove the record id column if it exists."""
         if self.RECORD_ID_COLUMN in arrow_data.column_names:
             arrow_data = arrow_data.drop([self.RECORD_ID_COLUMN])
         return arrow_data
 
     def _handle_record_id_column(
-        self, arrow_data: "pa.Table", record_id_column: str | None = None
-    ) -> "pa.Table":
+        self, arrow_data: pa.Table, record_id_column: str | None = None
+    ) -> pa.Table:
         """
         Handle record_id column based on add_record_id_column parameter.
 
@@ -300,7 +309,7 @@ class DeltaTableDatabase:
         self,
         record_path: tuple[str, ...],
         record_id: str,
-        record: "pa.Table",
+        record: pa.Table,
         skip_duplicates: bool = False,
         flush: bool = False,
         schema_handling: Literal["merge", "error", "coerce"] = "error",
@@ -718,7 +727,7 @@ class DeltaTableDatabase:
     def get_records_by_ids(
         self,
         record_path: tuple[str, ...],
-        record_ids: "Collection[str] | pl.Series | pa.Array",
+        record_ids: Collection[str] | pl.Series | pa.Array,
         record_id_column: str | None = None,
         flush: bool = False,
     ) -> "pa.Table | None":
@@ -776,10 +785,10 @@ class DeltaTableDatabase:
 
     def _read_delta_table(
         self,
-        delta_table: "deltalake.DeltaTable",
+        delta_table: deltalake.DeltaTable,
         filters: list | None = None,
-        expression: "pc.Expression | None" = None,
-    ) -> "pa.Table":
+        expression: pc.Expression | None = None,
+    ) -> pa.Table:
         """
         Read table using to_pyarrow_dataset with original schema preservation.
 
@@ -834,7 +843,7 @@ class DeltaTableDatabase:
         return config
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "DeltaTableDatabase":
+    def from_config(cls, config: dict[str, Any]) -> DeltaTableDatabase:
         """Reconstruct a DeltaTableDatabase from a config dict."""
         return cls(
             base_path=config["base_path"],
@@ -847,13 +856,19 @@ class DeltaTableDatabase:
 
     def flush(self) -> None:
         """Flush all pending batches."""
-        # TODO: capture and re-raise exceptions at the end
+        errors: list[tuple[str, Exception]] = []
         for record_key in list(self._pending_batches.keys()):
             record_path = tuple(record_key.split("/"))
             try:
                 self.flush_batch(record_path)
             except Exception as e:
                 logger.error(f"Error flushing batch for {record_key}: {e}")
+                errors.append((record_key, e))
+        if errors:
+            failed_keys = [k for k, _ in errors]
+            raise RuntimeError(
+                f"Failed to flush {len(errors)} batch(es): {failed_keys}"
+            ) from errors[0][1]
 
     def flush_batch(self, record_path: tuple[str, ...]) -> None:
         """
@@ -879,9 +894,7 @@ class DeltaTableDatabase:
             # Combine all tables in the batch
             combined_table = pending_batch.combine_chunks()
 
-            table_uri = self._get_table_uri(record_path)
-            if not self._is_cloud:
-                Path(table_uri).mkdir(parents=True, exist_ok=True)
+            table_uri = self._get_table_uri(record_path, create_dir=True)
 
             # Check if table exists
             delta_table = self._get_delta_table(record_path)

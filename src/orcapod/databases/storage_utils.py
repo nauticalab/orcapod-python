@@ -37,7 +37,7 @@ def is_cloud_uri(uri: str) -> bool:
     return scheme in _CLOUD_SCHEMES
 
 
-def _extract_upath_options(upath: "UPath") -> dict[str, str]:
+def _extract_upath_options(upath: UPath) -> dict[str, str]:
     """
     Extract storage options from a UPath and translate to deltalake's AWS_* format.
 
@@ -89,12 +89,8 @@ def parse_base_path(
     except ImportError:
         is_upath = False
 
-    if is_upath:
-        uri = str(base_path)
-        derived = _extract_upath_options(base_path)  # type: ignore[arg-type]
-    else:
-        uri = str(base_path)
-        derived = {}
+    uri = str(base_path)
+    derived = _extract_upath_options(base_path) if is_upath else {}  # type: ignore[arg-type]
 
     merged = {**derived, **(storage_options or {})}
     return uri, merged
