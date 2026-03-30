@@ -116,13 +116,14 @@ not fully resolved by the PR.
 
 When asked to respond to PR reviewer comments:
 
-1. **Fetch and present** — Read all review comments, then present a response plan as a table:
-   each comment, its severity, whether to fix or explain, and the proposed action.
-2. **Wait for approval** — Let the user approve the plan before making changes.
-3. **Fix, then reply** — Make all fixes in a single commit, then post replies to each
+1. **Read all comments carefully** — fetch every review comment on the PR before forming any opinion.
+2. **Evaluate each comment** — decide whether to accept, partially accept, or decline, and why.
+3. **Present a revision plan** — show the full plan (table: comment summary, verdict, proposed action)
+   and **wait for user approval before touching any code or posting any replies**.
+4. **Fix, then reply** — once approved, make all fixes in a single commit, then post replies to each
    reviewer comment explaining what was done (or why it was declined).
 
-Never make fixes silently or skip the plan step.
+Never implement changes or reply to reviewers before the plan has been approved.
 
 ## Git commits
 
