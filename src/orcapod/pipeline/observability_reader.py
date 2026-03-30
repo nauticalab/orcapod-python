@@ -33,8 +33,8 @@ class ObservabilityReader:
                 f"Results root does not exist: {self._root}"
             )
 
-        self._status_tables: dict[str, Path] = {}
-        self._log_tables: dict[str, Path] = {}
+        self._status_tables: dict[str, list[Path]] = {}
+        self._log_tables: dict[str, list[Path]] = {}
         self._discover_tables()
 
         if not self._status_tables and not self._log_tables:
@@ -57,12 +57,16 @@ class ObservabilityReader:
                 idx = parts.index("status")
                 if idx + 1 < len(parts):
                     node_name = parts[idx + 1]
-                    self._status_tables[node_name] = table_dir
+                    self._status_tables.setdefault(node_name, []).append(
+                        table_dir
+                    )
             elif "logs" in parts:
                 idx = parts.index("logs")
                 if idx + 1 < len(parts):
                     node_name = parts[idx + 1]
-                    self._log_tables[node_name] = table_dir
+                    self._log_tables.setdefault(node_name, []).append(
+                        table_dir
+                    )
 
     @property
     def nodes(self) -> list[str]:
@@ -87,9 +91,9 @@ class ObservabilityReader:
         """Lazy-load and return the concatenated status DataFrame."""
         if self._status_df is None:
             frames = []
-            for node_name, table_dir in self._status_tables.items():
-                df = pl.read_delta(str(table_dir))
-                frames.append(df)
+            for table_dirs in self._status_tables.values():
+                for table_dir in table_dirs:
+                    frames.append(pl.read_delta(str(table_dir)))
             if frames:
                 self._status_df = pl.concat(frames, how="diagonal_relaxed")
             else:
@@ -100,9 +104,9 @@ class ObservabilityReader:
         """Lazy-load and return the concatenated logs DataFrame."""
         if self._logs_df is None:
             frames = []
-            for node_name, table_dir in self._log_tables.items():
-                df = pl.read_delta(str(table_dir))
-                frames.append(df)
+            for table_dirs in self._log_tables.values():
+                for table_dir in table_dirs:
+                    frames.append(pl.read_delta(str(table_dir)))
             if frames:
                 self._logs_df = pl.concat(frames, how="diagonal_relaxed")
             else:
@@ -184,6 +188,8 @@ class ObservabilityReader:
             ``state``, ``timestamp``, ``error_summary``.
         """
         df = self._get_status_df()
+        if df.is_empty():
+            return df
         df = self._clean_status_df(df)
 
         # Deduplicate to latest status per (node, input)
@@ -219,7 +225,7 @@ class ObservabilityReader:
         Raises:
             KeyError: If ``node`` is not found.
         """
-        if node not in self._status_tables:
+        if node not in self._status_tables and node not in self._log_tables:
             raise KeyError(
                 f"Node {node!r} not found. Available nodes: {self.nodes}"
             )
