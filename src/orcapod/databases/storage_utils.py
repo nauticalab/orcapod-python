@@ -8,11 +8,14 @@ Provides two public functions:
 """
 from __future__ import annotations
 
-from pathlib import Path
+import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from pathlib import Path
     from upath import UPath
+
+logger = logging.getLogger(__name__)
 
 # Recognised cloud URI schemes
 _CLOUD_SCHEMES = frozenset({"s3", "s3a", "gs", "az", "abfs"})
@@ -43,7 +46,8 @@ def _extract_upath_options(upath: "UPath") -> dict[str, str]:
     """
     try:
         fsspec_opts: dict = dict(getattr(upath, "storage_options", {}))
-    except Exception:
+    except TypeError:
+        logger.warning("Could not extract storage_options from UPath %r; using empty options", upath)
         return {}
 
     result: dict[str, str] = {}
