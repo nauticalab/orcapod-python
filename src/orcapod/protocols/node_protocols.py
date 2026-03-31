@@ -31,6 +31,15 @@ class SourceNodeProtocol(Protocol):
 
     node_type: str
 
+    @property
+    def node_uri(self) -> tuple[str, ...]:
+        """Canonical URI tuple identifying this node's computation.
+
+        Used for path scoping in persistent storage (pipeline_path construction)
+        and serialization (``node_uri`` field in save files).
+        """
+        ...
+
     def execute(
         self,
         *,
@@ -50,6 +59,11 @@ class FunctionNodeProtocol(Protocol):
     """Protocol for function nodes in orchestrated execution."""
 
     node_type: str
+
+    @property
+    def node_uri(self) -> tuple[str, ...]:
+        """Canonical URI tuple identifying this node's computation."""
+        ...
 
     @property
     def pipeline_path(self) -> tuple[str, ...]:
@@ -81,6 +95,11 @@ class OperatorNodeProtocol(Protocol):
     """Protocol for operator nodes in orchestrated execution."""
 
     node_type: str
+
+    @property
+    def node_uri(self) -> tuple[str, ...]:
+        """Canonical URI tuple identifying this node's computation."""
+        ...
 
     def execute(
         self,

@@ -167,15 +167,10 @@ class OperatorNode(StreamBase):
         from orcapod.pipeline.serialization import LoadStatus
 
         pipeline_db = databases.get("pipeline")
-        cache_mode_str = descriptor.get("cache_mode", "OFF")
-        if isinstance(cache_mode_str, str):
-            # Support both uppercase names (old format: "OFF") and
-            # lowercase values (new format: "off")
-            try:
-                cache_mode = CacheMode[cache_mode_str.upper()]
-            except KeyError:
-                cache_mode = CacheMode(cache_mode_str)
-        else:
+        cache_mode_str = descriptor.get("cache_mode", "off")
+        try:
+            cache_mode = CacheMode(cache_mode_str)
+        except ValueError:
             cache_mode = CacheMode.OFF
 
         if operator is not None and input_streams:

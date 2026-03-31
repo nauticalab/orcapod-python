@@ -15,6 +15,7 @@ from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import pyarrow as pa
+    from orcapod.pipeline.serialization import DatabaseRegistry
 else:
     pa = LazyModule("pyarrow")
 
@@ -80,7 +81,7 @@ class CachedSource(RootSource):
     # Serialization
     # -------------------------------------------------------------------------
 
-    def to_config(self, db_registry=None) -> dict[str, Any]:
+    def to_config(self, db_registry: DatabaseRegistry | None = None) -> dict[str, Any]:
         """Serialize this CachedSource configuration to a JSON-compatible dict.
 
         Args:
@@ -118,7 +119,7 @@ class CachedSource(RootSource):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any], db_registry=None) -> "CachedSource":
+    def from_config(cls, config: dict[str, Any], db_registry: DatabaseRegistry | None = None) -> CachedSource:
         """Reconstruct a CachedSource from a config dict.
 
         If the inner source cannot be resolved (e.g. it requires live data

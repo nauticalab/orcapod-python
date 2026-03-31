@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
+
+logger = logging.getLogger(__name__)
 
 from orcapod import contexts
 from orcapod.channels import WritableChannel
@@ -119,14 +122,20 @@ class SourceNode(StreamBase):
         In read-only (deserialized) mode: returns stored value from descriptor.
         """
         if self.stream is None:
-            return tuple(getattr(self, "_stored_node_uri", ()))
+            uri = tuple(getattr(self, "_stored_node_uri", ()))
+            logger.debug("SourceNode.node_uri: read-only mode, returning stored URI %r", uri)
+            return uri
         stream = self.stream
         if hasattr(stream, "to_config"):
             cfg = stream.to_config()
             stream_type = cfg.get("source_type", "unknown")
             source_id = cfg.get("source_id") or getattr(stream, "source_id", "")
-            return (stream_type, str(source_id or ""))
-        return (type(stream).__name__,)
+            uri = (stream_type, str(source_id or ""))
+            logger.debug("SourceNode.node_uri: live stream, derived URI %r from to_config()", uri)
+            return uri
+        uri = (type(stream).__name__,)
+        logger.debug("SourceNode.node_uri: live stream without to_config, using type name %r", uri)
+        return uri
 
     # ------------------------------------------------------------------
     # load_status
