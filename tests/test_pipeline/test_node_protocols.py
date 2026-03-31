@@ -23,6 +23,10 @@ class TestSourceNodeProtocol:
         class GoodSource:
             node_type = "source"
 
+            @property
+            def node_uri(self):
+                return ("csv", "s1")
+
             def execute(self, *, observer=None):
                 return []
 
@@ -47,6 +51,10 @@ class TestFunctionNodeProtocol:
     def test_requires_execute_and_async_execute(self):
         class GoodFunction:
             node_type = "function"
+
+            @property
+            def node_uri(self):
+                return ("transform",)
 
             @property
             def pipeline_path(self):
@@ -86,6 +94,10 @@ class TestOperatorNodeProtocol:
     def test_requires_execute_and_async_execute(self):
         class GoodOperator:
             node_type = "operator"
+
+            @property
+            def node_uri(self):
+                return ("join",)
 
             def execute(self, *input_streams, observer=None):
                 return []

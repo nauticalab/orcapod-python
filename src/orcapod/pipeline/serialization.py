@@ -84,7 +84,7 @@ class DatabaseRegistry:
         return dict(self._entries)
 
     @classmethod
-    def from_dict(cls, data: dict[str, dict]) -> "DatabaseRegistry":
+    def from_dict(cls, data: dict[str, dict]) -> DatabaseRegistry:
         """Reconstruct a registry from the saved ``databases`` block."""
         registry = cls()
         registry._entries = dict(data)
@@ -332,7 +332,8 @@ def resolve_source_from_config(
     config: dict[str, Any],
     *,
     fallback_to_proxy: bool = False,
-    db_registry: "DatabaseRegistry | None" = None,
+    db_registry: DatabaseRegistry | None = None,
+    node_descriptor: dict[str, Any] | None = None,
 ) -> Any:
     """Reconstruct a source instance from a config dict.
 
@@ -340,12 +341,13 @@ def resolve_source_from_config(
         config: Dict with at least a ``"source_type"`` key matching a registered
             source type.
         fallback_to_proxy: If ``True`` and reconstruction fails, return a
-            ``SourceProxy`` preserving identity hashes and schemas from the
-            config.  Requires the config to contain ``content_hash``,
-            ``pipeline_hash``, ``tag_schema``, and ``packet_schema`` fields
-            (as written by ``RootSource._identity_config()``).
+            ``SourceProxy`` preserving identity hashes and schemas.
+            Requires *node_descriptor* to contain ``content_hash``,
+            ``pipeline_hash``, and ``output_schema`` fields.
         db_registry: Optional ``DatabaseRegistry`` forwarded to ``from_config``
             for source types that embed database references (e.g. CachedSource).
+        node_descriptor: Node descriptor dict containing identity fields used
+            when creating a ``SourceProxy`` fallback.
 
     Returns:
         A new source instance constructed from the config, or a ``SourceProxy``
@@ -362,7 +364,7 @@ def resolve_source_from_config(
     source_type = config.get("source_type")
     if source_type not in SOURCE_REGISTRY:
         if fallback_to_proxy:
-            return _source_proxy_from_config(config)
+            return _source_proxy_from_config(config, node_descriptor=node_descriptor)
         raise ValueError(
             f"Unknown source type: {source_type!r}. "
             f"Known types: {sorted(SOURCE_REGISTRY.keys())}"
@@ -380,7 +382,7 @@ def resolve_source_from_config(
                 "Could not reconstruct %s source; returning SourceProxy.",
                 source_type,
             )
-            return _source_proxy_from_config(config)
+            return _source_proxy_from_config(config, node_descriptor=node_descriptor)
         raise
 
 
@@ -390,34 +392,40 @@ def _source_proxy_from_config(
 ) -> Any:
     """Create a SourceProxy from identity fields.
 
-    Identity fields are read from node_descriptor if provided (new format),
-    falling back to config for backward compatibility with old saves that
-    embed them in source_config.
+    Identity fields are read from ``node_descriptor`` when provided (new
+    format for top-level pipeline nodes).  When ``node_descriptor`` is
+    ``None``, identity is read directly from ``config`` — this supports
+    inner sources (e.g. the wrapped source inside a ``CachedSource``) which
+    always embed identity via ``_identity_config()``.
 
     Args:
-        config: Source config dict. In old format, also contains identity
-            fields. In new format, identity fields are in node_descriptor.
-        node_descriptor: Optional node descriptor dict (new format) containing
-            ``content_hash``, ``pipeline_hash``, and ``output_schema`` fields.
+        config: Source config dict.  Always consulted for ``source_type``
+            and ``source_id``; also used for identity fields when
+            ``node_descriptor`` is ``None``.
+        node_descriptor: Node descriptor dict (new format) containing
+            ``content_hash``, ``pipeline_hash``, and ``output_schema``.
+            When provided, identity fields are taken from here rather than
+            from ``config``.
 
     Returns:
         A ``SourceProxy`` preserving the original source's identity.
 
     Raises:
-        ValueError: If required identity fields are missing.
+        ValueError: If required identity fields are not available from
+            either ``node_descriptor`` or ``config``.
     """
     from orcapod.core.sources.source_proxy import SourceProxy
     from orcapod.types import Schema
 
-    # New format: identity fields in node_descriptor with output_schema structure
     if node_descriptor is not None:
+        # New format: top-level node descriptor carries identity
         content_hash = node_descriptor.get("content_hash")
         pipeline_hash_val = node_descriptor.get("pipeline_hash")
         output_schema = node_descriptor.get("output_schema", {})
         tag_schema_dict = output_schema.get("tag", {})
         packet_schema_dict = output_schema.get("packet", {})
     else:
-        # Old format: identity fields embedded in source_config
+        # Inner sources (e.g. inside CachedSource) embed identity via _identity_config()
         content_hash = config.get("content_hash")
         pipeline_hash_val = config.get("pipeline_hash")
         tag_schema_dict = config.get("tag_schema", {})
@@ -425,8 +433,11 @@ def _source_proxy_from_config(
 
     if not content_hash or not pipeline_hash_val:
         raise ValueError(
-            "Cannot create SourceProxy: missing content_hash or pipeline_hash. "
-            "Provide node_descriptor with identity fields or use old-format source_config."
+            "Cannot create SourceProxy: missing identity fields. "
+            "For top-level pipeline nodes, pass node_descriptor with "
+            "content_hash, pipeline_hash, and output_schema. "
+            "For inner sources, ensure the source config includes "
+            "_identity_config() fields."
         )
 
     source_type = config.get("source_type")

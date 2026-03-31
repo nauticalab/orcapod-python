@@ -1832,16 +1832,16 @@ def test_save_full_level_equivalent_to_standard(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_load_definition_level_raises_clear_error(tmp_path):
-    """Loading a definition-level save raises a clear ValueError mentioning 'definition'.
+def test_load_minimal_level_raises_clear_error(tmp_path):
+    """Loading a 'minimal'-level save raises a clear ValueError mentioning 'minimal'.
 
-    Previously fell through to the generic "Missing 'databases' block" error.
+    Minimal saves contain topology and identity only — not enough to reconstruct.
     """
     pipeline = _make_simple_pipeline_for_level_tests(tmp_path)
-    path = tmp_path / "definition.json"
-    pipeline.save(str(path), level="definition")
+    path = tmp_path / "minimal.json"
+    pipeline.save(str(path), level="minimal")
 
-    with pytest.raises(ValueError, match="definition"):
+    with pytest.raises(ValueError, match="minimal"):
         Pipeline.load(str(path))
 
 
@@ -1969,3 +1969,172 @@ def test_load_function_node_pipeline_path_prefers_hint_over_stored_pipeline_path
     assert len(pp) > 0 and pp[0] == "prefixtest", (
         f"Expected pipeline_path to start with 'prefixtest', got {pp!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# eywalker review fixes (PR #120)
+# ---------------------------------------------------------------------------
+
+
+def test_load_definition_level_without_db_succeeds(tmp_path):
+    """Definition-level save can be loaded without providing a database.
+
+    Previously raised ValueError unconditionally for definition level.
+    The node ends up in a non-FULL status (UNAVAILABLE or CACHE_ONLY) since
+    no live data is accessible without a database.
+    """
+    pipeline = _make_simple_pipeline_for_level_tests(tmp_path)
+    path = tmp_path / "definition.json"
+    pipeline.save(str(path), level="definition")
+
+    loaded = Pipeline.load(str(path))  # no pipeline_database provided
+    fn_node = loaded.compiled_nodes["fn"]
+    assert fn_node.load_status != LoadStatus.FULL
+
+
+def test_load_definition_level_with_pipeline_database_arg(tmp_path):
+    """Definition-level save loaded with pipeline_database arg attaches DB.
+
+    Nodes should get CACHE_ONLY or similar status when DB is provided
+    but no data has been run yet (no cached records).
+    """
+    pipeline = _make_simple_pipeline_for_level_tests(tmp_path)
+    path = tmp_path / "definition.json"
+    pipeline.save(str(path), level="definition")
+
+    db = InMemoryArrowDatabase()
+    loaded = Pipeline.load(str(path), pipeline_database=db)
+    fn_node = loaded.compiled_nodes["fn"]
+    # With DB provided the node should not be UNAVAILABLE
+    assert fn_node.load_status != LoadStatus.UNAVAILABLE
+
+
+def test_load_old_format_with_pipeline_databases_in_pipeline_key_raises(tmp_path):
+    """Old format (pipeline.databases dict) raises ValueError — not supported.
+
+    New format uses a top-level 'databases' registry + pipeline.pipeline_database key.
+    Loading an old-format file must raise rather than silently mis-parse.
+    """
+    pipeline = _make_simple_pipeline_for_level_tests(tmp_path)
+    path = tmp_path / "standard.json"
+    pipeline.save(str(path))
+
+    with open(path) as f:
+        data = json.load(f)
+
+    # Rewrite to old format: move databases into pipeline.databases dict
+    db_registry = data.pop("databases", {})
+    pl = data["pipeline"]
+    pipeline_db_key = pl.pop("pipeline_database", None)
+    if pipeline_db_key and pipeline_db_key in db_registry:
+        pl["databases"] = {"pipeline_database": db_registry[pipeline_db_key]}
+    with open(path, "w") as f:
+        json.dump(data, f)
+
+    with pytest.raises(ValueError, match="databases"):
+        Pipeline.load(str(path))
+
+
+def test_load_function_node_with_old_function_pod_key_is_not_reconstructed(tmp_path):
+    """function_pod key in node descriptor is no longer recognized as function config.
+
+    A descriptor with only the old 'function_pod' key (not 'function_config') should
+    result in a node that cannot reconstruct its function pod, falling to unavailable.
+    Uses a CSVSource (reconstructable) so the upstream reaches FULL status, isolating
+    the function-pod reconstruction as the only failure point.
+    """
+    csv_path = str(tmp_path / "data.csv")
+    _write_csv(csv_path, [{"name": "alice", "y": 2}, {"name": "bob", "y": 4}])
+    db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
+    source = CSVSource(file_path=csv_path, tag_columns=["name"], source_id="people")
+    pf = PythonPacketFunction(
+        function=transform_func, output_keys="result", function_name="transform_func"
+    )
+    pod = FunctionPod(packet_function=pf)
+    pipeline = Pipeline(name="fntest", pipeline_database=db)
+    with pipeline:
+        pod.process(source, label="fn")
+    pipeline.run()
+
+    path = tmp_path / "p.json"
+    pipeline.save(str(path))
+
+    with open(path) as f:
+        data = json.load(f)
+
+    # Rename function_config → function_pod (old key)
+    for descriptor in data["nodes"].values():
+        if "function_config" in descriptor:
+            descriptor["function_pod"] = descriptor.pop("function_config")
+
+    with open(path, "w") as f:
+        json.dump(data, f)
+
+    loaded = Pipeline.load(str(path), mode="full")
+    fn_node = loaded.compiled_nodes["fn"]
+    # Cannot reconstruct function pod → should NOT be FULL (no live function)
+    assert fn_node.load_status != LoadStatus.FULL
+
+
+def test_load_operator_node_with_old_operator_key_is_not_reconstructed(tmp_path):
+    """operator key in node descriptor is no longer recognized as operator config.
+
+    A descriptor with only the old 'operator' key (not 'operator_config') should
+    result in an operator node that cannot be reconstructed, falling to read-only.
+    """
+    from orcapod.core.operators import SelectPacketColumns
+
+    csv_path = str(tmp_path / "data.csv")
+    _write_csv(csv_path, [{"name": "alice", "y": 2}, {"name": "bob", "y": 4}])
+    db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
+    source = CSVSource(file_path=csv_path, tag_columns=["name"], source_id="people")
+    pf = PythonPacketFunction(
+        function=transform_func, output_keys="result", function_name="transform_func"
+    )
+    pod = FunctionPod(packet_function=pf)
+    select_op = SelectPacketColumns(columns=["result"])
+    pipeline = Pipeline(name="q", pipeline_database=db)
+    with pipeline:
+        fn_result = pod.process(source, label="fn")
+        select_op.process(fn_result, label="sel")
+    pipeline.run()
+
+    path = tmp_path / "p.json"
+    pipeline.save(str(path))
+
+    with open(path) as f:
+        data = json.load(f)
+
+    # Rename operator_config → operator (old key)
+    for descriptor in data["nodes"].values():
+        if "operator_config" in descriptor:
+            descriptor["operator"] = descriptor.pop("operator_config")
+
+    with open(path, "w") as f:
+        json.dump(data, f)
+
+    loaded = Pipeline.load(str(path), mode="full")
+    sel_node = loaded.compiled_nodes["sel"]
+    # Cannot reconstruct operator → should NOT be FULL
+    assert sel_node.load_status != LoadStatus.FULL
+
+
+def test_source_proxy_from_config_raises_without_any_identity_fields(tmp_path):
+    """_source_proxy_from_config raises when neither node_descriptor nor
+    config provides identity fields.
+
+    Top-level nodes supply identity via node_descriptor (new format).
+    Inner sources (e.g. inside CachedSource) embed identity via _identity_config().
+    A bare config with no identity anywhere must raise a clear ValueError.
+    """
+    from orcapod.pipeline.serialization import _source_proxy_from_config
+
+    # Bare config: no identity fields anywhere
+    bare_config = {
+        "source_type": "dict",
+        "source_id": "s1",
+        # No content_hash, no pipeline_hash, no schema fields
+    }
+
+    with pytest.raises(ValueError, match="identity fields"):
+        _source_proxy_from_config(bare_config, node_descriptor=None)
