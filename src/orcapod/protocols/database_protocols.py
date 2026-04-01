@@ -65,6 +65,41 @@ class ArrowDatabaseProtocol(Protocol):
         """Flush any buffered writes to the underlying storage."""
         ...
 
+    @property
+    def base_path(self) -> tuple[str, ...]:
+        """The current relative root of this database view.
+
+        Always () for a root (non-scoped) instance. Extended by at().
+        The absolute storage root (filesystem URI, SQL connector, etc.)
+        is a separate, backend-specific implementation detail.
+        """
+        ...
+
+    def at(self, *path_components: str) -> "ArrowDatabaseProtocol":
+        """Return a new database scoped to the given sub-path.
+
+        All reads and writes on the returned database are relative to
+        this database's base_path extended by path_components. The
+        original is unmodified.
+
+        Calling at() with no arguments returns a new view equivalent
+        to the current one (same base_path, fresh or shared state
+        depending on the backend).
+
+        For backends with shared pending state (InMemoryArrowDatabase,
+        ConnectorArrowDatabase), calling flush() on any view drains
+        the entire shared pending queue — not just the caller's prefix.
+        This is intentional: all views share the same underlying store.
+
+        Args:
+            *path_components: Zero or more path components to append.
+
+        Returns:
+            A new database instance with
+            base_path == self.base_path + path_components.
+        """
+        ...
+
     def to_config(self) -> dict[str, Any]:
         """Serialize database configuration to a JSON-compatible dict.
 

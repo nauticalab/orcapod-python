@@ -79,6 +79,13 @@ class NoOpArrowDatabase:
     def flush(self) -> None:
         pass
 
+    @property
+    def base_path(self) -> tuple[str, ...]:
+        return ()
+
+    def at(self, *path_components: str) -> "NoOpArrowDatabase":
+        return NoOpArrowDatabase()
+
     def to_config(self) -> dict[str, Any]:
         """Serialize database configuration to a JSON-compatible dict."""
         return {"type": "noop"}
