@@ -811,7 +811,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     f"Pipeline database key {pipeline_db_key!r} not found in databases registry. "
                     f"Available keys: {sorted(db_registry_data.keys())}"
                 )
-            pipeline_db = resolve_database_from_config(db_registry_data[pipeline_db_key])
+            pipeline_db = resolve_database_from_config(db_registry_data[pipeline_db_key], db_registry=db_registry_data)
             fn_db_key = pipeline_meta.get("function_database")
             if fn_db_key is None:
                 function_db = None
@@ -821,7 +821,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     f"Available keys: {sorted(db_registry_data.keys())}"
                 )
             else:
-                function_db = resolve_database_from_config(db_registry_data[fn_db_key])
+                function_db = resolve_database_from_config(db_registry_data[fn_db_key], db_registry=db_registry_data)
         elif level == "definition":
             # Definition-level: no embedded DB config; caller may supply databases
             pipeline_db = pipeline_database

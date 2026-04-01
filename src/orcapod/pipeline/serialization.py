@@ -228,14 +228,14 @@ def _ensure_registries() -> None:
 # ---------------------------------------------------------------------------
 
 
-def resolve_database_from_config(config: dict[str, Any], registry: dict | None = None) -> Any:
+def resolve_database_from_config(config: dict[str, Any], db_registry: dict | None = None) -> Any:
     """Reconstruct a database instance from a config dict.
 
     Args:
         config: Dict with at least a ``"type"`` key matching a registered
             database type, or ``"type": "scoped"`` for a scoped database
             reference.
-        registry: Optional plain dict mapping ``"db_<key>"`` → config dict
+        db_registry: Optional plain dict mapping ``"db_<key>"`` → config dict
             (the output of ``DatabaseRegistry.to_dict()``).  Required when
             ``config["type"] == "scoped"``; ignored otherwise.
 
@@ -244,14 +244,17 @@ def resolve_database_from_config(config: dict[str, Any], registry: dict | None =
 
     Raises:
         ValueError: If the ``"type"`` key is missing or unknown, or if
-            ``config["type"] == "scoped"`` and no registry is provided.
+            ``config["type"] == "scoped"`` and no db_registry is provided.
     """
     _ensure_registries()
     db_type = config.get("type")
     if db_type == "scoped":
-        if registry is None:
-            raise ValueError("registry required to resolve scoped database config")
-        root_config = registry[config["ref"]]
+        if db_registry is None:
+            raise ValueError("db_registry required to resolve scoped database config")
+        ref = config["ref"]
+        if ref not in db_registry:
+            raise ValueError(f"Registry key {ref!r} not found; available keys: {sorted(db_registry.keys())}")
+        root_config = db_registry[ref]
         root_db = resolve_database_from_config(root_config)
         return root_db.at(*config["path"])
     if db_type not in DATABASE_REGISTRY:

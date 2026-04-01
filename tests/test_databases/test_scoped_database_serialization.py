@@ -56,7 +56,7 @@ class TestResolveFromScopedConfig:
         scoped_config = scoped_original.to_config(db_registry=registry)
         registry_dict = registry.to_dict()
 
-        resolved = resolve_database_from_config(scoped_config, registry=registry_dict)
+        resolved = resolve_database_from_config(scoped_config, db_registry=registry_dict)
         assert resolved._scoped_path == ("pipeline", "node")
 
     def test_resolve_scoped_config_has_correct_path_prefix(self):
@@ -67,14 +67,14 @@ class TestResolveFromScopedConfig:
         scoped_config = scoped_original.to_config(db_registry=registry)
         registry_dict = registry.to_dict()
 
-        resolved = resolve_database_from_config(scoped_config, registry=registry_dict)
+        resolved = resolve_database_from_config(scoped_config, db_registry=registry_dict)
         assert resolved._path_prefix == ("pipeline", "node")
 
     def test_resolve_non_scoped_config_ignores_registry(self):
         """Non-scoped config resolves normally even if registry is provided."""
         db = InMemoryArrowDatabase()
         config = db.to_config()
-        resolved = resolve_database_from_config(config, registry={})
+        resolved = resolve_database_from_config(config, db_registry={})
         assert resolved is not None
         assert resolved._scoped_path == ()
 
@@ -86,5 +86,11 @@ class TestResolveFromScopedConfig:
         config = scoped.to_config(db_registry=registry)
         registry_dict = registry.to_dict()
 
-        resolved = resolve_database_from_config(config, registry=registry_dict)
+        resolved = resolve_database_from_config(config, db_registry=registry_dict)
         assert resolved._scoped_path == ("a", "b", "c")
+
+    def test_resolve_scoped_config_without_registry_raises(self):
+        """Resolving a scoped config without registry raises ValueError."""
+        scoped_config = {"type": "scoped", "ref": "db_abc123", "path": ["a"]}
+        with pytest.raises(ValueError, match="db_registry required"):
+            resolve_database_from_config(scoped_config)
