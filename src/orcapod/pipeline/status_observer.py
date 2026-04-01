@@ -134,7 +134,6 @@ class StatusObserver:
         node_label: str,
         node_hash: str,
         tag_schema: SchemaLike | None = None,
-        **kwargs: Any,
     ) -> None:
         self._tag_schema_per_node[node_label] = (node_hash, tag_schema or {})
 
@@ -142,7 +141,6 @@ class StatusObserver:
         self,
         node_label: str,
         node_hash: str,
-        **kwargs: Any,
     ) -> None:
         self._tag_schema_per_node.pop(node_label, None)
 
@@ -170,7 +168,6 @@ class StatusObserver:
         self,
         tag: TagProtocol,
         packet: PacketProtocol,
-        **kwargs: Any,
     ) -> NoOpLogger:
         """Return a no-op logger.
 
@@ -323,7 +320,6 @@ class _ContextualizedStatusObserver:
         node_label: str,
         node_hash: str,
         tag_schema: SchemaLike | None = None,
-        **kwargs: Any,
     ) -> None:
         self._current_node_hash = node_hash
         self._tag_schema = tag_schema or {}
@@ -332,7 +328,6 @@ class _ContextualizedStatusObserver:
         self,
         node_label: str,
         node_hash: str,
-        **kwargs: Any,
     ) -> None:
         self._current_node_hash = ""
         self._tag_schema = {}
@@ -365,7 +360,6 @@ class _ContextualizedStatusObserver:
         self,
         tag: TagProtocol,
         packet: PacketProtocol,
-        **kwargs: Any,
     ) -> NoOpLogger:
         return _NOOP_LOGGER
 

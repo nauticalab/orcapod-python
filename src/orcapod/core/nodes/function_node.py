@@ -613,7 +613,7 @@ class FunctionNode(StreamBase):
 
         pp = self.pipeline_path
         tag_schema = input_stream.output_schema(columns={"system_tags": True})[0]
-        obs.on_node_start(node_label, node_hash, pipeline_path=pp, tag_schema=tag_schema)
+        obs.on_node_start(node_label, node_hash, tag_schema=tag_schema)
 
         # Gather entry IDs and check cache
         upstream_entries = [
@@ -636,7 +636,7 @@ class FunctionNode(StreamBase):
             else:
                 ctx_obs = obs.contextualize(node_hash, node_label)
                 pkt_logger = ctx_obs.create_packet_logger(
-                    tag, packet, pipeline_path=pp
+                    tag, packet
                 )
                 try:
                     tag_out, result = self._process_packet_internal(
@@ -649,7 +649,7 @@ class FunctionNode(StreamBase):
                     )
                     obs.on_packet_crash(node_label, tag, packet, exc)
                     if error_policy == "fail_fast":
-                        obs.on_node_end(node_label, node_hash, pipeline_path=pp)
+                        obs.on_node_end(node_label, node_hash)
                         raise
                 else:
                     obs.on_packet_end(
@@ -658,7 +658,7 @@ class FunctionNode(StreamBase):
                     if result is not None:
                         output.append((tag_out, result))
 
-        obs.on_node_end(node_label, node_hash, pipeline_path=pp)
+        obs.on_node_end(node_label, node_hash)
         return output
 
     def _process_packet_internal(
@@ -1137,7 +1137,7 @@ class FunctionNode(StreamBase):
         node_hash = self.content_hash().to_string()
         pp = self.pipeline_path
 
-        obs.on_node_start(node_label, node_hash, pipeline_path=pp, tag_schema=None)
+        obs.on_node_start(node_label, node_hash, tag_schema=None)
         try:
             result = self._load_all_cached_records()
             if result is not None:
@@ -1147,7 +1147,7 @@ class FunctionNode(StreamBase):
                     obs.on_packet_start(node_label, tag, packet)
                     obs.on_packet_end(node_label, tag, packet, packet, cached=True)
                     await output.send((tag, packet))
-            obs.on_node_end(node_label, node_hash, pipeline_path=pp)
+            obs.on_node_end(node_label, node_hash)
         finally:
             await output.close()
 
@@ -1494,7 +1494,7 @@ class FunctionNode(StreamBase):
             )
 
             tag_schema = self._input_stream.output_schema(columns={"system_tags": True})[0]
-            obs.on_node_start(node_label, node_hash, pipeline_path=pp, tag_schema=tag_schema)
+            obs.on_node_start(node_label, node_hash, tag_schema=tag_schema)
 
             if self._cached_function_pod is not None:
                 # DB-backed async execution:
@@ -1601,7 +1601,7 @@ class FunctionNode(StreamBase):
                             await sem.acquire()
                         tg.create_task(_guarded_simple())
 
-            obs.on_node_end(node_label, node_hash, pipeline_path=pp)
+            obs.on_node_end(node_label, node_hash)
         finally:
             await output.close()
 
@@ -1620,7 +1620,7 @@ class FunctionNode(StreamBase):
 
         observer.on_packet_start(node_label, tag, packet)
         ctx_obs = observer.contextualize(node_hash, node_label)
-        pkt_logger = ctx_obs.create_packet_logger(tag, packet, pipeline_path=pp)
+        pkt_logger = ctx_obs.create_packet_logger(tag, packet)
 
         try:
             tag_out, result_packet = await self._async_process_packet_internal(
