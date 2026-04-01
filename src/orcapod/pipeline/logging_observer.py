@@ -244,12 +244,9 @@ class LoggingObserver:
                 ctx_obs = observer.contextualize(node_hash, node_label)
                 pkt_logger = ctx_obs.create_packet_logger(tag, packet)
         """
-        tag_data = dict(tag)
-        return PacketLogger(
-            db=self._db,
-            log_path=DEFAULT_LOG_PATH,
-            run_id=self._current_run_id,
-            tag_data=tag_data,
+        raise NotImplementedError(
+            "LoggingObserver.create_packet_logger() must not be called directly. "
+            "Call contextualize(*identity_path) first to get a bound observer."
         )
 
     # -- convenience --
@@ -260,9 +257,53 @@ class LoggingObserver:
         Returns all log rows for this observer's database, regardless of node.
         Node-specific logs can be filtered via the ``_log_node_label`` column.
 
+        Scans all storage paths under the database's path prefix and
+        concatenates every table that contains at least one ``_log_``-prefixed
+        column.  This handles the case where logs are written at
+        per-node identity paths (``node_hash/node_label``) rather than a
+        single flat ``DEFAULT_LOG_PATH``.
+
         Returns ``None`` if no logs have been written yet.
         """
-        return self._db.get_all_records(DEFAULT_LOG_PATH)
+        import pyarrow as pa
+
+        db = self._db
+        # Access the underlying storage dicts if available (InMemoryArrowDatabase).
+        tables: dict = getattr(db, "_tables", {})
+        pending: dict = getattr(db, "_pending_batches", {})
+        prefix = "/".join(getattr(db, "_path_prefix", ()))
+
+        all_parts: list[pa.Table] = []
+        seen_keys: set[str] = set()
+
+        def _collect(store: dict) -> None:
+            for key, tbl in store.items():
+                if key in seen_keys:
+                    continue
+                # Only consider keys that fall under this db's prefix
+                if prefix and not key.startswith(prefix):
+                    continue
+                if tbl is None or tbl.num_rows == 0:
+                    continue
+                col_names = tbl.schema.names if hasattr(tbl, "schema") else []
+                if any(c.startswith("_log_") for c in col_names):
+                    # Drop the internal record-id column before concatenating
+                    record_id_col = "__record_id"
+                    if record_id_col in col_names:
+                        tbl = tbl.drop([record_id_col])
+                    all_parts.append(tbl)
+                seen_keys.add(key)
+
+        _collect(tables)
+        _collect(pending)
+
+        if not all_parts:
+            return None
+
+        if len(all_parts) == 1:
+            return all_parts[0]
+
+        return pa.concat_tables(all_parts, promote_options="default")
 
     # -- serialization --
 
@@ -380,7 +421,7 @@ class _ContextualizedLoggingObserver:
 
         return PacketLogger(
             db=self._db,
-            log_path=DEFAULT_LOG_PATH,
+            log_path=self._identity_path,
             run_id=self._run_id,
             node_label=node_label,
             node_hash=node_hash,
