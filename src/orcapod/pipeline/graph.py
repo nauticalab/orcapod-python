@@ -569,6 +569,13 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         include_configs = level in ("definition", "standard", "full")
         include_pipeline_dbs = level in ("standard", "full")
 
+        if include_pipeline_dbs and self._pipeline_database is None:
+            raise ValueError(
+                f"Cannot save pipeline at level={level!r} without a pipeline_database. "
+                "Either pass pipeline_database= when constructing the Pipeline, "
+                "or save with level='definition'."
+            )
+
         # Registry populated as nodes serialize their embedded databases
         db_registry = DatabaseRegistry()
 
@@ -786,8 +793,12 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             db_registry_data = data["databases"]
             load_db_registry = DatabaseRegistry.from_dict(db_registry_data)
             pipeline_db_key = pipeline_meta["pipeline_database"]
-            pipeline_db_config = db_registry_data[pipeline_db_key]
-            pipeline_db = resolve_database_from_config(pipeline_db_config)
+            if pipeline_db_key not in db_registry_data:
+                raise ValueError(
+                    f"Pipeline database key {pipeline_db_key!r} not found in databases registry. "
+                    f"Available keys: {sorted(db_registry_data.keys())}"
+                )
+            pipeline_db = resolve_database_from_config(db_registry_data[pipeline_db_key])
             fn_db_key = pipeline_meta.get("function_database")
             if fn_db_key is None:
                 function_db = None
