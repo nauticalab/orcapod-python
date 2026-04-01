@@ -167,3 +167,38 @@ class TestPathIsolation:
     def test_reads_on_unwritten_path_return_none(self, db):
         db.add_records(("written",), make_table(x=[1]))
         assert db.get_all_records(("never_written",)) is None
+
+
+# ---------------------------------------------------------------------------
+# 5. at() method and base_path
+# ---------------------------------------------------------------------------
+
+
+class TestAtMethod:
+    def test_base_path_is_empty_on_root_instance(self):
+        db = NoOpArrowDatabase()
+        assert db.base_path == ()
+        assert isinstance(db.base_path, tuple)
+
+    def test_at_sets_base_path(self):
+        db = NoOpArrowDatabase()
+        scoped = db.at("a", "b")
+        assert scoped.base_path == ("a", "b")
+        assert isinstance(scoped.base_path, tuple)
+
+    def test_at_chaining_equivalent_to_multi_component(self):
+        db = NoOpArrowDatabase()
+        assert db.at("a").at("b").base_path == db.at("a", "b").base_path
+
+    def test_at_does_not_modify_original(self):
+        db = NoOpArrowDatabase()
+        db.at("a", "b")
+        assert db.base_path == ()
+
+    def test_scoped_reads_still_return_none(self):
+        db = NoOpArrowDatabase()
+        scoped = db.at("pipeline", "node1")
+        import pyarrow as pa
+        scoped.add_record(("outputs",), "id1", pa.table({"v": [1]}))
+        assert scoped.get_record_by_id(("outputs",), "id1") is None
+        assert scoped.get_all_records(("outputs",)) is None
