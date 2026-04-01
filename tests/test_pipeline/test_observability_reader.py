@@ -2,12 +2,29 @@
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 import polars as pl
 import pytest
 
 from orcapod.pipeline.observability_reader import ObservabilityReader
+
+
+def _make_fake_delta_table(path: Path) -> None:
+    """Create a minimal _delta_log directory to simulate a Delta table."""
+    (path / "_delta_log").mkdir(parents=True, exist_ok=True)
+
+
+def test_discover_tables_finds_status_and_log_paths(tmp_path):
+    from orcapod.pipeline.observability_reader import ObservabilityReader
+
+    # Create fake Delta tables at new-format paths (_status/_log not status/logs)
+    _make_fake_delta_table(tmp_path / "my_pipeline" / "_status" / "my_pod" / "schema:abc" / "instance:xyz")
+    _make_fake_delta_table(tmp_path / "my_pipeline" / "_log" / "my_pod" / "schema:abc" / "instance:xyz")
+
+    reader = ObservabilityReader(tmp_path)
+    assert "my_pod" in reader.nodes
 
 
 def _write_status_table(
@@ -18,7 +35,7 @@ def _write_status_table(
 ) -> None:
     """Write a status Delta table mimicking StatusObserver output."""
     table_dir = (
-        root / pipeline_name / "status" / node_name / "hash_a" / "v0"
+        root / pipeline_name / "_status" / node_name / "hash_a" / "v0"
         / "python.function.v0" / "node:hash_b"
     )
     table_dir.mkdir(parents=True, exist_ok=True)
@@ -38,7 +55,7 @@ def _write_log_table(
 ) -> None:
     """Write a log Delta table mimicking LoggingObserver output."""
     table_dir = (
-        root / pipeline_name / "logs" / node_name / "hash_a" / "v0"
+        root / pipeline_name / "_log" / node_name / "hash_a" / "v0"
         / "python.function.v0" / "node:hash_b"
     )
     table_dir.mkdir(parents=True, exist_ok=True)
