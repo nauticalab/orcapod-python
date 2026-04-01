@@ -198,7 +198,6 @@ class TestAtMethod:
     def test_scoped_reads_still_return_none(self):
         db = NoOpArrowDatabase()
         scoped = db.at("pipeline", "node1")
-        import pyarrow as pa
         scoped.add_record(("outputs",), "id1", pa.table({"v": [1]}))
         assert scoped.get_record_by_id(("outputs",), "id1") is None
         assert scoped.get_all_records(("outputs",)) is None

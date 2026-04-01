@@ -88,6 +88,11 @@ class NoOpArrowDatabase:
         return self._path_prefix
 
     def at(self, *path_components: str) -> "NoOpArrowDatabase":
+        """Return a new NoOpArrowDatabase scoped to the given sub-path.
+
+        All reads and writes are still discarded; the prefix only affects
+        the reported base_path of the returned instance.
+        """
         return NoOpArrowDatabase(_path_prefix=self._path_prefix + path_components)
 
     def to_config(self) -> dict[str, Any]:
