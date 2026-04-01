@@ -51,6 +51,18 @@ class TestInMemoryDatabaseConfig:
         restored = InMemoryArrowDatabase.from_config(config)
         assert restored.to_config() == config
 
+    def test_to_config_includes_base_path(self):
+        db = InMemoryArrowDatabase()
+        assert db.to_config()["base_path"] == []
+
+    def test_round_trip_preserves_base_path(self):
+        db = InMemoryArrowDatabase()
+        scoped = db.at("pipeline", "v1")
+        config = scoped.to_config()
+        restored = InMemoryArrowDatabase.from_config(config)
+        assert restored.base_path == ("pipeline", "v1")
+        assert isinstance(restored.base_path, tuple)
+
 
 class TestNoOpDatabaseConfig:
     def test_to_config_includes_type(self):
