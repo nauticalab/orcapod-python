@@ -188,18 +188,26 @@ class Pipeline(AutoRegisteringContextBasedTracker):
     @property
     def result_database(self) -> dbp.ArrowDatabaseProtocol | None:
         """The _result-scoped database view (set after compile())."""
+        if not self._compiled:
+            raise RuntimeError("Pipeline must be compiled before accessing result_database. Call compile() first.")
         return self._result_database_scoped
 
     @property
     def scoped_pipeline_database(self) -> dbp.ArrowDatabaseProtocol | None:
+        if not self._compiled:
+            raise RuntimeError("Pipeline must be compiled before accessing scoped_pipeline_database. Call compile() first.")
         return self._scoped_pipeline_database
 
     @property
     def status_database(self) -> dbp.ArrowDatabaseProtocol | None:
+        if not self._compiled:
+            raise RuntimeError("Pipeline must be compiled before accessing status_database. Call compile() first.")
         return self._status_database
 
     @property
     def log_database(self) -> dbp.ArrowDatabaseProtocol | None:
+        if not self._compiled:
+            raise RuntimeError("Pipeline must be compiled before accessing log_database. Call compile() first.")
         return self._log_database
 
     @property
@@ -440,7 +448,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         if effective_engine is not None:
             self._apply_execution_engine(effective_engine, effective_opts)
 
-        effective_observer = observer or self._default_observer
+        effective_observer = observer if observer is not None else self._default_observer
 
         snapshot_hash = self._compute_pipeline_snapshot_hash()
         pipeline_uri = "/".join(self._name) + "@" + snapshot_hash

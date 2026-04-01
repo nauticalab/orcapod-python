@@ -133,8 +133,8 @@ class TestCompileFunctionNode:
 
         node = pipeline.compiled_nodes["adder"]
         assert isinstance(node, FunctionNode)
-        # pipeline_path should start with the pipeline name
-        assert node.pipeline_path[0] == "fn_pipe"
+        # node_identity_path should start with the function name
+        assert node.node_identity_path[0] == "add_values"
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +165,7 @@ class TestCompileOperatorNode:
 
         node = pipeline.compiled_nodes["joiner"]
         assert isinstance(node, OperatorNode)
-        assert node.pipeline_path[0] == "op_pipe"
+        assert node.node_identity_path[0] == "Join"
 
 
 # ---------------------------------------------------------------------------
@@ -459,11 +459,11 @@ class TestAutoCompileAndRun:
 
         # Check operator node
         joiner = pipeline.joiner
-        assert joiner.pipeline_path[0] == "scoped"
+        assert joiner.node_identity_path[0] == "Join"
 
         # Check function node
         adder = pipeline.adder
-        assert adder.pipeline_path[0] == "scoped"
+        assert adder.node_identity_path[0] == "add_values"
 
 
 # ---------------------------------------------------------------------------
@@ -627,8 +627,8 @@ class TestPipelineExtension:
         assert "renamer" in pipe_b.compiled_nodes
         assert isinstance(pipe_b.renamer, OperatorNode)
 
-        # pipe_b should scope everything under "pipe_b"
-        assert pipe_b.renamer.pipeline_path[0] == "pipe_b"
+        # pipe_b's renamer node_identity_path should start with the operator name
+        assert pipe_b.renamer.node_identity_path[0] == "MapPackets"
 
         pipe_b.run()
 
@@ -943,8 +943,8 @@ class TestHashChainDetaching:
         derived_src = pipe.adder.as_source()
         sid = derived_src.source_id
         assert isinstance(sid, str)
-        # Should contain the pipeline name
-        assert "my_pipe" in sid
+        # Should contain the function name (node identity path starts with function name)
+        assert "add_values" in sid
         # Should contain a content hash fragment
         content_frag = pipe.adder.content_hash().to_string()[:16]
         assert content_frag in sid
