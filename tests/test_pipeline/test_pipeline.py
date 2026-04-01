@@ -247,31 +247,26 @@ class TestCompileMutatesNodes:
 
 
 class TestFunctionDatabaseHandling:
-    def test_function_database_none_uses_results_subfolder(self, pipeline_db):
-        """When function_database=None, result path should be pipeline_name/_results."""
+    def test_result_database_none_uses_scoped_subfolder(self, pipeline_db):
+        """When result_database=None, result db is scoped to pipeline_name/_result."""
         src_a, src_b = _make_two_sources()
         pf = PythonPacketFunction(add_values, output_keys="total")
         pod = FunctionPod(packet_function=pf)
 
         pipeline = Pipeline(
-            name="my_pipe", pipeline_database=pipeline_db, function_database=None
+            name="my_pipe", pipeline_database=pipeline_db, result_database=None
         )
 
         with pipeline:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
 
-        node = pipeline.compiled_nodes["adder"]
-        assert isinstance(node, FunctionNode)
+        # The compiled pipeline's result_database should be scoped to _result
+        assert pipeline.result_database is not None
+        assert pipeline.result_database._scoped_path == ("my_pipe", "_result")
 
-        # The CachedFunctionPod's record_path should start with
-        # (pipeline_name, "_results", ...)
-        record_path = node._cached_function_pod.record_path
-        assert record_path[0] == "my_pipe"
-        assert record_path[1] == "_results"
-
-    def test_separate_function_database(self, pipeline_db, function_db):
-        """When function_database is provided, it's used as result_database."""
+    def test_separate_result_database(self, pipeline_db, function_db):
+        """When result_database is provided, it's used as the result database."""
         src_a, src_b = _make_two_sources()
         pf = PythonPacketFunction(add_values, output_keys="total")
         pod = FunctionPod(packet_function=pf)
@@ -279,18 +274,15 @@ class TestFunctionDatabaseHandling:
         pipeline = Pipeline(
             name="my_pipe",
             pipeline_database=pipeline_db,
-            function_database=function_db,
+            result_database=function_db,
         )
 
         with pipeline:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
 
-        node = pipeline.compiled_nodes["adder"]
-        assert isinstance(node, FunctionNode)
-
-        # The CachedFunctionPod should use function_db
-        assert node._cached_function_pod._result_database is function_db
+        # The compiled pipeline's result_database should be the provided db
+        assert pipeline._result_database is function_db
 
 
 # ---------------------------------------------------------------------------
@@ -484,7 +476,7 @@ class TestFlush:
         pipeline = Pipeline(
             name="test",
             pipeline_database=pipeline_db,
-            function_database=function_db,
+            result_database=function_db,
         )
         # Just verify it doesn't raise
         pipeline.flush()
@@ -1539,3 +1531,46 @@ class TestSourceNodeNoCaching:
         # Source data was cached in source_db (not pipeline_db)
         assert cached_a.get_all_records() is not None
         assert cached_b.get_all_records() is not None
+
+
+# ---------------------------------------------------------------------------
+# Tests: Task 10 — scoped databases and default observer
+# ---------------------------------------------------------------------------
+
+
+from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
+from orcapod.pipeline.composite_observer import CompositeObserver
+from orcapod.pipeline.observer import NoOpObserver
+
+
+def test_compile_creates_scoped_databases():
+    db = InMemoryArrowDatabase()
+    with Pipeline("my_pipeline", pipeline_database=db) as p:
+        pass
+    assert p.result_database._scoped_path == ("my_pipeline", "_result")
+    assert p.status_database._scoped_path == ("my_pipeline", "_status")
+    assert p.log_database._scoped_path == ("my_pipeline", "_log")
+
+
+def test_compile_creates_default_composite_observer():
+    db = InMemoryArrowDatabase()
+    with Pipeline("my_pipeline", pipeline_database=db) as p:
+        pass
+    assert isinstance(p._default_observer, CompositeObserver)
+
+
+def test_compile_without_pipeline_database_uses_noop_observer():
+    with Pipeline("no_db_pipeline") as p:
+        pass
+    assert isinstance(p._default_observer, NoOpObserver)
+
+
+def test_run_with_override_observer_does_not_raise():
+    from unittest.mock import MagicMock
+    db = InMemoryArrowDatabase()
+    obs = MagicMock()
+    obs.contextualize.return_value = obs
+    with Pipeline("my_pipeline", pipeline_database=db) as p:
+        pass
+    # An empty compiled pipeline has no nodes to execute; run() must not raise
+    p.run(observer=obs)

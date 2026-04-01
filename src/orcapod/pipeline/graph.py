@@ -56,9 +56,9 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         name: Pipeline name (string or tuple).  Used as the path prefix for
             all cache/pipeline paths within the databases.
         pipeline_database: Database for pipeline records and operator caches.
-        function_database: Optional separate database for function pod result
-            caches.  When ``None``, ``pipeline_database`` is used with a
-            ``_results`` subfolder under the pipeline name.
+        result_database: Optional separate database for function pod result
+            caches.  When ``None``, a ``_result`` scoped view of
+            ``pipeline_database`` is used (set during ``compile()``).
         auto_compile: If ``True`` (default), ``compile()`` is called
             automatically when the context manager exits.
         auto_save_path: Optional path to automatically save the pipeline
@@ -70,7 +70,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         self,
         name: str | tuple[str, ...],
         pipeline_database: dbp.ArrowDatabaseProtocol | None = None,
-        function_database: dbp.ArrowDatabaseProtocol | None = None,
+        result_database: dbp.ArrowDatabaseProtocol | None = None,
         tracker_manager: cp.TrackerManagerProtocol | None = None,
         auto_compile: bool = True,
         auto_save_path: str | Path | None = None,
@@ -82,8 +82,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         self._hash_graph: "nx.DiGraph" = nx.DiGraph()
         self._name = (name,) if isinstance(name, str) else tuple(name)
         self._pipeline_database = pipeline_database
-        self._function_database = function_database
-        self._pipeline_path_prefix = self._name
+        self._result_database = result_database
         self._nodes: dict[str, GraphNode] = {}
         self._persistent_node_map: dict[str, GraphNode] = {}
         self._node_graph: "nx.DiGraph | None" = None
@@ -95,6 +94,12 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 "a pipeline_database or remove auto_save_path."
             )
         self._auto_save_path = auto_save_path
+        # Scoped database views (set after compile())
+        self._result_database_scoped: dbp.ArrowDatabaseProtocol | None = None
+        self._scoped_pipeline_database: dbp.ArrowDatabaseProtocol | None = None
+        self._status_database: dbp.ArrowDatabaseProtocol | None = None
+        self._log_database: dbp.ArrowDatabaseProtocol | None = None
+        self._default_observer: Any = None
 
     # ------------------------------------------------------------------
     # Recording (TrackerProtocol)
@@ -181,8 +186,21 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         return self._pipeline_database
 
     @property
-    def function_database(self) -> dbp.ArrowDatabaseProtocol | None:
-        return self._function_database
+    def result_database(self) -> dbp.ArrowDatabaseProtocol | None:
+        """The _result-scoped database view (set after compile())."""
+        return self._result_database_scoped
+
+    @property
+    def scoped_pipeline_database(self) -> dbp.ArrowDatabaseProtocol | None:
+        return self._scoped_pipeline_database
+
+    @property
+    def status_database(self) -> dbp.ArrowDatabaseProtocol | None:
+        return self._status_database
+
+    @property
+    def log_database(self) -> dbp.ArrowDatabaseProtocol | None:
+        return self._log_database
 
     @property
     def compiled_nodes(self) -> dict[str, GraphNode]:
@@ -220,6 +238,30 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             FunctionNode,
             OperatorNode,
         )
+        from orcapod.pipeline.observer import NoOpObserver
+
+        # Create scoped databases and default observer eagerly at compile time
+        if self._pipeline_database is not None:
+            pipeline_db = self._pipeline_database.at(*self._name)
+            result_db = self._result_database if self._result_database is not None else pipeline_db.at("_result")
+            status_db = pipeline_db.at("_status")
+            log_db = pipeline_db.at("_log")
+            self._scoped_pipeline_database = pipeline_db
+            self._result_database_scoped = result_db
+            self._status_database = status_db
+            self._log_database = log_db
+
+            from orcapod.pipeline.composite_observer import CompositeObserver
+            from orcapod.pipeline.status_observer import StatusObserver
+            from orcapod.pipeline.logging_observer import LoggingObserver
+            self._default_observer = CompositeObserver(
+                StatusObserver(status_db),
+                LoggingObserver(log_db),
+            )
+        else:
+            pipeline_db = None
+            result_db = self._result_database  # explicit override or None
+            self._default_observer = NoOpObserver()
 
         G = nx.DiGraph()
         for edge in self._graph_edges:
@@ -252,18 +294,9 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     rewired_input = persistent_node_map[input_hash]
                     node.upstreams = (rewired_input,)
 
-                    # Determine result database and path prefix
-                    if self._function_database is not None:
-                        result_db = self._function_database
-                        result_prefix = None
-                    else:
-                        result_db = self._pipeline_database
-                        result_prefix = self._name + ("_results",)
-
                     node.attach_databases(
-                        pipeline_database=self._pipeline_database,
+                        pipeline_database=pipeline_db,
                         result_database=result_db,
-                        result_path_prefix=result_prefix,
                     )
 
                     # Default to LocalExecutor so capture/logging works
@@ -282,7 +315,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     node.upstreams = rewired_inputs
 
                     node.attach_databases(
-                        pipeline_database=self._pipeline_database,
+                        pipeline_database=pipeline_db,
                     )
 
                 else:
@@ -356,6 +389,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         config: PipelineConfig | None = None,
         execution_engine: cp.PacketFunctionExecutorProtocol | None = None,
         execution_engine_opts: "dict[str, Any] | None" = None,
+        observer=None,
     ) -> None:
         """Execute all compiled nodes.
 
@@ -379,6 +413,9 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 engine via ``with_options()`` (e.g. ``{"num_cpus": 4}``).
                 Overrides ``config.execution_engine_opts`` when both are
                 provided.
+            observer: Optional execution observer.  When provided, overrides
+                the pipeline's ``_default_observer``.  When omitted, the
+                ``_default_observer`` set during ``compile()`` is used.
         """
         from orcapod.types import ExecutorType, PipelineConfig
 
@@ -402,6 +439,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
 
         if effective_engine is not None:
             self._apply_execution_engine(effective_engine, effective_opts)
+
+        effective_observer = observer or self._default_observer
 
         snapshot_hash = self._compute_pipeline_snapshot_hash()
         pipeline_uri = "/".join(self._name) + "@" + snapshot_hash
@@ -434,7 +473,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     SyncPipelineOrchestrator,
                 )
 
-                SyncPipelineOrchestrator().run(
+                SyncPipelineOrchestrator(observer=effective_observer).run(
                     self._node_graph,
                     pipeline_uri=pipeline_uri,
                 )
@@ -540,8 +579,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         """Flush all databases."""
         if self._pipeline_database is not None:
             self._pipeline_database.flush()
-        if self._function_database is not None:
-            self._function_database.flush()
+        if self._result_database is not None:
+            self._result_database.flush()
 
     # ------------------------------------------------------------------
     # Serialization
@@ -586,6 +625,12 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 "Either pass pipeline_database= when constructing the Pipeline, "
                 "or save with level='definition'."
             )
+
+        # Observer serialization for full level
+        if level == "full" and self._default_observer is not None:
+            _observer_to_serialize = self._default_observer
+        else:
+            _observer_to_serialize = None
 
         # Registry populated as nodes serialize their embedded databases
         db_registry = DatabaseRegistry()
@@ -634,11 +679,13 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         if include_pipeline_dbs:
             pipeline_db_key = db_registry.register(self._pipeline_database.to_config())
             pipeline_block["pipeline_database"] = pipeline_db_key
-            if self._function_database is not None:
-                fn_db_key = db_registry.register(self._function_database.to_config())
-                pipeline_block["function_database"] = fn_db_key
+            if self._result_database is not None:
+                result_db_key = db_registry.register(self._result_database.to_config())
+                pipeline_block["result_database"] = result_db_key
             else:
-                pipeline_block["function_database"] = None
+                pipeline_block["result_database"] = None
+            if _observer_to_serialize is not None:
+                pipeline_block["observer"] = _observer_to_serialize.to_config(db_registry=db_registry)
 
         # -- Top-level output --
         output: dict[str, Any] = {
@@ -732,7 +779,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         mode: str = "full",
         *,
         pipeline_database: dbp.ArrowDatabaseProtocol | None = None,
-        function_database: dbp.ArrowDatabaseProtocol | None = None,
+        result_database: dbp.ArrowDatabaseProtocol | None = None,
     ) -> "Pipeline":
         """Deserialize a pipeline from a JSON file.
 
@@ -756,7 +803,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             mode: ``"full"`` (default) or ``"read_only"``.
             pipeline_database: Optional database to attach when loading a
                 ``"definition"``-level save that has no embedded DB config.
-            function_database: Optional function-result database to attach when
+            result_database: Optional function-result database to attach when
                 loading a ``"definition"``-level save.
 
         Returns:
@@ -810,20 +857,21 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     f"Available keys: {sorted(db_registry_data.keys())}"
                 )
             pipeline_db = resolve_database_from_config(db_registry_data[pipeline_db_key], db_registry=db_registry_data)
-            fn_db_key = pipeline_meta.get("function_database")
-            if fn_db_key is None:
-                function_db = None
-            elif fn_db_key not in db_registry_data:
+            # Support both old "function_database" key and new "result_database" key
+            result_db_key = pipeline_meta.get("result_database") or pipeline_meta.get("function_database")
+            if result_db_key is None:
+                result_db = None
+            elif result_db_key not in db_registry_data:
                 raise ValueError(
-                    f"Function database key {fn_db_key!r} not found in databases registry. "
+                    f"Result database key {result_db_key!r} not found in databases registry. "
                     f"Available keys: {sorted(db_registry_data.keys())}"
                 )
             else:
-                function_db = resolve_database_from_config(db_registry_data[fn_db_key], db_registry=db_registry_data)
+                result_db = resolve_database_from_config(db_registry_data[result_db_key], db_registry=db_registry_data)
         elif level == "definition":
             # Definition-level: no embedded DB config; caller may supply databases
             pipeline_db = pipeline_database
-            function_db = function_database
+            result_db = result_database
         else:
             raise ValueError(
                 "Cannot determine database configuration from pipeline JSON. "
@@ -831,10 +879,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 "'pipeline_database' key in the pipeline block."
             )
 
-        # Determine pipeline_path_prefix for new-format loading
-        # (new format omits pipeline_path, so we reconstruct prefix from pipeline name)
         name = tuple(pipeline_meta["name"])
-        pipeline_path_prefix = name  # same as Pipeline._pipeline_path_prefix
 
         # 3. Build edge graph and derive topological order
         nodes_data = data["nodes"]
@@ -885,18 +930,10 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 )
 
                 # Build databases dict
-                result_db = function_db if function_db is not None else pipeline_db
-                # When no separate function_database, result data is stored at
-                # pipeline_name + ("_results",) prefix (matching compile() behavior).
-                result_prefix_hint = (
-                    None if function_db is not None
-                    else pipeline_path_prefix + ("_results",)
-                )
+                node_result_db = result_db if result_db is not None else pipeline_db
                 dbs = {
                     "pipeline": pipeline_db,
-                    "result": result_db,
-                    "pipeline_path_prefix": pipeline_path_prefix,
-                    "result_path_prefix_hint": result_prefix_hint,
+                    "result": node_result_db,
                 }
 
                 node = cls._load_function_node(
@@ -939,7 +976,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         pipeline = cls(
             name=name,
             pipeline_database=pipeline_db,
-            function_database=function_db,
+            result_database=result_db,
             auto_compile=False,
         )
 
@@ -981,6 +1018,16 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             attrs["node_type"] = node.node_type
             if node.label:
                 attrs["label"] = node.label
+
+        # Reconstruct _default_observer if serialized (full-level saves)
+        if "observer" in pipeline_meta:
+            from orcapod.pipeline.serialization import resolve_observer_from_config
+            pipeline._default_observer = resolve_observer_from_config(
+                pipeline_meta["observer"], db_registry_data if "databases" in data else None
+            )
+        else:
+            from orcapod.pipeline.observer import NoOpObserver
+            pipeline._default_observer = NoOpObserver()
 
         pipeline._compiled = True
 
