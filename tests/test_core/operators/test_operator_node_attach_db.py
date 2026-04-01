@@ -66,15 +66,15 @@ class TestOperatorNodeAttachDatabases:
         node.attach_databases(pipeline_database=db)
         assert node._pipeline_database is db
 
-    def test_attach_databases_computes_pipeline_path(self):
+    def test_attach_databases_computes_node_identity_path(self):
         node = OperatorNode(
             operator=Join(),
             input_streams=(_make_stream("a"), _make_stream("b")),
         )
         db = InMemoryArrowDatabase()
         node.attach_databases(pipeline_database=db)
-        assert node.pipeline_path is not None
-        assert len(node.pipeline_path) > 0
+        assert node.node_identity_path is not None
+        assert len(node.node_identity_path) > 0
 
     def test_attach_databases_clears_caches(self):
         node = OperatorNode(

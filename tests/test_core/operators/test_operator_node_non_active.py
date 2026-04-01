@@ -189,7 +189,7 @@ class TestCacheModeNonActive:
         node_log = _node(map_op, (simple_source,), db=db, cache_mode=CacheMode.LOG)
         node_log.run()
         # Confirm records exist so we know the guard, not an empty DB, returns empty
-        assert db.get_all_records(node_log.pipeline_path) is not None
+        assert db.get_all_records(node_log.node_identity_path) is not None
 
         # Fresh LOG node (same DB, no in-memory cache)
         node_fresh = _node(
