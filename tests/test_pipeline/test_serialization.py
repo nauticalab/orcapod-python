@@ -120,13 +120,13 @@ class TestPipelineSave:
         assert pipeline_db_key in data["databases"]
         assert data["databases"][pipeline_db_key]["type"] == "delta_table"
 
-    def test_save_function_database_null_when_not_set(self, simple_pipeline):
+    def test_save_result_database_null_when_not_set(self, simple_pipeline):
         pipeline, tmp_path = simple_pipeline
         path = tmp_path / "pipeline.json"
         pipeline.save(str(path))
         data = json.loads(path.read_text())
-        # New format: function_database is None in pipeline block when not set
-        assert data["pipeline"]["function_database"] is None
+        # New format: result_database is None in pipeline block when not set
+        assert data["pipeline"]["result_database"] is None
 
     def test_save_includes_nodes(self, simple_pipeline):
         pipeline, tmp_path = simple_pipeline
@@ -261,10 +261,10 @@ class TestPipelineSave:
             assert upstream in node_keys, f"Edge upstream {upstream} not in nodes"
             assert downstream in node_keys, f"Edge downstream {downstream} not in nodes"
 
-    def test_save_with_separate_function_database(self, tmp_path):
-        """When a separate function_database is provided, it is serialized."""
+    def test_save_with_separate_result_database(self, tmp_path):
+        """When a separate result_database is provided, it is serialized."""
         pipeline_db = DeltaTableDatabase(base_path=str(tmp_path / "pipeline_db"))
-        function_db = DeltaTableDatabase(base_path=str(tmp_path / "function_db"))
+        result_db = DeltaTableDatabase(base_path=str(tmp_path / "result_db"))
 
         source = DictSource(
             data=[{"x": 1, "y": 2}],
@@ -280,7 +280,7 @@ class TestPipelineSave:
         pipeline = Pipeline(
             name="test",
             pipeline_database=pipeline_db,
-            function_database=function_db,
+            result_database=result_db,
         )
         with pipeline:
             pod.process(source, label="transform")
@@ -288,12 +288,12 @@ class TestPipelineSave:
         path = tmp_path / "pipeline.json"
         pipeline.save(str(path))
         data = json.loads(path.read_text())
-        # New format: function_database is a registry key string in pipeline block
-        fn_db_key = data["pipeline"]["function_database"]
-        assert fn_db_key is not None
-        assert isinstance(fn_db_key, str)
-        assert fn_db_key in data["databases"]
-        assert data["databases"][fn_db_key]["type"] == "delta_table"
+        # New format: result_database is a registry key string in pipeline block
+        result_db_key = data["pipeline"]["result_database"]
+        assert result_db_key is not None
+        assert isinstance(result_db_key, str)
+        assert result_db_key in data["databases"]
+        assert data["databases"][result_db_key]["type"] == "delta_table"
 
     def test_save_node_content_hash_matches_key(self, simple_pipeline):
         """Each node's content_hash field matches its key in the nodes dict."""
@@ -1072,10 +1072,10 @@ class TestLoadEdgeCases:
         assert ro_fn.load_status == LoadStatus.READ_ONLY
         assert full_fn.load_status == LoadStatus.FULL
 
-    def test_function_database_round_trip(self, tmp_path):
-        """Pipeline with separate function_database round-trips correctly."""
+    def test_result_database_round_trip(self, tmp_path):
+        """Pipeline with separate result_database round-trips correctly."""
         pipeline_db = DeltaTableDatabase(base_path=str(tmp_path / "pdb"))
-        function_db = DeltaTableDatabase(base_path=str(tmp_path / "fdb"))
+        result_db = DeltaTableDatabase(base_path=str(tmp_path / "fdb"))
         source = DictSource(data=[{"x": 1, "y": 2}], tag_columns=["x"], source_id="s")
         pf = PythonPacketFunction(
             function=transform_func,
@@ -1086,7 +1086,7 @@ class TestLoadEdgeCases:
         pipeline = Pipeline(
             name="test",
             pipeline_database=pipeline_db,
-            function_database=function_db,
+            result_database=result_db,
         )
         with pipeline:
             pod.process(source, label="transform")
@@ -1097,8 +1097,8 @@ class TestLoadEdgeCases:
         pipeline.save(str(path))
         loaded = Pipeline.load(str(path), mode="full")
 
-        assert loaded.function_database is not None
-        assert type(loaded.function_database) is DeltaTableDatabase
+        assert loaded._result_database is not None
+        assert type(loaded._result_database) is DeltaTableDatabase
 
 
 # ---------------------------------------------------------------------------
@@ -1886,15 +1886,15 @@ def test_load_operator_node_pipeline_path_has_pipeline_name_prefix(tmp_path):
     )
 
 
-def test_load_raises_on_missing_function_database_registry_key(tmp_path):
-    """Loading raises ValueError when function_database key is not in the databases registry.
+def test_load_raises_on_missing_result_database_registry_key(tmp_path):
+    """Loading raises ValueError when result_database key is not in the databases registry.
 
-    A non-null function_database key that cannot be resolved from the registry must
+    A non-null result_database key that cannot be resolved from the registry must
     raise a clear ValueError rather than silently using None and mis-scoping function
     records (or crashing later with a confusing error).
     """
     pipeline_db = DeltaTableDatabase(base_path=str(tmp_path / "pdb"))
-    function_db = DeltaTableDatabase(base_path=str(tmp_path / "fdb"))
+    result_db = DeltaTableDatabase(base_path=str(tmp_path / "fdb"))
     source = DictSource(data=[{"x": 1, "y": 2}], tag_columns=["x"], source_id="s")
     pf = PythonPacketFunction(
         function=transform_func,
@@ -1905,7 +1905,7 @@ def test_load_raises_on_missing_function_database_registry_key(tmp_path):
     pipeline = Pipeline(
         name="test",
         pipeline_database=pipeline_db,
-        function_database=function_db,
+        result_database=result_db,
     )
     with pipeline:
         pod.process(source, label="transform")
@@ -1913,10 +1913,10 @@ def test_load_raises_on_missing_function_database_registry_key(tmp_path):
     path = tmp_path / "pipeline.json"
     pipeline.save(str(path))
 
-    # Corrupt: replace the function_database key with one that doesn't exist
+    # Corrupt: replace the result_database key with one that doesn't exist
     with open(path) as f:
         data = json.load(f)
-    data["pipeline"]["function_database"] = "db_nonexistent"
+    data["pipeline"]["result_database"] = "db_nonexistent"
     with open(path, "w") as f:
         json.dump(data, f)
 
