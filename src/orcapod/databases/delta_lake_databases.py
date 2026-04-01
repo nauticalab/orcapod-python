@@ -50,22 +50,24 @@ class DeltaTableDatabase:
         batch_size: int = 1000,
         max_hierarchy_depth: int = 10,
         allow_schema_evolution: bool = True,
+        _path_prefix: tuple[str, ...] = (),
     ):
-        self._base_uri, self._storage_options = parse_base_path(base_path, storage_options)
-        self._is_cloud: bool = is_cloud_uri(self._base_uri)
+        self._root_uri, self._storage_options = parse_base_path(base_path, storage_options)
+        self._is_cloud: bool = is_cloud_uri(self._root_uri)
+        self._path_prefix = _path_prefix
         self.batch_size = batch_size
         self.max_hierarchy_depth = max_hierarchy_depth
         self.allow_schema_evolution = allow_schema_evolution
 
         if not self._is_cloud:
-            # Keep self._local_base_path for local-path operations (list_sources, etc.)
-            # NOTE: do NOT access self._local_base_path on cloud instances.
-            self._local_base_path = Path(self._base_uri)
+            # _local_root is the absolute filesystem root (for list_sources, mkdir, etc.)
+            # NOTE: do NOT access self._local_root on cloud instances.
+            self._local_root = Path(self._root_uri)
             if create_base_path:
-                self._local_base_path.mkdir(parents=True, exist_ok=True)
-            elif not self._local_base_path.exists():
+                self._local_root.mkdir(parents=True, exist_ok=True)
+            elif not self._local_root.exists():
                 raise ValueError(
-                    f"Base path {self._local_base_path} does not exist and create_base_path=False"
+                    f"Base path {self._local_root} does not exist and create_base_path=False"
                 )
         # For cloud paths: create_base_path is silently ignored (no directory needed).
 
@@ -100,17 +102,18 @@ class DeltaTableDatabase:
         return component
 
     def _get_table_uri(self, record_path: tuple[str, ...], create_dir: bool = False) -> str:
-        """Get the URI for a given record path (works for local and cloud).
+        """Get the URI for a given record path, incorporating base_path prefix.
 
         Args:
-            record_path: Tuple of path components.
+            record_path: Tuple of path components (relative to base_path).
             create_dir: If True, create the local directory (no-op for cloud paths).
         """
+        full_path = self._path_prefix + record_path  # prefix applied once, here only
         if self._is_cloud:
-            return self._base_uri.rstrip("/") + "/" + "/".join(record_path)
+            return self._root_uri.rstrip("/") + "/" + "/".join(full_path)
         else:
-            path = Path(self._base_uri)
-            for subpath in record_path:
+            path = self._local_root
+            for subpath in full_path:
                 path = path / self._sanitize_path_component(subpath)
             if create_dir:
                 path.mkdir(parents=True, exist_ok=True)
@@ -130,9 +133,11 @@ class DeltaTableDatabase:
         if not record_path:
             raise ValueError("Source path cannot be empty")
 
-        if len(record_path) > self.max_hierarchy_depth:
+        if len(self._path_prefix) + len(record_path) > self.max_hierarchy_depth:
             raise ValueError(
-                f"Source path depth {len(record_path)} exceeds maximum {self.max_hierarchy_depth}"
+                f"Source path depth {len(record_path)} exceeds maximum "
+                f"{self.max_hierarchy_depth - len(self._path_prefix)} "
+                f"(base_path uses {len(self._path_prefix)} components)"
             )
 
         # Validate path components
@@ -833,7 +838,8 @@ class DeltaTableDatabase:
         """Serialize database configuration to a JSON-compatible dict."""
         config: dict[str, Any] = {
             "type": "delta_table",
-            "base_path": self._base_uri,
+            "root_uri": self._root_uri,           # renamed from "base_path"
+            "base_path": list(self._path_prefix),  # new: relative prefix tuple
             "batch_size": self.batch_size,
             "max_hierarchy_depth": self.max_hierarchy_depth,
             "allow_schema_evolution": self.allow_schema_evolution,
@@ -843,15 +849,16 @@ class DeltaTableDatabase:
         return config
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> DeltaTableDatabase:
+    def from_config(cls, config: dict[str, Any]) -> "DeltaTableDatabase":
         """Reconstruct a DeltaTableDatabase from a config dict."""
         return cls(
-            base_path=config["base_path"],
+            base_path=config["root_uri"],
             storage_options=config.get("storage_options"),
             create_base_path=True,
             batch_size=config.get("batch_size", 1000),
             max_hierarchy_depth=config.get("max_hierarchy_depth", 10),
             allow_schema_evolution=config.get("allow_schema_evolution", True),
+            _path_prefix=tuple(config.get("base_path", [])),
         )
 
     def flush(self) -> None:
@@ -939,15 +946,24 @@ class DeltaTableDatabase:
 
     @property
     def base_path(self) -> tuple[str, ...]:
-        return ()
+        """The current relative root of this database view (always () for root instances)."""
+        return self._path_prefix
 
     def at(self, *path_components: str) -> "DeltaTableDatabase":
+        """Return a new DeltaTableDatabase scoped to the given sub-path.
+
+        The returned instance uses the same underlying filesystem root but
+        all reads and writes are relative to the extended prefix. Unlike
+        InMemoryArrowDatabase and ConnectorArrowDatabase, DeltaTableDatabase
+        does NOT share pending state — the filesystem is the shared storage.
+        """
         return DeltaTableDatabase(
-            base_path=self._base_uri,
+            base_path=self._root_uri,
             storage_options=self._storage_options,
             batch_size=self.batch_size,
             max_hierarchy_depth=self.max_hierarchy_depth,
             allow_schema_evolution=self.allow_schema_evolution,
+            _path_prefix=self._path_prefix + path_components,
         )
 
     def list_sources(self) -> list[tuple[str, ...]]:
@@ -985,5 +1001,10 @@ class DeltaTableDatabase:
                 except deltalake.exceptions.TableNotFoundError:
                     _scan(item, components)
 
-        _scan(self._local_base_path, ())
+        # Build the effective scoped root directory
+        scoped_root = self._local_root
+        for component in self._path_prefix:
+            scoped_root = scoped_root / self._sanitize_path_component(component)
+
+        _scan(scoped_root, ())
         return sources
