@@ -17,7 +17,7 @@ Test sections:
 10. Hierarchical record_path + _path_to_table_name
 11. Flush behaviour (pending cleared, connector receives data)
 12. Config (to_config shape, from_config raises NotImplementedError)
-13. Context-manager lifecycle (connector.close is called)
+13. at() method and base_path attribute
 """
 from __future__ import annotations
 
