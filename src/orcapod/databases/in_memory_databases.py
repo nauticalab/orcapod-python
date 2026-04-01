@@ -389,8 +389,25 @@ class InMemoryArrowDatabase:
             return None
         return self._handle_record_id_column(filtered, record_id_column)
 
-    def to_config(self) -> dict[str, Any]:
-        """Serialize database configuration to a JSON-compatible dict."""
+    def to_config(self, db_registry=None) -> dict[str, Any]:
+        """Serialize database configuration to a JSON-compatible dict.
+
+        When called on a scoped instance (``self._root is not None``) with a
+        ``db_registry``, emits a compact scoped format that references the root
+        database by registry key plus the scoped path.  The root config is
+        registered in the registry, not inlined.
+
+        When called without a registry, or on a root instance, emits the
+        existing flat format unchanged (backward compatible).
+        """
+        if self._root is not None and db_registry is not None:
+            root_config = self._root.to_config()  # root emits its own format (no registry)
+            ref = db_registry.register(root_config)
+            return {
+                "type": "scoped",
+                "ref": ref,
+                "path": list(self._scoped_path),
+            }
         return {
             "type": "in_memory",
             "base_path": list(self._path_prefix),

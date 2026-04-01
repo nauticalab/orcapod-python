@@ -228,21 +228,32 @@ def _ensure_registries() -> None:
 # ---------------------------------------------------------------------------
 
 
-def resolve_database_from_config(config: dict[str, Any]) -> Any:
+def resolve_database_from_config(config: dict[str, Any], registry: dict | None = None) -> Any:
     """Reconstruct a database instance from a config dict.
 
     Args:
         config: Dict with at least a ``"type"`` key matching a registered
-            database type.
+            database type, or ``"type": "scoped"`` for a scoped database
+            reference.
+        registry: Optional plain dict mapping ``"db_<key>"`` → config dict
+            (the output of ``DatabaseRegistry.to_dict()``).  Required when
+            ``config["type"] == "scoped"``; ignored otherwise.
 
     Returns:
         A new database instance constructed from the config.
 
     Raises:
-        ValueError: If the ``"type"`` key is missing or unknown.
+        ValueError: If the ``"type"`` key is missing or unknown, or if
+            ``config["type"] == "scoped"`` and no registry is provided.
     """
     _ensure_registries()
     db_type = config.get("type")
+    if db_type == "scoped":
+        if registry is None:
+            raise ValueError("registry required to resolve scoped database config")
+        root_config = registry[config["ref"]]
+        root_db = resolve_database_from_config(root_config)
+        return root_db.at(*config["path"])
     if db_type not in DATABASE_REGISTRY:
         raise ValueError(
             f"Unknown database type: {db_type!r}. "
