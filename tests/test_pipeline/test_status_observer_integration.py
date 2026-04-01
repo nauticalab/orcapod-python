@@ -15,6 +15,7 @@ from orcapod.core.function_pod import FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
+from orcapod.pipeline.serialization import DatabaseRegistry
 from orcapod.pipeline import (
     AsyncPipelineOrchestrator,
     Pipeline,
@@ -70,8 +71,7 @@ class TestSyncPipelineSuccessStatus:
         orch = SyncPipelineOrchestrator(observer=obs)
         pipeline.run(orchestrator=orch)
 
-        fn_node = _get_function_node(pipeline)
-        status = obs.get_status(pipeline_path=fn_node.pipeline_path)
+        status = obs.get_status()
 
         assert status is not None
         # 3 packets × 2 events each (RUNNING + SUCCESS) = 6 rows
@@ -106,8 +106,7 @@ class TestFailingPacketsStatus:
         orch = SyncPipelineOrchestrator(observer=obs)
         pipeline.run(orchestrator=orch)
 
-        fn_node = _get_function_node(pipeline)
-        status = obs.get_status(pipeline_path=fn_node.pipeline_path)
+        status = obs.get_status()
 
         assert status is not None
         # 2 packets × 2 events each (RUNNING + FAILED)
@@ -128,12 +127,12 @@ class TestFailingPacketsStatus:
 
 
 # ---------------------------------------------------------------------------
-# 3. Pipeline-path-mirrored storage
+# 3. Flat status storage (new design: single status table, not path-mirrored)
 # ---------------------------------------------------------------------------
 
 
-class TestPipelinePathMirroredStorage:
-    def test_status_path_mirrors_pipeline_path(self):
+class TestFlatStatusStorage:
+    def test_status_stored_in_flat_table(self):
         db = InMemoryArrowDatabase()
         source = _make_source(1)
 
@@ -143,7 +142,7 @@ class TestPipelinePathMirroredStorage:
         pf = PythonPacketFunction(identity, output_keys="result", executor=LocalExecutor())
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="test_mirror_status", pipeline_database=db)
+        pipeline = Pipeline(name="test_flat_status", pipeline_database=db)
         with pipeline:
             pod(source, label="ident")
 
@@ -151,14 +150,14 @@ class TestPipelinePathMirroredStorage:
         orch = SyncPipelineOrchestrator(observer=obs)
         pipeline.run(orchestrator=orch)
 
-        fn_node = _get_function_node(pipeline)
-        pp = fn_node.pipeline_path
-        expected_status_path = pp[:1] + ("status",) + pp[1:]
+        # All status is now in a single flat table via get_status()
+        all_status = obs.get_status()
+        assert all_status is not None
+        assert all_status.num_rows == 2  # RUNNING + SUCCESS
 
-        # Verify the status path is correct by reading directly from the DB
-        raw = db.get_all_records(expected_status_path)
-        assert raw is not None
-        assert raw.num_rows == 2  # RUNNING + SUCCESS
+        # Node label is stored as a column for filtering
+        labels = set(all_status.column("_status_node_label").to_pylist())
+        assert "ident" in labels
 
 
 # ---------------------------------------------------------------------------
@@ -185,8 +184,7 @@ class TestQueryableTagColumns:
         orch = SyncPipelineOrchestrator(observer=obs)
         pipeline.run(orchestrator=orch)
 
-        fn_node = _get_function_node(pipeline)
-        status = obs.get_status(pipeline_path=fn_node.pipeline_path)
+        status = obs.get_status()
 
         assert status is not None
         # "id" tag column should be a separate column, not JSON
@@ -219,8 +217,7 @@ class TestAsyncOrchestratorStatus:
         orch = AsyncPipelineOrchestrator(observer=obs)
         pipeline.run(orchestrator=orch)
 
-        fn_node = _get_function_node(pipeline)
-        status = obs.get_status(pipeline_path=fn_node.pipeline_path)
+        status = obs.get_status()
 
         assert status is not None
         assert status.num_rows == 4  # 2 × (RUNNING + SUCCESS)
@@ -256,8 +253,7 @@ class TestFailFastErrorPolicy:
         with pytest.raises(RuntimeError, match="crash"):
             pipeline.run(orchestrator=orch)
 
-        fn_node = _get_function_node(pipeline)
-        status = obs.get_status(pipeline_path=fn_node.pipeline_path)
+        status = obs.get_status()
 
         # At least one RUNNING + one FAILED before abort
         assert status is not None
@@ -297,8 +293,7 @@ class TestMixedSuccessFailure:
         orch = SyncPipelineOrchestrator(observer=obs)
         pipeline.run(orchestrator=orch)
 
-        fn_node = _get_function_node(pipeline)
-        status = obs.get_status(pipeline_path=fn_node.pipeline_path)
+        status = obs.get_status()
 
         assert status is not None
         # 3 RUNNING + 2 SUCCESS + 1 FAILED = 6
@@ -311,12 +306,12 @@ class TestMixedSuccessFailure:
 
 
 # ---------------------------------------------------------------------------
-# 8. Multiple function nodes — each gets own status table
+# 8. Multiple function nodes — each gets own rows in combined status table
 # ---------------------------------------------------------------------------
 
 
 class TestMultipleFunctionNodesSeparateStatus:
-    def test_two_nodes_separate_status_tables(self):
+    def test_two_nodes_combined_status_table(self):
         db = InMemoryArrowDatabase()
         source = _make_source(2)
 
@@ -340,35 +335,25 @@ class TestMultipleFunctionNodesSeparateStatus:
         orch = SyncPipelineOrchestrator(observer=obs)
         pipeline.run(orchestrator=orch)
 
-        import networkx as nx
+        # Combined status contains events for both nodes
+        status = obs.get_status()
+        assert status is not None
+        # Each node: 2 packets × 2 events = 4 rows per node → 8 total
+        assert status.num_rows == 8
 
-        fn_nodes = [
-            n
-            for n in nx.topological_sort(pipeline._node_graph)
-            if n.node_type == "function"
-        ]
-        assert len(fn_nodes) == 2
-
-        status1 = obs.get_status(pipeline_path=fn_nodes[0].pipeline_path)
-        status2 = obs.get_status(pipeline_path=fn_nodes[1].pipeline_path)
-
-        assert status1 is not None
-        assert status2 is not None
-        # Each node: 2 packets × 2 events = 4 rows
-        assert status1.num_rows == 4
-        assert status2.num_rows == 4
-
-        # Verify they are at different paths
-        assert fn_nodes[0].pipeline_path != fn_nodes[1].pipeline_path
+        # Both node labels appear in the combined table
+        labels = set(status.column("_status_node_label").to_pylist())
+        assert "doubler" in labels
+        assert "tripler" in labels
 
 
 # ---------------------------------------------------------------------------
-# 9. get_status(pipeline_path) retrieves node-specific status
+# 9. get_status() returns combined status, filter by node_label column
 # ---------------------------------------------------------------------------
 
 
 class TestGetStatusNodeSpecific:
-    def test_get_status_filters_by_node(self):
+    def test_get_status_filters_by_node_label_column(self):
         db = InMemoryArrowDatabase()
         source = _make_source(2)
 
@@ -392,17 +377,14 @@ class TestGetStatusNodeSpecific:
         orch = SyncPipelineOrchestrator(observer=obs)
         pipeline.run(orchestrator=orch)
 
-        import networkx as nx
+        # Retrieve all status and filter by node label
+        import pyarrow.compute as pc
 
-        fn_nodes = [
-            n
-            for n in nx.topological_sort(pipeline._node_graph)
-            if n.node_type == "function"
-        ]
+        all_status = obs.get_status()
+        assert all_status is not None
 
-        # Each node's status contains only that node's label
-        status1 = obs.get_status(pipeline_path=fn_nodes[0].pipeline_path)
-        status2 = obs.get_status(pipeline_path=fn_nodes[1].pipeline_path)
+        status1 = all_status.filter(pc.field("_status_node_label") == "doubler")
+        status2 = all_status.filter(pc.field("_status_node_label") == "tripler")
 
         labels1 = set(status1.column("_status_node_label").to_pylist())
         labels2 = set(status2.column("_status_node_label").to_pylist())
@@ -435,8 +417,7 @@ class TestStatusSchema:
         orch = SyncPipelineOrchestrator(observer=obs)
         pipeline.run(orchestrator=orch)
 
-        fn_node = _get_function_node(pipeline)
-        status = obs.get_status(pipeline_path=fn_node.pipeline_path)
+        status = obs.get_status()
 
         expected_system_cols = {
             "_status_id",
@@ -478,8 +459,39 @@ class TestRunIdTracking:
         # Pass run_id via the orchestrator's run() method directly
         orch.run(pipeline._node_graph, run_id="my-custom-run-id")
 
-        fn_node = _get_function_node(pipeline)
-        status = obs.get_status(pipeline_path=fn_node.pipeline_path)
+        status = obs.get_status()
 
         run_ids = set(status.column("_status_run_id").to_pylist())
         assert run_ids == {"my-custom-run-id"}
+
+
+# ---------------------------------------------------------------------------
+# 12. Serialization: to_config shape
+# ---------------------------------------------------------------------------
+
+
+def test_status_observer_to_config_shape():
+    db = InMemoryArrowDatabase()
+    status_db = db.at("my_pipeline", "_status")
+    obs = StatusObserver(status_db)
+    registry = DatabaseRegistry()
+    config = obs.to_config(db_registry=registry)
+    assert config["type"] == "status"
+    assert config["database"]["type"] == "scoped"
+    assert config["database"]["path"] == ["my_pipeline", "_status"]
+
+
+# ---------------------------------------------------------------------------
+# 13. Serialization: from_config round-trip
+# ---------------------------------------------------------------------------
+
+
+def test_status_observer_from_config_round_trip():
+    db = InMemoryArrowDatabase()
+    status_db = db.at("my_pipeline", "_status")
+    obs = StatusObserver(status_db)
+    registry = DatabaseRegistry()
+    config = obs.to_config(db_registry=registry)
+    db_dict = registry.to_dict()
+    restored = StatusObserver.from_config(config, db_dict)
+    assert restored._db._path_prefix == status_db._path_prefix
