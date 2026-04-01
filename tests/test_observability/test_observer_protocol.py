@@ -10,7 +10,7 @@ class TestNoOpObserver:
         """contextualize() returns an object implementing the protocol."""
         observer = NoOpObserver()
         contextualized = observer.contextualize("pod_uri", "schema_abc", "inst_xyz")
-        assert contextualized is not None
+        assert isinstance(contextualized, ExecutionObserverProtocol)
 
     def test_noop_contextualize_returns_self(self):
         """NoOpObserver.contextualize() returns self (no wrapping needed)."""
