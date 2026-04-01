@@ -62,20 +62,25 @@ class ConnectorArrowDatabase:
         self,
         connector: DBConnectorProtocol,
         max_hierarchy_depth: int = 10,
+        _path_prefix: tuple[str, ...] = (),
+        _shared_pending_batches: "dict[str, pa.Table] | None" = None,
+        _shared_pending_record_ids: "dict[str, set[str]] | None" = None,
+        _shared_pending_skip_existing: "dict[str, bool] | None" = None,
     ) -> None:
         self._connector = connector
         self.max_hierarchy_depth = max_hierarchy_depth
-        self._pending_batches: dict[str, pa.Table] = {}
-        self._pending_record_ids: dict[str, set[str]] = defaultdict(set)
+        self._path_prefix = _path_prefix
+        self._pending_batches: dict[str, pa.Table] = _shared_pending_batches if _shared_pending_batches is not None else {}
+        self._pending_record_ids: dict[str, set[str]] = _shared_pending_record_ids if _shared_pending_record_ids is not None else defaultdict(set)
         # Per-batch flag: True when the batch was added with skip_duplicates=True,
         # so flush() can pass skip_existing=True to the connector and let it use
         # native INSERT-OR-IGNORE semantics rather than Python-side prefiltering.
-        self._pending_skip_existing: dict[str, bool] = {}
+        self._pending_skip_existing: dict[str, bool] = _shared_pending_skip_existing if _shared_pending_skip_existing is not None else {}
 
     # ── Path helpers ──────────────────────────────────────────────────────────
 
     def _get_record_key(self, record_path: tuple[str, ...]) -> str:
-        return "/".join(record_path)
+        return "/".join(self._path_prefix + record_path)
 
     def _path_to_table_name(self, record_path: tuple[str, ...]) -> str:
         """Map a record_path to a safe SQL table name.
@@ -93,10 +98,11 @@ class ConnectorArrowDatabase:
     def _validate_record_path(self, record_path: tuple[str, ...]) -> None:
         if not record_path:
             raise ValueError("record_path cannot be empty")
-        if len(record_path) > self.max_hierarchy_depth:
+        if len(self._path_prefix) + len(record_path) > self.max_hierarchy_depth:
             raise ValueError(
                 f"record_path depth {len(record_path)} exceeds maximum "
-                f"{self.max_hierarchy_depth}"
+                f"{self.max_hierarchy_depth - len(self._path_prefix)} "
+                f"(base_path uses {len(self._path_prefix)} components)"
             )
         for i, component in enumerate(record_path):
             if not component or not isinstance(component, str):
@@ -165,7 +171,7 @@ class ConnectorArrowDatabase:
         self, record_path: tuple[str, ...]
     ) -> pa.Table | None:
         """Fetch all committed records for a path from the connector."""
-        table_name = self._path_to_table_name(record_path)
+        table_name = self._path_to_table_name(self._path_prefix + record_path)
         if table_name not in self._connector.get_table_names():
             return None
         batches = list(
@@ -272,12 +278,23 @@ class ConnectorArrowDatabase:
 
     @property
     def base_path(self) -> tuple[str, ...]:
-        return ()
+        """The current relative root of this database view (always () for root instances)."""
+        return self._path_prefix
 
     def at(self, *path_components: str) -> "ConnectorArrowDatabase":
+        """Return a new ConnectorArrowDatabase scoped to the given sub-path.
+
+        The returned instance shares the connector and all three pending dicts
+        (_pending_batches, _pending_record_ids, _pending_skip_existing) by reference.
+        Calling flush() on any view drains the entire shared pending queue.
+        """
         return ConnectorArrowDatabase(
             connector=self._connector,
             max_hierarchy_depth=self.max_hierarchy_depth,
+            _path_prefix=self._path_prefix + path_components,
+            _shared_pending_batches=self._pending_batches,
+            _shared_pending_record_ids=self._pending_record_ids,
+            _shared_pending_skip_existing=self._pending_skip_existing,
         )
 
     # ── Flush ─────────────────────────────────────────────────────────────────
@@ -432,6 +449,7 @@ class ConnectorArrowDatabase:
         return {
             "type": "connector_arrow_database",
             "connector": self._connector.to_config(),
+            "base_path": list(self._path_prefix),
             "max_hierarchy_depth": self.max_hierarchy_depth,
         }
 
