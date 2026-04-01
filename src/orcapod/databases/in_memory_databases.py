@@ -273,7 +273,20 @@ class InMemoryArrowDatabase:
         The returned instance shares the underlying storage dicts (_tables,
         _pending_batches, _pending_record_ids) by reference, so writes
         through any view are visible to all views of the same root database.
+
+        Raises:
+            ValueError: If any path component is empty, not a str, or contains
+                ``'/'`` or ``'\\0'`` (which would corrupt the ``'/'``-separated
+                record key scheme).
         """
+        for i, component in enumerate(path_components):
+            if not component or not isinstance(component, str):
+                raise ValueError(f"at() path component {i} is invalid: {repr(component)}")
+            if "/" in component or "\0" in component:
+                raise ValueError(
+                    f"at() path component {repr(component)} contains an invalid character "
+                    "('/' or '\\0')"
+                )
         return InMemoryArrowDatabase(
             max_hierarchy_depth=self.max_hierarchy_depth,
             _path_prefix=self._path_prefix + path_components,

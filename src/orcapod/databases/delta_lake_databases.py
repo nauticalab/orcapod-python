@@ -850,15 +850,29 @@ class DeltaTableDatabase:
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> "DeltaTableDatabase":
-        """Reconstruct a DeltaTableDatabase from a config dict."""
+        """Reconstruct a DeltaTableDatabase from a config dict.
+
+        Supports both the current format (``"root_uri"`` for the storage root,
+        ``"base_path"`` as a list for the scoping prefix) and the legacy format
+        produced before ENG-341 (``"base_path"`` as a URI string, no prefix).
+        """
+        if "root_uri" in config:
+            # Current format (post-ENG-341)
+            root_uri = config["root_uri"]
+            base_path_value = config.get("base_path", [])
+            _path_prefix = tuple(base_path_value) if isinstance(base_path_value, list) else ()
+        else:
+            # Legacy format (pre-ENG-341): "base_path" was the root URI string
+            root_uri = config["base_path"]
+            _path_prefix = ()
         return cls(
-            base_path=config["root_uri"],
+            base_path=root_uri,
             storage_options=config.get("storage_options"),
             create_base_path=True,
             batch_size=config.get("batch_size", 1000),
             max_hierarchy_depth=config.get("max_hierarchy_depth", 10),
             allow_schema_evolution=config.get("allow_schema_evolution", True),
-            _path_prefix=tuple(config.get("base_path", [])),
+            _path_prefix=_path_prefix,
         )
 
     def flush(self) -> None:
@@ -956,7 +970,29 @@ class DeltaTableDatabase:
         all reads and writes are relative to the extended prefix. Unlike
         InMemoryArrowDatabase and ConnectorArrowDatabase, DeltaTableDatabase
         does NOT share pending state — the filesystem is the shared storage.
+
+        Raises:
+            TypeError: If any component is not a str.
+            ValueError: If any component is empty, is ``'.'`` or ``'..'``, or
+                contains filesystem-unsafe characters (``/``, ``\\``, ``*``,
+                ``?``, ``"``, ``<``, ``>``, ``|``, ``\\0``).
         """
+        _unsafe_chars = ["/", "\\", "*", "?", '"', "<", ">", "|", "\0"]
+        for i, component in enumerate(path_components):
+            if not isinstance(component, str):
+                raise TypeError(
+                    f"at() path component {i} must be str, got {type(component)!r}"
+                )
+            if not component:
+                raise ValueError(f"at() path component {i} must not be empty")
+            if component in (".", ".."):
+                raise ValueError(
+                    f"at() path component {repr(component)}: '.' and '..' are not allowed"
+                )
+            if any(char in component for char in _unsafe_chars):
+                raise ValueError(
+                    f"at() path component {repr(component)} contains invalid characters"
+                )
         return DeltaTableDatabase(
             base_path=self._root_uri,
             storage_options=self._storage_options,

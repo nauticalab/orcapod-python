@@ -58,6 +58,19 @@ class TestDeltaTableDatabaseConfig:
         restored = DeltaTableDatabase.from_config(config)
         assert restored.to_config() == config
 
+    def test_from_config_accepts_legacy_base_path(self, tmp_path):
+        """from_config accepts pre-ENG-341 configs where 'base_path' was the root URI string."""
+        legacy_config = {
+            "type": "delta_table",
+            "base_path": str(tmp_path / "delta_db"),
+            "batch_size": 1000,
+            "max_hierarchy_depth": 10,
+            "allow_schema_evolution": True,
+        }
+        db = DeltaTableDatabase.from_config(legacy_config)
+        assert db.base_path == ()
+        assert db.to_config()["root_uri"] == str(tmp_path / "delta_db")
+
 
 class TestInMemoryDatabaseConfig:
     def test_to_config_includes_type(self):
