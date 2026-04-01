@@ -689,12 +689,18 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             "snapshot_time": None,
         }
         if include_pipeline_dbs:
-            pipeline_db_key = db_registry.register(self._pipeline_database.to_config())
+            # Save the scoped pipeline database (with pipeline-name prefix in base_path)
+            # so that on load, nodes can read their records at the correct paths.
+            scoped_pipeline_db = getattr(self, "_scoped_pipeline_database", self._pipeline_database)
+            pipeline_db_key = db_registry.register(scoped_pipeline_db.to_config())
             pipeline_block["pipeline_database"] = pipeline_db_key
             if self._result_database is not None:
+                # User supplied an explicit result_database — save it as-is.
                 result_db_key = db_registry.register(self._result_database.to_config())
                 pipeline_block["result_database"] = result_db_key
             else:
+                # Result database was implicitly scoped as pipeline_db.at("_result").
+                # Save null so load() knows to re-derive it from pipeline_db.
                 pipeline_block["result_database"] = None
             if _observer_to_serialize is not None:
                 pipeline_block["observer"] = _observer_to_serialize.to_config(db_registry=db_registry)
@@ -872,7 +878,9 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             # Support both old "function_database" key and new "result_database" key
             result_db_key = pipeline_meta.get("result_database") or pipeline_meta.get("function_database")
             if result_db_key is None:
-                result_db = None
+                # Null means the result DB was implicitly pipeline_db.at("_result") at run time.
+                # Re-derive it here so loaded nodes can find their cached records.
+                result_db = pipeline_db.at("_result") if pipeline_db is not None else None
             elif result_db_key not in db_registry_data:
                 raise ValueError(
                     f"Result database key {result_db_key!r} not found in databases registry. "

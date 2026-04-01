@@ -53,6 +53,8 @@ class DeltaTableDatabase:
         _path_prefix: tuple[str, ...] = (),
         _root: "DeltaTableDatabase | None" = None,
         _scoped_path: tuple[str, ...] = (),
+        _shared_pending_batches: "dict[str, pa.Table] | None" = None,
+        _shared_pending_record_ids: "defaultdict[str, set[str]] | None" = None,
     ):
         self._root_uri, self._storage_options = parse_base_path(base_path, storage_options)
         self._is_cloud: bool = is_cloud_uri(self._root_uri)
@@ -76,8 +78,16 @@ class DeltaTableDatabase:
         # For cloud paths: create_base_path is silently ignored (no directory needed).
 
         self._delta_table_cache: dict[str, deltalake.DeltaTable] = {}
-        self._pending_batches: dict[str, pa.Table] = {}
-        self._pending_record_ids: dict[str, set[str]] = defaultdict(set)
+        # Shared pending state — when constructed via at(), these dicts are shared
+        # with the root instance so that root.flush() can flush all scoped writes.
+        if _shared_pending_batches is not None:
+            self._pending_batches = _shared_pending_batches
+        else:
+            self._pending_batches: dict[str, pa.Table] = {}
+        if _shared_pending_record_ids is not None:
+            self._pending_record_ids = _shared_pending_record_ids
+        else:
+            self._pending_record_ids: dict[str, set[str]] = defaultdict(set)
         self._existing_ids_cache: dict[str, set[str]] = defaultdict(set)
         self._cache_dirty: dict[str, bool] = defaultdict(lambda: True)
 
@@ -88,8 +98,13 @@ class DeltaTableDatabase:
         # Note: next_row_index continues incrementing
 
     def _get_record_key(self, record_path: tuple[str, ...]) -> str:
-        """Generate cache key for source storage."""
-        return "/".join(record_path)
+        """Generate cache key for source storage.
+
+        The key includes the full path (prefix + record_path) so that scoped
+        instances that share pending state with the root can be correctly flushed
+        from the root.
+        """
+        return "/".join(self._path_prefix + record_path)
 
     @staticmethod
     def _sanitize_path_component(component: str) -> str:
@@ -883,9 +898,8 @@ class DeltaTableDatabase:
         """Flush all pending batches."""
         errors: list[tuple[str, Exception]] = []
         for record_key in list(self._pending_batches.keys()):
-            record_path = tuple(record_key.split("/"))
             try:
-                self.flush_batch(record_path)
+                self._flush_by_key(record_key)
             except Exception as e:
                 logger.error(f"Error flushing batch for {record_key}: {e}")
                 errors.append((record_key, e))
@@ -900,10 +914,19 @@ class DeltaTableDatabase:
         Flush pending batch for a specific source path.
 
         Args:
-            record_path: Tuple of path components
+            record_path: Tuple of path components (relative to this instance's prefix)
+        """
+        record_key = self._get_record_key(record_path)
+        self._flush_by_key(record_key)
+
+    def _flush_by_key(self, record_key: str) -> None:
+        """Flush a pending batch identified by its absolute record_key (prefix + path).
+
+        This method is safe to call from any instance (root or scoped) since the
+        key already encodes the full path. The URI is derived directly from the key
+        without applying any instance-level prefix.
         """
         logger.debug("Flushing triggered!!")
-        record_key = self._get_record_key(record_path)
 
         if (
             record_key not in self._pending_batches
@@ -913,16 +936,30 @@ class DeltaTableDatabase:
 
         # Get all pending records
         pending_batch = self._pending_batches.pop(record_key)
-        pending_ids = self._pending_record_ids.pop(record_key)
+        pending_ids = self._pending_record_ids.pop(record_key, set())
+
+        # Derive the absolute table URI directly from the key (already includes prefix).
+        abs_path_components = tuple(record_key.split("/"))
+        if not self._is_cloud:
+            table_uri = str(self._local_root.joinpath(*abs_path_components))
+        else:
+            table_uri = self._root_uri.rstrip("/") + "/" + record_key
 
         try:
             # Combine all tables in the batch
             combined_table = pending_batch.combine_chunks()
 
-            table_uri = self._get_table_uri(record_path, create_dir=True)
+            # Ensure parent directory exists (local only)
+            if not self._is_cloud:
+                import os
+                os.makedirs(table_uri, exist_ok=True)
 
-            # Check if table exists
-            delta_table = self._get_delta_table(record_path)
+            # Check if Delta table exists at this URI
+            try:
+                import deltalake as _dl
+                delta_table = _dl.DeltaTable(table_uri, storage_options=self._storage_options or None)
+            except Exception:
+                delta_table = None
 
             if delta_table is None:
                 # TODO: reconsider mode="overwrite" here
@@ -952,8 +989,8 @@ class DeltaTableDatabase:
             # Update cache
             self._delta_table_cache[record_key] = deltalake.DeltaTable(table_uri, storage_options=self._storage_options or None)
 
-            # invalide record id cache
-            self._invalidate_cache(record_path)
+            # invalidate record id cache (uses abs_path_components as the record_path)
+            self._invalidate_cache(abs_path_components)
 
         except Exception as e:
             logger.error(f"Error flushing batch for {record_key}: {e}")
@@ -999,6 +1036,9 @@ class DeltaTableDatabase:
                 )
         new_root = self._root if self._root is not None else self
         new_scoped_path = self._scoped_path + path_components
+        # Propagate shared pending state to the scoped instance so that
+        # root.flush() is visible to — and can flush — all scoped instances.
+        root_instance = new_root
         return DeltaTableDatabase(
             base_path=self._root_uri,
             storage_options=self._storage_options,
@@ -1008,6 +1048,8 @@ class DeltaTableDatabase:
             _path_prefix=self._path_prefix + path_components,
             _root=new_root,
             _scoped_path=new_scoped_path,
+            _shared_pending_batches=root_instance._pending_batches,
+            _shared_pending_record_ids=root_instance._pending_record_ids,
         )
 
     def list_sources(self) -> list[tuple[str, ...]]:

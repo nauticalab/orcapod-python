@@ -366,6 +366,9 @@ class _ContextualizedLoggingObserver:
         self._db = db
         self._identity_path = identity_path
         self._run_id = run_id
+        # Populated by on_node_start so create_packet_logger can stamp the right label/hash.
+        self._node_label: str = ""
+        self._node_hash: str = ""
 
     def contextualize(self, *identity_path: str) -> "_ContextualizedLoggingObserver":
         """Re-contextualize with a new identity path."""
@@ -378,7 +381,8 @@ class _ContextualizedLoggingObserver:
         pass
 
     def on_node_start(self, node_label: str, node_hash: str, tag_schema=None) -> None:
-        pass
+        self._node_label = node_label
+        self._node_hash = node_hash
 
     def on_node_end(self, node_label: str, node_hash: str) -> None:
         pass
@@ -409,20 +413,15 @@ class _ContextualizedLoggingObserver:
         """Create a PacketLogger using context from this wrapper.
 
         Logs are written at ``DEFAULT_LOG_PATH`` within the database.
-        Node identity (hash and label) is extracted from ``self._identity_path``
-        and stored as columns in each log row.
+        Node identity (label and hash) are captured from ``on_node_start``.
         """
         tag_data = dict(tag)
 
-        # identity_path is (node_hash, node_label) as passed from FunctionNode
-        node_hash = self._identity_path[0] if len(self._identity_path) > 0 else ""
-        node_label = self._identity_path[1] if len(self._identity_path) > 1 else ""
-
         return PacketLogger(
             db=self._db,
-            log_path=self._identity_path,
+            log_path=DEFAULT_LOG_PATH,
             run_id=self._run_id,
-            node_label=node_label,
-            node_hash=node_hash,
+            node_label=self._node_label,
+            node_hash=self._node_hash,
             tag_data=tag_data,
         )
