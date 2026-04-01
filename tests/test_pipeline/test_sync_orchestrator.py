@@ -459,7 +459,7 @@ class TestSyncObserverInjection:
         pod = FunctionPod(pf)
 
         db = InMemoryArrowDatabase()
-        pipeline = Pipeline(name="cached_obs", pipeline_database=db, function_database=db)
+        pipeline = Pipeline(name="cached_obs", pipeline_database=db, result_database=db)
         with pipeline:
             pod(src, label="doubler")
 

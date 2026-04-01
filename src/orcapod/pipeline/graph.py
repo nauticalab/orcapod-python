@@ -475,6 +475,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     buffer_size=config.channel_buffer_size,
                 ).run(
                     self._node_graph,
+                    observer=effective_observer,
                     pipeline_uri=pipeline_uri,
                 )
             else:
