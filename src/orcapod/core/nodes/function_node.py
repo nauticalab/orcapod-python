@@ -459,15 +459,6 @@ class FunctionNode(StreamBase):
         )
 
     @property
-    def pipeline_path(self) -> tuple[str, ...]:
-        """Deprecated alias for ``node_identity_path``.
-
-        .. deprecated::
-            Use ``node_identity_path`` instead.
-        """
-        return self.node_identity_path
-
-    @property
     def node_uri(self) -> tuple[str, ...]:
         """Canonical URI tuple identifying this computation.
 
@@ -680,7 +671,7 @@ class FunctionNode(StreamBase):
         entry_id_set = set(entry_ids)
 
         taginfo = self._pipeline_database.get_all_records(
-            self.pipeline_path,
+            self.node_identity_path,
             record_id_column=PIPELINE_ENTRY_ID_COL,
         )
         results = self._cached_function_pod._result_database.get_all_records(
@@ -846,7 +837,7 @@ class FunctionNode(StreamBase):
         existing_record = None
         if not skip_cache_lookup:
             existing_record = self._pipeline_database.get_record_by_id(
-                self.pipeline_path,
+                self.node_identity_path,
                 entry_id,
             )
 
@@ -888,7 +879,7 @@ class FunctionNode(StreamBase):
         )
 
         self._pipeline_database.add_record(
-            self.pipeline_path,
+            self.node_identity_path,
             entry_id,
             combined_record,
             skip_duplicates=False,
@@ -920,7 +911,7 @@ class FunctionNode(StreamBase):
             self._cached_function_pod.record_path,
             record_id_column=constants.PACKET_RECORD_ID,
         )
-        taginfo = self._pipeline_database.get_all_records(self.pipeline_path)
+        taginfo = self._pipeline_database.get_all_records(self.node_identity_path)
 
         if results is None or taginfo is None:
             return None
@@ -964,7 +955,7 @@ class FunctionNode(StreamBase):
 
         from orcapod.core.sources.derived_source import DerivedSource
 
-        path_str = "/".join(self.pipeline_path)
+        path_str = "/".join(self.node_identity_path)
         content_frag = self.content_hash().to_string()[:16]
         source_id = f"{path_str}:{content_frag}"
         return DerivedSource(
@@ -994,7 +985,7 @@ class FunctionNode(StreamBase):
         PIPELINE_ENTRY_ID_COL = "__pipeline_entry_id"
 
         taginfo = self._pipeline_database.get_all_records(
-            self.pipeline_path,
+            self.node_identity_path,
             record_id_column=PIPELINE_ENTRY_ID_COL,
         )
         results = self._cached_function_pod._result_database.get_all_records(
@@ -1120,7 +1111,7 @@ class FunctionNode(StreamBase):
                 existing_entry_ids: set[str] = set()
 
                 taginfo = self._pipeline_database.get_all_records(
-                    self.pipeline_path,
+                    self.node_identity_path,
                     record_id_column=PIPELINE_ENTRY_ID_COL,
                 )
                 results = self._cached_function_pod._result_database.get_all_records(
