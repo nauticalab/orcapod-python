@@ -393,6 +393,49 @@ class TestAutoCompileAndRun:
         assert records is not None
         assert records.num_rows == 2  # two input rows (a, b)
 
+    def test_run_auto_saves_when_path_set(self, pipeline_db, tmp_path):
+        """Pipeline.run() writes a save file when auto_save_path is set."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+        save_path = tmp_path / "auto_saved.json"
+
+        pipeline = Pipeline(
+            name="auto_save_test",
+            pipeline_database=pipeline_db,
+            auto_save_path=save_path,
+        )
+
+        with pipeline:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        pipeline.run()
+
+        assert save_path.exists()
+        import json
+
+        data = json.loads(save_path.read_text())
+        assert "nodes" in data
+        assert "edges" in data
+
+    def test_run_does_not_save_when_path_not_set(self, pipeline_db, tmp_path):
+        """Pipeline.run() does not write any file when auto_save_path is None."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonPacketFunction(add_values, output_keys="total")
+        pod = FunctionPod(packet_function=pf)
+
+        pipeline = Pipeline(name="no_save_test", pipeline_database=pipeline_db)
+
+        with pipeline:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        pipeline.run()
+
+        # No JSON files should have been created
+        assert list(tmp_path.glob("*.json")) == []
+
     def test_pipeline_path_prefix_scoping(self, pipeline_db):
         """All persistent nodes' paths start with pipeline name prefix."""
         src_a, src_b = _make_two_sources()
