@@ -108,10 +108,33 @@ class ArrowDatabaseWithMetadataProtocol(
     pass
 
 
+@runtime_checkable
+class DatabaseRegistryProtocol(Protocol):
+    """Protocol for a database config registry used during pipeline save/load.
+
+    At **save time** (``to_config``), sources that embed database references
+    call ``register()`` to deduplicate configs and get a stable key string.
+
+    At **load time** (``from_config``), sources call ``resolve()`` with the
+    key string to retrieve the original config dict for reconstruction.
+
+    The existing ``DatabaseRegistry`` class satisfies this protocol.
+    """
+
+    def register(self, config: dict[str, Any]) -> str:
+        """Register a database config and return a stable registry key."""
+        ...
+
+    def resolve(self, key: str) -> dict[str, Any]:
+        """Return the config dict for a previously registered key."""
+        ...
+
+
 __all__ = [
     "ArrowDatabaseProtocol",
     "ArrowDatabaseWithMetadataProtocol",
     "ColumnInfo",
     "DBConnectorProtocol",
+    "DatabaseRegistryProtocol",
     "MetadataCapableProtocol",
 ]

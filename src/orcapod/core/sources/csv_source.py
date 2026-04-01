@@ -55,7 +55,7 @@ class CSVSource(RootSource):
         if self._source_id is None:
             self._source_id = result.source_id
 
-    def to_config(self) -> dict[str, Any]:
+    def to_config(self, db_registry=None) -> dict[str, Any]:
         """Serialize this source's configuration to a JSON-compatible dict."""
         return {
             "source_type": "csv",
@@ -68,7 +68,7 @@ class CSVSource(RootSource):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "CSVSource":
+    def from_config(cls, config: dict[str, Any], db_registry=None) -> "CSVSource":
         """Reconstruct a CSVSource from a config dict."""
         return cls(
             file_path=config["file_path"],

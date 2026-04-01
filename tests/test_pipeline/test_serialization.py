@@ -2138,3 +2138,108 @@ def test_source_proxy_from_config_raises_without_any_identity_fields(tmp_path):
 
     with pytest.raises(ValueError, match="identity fields"):
         _source_proxy_from_config(bare_config, node_descriptor=None)
+
+
+# ---------------------------------------------------------------------------
+# brian-arnold review: save→load→run round-trip integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestSaveLoadRunRoundtrip:
+    """Golden-path end-to-end tests: build, run, save, load, run again, compare.
+
+    These tests verify that the full cycle from pipeline construction through
+    serialization and reconstruction produces identical results.
+    """
+
+    def test_standard_save_load_run_roundtrip(self, tmp_path):
+        """Build+run a pipeline, save at standard level, load, run loaded pipeline,
+        verify results exactly match the original run.
+
+        Uses CSVSource (reconstructable) so the full pipeline can be reconstructed
+        from the saved JSON without needing live in-memory data.
+        """
+        csv_path = str(tmp_path / "data.csv")
+        _write_csv(csv_path, [{"x": "1", "y": "2"}, {"x": "3", "y": "4"}])
+
+        db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
+        source = CSVSource(file_path=csv_path, tag_columns=["x"], source_id="src")
+        pf = PythonPacketFunction(
+            function=transform_func,
+            output_keys=["result"],
+            function_name="transform_func",
+        )
+        pod = FunctionPod(packet_function=pf)
+        pipeline = Pipeline(name="roundtrip", pipeline_database=db)
+        with pipeline:
+            result_stream = pod.process(source, label="transform")
+
+        # Run original pipeline and capture results
+        pipeline.run()
+        db.flush()
+        original_results = sorted(
+            p.as_dict()["result"] for _, p in result_stream.iter_packets()
+        )
+        assert len(original_results) == 2
+
+        # Save and load
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))  # default: standard level
+        loaded = Pipeline.load(str(path), mode="full")
+
+        # Run the loaded pipeline and compare
+        fn_node = loaded.compiled_nodes["transform"]
+        assert fn_node.load_status == LoadStatus.FULL
+        loaded_results = sorted(
+            p.as_dict()["result"] for _, p in fn_node.iter_packets()
+        )
+        assert loaded_results == original_results
+
+    def test_definition_save_load_run_roundtrip(self, tmp_path):
+        """Save at definition level, load with a caller-supplied database,
+        run the loaded pipeline, verify results match the original.
+
+        Definition-level saves carry graph structure and function config but
+        no embedded DB config.  Supplying a fresh database at load time
+        should allow the pipeline to execute as normal.
+        """
+        csv_path = str(tmp_path / "data.csv")
+        _write_csv(csv_path, [{"x": "1", "y": "10"}, {"x": "3", "y": "20"}])
+
+        original_db = DeltaTableDatabase(base_path=str(tmp_path / "original_db"))
+        source = CSVSource(file_path=csv_path, tag_columns=["x"], source_id="src2")
+        pf = PythonPacketFunction(
+            function=transform_func,
+            output_keys=["result"],
+            function_name="transform_func",
+        )
+        pod = FunctionPod(packet_function=pf)
+        pipeline = Pipeline(name="def_roundtrip", pipeline_database=original_db)
+        with pipeline:
+            result_stream = pod.process(source, label="transform")
+
+        # Run original pipeline to capture expected results
+        pipeline.run()
+        original_db.flush()
+        original_results = sorted(
+            p.as_dict()["result"] for _, p in result_stream.iter_packets()
+        )
+        assert len(original_results) == 2
+
+        # Save at definition level (no DB config embedded)
+        path = tmp_path / "pipeline_definition.json"
+        pipeline.save(str(path), level="definition")
+
+        # Load with a fresh database supplied by the caller
+        fresh_db = DeltaTableDatabase(base_path=str(tmp_path / "fresh_db"))
+        loaded = Pipeline.load(str(path), pipeline_database=fresh_db)
+
+        # Source is reconstructable → function node should reach FULL status
+        fn_node = loaded.compiled_nodes["transform"]
+        assert fn_node.load_status == LoadStatus.FULL
+
+        # Run the loaded pipeline and compare results
+        loaded_results = sorted(
+            p.as_dict()["result"] for _, p in fn_node.iter_packets()
+        )
+        assert loaded_results == original_results

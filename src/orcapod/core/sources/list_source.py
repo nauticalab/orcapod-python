@@ -111,7 +111,7 @@ class ListSource(RootSource):
             self._tag_function_hash,
         )
 
-    def to_config(self) -> dict[str, Any]:
+    def to_config(self, db_registry=None) -> dict[str, Any]:
         """Serialize metadata-only config (data is not serializable)."""
         return {
             "source_type": "list",
@@ -121,7 +121,7 @@ class ListSource(RootSource):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "ListSource":
+    def from_config(cls, config: dict[str, Any], db_registry=None) -> "ListSource":
         """Not supported — ListSource data cannot be reconstructed from config.
 
         Raises:

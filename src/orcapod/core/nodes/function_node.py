@@ -197,6 +197,26 @@ class FunctionNode(StreamBase):
         ).to_string()
 
     # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _require_pipeline_database(self) -> None:
+        """Raise a clear RuntimeError if no pipeline database is attached.
+
+        Called at the top of methods that unconditionally access
+        ``self._pipeline_database``.  Provides an actionable error message
+        instead of an opaque ``AttributeError: 'NoneType' object has no
+        attribute ...`` when a definition-level pipeline is executed without
+        supplying a database.
+        """
+        if self._pipeline_database is None:
+            raise RuntimeError(
+                f"FunctionNode '{self.label}' has no pipeline database attached. "
+                "Either construct the pipeline with a pipeline_database argument, "
+                "or supply one via Pipeline.load(..., pipeline_database=<db>)."
+            )
+
+    # ------------------------------------------------------------------
     # from_descriptor — reconstruct from a serialized pipeline descriptor
     # ------------------------------------------------------------------
 
@@ -718,6 +738,8 @@ class FunctionNode(StreamBase):
         if self._cached_function_pod is None or not entry_ids:
             return {}
 
+        self._require_pipeline_database()
+
         PIPELINE_ENTRY_ID_COL = "__pipeline_entry_id"
         entry_id_set = set(entry_ids)
 
@@ -881,6 +903,7 @@ class FunctionNode(StreamBase):
         - Input packet data context key
         - Whether the result was freshly computed or cached
         """
+        self._require_pipeline_database()
         entry_id = self.compute_pipeline_entry_id(tag, input_packet)
 
         # Check for existing entry

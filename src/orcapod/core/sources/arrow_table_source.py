@@ -47,7 +47,7 @@ class ArrowTableSource(RootSource):
         if self._source_id is None:
             self._source_id = result.source_id
 
-    def to_config(self) -> dict[str, Any]:
+    def to_config(self, db_registry=None) -> dict[str, Any]:
         """Serialize metadata-only config (in-memory table is not serializable)."""
         return {
             "source_type": "arrow_table",
@@ -57,7 +57,7 @@ class ArrowTableSource(RootSource):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> ArrowTableSource:
+    def from_config(cls, config: dict[str, Any], db_registry=None) -> ArrowTableSource:
         """Not supported — ArrowTableSource cannot be reconstructed from config.
 
         Raises:

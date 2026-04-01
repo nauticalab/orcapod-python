@@ -22,6 +22,7 @@ from orcapod.utils.lazy_module import LazyModule
 if TYPE_CHECKING:
     import networkx as nx
     from orcapod.pipeline.serialization import DatabaseRegistry
+    from orcapod.protocols.database_protocols import DatabaseRegistryProtocol
 else:
     nx = LazyModule("networkx")
 
@@ -641,12 +642,15 @@ class Pipeline(AutoRegisteringContextBasedTracker):
     # rebuilt from config alone.
     _RECONSTRUCTABLE_SOURCE_TYPES = frozenset({"csv", "delta_table", "cached"})
 
-    def _build_source_descriptor(self, node: SourceNode, db_registry: DatabaseRegistry | None = None) -> dict[str, Any]:
+    def _build_source_descriptor(self, node: SourceNode, db_registry: DatabaseRegistryProtocol | None = None) -> dict[str, Any]:
         """Build source-specific descriptor fields for a SourceNode.
 
         Args:
             node: The SourceNode to describe.
-            db_registry: Optional DatabaseRegistry to forward to CachedSource.
+            db_registry: Optional registry forwarded to all sources via
+                ``to_config``.  Sources that do not embed database references
+                ignore it; ``CachedSource`` uses it to deduplicate its cache
+                database config.
 
         Returns:
             Dict with source-specific fields.
@@ -654,13 +658,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         stream = node.stream
 
         if stream is not None and hasattr(stream, "to_config"):
-            # Forward db_registry if the source supports it (e.g. CachedSource)
-            import inspect
-            to_config_sig = inspect.signature(stream.to_config)
-            if "db_registry" in to_config_sig.parameters:
-                config = stream.to_config(db_registry=db_registry)
-            else:
-                config = stream.to_config()
+            # All sources accept db_registry — always forward it.
+            config = stream.to_config(db_registry=db_registry)
             stream_type = config.get("source_type", "stream")
             # Remove identity fields — they live in the node descriptor
             source_config = {
@@ -781,7 +780,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         # 2. Reconstruct databases
         pipeline_meta = data["pipeline"]
 
-        load_db_registry: DatabaseRegistry | None = None
+        load_db_registry: DatabaseRegistryProtocol | None = None
         if "databases" in data and "pipeline_database" in pipeline_meta:
             # Standard/full format: top-level databases registry
             db_registry_data = data["databases"]
@@ -971,7 +970,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         descriptor: dict[str, Any],
         mode: str,
         resolve_source_from_config: Callable[..., Any],
-        db_registry: DatabaseRegistry | None = None,
+        db_registry: DatabaseRegistryProtocol | None = None,
     ) -> SourceNode:
         """Reconstruct a SourceNode from a descriptor.
 
@@ -979,7 +978,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             descriptor: The serialized node descriptor.
             mode: Load mode (``"full"`` or ``"read_only"``).
             resolve_source_from_config: Callable to reconstruct a source.
-            db_registry: Optional DatabaseRegistry for resolving embedded DB keys.
+            db_registry: Optional registry forwarded to all sources via
+                ``from_config``; sources that don't embed DB refs ignore it.
 
         Returns:
             A ``SourceNode`` instance.

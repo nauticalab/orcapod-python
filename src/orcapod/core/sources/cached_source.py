@@ -15,7 +15,7 @@ from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import pyarrow as pa
-    from orcapod.pipeline.serialization import DatabaseRegistry
+    from orcapod.protocols.database_protocols import DatabaseRegistryProtocol
 else:
     pa = LazyModule("pyarrow")
 
@@ -81,32 +81,29 @@ class CachedSource(RootSource):
     # Serialization
     # -------------------------------------------------------------------------
 
-    def to_config(self, db_registry: DatabaseRegistry | None = None) -> dict[str, Any]:
+    def to_config(
+        self, db_registry: DatabaseRegistryProtocol | None = None
+    ) -> dict[str, Any]:
         """Serialize this CachedSource configuration to a JSON-compatible dict.
 
         Args:
-            db_registry: Optional DatabaseRegistry. When provided, the cache
-                database config is registered and replaced by its key string.
-                When None, the full database config is embedded inline.
+            db_registry: Optional registry. When provided, the cache database
+                config is registered (deduplicated) and replaced by its key
+                string.  When None, the full database config is embedded inline.
 
         Returns:
             Dict containing the inner source config, cache database config,
             cache path prefix, and resolved cache path (for cache-only loading).
         """
-        import inspect as _inspect
-
         db_config = self._cache_database.to_config()
         if db_registry is not None:
             cache_db_ref = db_registry.register(db_config)
         else:
             cache_db_ref = db_config
 
-        # Forward db_registry to inner source if it supports the parameter
-        inner_to_config = self._source.to_config
-        if "db_registry" in _inspect.signature(inner_to_config).parameters:
-            inner_source_config = inner_to_config(db_registry=db_registry)
-        else:
-            inner_source_config = inner_to_config()
+        # All sources accept db_registry — always forward it so nested
+        # CachedSources can also deduplicate their cache database configs.
+        inner_source_config = self._source.to_config(db_registry=db_registry)
 
         return {
             "source_type": "cached",
@@ -119,7 +116,11 @@ class CachedSource(RootSource):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any], db_registry: DatabaseRegistry | None = None) -> CachedSource:
+    def from_config(
+        cls,
+        config: dict[str, Any],
+        db_registry: DatabaseRegistryProtocol | None = None,
+    ) -> CachedSource:
         """Reconstruct a CachedSource from a config dict.
 
         If the inner source cannot be resolved (e.g. it requires live data
@@ -128,10 +129,11 @@ class CachedSource(RootSource):
         CachedSource can still serve data from its cache database.
 
         Args:
-            config: Dict as produced by `to_config`.
-            db_registry: Optional DatabaseRegistry. When cache_database is a
-                string key, it is resolved via this registry. When None and
-                cache_database is a string, a ValueError is raised.
+            config: Dict as produced by ``to_config``.
+            db_registry: Optional registry. When ``cache_database`` is a
+                string key, it is resolved via ``db_registry.resolve()``.
+                When None and the cache_database value is a string key,
+                a ValueError is raised.
 
         Returns:
             A new CachedSource constructed from the config.
@@ -152,6 +154,8 @@ class CachedSource(RootSource):
         else:
             cache_db = resolve_database_from_config(cache_db_ref)
 
+        # All sources accept db_registry — always forward it so nested
+        # CachedSources can resolve their own cache database references.
         inner_source = resolve_source_from_config(
             config["inner_source"], fallback_to_proxy=True, db_registry=db_registry
         )

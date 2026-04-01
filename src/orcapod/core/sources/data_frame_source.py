@@ -71,7 +71,7 @@ class DataFrameSource(RootSource):
         if self._source_id is None:
             self._source_id = result.source_id
 
-    def to_config(self) -> dict[str, Any]:
+    def to_config(self, db_registry=None) -> dict[str, Any]:
         """Serialize metadata-only config (DataFrame is not serializable)."""
         return {
             "source_type": "data_frame",
@@ -81,7 +81,7 @@ class DataFrameSource(RootSource):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "DataFrameSource":
+    def from_config(cls, config: dict[str, Any], db_registry=None) -> "DataFrameSource":
         """Not supported — DataFrameSource cannot be reconstructed from config.
 
         Raises:
