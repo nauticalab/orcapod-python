@@ -230,6 +230,13 @@ class InMemoryArrowDatabase:
     # Flush
     # ------------------------------------------------------------------
 
+    @property
+    def base_path(self) -> tuple[str, ...]:
+        return ()
+
+    def at(self, *path_components: str) -> "InMemoryArrowDatabase":
+        return InMemoryArrowDatabase(max_hierarchy_depth=self.max_hierarchy_depth)
+
     def flush(self) -> None:
         for record_key in list(self._pending_batches.keys()):
             pending = self._pending_batches.pop(record_key)

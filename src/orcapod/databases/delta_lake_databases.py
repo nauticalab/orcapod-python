@@ -58,14 +58,14 @@ class DeltaTableDatabase:
         self.allow_schema_evolution = allow_schema_evolution
 
         if not self._is_cloud:
-            # Keep self.base_path for local-path operations (list_sources, etc.)
-            # NOTE: do NOT access self.base_path on cloud instances.
-            self.base_path = Path(self._base_uri)
+            # Keep self._local_base_path for local-path operations (list_sources, etc.)
+            # NOTE: do NOT access self._local_base_path on cloud instances.
+            self._local_base_path = Path(self._base_uri)
             if create_base_path:
-                self.base_path.mkdir(parents=True, exist_ok=True)
-            elif not self.base_path.exists():
+                self._local_base_path.mkdir(parents=True, exist_ok=True)
+            elif not self._local_base_path.exists():
                 raise ValueError(
-                    f"Base path {self.base_path} does not exist and create_base_path=False"
+                    f"Base path {self._local_base_path} does not exist and create_base_path=False"
                 )
         # For cloud paths: create_base_path is silently ignored (no directory needed).
 
@@ -937,6 +937,19 @@ class DeltaTableDatabase:
             self._pending_record_ids[record_key] = pending_ids
             raise
 
+    @property
+    def base_path(self) -> tuple[str, ...]:
+        return ()
+
+    def at(self, *path_components: str) -> "DeltaTableDatabase":
+        return DeltaTableDatabase(
+            base_path=self._base_uri,
+            storage_options=self._storage_options,
+            batch_size=self.batch_size,
+            max_hierarchy_depth=self.max_hierarchy_depth,
+            allow_schema_evolution=self.allow_schema_evolution,
+        )
+
     def list_sources(self) -> list[tuple[str, ...]]:
         """
         List all record paths that contain a valid Delta table under base_path.
@@ -972,5 +985,5 @@ class DeltaTableDatabase:
                 except deltalake.exceptions.TableNotFoundError:
                     _scan(item, components)
 
-        _scan(self.base_path, ())
+        _scan(self._local_base_path, ())
         return sources

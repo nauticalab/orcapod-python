@@ -268,6 +268,18 @@ class ConnectorArrowDatabase:
         if flush:
             self.flush()
 
+    # ── base_path / at ────────────────────────────────────────────────────────
+
+    @property
+    def base_path(self) -> tuple[str, ...]:
+        return ()
+
+    def at(self, *path_components: str) -> "ConnectorArrowDatabase":
+        return ConnectorArrowDatabase(
+            connector=self._connector,
+            max_hierarchy_depth=self.max_hierarchy_depth,
+        )
+
     # ── Flush ─────────────────────────────────────────────────────────────────
 
     def flush(self) -> None:
