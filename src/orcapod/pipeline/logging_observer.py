@@ -12,7 +12,7 @@ Example::
     from orcapod.databases import InMemoryArrowDatabase
 
     obs = LoggingObserver(log_database=InMemoryArrowDatabase())
-    pipeline.run(orchestrator=SyncPipelineOrchestrator(observer=obs))
+    pipeline.run(observer=obs)
 
     # Inspect captured logs
     logs = obs.get_logs()           # pyarrow.Table
@@ -150,8 +150,7 @@ class LoggingObserver:
     Instantiate once, outside the pipeline, and pass to the orchestrator::
 
         obs = LoggingObserver(log_database=InMemoryArrowDatabase())
-        orch = SyncPipelineOrchestrator(observer=obs)
-        pipeline.run(orchestrator=orch)
+        pipeline.run(observer=obs)
 
         # After the run, read back captured logs:
         logs_table = obs.get_logs()   # pyarrow.Table

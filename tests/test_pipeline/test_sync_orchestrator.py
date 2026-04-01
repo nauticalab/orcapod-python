@@ -144,11 +144,11 @@ class TestSyncOrchestratorObserver:
             def create_packet_logger(self, tag, packet, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
-            def contextualize(self, node_hash, node_label):
+            def contextualize(self, *identity_path):
                 return self
 
-        orch = SyncPipelineOrchestrator(observer=RecordingObserver())
-        orch.run(pipeline._node_graph)
+        orch = SyncPipelineOrchestrator()
+        orch.run(pipeline._node_graph, observer=RecordingObserver())
 
         # First two events are source node start/end
         assert events[0][0] == "node_start"
@@ -225,11 +225,11 @@ class TestPipelineRunIntegration:
             def create_packet_logger(self, tag, packet, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
-            def contextualize(self, node_hash, node_label):
+            def contextualize(self, *identity_path):
                 return self
 
-        orch = SyncPipelineOrchestrator(observer=RecordingObserver())
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=RecordingObserver())
 
         assert len(events) > 0
         records = pipeline.doubler.get_all_records()
@@ -435,11 +435,11 @@ class TestSyncObserverInjection:
             def create_packet_logger(self, tag, packet, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
-            def contextualize(self, node_hash, node_label):
+            def contextualize(self, *identity_path):
                 return self
 
-        orch = SyncPipelineOrchestrator(observer=RecordingObserver())
-        orch.run(pipeline._node_graph)
+        orch = SyncPipelineOrchestrator()
+        orch.run(pipeline._node_graph, observer=RecordingObserver())
 
         # Mapper fires node_start/node_end only (no packet-level hooks)
         assert ("node_start", "mapper") in events
@@ -479,10 +479,10 @@ class TestSyncObserverInjection:
             def create_packet_logger(self, tag, packet, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
-            def contextualize(self, node_hash, node_label):
+            def contextualize(self, *identity_path):
                 return self
 
-        SyncPipelineOrchestrator(observer=Obs1()).run(pipeline._node_graph)
+        SyncPipelineOrchestrator().run(pipeline._node_graph, observer=Obs1())
         assert events1 == [False]
 
         # Second run — should be cached=True
@@ -501,10 +501,10 @@ class TestSyncObserverInjection:
             def create_packet_logger(self, tag, packet, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
-            def contextualize(self, node_hash, node_label):
+            def contextualize(self, *identity_path):
                 return self
 
-        SyncPipelineOrchestrator(observer=Obs2()).run(pipeline._node_graph)
+        SyncPipelineOrchestrator().run(pipeline._node_graph, observer=Obs2())
         assert events2 == [True]
 
     def test_diamond_dag_observer_event_order(self):
@@ -534,10 +534,10 @@ class TestSyncObserverInjection:
             def create_packet_logger(self, tag, packet, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
-            def contextualize(self, node_hash, node_label):
+            def contextualize(self, *identity_path):
                 return self
 
-        SyncPipelineOrchestrator(observer=OrderObserver()).run(pipeline._node_graph)
+        SyncPipelineOrchestrator().run(pipeline._node_graph, observer=OrderObserver())
 
         # Extract just the node labels in start order
         starts = [label for event, label in node_order if event == "start"]

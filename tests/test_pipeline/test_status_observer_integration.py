@@ -68,8 +68,8 @@ class TestSyncPipelineSuccessStatus:
             pod(source, label="doubler")
 
         obs = StatusObserver(status_database=db)
-        orch = SyncPipelineOrchestrator(observer=obs)
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=obs)
 
         status = obs.get_status()
 
@@ -103,8 +103,8 @@ class TestFailingPacketsStatus:
             pod(source, label="failing")
 
         obs = StatusObserver(status_database=db)
-        orch = SyncPipelineOrchestrator(observer=obs)
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=obs)
 
         status = obs.get_status()
 
@@ -147,8 +147,8 @@ class TestFlatStatusStorage:
             pod(source, label="ident")
 
         obs = StatusObserver(status_database=db)
-        orch = SyncPipelineOrchestrator(observer=obs)
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=obs)
 
         # All status is now in a single flat table via get_status()
         all_status = obs.get_status()
@@ -181,8 +181,8 @@ class TestQueryableTagColumns:
             pod(source, label="ident")
 
         obs = StatusObserver(status_database=db)
-        orch = SyncPipelineOrchestrator(observer=obs)
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=obs)
 
         status = obs.get_status()
 
@@ -214,8 +214,8 @@ class TestAsyncOrchestratorStatus:
             pod(source, label="doubler")
 
         obs = StatusObserver(status_database=db)
-        orch = AsyncPipelineOrchestrator(observer=obs)
-        pipeline.run(orchestrator=orch)
+        orch = AsyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=obs)
 
         status = obs.get_status()
 
@@ -248,10 +248,10 @@ class TestFailFastErrorPolicy:
             pod(source, label="failing")
 
         obs = StatusObserver(status_database=db)
-        orch = SyncPipelineOrchestrator(observer=obs, error_policy="fail_fast")
+        orch = SyncPipelineOrchestrator(error_policy="fail_fast")
 
         with pytest.raises(RuntimeError, match="crash"):
-            pipeline.run(orchestrator=orch)
+            pipeline.run(orchestrator=orch, observer=obs)
 
         status = obs.get_status()
 
@@ -290,8 +290,8 @@ class TestMixedSuccessFailure:
             pod(source, label="divider")
 
         obs = StatusObserver(status_database=db)
-        orch = SyncPipelineOrchestrator(observer=obs)
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=obs)
 
         status = obs.get_status()
 
@@ -332,8 +332,8 @@ class TestMultipleFunctionNodesSeparateStatus:
             pod2(s1, label="tripler")
 
         obs = StatusObserver(status_database=db)
-        orch = SyncPipelineOrchestrator(observer=obs)
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=obs)
 
         # Combined status contains events for both nodes
         status = obs.get_status()
@@ -374,8 +374,8 @@ class TestGetStatusNodeSpecific:
             pod2(s1, label="tripler")
 
         obs = StatusObserver(status_database=db)
-        orch = SyncPipelineOrchestrator(observer=obs)
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=obs)
 
         # Retrieve all status and filter by node label
         import pyarrow.compute as pc
@@ -414,8 +414,8 @@ class TestStatusSchema:
             pod(source, label="ident")
 
         obs = StatusObserver(status_database=db)
-        orch = SyncPipelineOrchestrator(observer=obs)
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=obs)
 
         status = obs.get_status()
 
@@ -455,9 +455,9 @@ class TestRunIdTracking:
             pod(source, label="ident")
 
         obs = StatusObserver(status_database=db)
-        orch = SyncPipelineOrchestrator(observer=obs)
+        orch = SyncPipelineOrchestrator()
         # Pass run_id via the orchestrator's run() method directly
-        orch.run(pipeline._node_graph, run_id="my-custom-run-id")
+        orch.run(pipeline._node_graph, observer=obs, run_id="my-custom-run-id")
 
         status = obs.get_status()
 

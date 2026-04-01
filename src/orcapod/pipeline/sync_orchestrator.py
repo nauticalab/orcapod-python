@@ -35,22 +35,19 @@ class SyncPipelineOrchestrator:
 
     The orchestrator is responsible only for topological ordering,
     buffer management, and stream materialization between nodes.
-
-    Args:
-        observer: Optional execution observer forwarded to nodes.
     """
 
     def __init__(
         self,
-        observer: ExecutionObserverProtocol | None = None,
         error_policy: Literal["continue", "fail_fast"] = "continue",
     ) -> None:
-        self._observer = observer
         self._error_policy = error_policy
 
     def run(
         self,
         graph: nx.DiGraph,
+        *,
+        observer: ExecutionObserverProtocol | None = None,
         materialize_results: bool = True,
         run_id: str | None = None,
         pipeline_uri: str = "",
@@ -59,6 +56,7 @@ class SyncPipelineOrchestrator:
 
         Args:
             graph: A NetworkX DiGraph with GraphNode objects as vertices.
+            observer: Optional execution observer forwarded to nodes.
             materialize_results: If True, keep all node outputs in memory
                 and return them. If False, discard buffers after downstream
                 consumption (only DB-persisted results survive).
@@ -71,11 +69,12 @@ class SyncPipelineOrchestrator:
         Returns:
             OrchestratorResult with node outputs.
         """
+        from orcapod.pipeline.observer import NoOpObserver
         import networkx as nx
 
         run_id = run_id or str(uuid.uuid4())
-        if self._observer is not None:
-            self._observer.on_run_start(run_id, pipeline_uri=pipeline_uri)
+        effective_observer = observer if observer is not None else NoOpObserver()
+        effective_observer.on_run_start(run_id, pipeline_uri=pipeline_uri)
 
         try:
             topo_order = list(nx.topological_sort(graph))
@@ -84,14 +83,14 @@ class SyncPipelineOrchestrator:
 
             for node in topo_order:
                 if is_source_node(node):
-                    buffers[node] = node.execute(observer=self._observer)
+                    buffers[node] = node.execute(observer=effective_observer)
                 elif is_function_node(node):
                     upstream_buf = self._gather_upstream(node, graph, buffers)
                     upstream_node = list(graph.predecessors(node))[0]
                     input_stream = self._materialize_as_stream(upstream_buf, upstream_node)
                     buffers[node] = node.execute(
                         input_stream,
-                        observer=self._observer,
+                        observer=effective_observer,
                         error_policy=self._error_policy,
                     )
                 elif is_operator_node(node):
@@ -100,7 +99,7 @@ class SyncPipelineOrchestrator:
                         self._materialize_as_stream(buf, upstream_node)
                         for buf, upstream_node in upstream_buffers
                     ]
-                    buffers[node] = node.execute(*input_streams, observer=self._observer)
+                    buffers[node] = node.execute(*input_streams, observer=effective_observer)
                 else:
                     raise TypeError(
                         f"Unknown node type: {getattr(node, 'node_type', None)!r}"
@@ -116,8 +115,7 @@ class SyncPipelineOrchestrator:
 
             return OrchestratorResult(node_outputs=buffers)
         finally:
-            if self._observer is not None:
-                self._observer.on_run_end(run_id)
+            effective_observer.on_run_end(run_id)
 
     @staticmethod
     def _gather_upstream(

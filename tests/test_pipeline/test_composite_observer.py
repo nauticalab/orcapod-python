@@ -64,8 +64,8 @@ class TestLoggingAndStatusTogether:
         status_obs = StatusObserver(status_database=obs_db.at("test_composite", "_status"))
         observer = CompositeObserver(log_obs, status_obs)
 
-        orch = SyncPipelineOrchestrator(observer=observer)
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=observer)
 
         # Logging observer should have logs
         logs = log_obs.get_logs()
@@ -104,8 +104,8 @@ class TestCreatePacketLoggerDelegation:
         status_obs = StatusObserver(status_database=obs_db.at("test_logger_delegation", "_status"))
         observer = CompositeObserver(log_obs, status_obs)
 
-        orch = SyncPipelineOrchestrator(observer=observer)
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=observer)
 
         # Logs should have captured the print output, proving the real
         # LoggingObserver logger was used (not the no-op)
@@ -146,8 +146,8 @@ class TestContextualizeReturnsComposite:
         status_obs = StatusObserver(status_database=obs_db.at("test_ctx_composite", "_status"))
         observer = CompositeObserver(log_obs, status_obs)
 
-        orch = SyncPipelineOrchestrator(observer=observer)
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=observer)
 
         # Both observers should have received events for both function nodes
         # 2 nodes × 2 packets each = 4 log rows total
@@ -189,8 +189,8 @@ class TestCompositeWithFailures:
         status_obs = StatusObserver(status_database=obs_db.at("test_composite_fail", "_status"))
         observer = CompositeObserver(log_obs, status_obs)
 
-        orch = SyncPipelineOrchestrator(observer=observer)
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=observer)
 
         # Logs should show failures
         logs = log_obs.get_logs()
