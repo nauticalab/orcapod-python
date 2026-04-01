@@ -419,8 +419,8 @@ class TestAutoCompileAndRun:
         assert "nodes" in data
         assert "edges" in data
 
-    def test_run_does_not_save_when_path_not_set(self, pipeline_db, tmp_path):
-        """Pipeline.run() does not write any file when auto_save_path is None."""
+    def test_run_does_not_save_when_path_not_set(self, pipeline_db, monkeypatch):
+        """Pipeline.run() does not call save() when auto_save_path is None."""
         src_a, src_b = _make_two_sources()
         pf = PythonPacketFunction(add_values, output_keys="total")
         pod = FunctionPod(packet_function=pf)
@@ -431,10 +431,27 @@ class TestAutoCompileAndRun:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
 
+        save_called = False
+        original_save = Pipeline.save
+
+        def spy_save(self, *args, **kwargs):
+            nonlocal save_called
+            save_called = True
+            return original_save(self, *args, **kwargs)
+
+        monkeypatch.setattr(Pipeline, "save", spy_save)
+
         pipeline.run()
 
-        # No JSON files should have been created
-        assert list(tmp_path.glob("*.json")) == []
+        assert not save_called
+
+    def test_auto_save_path_without_database_raises(self, tmp_path):
+        """Setting auto_save_path without pipeline_database raises immediately."""
+        with pytest.raises(ValueError, match="auto_save_path requires a pipeline_database"):
+            Pipeline(
+                name="bad",
+                auto_save_path=tmp_path / "out.json",
+            )
 
     def test_pipeline_path_prefix_scoping(self, pipeline_db):
         """All persistent nodes' paths start with pipeline name prefix."""
