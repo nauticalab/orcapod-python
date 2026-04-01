@@ -53,15 +53,15 @@ class ObservabilityReader:
             table_dir = delta_log_dir.parent
             parts = table_dir.relative_to(self._root).parts
 
-            if "status" in parts:
-                idx = parts.index("status")
+            if "_status" in parts:
+                idx = parts.index("_status")
                 if idx + 1 < len(parts):
                     node_name = parts[idx + 1]
                     self._status_tables.setdefault(node_name, []).append(
                         table_dir
                     )
-            elif "logs" in parts:
-                idx = parts.index("logs")
+            elif "_log" in parts:
+                idx = parts.index("_log")
                 if idx + 1 < len(parts):
                     node_name = parts[idx + 1]
                     self._log_tables.setdefault(node_name, []).append(
