@@ -237,3 +237,12 @@ def test_composite_observer_round_trip():
 def test_resolve_observer_from_config_unknown_type_raises():
     with pytest.raises(ValueError, match="Unknown observer type"):
         resolve_observer_from_config({"type": "unknown"})
+
+
+def test_composite_contextualize_with_empty_path_raises():
+    from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
+    from orcapod.pipeline.status_observer import StatusObserver
+    db = InMemoryArrowDatabase()
+    obs = CompositeObserver(StatusObserver(db))
+    with pytest.raises(ValueError, match="non-empty identity_path"):
+        obs.contextualize()
