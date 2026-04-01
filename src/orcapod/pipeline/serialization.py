@@ -345,13 +345,16 @@ def resolve_source_from_config(
             source type.
         fallback_to_proxy: If ``True`` and reconstruction fails, return a
             ``SourceProxy`` preserving identity hashes and schemas.
-            Requires *node_descriptor* to contain ``content_hash``,
-            ``pipeline_hash``, and ``output_schema`` fields.
+            Identity fields (``content_hash``, ``pipeline_hash``, and
+            ``output_schema``) are taken from *node_descriptor* when provided,
+            or from *config* when available (e.g. inner sources embedded inside
+            a ``CachedSource`` always include identity via ``_identity_config()``).
         db_registry: Optional registry forwarded to ``from_config`` for all
             source types.  Sources that do not embed database references ignore
             it; ``CachedSource`` uses it to resolve its cache database key.
-        node_descriptor: Node descriptor dict containing identity fields used
-            when creating a ``SourceProxy`` fallback.
+        node_descriptor: Optional node descriptor dict (new save format) containing
+            identity fields used when creating a ``SourceProxy`` fallback.
+            If omitted, identity is inferred from *config* where possible.
 
     Returns:
         A new source instance constructed from the config, or a ``SourceProxy``
