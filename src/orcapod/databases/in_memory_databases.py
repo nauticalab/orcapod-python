@@ -36,8 +36,12 @@ class InMemoryArrowDatabase:
         _shared_tables: "dict[str, pa.Table] | None" = None,
         _shared_pending_batches: "dict[str, pa.Table] | None" = None,
         _shared_pending_record_ids: "dict[str, set[str]] | None" = None,
+        _root: "InMemoryArrowDatabase | None" = None,
+        _scoped_path: tuple[str, ...] = (),
     ):
         self._path_prefix = _path_prefix
+        self._root = _root
+        self._scoped_path = _scoped_path
         self.max_hierarchy_depth = max_hierarchy_depth
         self._tables: dict[str, pa.Table] = _shared_tables if _shared_tables is not None else {}
         self._pending_batches: dict[str, pa.Table] = _shared_pending_batches if _shared_pending_batches is not None else {}
@@ -287,12 +291,16 @@ class InMemoryArrowDatabase:
                     f"at() path component {repr(component)} contains an invalid character "
                     "('/' or '\\0')"
                 )
+        new_root = self._root if self._root is not None else self
+        new_scoped_path = self._scoped_path + path_components
         return InMemoryArrowDatabase(
             max_hierarchy_depth=self.max_hierarchy_depth,
             _path_prefix=self._path_prefix + path_components,
             _shared_tables=self._tables,
             _shared_pending_batches=self._pending_batches,
             _shared_pending_record_ids=self._pending_record_ids,
+            _root=new_root,
+            _scoped_path=new_scoped_path,
         )
 
     # ------------------------------------------------------------------
