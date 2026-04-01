@@ -65,17 +65,20 @@ class ExecutionObserverProtocol(Protocol):
     """
 
     def contextualize(
-        self, node_hash: str, node_label: str
+        self, *identity_path: str
     ) -> ExecutionObserverProtocol:
-        """Return a contextualized copy stamped with node identity.
+        """Return a copy of this observer bound to the given node identity path.
+
+        The returned observer is a wrapper that calls through to the same
+        underlying observer but doesn't need pipeline_path on each hook call.
 
         Args:
-            node_hash: The pipeline hash of the node (stable identity).
-            node_label: Human-readable label of the node.
+            *identity_path: Variable-length sequence of strings that together
+                identify the node (e.g. pod_uri, schema, instance).
 
         Returns:
-            An observer (possibly a lightweight wrapper) that carries
-            node_hash and node_label context for all subsequent calls.
+            An observer (possibly a lightweight wrapper) that carries the
+            identity_path context for all subsequent calls.
         """
         ...
 
@@ -96,9 +99,8 @@ class ExecutionObserverProtocol(Protocol):
                 treat it as an arbitrary correlation token.  The snapshot hash
                 component changes whenever nodes are added, removed, or
                 modified; the name component remains stable.  Observers that
-                need node-level storage scoping should use the ``pipeline_path``
-                supplied per-node via ``on_node_start`` — those paths already
-                embed the pipeline name as their first component.
+                need node-level storage scoping should use the identity path
+                supplied via ``contextualize()`` before each node is processed.
         """
         ...
 
@@ -114,7 +116,6 @@ class ExecutionObserverProtocol(Protocol):
         self,
         node_label: str,
         node_hash: str,
-        pipeline_path: tuple[str, ...] = (),
         tag_schema: SchemaLike | None = None,
     ) -> None:
         """Called before a node begins processing its packets.
@@ -122,7 +123,6 @@ class ExecutionObserverProtocol(Protocol):
         Args:
             node_label: Human-readable label of the node.
             node_hash: Content hash of the node.
-            pipeline_path: The node's pipeline path for storage scoping.
             tag_schema: The tag schema (including system tags) for this
                 node's input stream.
         """
@@ -132,14 +132,12 @@ class ExecutionObserverProtocol(Protocol):
         self,
         node_label: str,
         node_hash: str,
-        pipeline_path: tuple[str, ...] = (),
     ) -> None:
         """Called after a node finishes processing all packets.
 
         Args:
             node_label: Human-readable label of the node.
             node_hash: Content hash of the node.
-            pipeline_path: The node's pipeline path for storage scoping.
         """
         ...
 
@@ -187,7 +185,6 @@ class ExecutionObserverProtocol(Protocol):
         self,
         tag: TagProtocol,
         packet: PacketProtocol,
-        pipeline_path: tuple[str, ...] = (),
     ) -> PacketExecutionLoggerProtocol:
         """Create a context-bound logger for a single packet execution.
 
@@ -198,6 +195,5 @@ class ExecutionObserverProtocol(Protocol):
         Args:
             tag: The tag for the packet being processed.
             packet: The input packet being processed.
-            pipeline_path: The node's pipeline path for log storage scoping.
         """
         ...
