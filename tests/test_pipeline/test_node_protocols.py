@@ -266,7 +266,7 @@ class TestFunctionNodeExecute:
         events = []
 
         class Obs:
-            def contextualize(self, node_hash, node_label):
+            def contextualize(self, *identity_path):
                 return self
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
@@ -345,7 +345,7 @@ class TestFunctionNodeAsyncExecute:
         events = []
 
         class Obs:
-            def contextualize(self, node_hash, node_label):
+            def contextualize(self, *identity_path):
                 return self
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append("node_start")
@@ -399,6 +399,8 @@ class TestOperatorNodeExecute:
         events = []
 
         class Obs:
+            def contextualize(self, *identity_path):
+                return self
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append(("node_start", node_label))
             def on_node_end(self, node_label, node_hash, **kwargs):
@@ -440,6 +442,8 @@ class TestOperatorNodeAsyncExecute:
         events = []
 
         class Obs:
+            def contextualize(self, *identity_path):
+                return self
             def on_node_start(self, node_label, node_hash, **kwargs):
                 events.append("start")
             def on_node_end(self, node_label, node_hash, **kwargs):

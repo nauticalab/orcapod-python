@@ -112,7 +112,10 @@ class StatusObserver:
 
     def contextualize(self, *identity_path: str) -> "_ContextualizedStatusObserver":
         """Return a contextualized wrapper bound to the given identity path."""
-        return _ContextualizedStatusObserver(self._db, identity_path)
+        ctx = _ContextualizedStatusObserver(self._db, identity_path)
+        ctx._current_run_id = self._current_run_id
+        ctx._current_pipeline_uri = self._current_pipeline_uri
+        return ctx
 
     # -- lifecycle hooks --
 
@@ -410,9 +413,8 @@ class _ContextualizedStatusObserver:
             )
 
         row = pa.table(columns)
-        record_path = self._identity_path
         try:
-            self._db.add_record(record_path, status_id, row, flush=True)
+            self._db.add_record(DEFAULT_STATUS_PATH, status_id, row, flush=True)
         except Exception:
             logger.exception(
                 "_ContextualizedStatusObserver: failed to write status event "

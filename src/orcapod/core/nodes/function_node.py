@@ -459,6 +459,16 @@ class FunctionNode(StreamBase):
         )
 
     @property
+    def pipeline_path(self) -> tuple[str, ...]:
+        """Return the full absolute storage path for this node.
+
+        This is the database's path prefix prepended to ``node_identity_path``.
+        Useful for inspecting or debugging where records are stored.
+        """
+        prefix = getattr(self._pipeline_database, "_path_prefix", ()) if self._pipeline_database is not None else ()
+        return prefix + self.node_identity_path
+
+    @property
     def node_uri(self) -> tuple[str, ...]:
         """Canonical URI tuple identifying this computation.
 

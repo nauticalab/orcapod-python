@@ -134,11 +134,11 @@ class TestFunctionNodeFromDescriptor:
         pf = PythonPacketFunction(function=_sample_func, output_keys=["result"])
         pod = FunctionPod(packet_function=pf)
         db = InMemoryArrowDatabase()
+        scoped_db = db.at("test_pipeline")
         node = FunctionNode(
             function_pod=pod,
             input_stream=source,
-            pipeline_database=db,
-            pipeline_path_prefix=("test_pipeline",),
+            pipeline_database=scoped_db,
         )
         tag_schema, packet_schema = node.output_schema()
         descriptor = {
@@ -155,7 +155,7 @@ class TestFunctionNodeFromDescriptor:
             "pipeline_path": list(node.pipeline_path),
             "result_record_path": list(node._cached_function_pod.record_path),
         }
-        return node, descriptor, db
+        return node, descriptor, scoped_db
 
     def test_from_descriptor_full_mode(self):
         original, descriptor, db = self._make_function_node_descriptor()
@@ -221,14 +221,14 @@ class TestOperatorNodeFromDescriptor:
 
     def test_from_descriptor_full_mode(self):
         db = InMemoryArrowDatabase()
+        scoped_db = db.at("test")
         source1 = DictSource(data=[{"a": 1, "b": 2}], tag_columns=["a"], source_id="s1")
         source2 = DictSource(data=[{"a": 1, "c": 3}], tag_columns=["a"], source_id="s2")
         op = Join()
         node = OperatorNode(
             operator=op,
             input_streams=(source1, source2),
-            pipeline_database=db,
-            pipeline_path_prefix=("test",),
+            pipeline_database=scoped_db,
         )
         descriptor = {
             "node_type": "operator",
@@ -248,6 +248,6 @@ class TestOperatorNodeFromDescriptor:
             descriptor=descriptor,
             operator=op,
             input_streams=(source1, source2),
-            databases={"pipeline": db},
+            databases={"pipeline": scoped_db},
         )
         assert loaded.load_status == LoadStatus.FULL
