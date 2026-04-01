@@ -121,14 +121,14 @@ class SQLiteTableSource(DBTableSource):
                 # Suppress connector close errors to avoid masking __init__ failures.
                 pass
 
-    def to_config(self) -> dict[str, Any]:
+    def to_config(self, db_registry=None) -> dict[str, Any]:
         """Serialize source configuration to a JSON-compatible dict."""
         base = super().to_config()
         base.pop("connector", None)
         return {**base, "source_type": "sqlite_table", "db_path": str(self._db_path)}
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "SQLiteTableSource":
+    def from_config(cls, config: dict[str, Any], db_registry=None) -> "SQLiteTableSource":
         """Reconstruct a SQLiteTableSource from a config dict.
 
         Args:

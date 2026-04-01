@@ -137,7 +137,7 @@ class SpiralDBTableSource(DBTableSource):
                 # failures.
                 pass
 
-    def to_config(self) -> dict[str, Any]:
+    def to_config(self, db_registry=None) -> dict[str, Any]:
         """Serialize source configuration to a JSON-compatible dict.
 
         Note:
@@ -161,7 +161,7 @@ class SpiralDBTableSource(DBTableSource):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "SpiralDBTableSource":
+    def from_config(cls, config: dict[str, Any], db_registry=None) -> "SpiralDBTableSource":
         """Reconstruct a SpiralDBTableSource from a config dict.
 
         Args:

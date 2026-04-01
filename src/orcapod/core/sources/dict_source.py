@@ -45,7 +45,7 @@ class DictSource(RootSource):
         if self._source_id is None:
             self._source_id = result.source_id
 
-    def to_config(self) -> dict[str, Any]:
+    def to_config(self, db_registry=None) -> dict[str, Any]:
         """Serialize metadata-only config (data is not serializable)."""
         return {
             "source_type": "dict",
@@ -55,7 +55,7 @@ class DictSource(RootSource):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "DictSource":
+    def from_config(cls, config: dict[str, Any], db_registry=None) -> "DictSource":
         """Not supported — DictSource data cannot be reconstructed from config.
 
         Raises:

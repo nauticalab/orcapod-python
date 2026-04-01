@@ -91,7 +91,7 @@ class PostgreSQLTableSource(DBTableSource):
             except Exception:
                 pass  # suppress close errors; don't mask original __init__ failure
 
-    def to_config(self) -> dict[str, Any]:
+    def to_config(self, db_registry=None) -> dict[str, Any]:
         """Serialize source configuration to a JSON-compatible dict."""
         # super().to_config() calls self._connector.to_config(), which reads only
         # self._connector._dsn (a stored string) — safe even though the connector
@@ -101,7 +101,7 @@ class PostgreSQLTableSource(DBTableSource):
         return {**base, "source_type": "postgresql_table", "dsn": self._dsn}
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> PostgreSQLTableSource:
+    def from_config(cls, config: dict[str, Any], db_registry=None) -> PostgreSQLTableSource:
         """Reconstruct a PostgreSQLTableSource from a config dict.
 
         Args:

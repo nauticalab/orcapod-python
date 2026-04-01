@@ -210,12 +210,12 @@ class SourceProxy(RootSource):
     # Serialization
     # -------------------------------------------------------------------------
 
-    def to_config(self) -> dict[str, Any]:
+    def to_config(self, db_registry=None) -> dict[str, Any]:
         """Return the original source's config (preserves source_type)."""
         return dict(self._source_config)
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> SourceProxy:
+    def from_config(cls, config: dict[str, Any], db_registry=None) -> SourceProxy:
         """Not supported — SourceProxy is created by the deserialization pipeline."""
         raise NotImplementedError(
             "SourceProxy cannot be reconstructed via from_config. "

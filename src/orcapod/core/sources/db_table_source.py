@@ -126,7 +126,7 @@ class DBTableSource(RootSource):
         if self._source_id is None:
             self._source_id = result.source_id
 
-    def to_config(self) -> dict[str, Any]:
+    def to_config(self, db_registry=None) -> dict[str, Any]:
         """Serialize source configuration to a JSON-compatible dict."""
         return {
             "source_type": "db_table",
@@ -140,7 +140,7 @@ class DBTableSource(RootSource):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> DBTableSource:
+    def from_config(cls, config: dict[str, Any], db_registry=None) -> DBTableSource:
         """Not yet implemented — requires a connector factory registry.
 
         Raises:
