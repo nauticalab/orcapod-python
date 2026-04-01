@@ -168,7 +168,7 @@ class TestResultVsPipelineRecordCounts:
         assert result_records.num_rows == 1
 
         # Pipeline DB: 2 records (different tags → different entry_ids)
-        pipeline_records = db.get_all_records(node.pipeline_path)
+        pipeline_records = db.get_all_records(node.node_identity_path)
         assert pipeline_records is not None
         assert pipeline_records.num_rows == 2
 
@@ -188,7 +188,7 @@ class TestResultVsPipelineRecordCounts:
         assert result_records is not None
         assert result_records.num_rows == 2
 
-        pipeline_records = db.get_all_records(node.pipeline_path)
+        pipeline_records = db.get_all_records(node.node_identity_path)
         assert pipeline_records is not None
         assert pipeline_records.num_rows == 2
 
@@ -205,7 +205,7 @@ class TestResultVsPipelineRecordCounts:
         assert result_records is not None
         assert result_records.num_rows == 1
 
-        pipeline_records = db.get_all_records(node.pipeline_path)
+        pipeline_records = db.get_all_records(node.node_identity_path)
         assert pipeline_records is not None
         assert pipeline_records.num_rows == 1
 
@@ -265,7 +265,7 @@ class TestPhase1Phase2PipelineEntryId:
         node1, _ = _make_node(stream1, db=db)
         node1.run()
 
-        pipeline_count_after_first = db.get_all_records(node1.pipeline_path).num_rows
+        pipeline_count_after_first = db.get_all_records(node1.node_identity_path).num_rows
         assert pipeline_count_after_first == 1
 
         # Second run: tag=1, x=10 (same packet, different tag)
@@ -273,8 +273,8 @@ class TestPhase1Phase2PipelineEntryId:
         node2, _ = _make_node(stream2, db=db)
 
         # Different data → different pipeline_path (different instance: component)
-        assert node1.pipeline_path != node2.pipeline_path
-        assert node1.pipeline_path[-2] == node2.pipeline_path[-2]  # same schema:
+        assert node1.node_identity_path != node2.node_identity_path
+        assert node1.node_identity_path[-2] == node2.node_identity_path[-2]  # same schema:
 
         results = list(node2.iter_packets())
 
@@ -283,7 +283,7 @@ class TestPhase1Phase2PipelineEntryId:
         assert len(results) == 1
 
         # node2's pipeline DB should have 1 record
-        pipeline_records = db.get_all_records(node2.pipeline_path)
+        pipeline_records = db.get_all_records(node2.node_identity_path)
         assert pipeline_records is not None
         assert pipeline_records.num_rows == 1
 
@@ -307,13 +307,13 @@ class TestPhase1Phase2PipelineEntryId:
         stream2 = _make_stream([{"id": 0, "x": 10}, {"id": 1, "x": 20}])
         node2, _ = _make_node(stream2, db=db)
 
-        pipeline_count_before = db.get_all_records(node2.pipeline_path).num_rows
+        pipeline_count_before = db.get_all_records(node2.node_identity_path).num_rows
 
         results = list(node2.iter_packets())
         assert len(results) == 2
 
         # No new pipeline records should be added
-        pipeline_count_after = db.get_all_records(node2.pipeline_path).num_rows
+        pipeline_count_after = db.get_all_records(node2.node_identity_path).num_rows
         assert pipeline_count_after == pipeline_count_before
 
 
@@ -352,7 +352,7 @@ class TestResultCacheHitPipelineNovel:
         node, _ = _make_node(stream, db=db)
         node.run()
 
-        pipeline_records = db.get_all_records(node.pipeline_path)
+        pipeline_records = db.get_all_records(node.node_identity_path)
         assert pipeline_records is not None
         assert pipeline_records.num_rows == 2
 
@@ -373,7 +373,7 @@ class TestPipelineRecordSourceColumns:
         node, db = _make_node(stream)
         node.run()
 
-        pipeline_records = db.get_all_records(node.pipeline_path)
+        pipeline_records = db.get_all_records(node.node_identity_path)
         assert pipeline_records is not None
 
         source_cols = [
@@ -389,7 +389,7 @@ class TestPipelineRecordSourceColumns:
         node, db = _make_node(stream)
         node.run()
 
-        pipeline_records = db.get_all_records(node.pipeline_path)
+        pipeline_records = db.get_all_records(node.node_identity_path)
         assert pipeline_records is not None
 
         # "x" is the input packet data column — should not appear

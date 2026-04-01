@@ -96,7 +96,7 @@ class TestFunctionNodeConstruction:
         assert node is not None
 
     def test_pipeline_path_is_tuple_of_strings(self, node):
-        path = node.pipeline_path
+        path = node.node_identity_path
         assert isinstance(path, tuple)
         assert all(isinstance(p, str) for p in path)
 
@@ -109,17 +109,17 @@ class TestFunctionNodeConstruction:
         assert node_hash == stream_hash
 
     def test_pipeline_path_ends_with_node_hash(self, node):
-        path = node.pipeline_path
+        path = node.node_identity_path
         assert path[-2].startswith("schema:")
         assert path[-1].startswith("instance:")
 
     def test_pipeline_path_contains_packet_function_uri(self, node):
         pf_uri = node._packet_function.uri
         for part in pf_uri:
-            assert part in node.pipeline_path
+            assert part in node.node_identity_path
 
     def test_pipeline_path_has_no_tag_schema_hash(self, node):
-        path = node.pipeline_path
+        path = node.node_identity_path
         assert not any(segment.startswith("tag:") for segment in path)
 
     def test_node_is_stream_protocol(self, node):
@@ -247,7 +247,7 @@ class TestFunctionNodeExecutePacket:
         node.execute_packet(tag, packet)
         db = node._pipeline_database
         db.flush()
-        all_records = db.get_all_records(node.pipeline_path)
+        all_records = db.get_all_records(node.node_identity_path)
         assert all_records is not None
         assert all_records.num_rows >= 1
 
@@ -257,7 +257,7 @@ class TestFunctionNodeExecutePacket:
         node._process_packet_internal(tag, packet)
         db = node._pipeline_database
         db.flush()
-        all_records = db.get_all_records(node.pipeline_path)
+        all_records = db.get_all_records(node.node_identity_path)
         assert all_records is not None
         assert all_records.num_rows >= 1
 
@@ -268,7 +268,7 @@ class TestFunctionNodeExecutePacket:
         node._process_packet_internal(tag, packet)
         db = node._pipeline_database
         db.flush()
-        all_records = db.get_all_records(node.pipeline_path)
+        all_records = db.get_all_records(node.node_identity_path)
         assert all_records is not None
         assert all_records.num_rows == 1
 
@@ -279,7 +279,7 @@ class TestFunctionNodeExecutePacket:
         node._process_packet_internal(tag, packet1)
         node._process_packet_internal(tag, packet2)
         db = node._pipeline_database
-        all_records = db.get_all_records(node.pipeline_path)
+        all_records = db.get_all_records(node.node_identity_path)
         assert all_records is not None
         assert all_records.num_rows == 2
 
@@ -368,7 +368,7 @@ class TestFunctionNodePipelineIdentity:
         assert node.pipeline_hash() == node.pipeline_hash()
 
     def test_pipeline_node_hash_in_uri_is_schema_based(self, double_pf):
-        """pipeline_path uses schema:{pipeline_hash} and instance:{content_hash}.
+        """node_identity_path uses schema:{pipeline_hash} and instance:{content_hash}.
         Two nodes with same schema share the schema: component but differ in instance:."""
         db = InMemoryArrowDatabase()
         node1 = FunctionNode(
@@ -382,11 +382,11 @@ class TestFunctionNodePipelineIdentity:
             pipeline_database=db,
         )
         # Same schema → same schema: component
-        assert node1.pipeline_path[-2] == node2.pipeline_path[-2]
-        assert node1.pipeline_path[-2].startswith("schema:")
+        assert node1.node_identity_path[-2] == node2.node_identity_path[-2]
+        assert node1.node_identity_path[-2].startswith("schema:")
         # Different data → different instance: component
-        assert node1.pipeline_path[-1] != node2.pipeline_path[-1]
-        assert node1.pipeline_path[-1].startswith("instance:")
+        assert node1.node_identity_path[-1] != node2.node_identity_path[-1]
+        assert node1.node_identity_path[-1].startswith("instance:")
 
 
 # ---------------------------------------------------------------------------
@@ -634,24 +634,12 @@ class TestGetAllRecordsAllInfo:
 
 
 # ---------------------------------------------------------------------------
-# 12. pipeline_path_prefix
+# 12. node_identity_path structure
 # ---------------------------------------------------------------------------
 
 
-class TestFunctionNodePipelinePathPrefix:
-    def test_prefix_prepended_to_pipeline_path(self, double_pf):
-        db = InMemoryArrowDatabase()
-        prefix = ("my_pipeline", "stage_1")
-        node = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
-            input_stream=make_int_stream(n=2),
-            pipeline_database=db,
-            pipeline_path_prefix=prefix,
-        )
-        pipeline_path = node.pipeline_path
-        assert pipeline_path[: len(prefix)] == prefix
-
-    def test_no_prefix_pipeline_path_starts_with_pf_uri(self, double_pf):
+class TestFunctionNodeIdentityPath:
+    def test_node_identity_path_starts_with_pf_uri(self, double_pf):
         db = InMemoryArrowDatabase()
         node = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
@@ -659,9 +647,9 @@ class TestFunctionNodePipelinePathPrefix:
             pipeline_database=db,
         )
         pf_uri = node._packet_function.uri
-        assert node.pipeline_path[: len(pf_uri)] == pf_uri
-        assert node.pipeline_path[-2].startswith("schema:")
-        assert node.pipeline_path[-1].startswith("instance:")
+        assert node.node_identity_path[: len(pf_uri)] == pf_uri
+        assert node.node_identity_path[-2].startswith("schema:")
+        assert node.node_identity_path[-1].startswith("instance:")
 
 
 # ---------------------------------------------------------------------------

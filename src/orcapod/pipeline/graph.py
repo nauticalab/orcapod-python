@@ -264,7 +264,6 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                         pipeline_database=self._pipeline_database,
                         result_database=result_db,
                         result_path_prefix=result_prefix,
-                        pipeline_path_prefix=self._pipeline_path_prefix,
                     )
 
                     # Default to LocalExecutor so capture/logging works
