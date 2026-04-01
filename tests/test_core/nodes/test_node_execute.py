@@ -70,7 +70,7 @@ class TestFunctionNodeExecutePacket:
         packets = list(node._input_stream.iter_packets())
         tag, packet = packets[0]
         node.execute_packet(tag, packet)
-        records = pipeline_db.get_all_records(node.pipeline_path)
+        records = pipeline_db.get_all_records(node.node_identity_path)
         assert records is not None
         assert records.num_rows == 1
 
@@ -103,7 +103,7 @@ class TestFunctionNodeExecute:
     def test_writes_pipeline_records(self, function_node_with_db):
         node, pipeline_db, _ = function_node_with_db
         node.execute(node._input_stream)
-        records = pipeline_db.get_all_records(node.pipeline_path)
+        records = pipeline_db.get_all_records(node.node_identity_path)
         assert records is not None
         assert records.num_rows == 2
 

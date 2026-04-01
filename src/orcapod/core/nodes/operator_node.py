@@ -47,9 +47,9 @@ class OperatorNode(StreamBase):
     ``DerivedSource`` from DB records, and three-tier cache mode
     (OFF / LOG / REPLAY).
 
-    Pipeline path structure::
+    Node identity path structure::
 
-        pipeline_path_prefix / operator.uri / schema:{pipeline_hash} / instance:{content_hash}
+        operator.uri / schema:{pipeline_hash} / instance:{content_hash}
 
     Where ``pipeline_hash`` encodes the pipeline structure (operator +
     upstream topology) and ``instance:{content_hash}`` is the
@@ -75,7 +75,6 @@ class OperatorNode(StreamBase):
         # Optional DB params for persistent mode:
         pipeline_database: ArrowDatabaseProtocol | None = None,
         cache_mode: CacheMode = CacheMode.OFF,
-        pipeline_path_prefix: tuple[str, ...] = (),
     ):
         if tracker_manager is None:
             tracker_manager = DEFAULT_TRACKER_MANAGER
@@ -96,14 +95,12 @@ class OperatorNode(StreamBase):
 
         # DB persistence state (initially None; set via __init__ params or attach_databases)
         self._pipeline_database: ArrowDatabaseProtocol | None = None
-        self._pipeline_path_prefix: tuple[str, ...] = ()
         self._cache_mode = CacheMode.OFF
 
         if pipeline_database is not None:
             self.attach_databases(
                 pipeline_database=pipeline_database,
                 cache_mode=cache_mode,
-                pipeline_path_prefix=pipeline_path_prefix,
             )
 
     # ------------------------------------------------------------------
@@ -114,17 +111,14 @@ class OperatorNode(StreamBase):
         self,
         pipeline_database: ArrowDatabaseProtocol,
         cache_mode: CacheMode = CacheMode.OFF,
-        pipeline_path_prefix: tuple[str, ...] = (),
     ) -> None:
         """Attach a database for persistent caching and pipeline records.
 
         Args:
             pipeline_database: Database for pipeline records.
             cache_mode: Caching behaviour (OFF, LOG, or REPLAY).
-            pipeline_path_prefix: Path prefix for pipeline records.
         """
         self._pipeline_database = pipeline_database
-        self._pipeline_path_prefix = pipeline_path_prefix
         self._cache_mode = cache_mode
 
         # Clear caches
@@ -175,38 +169,16 @@ class OperatorNode(StreamBase):
 
         if operator is not None and input_streams:
             # Full mode: construct normally.
-            # Prefer the pipeline_path_prefix hint from the databases dict (new format:
-            # pipeline_path is not stored in the descriptor). Fall back to deriving the
-            # prefix from a stored pipeline_path for backward compatibility with old saves.
-            if "pipeline_path_prefix" in databases:
-                prefix = tuple(databases["pipeline_path_prefix"])
-            else:
-                pipeline_path = tuple(descriptor.get("pipeline_path", ()))
-                # Derive pipeline_path_prefix by stripping the suffix that
-                # __init__ appends: operator.uri + schema:{hash} + instance:{hash} (2 elements).
-                uri_len = len(operator.uri) + 2  # +2 for schema/instance components
-                if len(pipeline_path) > uri_len:
-                    prefix = pipeline_path[:-uri_len]
-                elif len(pipeline_path) == uri_len:
-                    prefix = ()
-                else:
-                    import logging as _logging
-                    _logging.getLogger(__name__).warning(
-                        "pipeline_path %r is shorter than expected (uri_len=%d); "
-                        "using empty prefix — DB path may be incorrect.",
-                        pipeline_path,
-                        uri_len,
-                    )
-                    prefix = ()
-
             node = cls(
                 operator=operator,
                 input_streams=input_streams,
-                pipeline_database=pipeline_db,
-                cache_mode=cache_mode,
-                pipeline_path_prefix=prefix,
                 label=descriptor.get("label"),
             )
+            if pipeline_db is not None:
+                node.attach_databases(
+                    pipeline_database=pipeline_db,
+                    cache_mode=cache_mode,
+                )
             node._descriptor = descriptor
             node._load_status = LoadStatus.FULL
             return node
@@ -244,7 +216,6 @@ class OperatorNode(StreamBase):
 
         # DB persistence state
         node._pipeline_database = pipeline_db
-        node._pipeline_path_prefix = ()
         node._cache_mode = cache_mode
 
         # Descriptor metadata for read-only access
@@ -370,27 +341,22 @@ class OperatorNode(StreamBase):
         )
 
     # ------------------------------------------------------------------
-    # Pipeline path
+    # Node identity path
     # ------------------------------------------------------------------
 
     @property
-    def pipeline_path(self) -> tuple[str, ...]:
-        """Return the pipeline path for DB record scoping.
+    def node_identity_path(self) -> tuple[str, ...]:
+        """Return the node identity path for DB record scoping.
 
-        Raises:
-            RuntimeError: If no database is attached and this is not a
-                read-only deserialized node.
+        Returns ``()`` when no pipeline database is attached.
         """
         stored = getattr(self, "_stored_pipeline_path", None)
         if self._operator is None and stored is not None:
             return stored
         if self._pipeline_database is None:
-            raise RuntimeError(
-                "pipeline_path requires a database. Call attach_databases() first."
-            )
+            return ()
         return (
-            self._pipeline_path_prefix
-            + self._operator.uri
+            self._operator.uri
             + (
                 f"schema:{self.pipeline_hash().to_string()}",
                 f"instance:{self.content_hash().to_string()}",
@@ -441,7 +407,7 @@ class OperatorNode(StreamBase):
 
         # Store (identical rows across runs naturally deduplicate)
         self._pipeline_database.add_records(
-            self.pipeline_path,
+            self.node_identity_path,
             output_table,
             record_id_column=self.HASH_COLUMN_NAME,
             skip_duplicates=True,
@@ -486,7 +452,7 @@ class OperatorNode(StreamBase):
             return None
         if self._cache_mode != CacheMode.REPLAY:
             return None
-        records = self._pipeline_database.get_all_records(self.pipeline_path)
+        records = self._pipeline_database.get_all_records(self.node_identity_path)
         if records is None:
             if self._operator is None:
                 # Read-only (deserialized) node with no operator: cannot derive
@@ -527,17 +493,21 @@ class OperatorNode(StreamBase):
         Returns:
             Materialized list of (tag, packet) pairs.
         """
+        from orcapod.pipeline.observer import NoOpObserver
+
         node_label = self.label
-        node_hash = ""
-        if observer is not None:
-            observer.on_node_start(node_label, node_hash)
+        node_hash = self.content_hash().to_string()
+
+        obs = observer if observer is not None else NoOpObserver()
+        ctx_obs = obs.contextualize(*self.node_identity_path)
+
+        ctx_obs.on_node_start(node_label, node_hash)
 
         # Check REPLAY cache first
         cached_output = self.get_cached_output()
         if cached_output is not None:
             output = list(cached_output.iter_packets())
-            if observer is not None:
-                observer.on_node_end(node_label, node_hash)
+            ctx_obs.on_node_end(node_label, node_hash)
             return output
 
         # Compute
@@ -564,8 +534,7 @@ class OperatorNode(StreamBase):
         ):
             self._store_output_stream(self._cached_output_stream)
 
-        if observer is not None:
-            observer.on_node_end(node_label, node_hash)
+        ctx_obs.on_node_end(node_label, node_hash)
         return output
 
     def _compute_and_store(self) -> None:
@@ -587,7 +556,7 @@ class OperatorNode(StreamBase):
         If no cached records exist yet, produces an empty stream with
         the correct schema (zero rows, correct columns).
         """
-        records = self._pipeline_database.get_all_records(self.pipeline_path)
+        records = self._pipeline_database.get_all_records(self.node_identity_path)
         if records is None:
             records = self._make_empty_table()
 
@@ -682,7 +651,7 @@ class OperatorNode(StreamBase):
         if self._pipeline_database is None:
             return None
 
-        results = self._pipeline_database.get_all_records(self.pipeline_path)
+        results = self._pipeline_database.get_all_records(self.node_identity_path)
         if results is None:
             return None
 
@@ -725,7 +694,7 @@ class OperatorNode(StreamBase):
 
         from orcapod.core.sources.derived_source import DerivedSource
 
-        path_str = "/".join(self.pipeline_path)
+        path_str = "/".join(self.node_identity_path)
         content_frag = self.content_hash().to_string()[:16]
         source_id = f"{path_str}:{content_frag}"
         return DerivedSource(
@@ -761,23 +730,25 @@ class OperatorNode(StreamBase):
             output: Writable channel for output (tag, packet) pairs.
             observer: Optional execution observer for hooks.
         """
+        from orcapod.pipeline.observer import NoOpObserver
+
+        obs = observer if observer is not None else NoOpObserver()
         node_label = self.label
-        node_hash = ""
+        node_hash = self.content_hash().to_string()
+        ctx_obs = obs.contextualize(*self.node_identity_path)
+
         if self._pipeline_database is None:
             # Simple delegation without DB
-            if observer is not None:
-                observer.on_node_start(node_label, node_hash)
+            ctx_obs.on_node_start(node_label, node_hash)
             hashes = [s.pipeline_hash() for s in self._input_streams]
             await self._operator.async_execute(
                 inputs, output, input_pipeline_hashes=hashes
             )
-            if observer is not None:
-                observer.on_node_end(node_label, node_hash)
+            ctx_obs.on_node_end(node_label, node_hash)
             return
 
         try:
-            if observer is not None:
-                observer.on_node_start(node_label, node_hash)
+            ctx_obs.on_node_start(node_label, node_hash)
 
             if self._cache_mode == CacheMode.REPLAY:
                 self._replay_from_cache()
@@ -816,8 +787,7 @@ class OperatorNode(StreamBase):
 
             self._update_modified_time()
 
-            if observer is not None:
-                observer.on_node_end(node_label, node_hash)
+            ctx_obs.on_node_end(node_label, node_hash)
         finally:
             await output.close()
 

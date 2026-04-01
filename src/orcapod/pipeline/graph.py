@@ -283,7 +283,6 @@ class Pipeline(AutoRegisteringContextBasedTracker):
 
                     node.attach_databases(
                         pipeline_database=self._pipeline_database,
-                        pipeline_path_prefix=self._pipeline_path_prefix,
                     )
 
                 else:
@@ -924,7 +923,6 @@ class Pipeline(AutoRegisteringContextBasedTracker):
 
                 dbs = {
                     "pipeline": pipeline_db,
-                    "pipeline_path_prefix": pipeline_path_prefix,
                 }
 
                 node = cls._load_operator_node(

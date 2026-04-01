@@ -1,7 +1,7 @@
 """
 Tests for OperatorNode covering:
 - Construction, producer, upstreams
-- pipeline_path structure
+- node_identity_path structure
 - output_schema and keys
 - identity_structure, content_hash, pipeline_identity_structure, pipeline_hash
 - run() + get_all_records: DB storage and retrieval
@@ -98,7 +98,6 @@ def _make_node(
     operator,
     streams: tuple[ArrowTableStream, ...],
     db: InMemoryArrowDatabase | None = None,
-    prefix: tuple[str, ...] = (),
     cache_mode: CacheMode = CacheMode.OFF,
 ) -> OperatorNode:
     if db is None:
@@ -108,7 +107,6 @@ def _make_node(
         input_streams=streams,
         pipeline_database=db,
         cache_mode=cache_mode,
-        pipeline_path_prefix=prefix,
     )
 
 
@@ -155,7 +153,7 @@ class TestOperatorNodeConstruction:
 
 
 # ---------------------------------------------------------------------------
-# Pipeline path
+# Node identity path
 # ---------------------------------------------------------------------------
 
 
@@ -163,29 +161,22 @@ class TestOperatorNodePipelinePath:
     def test_pipeline_path_contains_operator_uri(self, simple_stream):
         op = MapPackets({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
-        # pipeline_path = prefix + operator.uri + (f"node:{pipeline_hash}",)
-        path = node.pipeline_path
+        # node_identity_path = operator.uri + (f"schema:{pipeline_hash}", f"instance:{content_hash}")
+        path = node.node_identity_path
         # operator.uri is a tuple starting with the class name
         assert any("MapPackets" in segment for segment in path)
 
     def test_pipeline_path_ends_with_node_hash(self, simple_stream):
         op = MapPackets({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
-        path = node.pipeline_path
+        path = node.node_identity_path
         assert path[-2].startswith("schema:")
         assert path[-1].startswith("instance:")
-
-    def test_pipeline_path_prefix(self, simple_stream):
-        op = MapPackets({"x": "renamed_x"})
-        prefix = ("my_pipeline", "v1")
-        node = _make_node(op, (simple_stream,), prefix=prefix)
-        path = node.pipeline_path
-        assert path[:2] == prefix
 
     def test_no_tag_schema_hash_in_path(self, simple_stream):
         op = MapPackets({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
-        path = node.pipeline_path
+        path = node.node_identity_path
         assert not any(segment.startswith("tag:") for segment in path)
 
 
