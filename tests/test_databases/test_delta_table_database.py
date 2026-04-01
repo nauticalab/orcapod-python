@@ -443,7 +443,6 @@ class TestAtMethod:
         scoped = db.at("pipeline", "node1")
         scoped.add_record(("outputs",), "id1", make_table(value=[1]), flush=True)
         # Delta table should be at <tmp_path>/db/pipeline/node1/outputs/
-        import os
         expected_path = tmp_path / "db" / "pipeline" / "node1" / "outputs"
         assert expected_path.exists()
 
