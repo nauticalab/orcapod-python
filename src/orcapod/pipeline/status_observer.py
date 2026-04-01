@@ -13,9 +13,9 @@ Example::
     obs = StatusObserver(status_database=InMemoryArrowDatabase())
     pipeline.run(orchestrator=SyncPipelineOrchestrator(observer=obs))
 
-    # Inspect run status for a specific node
-    status = obs.get_status(pipeline_path=node.pipeline_path)  # pyarrow.Table
-    status.to_pandas()                                         # pandas DataFrame
+    # Inspect run status
+    status = obs.get_status()  # pyarrow.Table
+    status.to_pandas()         # pandas DataFrame
 
 Status schema (fixed columns):
     Fixed columns are prefixed with ``_status_`` to follow system column
@@ -39,11 +39,10 @@ Status schema (fixed columns):
     columns.
 
 Status storage:
-    Status events are stored at a pipeline-path-mirrored location:
-    ``pipeline_path[:1] + ("status",) + pipeline_path[1:]``.
-    Each function node gets its own status table.  Use
-    ``get_status(pipeline_path=node.pipeline_path)`` to retrieve
-    node-specific status.
+    Status events are stored in a single flat table at ``DEFAULT_STATUS_PATH``
+    within the provided ``status_database``.  Pass a pre-scoped database
+    (via ``db.at("pipeline_name", "_status")``) to namespace events.
+    Node identity is queryable via the ``_status_node_label`` column.
 
 Append-only:
     Each state transition is a new row.  Current state for a (node, tag)
@@ -78,10 +77,9 @@ _NOOP_LOGGER = NoOpLogger()
 
 
 class StatusObserver:
-    """Concrete observer that writes packet execution status to a database.
+    """Writes node execution status to a pre-scoped status database.
 
-    Instantiate once, outside the pipeline, and pass to the orchestrator
-    (directly or via a ``CompositeObserver``)::
+    Instantiate once, outside the pipeline, and pass to the orchestrator::
 
         obs = StatusObserver(status_database=InMemoryArrowDatabase())
         orch = SyncPipelineOrchestrator(observer=obs)
@@ -90,34 +88,32 @@ class StatusObserver:
         # After the run, read back status:
         status_table = obs.get_status()   # pyarrow.Table
 
+    For scoped storage (e.g. per-pipeline namespace), pass a pre-scoped
+    database::
+
+        obs = StatusObserver(status_database=db.at("my_pipeline", "_status"))
+
     Args:
-        status_database: Any ``ArrowDatabaseProtocol`` instance.
-        status_path: Tuple of strings identifying the default table within
-            the database.  Defaults to ``("execution_status",)``.
+        status_database: Any ``ArrowDatabaseProtocol`` instance.  May be
+            a root database or a scoped view created via ``db.at(...)``.
     """
 
     def __init__(
         self,
         status_database: ArrowDatabaseProtocol,
-        status_path: tuple[str, ...] | None = None,
     ) -> None:
         self._db = status_database
-        self._status_path = status_path or DEFAULT_STATUS_PATH
         self._current_run_id: str = ""
         self._current_pipeline_uri: str = ""
-        # Tracks (node_hash, pipeline_path, tag_schema) per node_label,
-        # populated by on_node_start.  Allows packet-level hooks (which
-        # only receive node_label) to look up the node's identity,
-        # storage path, and tag schema.
-        self._node_context: dict[str, tuple[str, tuple[str, ...], SchemaLike]] = {}
+        # Maps node_label → (node_hash, tag_schema) for in-flight nodes.
+        # Populated by on_node_start; cleared by on_node_end.
+        self._tag_schema_per_node: dict[str, tuple[str, SchemaLike]] = {}
 
     # -- contextualize --
 
-    def contextualize(
-        self, node_hash: str, node_label: str
-    ) -> _ContextualizedStatusObserver:
-        """Return a contextualized wrapper stamped with node identity."""
-        return _ContextualizedStatusObserver(self, node_hash, node_label)
+    def contextualize(self, *identity_path: str) -> "_ContextualizedStatusObserver":
+        """Return a contextualized wrapper bound to the given identity path."""
+        return _ContextualizedStatusObserver(self._db, identity_path)
 
     # -- lifecycle hooks --
 
@@ -128,27 +124,27 @@ class StatusObserver:
     ) -> None:
         self._current_run_id = run_id
         self._current_pipeline_uri = pipeline_uri
-        self._node_context.clear()
+        self._tag_schema_per_node.clear()
 
     def on_run_end(self, run_id: str) -> None:
-        self._node_context.clear()
+        self._tag_schema_per_node.clear()
 
     def on_node_start(
         self,
         node_label: str,
         node_hash: str,
-        pipeline_path: tuple[str, ...] = (),
         tag_schema: SchemaLike | None = None,
+        **kwargs: Any,
     ) -> None:
-        self._node_context[node_label] = (node_hash, pipeline_path, tag_schema or {})
+        self._tag_schema_per_node[node_label] = (node_hash, tag_schema or {})
 
     def on_node_end(
         self,
         node_label: str,
         node_hash: str,
-        pipeline_path: tuple[str, ...] = (),
+        **kwargs: Any,
     ) -> None:
-        self._node_context.pop(node_label, None)
+        self._tag_schema_per_node.pop(node_label, None)
 
     def on_packet_start(
         self, node_label: str, tag: TagProtocol, packet: PacketProtocol
@@ -168,15 +164,13 @@ class StatusObserver:
     def on_packet_crash(
         self, node_label: str, tag: TagProtocol, packet: PacketProtocol, error: Exception
     ) -> None:
-        self._write_event(
-            node_label, tag, state="FAILED", error=error
-        )
+        self._write_event(node_label, tag, state="FAILED", error=error)
 
     def create_packet_logger(
         self,
         tag: TagProtocol,
         packet: PacketProtocol,
-        pipeline_path: tuple[str, ...] = (),
+        **kwargs: Any,
     ) -> NoOpLogger:
         """Return a no-op logger.
 
@@ -187,24 +181,56 @@ class StatusObserver:
 
     # -- convenience --
 
-    def get_status(
-        self, pipeline_path: tuple[str, ...] | None = None
-    ) -> pa.Table | None:
-        """Read status rows from the database as a ``pyarrow.Table``.
+    def get_status(self) -> pa.Table | None:
+        """Read all status rows from the database as a ``pyarrow.Table``.
 
-        Args:
-            pipeline_path: If provided, reads status for a specific node
-                (mirrored path).  If ``None``, reads from the default
-                status path.
+        Returns all status events across all nodes.  Filter by the
+        ``_status_node_label`` column to retrieve per-node status.
 
         Returns:
             ``None`` if no status events have been written yet.
         """
-        if pipeline_path is not None:
-            status_path = pipeline_path[:1] + ("status",) + pipeline_path[1:]
-        else:
-            status_path = self._status_path
-        return self._db.get_all_records(status_path)
+        return self._db.get_all_records(DEFAULT_STATUS_PATH)
+
+    # -- serialization --
+
+    def to_config(self, db_registry: Any = None) -> dict:
+        """Serialize this observer to a JSON-compatible config dict.
+
+        Args:
+            db_registry: Optional ``DatabaseRegistry`` instance.  When
+                provided, the database config is registered and the
+                emitted config uses the compact scoped reference format.
+
+        Returns:
+            A dict with ``"type": "status"`` and a ``"database"`` key.
+        """
+        return {
+            "type": "status",
+            "database": self._db.to_config(db_registry=db_registry),
+        }
+
+    @classmethod
+    def from_config(
+        cls, config: dict, db_registry: dict | None = None
+    ) -> "StatusObserver":
+        """Reconstruct a ``StatusObserver`` from a config dict.
+
+        Args:
+            config: Dict as produced by ``to_config``.
+            db_registry: Optional plain dict (output of
+                ``DatabaseRegistry.to_dict()``) used to resolve scoped
+                database references.
+
+        Returns:
+            A new ``StatusObserver`` instance.
+        """
+        from orcapod.pipeline.serialization import resolve_database_from_config
+
+        db = resolve_database_from_config(
+            config["database"], db_registry=db_registry
+        )
+        return cls(db)
 
     # -- internal --
 
@@ -218,15 +244,9 @@ class StatusObserver:
         """Build and write a single status event row."""
         import pyarrow as pa
 
-        node_hash, pipeline_path, tag_schema = self._node_context.get(
-            node_label, ("", (), {})
+        node_hash, tag_schema = self._tag_schema_per_node.get(
+            node_label, ("", {})
         )
-
-        # Compute mirrored status path
-        if pipeline_path:
-            status_path = pipeline_path[:1] + ("status",) + pipeline_path[1:]
-        else:
-            status_path = self._status_path
 
         status_id = str(uuid7())
         timestamp = datetime.now(timezone.utc).isoformat()
@@ -255,7 +275,7 @@ class StatusObserver:
 
         row = pa.table(columns)
         try:
-            self._db.add_record(status_path, status_id, row, flush=True)
+            self._db.add_record(DEFAULT_STATUS_PATH, status_id, row, flush=True)
         except Exception:
             logger.exception(
                 "StatusObserver: failed to write status event for node=%s state=%s",
@@ -265,50 +285,62 @@ class StatusObserver:
 
 
 class _ContextualizedStatusObserver:
-    """Lightweight wrapper holding parent observer + node identity context.
+    """Implements ExecutionObserverProtocol. Writes to db at the bound identity_path.
 
-    Created by ``StatusObserver.contextualize()``.  All lifecycle hooks
-    delegate to the parent.
+    Created by ``StatusObserver.contextualize()``.  Holds the pre-scoped
+    database and an ``identity_path`` used as the record path for writes.
     """
 
     def __init__(
         self,
-        parent: StatusObserver,
-        node_hash: str,
-        node_label: str,
+        db: ArrowDatabaseProtocol,
+        identity_path: tuple[str, ...],
     ) -> None:
-        self._parent = parent
+        self._db = db
+        self._identity_path = identity_path
+        self._current_run_id: str = ""
+        self._current_pipeline_uri: str = ""
+        self._current_node_hash: str = ""
+        self._tag_schema: SchemaLike = {}
 
-    def contextualize(
-        self, node_hash: str, node_label: str
-    ) -> _ContextualizedStatusObserver:
-        """Re-contextualize (returns a new wrapper with updated identity)."""
-        return _ContextualizedStatusObserver(self._parent, node_hash, node_label)
+    def contextualize(self, *identity_path: str) -> "_ContextualizedStatusObserver":
+        """Re-contextualize with a new identity path."""
+        return _ContextualizedStatusObserver(self._db, identity_path)
 
     def on_run_start(
         self,
         run_id: str,
         pipeline_uri: str = "",
     ) -> None:
-        self._parent.on_run_start(run_id, pipeline_uri=pipeline_uri)
+        self._current_run_id = run_id
+        self._current_pipeline_uri = pipeline_uri
 
     def on_run_end(self, run_id: str) -> None:
-        self._parent.on_run_end(run_id)
+        pass
 
     def on_node_start(
-        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = (), tag_schema: SchemaLike | None = None
+        self,
+        node_label: str,
+        node_hash: str,
+        tag_schema: SchemaLike | None = None,
+        **kwargs: Any,
     ) -> None:
-        self._parent.on_node_start(node_label, node_hash, pipeline_path=pipeline_path, tag_schema=tag_schema)
+        self._current_node_hash = node_hash
+        self._tag_schema = tag_schema or {}
 
     def on_node_end(
-        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = ()
+        self,
+        node_label: str,
+        node_hash: str,
+        **kwargs: Any,
     ) -> None:
-        self._parent.on_node_end(node_label, node_hash, pipeline_path=pipeline_path)
+        self._current_node_hash = ""
+        self._tag_schema = {}
 
     def on_packet_start(
         self, node_label: str, tag: TagProtocol, packet: PacketProtocol
     ) -> None:
-        self._parent.on_packet_start(node_label, tag, packet)
+        self._write_event(node_label, tag, state="RUNNING")
 
     def on_packet_end(
         self,
@@ -318,19 +350,69 @@ class _ContextualizedStatusObserver:
         output_packet: PacketProtocol | None,
         cached: bool,
     ) -> None:
-        self._parent.on_packet_end(
-            node_label, tag, input_packet, output_packet, cached
-        )
+        self._write_event(node_label, tag, state="CACHED" if cached else "SUCCESS")
 
     def on_packet_crash(
-        self, node_label: str, tag: TagProtocol, packet: PacketProtocol, error: Exception
+        self,
+        node_label: str,
+        tag: TagProtocol,
+        packet: PacketProtocol,
+        error: Exception,
     ) -> None:
-        self._parent.on_packet_crash(node_label, tag, packet, error)
+        self._write_event(node_label, tag, state="FAILED", error=error)
 
     def create_packet_logger(
         self,
         tag: TagProtocol,
         packet: PacketProtocol,
-        pipeline_path: tuple[str, ...] = (),
+        **kwargs: Any,
     ) -> NoOpLogger:
         return _NOOP_LOGGER
+
+    # -- internal --
+
+    def _write_event(
+        self,
+        node_label: str,
+        tag: TagProtocol,
+        state: str,
+        error: Exception | None = None,
+    ) -> None:
+        """Build and write a single status event row using self._identity_path."""
+        import pyarrow as pa
+
+        status_id = str(uuid7())
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        columns: dict[str, pa.Array] = {
+            "_status_id":            pa.array([status_id],               type=pa.large_utf8()),
+            "_status_run_id":        pa.array([self._current_run_id],     type=pa.large_utf8()),
+            "_status_pipeline_uri":  pa.array([self._current_pipeline_uri], type=pa.large_utf8()),
+            "_status_node_label":    pa.array([node_label],               type=pa.large_utf8()),
+            "_status_node_hash":     pa.array([self._current_node_hash],  type=pa.large_utf8()),
+            "_status_state":         pa.array([state],                    type=pa.large_utf8()),
+            "_status_timestamp":     pa.array([timestamp],                type=pa.large_utf8()),
+            "_status_error_summary": pa.array(
+                [str(error) if error is not None else None],
+                type=pa.large_utf8(),
+            ),
+        }
+
+        for key in self._tag_schema:
+            value = tag.get(key, None)
+            columns[key] = pa.array(
+                [str(value) if value is not None else None],
+                type=pa.large_utf8(),
+            )
+
+        row = pa.table(columns)
+        record_path = self._identity_path if self._identity_path else DEFAULT_STATUS_PATH
+        try:
+            self._db.add_record(record_path, status_id, row, flush=True)
+        except Exception:
+            logger.exception(
+                "_ContextualizedStatusObserver: failed to write status event "
+                "for node=%s state=%s",
+                node_label,
+                state,
+            )
