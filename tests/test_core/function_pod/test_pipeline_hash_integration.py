@@ -288,11 +288,11 @@ class TestFunctionNodePipelineHashFix:
             pipeline_database=db,
         )
         # Same schema → same schema: component
-        assert node1.pipeline_path[-2] == node2.pipeline_path[-2]
-        assert node1.pipeline_path[-2].startswith("schema:")
+        assert node1.node_identity_path[-2] == node2.node_identity_path[-2]
+        assert node1.node_identity_path[-2].startswith("schema:")
         # Different data → different instance: component → different full path
-        assert node1.pipeline_path[-1] != node2.pipeline_path[-1]
-        assert node1.pipeline_path != node2.pipeline_path
+        assert node1.node_identity_path[-1] != node2.node_identity_path[-1]
+        assert node1.node_identity_path != node2.node_identity_path
 
     def test_different_data_same_schema_share_uri(self, double_pf):
         """URI is schema-based; two nodes with same schema share URI prefix."""
@@ -317,9 +317,9 @@ class TestFunctionNodePipelineHashFix:
         )
         # URI (pf.uri) portion is identical for same function
         pf_uri_len = len(node1._packet_function.uri)
-        assert node1.pipeline_path[:pf_uri_len] == node2.pipeline_path[:pf_uri_len]
+        assert node1.node_identity_path[:pf_uri_len] == node2.node_identity_path[:pf_uri_len]
         # But full path differs (different instance: suffix)
-        assert node1.pipeline_path != node2.pipeline_path
+        assert node1.node_identity_path != node2.node_identity_path
 
     def test_different_data_yields_different_content_hash(self, double_pf):
         """Same schema, different actual data → content_hash must differ."""
@@ -357,29 +357,18 @@ class TestFunctionNodePipelineHashFix:
             input_stream=make_two_col_stream(n=3),
             pipeline_database=db,
         )
-        assert node_double.pipeline_path != node_add.pipeline_path
+        assert node_double.node_identity_path != node_add.node_identity_path
 
-    def test_pipeline_path_prefix_propagates(self, double_pf):
-        db = InMemoryArrowDatabase()
-        prefix = ("stage", "one")
-        node = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
-            input_stream=make_int_stream(n=2),
-            pipeline_database=db,
-            pipeline_path_prefix=prefix,
-        )
-        assert node.pipeline_path[: len(prefix)] == prefix
-
-    def test_pipeline_path_without_prefix_starts_with_pf_uri(self, double_pf):
+    def test_node_identity_path_starts_with_pf_uri(self, double_pf):
         node = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=2),
             pipeline_database=InMemoryArrowDatabase(),
         )
         pf_uri = node._packet_function.uri
-        assert node.pipeline_path[: len(pf_uri)] == pf_uri
-        assert node.pipeline_path[-2].startswith("schema:")
-        assert node.pipeline_path[-1].startswith("instance:")
+        assert node.node_identity_path[: len(pf_uri)] == pf_uri
+        assert node.node_identity_path[-2].startswith("schema:")
+        assert node.node_identity_path[-1].startswith("instance:")
 
 
 # ---------------------------------------------------------------------------
@@ -425,8 +414,8 @@ class TestPipelineDbScoping:
         )
 
         # Different data → different instance: component → different full path
-        assert node1.pipeline_path != node2.pipeline_path
-        assert node1.pipeline_path[-2] == node2.pipeline_path[-2]  # same schema:
+        assert node1.node_identity_path != node2.node_identity_path
+        assert node1.node_identity_path[-2] == node2.node_identity_path[-2]  # same schema:
 
         node1.run()
         assert call_count == 3
@@ -579,9 +568,9 @@ class TestPipelineDbScoping:
         src_b = node1_b.as_source()
 
         # Same schema → same schema: component; different data → different full path
-        assert node1_a.pipeline_path[-2] == node1_b.pipeline_path[-2]
-        assert node1_a.pipeline_path[-2].startswith("schema:")
-        assert node1_a.pipeline_path != node1_b.pipeline_path
+        assert node1_a.node_identity_path[-2] == node1_b.node_identity_path[-2]
+        assert node1_a.node_identity_path[-2].startswith("schema:")
+        assert node1_a.node_identity_path != node1_b.node_identity_path
 
         # At the DerivedSource level, pipeline_hash is schema-only
         assert src_a.pipeline_hash() == src_b.pipeline_hash()

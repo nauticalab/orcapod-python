@@ -75,12 +75,12 @@ class TestFunctionNodeAttachDatabases:
         node.attach_databases(pipeline_database=db, result_database=db)
         assert len(node._cached_output_packets) == 0
 
-    def test_attach_databases_computes_pipeline_path(self):
+    def test_attach_databases_computes_node_identity_path(self):
         node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream())
         db = InMemoryArrowDatabase()
         node.attach_databases(pipeline_database=db, result_database=db)
-        assert node.pipeline_path is not None
-        assert len(node.pipeline_path) > 0
+        assert node.node_identity_path is not None
+        assert len(node.node_identity_path) > 0
 
     def test_double_attach_does_not_double_wrap(self):
         from orcapod.core.cached_function_pod import CachedFunctionPod
@@ -115,7 +115,7 @@ class TestFunctionNodeWithDatabase:
         )
         assert node._pipeline_database is db
 
-    def test_pipeline_path_with_database(self):
+    def test_node_identity_path_with_database(self):
         db = InMemoryArrowDatabase()
         node = FunctionNode(
             function_pod=_make_pod(),
@@ -123,7 +123,7 @@ class TestFunctionNodeWithDatabase:
             pipeline_database=db,
             result_database=db,
         )
-        assert len(node.pipeline_path) > 0
+        assert len(node.node_identity_path) > 0
 
     def test_iter_packets_with_database(self):
         db = InMemoryArrowDatabase()

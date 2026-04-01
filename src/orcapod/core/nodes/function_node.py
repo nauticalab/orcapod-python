@@ -82,7 +82,6 @@ class FunctionNode(StreamBase):
         pipeline_database: ArrowDatabaseProtocol | None = None,
         result_database: ArrowDatabaseProtocol | None = None,
         result_path_prefix: tuple[str, ...] | None = None,
-        pipeline_path_prefix: tuple[str, ...] = (),
     ):
         if tracker_manager is None:
             tracker_manager = DEFAULT_TRACKER_MANAGER
@@ -130,7 +129,6 @@ class FunctionNode(StreamBase):
         # DB persistence state (initially None; set via __init__ params or attach_databases)
         self._pipeline_database: ArrowDatabaseProtocol | None = None
         self._cached_function_pod: CachedFunctionPod | None = None
-        self._pipeline_path_prefix: tuple[str, ...] = ()
         self._output_schema_hash: str | None = None
 
         if pipeline_database is not None:
@@ -138,7 +136,6 @@ class FunctionNode(StreamBase):
                 pipeline_database=pipeline_database,
                 result_database=result_database,
                 result_path_prefix=result_path_prefix,
-                pipeline_path_prefix=pipeline_path_prefix,
             )
 
     # ------------------------------------------------------------------
@@ -150,7 +147,6 @@ class FunctionNode(StreamBase):
         pipeline_database: ArrowDatabaseProtocol,
         result_database: ArrowDatabaseProtocol | None = None,
         result_path_prefix: tuple[str, ...] | None = None,
-        pipeline_path_prefix: tuple[str, ...] = (),
     ) -> None:
         """Attach databases for persistent caching and pipeline records.
 
@@ -163,15 +159,12 @@ class FunctionNode(StreamBase):
             result_database: Database for cached results. Defaults to
                 pipeline_database.
             result_path_prefix: Path prefix for result records.
-            pipeline_path_prefix: Path prefix for pipeline records.
         """
         computed_result_path_prefix: tuple[str, ...] = ()
         if result_database is None:
             result_database = pipeline_database
             computed_result_path_prefix = (
-                result_path_prefix
-                if result_path_prefix is not None
-                else pipeline_path_prefix + ("_result",)
+                result_path_prefix if result_path_prefix is not None else ()
             )
         elif result_path_prefix is not None:
             computed_result_path_prefix = result_path_prefix
@@ -184,7 +177,6 @@ class FunctionNode(StreamBase):
         )
 
         self._pipeline_database = pipeline_database
-        self._pipeline_path_prefix = pipeline_path_prefix
 
         # Clear all caches
         self.clear_cache()
@@ -251,75 +243,15 @@ class FunctionNode(StreamBase):
         from orcapod.pipeline.serialization import LoadStatus
 
         pipeline_db = databases.get("pipeline")
-        result_db = databases.get("result", pipeline_db)
-        # pipeline_path_prefix may be passed explicitly (new-format loading)
-        # or derived from the stored pipeline_path (old-format loading).
-        hint_prefix: tuple[str, ...] | None = databases.get("pipeline_path_prefix")
-        # result_path_prefix_hint is passed explicitly for new-format loading
-        # where result_record_path is no longer stored.
-        result_prefix_hint: tuple[str, ...] | None = databases.get("result_path_prefix_hint")
+        result_db = databases.get("result")  # pre-scoped; None if not provided
 
         if function_pod is not None and input_stream is not None:
             # Full / READ_ONLY / CACHE_ONLY mode: construct normally via __init__.
-            # Prefer the pipeline_path_prefix hint from the databases dict (new-format
-            # loading: Pipeline.load() always passes this). Fall back to deriving the
-            # prefix from a stored pipeline_path only when no hint is available
-            # (direct from_descriptor calls without a loader hint).
-            if hint_prefix is not None:
-                prefix = hint_prefix
-            else:
-                pipeline_path = tuple(descriptor.get("pipeline_path", ()))
-                # Derive pipeline_path_prefix by stripping the suffix that
-                # __init__ appends (packet_function.uri + two hash elements).
-                # The suffix added is:
-                #   pf.uri + (f"schema:{pipeline_hash}", f"instance:{content_hash}")
-                pf_uri_len = len(function_pod.packet_function.uri) + 2  # +2 for schema/instance
-                if len(pipeline_path) > pf_uri_len:
-                    prefix = pipeline_path[:-pf_uri_len]
-                elif len(pipeline_path) == pf_uri_len:
-                    prefix = ()
-                else:
-                    import logging as _logging
-                    _logging.getLogger(__name__).warning(
-                        "pipeline_path %r is shorter than expected (uri_len=%d); "
-                        "using empty prefix — DB path may be incorrect.",
-                        pipeline_path,
-                        pf_uri_len,
-                    )
-                    prefix = ()
-
-            # Derive result_path_prefix from the stored result_record_path
-            # by stripping the URI suffix that CachedFunctionPod appends.
-            stored_result_path = tuple(
-                descriptor.get("result_record_path", ())
-            )
-            uri_len = len(function_pod.packet_function.uri)
-            result_prefix: tuple[str, ...] | None = None
-            if stored_result_path and len(stored_result_path) > uri_len:
-                # Old format: derive prefix from stored result_record_path
-                result_prefix = stored_result_path[:-uri_len]
-            elif not stored_result_path and result_prefix_hint is not None:
-                # New format: use the hint computed from pipeline context
-                result_prefix = result_prefix_hint
-
-            # Determine effective result_database.
-            # When result_prefix is known (old format stored path, or new format hint),
-            # pass result_db explicitly with the prefix.
-            # When neither is available, pass None so attach_database uses its default.
-            if result_prefix is not None:
-                effective_result_db = result_db
-            else:
-                effective_result_db = (
-                    None if result_db is pipeline_db else result_db
-                )
-
             node = cls(
                 function_pod=function_pod,
                 input_stream=input_stream,
                 pipeline_database=pipeline_db,
-                result_database=effective_result_db,
-                result_path_prefix=result_prefix,
-                pipeline_path_prefix=prefix,
+                result_database=result_db,
                 label=descriptor.get("label"),
             )
             node._descriptor = descriptor
@@ -377,7 +309,6 @@ class FunctionNode(StreamBase):
         # DB persistence state
         node._pipeline_database = pipeline_db
         node._cached_function_pod = None
-        node._pipeline_path_prefix = ()
         node._output_schema_hash = None
 
         # Descriptor metadata for read-only access
@@ -511,8 +442,8 @@ class FunctionNode(StreamBase):
     # ------------------------------------------------------------------
 
     @property
-    def pipeline_path(self) -> tuple[str, ...]:
-        """Return the pipeline path for DB record scoping.
+    def node_identity_path(self) -> tuple[str, ...]:
+        """Return the node identity path for DB record scoping.
 
         Returns ``()`` when no pipeline database is attached.
         """
@@ -521,14 +452,20 @@ class FunctionNode(StreamBase):
             return stored
         if self._pipeline_database is None:
             return ()
-        return (
-            self._pipeline_path_prefix
-            + self._packet_function.uri
-            + (
-                f"schema:{self.pipeline_hash().to_string()}",
-                f"instance:{self.content_hash().to_string()}",
-            )
+        pf = self._function_pod
+        return pf.uri + (
+            f"schema:{self.pipeline_hash().to_string()}",
+            f"instance:{self.content_hash().to_string()}",
         )
+
+    @property
+    def pipeline_path(self) -> tuple[str, ...]:
+        """Deprecated alias for ``node_identity_path``.
+
+        .. deprecated::
+            Use ``node_identity_path`` instead.
+        """
+        return self.node_identity_path
 
     @property
     def node_uri(self) -> tuple[str, ...]:
@@ -610,10 +547,10 @@ class FunctionNode(StreamBase):
         node_hash = self.content_hash().to_string()
 
         obs = observer if observer is not None else NoOpObserver()
+        ctx_obs = obs.contextualize(*self.node_identity_path)
 
-        pp = self.pipeline_path
         tag_schema = input_stream.output_schema(columns={"system_tags": True})[0]
-        obs.on_node_start(node_label, node_hash, tag_schema=tag_schema)
+        ctx_obs.on_node_start(node_label, node_hash, tag_schema=tag_schema)
 
         # Gather entry IDs and check cache
         upstream_entries = [
@@ -625,16 +562,15 @@ class FunctionNode(StreamBase):
 
         output: list[tuple[TagProtocol, PacketProtocol]] = []
         for tag, packet, entry_id in upstream_entries:
-            obs.on_packet_start(node_label, tag, packet)
+            ctx_obs.on_packet_start(node_label, tag, packet)
 
             if entry_id in cached:
                 tag_out, result = cached[entry_id]
-                obs.on_packet_end(
+                ctx_obs.on_packet_end(
                     node_label, tag, packet, result, cached=True
                 )
                 output.append((tag_out, result))
             else:
-                ctx_obs = obs.contextualize(node_hash, node_label)
                 pkt_logger = ctx_obs.create_packet_logger(
                     tag, packet
                 )
@@ -647,18 +583,18 @@ class FunctionNode(StreamBase):
                         "Packet execution failed in %s: %s", node_label, exc,
                         exc_info=True,
                     )
-                    obs.on_packet_crash(node_label, tag, packet, exc)
+                    ctx_obs.on_packet_crash(node_label, tag, packet, exc)
                     if error_policy == "fail_fast":
-                        obs.on_node_end(node_label, node_hash)
+                        ctx_obs.on_node_end(node_label, node_hash)
                         raise
                 else:
-                    obs.on_packet_end(
+                    ctx_obs.on_packet_end(
                         node_label, tag, packet, result, cached=False
                     )
                     if result is not None:
                         output.append((tag_out, result))
 
-        obs.on_node_end(node_label, node_hash)
+        ctx_obs.on_node_end(node_label, node_hash)
         return output
 
     def _process_packet_internal(
@@ -1135,19 +1071,19 @@ class FunctionNode(StreamBase):
         obs = observer if observer is not None else NoOpObserver()
         node_label = self.label
         node_hash = self.content_hash().to_string()
-        pp = self.pipeline_path
+        ctx_obs = obs.contextualize(*self.node_identity_path)
 
-        obs.on_node_start(node_label, node_hash, tag_schema=None)
+        ctx_obs.on_node_start(node_label, node_hash, tag_schema=None)
         try:
             result = self._load_all_cached_records()
             if result is not None:
                 tag_keys, data_table = result
                 stream = ArrowTableStream(data_table, tag_columns=tag_keys)
                 for tag, packet in stream.iter_packets():
-                    obs.on_packet_start(node_label, tag, packet)
-                    obs.on_packet_end(node_label, tag, packet, packet, cached=True)
+                    ctx_obs.on_packet_start(node_label, tag, packet)
+                    ctx_obs.on_packet_end(node_label, tag, packet, packet, cached=True)
                     await output.send((tag, packet))
-            obs.on_node_end(node_label, node_hash)
+            ctx_obs.on_node_end(node_label, node_hash)
         finally:
             await output.close()
 
@@ -1478,8 +1414,7 @@ class FunctionNode(StreamBase):
         node_hash = self.content_hash().to_string()
 
         obs = observer if observer is not None else NoOpObserver()
-
-        pp = self.pipeline_path
+        ctx_obs = obs.contextualize(*self.node_identity_path)
 
         try:
             # Resolve concurrency limit from node config (pipeline config is not
@@ -1494,7 +1429,7 @@ class FunctionNode(StreamBase):
             )
 
             tag_schema = self._input_stream.output_schema(columns={"system_tags": True})[0]
-            obs.on_node_start(node_label, node_hash, tag_schema=tag_schema)
+            ctx_obs.on_node_start(node_label, node_hash, tag_schema=tag_schema)
 
             if self._cached_function_pod is not None:
                 # DB-backed async execution:
@@ -1505,7 +1440,7 @@ class FunctionNode(StreamBase):
                 ] = {}
 
                 taginfo = self._pipeline_database.get_all_records(
-                    self.pipeline_path,
+                    self.node_identity_path,
                     record_id_column=PIPELINE_ENTRY_ID_COL,
                 )
                 results = self._cached_function_pod._result_database.get_all_records(
@@ -1552,15 +1487,15 @@ class FunctionNode(StreamBase):
                     entry_id = self.compute_pipeline_entry_id(tag, packet)
                     if entry_id in cached_by_entry_id:
                         tag_out, result_packet = cached_by_entry_id[entry_id]
-                        obs.on_packet_start(node_label, tag, packet)
-                        obs.on_packet_end(
+                        ctx_obs.on_packet_start(node_label, tag, packet)
+                        ctx_obs.on_packet_end(
                             node_label, tag, packet, result_packet, cached=True
                         )
                         await output.send((tag_out, result_packet))
                     else:
                         await self._async_execute_one_packet(
                             tag, packet, output,
-                            observer=obs,
+                            observer=ctx_obs,
                             node_label=node_label,
                             node_hash=node_hash,
                         )
@@ -1589,7 +1524,7 @@ class FunctionNode(StreamBase):
                             try:
                                 await self._async_execute_one_packet(
                                     t, p, output,
-                                    observer=obs,
+                                    observer=ctx_obs,
                                     node_label=node_label,
                                     node_hash=node_hash,
                                 )
@@ -1601,7 +1536,7 @@ class FunctionNode(StreamBase):
                             await sem.acquire()
                         tg.create_task(_guarded_simple())
 
-            obs.on_node_end(node_label, node_hash)
+            ctx_obs.on_node_end(node_label, node_hash)
         finally:
             await output.close()
 
@@ -1616,11 +1551,8 @@ class FunctionNode(StreamBase):
         node_hash: str,
     ) -> None:
         """Process one non-cached packet in the async execute path."""
-        pp = self.pipeline_path
-
         observer.on_packet_start(node_label, tag, packet)
-        ctx_obs = observer.contextualize(node_hash, node_label)
-        pkt_logger = ctx_obs.create_packet_logger(tag, packet)
+        pkt_logger = observer.create_packet_logger(tag, packet)
 
         try:
             tag_out, result_packet = await self._async_process_packet_internal(
