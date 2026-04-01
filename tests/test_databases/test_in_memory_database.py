@@ -387,3 +387,15 @@ class TestAtMethod:
         # 9 prefix + 2 record_path = 11: should raise
         with pytest.raises(ValueError):
             scoped.add_record(("z", "extra"), "id2", make_table(value=[2]))
+
+    def test_at_rejects_slash_in_component(self, db):
+        with pytest.raises(ValueError, match="invalid character"):
+            db.at("pipe/line")
+
+    def test_at_rejects_null_in_component(self, db):
+        with pytest.raises(ValueError, match="invalid character"):
+            db.at("pipe\x00line")
+
+    def test_at_rejects_empty_component(self, db):
+        with pytest.raises(ValueError):
+            db.at("")

@@ -287,7 +287,20 @@ class ConnectorArrowDatabase:
         The returned instance shares the connector and all three pending dicts
         (_pending_batches, _pending_record_ids, _pending_skip_existing) by reference.
         Calling flush() on any view drains the entire shared pending queue.
+
+        Raises:
+            ValueError: If any path component is empty, not a str, or contains
+                ``'/'`` or ``'\\0'`` (which would corrupt the ``'/'``-separated
+                record key scheme and break ``flush()``'s key reconstruction).
         """
+        for i, component in enumerate(path_components):
+            if not component or not isinstance(component, str):
+                raise ValueError(f"at() path component {i} is invalid: {repr(component)}")
+            if "/" in component or "\0" in component:
+                raise ValueError(
+                    f"at() path component {repr(component)} contains an invalid character "
+                    "('/' or '\\0')"
+                )
         return ConnectorArrowDatabase(
             connector=self._connector,
             max_hierarchy_depth=self.max_hierarchy_depth,

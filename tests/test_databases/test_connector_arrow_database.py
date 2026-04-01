@@ -771,3 +771,15 @@ class TestAtMethod:
         scoped.add_record(("z",), "id1", pa.table({"v": pa.array([1])}))
         with pytest.raises(ValueError):
             scoped.add_record(("z", "extra"), "id2", pa.table({"v": pa.array([2])}))
+
+    def test_at_rejects_slash_in_component(self, db):
+        with pytest.raises(ValueError, match="invalid character"):
+            db.at("pipe/line")
+
+    def test_at_rejects_null_in_component(self, db):
+        with pytest.raises(ValueError, match="invalid character"):
+            db.at("pipe\x00line")
+
+    def test_at_rejects_empty_component(self, db):
+        with pytest.raises(ValueError):
+            db.at("")

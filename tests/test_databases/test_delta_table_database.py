@@ -467,3 +467,19 @@ class TestAtMethod:
         root_sources = db.list_sources()
         assert ("node1",) not in root_sources
         assert ("pipeline", "node1") in root_sources
+
+    def test_at_rejects_slash_in_component(self, db):
+        with pytest.raises(ValueError, match="invalid character"):
+            db.at("pipe/line")
+
+    def test_at_rejects_dotdot_component(self, db):
+        with pytest.raises(ValueError, match="not allowed"):
+            db.at("..")
+
+    def test_at_rejects_empty_component(self, db):
+        with pytest.raises(ValueError):
+            db.at("")
+
+    def test_at_rejects_non_str_component(self, db):
+        with pytest.raises(TypeError):
+            db.at(42)  # type: ignore[arg-type]
