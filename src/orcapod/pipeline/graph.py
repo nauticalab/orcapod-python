@@ -89,6 +89,11 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         self._node_graph: "nx.DiGraph | None" = None
         self._auto_compile = auto_compile
         self._compiled = False
+        if auto_save_path is not None and pipeline_database is None:
+            raise ValueError(
+                "auto_save_path requires a pipeline_database. Either provide "
+                "a pipeline_database or remove auto_save_path."
+            )
         self._auto_save_path = auto_save_path
 
     # ------------------------------------------------------------------
@@ -439,7 +444,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         self.flush()
 
         if self._auto_save_path is not None:
-            self.save(self._auto_save_path)
+            self.save(str(self._auto_save_path))
 
     def _apply_execution_engine(
         self,
