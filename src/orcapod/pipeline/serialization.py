@@ -213,6 +213,44 @@ OPERATOR_REGISTRY: dict[str, type] = _build_operator_registry()
 PACKET_FUNCTION_REGISTRY: dict[str, type] = _build_packet_function_registry()
 
 
+def _build_observer_registry() -> dict[str, Any]:
+    from orcapod.pipeline.status_observer import StatusObserver
+    from orcapod.pipeline.logging_observer import LoggingObserver
+    from orcapod.pipeline.composite_observer import CompositeObserver
+
+    return {
+        "status":    lambda cfg, reg: StatusObserver.from_config(cfg, reg),
+        "logging":   lambda cfg, reg: LoggingObserver.from_config(cfg, reg),
+        "composite": lambda cfg, reg: CompositeObserver.from_config(cfg, reg),
+    }
+
+
+OBSERVER_REGISTRY: dict[str, Any] = _build_observer_registry()
+
+
+def resolve_observer_from_config(config: dict, db_registry: dict | None = None) -> Any:
+    """Reconstruct an observer from its config dict.
+
+    Args:
+        config: Observer config dict with ``"type"`` key.
+        db_registry: Optional plain dict mapping database registry keys to
+            configs (the output of ``DatabaseRegistry.to_dict()``).
+
+    Returns:
+        Reconstructed observer instance.
+
+    Raises:
+        ValueError: If observer type is unknown.
+    """
+    obs_type = config.get("type")
+    if obs_type not in OBSERVER_REGISTRY:
+        raise ValueError(
+            f"Unknown observer type: {obs_type!r}. "
+            f"Known types: {sorted(OBSERVER_REGISTRY.keys())}"
+        )
+    return OBSERVER_REGISTRY[obs_type](config, db_registry)
+
+
 def _ensure_registries() -> None:
     """Ensure registries are populated.
 

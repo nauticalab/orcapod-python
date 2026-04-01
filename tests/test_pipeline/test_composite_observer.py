@@ -7,6 +7,7 @@ first real (non-no-op) logger.
 
 from __future__ import annotations
 
+import pytest
 import pyarrow as pa
 
 from orcapod.core.executors import LocalExecutor
@@ -21,6 +22,7 @@ from orcapod.pipeline import (
 from orcapod.pipeline.composite_observer import CompositeObserver
 from orcapod.pipeline.logging_observer import LoggingObserver, PacketLogger
 from orcapod.pipeline.observer import NoOpLogger
+from orcapod.pipeline.serialization import DatabaseRegistry, resolve_observer_from_config
 from orcapod.pipeline.status_observer import StatusObserver
 
 
@@ -37,16 +39,6 @@ def _make_source(n: int = 3) -> ArrowTableSource:
     return ArrowTableSource(table, tag_columns=["id"])
 
 
-def _get_function_node(pipeline: Pipeline):
-    """Return the first function node from the pipeline graph."""
-    import networkx as nx
-
-    for node in nx.topological_sort(pipeline._node_graph):
-        if node.node_type == "function":
-            return node
-    raise RuntimeError("No function node found")
-
-
 # ---------------------------------------------------------------------------
 # 1. Integration: logging + status together
 # ---------------------------------------------------------------------------
@@ -54,7 +46,8 @@ def _get_function_node(pipeline: Pipeline):
 
 class TestLoggingAndStatusTogether:
     def test_both_observers_populated(self):
-        db = InMemoryArrowDatabase()
+        pipeline_db = InMemoryArrowDatabase()
+        obs_db = InMemoryArrowDatabase()
         source = _make_source(2)
 
         def double(x: int) -> int:
@@ -63,26 +56,24 @@ class TestLoggingAndStatusTogether:
         pf = PythonPacketFunction(double, output_keys="result", executor=LocalExecutor())
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="test_composite", pipeline_database=db)
+        pipeline = Pipeline(name="test_composite", pipeline_database=pipeline_db)
         with pipeline:
             pod(source, label="doubler")
 
-        log_obs = LoggingObserver(log_database=db)
-        status_obs = StatusObserver(status_database=db)
+        log_obs = LoggingObserver(log_database=obs_db.at("test_composite", "_log"))
+        status_obs = StatusObserver(status_database=obs_db.at("test_composite", "_status"))
         observer = CompositeObserver(log_obs, status_obs)
 
         orch = SyncPipelineOrchestrator(observer=observer)
         pipeline.run(orchestrator=orch)
 
-        fn_node = _get_function_node(pipeline)
-
         # Logging observer should have logs
-        logs = log_obs.get_logs(pipeline_path=fn_node.pipeline_path)
+        logs = log_obs.get_logs()
         assert logs is not None
         assert logs.num_rows == 2
 
         # Status observer should have status events
-        status = status_obs.get_status(pipeline_path=fn_node.pipeline_path)
+        status = status_obs.get_status()
         assert status is not None
         assert status.num_rows == 4  # 2 × (RUNNING + SUCCESS)
 
@@ -94,7 +85,8 @@ class TestLoggingAndStatusTogether:
 
 class TestCreatePacketLoggerDelegation:
     def test_returns_logging_observer_logger(self):
-        db = InMemoryArrowDatabase()
+        pipeline_db = InMemoryArrowDatabase()
+        obs_db = InMemoryArrowDatabase()
         source = _make_source(1)
 
         def identity(x: int) -> int:
@@ -104,22 +96,20 @@ class TestCreatePacketLoggerDelegation:
         pf = PythonPacketFunction(identity, output_keys="result", executor=LocalExecutor())
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="test_logger_delegation", pipeline_database=db)
+        pipeline = Pipeline(name="test_logger_delegation", pipeline_database=pipeline_db)
         with pipeline:
             pod(source, label="ident")
 
-        log_obs = LoggingObserver(log_database=db)
-        status_obs = StatusObserver(status_database=db)
+        log_obs = LoggingObserver(log_database=obs_db.at("test_logger_delegation", "_log"))
+        status_obs = StatusObserver(status_database=obs_db.at("test_logger_delegation", "_status"))
         observer = CompositeObserver(log_obs, status_obs)
 
         orch = SyncPipelineOrchestrator(observer=observer)
         pipeline.run(orchestrator=orch)
 
-        fn_node = _get_function_node(pipeline)
-
         # Logs should have captured the print output, proving the real
         # LoggingObserver logger was used (not the no-op)
-        logs = log_obs.get_logs(pipeline_path=fn_node.pipeline_path)
+        logs = log_obs.get_logs()
         assert logs is not None
         stdout = logs.column("_log_stdout_log").to_pylist()[0]
         assert "hello" in stdout
@@ -132,7 +122,8 @@ class TestCreatePacketLoggerDelegation:
 
 class TestContextualizeReturnsComposite:
     def test_contextualized_composite_delegates(self):
-        db = InMemoryArrowDatabase()
+        pipeline_db = InMemoryArrowDatabase()
+        obs_db = InMemoryArrowDatabase()
         source = _make_source(2)
 
         def double(x: int) -> int:
@@ -146,34 +137,31 @@ class TestContextualizeReturnsComposite:
         pf2 = PythonPacketFunction(triple, output_keys="final", executor=LocalExecutor())
         pod2 = FunctionPod(pf2)
 
-        pipeline = Pipeline(name="test_ctx_composite", pipeline_database=db)
+        pipeline = Pipeline(name="test_ctx_composite", pipeline_database=pipeline_db)
         with pipeline:
             s1 = pod1(source, label="doubler")
             pod2(s1, label="tripler")
 
-        log_obs = LoggingObserver(log_database=db)
-        status_obs = StatusObserver(status_database=db)
+        log_obs = LoggingObserver(log_database=obs_db.at("test_ctx_composite", "_log"))
+        status_obs = StatusObserver(status_database=obs_db.at("test_ctx_composite", "_status"))
         observer = CompositeObserver(log_obs, status_obs)
 
         orch = SyncPipelineOrchestrator(observer=observer)
         pipeline.run(orchestrator=orch)
 
-        import networkx as nx
-
-        fn_nodes = [
-            n
-            for n in nx.topological_sort(pipeline._node_graph)
-            if n.node_type == "function"
-        ]
-
-        # Both nodes should have both logs and status
-        for fn_node in fn_nodes:
-            logs = log_obs.get_logs(pipeline_path=fn_node.pipeline_path)
-            status = status_obs.get_status(pipeline_path=fn_node.pipeline_path)
-            assert logs is not None
-            assert status is not None
-            assert logs.num_rows == 2
-            assert status.num_rows == 4  # 2 × (RUNNING + SUCCESS)
+        # Both observers should have received events for both function nodes
+        # 2 nodes × 2 packets each = 4 log rows total
+        # 2 nodes × 2 packets × 2 events (RUNNING + SUCCESS) = 8 status rows total
+        logs = log_obs.get_logs()
+        status = status_obs.get_status()
+        assert logs is not None
+        assert status is not None
+        assert logs.num_rows == 4   # 2 nodes × 2 packets
+        assert status.num_rows == 8  # 2 nodes × 2 × (RUNNING + SUCCESS)
+        # Both node labels appear in logs
+        node_labels = set(logs.column("_log_node_label").to_pylist())
+        assert "doubler" in node_labels
+        assert "tripler" in node_labels
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +171,8 @@ class TestContextualizeReturnsComposite:
 
 class TestCompositeWithFailures:
     def test_failures_tracked_by_both_observers(self):
-        db = InMemoryArrowDatabase()
+        pipeline_db = InMemoryArrowDatabase()
+        obs_db = InMemoryArrowDatabase()
         source = _make_source(2)
 
         def failing(x: int) -> int:
@@ -192,27 +181,59 @@ class TestCompositeWithFailures:
         pf = PythonPacketFunction(failing, output_keys="result", executor=LocalExecutor())
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="test_composite_fail", pipeline_database=db)
+        pipeline = Pipeline(name="test_composite_fail", pipeline_database=pipeline_db)
         with pipeline:
             pod(source, label="failing")
 
-        log_obs = LoggingObserver(log_database=db)
-        status_obs = StatusObserver(status_database=db)
+        log_obs = LoggingObserver(log_database=obs_db.at("test_composite_fail", "_log"))
+        status_obs = StatusObserver(status_database=obs_db.at("test_composite_fail", "_status"))
         observer = CompositeObserver(log_obs, status_obs)
 
         orch = SyncPipelineOrchestrator(observer=observer)
         pipeline.run(orchestrator=orch)
 
-        fn_node = _get_function_node(pipeline)
-
         # Logs should show failures
-        logs = log_obs.get_logs(pipeline_path=fn_node.pipeline_path)
+        logs = log_obs.get_logs()
         assert logs is not None
         assert all(s is False for s in logs.column("_log_success").to_pylist())
 
         # Status should show RUNNING + FAILED
-        status = status_obs.get_status(pipeline_path=fn_node.pipeline_path)
+        status = status_obs.get_status()
         assert status is not None
         states = status.column("_status_state").to_pylist()
         assert states.count("RUNNING") == 2
         assert states.count("FAILED") == 2
+
+
+# ---------------------------------------------------------------------------
+# 5. Serialization: to_config / from_config / OBSERVER_REGISTRY
+# ---------------------------------------------------------------------------
+
+
+def test_composite_observer_to_config_shape():
+    db = InMemoryArrowDatabase()
+    status_obs = StatusObserver(db.at("p", "_status"))
+    log_obs = LoggingObserver(db.at("p", "_log"))
+    composite = CompositeObserver(status_obs, log_obs)
+    registry = DatabaseRegistry()
+    config = composite.to_config(db_registry=registry)
+    assert config["type"] == "composite"
+    assert len(config["observers"]) == 2
+    assert config["observers"][0]["type"] == "status"
+    assert config["observers"][1]["type"] == "logging"
+
+
+def test_composite_observer_round_trip():
+    db = InMemoryArrowDatabase()
+    status_obs = StatusObserver(db.at("p", "_status"))
+    log_obs = LoggingObserver(db.at("p", "_log"))
+    composite = CompositeObserver(status_obs, log_obs)
+    registry = DatabaseRegistry()
+    config = composite.to_config(db_registry=registry)
+    restored = resolve_observer_from_config(config, registry.to_dict())
+    assert len(restored._observers) == 2
+
+
+def test_resolve_observer_from_config_unknown_type_raises():
+    with pytest.raises(ValueError, match="Unknown observer type"):
+        resolve_observer_from_config({"type": "unknown"})
