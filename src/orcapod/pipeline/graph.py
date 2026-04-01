@@ -61,6 +61,9 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             ``_results`` subfolder under the pipeline name.
         auto_compile: If ``True`` (default), ``compile()`` is called
             automatically when the context manager exits.
+        auto_save_path: Optional path to automatically save the pipeline
+            JSON after each successful ``run()`` call.  When ``None``
+            (default), no automatic save is performed.
     """
 
     def __init__(
@@ -70,6 +73,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         function_database: dbp.ArrowDatabaseProtocol | None = None,
         tracker_manager: cp.TrackerManagerProtocol | None = None,
         auto_compile: bool = True,
+        auto_save_path: str | Path | None = None,
     ) -> None:
         super().__init__(tracker_manager=tracker_manager)
         self._node_lut: dict[str, GraphNode] = {}
@@ -85,6 +89,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         self._node_graph: "nx.DiGraph | None" = None
         self._auto_compile = auto_compile
         self._compiled = False
+        self._auto_save_path = auto_save_path
 
     # ------------------------------------------------------------------
     # Recording (TrackerProtocol)
@@ -432,6 +437,9 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 )
 
         self.flush()
+
+        if self._auto_save_path is not None:
+            self.save(self._auto_save_path)
 
     def _apply_execution_engine(
         self,
