@@ -11,10 +11,30 @@ class TestDeltaTableDatabaseConfig:
         config = db.to_config()
         assert config["type"] == "delta_table"
 
-    def test_to_config_includes_base_path(self, tmp_path):
+    def test_to_config_includes_root_uri(self, tmp_path):
         db = DeltaTableDatabase(base_path=str(tmp_path / "delta_db"))
         config = db.to_config()
-        assert config["base_path"] == str(tmp_path / "delta_db")
+        assert config["root_uri"] == str(tmp_path / "delta_db")
+
+    def test_to_config_includes_base_path_tuple(self, tmp_path):
+        db = DeltaTableDatabase(base_path=str(tmp_path / "delta_db"))
+        config = db.to_config()
+        assert config["base_path"] == []
+
+    def test_to_config_scoped_includes_base_path_tuple(self, tmp_path):
+        db = DeltaTableDatabase(base_path=str(tmp_path / "delta_db"))
+        scoped = db.at("pipeline", "v1")
+        config = scoped.to_config()
+        assert config["root_uri"] == str(tmp_path / "delta_db")
+        assert config["base_path"] == ["pipeline", "v1"]
+
+    def test_round_trip_preserves_base_path(self, tmp_path):
+        db = DeltaTableDatabase(base_path=str(tmp_path / "delta_db"))
+        scoped = db.at("pipeline", "v1")
+        config = scoped.to_config()
+        restored = DeltaTableDatabase.from_config(config)
+        assert restored.base_path == ("pipeline", "v1")
+        assert isinstance(restored.base_path, tuple)
 
     def test_to_config_includes_all_settings(self, tmp_path):
         db = DeltaTableDatabase(

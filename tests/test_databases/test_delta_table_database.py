@@ -402,3 +402,69 @@ def test_schema_evolution(tmp_path):
     result = db.get_all_records(("src",))
     assert result is not None
     assert "b" in result.column_names
+
+
+# ---------------------------------------------------------------------------
+# 12. at() method and base_path scoping
+# ---------------------------------------------------------------------------
+
+
+class TestAtMethod:
+    def test_base_path_is_empty_on_root_instance(self, db):
+        assert db.base_path == ()
+        assert isinstance(db.base_path, tuple)
+
+    def test_at_sets_base_path(self, db):
+        scoped = db.at("pipeline", "node1")
+        assert scoped.base_path == ("pipeline", "node1")
+        assert isinstance(scoped.base_path, tuple)
+
+    def test_at_chaining_equivalent_to_multi_component(self, db):
+        assert db.at("a").at("b").base_path == db.at("a", "b").base_path
+
+    def test_at_does_not_modify_original(self, db):
+        db.at("pipeline", "node1")
+        assert db.base_path == ()
+
+    def test_writes_through_scoped_view_readable_from_same_view(self, db):
+        scoped = db.at("pipeline", "node1")
+        record = make_table(value=[42])
+        scoped.add_record(("outputs",), "id1", record, flush=True)
+        result = scoped.get_record_by_id(("outputs",), "id1", flush=True)
+        assert result is not None
+        assert result.column("value").to_pylist() == [42]
+
+    def test_scoped_write_not_visible_via_parent_at_same_path(self, db):
+        scoped = db.at("pipeline", "node1")
+        scoped.add_record(("outputs",), "id1", make_table(value=[42]), flush=True)
+        assert db.get_record_by_id(("outputs",), "id1") is None
+
+    def test_scoped_write_stored_under_correct_filesystem_path(self, db, tmp_path):
+        scoped = db.at("pipeline", "node1")
+        scoped.add_record(("outputs",), "id1", make_table(value=[1]), flush=True)
+        # Delta table should be at <tmp_path>/db/pipeline/node1/outputs/
+        import os
+        expected_path = tmp_path / "db" / "pipeline" / "node1" / "outputs"
+        assert expected_path.exists()
+
+    def test_validate_record_path_checks_combined_depth(self, tmp_path):
+        db = DeltaTableDatabase(base_path=tmp_path / "db", max_hierarchy_depth=10)
+        scoped = db.at("a", "b", "c", "d", "e", "f", "g", "h", "i")  # 9 prefix
+        # 9 + 1 = 10: OK
+        scoped.add_record(("z",), "id1", make_table(value=[1]))
+        # 9 + 2 = 11: should raise
+        with pytest.raises(ValueError):
+            scoped.add_record(("z", "extra"), "id2", make_table(value=[2]))
+
+    def test_list_sources_on_scoped_instance(self, tmp_path):
+        db = DeltaTableDatabase(base_path=tmp_path / "db")
+        scoped = db.at("pipeline")
+        scoped.add_record(("node1",), "id1", make_table(value=[1]), flush=True)
+        scoped.add_record(("node2",), "id2", make_table(value=[2]), flush=True)
+        sources = scoped.list_sources()
+        assert ("node1",) in sources
+        assert ("node2",) in sources
+        # Root db should NOT see these under bare ("node1",) — they live under pipeline/
+        root_sources = db.list_sources()
+        assert ("node1",) not in root_sources
+        assert ("pipeline", "node1") in root_sources
