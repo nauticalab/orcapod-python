@@ -713,3 +713,61 @@ class TestConfig:
         config = db.to_config()
         with pytest.raises(NotImplementedError):
             ConnectorArrowDatabase.from_config(config)
+
+
+# ===========================================================================
+# 13. at() and base_path
+# ===========================================================================
+
+
+class TestAtMethod:
+    def test_base_path_is_empty_on_root_instance(self, db):
+        assert db.base_path == ()
+        assert isinstance(db.base_path, tuple)
+
+    def test_at_sets_base_path(self, db):
+        scoped = db.at("a", "b")
+        assert scoped.base_path == ("a", "b")
+        assert isinstance(scoped.base_path, tuple)
+
+    def test_at_chaining_equivalent_to_multi_component(self, db):
+        assert db.at("a").at("b").base_path == db.at("a", "b").base_path
+
+    def test_at_does_not_modify_original(self, db):
+        db.at("a", "b")
+        assert db.base_path == ()
+
+    def test_writes_through_scoped_view_readable_from_same_view(self, db):
+        scoped = db.at("pipeline", "node1")
+        record = pa.table({"value": pa.array([42])})
+        scoped.add_record(("outputs",), "id1", record, flush=True)
+        result = scoped.get_record_by_id(("outputs",), "id1")
+        assert result is not None
+        assert result.column("value").to_pylist() == [42]
+
+    def test_scoped_write_not_visible_via_parent_at_same_path(self, db):
+        scoped = db.at("pipeline", "node1")
+        scoped.add_record(("outputs",), "id1", pa.table({"v": pa.array([1])}), flush=True)
+        assert db.get_record_by_id(("outputs",), "id1") is None
+
+    def test_two_scoped_views_share_storage(self, db):
+        view_a = db.at("pipeline", "node1")
+        view_b = db.at("pipeline", "node1")
+        view_a.add_record(("outputs",), "id1", pa.table({"v": pa.array([99])}), flush=True)
+        result = view_b.get_record_by_id(("outputs",), "id1")
+        assert result is not None
+        assert result.column("v").to_pylist() == [99]
+
+    def test_prefix_appears_in_sql_table_name(self, db):
+        """Prefix components are included in the SQL table name via _path_to_table_name."""
+        scoped = db.at("pipeline", "node1")
+        scoped.add_record(("outputs",), "id1", pa.table({"v": pa.array([1])}), flush=True)
+        # Table name should be pipeline__node1__outputs
+        table_names = db._connector.get_table_names()
+        assert "pipeline__node1__outputs" in table_names
+
+    def test_validate_record_path_checks_combined_depth(self, db):
+        scoped = db.at("a", "b", "c", "d", "e", "f", "g", "h", "i")  # 9 prefix components
+        scoped.add_record(("z",), "id1", pa.table({"v": pa.array([1])}))
+        with pytest.raises(ValueError):
+            scoped.add_record(("z", "extra"), "id2", pa.table({"v": pa.array([2])}))
