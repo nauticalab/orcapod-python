@@ -2243,3 +2243,58 @@ class TestSaveLoadRunRoundtrip:
             p.as_dict()["result"] for _, p in fn_node.iter_packets()
         )
         assert loaded_results == original_results
+
+    def test_definition_save_load_with_unloadable_function_uses_proxy(self, tmp_path):
+        """Save at definition level; on load the function module is unavailable.
+
+        When the Python function cannot be imported in the new context (e.g. it
+        was defined in a module that no longer exists, or was a lambda), the
+        pipeline should still load successfully using ``PacketFunctionProxy``
+        to stand in for the missing function.  The function node should reach
+        ``READ_ONLY`` status (source reconstructable, function proxied) and be
+        able to serve previously-cached results from the supplied database.
+        """
+        from orcapod.core.packet_function_proxy import PacketFunctionProxy
+
+        csv_path = str(tmp_path / "data.csv")
+        _write_csv(csv_path, [{"x": "1", "y": "5"}, {"x": "3", "y": "15"}])
+
+        db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
+        source = CSVSource(file_path=csv_path, tag_columns=["x"], source_id="src3")
+        pf = PythonPacketFunction(
+            function=transform_func,
+            output_keys=["result"],
+            function_name="transform_func",
+        )
+        pod = FunctionPod(packet_function=pf)
+        pipeline = Pipeline(name="proxy_def", pipeline_database=db)
+        with pipeline:
+            result_stream = pod.process(source, label="transform")
+
+        # Run original pipeline and flush so cached results exist in the DB
+        pipeline.run()
+        db.flush()
+        original_results = sorted(
+            p.as_dict()["result"] for _, p in result_stream.iter_packets()
+        )
+        assert len(original_results) == 2
+
+        # Save at definition level — no DB config embedded in the JSON
+        path = tmp_path / "pipeline_def_proxy.json"
+        pipeline.save(str(path), level="definition")
+
+        # Corrupt the function's module path so it cannot be imported in this context
+        _corrupt_function_module_path(str(path))
+
+        # Load with the original DB (which has the cached results) supplied by caller.
+        # The unloadable function should be replaced by PacketFunctionProxy.
+        loaded = Pipeline.load(str(path), pipeline_database=db)
+
+        fn_node = loaded.compiled_nodes["transform"]
+
+        # Source is CSVSource (reconstructable → FULL); function is PacketFunctionProxy
+        # → READ_ONLY (not FULL because live computation is unavailable).
+        assert fn_node.load_status == LoadStatus.READ_ONLY
+
+        # The packet function should be a proxy standing in for the missing function
+        assert isinstance(fn_node._packet_function, PacketFunctionProxy)
