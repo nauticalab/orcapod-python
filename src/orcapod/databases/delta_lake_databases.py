@@ -51,10 +51,14 @@ class DeltaTableDatabase:
         max_hierarchy_depth: int = 10,
         allow_schema_evolution: bool = True,
         _path_prefix: tuple[str, ...] = (),
+        _root: "DeltaTableDatabase | None" = None,
+        _scoped_path: tuple[str, ...] = (),
     ):
         self._root_uri, self._storage_options = parse_base_path(base_path, storage_options)
         self._is_cloud: bool = is_cloud_uri(self._root_uri)
         self._path_prefix = _path_prefix
+        self._root = _root
+        self._scoped_path = _scoped_path
         self.batch_size = batch_size
         self.max_hierarchy_depth = max_hierarchy_depth
         self.allow_schema_evolution = allow_schema_evolution
@@ -993,6 +997,8 @@ class DeltaTableDatabase:
                 raise ValueError(
                     f"at() path component {repr(component)} contains invalid characters"
                 )
+        new_root = self._root if self._root is not None else self
+        new_scoped_path = self._scoped_path + path_components
         return DeltaTableDatabase(
             base_path=self._root_uri,
             storage_options=self._storage_options,
@@ -1000,6 +1006,8 @@ class DeltaTableDatabase:
             max_hierarchy_depth=self.max_hierarchy_depth,
             allow_schema_evolution=self.allow_schema_evolution,
             _path_prefix=self._path_prefix + path_components,
+            _root=new_root,
+            _scoped_path=new_scoped_path,
         )
 
     def list_sources(self) -> list[tuple[str, ...]]:

@@ -22,8 +22,15 @@ class NoOpArrowDatabase:
     or benchmarking pure compute overhead.
     """
 
-    def __init__(self, _path_prefix: tuple[str, ...] = ()) -> None:
+    def __init__(
+        self,
+        _path_prefix: tuple[str, ...] = (),
+        _root: "NoOpArrowDatabase | None" = None,
+        _scoped_path: tuple[str, ...] = (),
+    ) -> None:
         self._path_prefix = _path_prefix
+        self._root = _root
+        self._scoped_path = _scoped_path
 
     def add_record(
         self,
@@ -93,7 +100,13 @@ class NoOpArrowDatabase:
         All reads and writes are still discarded; the prefix only affects
         the reported base_path of the returned instance.
         """
-        return NoOpArrowDatabase(_path_prefix=self._path_prefix + path_components)
+        new_root = self._root if self._root is not None else self
+        new_scoped_path = self._scoped_path + path_components
+        return NoOpArrowDatabase(
+            _path_prefix=self._path_prefix + path_components,
+            _root=new_root,
+            _scoped_path=new_scoped_path,
+        )
 
     def to_config(self) -> dict[str, Any]:
         """Serialize database configuration to a JSON-compatible dict."""

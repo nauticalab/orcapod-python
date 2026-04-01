@@ -66,10 +66,14 @@ class ConnectorArrowDatabase:
         _shared_pending_batches: "dict[str, pa.Table] | None" = None,
         _shared_pending_record_ids: "dict[str, set[str]] | None" = None,
         _shared_pending_skip_existing: "dict[str, bool] | None" = None,
+        _root: "ConnectorArrowDatabase | None" = None,
+        _scoped_path: tuple[str, ...] = (),
     ) -> None:
         self._connector = connector
         self.max_hierarchy_depth = max_hierarchy_depth
         self._path_prefix = _path_prefix
+        self._root = _root
+        self._scoped_path = _scoped_path
         self._pending_batches: dict[str, pa.Table] = _shared_pending_batches if _shared_pending_batches is not None else {}
         self._pending_record_ids: dict[str, set[str]] = _shared_pending_record_ids if _shared_pending_record_ids is not None else defaultdict(set)
         # Per-batch flag: True when the batch was added with skip_duplicates=True,
@@ -301,6 +305,8 @@ class ConnectorArrowDatabase:
                     f"at() path component {repr(component)} contains an invalid character "
                     "('/' or '\\0')"
                 )
+        new_root = self._root if self._root is not None else self
+        new_scoped_path = self._scoped_path + path_components
         return ConnectorArrowDatabase(
             connector=self._connector,
             max_hierarchy_depth=self.max_hierarchy_depth,
@@ -308,6 +314,8 @@ class ConnectorArrowDatabase:
             _shared_pending_batches=self._pending_batches,
             _shared_pending_record_ids=self._pending_record_ids,
             _shared_pending_skip_existing=self._pending_skip_existing,
+            _root=new_root,
+            _scoped_path=new_scoped_path,
         )
 
     # ── Flush ─────────────────────────────────────────────────────────────────
