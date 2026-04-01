@@ -22,6 +22,9 @@ class NoOpArrowDatabase:
     or benchmarking pure compute overhead.
     """
 
+    def __init__(self, _path_prefix: tuple[str, ...] = ()) -> None:
+        self._path_prefix = _path_prefix
+
     def add_record(
         self,
         record_path: tuple[str, ...],
@@ -81,16 +84,20 @@ class NoOpArrowDatabase:
 
     @property
     def base_path(self) -> tuple[str, ...]:
-        return ()
+        """The current relative root of this database view (always () for root instances)."""
+        return self._path_prefix
 
     def at(self, *path_components: str) -> "NoOpArrowDatabase":
-        return NoOpArrowDatabase()
+        return NoOpArrowDatabase(_path_prefix=self._path_prefix + path_components)
 
     def to_config(self) -> dict[str, Any]:
         """Serialize database configuration to a JSON-compatible dict."""
-        return {"type": "noop"}
+        return {
+            "type": "noop",
+            "base_path": list(self._path_prefix),
+        }
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> "NoOpArrowDatabase":
         """Reconstruct a NoOpArrowDatabase from a config dict."""
-        return cls()
+        return cls(_path_prefix=tuple(config.get("base_path", [])))
