@@ -63,16 +63,17 @@ class TestConstruction:
     def test_record_path_ends_with_inner_uri(self, cached_pod, double_pod):
         assert cached_pod.record_path[-len(double_pod.uri) :] == double_pod.uri
 
-    def test_record_path_prefix_empty_by_default(self, cached_pod, double_pod):
+    def test_record_path_equals_inner_uri(self, cached_pod, double_pod):
         assert cached_pod.record_path == double_pod.uri
 
-    def test_record_path_prefix_prepended(self, double_pod, cache_db):
-        pod = CachedFunctionPod(
-            double_pod,
-            result_database=cache_db,
-            record_path_prefix=("my", "prefix"),
-        )
-        assert pod.record_path[:2] == ("my", "prefix")
+    def test_record_path_prefix_param_removed(self, double_pod, cache_db):
+        """record_path_prefix was removed — passing it must raise TypeError."""
+        with pytest.raises(TypeError):
+            CachedFunctionPod(
+                double_pod,
+                result_database=cache_db,
+                record_path_prefix=("x",),
+            )
 
 
 # ---------------------------------------------------------------------------
