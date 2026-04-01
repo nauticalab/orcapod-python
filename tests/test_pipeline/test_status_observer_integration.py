@@ -495,3 +495,17 @@ def test_status_observer_from_config_round_trip():
     db_dict = registry.to_dict()
     restored = StatusObserver.from_config(config, db_dict)
     assert restored._db._path_prefix == status_db._path_prefix
+
+
+# ---------------------------------------------------------------------------
+# 14. Empty identity_path guard
+# ---------------------------------------------------------------------------
+
+
+def test_contextualize_with_empty_path_raises():
+    """contextualize() with no args should raise ValueError (not silently use fallback)."""
+    import pytest
+    db = InMemoryArrowDatabase()
+    obs = StatusObserver(db)
+    with pytest.raises(ValueError, match="non-empty identity_path"):
+        obs.contextualize()  # no args → empty identity_path → should raise

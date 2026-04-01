@@ -179,10 +179,12 @@ class StatusObserver:
     # -- convenience --
 
     def get_status(self) -> pa.Table | None:
-        """Read all status rows from the database as a ``pyarrow.Table``.
+        """Return all status records in this observer's database.
 
-        Returns all status events across all nodes.  Filter by the
-        ``_status_node_label`` column to retrieve per-node status.
+        Reads from the root of the pre-scoped status database. Since the database
+        is scoped at pipeline compile time (e.g., db.at("my_pipeline", "_status")),
+        this returns all node statuses for that pipeline. Individual node records
+        are filed within the database by identity_path passed to contextualize().
 
         Returns:
             ``None`` if no status events have been written yet.
@@ -282,10 +284,14 @@ class StatusObserver:
 
 
 class _ContextualizedStatusObserver:
-    """Implements ExecutionObserverProtocol. Writes to db at the bound identity_path.
+    """ExecutionObserverProtocol implementation bound to a specific node identity path.
 
-    Created by ``StatusObserver.contextualize()``.  Holds the pre-scoped
-    database and an ``identity_path`` used as the record path for writes.
+    One instance is created per node per run via StatusObserver.contextualize().
+    Instances should NOT be shared across concurrent node executions — each node
+    must get its own instance from contextualize().
+
+    Mutable state (_current_run_id, _current_node_hash, etc.) is scoped to a
+    single sequential execute() call on one node.
     """
 
     def __init__(
@@ -293,6 +299,11 @@ class _ContextualizedStatusObserver:
         db: ArrowDatabaseProtocol,
         identity_path: tuple[str, ...],
     ) -> None:
+        if not identity_path:
+            raise ValueError(
+                "_ContextualizedStatusObserver requires a non-empty identity_path. "
+                "Call StatusObserver.contextualize(*identity_path) with at least one component."
+            )
         self._db = db
         self._identity_path = identity_path
         self._current_run_id: str = ""
@@ -400,7 +411,7 @@ class _ContextualizedStatusObserver:
             )
 
         row = pa.table(columns)
-        record_path = self._identity_path if self._identity_path else DEFAULT_STATUS_PATH
+        record_path = self._identity_path
         try:
             self._db.add_record(record_path, status_id, row, flush=True)
         except Exception:
