@@ -43,23 +43,22 @@ class AsyncPipelineOrchestrator:
        signatures.
 
     Args:
-        observer: Optional execution observer for hooks.
         buffer_size: Channel buffer size. Defaults to 64.
     """
 
     def __init__(
         self,
-        observer: ExecutionObserverProtocol | None = None,
         buffer_size: int = 64,
         error_policy: Literal["continue", "fail_fast"] = "continue",
     ) -> None:
-        self._observer = observer
         self._buffer_size = buffer_size
         self._error_policy = error_policy
 
     def run(
         self,
         graph: nx.DiGraph,
+        *,
+        observer: ExecutionObserverProtocol | None = None,
         materialize_results: bool = True,
         run_id: str | None = None,
         pipeline_uri: str = "",
@@ -68,6 +67,7 @@ class AsyncPipelineOrchestrator:
 
         Args:
             graph: A NetworkX DiGraph with GraphNode objects as vertices.
+            observer: Optional execution observer forwarded to nodes.
             materialize_results: If True, collect all node outputs into
                 the result. If False, return empty node_outputs.
             run_id: Optional run identifier.  If not provided, a UUID is
@@ -83,6 +83,7 @@ class AsyncPipelineOrchestrator:
             self._run_async(
                 graph,
                 materialize_results,
+                observer=observer,
                 run_id=run_id,
                 pipeline_uri=pipeline_uri,
             )
@@ -91,6 +92,8 @@ class AsyncPipelineOrchestrator:
     async def run_async(
         self,
         graph: nx.DiGraph,
+        *,
+        observer: ExecutionObserverProtocol | None = None,
         materialize_results: bool = True,
         run_id: str | None = None,
         pipeline_uri: str = "",
@@ -99,6 +102,7 @@ class AsyncPipelineOrchestrator:
 
         Args:
             graph: A NetworkX DiGraph with GraphNode objects as vertices.
+            observer: Optional execution observer forwarded to nodes.
             materialize_results: If True, collect all node outputs.
             run_id: Optional run identifier.  If not provided, a UUID is
                 generated automatically.
@@ -111,6 +115,7 @@ class AsyncPipelineOrchestrator:
         return await self._run_async(
             graph,
             materialize_results,
+            observer=observer,
             run_id=run_id,
             pipeline_uri=pipeline_uri,
         )
@@ -119,15 +124,18 @@ class AsyncPipelineOrchestrator:
         self,
         graph: nx.DiGraph,
         materialize_results: bool,
+        *,
+        observer: ExecutionObserverProtocol | None = None,
         run_id: str | None = None,
         pipeline_uri: str = "",
     ) -> OrchestratorResult:
         """Core async logic: wire channels, launch tasks, collect results."""
+        from orcapod.pipeline.observer import NoOpObserver
         import networkx as nx
 
         run_id = run_id or str(uuid.uuid4())
-        if self._observer is not None:
-            self._observer.on_run_start(run_id, pipeline_uri=pipeline_uri)
+        effective_observer = observer if observer is not None else NoOpObserver()
+        effective_observer.on_run_start(run_id, pipeline_uri=pipeline_uri)
 
         try:
             topo_order = list(nx.topological_sort(graph))
@@ -180,7 +188,7 @@ class AsyncPipelineOrchestrator:
 
                     if is_source_node(node):
                         tg.create_task(
-                            node.async_execute(writer, observer=self._observer)
+                            node.async_execute(writer, observer=effective_observer)
                         )
                     elif is_function_node(node):
                         predecessors = in_edges.get(node, [])
@@ -192,7 +200,7 @@ class AsyncPipelineOrchestrator:
                         input_reader = edge_readers[(predecessors[0], node)]
                         tg.create_task(
                             node.async_execute(
-                                input_reader, writer, observer=self._observer
+                                input_reader, writer, observer=effective_observer
                             )
                         )
                     elif is_operator_node(node):
@@ -209,7 +217,7 @@ class AsyncPipelineOrchestrator:
                         ]
                         tg.create_task(
                             node.async_execute(
-                                input_readers, writer, observer=self._observer
+                                input_readers, writer, observer=effective_observer
                             )
                         )
                     else:
@@ -225,8 +233,7 @@ class AsyncPipelineOrchestrator:
                 node_outputs=collectors if materialize_results else {}
             )
         finally:
-            if self._observer is not None:
-                self._observer.on_run_end(run_id)
+            effective_observer.on_run_end(run_id)
 
 
 class _CollectingWriter:

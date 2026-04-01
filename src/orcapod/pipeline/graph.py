@@ -456,6 +456,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         if orchestrator is not None:
             orchestrator.run(
                 self._node_graph,
+                observer=effective_observer,
                 pipeline_uri=pipeline_uri,
             )
         else:
@@ -481,8 +482,10 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     SyncPipelineOrchestrator,
                 )
 
-                SyncPipelineOrchestrator(observer=effective_observer).run(
+                orchestrator_sync = SyncPipelineOrchestrator()
+                orchestrator_sync.run(
                     self._node_graph,
+                    observer=effective_observer,
                     pipeline_uri=pipeline_uri,
                 )
 

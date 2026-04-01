@@ -68,8 +68,8 @@ class TestSyncPipelineSuccessLogs:
             pod(source, label="doubler")
 
         obs = LoggingObserver(log_database=db)
-        orch = SyncPipelineOrchestrator(observer=obs)
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=obs)
 
         logs = obs.get_logs()
 
@@ -100,8 +100,8 @@ class TestFailingPacketsLogged:
             pod(source, label="failing")
 
         obs = LoggingObserver(log_database=db)
-        orch = SyncPipelineOrchestrator(observer=obs)
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=obs)
 
         logs = obs.get_logs()
 
@@ -136,8 +136,8 @@ class TestFlatLogStorage:
             pod(source, label="ident")
 
         obs = LoggingObserver(log_database=db)
-        orch = SyncPipelineOrchestrator(observer=obs)
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=obs)
 
         logs = obs.get_logs()
         assert logs is not None
@@ -168,8 +168,8 @@ class TestQueryableTagColumns:
             pod(source, label="ident")
 
         obs = LoggingObserver(log_database=db)
-        orch = SyncPipelineOrchestrator(observer=obs)
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=obs)
 
         logs = obs.get_logs()
 
@@ -202,8 +202,8 @@ class TestAsyncOrchestratorLogs:
             pod(source, label="doubler")
 
         obs = LoggingObserver(log_database=db)
-        orch = AsyncPipelineOrchestrator(observer=obs)
-        pipeline.run(orchestrator=orch)
+        orch = AsyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=obs)
 
         logs = obs.get_logs()
 
@@ -233,10 +233,10 @@ class TestFailFastErrorPolicy:
             pod(source, label="failing")
 
         obs = LoggingObserver(log_database=db)
-        orch = SyncPipelineOrchestrator(observer=obs, error_policy="fail_fast")
+        orch = SyncPipelineOrchestrator(error_policy="fail_fast")
 
         with pytest.raises(RuntimeError, match="crash"):
-            pipeline.run(orchestrator=orch)
+            pipeline.run(orchestrator=orch, observer=obs)
 
         logs = obs.get_logs()
 
@@ -273,8 +273,8 @@ class TestMixedSuccessFailure:
             pod(source, label="divider")
 
         obs = LoggingObserver(log_database=db)
-        orch = SyncPipelineOrchestrator(observer=obs)
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=obs)
 
         logs = obs.get_logs()
 
@@ -312,8 +312,8 @@ class TestMultipleFunctionNodesCombinedLogs:
             pod2(s1, label="tripler")
 
         obs = LoggingObserver(log_database=db)
-        orch = SyncPipelineOrchestrator(observer=obs)
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=obs)
 
         logs = obs.get_logs()
         assert logs is not None
@@ -352,8 +352,8 @@ class TestGetLogsNodeSpecific:
             pod2(s1, label="tripler")
 
         obs = LoggingObserver(log_database=db)
-        orch = SyncPipelineOrchestrator(observer=obs)
-        pipeline.run(orchestrator=orch)
+        orch = SyncPipelineOrchestrator()
+        pipeline.run(orchestrator=orch, observer=obs)
 
         logs = obs.get_logs()
         assert logs is not None

@@ -11,7 +11,7 @@ Example::
     from orcapod.databases import InMemoryArrowDatabase
 
     obs = StatusObserver(status_database=InMemoryArrowDatabase())
-    pipeline.run(orchestrator=SyncPipelineOrchestrator(observer=obs))
+    pipeline.run(observer=obs)
 
     # Inspect run status
     status = obs.get_status()  # pyarrow.Table
@@ -82,8 +82,7 @@ class StatusObserver:
     Instantiate once, outside the pipeline, and pass to the orchestrator::
 
         obs = StatusObserver(status_database=InMemoryArrowDatabase())
-        orch = SyncPipelineOrchestrator(observer=obs)
-        pipeline.run(orchestrator=orch)
+        pipeline.run(observer=obs)
 
         # After the run, read back status:
         status_table = obs.get_status()   # pyarrow.Table

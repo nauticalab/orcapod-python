@@ -471,8 +471,8 @@ class TestAsyncOrchestratorErrorPropagation:
                 crashes.append(error)
 
         pipeline.compile()
-        orch = AsyncPipelineOrchestrator(observer=CrashRecorder())
-        orch.run(pipeline._node_graph)
+        orch = AsyncPipelineOrchestrator()
+        orch.run(pipeline._node_graph, observer=CrashRecorder())
 
         assert len(crashes) == 1
         assert isinstance(crashes[0], (ValueError, RuntimeError))
@@ -508,12 +508,12 @@ class TestAsyncOrchestratorObserverInjection:
             def create_packet_logger(self, tag, packet, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
-            def contextualize(self, node_hash, node_label):
+            def contextualize(self, *identity_path):
                 return self
 
         pipeline.compile()
-        orch = AsyncPipelineOrchestrator(observer=RecordingObserver())
-        orch.run(pipeline._node_graph)
+        orch = AsyncPipelineOrchestrator()
+        orch.run(pipeline._node_graph, observer=RecordingObserver())
 
         # Source fires node_start/node_end (label contains "ArrowTableSource" or similar)
         source_starts = [e for e in events if e[0] == "node_start" and e[1] != "doubler"]
@@ -565,12 +565,12 @@ class TestAsyncOrchestratorObserverInjection:
             def create_packet_logger(self, tag, packet, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
-            def contextualize(self, node_hash, node_label):
+            def contextualize(self, *identity_path):
                 return self
 
         pipeline.compile()
-        orch = AsyncPipelineOrchestrator(observer=RecordingObserver())
-        orch.run(pipeline._node_graph)
+        orch = AsyncPipelineOrchestrator()
+        orch.run(pipeline._node_graph, observer=RecordingObserver())
 
         # All labeled nodes fire start/end
         assert ("node_start", "mapper") in events
@@ -602,3 +602,9 @@ class TestAsyncOrchestratorObserverInjection:
         ]
         assert len(fn_outputs) == 1
         assert len(fn_outputs[0]) == 1
+
+
+def test_async_orchestrator_accepts_observer_in_run():
+    import inspect
+    sig = inspect.signature(AsyncPipelineOrchestrator.run)
+    assert "observer" in sig.parameters

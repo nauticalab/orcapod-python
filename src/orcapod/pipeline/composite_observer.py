@@ -17,7 +17,7 @@ Example::
     status_obs = StatusObserver(status_database=db.at("my_pipeline", "_status"))
     observer = CompositeObserver(log_obs, status_obs)
 
-    pipeline.run(orchestrator=SyncPipelineOrchestrator(observer=observer))
+    pipeline.run(observer=observer)
 """
 
 from __future__ import annotations
