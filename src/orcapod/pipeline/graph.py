@@ -609,7 +609,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                   Loadable via :meth:`Pipeline.load` with an optional ``pipeline_database``
                   argument; without one, all nodes load as UNAVAILABLE.
                 - ``"standard"`` (default): adds pipeline-level DB registry. Round-trippable.
-                - ``"full"``: same as standard (observer serialization TBD).
+                - ``"full"``: same as standard, plus serializes the default observer
+                  (status + logging configuration) for full round-trip reconstruction.
         """
         _VALID_LEVELS = ("minimal", "definition", "standard", "full")
         if level not in _VALID_LEVELS:
