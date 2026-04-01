@@ -331,3 +331,59 @@ class TestFlushBehaviour:
         result = db.get_all_records(self.PATH)
         assert result is not None
         assert result.num_rows == 2
+
+
+# ---------------------------------------------------------------------------
+# 10. at() and base_path
+# ---------------------------------------------------------------------------
+
+
+class TestAtMethod:
+    def test_base_path_is_empty_on_root_instance(self, db):
+        assert db.base_path == ()
+        assert isinstance(db.base_path, tuple)
+
+    def test_at_sets_base_path(self, db):
+        scoped = db.at("a", "b")
+        assert scoped.base_path == ("a", "b")
+        assert isinstance(scoped.base_path, tuple)
+
+    def test_at_chaining_equivalent_to_multi_component(self, db):
+        assert db.at("a").at("b").base_path == db.at("a", "b").base_path
+
+    def test_at_does_not_modify_original(self, db):
+        db.at("a", "b")
+        assert db.base_path == ()
+
+    def test_writes_through_scoped_view_readable_from_same_view(self, db):
+        scoped = db.at("pipeline", "node1")
+        record = make_table(value=[42])
+        scoped.add_record(("outputs",), "id1", record)
+        result = scoped.get_record_by_id(("outputs",), "id1")
+        assert result is not None
+        assert result.column("value").to_pylist() == [42]
+
+    def test_scoped_write_not_visible_via_parent_at_same_path(self, db):
+        scoped = db.at("pipeline", "node1")
+        scoped.add_record(("outputs",), "id1", make_table(value=[42]))
+        # Parent sees ("outputs",) as a different key from ("pipeline","node1","outputs")
+        assert db.get_record_by_id(("outputs",), "id1") is None
+
+    def test_two_scoped_views_share_storage(self, db):
+        view_a = db.at("pipeline", "node1")
+        view_b = db.at("pipeline", "node1")
+        view_a.add_record(("outputs",), "id1", make_table(value=[99]))
+        view_a.flush()
+        result = view_b.get_record_by_id(("outputs",), "id1")
+        assert result is not None
+        assert result.column("value").to_pylist() == [99]
+
+    def test_validate_record_path_checks_combined_depth(self, db):
+        # max_hierarchy_depth=10 (default). Fill prefix with 9 components.
+        deep_db = InMemoryArrowDatabase(max_hierarchy_depth=10)
+        scoped = deep_db.at("a", "b", "c", "d", "e", "f", "g", "h", "i")
+        # 9 prefix + 1 record_path = 10: OK
+        scoped.add_record(("z",), "id1", make_table(value=[1]))
+        # 9 prefix + 2 record_path = 11: should raise
+        with pytest.raises(ValueError):
+            scoped.add_record(("z", "extra"), "id2", make_table(value=[2]))

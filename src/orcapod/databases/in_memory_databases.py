@@ -29,26 +29,36 @@ class InMemoryArrowDatabase:
 
     RECORD_ID_COLUMN = "__record_id"
 
-    def __init__(self, max_hierarchy_depth: int = 10):
+    def __init__(
+        self,
+        max_hierarchy_depth: int = 10,
+        _path_prefix: tuple[str, ...] = (),
+        _shared_tables: "dict[str, pa.Table] | None" = None,
+        _shared_pending_batches: "dict[str, pa.Table] | None" = None,
+        _shared_pending_record_ids: "dict[str, set[str]] | None" = None,
+    ):
+        self._path_prefix = _path_prefix
         self.max_hierarchy_depth = max_hierarchy_depth
-        self._tables: dict[str, pa.Table] = {}
-        self._pending_batches: dict[str, pa.Table] = {}
-        self._pending_record_ids: dict[str, set[str]] = defaultdict(set)
+        self._tables: dict[str, pa.Table] = _shared_tables if _shared_tables is not None else {}
+        self._pending_batches: dict[str, pa.Table] = _shared_pending_batches if _shared_pending_batches is not None else {}
+        self._pending_record_ids: dict[str, set[str]] = _shared_pending_record_ids if _shared_pending_record_ids is not None else defaultdict(set)
 
     # ------------------------------------------------------------------
     # Path helpers
     # ------------------------------------------------------------------
 
     def _get_record_key(self, record_path: tuple[str, ...]) -> str:
-        return "/".join(record_path)
+        return "/".join(self._path_prefix + record_path)
 
     def _validate_record_path(self, record_path: tuple[str, ...]) -> None:
         if not record_path:
             raise ValueError("record_path cannot be empty")
 
-        if len(record_path) > self.max_hierarchy_depth:
+        if len(self._path_prefix) + len(record_path) > self.max_hierarchy_depth:
             raise ValueError(
-                f"record_path depth {len(record_path)} exceeds maximum {self.max_hierarchy_depth}"
+                f"record_path depth {len(record_path)} exceeds maximum "
+                f"{self.max_hierarchy_depth - len(self._path_prefix)} "
+                f"(base_path uses {len(self._path_prefix)} components)"
             )
 
         # Only restrict characters that break the "/".join(record_path) key scheme.
@@ -230,13 +240,6 @@ class InMemoryArrowDatabase:
     # Flush
     # ------------------------------------------------------------------
 
-    @property
-    def base_path(self) -> tuple[str, ...]:
-        return ()
-
-    def at(self, *path_components: str) -> "InMemoryArrowDatabase":
-        return InMemoryArrowDatabase(max_hierarchy_depth=self.max_hierarchy_depth)
-
     def flush(self) -> None:
         for record_key in list(self._pending_batches.keys()):
             pending = self._pending_batches.pop(record_key)
@@ -254,6 +257,30 @@ class InMemoryArrowDatabase:
                 )
                 kept = committed.filter(mask)
                 self._tables[record_key] = pa.concat_tables([kept, pending])
+
+    # ------------------------------------------------------------------
+    # Path scoping
+    # ------------------------------------------------------------------
+
+    @property
+    def base_path(self) -> tuple[str, ...]:
+        """The current relative root of this database view (always () for root instances)."""
+        return self._path_prefix
+
+    def at(self, *path_components: str) -> "InMemoryArrowDatabase":
+        """Return a new InMemoryArrowDatabase scoped to the given sub-path.
+
+        The returned instance shares the underlying storage dicts (_tables,
+        _pending_batches, _pending_record_ids) by reference, so writes
+        through any view are visible to all views of the same root database.
+        """
+        return InMemoryArrowDatabase(
+            max_hierarchy_depth=self.max_hierarchy_depth,
+            _path_prefix=self._path_prefix + path_components,
+            _shared_tables=self._tables,
+            _shared_pending_batches=self._pending_batches,
+            _shared_pending_record_ids=self._pending_record_ids,
+        )
 
     # ------------------------------------------------------------------
     # Read helpers
@@ -345,6 +372,7 @@ class InMemoryArrowDatabase:
         """Serialize database configuration to a JSON-compatible dict."""
         return {
             "type": "in_memory",
+            "base_path": list(self._path_prefix),
             "max_hierarchy_depth": self.max_hierarchy_depth,
         }
 
@@ -353,6 +381,7 @@ class InMemoryArrowDatabase:
         """Reconstruct an InMemoryArrowDatabase from a config dict."""
         return cls(
             max_hierarchy_depth=config.get("max_hierarchy_depth", 10),
+            _path_prefix=tuple(config.get("base_path", [])),
         )
 
     def get_records_with_column_value(
