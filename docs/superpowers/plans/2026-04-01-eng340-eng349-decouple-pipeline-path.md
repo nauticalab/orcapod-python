@@ -996,7 +996,7 @@ def test_compile_without_pipeline_database_uses_noop_observer():
     assert isinstance(p._default_observer, NoOpObserver)
 
 
-def test_run_with_override_observer_does_not_raise(mock_observer):
+def test_run_with_override_observer_does_not_raise():
     """Passing an explicit observer to run() should be accepted without error."""
     from unittest.mock import MagicMock
     db = InMemoryArrowDatabase()
