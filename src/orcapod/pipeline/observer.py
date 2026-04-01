@@ -49,7 +49,7 @@ class NoOpObserver:
     """
 
     def contextualize(
-        self, node_hash: str, node_label: str
+        self, *identity_path: str
     ) -> NoOpObserver:
         return self
 
@@ -64,12 +64,12 @@ class NoOpObserver:
         pass
 
     def on_node_start(
-        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = (), tag_schema: SchemaLike | None = None
+        self, node_label: str, node_hash: str, tag_schema: SchemaLike | None = None
     ) -> None:
         pass
 
     def on_node_end(
-        self, node_label: str, node_hash: str, pipeline_path: tuple[str, ...] = ()
+        self, node_label: str, node_hash: str
     ) -> None:
         pass
 
@@ -104,6 +104,5 @@ class NoOpObserver:
         self,
         tag: TagProtocol,
         packet: PacketProtocol,
-        pipeline_path: tuple[str, ...] = (),
     ) -> NoOpLogger:
         return _NOOP_LOGGER
