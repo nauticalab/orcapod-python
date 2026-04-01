@@ -71,8 +71,7 @@ class TestSyncPipelineSuccessLogs:
         orch = SyncPipelineOrchestrator(observer=obs)
         pipeline.run(orchestrator=orch)
 
-        fn_node = _get_function_node(pipeline)
-        logs = obs.get_logs(pipeline_path=fn_node.pipeline_path)
+        logs = obs.get_logs()
 
         assert logs is not None
         assert logs.num_rows == 3
@@ -104,8 +103,7 @@ class TestFailingPacketsLogged:
         orch = SyncPipelineOrchestrator(observer=obs)
         pipeline.run(orchestrator=orch)
 
-        fn_node = _get_function_node(pipeline)
-        logs = obs.get_logs(pipeline_path=fn_node.pipeline_path)
+        logs = obs.get_logs()
 
         assert logs is not None
         assert logs.num_rows == 2
@@ -118,12 +116,12 @@ class TestFailingPacketsLogged:
 
 
 # ---------------------------------------------------------------------------
-# 3. Pipeline-path-mirrored storage
+# 3. Flat log storage — all logs in a single table
 # ---------------------------------------------------------------------------
 
 
-class TestPipelinePathMirroredStorage:
-    def test_log_path_mirrors_pipeline_path(self):
+class TestFlatLogStorage:
+    def test_log_stored_in_flat_table(self):
         db = InMemoryArrowDatabase()
         source = _make_source(1)
 
@@ -133,7 +131,7 @@ class TestPipelinePathMirroredStorage:
         pf = PythonPacketFunction(identity, output_keys="result", executor=LocalExecutor())
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="test_mirror", pipeline_database=db)
+        pipeline = Pipeline(name="test_flat", pipeline_database=db)
         with pipeline:
             pod(source, label="ident")
 
@@ -141,14 +139,12 @@ class TestPipelinePathMirroredStorage:
         orch = SyncPipelineOrchestrator(observer=obs)
         pipeline.run(orchestrator=orch)
 
-        fn_node = _get_function_node(pipeline)
-        pp = fn_node.pipeline_path
-        expected_log_path = pp[:1] + ("logs",) + pp[1:]
-
-        # Verify the log path is correct by reading directly from the DB
-        raw = db.get_all_records(expected_log_path)
-        assert raw is not None
-        assert raw.num_rows == 1
+        logs = obs.get_logs()
+        assert logs is not None
+        assert logs.num_rows == 1
+        # Verify node label is stored as a column
+        assert "_log_node_label" in logs.column_names
+        assert logs.column("_log_node_label").to_pylist() == ["ident"]
 
 
 # ---------------------------------------------------------------------------
@@ -175,8 +171,7 @@ class TestQueryableTagColumns:
         orch = SyncPipelineOrchestrator(observer=obs)
         pipeline.run(orchestrator=orch)
 
-        fn_node = _get_function_node(pipeline)
-        logs = obs.get_logs(pipeline_path=fn_node.pipeline_path)
+        logs = obs.get_logs()
 
         assert logs is not None
         # "id" tag column should be a separate column, not JSON
@@ -210,8 +205,7 @@ class TestAsyncOrchestratorLogs:
         orch = AsyncPipelineOrchestrator(observer=obs)
         pipeline.run(orchestrator=orch)
 
-        fn_node = _get_function_node(pipeline)
-        logs = obs.get_logs(pipeline_path=fn_node.pipeline_path)
+        logs = obs.get_logs()
 
         assert logs is not None
         assert logs.num_rows == 2
@@ -244,8 +238,7 @@ class TestFailFastErrorPolicy:
         with pytest.raises(RuntimeError, match="crash"):
             pipeline.run(orchestrator=orch)
 
-        fn_node = _get_function_node(pipeline)
-        logs = obs.get_logs(pipeline_path=fn_node.pipeline_path)
+        logs = obs.get_logs()
 
         # At least the first crash should be logged before abort
         assert logs is not None
@@ -283,8 +276,7 @@ class TestMixedSuccessFailure:
         orch = SyncPipelineOrchestrator(observer=obs)
         pipeline.run(orchestrator=orch)
 
-        fn_node = _get_function_node(pipeline)
-        logs = obs.get_logs(pipeline_path=fn_node.pipeline_path)
+        logs = obs.get_logs()
 
         assert logs is not None
         # x=10 succeeds, x=-1 succeeds (100/-1 = -100), x=30 succeeds
@@ -294,12 +286,12 @@ class TestMixedSuccessFailure:
 
 
 # ---------------------------------------------------------------------------
-# 8. Multiple function nodes — each gets own log table
+# 8. Multiple function nodes — all logs in one flat table
 # ---------------------------------------------------------------------------
 
 
-class TestMultipleFunctionNodesSeparateLogs:
-    def test_two_nodes_separate_log_tables(self):
+class TestMultipleFunctionNodesCombinedLogs:
+    def test_two_nodes_combined_log_table(self):
         db = InMemoryArrowDatabase()
         source = _make_source(2)
 
@@ -323,34 +315,23 @@ class TestMultipleFunctionNodesSeparateLogs:
         orch = SyncPipelineOrchestrator(observer=obs)
         pipeline.run(orchestrator=orch)
 
-        import networkx as nx
+        logs = obs.get_logs()
+        assert logs is not None
+        # 2 packets × 2 nodes = 4 log rows total
+        assert logs.num_rows == 4
 
-        fn_nodes = [
-            n
-            for n in nx.topological_sort(pipeline._node_graph)
-            if n.node_type == "function"
-        ]
-        assert len(fn_nodes) == 2
-
-        logs1 = obs.get_logs(pipeline_path=fn_nodes[0].pipeline_path)
-        logs2 = obs.get_logs(pipeline_path=fn_nodes[1].pipeline_path)
-
-        assert logs1 is not None
-        assert logs2 is not None
-        assert logs1.num_rows == 2
-        assert logs2.num_rows == 2
-
-        # Verify they are at different paths
-        assert fn_nodes[0].pipeline_path != fn_nodes[1].pipeline_path
+        # Both node labels appear in the combined table
+        node_labels = set(logs.column("_log_node_label").to_pylist())
+        assert node_labels == {"doubler", "tripler"}
 
 
 # ---------------------------------------------------------------------------
-# 9. get_logs(pipeline_path) retrieves node-specific logs
+# 9. get_logs() returns all logs; filter by _log_node_label for node-specific
 # ---------------------------------------------------------------------------
 
 
 class TestGetLogsNodeSpecific:
-    def test_get_logs_filters_by_node(self):
+    def test_get_logs_filters_by_node_label_column(self):
         db = InMemoryArrowDatabase()
         source = _make_source(2)
 
@@ -374,20 +355,57 @@ class TestGetLogsNodeSpecific:
         orch = SyncPipelineOrchestrator(observer=obs)
         pipeline.run(orchestrator=orch)
 
-        import networkx as nx
+        logs = obs.get_logs()
+        assert logs is not None
 
-        fn_nodes = [
-            n
-            for n in nx.topological_sort(pipeline._node_graph)
-            if n.node_type == "function"
-        ]
+        import pyarrow.compute as pc
 
-        # Each node's logs contain only that node's label
-        logs1 = obs.get_logs(pipeline_path=fn_nodes[0].pipeline_path)
-        logs2 = obs.get_logs(pipeline_path=fn_nodes[1].pipeline_path)
+        # Filter by node label to get per-node logs
+        logs_doubler = logs.filter(
+            pc.equal(logs.column("_log_node_label"), "doubler")
+        )
+        logs_tripler = logs.filter(
+            pc.equal(logs.column("_log_node_label"), "tripler")
+        )
 
-        labels1 = set(logs1.column("_log_node_label").to_pylist())
-        labels2 = set(logs2.column("_log_node_label").to_pylist())
+        labels_doubler = set(logs_doubler.column("_log_node_label").to_pylist())
+        labels_tripler = set(logs_tripler.column("_log_node_label").to_pylist())
 
-        assert labels1 == {"doubler"}
-        assert labels2 == {"tripler"}
+        assert labels_doubler == {"doubler"}
+        assert labels_tripler == {"tripler"}
+
+
+# ---------------------------------------------------------------------------
+# 10. Serialization round-trip tests
+# ---------------------------------------------------------------------------
+
+
+def test_logging_observer_to_config_shape():
+    db = InMemoryArrowDatabase()
+    log_db = db.at("my_pipeline", "_log")
+    obs = LoggingObserver(log_db)
+    from orcapod.pipeline.serialization import DatabaseRegistry
+    registry = DatabaseRegistry()
+    config = obs.to_config(db_registry=registry)
+    assert config["type"] == "logging"
+    assert config["database"]["type"] == "scoped"
+    assert config["database"]["path"] == ["my_pipeline", "_log"]
+
+
+def test_logging_observer_from_config_round_trip():
+    db = InMemoryArrowDatabase()
+    log_db = db.at("my_pipeline", "_log")
+    obs = LoggingObserver(log_db)
+    from orcapod.pipeline.serialization import DatabaseRegistry
+    registry = DatabaseRegistry()
+    config = obs.to_config(db_registry=registry)
+    restored = LoggingObserver.from_config(config, registry.to_dict())
+    assert restored._db._path_prefix == log_db._path_prefix
+
+
+def test_contextualize_with_empty_path_raises():
+    """contextualize() with no args should raise ValueError."""
+    db = InMemoryArrowDatabase()
+    obs = LoggingObserver(db)
+    with pytest.raises(ValueError, match="non-empty identity_path"):
+        obs.contextualize()
