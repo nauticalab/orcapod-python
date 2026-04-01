@@ -44,6 +44,10 @@ class CompositeObserver:
 
     def contextualize(self, *identity_path: str) -> "CompositeObserver":
         """Return a new CompositeObserver wrapping each child's contextualized version."""
+        if not identity_path:
+            raise ValueError(
+                "CompositeObserver.contextualize() requires a non-empty identity_path."
+            )
         return CompositeObserver(*[o.contextualize(*identity_path) for o in self._observers])
 
     def on_run_start(self, run_id: str, **kwargs: Any) -> None:
