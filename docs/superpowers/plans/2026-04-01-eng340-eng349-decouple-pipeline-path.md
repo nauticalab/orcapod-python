@@ -996,16 +996,16 @@ def test_compile_without_pipeline_database_uses_noop_observer():
     assert isinstance(p._default_observer, NoOpObserver)
 
 
-def test_run_with_override_observer_uses_override():
-    from orcapod.pipeline.observer import NoOpObserver
+def test_run_with_override_observer_does_not_raise(mock_observer):
+    """Passing an explicit observer to run() should be accepted without error."""
+    from unittest.mock import MagicMock
     db = InMemoryArrowDatabase()
-    custom_obs = NoOpObserver()
+    obs = MagicMock()
+    obs.contextualize.return_value = obs
     with Pipeline("my_pipeline", pipeline_database=db) as p:
         pass
-    # Observer override is threaded through — would need a mock to verify
-    # but at minimum it should not raise
-    from orcapod.pipeline import SyncPipelineOrchestrator
-    SyncPipelineOrchestrator().run(p._node_graph or ..., observer=custom_obs)
+    # An empty compiled pipeline has no nodes to execute; run() must not raise
+    p.run(observer=obs)
 ```
 
 - [ ] **Step 2: Run to confirm failures**
@@ -1072,15 +1072,15 @@ def compile(self) -> None:
         result_db = self._result_database  # explicit override or None
         self._default_observer = NoOpObserver()
 
-    # attach databases to nodes (no pipeline_path_prefix)
+    # attach databases to nodes using the pipeline-scoped view, not the raw root
     for node in function_nodes:
         node.attach_databases(
-            pipeline_database=self._pipeline_database,
-            result_database=result_db,
+            pipeline_database=pipeline_db,   # scoped: user_db.at(*name)
+            result_database=result_db,        # scoped: pipeline_db.at("_result")
         )
     for node in operator_nodes:
         node.attach_databases(
-            pipeline_database=self._pipeline_database,
+            pipeline_database=pipeline_db,   # scoped: user_db.at(*name)
         )
     ...
 ```
@@ -1138,6 +1138,8 @@ if "observer" in pipeline_meta:
         pipeline_meta["observer"], db_registry_data
     )
 ```
+
+Direct assignment to `_default_observer` is acceptable here because `load()` is constructing the object. To enforce immutability post-construction, add a `_compiled` flag check: set `self._compiled = True` at the end of `compile()`, and guard `_default_observer` against reassignment after that point (e.g., with an `assert not self._compiled` check or by making `_default_observer` a property that raises after compile). This ensures external callers cannot replace the default observer after the pipeline is compiled.
 
 Remove all `pipeline_path_prefix` hint construction from `load()` (the `pipeline_path_prefix = name` block and its usage at lines ~823-915).
 
@@ -1252,13 +1254,17 @@ class AsyncPipelineOrchestrator:
 Also add a test in `tests/test_pipeline/test_orchestrator.py` for the async orchestrator:
 ```python
 def test_async_orchestrator_accepts_observer_in_run():
+    """AsyncPipelineOrchestrator() has no observer param; it goes to run()."""
     from orcapod.pipeline import AsyncPipelineOrchestrator
     from orcapod.pipeline.observer import NoOpObserver
+    import inspect
     orch = AsyncPipelineOrchestrator()
-    # Constructing without observer must not raise
-    obs = NoOpObserver()
-    # Passing observer to run() (with an empty graph) must not raise
-    # (exact invocation depends on the test graph fixture)
+    # __init__ must not accept observer
+    assert "observer" not in inspect.signature(orch.__init__).parameters
+    # run() must accept observer as keyword arg
+    assert "observer" in inspect.signature(orch.run).parameters
+    # run_async() too
+    assert "observer" in inspect.signature(orch.run_async).parameters
 ```
 
 - [ ] **Step 5: Run orchestrator tests**
