@@ -670,10 +670,13 @@ class TestFunctionNodePipelinePathPrefix:
 
 
 class TestFunctionNodeResultPath:
-    def test_result_records_stored_under_result_suffix_path(self, double_pf):
+    def test_result_records_stored_under_pod_uri_path(self, double_pf):
+        """Result records are stored under the pod's URI — no _result prefix
+        since the database is pre-scoped at compile time (ENG-340/ENG-349)."""
         db = InMemoryArrowDatabase()
+        pod = FunctionPod(packet_function=double_pf)
         node = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=pod,
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
         )
@@ -683,6 +686,4 @@ class TestFunctionNodeResultPath:
         db.flush()
 
         result_path = node._cached_function_pod.record_path
-        assert result_path[-1] == "_result" or any(
-            "_result" in part for part in result_path
-        )
+        assert result_path == pod.uri

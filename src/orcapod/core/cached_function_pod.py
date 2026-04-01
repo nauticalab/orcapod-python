@@ -43,15 +43,13 @@ class CachedFunctionPod(WrappedFunctionPod):
         self,
         function_pod: FunctionPodProtocol,
         result_database: ArrowDatabaseProtocol,
-        record_path_prefix: tuple[str, ...] = (),
         auto_flush: bool = True,
         **kwargs,
     ) -> None:
         super().__init__(function_pod, **kwargs)
-        self._record_path_prefix = record_path_prefix
         self._cache = ResultCache(
             result_database=result_database,
-            record_path=record_path_prefix + self.uri,
+            record_path=self.uri,  # no prefix; db is pre-scoped
             auto_flush=auto_flush,
         )
 

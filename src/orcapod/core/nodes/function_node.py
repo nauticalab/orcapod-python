@@ -177,10 +177,10 @@ class FunctionNode(StreamBase):
             computed_result_path_prefix = result_path_prefix
 
         # Always wrap the original function_pod (not a previous cached wrapper)
+        # record_path_prefix removed — database is pre-scoped
         self._cached_function_pod = CachedFunctionPod(
             self._function_pod,
             result_database=result_database,
-            record_path_prefix=computed_result_path_prefix,
         )
 
         self._pipeline_database = pipeline_database
