@@ -206,9 +206,13 @@ class StatusObserver:
         Returns:
             A dict with ``"type": "status"`` and a ``"database"`` key.
         """
+        try:
+            db_config = self._db.to_config(db_registry=db_registry)
+        except TypeError:
+            db_config = self._db.to_config()
         return {
             "type": "status",
-            "database": self._db.to_config(db_registry=db_registry),
+            "database": db_config,
         }
 
     @classmethod

@@ -240,7 +240,7 @@ class LoggingObserver:
 
             Correct usage (mirrors how ``FunctionNode`` calls it)::
 
-                ctx_obs = observer.contextualize(node_hash, node_label)
+                ctx_obs = observer.contextualize(*identity_path)
                 pkt_logger = ctx_obs.create_packet_logger(tag, packet)
         """
         raise NotImplementedError(
@@ -250,59 +250,29 @@ class LoggingObserver:
 
     # -- convenience --
 
-    def get_logs(self) -> pa.Table | None:
+    def get_logs(self) -> "pa.Table | None":
         """Read all log rows from the database as a `pyarrow.Table`.
 
-        Returns all log rows for this observer's database, regardless of node.
-        Node-specific logs can be filtered via the ``_log_node_label`` column.
+        Returns all log rows written to ``DEFAULT_LOG_PATH`` for this
+        observer's database, regardless of node.  Node-specific logs can
+        be filtered via the ``_log_node_label`` column.
 
-        Scans all storage paths under the database's path prefix and
-        concatenates every table that contains at least one ``_log_``-prefixed
-        column.  This handles the case where logs are written at
-        per-node identity paths (``node_hash/node_label``) rather than a
-        single flat ``DEFAULT_LOG_PATH``.
+        Works across all ``ArrowDatabaseProtocol`` implementations because
+        it reads via the public ``get_all_records()`` API rather than
+        inspecting private in-memory fields.
 
         Returns ``None`` if no logs have been written yet.
         """
         import pyarrow as pa
 
-        db = self._db
-        # Access the underlying storage dicts if available (InMemoryArrowDatabase).
-        tables: dict = getattr(db, "_tables", {})
-        pending: dict = getattr(db, "_pending_batches", {})
-        prefix = "/".join(getattr(db, "_path_prefix", ()))
-
-        all_parts: list[pa.Table] = []
-        seen_keys: set[str] = set()
-
-        def _collect(store: dict) -> None:
-            for key, tbl in store.items():
-                if key in seen_keys:
-                    continue
-                # Only consider keys that fall under this db's prefix
-                if prefix and not key.startswith(prefix):
-                    continue
-                if tbl is None or tbl.num_rows == 0:
-                    continue
-                col_names = tbl.schema.names if hasattr(tbl, "schema") else []
-                if any(c.startswith("_log_") for c in col_names):
-                    # Drop the internal record-id column before concatenating
-                    record_id_col = "__record_id"
-                    if record_id_col in col_names:
-                        tbl = tbl.drop([record_id_col])
-                    all_parts.append(tbl)
-                seen_keys.add(key)
-
-        _collect(tables)
-        _collect(pending)
-
-        if not all_parts:
+        tbl = self._db.get_all_records(DEFAULT_LOG_PATH)
+        if tbl is None or tbl.num_rows == 0:
             return None
-
-        if len(all_parts) == 1:
-            return all_parts[0]
-
-        return pa.concat_tables(all_parts, promote_options="default")
+        # Drop the internal record-id column if present
+        record_id_col = "__record_id"
+        if record_id_col in tbl.schema.names:
+            tbl = tbl.drop([record_id_col])
+        return tbl
 
     # -- serialization --
 
@@ -317,9 +287,13 @@ class LoggingObserver:
         Returns:
             A dict with ``"type": "logging"`` and a ``"database"`` key.
         """
+        try:
+            db_config = self._db.to_config(db_registry=db_registry)
+        except TypeError:
+            db_config = self._db.to_config()
         return {
             "type": "logging",
-            "database": self._db.to_config(db_registry=db_registry),
+            "database": db_config,
         }
 
     @classmethod

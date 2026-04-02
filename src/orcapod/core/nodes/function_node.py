@@ -81,7 +81,6 @@ class FunctionNode(StreamBase):
         # Optional DB params for persistent mode:
         pipeline_database: ArrowDatabaseProtocol | None = None,
         result_database: ArrowDatabaseProtocol | None = None,
-        result_path_prefix: tuple[str, ...] | None = None,
     ):
         if tracker_manager is None:
             tracker_manager = DEFAULT_TRACKER_MANAGER
@@ -135,7 +134,6 @@ class FunctionNode(StreamBase):
             self.attach_databases(
                 pipeline_database=pipeline_database,
                 result_database=result_database,
-                result_path_prefix=result_path_prefix,
             )
 
     # ------------------------------------------------------------------
@@ -146,7 +144,6 @@ class FunctionNode(StreamBase):
         self,
         pipeline_database: ArrowDatabaseProtocol,
         result_database: ArrowDatabaseProtocol | None = None,
-        result_path_prefix: tuple[str, ...] | None = None,
     ) -> None:
         """Attach databases for persistent caching and pipeline records.
 
@@ -154,23 +151,19 @@ class FunctionNode(StreamBase):
         for result caching.  The pipeline database is used separately for
         pipeline-level provenance records (tag + packet hash).
 
+        The databases are expected to be pre-scoped by the pipeline (via
+        ``db.at(*pipeline_name).at("_result")`` etc.) so no additional path
+        prefix is needed here.
+
         Args:
             pipeline_database: Database for pipeline records.
             result_database: Database for cached results. Defaults to
                 pipeline_database.
-            result_path_prefix: Path prefix for result records.
         """
-        computed_result_path_prefix: tuple[str, ...] = ()
         if result_database is None:
             result_database = pipeline_database
-            computed_result_path_prefix = (
-                result_path_prefix if result_path_prefix is not None else ()
-            )
-        elif result_path_prefix is not None:
-            computed_result_path_prefix = result_path_prefix
 
         # Always wrap the original function_pod (not a previous cached wrapper)
-        # record_path_prefix removed — database is pre-scoped
         self._cached_function_pod = CachedFunctionPod(
             self._function_pod,
             result_database=result_database,
@@ -443,14 +436,19 @@ class FunctionNode(StreamBase):
 
     @property
     def node_identity_path(self) -> tuple[str, ...]:
-        """Return the node identity path for DB record scoping.
+        """Return the node identity path for observer contextualization.
 
-        Returns ``()`` when no pipeline database is attached.
+        The identity path is ``pod.uri + (schema_hash, instance_hash)`` and
+        is computable independently of whether a pipeline database is attached.
+        Only ``pipeline_path`` (the full absolute storage path) requires a DB.
+
+        Returns ``()`` only when the node is in a load-only state with no
+        live function pod (deserialized descriptor without a real pod).
         """
         stored = getattr(self, "_stored_pipeline_path", None)
         if self._packet_function is None and stored is not None:
             return stored
-        if self._pipeline_database is None:
+        if self._packet_function is None:
             return ()
         pf = self._function_pod
         return pf.uri + (
