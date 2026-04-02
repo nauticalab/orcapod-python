@@ -96,9 +96,18 @@ class OperatorNode(StreamBase):
         # DB persistence state (initially None; set via __init__ params or attach_databases)
         self._pipeline_database: ArrowDatabaseProtocol | None = None
         self._cache_mode = CacheMode.OFF
-        # Stored identity path from a deserialized descriptor (read-only/UNAVAILABLE nodes).
-        # Always present so node_identity_path never uses getattr.
+
+        # Descriptor fields — populated by from_descriptor() for read-only/UNAVAILABLE
+        # nodes. Initialized here so they are always present on the concrete class
+        # (avoids getattr access for possibly-absent attributes).
+        from orcapod.pipeline.serialization import LoadStatus
+        self._load_status: LoadStatus = LoadStatus.FULL
+        self._stored_content_hash: str | None = None
+        self._stored_pipeline_hash: str | None = None
+        self._stored_schema: dict = {}
+        self._stored_node_uri: tuple[str, ...] = ()
         self._stored_pipeline_path: tuple[str, ...] = ()
+        self._descriptor: dict = {}
 
         if pipeline_database is not None:
             self.attach_databases(
@@ -253,9 +262,7 @@ class OperatorNode(StreamBase):
             loaded.  Defaults to ``FULL`` for nodes created via
             ``__init__``.
         """
-        from orcapod.pipeline.serialization import LoadStatus
-
-        return getattr(self, "_load_status", LoadStatus.FULL)
+        return self._load_status
 
     # ------------------------------------------------------------------
     # Identity
@@ -273,16 +280,14 @@ class OperatorNode(StreamBase):
 
     def content_hash(self, hasher=None) -> ContentHash:
         """Return the content hash, using stored value in read-only mode."""
-        stored = getattr(self, "_stored_content_hash", None)
-        if self._operator is None and stored is not None:
-            return ContentHash.from_string(stored)
+        if self._operator is None and self._stored_content_hash is not None:
+            return ContentHash.from_string(self._stored_content_hash)
         return super().content_hash(hasher)
 
     def pipeline_hash(self, hasher=None) -> ContentHash:
         """Return the pipeline hash, using stored value in read-only mode."""
-        stored = getattr(self, "_stored_pipeline_hash", None)
-        if self._operator is None and stored is not None:
-            return ContentHash.from_string(stored)
+        if self._operator is None and self._stored_pipeline_hash is not None:
+            return ContentHash.from_string(self._stored_pipeline_hash)
         return super().pipeline_hash(hasher)
 
     # ------------------------------------------------------------------
@@ -316,9 +321,8 @@ class OperatorNode(StreamBase):
         all_info: bool = False,
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         if self._operator is None:
-            stored = getattr(self, "_stored_schema", {})
-            tag_keys = tuple(stored.get("tag", {}).keys())
-            packet_keys = tuple(stored.get("packet", {}).keys())
+            tag_keys = tuple(self._stored_schema.get("tag", {}).keys())
+            packet_keys = tuple(self._stored_schema.get("packet", {}).keys())
             return tag_keys, packet_keys
         tag_schema, packet_schema = self.output_schema(
             columns=columns, all_info=all_info
@@ -333,9 +337,8 @@ class OperatorNode(StreamBase):
     ) -> tuple[Schema, Schema]:
         """Return output schema, using stored value in read-only mode."""
         if self._operator is None:
-            stored = getattr(self, "_stored_schema", {})
-            tag = Schema(stored.get("tag", {}))
-            packet = Schema(stored.get("packet", {}))
+            tag = Schema(self._stored_schema.get("tag", {}))
+            packet = Schema(self._stored_schema.get("packet", {}))
             return tag, packet
         return self._operator.output_schema(
             *self._input_streams,
@@ -377,7 +380,7 @@ class OperatorNode(StreamBase):
         Returns stored value in read-only (deserialized) mode.
         """
         if self._operator is None:
-            return tuple(getattr(self, "_stored_node_uri", ()))
+            return self._stored_node_uri
         return self._operator.uri
 
     # ------------------------------------------------------------------
