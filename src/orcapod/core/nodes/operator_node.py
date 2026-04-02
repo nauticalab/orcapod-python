@@ -96,6 +96,9 @@ class OperatorNode(StreamBase):
         # DB persistence state (initially None; set via __init__ params or attach_databases)
         self._pipeline_database: ArrowDatabaseProtocol | None = None
         self._cache_mode = CacheMode.OFF
+        # Stored identity path from a deserialized descriptor (read-only/UNAVAILABLE nodes).
+        # Always present so node_identity_path never uses getattr.
+        self._stored_pipeline_path: tuple[str, ...] = ()
 
         if pipeline_database is not None:
             self.attach_databases(
@@ -350,17 +353,14 @@ class OperatorNode(StreamBase):
 
         The identity path is ``operator.uri + (schema_hash, instance_hash)``
         and is computable independently of whether a pipeline database is
-        attached.  Only ``pipeline_path`` (the full absolute storage path)
-        requires a DB.
+        attached.
 
-        Returns ``()`` only when the node is in a load-only state with no
-        live operator (deserialized descriptor without a real operator).
+        In live mode (operator present) the path is computed from the operator.
+        In read-only/UNAVAILABLE mode (no operator) the path stored from the
+        deserialized descriptor is returned (empty tuple when absent).
         """
-        stored = getattr(self, "_stored_pipeline_path", None)
-        if self._operator is None and stored is not None:
-            return stored
         if self._operator is None:
-            return ()
+            return self._stored_pipeline_path
         return (
             self._operator.uri
             + (
