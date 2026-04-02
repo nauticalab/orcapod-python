@@ -163,7 +163,7 @@ class SourceStreamBuilder:
         )
 
         # 10. Wrap in ArrowTableStream. Nullable flags are already correct —
-        # the caller is responsible for setting them before calling build().
+        # the caller set them before calling build().
         stream = ArrowTableStream(
             table=table,
             tag_columns=tag_columns_tuple,

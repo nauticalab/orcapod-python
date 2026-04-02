@@ -12,7 +12,7 @@ import pytest
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import Join
 from orcapod.core.packet_function import PythonPacketFunction
-from orcapod.core.streams import ArrowTableStream
+from orcapod.core.sources import ArrowTableSource
 from orcapod.core.tracker import BasicTrackerManager
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import Pipeline
@@ -33,14 +33,14 @@ def _make_pipeline(
     )
 
 
-def _make_stream(n: int = 3) -> ArrowTableStream:
+def _make_stream(n: int = 3) -> ArrowTableSource:
     table = pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
             "x": pa.array([i * 10 for i in range(n)], type=pa.int64()),
         }
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableSource(table, tag_columns=["id"])
 
 
 class TestBasicTrackerManager:

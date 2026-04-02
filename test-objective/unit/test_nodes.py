@@ -20,8 +20,7 @@ from orcapod.core.nodes import (
 )
 from orcapod.core.operators import Join
 from orcapod.core.packet_function import PythonPacketFunction
-from orcapod.core.sources import DerivedSource
-from orcapod.core.streams import ArrowTableStream
+from orcapod.core.sources import ArrowTableSource, DerivedSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.types import CacheMode
 
@@ -35,17 +34,17 @@ def _double(x: int) -> int:
     return x * 2
 
 
-def _make_stream(n: int = 3) -> ArrowTableStream:
+def _make_stream(n: int = 3) -> ArrowTableSource:
     table = pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
             "x": pa.array(list(range(n)), type=pa.int64()),
         }
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableSource(table, tag_columns=["id"])
 
 
-def _make_joinable_streams() -> tuple[ArrowTableStream, ArrowTableStream]:
+def _make_joinable_streams() -> tuple[ArrowTableSource, ArrowTableSource]:
     left = pa.table(
         {
             "id": pa.array([1, 2, 3], type=pa.int64()),
@@ -59,8 +58,8 @@ def _make_joinable_streams() -> tuple[ArrowTableStream, ArrowTableStream]:
         }
     )
     return (
-        ArrowTableStream(left, tag_columns=["id"]),
-        ArrowTableStream(right, tag_columns=["id"]),
+        ArrowTableSource(left, tag_columns=["id"]),
+        ArrowTableSource(right, tag_columns=["id"]),
     )
 
 

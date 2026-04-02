@@ -20,22 +20,33 @@ from orcapod.types import ColumnConfig, Schema
 
 def _simple_table(n_rows: int = 3) -> pa.Table:
     """A table with one tag-eligible column and one packet column."""
+    schema = pa.schema([
+        pa.field("id", pa.int64(), nullable=False),
+        pa.field("value", pa.large_string(), nullable=False),
+    ])
     return pa.table(
         {
             "id": pa.array(list(range(n_rows)), type=pa.int64()),
             "value": pa.array([f"v{i}" for i in range(n_rows)], type=pa.large_string()),
-        }
+        },
+        schema=schema,
     )
 
 
 def _multi_packet_table(n_rows: int = 3) -> pa.Table:
     """A table with one tag column and two packet columns."""
+    schema = pa.schema([
+        pa.field("id", pa.int64(), nullable=False),
+        pa.field("x", pa.int64(), nullable=False),
+        pa.field("y", pa.large_string(), nullable=False),
+    ])
     return pa.table(
         {
             "id": pa.array(list(range(n_rows)), type=pa.int64()),
             "x": pa.array([i * 10 for i in range(n_rows)], type=pa.int64()),
             "y": pa.array([f"y{i}" for i in range(n_rows)], type=pa.large_string()),
-        }
+        },
+        schema=schema,
     )
 
 
@@ -231,13 +242,20 @@ class TestOutputSchema:
 
     def test_schema_with_multiple_types(self):
         """Schema correctly reflects different column types."""
+        schema = pa.schema([
+            pa.field("tag", pa.int64(), nullable=False),
+            pa.field("col_int", pa.int64(), nullable=False),
+            pa.field("col_str", pa.large_string(), nullable=False),
+            pa.field("col_float", pa.float64(), nullable=False),
+        ])
         table = pa.table(
             {
                 "tag": pa.array([1], type=pa.int64()),
                 "col_int": pa.array([42], type=pa.int64()),
                 "col_str": pa.array(["hello"], type=pa.large_string()),
                 "col_float": pa.array([3.14], type=pa.float64()),
-            }
+            },
+            schema=schema,
         )
         stream = ArrowTableStream(table, tag_columns=["tag"])
         tag_schema, packet_schema = stream.output_schema()

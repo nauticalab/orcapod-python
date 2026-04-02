@@ -15,6 +15,7 @@ import pytest
 from orcapod.core.datagrams.tag_packet import Packet, Tag
 from orcapod.core.function_pod import FunctionPod, FunctionPodStream, function_pod
 from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.sources import ArrowTableSource
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.types import Schema
@@ -33,17 +34,17 @@ def _add(x: int, y: int) -> int:
     return x + y
 
 
-def _make_stream(n: int = 3) -> ArrowTableStream:
+def _make_stream(n: int = 3) -> ArrowTableSource:
     table = pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
             "x": pa.array(list(range(n)), type=pa.int64()),
         }
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableSource(table, tag_columns=["id"])
 
 
-def _make_two_col_stream(n: int = 3) -> ArrowTableStream:
+def _make_two_col_stream(n: int = 3) -> ArrowTableSource:
     table = pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
@@ -51,7 +52,7 @@ def _make_two_col_stream(n: int = 3) -> ArrowTableStream:
             "y": pa.array([i * 10 for i in range(n)], type=pa.int64()),
         }
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableSource(table, tag_columns=["id"])
 
 
 # ---------------------------------------------------------------------------
