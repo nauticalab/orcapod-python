@@ -338,3 +338,21 @@ def test_inspect_arrow_schema_dict_str_list():
     to_arrow_struct, to_python = universal_converter.get_conversion_functions(typ)
     arr = to_arrow_struct(py_val)
     assert arr == [{"key": "test", "value": [1, 2]}]
+
+
+def test_schema_as_required_strips_optional_fields():
+    from orcapod.types import Schema
+
+    s = Schema({"a": int, "b": str}, optional_fields=["b"])
+    result = s.as_required()
+    assert result == Schema({"a": int, "b": str})
+    assert result.optional_fields == frozenset()
+
+
+def test_schema_as_required_idempotent():
+    from orcapod.types import Schema
+
+    s = Schema({"a": int, "b": str}, optional_fields=["a", "b"])
+    once = s.as_required()
+    twice = s.as_required().as_required()
+    assert once == twice
