@@ -7,7 +7,7 @@ from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import PacketProtocol, StreamProtocol, TagProtocol
 from orcapod.types import ColumnConfig, Schema
-from orcapod.utils import schema_utils
+from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -68,6 +68,8 @@ class SemiJoin(BinaryOperator):
             keys=list(common_keys),
             join_type="left semi",
         )
+        # Re-apply left table's schema to restore nullable flags that Arrow join may have reset
+        semi_joined_table = semi_joined_table.cast(left_table.schema)
 
         return ArrowTableStream(
             semi_joined_table,

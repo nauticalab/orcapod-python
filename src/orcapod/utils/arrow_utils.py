@@ -624,8 +624,10 @@ def prepare_prefixed_columns(
             target_prefixed_column_names.append(prefixed_col_name)
             target_prefixed_columns.append(column_values)
 
-    # Step 3: Create the final table
-    data_table: pa.Table = pa.Table.from_arrays(data_columns, names=data_column_names)
+    # Step 3: Create the final table, preserving nullable flags from the source table
+    data_fields = [table.schema.field(name) for name in data_column_names]
+    data_schema = pa.schema(data_fields, metadata=table.schema.metadata)
+    data_table: pa.Table = pa.Table.from_arrays(data_columns, schema=data_schema)
     result_tables = {}
     for prefix in all_prefix_info:
         prefix_table = pa.Table.from_arrays(

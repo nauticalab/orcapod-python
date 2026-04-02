@@ -28,10 +28,17 @@ from orcapod.protocols.core_protocols import PodProtocol
 def left_stream() -> ArrowTableStream:
     table = pa.table(
         {
-            "id": [1, 2, 3],
-            "value": [10, 500, 30],
-            "extra_left": ["a", "b", "c"],
-        }
+            "id": pa.array([1, 2, 3], type=pa.int64()),
+            "value": pa.array([10, 500, 30], type=pa.int64()),
+            "extra_left": pa.array(["a", "b", "c"], type=pa.large_string()),
+        },
+        schema=pa.schema(
+            [
+                pa.field("id", pa.int64(), nullable=False),
+                pa.field("value", pa.int64(), nullable=False),
+                pa.field("extra_left", pa.large_string(), nullable=False),
+            ]
+        ),
     )
     return ArrowTableStream(table, tag_columns=["id"])
 
@@ -40,11 +47,19 @@ def left_stream() -> ArrowTableStream:
 def right_stream() -> ArrowTableStream:
     table = pa.table(
         {
-            "id": [2, 3, 4],
-            "group": ["X", "Y", "Z"],
-            "value": [200, 300, 400],
-            "extra_right": ["x", "y", "z"],
-        }
+            "id": pa.array([2, 3, 4], type=pa.int64()),
+            "group": pa.array(["X", "Y", "Z"], type=pa.large_string()),
+            "value": pa.array([200, 300, 400], type=pa.int64()),
+            "extra_right": pa.array(["x", "y", "z"], type=pa.large_string()),
+        },
+        schema=pa.schema(
+            [
+                pa.field("id", pa.int64(), nullable=False),
+                pa.field("group", pa.large_string(), nullable=False),
+                pa.field("value", pa.int64(), nullable=False),
+                pa.field("extra_right", pa.large_string(), nullable=False),
+            ]
+        ),
     )
     return ArrowTableStream(table, tag_columns=["id", "group"])
 

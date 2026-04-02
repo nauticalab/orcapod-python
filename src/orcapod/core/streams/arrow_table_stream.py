@@ -44,7 +44,6 @@ class ArrowTableStream(StreamBase):
         source_info: dict[str, str | None] | None = None,
         producer: PodProtocol | None = None,
         upstreams: tuple[StreamProtocol, ...] = (),
-        respect_nullable: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -115,31 +114,18 @@ class ArrowTableStream(StreamBase):
                 "No packet columns found in the table. At least one packet column is required."
             )
 
-        # By default, cast all schemas to non-nullable: Arrow's default nullable=True
-        # is a storage convention, not a semantic declaration. The Python schema
-        # round-trip relies on nullable=False ↔ T and nullable=True ↔ T | None,
-        # so raw tables (where nullable=True is always the default) must be
-        # normalised to nullable=False to avoid spurious T | None types.
-        # Set respect_nullable=True to opt-in to preserving Arrow nullable flags so
-        # that nullable=True fields yield T | None in the Python schema.
-        def _normalise(schema: "pa.Schema") -> "pa.Schema":
-            return schema if respect_nullable else arrow_utils.make_schema_non_nullable(schema)
-
-        tag_schema = _normalise(
-            pa.schema(
-                f for f in self._table.schema if f.name in self._tag_columns
-            )
+        # Always respect Arrow nullable flags: nullable=True → T | None,
+        # nullable=False → T. The nullable-stripping concern belongs exclusively
+        # at the data ingestion boundary (SourceStreamBuilder.build).
+        tag_schema = pa.schema(
+            f for f in self._table.schema if f.name in self._tag_columns
         )
-        system_tag_schema = _normalise(
-            pa.schema(
-                f for f in self._table.schema if f.name in self._system_tag_columns
-            )
+        system_tag_schema = pa.schema(
+            f for f in self._table.schema if f.name in self._system_tag_columns
         )
         all_tag_schema = arrow_utils.join_arrow_schemas(tag_schema, system_tag_schema)
-        packet_schema = _normalise(
-            pa.schema(
-                f for f in self._table.schema if f.name in self._packet_columns
-            )
+        packet_schema = pa.schema(
+            f for f in self._table.schema if f.name in self._packet_columns
         )
 
         self._tag_schema = tag_schema

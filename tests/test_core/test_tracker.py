@@ -55,35 +55,45 @@ def _make_pipeline(
 
 
 def _make_stream(n: int = 3) -> ArrowTableStream:
-    """Simple stream with tag=id, packet=x."""
+    """Simple stream with tag=id, packet=x. Uses nullable=False schema."""
+    schema = pa.schema(
+        [pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]
+    )
     table = pa.table(
-        {
-            "id": pa.array(list(range(n)), type=pa.int64()),
-            "x": pa.array(list(range(n)), type=pa.int64()),
-        }
+        {"id": pa.array(list(range(n)), type=pa.int64()), "x": pa.array(list(range(n)), type=pa.int64())},
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
 
 
 def _make_two_col_stream(n: int = 3) -> ArrowTableStream:
-    """Stream with tag=id, packet={a, b} for binary operator tests."""
+    """Stream with tag=id, packet={a, b} for binary operator tests. Uses nullable=False schema."""
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("a", pa.int64(), nullable=False),
+            pa.field("b", pa.int64(), nullable=False),
+        ]
+    )
     table = pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
             "a": pa.array(list(range(n)), type=pa.int64()),
             "b": pa.array([i * 10 for i in range(n)], type=pa.int64()),
-        }
+        },
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
 
 
 def _make_y_stream(n: int = 3) -> ArrowTableStream:
-    """Stream with tag=id, packet=y (non-overlapping with _make_stream)."""
+    """Stream with tag=id, packet=y (non-overlapping with _make_stream). Uses nullable=False schema."""
+    schema = pa.schema(
+        [pa.field("id", pa.int64(), nullable=False), pa.field("y", pa.int64(), nullable=False)]
+    )
     table = pa.table(
-        {
-            "id": pa.array(list(range(n)), type=pa.int64()),
-            "y": pa.array([i * 10 for i in range(n)], type=pa.int64()),
-        }
+        {"id": pa.array(list(range(n)), type=pa.int64()), "y": pa.array([i * 10 for i in range(n)], type=pa.int64())},
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
 

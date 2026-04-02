@@ -28,24 +28,47 @@ def to_upper(name: str) -> str:
 
 
 def make_int_stream(n: int = 3) -> ArrowTableStream:
-    """ArrowTableStream with tag=id (int), packet=x (int)."""
+    """ArrowTableStream with tag=id (int), packet=x (int).
+
+    Uses explicit nullable=False schema to simulate data that has been
+    processed through SourceStreamBuilder (which normalizes nullable flags).
+    """
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("x", pa.int64(), nullable=False),
+        ]
+    )
     table = pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
             "x": pa.array(list(range(n)), type=pa.int64()),
-        }
+        },
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
 
 
 def make_two_col_stream(n: int = 3) -> ArrowTableStream:
-    """ArrowTableStream with tag=id, packet={x, y} for add_pf."""
+    """ArrowTableStream with tag=id, packet={x, y} for add_pf.
+
+    Uses explicit nullable=False schema to simulate data that has been
+    processed through SourceStreamBuilder (which normalizes nullable flags).
+    """
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("x", pa.int64(), nullable=False),
+            pa.field("y", pa.int64(), nullable=False),
+        ]
+    )
     table = pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
             "x": pa.array(list(range(n)), type=pa.int64()),
             "y": pa.array([i * 10 for i in range(n)], type=pa.int64()),
-        }
+        },
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
 

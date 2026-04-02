@@ -56,12 +56,20 @@ def _make_node_with_system_tags(
     """Build a node whose input stream has an explicit system-tag column ('run')."""
     if db is None:
         db = InMemoryArrowDatabase()
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("run", pa.large_string(), nullable=False),
+            pa.field("x", pa.int64(), nullable=False),
+        ]
+    )
     table = pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
-            "run": pa.array([f"r{i}" for i in range(n)]),
+            "run": pa.array([f"r{i}" for i in range(n)], type=pa.large_string()),
             "x": pa.array(list(range(n)), type=pa.int64()),
-        }
+        },
+        schema=schema,
     )
     stream = ArrowTableStream(table, tag_columns=["id"], system_tag_columns=["run"])
     return FunctionNode(
@@ -344,7 +352,10 @@ class TestFunctionNodePipelineIdentity:
                 {
                     "id": pa.array([10, 11, 12], type=pa.int64()),
                     "x": pa.array([100, 200, 300], type=pa.int64()),
-                }
+                },
+                schema=pa.schema(
+                    [pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]
+                ),
             ),
             tag_columns=["id"],
         )

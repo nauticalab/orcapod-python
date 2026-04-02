@@ -470,32 +470,31 @@ class TestRecordBatchInput:
         assert p._source_info == {"a": "s1", "b": "s2"}
 
 
-class TestDatagramRespectNullable:
-    """respect_nullable controls whether raw Arrow nullable=True becomes T | None."""
+class TestDatagramNullablePreservation:
+    """Datagram always respects Arrow nullable flags.
 
-    def _make_nullable_table(self) -> pa.Table:
-        """Single-row Arrow table where all fields default to nullable=True."""
-        return pa.table({"val": pa.array([42], type=pa.int64())})
+    nullable=True  → T | None in schema()
+    nullable=False → T       in schema()
 
-    def test_default_strips_nullable_from_python_schema(self):
-        """Default respect_nullable=False: nullable Arrow fields → plain T in schema()."""
-        tbl = self._make_nullable_table()
+    The nullable-stripping concern belongs exclusively at the data ingestion
+    boundary (SourceStreamBuilder.build(respect_nullable=False)).
+    """
+
+    def test_nullable_true_fields_yield_optional_in_schema(self):
+        """nullable=True fields → T | None in schema()."""
+        tbl = pa.table({"val": pa.array([42], type=pa.int64())})
         assert tbl.schema.field("val").nullable is True
 
         d = Datagram(tbl)
-        assert d.schema()["val"] is int
-
-    def test_respect_nullable_true_yields_optional_in_schema(self):
-        """respect_nullable=True: nullable Arrow fields → T | None in schema()."""
-        tbl = self._make_nullable_table()
-        d = Datagram(tbl, respect_nullable=True)
         assert d.schema()["val"] == int | None
 
-    def test_non_nullable_field_stays_plain_when_respected(self):
-        """Even with respect_nullable=True, nullable=False fields stay plain T."""
+    def test_non_nullable_fields_yield_plain_type_in_schema(self):
+        """nullable=False fields → plain T in schema()."""
         tbl = pa.table(
             {"val": pa.array([1], type=pa.int64())},
             schema=pa.schema([pa.field("val", pa.int64(), nullable=False)]),
         )
-        d = Datagram(tbl, respect_nullable=True)
+        assert tbl.schema.field("val").nullable is False
+
+        d = Datagram(tbl)
         assert d.schema()["val"] is int

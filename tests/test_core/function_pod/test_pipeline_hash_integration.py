@@ -241,7 +241,13 @@ class TestTableStreamPipelineHash:
                 {
                     "id": pa.array([10, 11, 12], type=pa.int64()),
                     "x": pa.array([100, 200, 300], type=pa.int64()),
-                }
+                },
+                schema=pa.schema(
+                    [
+                        pa.field("id", pa.int64(), nullable=False),
+                        pa.field("x", pa.int64(), nullable=False),
+                    ]
+                ),
             ),
             tag_columns=["id"],
         )
@@ -251,11 +257,12 @@ class TestTableStreamPipelineHash:
     def test_table_stream_pipeline_hash_equals_source_pipeline_hash(self):
         """ArrowTableStream backed by a source should inherit the source's pipeline_hash
         at the stream level (it is the RootSource itself here)."""
+        _schema = pa.schema([pa.field("x", pa.int64(), nullable=False)])
         src = ArrowTableSource(
-            table=pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
+            table=pa.table({"x": pa.array([1, 2, 3], type=pa.int64())}, schema=_schema)
         )
         # The source IS a stream; its pipeline_hash is schema-only
-        s = ArrowTableStream(pa.table({"x": pa.array([1, 2, 3], type=pa.int64())}))
+        s = ArrowTableStream(pa.table({"x": pa.array([1, 2, 3], type=pa.int64())}, schema=_schema))
         # Both have same schema, so same pipeline_hash
         assert src.pipeline_hash() == s.pipeline_hash()
 
@@ -309,7 +316,13 @@ class TestFunctionNodePipelineHashFix:
                     {
                         "id": pa.array([10, 11, 12, 13], type=pa.int64()),
                         "x": pa.array([100, 200, 300, 400], type=pa.int64()),
-                    }
+                    },
+                    schema=pa.schema(
+                        [
+                            pa.field("id", pa.int64(), nullable=False),
+                            pa.field("x", pa.int64(), nullable=False),
+                        ]
+                    ),
                 ),
                 tag_columns=["id"],
             ),
@@ -336,7 +349,13 @@ class TestFunctionNodePipelineHashFix:
                     {
                         "id": pa.array([10, 11, 12], type=pa.int64()),
                         "x": pa.array([100, 200, 300], type=pa.int64()),
-                    }
+                    },
+                    schema=pa.schema(
+                        [
+                            pa.field("id", pa.int64(), nullable=False),
+                            pa.field("x", pa.int64(), nullable=False),
+                        ]
+                    ),
                 ),
                 tag_columns=["id"],
             ),

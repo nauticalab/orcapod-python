@@ -48,80 +48,86 @@ from orcapod.system_constants import constants
 # ---------------------------------------------------------------------------
 
 
+def _make_non_nullable_schema(*fields: tuple) -> "pa.Schema":
+    """Helper: build a pa.Schema with all fields nullable=False."""
+    return pa.schema([pa.field(name, typ, nullable=False) for name, typ in fields])
+
+
 def make_simple_stream() -> ArrowTableStream:
-    """Stream with 1 tag (animal) and 2 packet columns (weight, legs)."""
+    """Stream with 1 tag (animal) and 2 packet columns (weight, legs). Uses nullable=False schema."""
+    schema = _make_non_nullable_schema(
+        ("animal", pa.large_string()), ("weight", pa.float64()), ("legs", pa.int64())
+    )
     table = pa.table(
-        {
-            "animal": ["cat", "dog", "bird"],
-            "weight": [4.0, 12.0, 0.5],
-            "legs": [4, 4, 2],
-        }
+        {"animal": pa.array(["cat", "dog", "bird"], type=pa.large_string()),
+         "weight": pa.array([4.0, 12.0, 0.5], type=pa.float64()),
+         "legs": pa.array([4, 4, 2], type=pa.int64())},
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["animal"])
 
 
 def make_two_tag_stream() -> ArrowTableStream:
-    """Stream with 2 tags (region, animal) and 1 packet column (count)."""
+    """Stream with 2 tags (region, animal) and 1 packet column (count). Uses nullable=False schema."""
+    schema = _make_non_nullable_schema(
+        ("region", pa.large_string()), ("animal", pa.large_string()), ("count", pa.int64())
+    )
     table = pa.table(
-        {
-            "region": ["east", "east", "west"],
-            "animal": ["cat", "dog", "cat"],
-            "count": [10, 5, 8],
-        }
+        {"region": pa.array(["east", "east", "west"], type=pa.large_string()),
+         "animal": pa.array(["cat", "dog", "cat"], type=pa.large_string()),
+         "count": pa.array([10, 5, 8], type=pa.int64())},
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["region", "animal"])
 
 
 def make_int_stream(n: int = 3) -> ArrowTableStream:
-    """Stream with tag=id, packet=x (ints)."""
+    """Stream with tag=id, packet=x (ints). Uses nullable=False schema."""
+    schema = _make_non_nullable_schema(("id", pa.int64()), ("x", pa.int64()))
     table = pa.table(
-        {
-            "id": pa.array(list(range(n)), type=pa.int64()),
-            "x": pa.array(list(range(n)), type=pa.int64()),
-        }
+        {"id": pa.array(list(range(n)), type=pa.int64()), "x": pa.array(list(range(n)), type=pa.int64())},
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
 
 
 def make_two_col_stream(n: int = 3) -> ArrowTableStream:
-    """Stream with tag=id, packet={x, y}."""
+    """Stream with tag=id, packet={x, y}. Uses nullable=False schema."""
+    schema = _make_non_nullable_schema(("id", pa.int64()), ("x", pa.int64()), ("y", pa.int64()))
     table = pa.table(
-        {
-            "id": pa.array(list(range(n)), type=pa.int64()),
-            "x": pa.array(list(range(n)), type=pa.int64()),
-            "y": pa.array([i * 10 for i in range(n)], type=pa.int64()),
-        }
+        {"id": pa.array(list(range(n)), type=pa.int64()),
+         "x": pa.array(list(range(n)), type=pa.int64()),
+         "y": pa.array([i * 10 for i in range(n)], type=pa.int64())},
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
 
 
 def make_left_stream() -> ArrowTableStream:
+    schema = _make_non_nullable_schema(("id", pa.int64()), ("value_a", pa.int64()))
     table = pa.table(
-        {
-            "id": pa.array([1, 2, 3], type=pa.int64()),
-            "value_a": pa.array([10, 20, 30], type=pa.int64()),
-        }
+        {"id": pa.array([1, 2, 3], type=pa.int64()), "value_a": pa.array([10, 20, 30], type=pa.int64())},
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
 
 
 def make_right_stream() -> ArrowTableStream:
+    schema = _make_non_nullable_schema(("id", pa.int64()), ("value_b", pa.int64()))
     table = pa.table(
-        {
-            "id": pa.array([2, 3, 4], type=pa.int64()),
-            "value_b": pa.array([200, 300, 400], type=pa.int64()),
-        }
+        {"id": pa.array([2, 3, 4], type=pa.int64()), "value_b": pa.array([200, 300, 400], type=pa.int64())},
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
 
 
 def make_disjoint_stream() -> ArrowTableStream:
-    """Stream with same tags as simple_stream but different packet columns."""
+    """Stream with same tags as simple_stream but different packet columns. Uses nullable=False schema."""
+    schema = _make_non_nullable_schema(("animal", pa.large_string()), ("speed", pa.float64()))
     table = pa.table(
-        {
-            "animal": ["cat", "dog", "bird"],
-            "speed": [30.0, 45.0, 80.0],
-        }
+        {"animal": pa.array(["cat", "dog", "bird"], type=pa.large_string()),
+         "speed": pa.array([30.0, 45.0, 80.0], type=pa.float64())},
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["animal"])
 
