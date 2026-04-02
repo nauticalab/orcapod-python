@@ -411,3 +411,4 @@ def test_round_trip_preserves_optionality():
 
     assert recovered["required"] == int
     assert recovered["nullable_field"] == int | None
+    assert recovered == original

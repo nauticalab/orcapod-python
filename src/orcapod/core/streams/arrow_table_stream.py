@@ -119,21 +119,21 @@ class ArrowTableStream(StreamBase):
         # round-trip relies on nullable=False ↔ T and nullable=True ↔ T | None,
         # so raw tables (where nullable=True is always the default) must be
         # normalised to nullable=False to avoid spurious T | None types.
-        tag_schema = pa.schema(
-            pa.field(f.name, f.type, nullable=False)
-            for f in self._table.schema
-            if f.name in self._tag_columns
+        tag_schema = arrow_utils.make_schema_non_nullable(
+            pa.schema(
+                f for f in self._table.schema if f.name in self._tag_columns
+            )
         )
-        system_tag_schema = pa.schema(
-            pa.field(f.name, f.type, nullable=False)
-            for f in self._table.schema
-            if f.name in self._system_tag_columns
+        system_tag_schema = arrow_utils.make_schema_non_nullable(
+            pa.schema(
+                f for f in self._table.schema if f.name in self._system_tag_columns
+            )
         )
         all_tag_schema = arrow_utils.join_arrow_schemas(tag_schema, system_tag_schema)
-        packet_schema = pa.schema(
-            pa.field(f.name, f.type, nullable=False)
-            for f in self._table.schema
-            if f.name in self._packet_columns
+        packet_schema = arrow_utils.make_schema_non_nullable(
+            pa.schema(
+                f for f in self._table.schema if f.name in self._packet_columns
+            )
         )
 
         self._tag_schema = tag_schema
