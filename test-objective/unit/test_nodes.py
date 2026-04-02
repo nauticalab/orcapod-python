@@ -178,7 +178,7 @@ class TestFunctionNode:
         source = node.as_source()
         assert isinstance(source, DerivedSource)
 
-    def test_pipeline_path_uses_pipeline_hash(self):
+    def test_node_identity_path_uses_pipeline_hash(self):
         pf = PythonPacketFunction(_double, output_keys="result")
         pod = FunctionPod(packet_function=pf)
         stream = _make_stream()
@@ -190,7 +190,7 @@ class TestFunctionNode:
             pipeline_database=pipeline_db,
             result_database=result_db,
         )
-        path = node.pipeline_path
+        path = node.node_identity_path
         assert isinstance(path, tuple)
         assert len(path) > 0
 
