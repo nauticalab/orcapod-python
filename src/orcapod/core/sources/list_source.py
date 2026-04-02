@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any, Literal
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.protocols.core_protocols import TagProtocol
+from orcapod.types import SchemaLike
+from orcapod.utils import arrow_utils
 
 if TYPE_CHECKING:
     pass
@@ -30,6 +32,7 @@ class ListSource(RootSource):
         tag_function: Callable[[Any, int], dict[str, Any] | TagProtocol] | None = None,
         expected_tag_keys: Collection[str] | None = None,
         tag_function_hash_mode: Literal["content", "signature", "name"] = "name",
+        data_schema: SchemaLike | None = None,
         source_id: str | None = None,
         **kwargs: Any,
     ) -> None:
@@ -68,7 +71,14 @@ class ListSource(RootSource):
             else [k for k in (rows[0].keys() if rows else []) if k != name]
         )
 
-        arrow_table = self.data_context.type_converter.python_dicts_to_arrow_table(rows)
+        arrow_table = self.data_context.type_converter.python_dicts_to_arrow_table(
+            rows, python_schema=data_schema
+        )
+        if data_schema is None:
+            # No explicit schema — infer nullable from actual values.
+            # The type converter defaults all fields to nullable=True; derive
+            # the correct flags here so the builder can trust the schema as-is.
+            arrow_table = arrow_table.cast(arrow_utils.infer_schema_nullable(arrow_table))
 
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(

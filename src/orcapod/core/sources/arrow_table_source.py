@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
+from orcapod.utils import arrow_utils
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -27,6 +28,11 @@ class ArrowTableSource(RootSource):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
+
+        # Infer nullable from actual data: Arrow tables default all fields to
+        # nullable=True regardless of content; derive the correct flags here
+        # before the builder, which trusts the schema as-is.
+        table = table.cast(arrow_utils.infer_schema_nullable(table))
 
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(

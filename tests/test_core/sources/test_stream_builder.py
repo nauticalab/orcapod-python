@@ -84,8 +84,8 @@ class TestSourceStreamBuilder:
         assert "__system_col" not in packet_schema
 
 
-class TestSourceStreamBuilderRespectNullable:
-    """respect_nullable controls whether nullable Arrow fields become T | None."""
+class TestSourceStreamBuilderRespectsSchema:
+    """build() trusts the incoming table's nullable flags as-is."""
 
     @pytest.fixture
     def builder(self):
@@ -95,42 +95,40 @@ class TestSourceStreamBuilderRespectNullable:
         ctx = resolve_context(None)
         return SourceStreamBuilder(data_context=ctx, config=DEFAULT_CONFIG)
 
-    def _make_nullable_table(self) -> pa.Table:
-        """Arrow table where all fields default to nullable=True."""
-        return pa.table({"id": pa.array([1]), "val": pa.array([10], type=pa.int64())})
-
-    def test_default_strips_nullable_for_schema_hash(self, builder):
-        """Default respect_nullable=False: schema hash uses plain T types."""
-        table = self._make_nullable_table()
-        result_default = builder.build(table, tag_columns=["id"])
-
-        # Build explicit non-nullable schema to compare
-        non_nullable_table = pa.table(
-            {"id": pa.array([1]), "val": pa.array([10], type=pa.int64())},
-            schema=pa.schema(
-                [
-                    pa.field("id", pa.int64(), nullable=False),
-                    pa.field("val", pa.int64(), nullable=False),
-                ]
-            ),
-        )
-        result_non_nullable = builder.build(non_nullable_table, tag_columns=["id"])
-        assert result_default.schema_hash == result_non_nullable.schema_hash
-
-    def test_respect_nullable_true_uses_nullable_types_for_hash(self, builder):
-        """respect_nullable=True: schema hash uses T | None for nullable fields."""
-        table = self._make_nullable_table()
-        result_nullable = builder.build(table, tag_columns=["id"], respect_nullable=True)
-        result_default = builder.build(table, tag_columns=["id"])
-        # nullable and non-nullable schemas produce different hashes
-        assert result_nullable.schema_hash != result_default.schema_hash
-
-    def test_respect_nullable_true_output_schema_has_optional_types(self, builder):
-        """respect_nullable=True: output schema reflects T | None for nullable fields."""
-        table = self._make_nullable_table()
-        result = builder.build(table, tag_columns=["id"], respect_nullable=True)
+    def test_nullable_true_schema_preserved(self, builder):
+        """build() preserves nullable=True from incoming schema."""
+        table = pa.table({"id": pa.array([1]), "val": pa.array([10], type=pa.int64())})
+        # Arrow default: nullable=True
+        result = builder.build(table, tag_columns=["id"])
         _, packet_schema = result.stream.output_schema()
         assert packet_schema["val"] == int | None
+
+    def test_nullable_false_schema_preserved(self, builder):
+        """build() preserves nullable=False from incoming schema."""
+        table = pa.table(
+            {"id": pa.array([1]), "val": pa.array([10], type=pa.int64())},
+            schema=pa.schema([
+                pa.field("id", pa.int64(), nullable=False),
+                pa.field("val", pa.int64(), nullable=False),
+            ]),
+        )
+        result = builder.build(table, tag_columns=["id"])
+        _, packet_schema = result.stream.output_schema()
+        assert packet_schema["val"] is int
+
+    def test_nullable_flags_affect_schema_hash(self, builder):
+        """nullable=True and nullable=False schemas produce different hashes."""
+        nullable_table = pa.table({"id": pa.array([1]), "val": pa.array([10], type=pa.int64())})
+        non_nullable_table = pa.table(
+            {"id": pa.array([1]), "val": pa.array([10], type=pa.int64())},
+            schema=pa.schema([
+                pa.field("id", pa.int64(), nullable=False),
+                pa.field("val", pa.int64(), nullable=False),
+            ]),
+        )
+        result_nullable = builder.build(nullable_table, tag_columns=["id"])
+        result_non_nullable = builder.build(non_nullable_table, tag_columns=["id"])
+        assert result_nullable.schema_hash != result_non_nullable.schema_hash
 
 
 from orcapod.core.sources.arrow_table_source import ArrowTableSource

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
+from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -38,6 +39,7 @@ class CSVSource(RootSource):
 
         self._file_path = file_path
         table: pa.Table = pa_csv.read_csv(file_path)
+        table = table.cast(arrow_utils.infer_schema_nullable(table))
 
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(

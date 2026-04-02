@@ -773,5 +773,27 @@ def make_schema_non_nullable(schema: "pa.Schema") -> "pa.Schema":
     )
 
 
+def infer_schema_nullable(table: "pa.Table") -> "pa.Schema":
+    """Return a schema where each field's nullable flag is inferred from actual data.
+
+    A field is marked ``nullable=True`` if its column contains any null values,
+    ``nullable=False`` otherwise.  This is the right heuristic when receiving
+    a raw Arrow table whose schema has not been set deliberately — Arrow and
+    Polars default all fields to ``nullable=True`` regardless of content, so
+    inferring from the data avoids spurious ``T | None`` types for columns
+    that never contain nulls.
+
+    Args:
+        table: Arrow table to inspect.
+
+    Returns:
+        A new schema with nullable flags derived from actual null counts.
+    """
+    return pa.schema([
+        pa.field(field.name, field.type, nullable=table.column(i).null_count > 0, metadata=field.metadata)
+        for i, field in enumerate(table.schema)
+    ])
+
+
 if __name__ == "__main__":
     test_schema_normalization()

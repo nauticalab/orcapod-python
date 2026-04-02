@@ -467,8 +467,9 @@ class TestArrowTableStreamNullablePreservation:
     nullable=True  → T | None in output_schema
     nullable=False → T       in output_schema
 
-    The nullable-stripping concern belongs exclusively at the data ingestion
-    boundary (SourceStreamBuilder.build(respect_nullable=False)).
+    Callers are responsible for setting nullable correctly before passing a
+    table to ArrowTableStream or SourceStreamBuilder — use
+    ``arrow_utils.infer_schema_nullable(table)`` to derive flags from data.
     """
 
     def test_nullable_true_fields_yield_optional_in_output_schema(self):
@@ -506,11 +507,12 @@ class TestArrowTableStreamNullablePreservation:
         _, packet_schema = stream.output_schema()
         assert packet_schema["val"] is int
 
-    def test_source_stream_builder_strips_nullable_by_default(self):
-        """Via SourceStreamBuilder.build() default respect_nullable=False, output_schema returns plain T."""
+    def test_infer_schema_nullable_before_build_produces_plain_type(self):
+        """Applying infer_schema_nullable() before build() gives plain T for null-free columns."""
         from orcapod.config import DEFAULT_CONFIG
         from orcapod.contexts import resolve_context
         from orcapod.core.sources.stream_builder import SourceStreamBuilder
+        from orcapod.utils import arrow_utils
 
         ctx = resolve_context(None)
         builder = SourceStreamBuilder(data_context=ctx, config=DEFAULT_CONFIG)
@@ -524,7 +526,8 @@ class TestArrowTableStreamNullablePreservation:
         )
         assert table.schema.field("val").nullable is True
 
+        # Caller infers nullable before handing off to builder
+        table = table.cast(arrow_utils.infer_schema_nullable(table))
         result = builder.build(table, tag_columns=["tag"])
         _, packet_schema = result.stream.output_schema()
-        # Despite nullable=True in the raw table, build() normalizes to non-nullable
         assert packet_schema["val"] is int
