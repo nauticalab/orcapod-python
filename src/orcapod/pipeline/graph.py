@@ -1053,6 +1053,15 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             from orcapod.pipeline.observer import NoOpObserver
             pipeline._default_observer = NoOpObserver()
 
+        # Restore scoped database view fields so that result_database,
+        # status_database, and log_database properties return meaningful values
+        # on loaded pipelines (mirrors what compile() does at runtime).
+        pipeline._scoped_pipeline_database = pipeline_db
+        pipeline._result_database_scoped = result_db
+        if pipeline_db is not None:
+            pipeline._status_database = pipeline_db.at("_status")
+            pipeline._log_database = pipeline_db.at("_log")
+
         pipeline._compiled = True
 
         return pipeline

@@ -339,7 +339,7 @@ class TestMultipleFunctionNodesSeparateStatus:
 
 
 # ---------------------------------------------------------------------------
-# 9. get_status() returns combined status, filter by node_label column
+# 9. get_status() returns combined status across all node sub-paths
 # ---------------------------------------------------------------------------
 
 
