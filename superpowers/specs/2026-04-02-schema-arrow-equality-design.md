@@ -22,9 +22,9 @@ that together prove and document this correspondence.
 | Aspect | Behaviour |
 |---|---|
 | `Schema.__eq__` | Compares `_data` (dict, order-insensitive) **and** `_optional` (frozenset) |
-| `python_schema_to_arrow_schema` | Iterates fields in insertion order; ignores `optional_fields` |
+| `python_schema_to_arrow_schema` | Iterates fields in insertion order; ignores `optional_fields`; always sets `nullable=True` |
 | Arrow schema `==` | Order-sensitive, not normalised for `Utf8`/`LargeUtf8` |
-| `StarfixArrowHasher.hash_schema` | Column-order-independent, `Utf8`/`LargeUtf8` normalised |
+| `StarfixArrowHasher.hash_schema` | Column-order-independent; normalises `Utf8`/`LargeUtf8` and `Binary`/`LargeBinary` |
 
 ### The `optional_fields` asymmetry
 
@@ -36,6 +36,16 @@ Python-only concept with no Arrow representation.  This creates a directional mi
 
 The fix is not to paper over this with test caveats but to give `Schema` a method that
 returns its **structural** (Arrow-correspondent) view by stripping optionality.
+
+### Arrow nullability
+
+`python_schema_to_arrow_schema` always constructs Arrow fields with the default
+`nullable=True`, regardless of whether a field is in `optional_fields` or not.  There
+is therefore no Arrow-level nullability distinction between required and optional fields
+in this converter.  The "nullable vs non-nullable" edge case listed in PLT-923 is
+addressed by testing that `int | None` (a Python union) maps to the same Arrow type
+as plain `int` — both become `int64` with `nullable=True` — confirming no structural
+difference arises from this type variation.
 
 ---
 
@@ -65,6 +75,8 @@ This makes structural (Arrow-correspondent) equality expressible as:
 s1.as_required() == s2.as_required()
 ```
 
+The method is idempotent: `s.as_required().as_required() == s.as_required()`.
+
 ---
 
 ## New test file — `tests/test_semantic_types/test_schema_arrow_equality.py`
@@ -74,6 +86,8 @@ s1.as_required() == s2.as_required()
 Two module-level helpers power all tests:
 
 ```python
+# SemanticTypeRegistry is empty because hash_schema operates on Arrow types only
+# and does not consult the semantic registry (unlike hash_table).
 _hasher = StarfixArrowHasher(SemanticTypeRegistry(), hasher_id="test")
 
 def _to_arrow(schema: Schema) -> pa.Schema:
@@ -98,7 +112,11 @@ Cases:
 - Single primitive field (`int`, `float`, `str`, `bool`, `bytes`)
 - Multiple primitive fields
 - Schema created with keyword-argument syntax vs mapping syntax
-- `Schema` compared against a plain `dict` (uses the `Mapping` branch of `__eq__`)
+- Empty schema — `Schema.empty()` vs `Schema({})` (degenerate but valid; exercises
+  `ArrowDigester.hash_schema` on an empty `pa.schema([])`)
+- `Schema` compared against a plain `dict` (uses the `Mapping` branch of `__eq__`;
+  note: `Schema.__eq__` raises `NotImplementedError` for non-`Mapping` types rather
+  than returning `NotImplemented`, so test inputs must always be `Mapping` instances)
 
 #### `TestUnequalSchemasHaveLogicallyUnequalArrowSchemas`
 
@@ -107,9 +125,8 @@ logically unequal Arrow schemas.
 
 Cases:
 - Different field names (same type)
-- Different field types (same name)
-- Different number of fields (subset vs superset)
-- Same fields, one with an extra field
+- Different field types for the same field name (e.g. `int` vs `float`)
+- One schema is a strict subset of the other (missing field)
 
 #### `TestFieldOrderingDoesNotAffectLogicalEquality`
 
@@ -129,31 +146,45 @@ Cases:
 - `list[int]`, `list[str]`, `list[float]`
 - `list[list[int]]` (nested list)
 - `Path` (maps to Arrow struct `{path: large_string}`)
-- Optional union `int | None` (maps to nullable int64)
+- `int | None` — maps to the same `int64` Arrow type as plain `int` (the Python union
+  strips `None`; `nullable=True` is the default for all fields regardless; no Arrow
+  structural difference arises)
 
 #### `TestAsRequired`
 
-Verify the `as_required()` method and document the `optional_fields` design intentionality.
+Verify the `as_required()` method and document the `optional_fields` design
+intentionality.
 
 Cases:
-- `schema.as_required()` returns a schema equal to a schema with no optional fields
-- `schema.as_required()` on a schema with no optional fields returns an equal schema (idempotent)
-- Two schemas that differ only in `optional_fields` are Python-unequal but
-  `s1.as_required() == s2.as_required()` is True
-- Two schemas that differ only in `optional_fields` produce logically equal Arrow schemas
-- `s1.as_required() == s2.as_required()` ↔ `_arrow_logical_eq(_to_arrow(s1), _to_arrow(s2))`
-  for representative pairs (the central correspondence claim)
+1. `schema.as_required()` on a schema with optional fields returns a schema equal to
+   the same schema constructed without `optional_fields`
+2. `schema.as_required()` on a schema with no optional fields returns a schema equal
+   to the original (no-op)
+3. Idempotency: `s.as_required().as_required() == s.as_required()`
+4. Two schemas that differ only in `optional_fields` are Python-unequal but
+   `s1.as_required() == s2.as_required()` is `True`
+5. Two schemas that differ only in `optional_fields` produce logically equal Arrow
+   schemas: `_arrow_logical_eq(_to_arrow(s1), _to_arrow(s2))` is `True`
+6. The central correspondence claim (one direction):
+   `s1.as_required() == s2.as_required()` **implies** `_arrow_logical_eq(_to_arrow(s1), _to_arrow(s2))`
+   for representative pairs (equal schemas, schemas differing only in optional fields).
+   The reverse direction (`arrow_logical_eq` implies `as_required()` equality) is not
+   separately asserted because it is already covered by the negative cases in
+   `TestUnequalSchemasHaveLogicallyUnequalArrowSchemas`.
 
 ---
 
 ## Success criteria (from PLT-923)
 
-- Tests verifying: if two `Schema` objects are equal, their Arrow conversions are also logically equal ✓
-- Tests covering field ordering ✓
-- Tests covering metadata differences (metadata is not produced by `python_schema_to_arrow_schema`) ✓
-- Tests covering nested types ✓
-- Tests covering nullable vs non-nullable (optional_fields ↔ Arrow nullability) ✓
-- `Schema.as_required()` method added and tested ✓
+| Criterion | Status |
+|---|---|
+| Tests verifying: if two `Schema` objects are equal, their Arrow conversions are also logically equal | ✓ |
+| Tests covering field ordering | ✓ |
+| Tests covering metadata differences | ✓ (Python schemas produce no Arrow field metadata; covered implicitly by all cases) |
+| Tests covering nested types | ✓ |
+| Tests covering `int \| None` union (nullable variant of a type) | ✓ (maps to same Arrow type as `int`; tested explicitly) |
+| Arrow field `nullable=True/False` distinction | N/A — converter always emits `nullable=True`; no Python-Schema concept maps to `nullable=False` |
+| `Schema.as_required()` method added and tested | ✓ |
 
 ---
 
