@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
-from orcapod.utils import polars_data_utils
+from orcapod.utils import arrow_utils, polars_data_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -58,9 +58,14 @@ class DataFrameSource(RootSource):
         if missing:
             raise ValueError(f"TagProtocol column(s) not found in data: {missing}")
 
+        arrow_table = df.to_arrow()
+        # Polars (like plain Arrow) defaults all fields to nullable=True; infer
+        # the correct flags from the actual data before passing to the builder.
+        arrow_table = arrow_table.cast(arrow_utils.infer_schema_nullable(arrow_table))
+
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(
-            df.to_arrow(),
+            arrow_table,
             tag_columns=tag_columns,
             source_id=self._source_id,
             system_tag_columns=system_tag_columns,

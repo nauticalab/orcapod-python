@@ -476,8 +476,9 @@ class TestDatagramNullablePreservation:
     nullable=True  → T | None in schema()
     nullable=False → T       in schema()
 
-    The nullable-stripping concern belongs exclusively at the data ingestion
-    boundary (SourceStreamBuilder.build(respect_nullable=False)).
+    Callers must set nullable correctly before passing a table to
+    SourceStreamBuilder — use ``arrow_utils.infer_schema_nullable(table)``
+    to derive flags from data when no explicit schema is available.
     """
 
     def test_nullable_true_fields_yield_optional_in_schema(self):

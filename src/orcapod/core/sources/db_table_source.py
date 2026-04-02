@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
+from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -109,6 +110,7 @@ class DBTableSource(RootSource):
         if not batches:
             raise ValueError(f"Table {table_name!r} is empty.")
         table: pa.Table = pa.Table.from_batches(batches)
+        table = table.cast(arrow_utils.infer_schema_nullable(table))
 
         # Step 4: Enrich via SourceStreamBuilder (same pipeline as all other RootSources)
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)

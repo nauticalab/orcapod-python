@@ -70,12 +70,18 @@ class SourceStreamBuilder:
         source_id: str | None = None,
         record_id_column: str | None = None,
         system_tag_columns: Collection[str] = (),
-        respect_nullable: bool = False,
     ) -> SourceStreamResult:
         """Run the full enrichment pipeline.
 
+        The builder trusts the incoming table's nullable flags as-is.
+        Callers are responsible for setting nullable correctly before calling
+        this method — use ``arrow_utils.infer_schema_nullable(table)`` when
+        receiving a raw Arrow table whose schema has not been set deliberately
+        (e.g. from Polars or plain ``pa.table({})``, which default all fields
+        to ``nullable=True`` regardless of content).
+
         Args:
-            table: Raw Arrow table (system columns will be stripped).
+            table: Arrow table with nullable flags already set correctly.
             tag_columns: Column names forming the tag for each row.
             source_id: Canonical source name. Defaults to table hash.
             record_id_column: Column for stable record IDs in provenance.
@@ -109,17 +115,11 @@ class SourceStreamBuilder:
             )
 
         # 4. Compute schema hash from tag/packet python schemas.
+        # Nullable flags in the incoming table are trusted as-is — callers must
+        # set them correctly before calling build().
         non_sys = arrow_data_utils.drop_system_columns(table)
         tag_schema = non_sys.select(list(tag_columns_tuple)).schema
         packet_schema = non_sys.drop(list(tag_columns_tuple)).schema
-        # By default, normalise to non-nullable: raw Arrow tables default to
-        # nullable=True for all fields. arrow_schema_to_python_schema maps
-        # nullable=True → T | None, so we strip nullability to get plain Python
-        # types for hashing. Set respect_nullable=True to opt-in to preserving
-        # Arrow nullable flags so that nullable=True fields yield T | None.
-        if not respect_nullable:
-            tag_schema = arrow_utils.make_schema_non_nullable(tag_schema)
-            packet_schema = arrow_utils.make_schema_non_nullable(packet_schema)
         tag_python = self._data_context.type_converter.arrow_schema_to_python_schema(
             tag_schema
         )
@@ -162,11 +162,8 @@ class SourceStreamBuilder:
             record_id_values,
         )
 
-        # 10. Normalize table nullable flags if requested, then wrap in ArrowTableStream.
-        # ArrowTableStream always respects Arrow nullable flags, so the stripping
-        # must happen here — at the data ingestion boundary.
-        if not respect_nullable:
-            table = table.cast(arrow_utils.make_schema_non_nullable(table.schema))
+        # 10. Wrap in ArrowTableStream. Nullable flags are already correct —
+        # the caller is responsible for setting them before calling build().
         stream = ArrowTableStream(
             table=table,
             tag_columns=tag_columns_tuple,
