@@ -41,7 +41,7 @@ def _make_source(tag_col: str, packet_col: str, data: dict) -> ArrowTableSource:
             packet_col: pa.array(data[packet_col], type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=[tag_col])
+    return ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
 
 
 def _make_two_sources():
@@ -893,7 +893,7 @@ class TestHashChainDetaching:
                 "total": pa.array([999, 888], type=pa.int64()),
             }
         )
-        fresh_src = ArrowTableSource(fresh_table, tag_columns=["key"])
+        fresh_src = ArrowTableSource(fresh_table, tag_columns=["key"], infer_nullable=True)
         db_fresh = InMemoryArrowDatabase()
         pipe_fresh = Pipeline(name="fresh_pipe", pipeline_database=db_fresh)
         with pipe_fresh:
@@ -1447,6 +1447,7 @@ class TestSourceNodesInPipeline:
             ),
             tag_columns=["key"],
             label="my_source",
+            infer_nullable=True,
         )
         pf = PythonPacketFunction(double_value, output_keys="result")
         pod = FunctionPod(packet_function=pf)

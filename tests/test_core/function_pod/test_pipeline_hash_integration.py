@@ -92,7 +92,8 @@ class TestPipelineElementBase:
 
     def test_root_source_satisfies_pipeline_element_protocol(self):
         src = ArrowTableSource(
-            table=pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
+            table=pa.table({"x": pa.array([1, 2, 3], type=pa.int64())}),
+            infer_nullable=True,
         )
         assert isinstance(src, PipelineElementProtocol)
 
@@ -160,24 +161,26 @@ class TestRootSourcePipelineHash:
         must share pipeline_hash (schema-only base case)."""
         t1 = pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
         t2 = pa.table({"x": pa.array([99, 100, 101], type=pa.int64())})
-        src1 = ArrowTableSource(table=t1)
-        src2 = ArrowTableSource(table=t2)
+        src1 = ArrowTableSource(table=t1, infer_nullable=True)
+        src2 = ArrowTableSource(table=t2, infer_nullable=True)
         assert src1.pipeline_hash() == src2.pipeline_hash()
 
     def test_same_schema_different_data_different_content_hash(self):
         """Counterpart: same schema → same pipeline_hash but different content_hash."""
         t1 = pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
         t2 = pa.table({"x": pa.array([99, 100, 101], type=pa.int64())})
-        src1 = ArrowTableSource(table=t1)
-        src2 = ArrowTableSource(table=t2)
+        src1 = ArrowTableSource(table=t1, infer_nullable=True)
+        src2 = ArrowTableSource(table=t2, infer_nullable=True)
         assert src1.content_hash() != src2.content_hash()
 
     def test_different_schema_different_pipeline_hash(self):
         src_x = ArrowTableSource(
-            table=pa.table({"x": pa.array([1, 2], type=pa.int64())})
+            table=pa.table({"x": pa.array([1, 2], type=pa.int64())}),
+            infer_nullable=True,
         )
         src_y = ArrowTableSource(
-            table=pa.table({"y": pa.array([1, 2], type=pa.int64())})
+            table=pa.table({"y": pa.array([1, 2], type=pa.int64())}),
+            infer_nullable=True,
         )
         assert src_x.pipeline_hash() != src_y.pipeline_hash()
 
@@ -189,14 +192,14 @@ class TestRootSourcePipelineHash:
                 "val": pa.array([10, 20], type=pa.int64()),
             }
         )
-        src_with_tag = ArrowTableSource(table=table, tag_columns=["id"])
-        src_no_tag = ArrowTableSource(table=table)
+        src_with_tag = ArrowTableSource(table=table, tag_columns=["id"], infer_nullable=True)
+        src_no_tag = ArrowTableSource(table=table, infer_nullable=True)
         assert src_with_tag.pipeline_hash() != src_no_tag.pipeline_hash()
 
     def test_dict_source_same_schema_shares_pipeline_hash_with_arrow_source(self):
         """DictSource and ArrowTableSource with identical schemas share pipeline_hash."""
         arrow_table = pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
-        arrow_src = ArrowTableSource(table=arrow_table)
+        arrow_src = ArrowTableSource(table=arrow_table, infer_nullable=True)
 
         dict_src = DictSource(
             data=[{"x": 10}, {"x": 20}, {"x": 30}],
@@ -207,8 +210,8 @@ class TestRootSourcePipelineHash:
 
     def test_pipeline_hash_stable_across_instances(self):
         t = pa.table({"x": pa.array([1, 2], type=pa.int64())})
-        src1 = ArrowTableSource(table=t)
-        src2 = ArrowTableSource(table=t)
+        src1 = ArrowTableSource(table=t, infer_nullable=True)
+        src2 = ArrowTableSource(table=t, infer_nullable=True)
         assert src1.pipeline_hash() == src2.pipeline_hash()
 
 

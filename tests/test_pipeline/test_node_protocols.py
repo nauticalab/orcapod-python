@@ -153,7 +153,7 @@ class TestSourceNodeExecute:
             "key": pa.array(["a", "b", "c"], type=pa.large_string()),
             "value": pa.array([1, 2, 3], type=pa.int64()),
         })
-        src = ArrowTableSource(table, tag_columns=["key"])
+        src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
         return SourceNode(src)
 
     def test_execute_returns_list(self):
@@ -204,7 +204,7 @@ class TestSourceNodeAsyncExecuteProtocol:
             "key": pa.array(["a", "b"], type=pa.large_string()),
             "value": pa.array([1, 2], type=pa.int64()),
         })
-        src = ArrowTableSource(table, tag_columns=["key"])
+        src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
         node = SourceNode(src)
 
         output_ch = Channel(buffer_size=16)
@@ -218,7 +218,7 @@ class TestSourceNodeAsyncExecuteProtocol:
             "key": pa.array(["a"], type=pa.large_string()),
             "value": pa.array([1], type=pa.int64()),
         })
-        src = ArrowTableSource(table, tag_columns=["key"])
+        src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
         node = SourceNode(src)
         events = []
 
@@ -256,7 +256,7 @@ class TestFunctionNodeExecute:
             "key": pa.array(["a", "b"], type=pa.large_string()),
             "value": pa.array([1, 2], type=pa.int64()),
         })
-        src = ArrowTableSource(table, tag_columns=["key"])
+        src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
         pf = PythonPacketFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
         return FunctionNode(pod, src)
@@ -313,7 +313,7 @@ class TestFunctionNodeAsyncExecute:
             "key": pa.array(["a", "b"], type=pa.large_string()),
             "value": pa.array([1, 2], type=pa.int64()),
         })
-        src = ArrowTableSource(table, tag_columns=["key"])
+        src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
         pf = PythonPacketFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
         node = FunctionNode(pod, src)
@@ -337,7 +337,7 @@ class TestFunctionNodeAsyncExecute:
             "key": pa.array(["a"], type=pa.large_string()),
             "value": pa.array([1], type=pa.int64()),
         })
-        src = ArrowTableSource(table, tag_columns=["key"])
+        src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
         pf = PythonPacketFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
         node = FunctionNode(pod, src)
@@ -390,8 +390,8 @@ class TestOperatorNodeExecute:
             "key": pa.array(["a", "b"], type=pa.large_string()),
             "score": pa.array([100, 200], type=pa.int64()),
         })
-        src_a = ArrowTableSource(table_a, tag_columns=["key"])
-        src_b = ArrowTableSource(table_b, tag_columns=["key"])
+        src_a = ArrowTableSource(table_a, tag_columns=["key"], infer_nullable=True)
+        src_b = ArrowTableSource(table_b, tag_columns=["key"], infer_nullable=True)
         return OperatorNode(Join(), input_streams=[src_a, src_b])
 
     def test_execute_with_observer(self):
@@ -435,7 +435,7 @@ class TestOperatorNodeAsyncExecute:
             "key": pa.array(["a", "b"], type=pa.large_string()),
             "value": pa.array([10, 20], type=pa.int64()),
         })
-        src_a = ArrowTableSource(table_a, tag_columns=["key"])
+        src_a = ArrowTableSource(table_a, tag_columns=["key"], infer_nullable=True)
         op = SelectPacketColumns(columns=["value"])
         op_node = OperatorNode(op, input_streams=[src_a])
 

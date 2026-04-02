@@ -469,7 +469,7 @@ class TestArrowTableSourceAdditional:
     def test_table_property_returns_enriched_table(self):
         """The .table property returns the internal PA table including system cols."""
         table = pa.table({"x": pa.array([1, 2], type=pa.int64())})
-        src = ArrowTableSource(table=table)
+        src = ArrowTableSource(table=table, infer_nullable=True)
         enriched = src.table
         assert isinstance(enriched, pa.Table)
         # The enriched table includes source-info and system-tag columns
@@ -482,6 +482,7 @@ class TestArrowTableSourceAdditional:
             table=table,
             tag_columns=["user_id"],
             source_id="my_source",
+            infer_nullable=True,
         )
         assert src.source_id == "my_source"
         t = src.as_table(all_info=True)
@@ -492,14 +493,14 @@ class TestArrowTableSourceAdditional:
     def test_resolve_field_raises_not_implemented(self):
         """ArrowTableSource no longer implements resolve_field."""
         table = pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
-        src = ArrowTableSource(table=table)
+        src = ArrowTableSource(table=table, infer_nullable=True)
         with pytest.raises(NotImplementedError):
             src.resolve_field("row_0", "x")
 
     def test_system_tag_columns_forwarded_to_stream(self):
         """system_tag_columns passed at construction are preserved."""
         table = pa.table({"x": pa.array([1, 2], type=pa.int64())})
-        src = ArrowTableSource(table=table, system_tag_columns=["sys_col"])
+        src = ArrowTableSource(table=table, system_tag_columns=["sys_col"], infer_nullable=True)
         assert "sys_col" in src._system_tag_columns
 
     def test_as_table_all_info_includes_system_tag_columns(self):
@@ -507,7 +508,7 @@ class TestArrowTableSourceAdditional:
         from orcapod.system_constants import constants
 
         table = pa.table({"x": pa.array([1, 2], type=pa.int64())})
-        src = ArrowTableSource(table=table)
+        src = ArrowTableSource(table=table, infer_nullable=True)
         enriched = src.as_table(all_info=True)
         assert any(
             c.startswith(constants.SYSTEM_TAG_SOURCE_ID_PREFIX)
@@ -521,7 +522,7 @@ class TestArrowTableSourceAdditional:
     def test_resolve_field_on_empty_record_id_prefix_raises(self):
         """An empty string record_id raises NotImplementedError."""
         table = pa.table({"x": pa.array([1, 2], type=pa.int64())})
-        src = ArrowTableSource(table=table)
+        src = ArrowTableSource(table=table, infer_nullable=True)
         with pytest.raises(NotImplementedError):
             src.resolve_field("", "x")
 
@@ -534,7 +535,7 @@ class TestArrowTableSourceAdditional:
             }
         )
         with pytest.raises(ValueError, match="tag_columns not found in table"):
-            ArrowTableSource(table=table, tag_columns=["nonexistent", "id"])
+            ArrowTableSource(table=table, tag_columns=["nonexistent", "id"], infer_nullable=True)
 
     def test_tag_columns_all_missing_raises(self):
         """All tag_columns missing from the table raises ValueError."""
@@ -545,7 +546,7 @@ class TestArrowTableSourceAdditional:
             }
         )
         with pytest.raises(ValueError, match="tag_columns not found in table"):
-            ArrowTableSource(table=table, tag_columns=["foo", "bar"])
+            ArrowTableSource(table=table, tag_columns=["foo", "bar"], infer_nullable=True)
 
     def test_tag_columns_all_valid_succeeds(self):
         """tag_columns that all exist in the table work correctly."""
@@ -555,7 +556,7 @@ class TestArrowTableSourceAdditional:
                 "val": pa.array([42], type=pa.int64()),
             }
         )
-        src = ArrowTableSource(table=table, tag_columns=["id"])
+        src = ArrowTableSource(table=table, tag_columns=["id"], infer_nullable=True)
         tag_keys, packet_keys = src.keys()
         assert "id" in tag_keys
         assert "val" in packet_keys
@@ -570,6 +571,7 @@ def _make_src(source_id: str | None = None) -> ArrowTableSource:
     return ArrowTableSource(
         table=pa.table({"x": pa.array([1], type=pa.int64())}),
         source_id=source_id,
+        infer_nullable=True,
     )
 
 

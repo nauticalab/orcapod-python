@@ -40,7 +40,7 @@ def _make_stream(n: int = 3) -> ArrowTableSource:
             "x": pa.array([i * 10 for i in range(n)], type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=["id"])
+    return ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
 
 
 class TestBasicTrackerManager:

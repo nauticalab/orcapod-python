@@ -245,6 +245,7 @@ class TestSelectTagColumnsStreaming:
                 }
             ),
             tag_columns=["region", "animal"],
+            infer_nullable=True,
         )
         op = SelectTagColumns(columns=["region"])
         results = await run_unary(op, src)
@@ -333,6 +334,7 @@ class TestSelectPacketColumnsStreaming:
                 }
             ),
             tag_columns=["animal"],
+            infer_nullable=True,
         )
         op = SelectPacketColumns(columns=["weight"])
         results = await run_unary(op, src)
@@ -478,6 +480,7 @@ class TestDropPacketColumnsStreaming:
                 }
             ),
             tag_columns=["animal"],
+            infer_nullable=True,
         )
         op = DropPacketColumns(columns=["legs"])
         results = await run_unary(op, src)
@@ -630,6 +633,7 @@ class TestMapPacketsStreaming:
                 }
             ),
             tag_columns=["animal"],
+            infer_nullable=True,
         )
         op = MapPackets(name_map={"weight": "mass"})
         results = await run_unary(op, src)
@@ -1672,7 +1676,7 @@ def _make_source(tag_col: str, packet_col: str, data: dict) -> ArrowTableStream:
             packet_col: pa.array(data[packet_col], type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=[tag_col])
+    return ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
 
 
 async def run_binary_validated(

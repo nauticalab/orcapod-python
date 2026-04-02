@@ -7,7 +7,7 @@ from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import PacketProtocol, StreamProtocol, TagProtocol
 from orcapod.types import ColumnConfig, Schema
-from orcapod.utils import arrow_utils, schema_utils
+from orcapod.utils import schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:

@@ -860,6 +860,7 @@ class TestBMIPipelineEndToEnd:
             ),
             tag_columns=["person_id"],
             source_id="heights",
+            infer_nullable=True,
         )
         weights = ArrowTableSource(
             pa.table(
@@ -870,6 +871,7 @@ class TestBMIPipelineEndToEnd:
             ),
             tag_columns=["person_id"],
             source_id="weights",
+            infer_nullable=True,
         )
         return heights, weights
 

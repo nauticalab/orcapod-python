@@ -212,6 +212,7 @@ def dict_source() -> DictSource:
     return DictSource(
         {"id": [1, 2, 3], "value": [10, 20, 30]},
         tag_columns=["id"],
+        infer_nullable=True,
     )
 
 

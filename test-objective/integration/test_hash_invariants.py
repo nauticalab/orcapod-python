@@ -28,7 +28,7 @@ def _double(x: int) -> int:
 
 def _make_source(data: dict, tag_columns: list[str]) -> ArrowTableSource:
     table = pa.table(data)
-    return ArrowTableSource(table, tag_columns=tag_columns)
+    return ArrowTableSource(table, tag_columns=tag_columns, infer_nullable=True)
 
 
 # ===================================================================

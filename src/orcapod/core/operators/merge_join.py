@@ -284,12 +284,16 @@ class MergeJoin(BinaryOperator):
         other_cols = [c for c in joined.column_names if c not in all_tag_keys]
         joined = joined.select(tag_cols + other_cols)
 
-        # Rebuild schema with nullable=False to avoid spurious T | None types.
+        # Derive nullable per column from actual null counts: only columns that
+        # genuinely contain nulls (e.g. legitimately Optional fields) are kept
+        # nullable=True; the rest become nullable=False.  This avoids both the
+        # "spurious T | None from Polars default" and the opposite mistake of
+        # forcing nullable=False on columns that actually have nulls.
         # pa.Table.cast() is not used here because list columns may fail validation.
-        new_schema = arrow_utils.make_schema_non_nullable(joined.schema)
+        inferred_schema = arrow_utils.infer_schema_nullable(joined)
         joined = pa.Table.from_arrays(
             [joined.column(i) for i in range(joined.num_columns)],
-            schema=new_schema,
+            schema=inferred_schema,
         )
         return ArrowTableStream(
             joined,

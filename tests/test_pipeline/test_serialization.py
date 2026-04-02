@@ -62,8 +62,8 @@ def multi_source_pipeline(tmp_path):
             "score": pa.array([100, 200], type=pa.int64()),
         }
     )
-    src_a = ArrowTableSource(table_a, tag_columns=["key"], source_id="src_a")
-    src_b = ArrowTableSource(table_b, tag_columns=["key"], source_id="src_b")
+    src_a = ArrowTableSource(table_a, tag_columns=["key"], source_id="src_a", infer_nullable=True)
+    src_b = ArrowTableSource(table_b, tag_columns=["key"], source_id="src_b", infer_nullable=True)
 
     def add_values(value: int, score: int) -> dict[str, int]:
         return {"total": value + score}
@@ -1682,8 +1682,8 @@ def test_operator_node_pipeline_path_two_level(tmp_path):
             "score": pa.array([100, 200], type=pa.int64()),
         }
     )
-    src_a = ArrowTableSource(table_a, tag_columns=["key"], source_id="src_a")
-    src_b = ArrowTableSource(table_b, tag_columns=["key"], source_id="src_b")
+    src_a = ArrowTableSource(table_a, tag_columns=["key"], source_id="src_a", infer_nullable=True)
+    src_b = ArrowTableSource(table_b, tag_columns=["key"], source_id="src_b", infer_nullable=True)
     join = Join()
 
     pipeline = Pipeline(name="test", pipeline_database=db)

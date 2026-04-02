@@ -193,7 +193,7 @@ class TestSourceLabelDefaults:
 
     def test_arrow_table_source_label_defaults_to_class_name(self):
         table = pa.table({"id": pa.array([1, 2]), "x": pa.array([10, 20])})
-        src = ArrowTableSource(table=table, tag_columns=["id"])
+        src = ArrowTableSource(table=table, tag_columns=["id"], infer_nullable=True)
         assert src.label == "ArrowTableSource"
 
     def test_list_source_label_defaults_to_class_name(self):

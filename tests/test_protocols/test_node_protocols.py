@@ -23,7 +23,7 @@ def _sample_source():
             "value": pa.array([1, 2], type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=["key"])
+    return ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
 
 
 @pytest.fixture
