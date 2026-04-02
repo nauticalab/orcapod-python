@@ -39,7 +39,7 @@ def _make_source(tag_col: str, packet_col: str, data: dict) -> ArrowTableSource:
             packet_col: pa.array(data[packet_col], type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=[tag_col])
+    return ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
 
 
 def _make_two_sources() -> tuple[ArrowTableSource, ArrowTableSource]:

@@ -28,7 +28,7 @@ def function_node_with_db():
             "value": pa.array([1, 2], type=pa.int64()),
         }
     )
-    src = ArrowTableSource(table, tag_columns=["key"])
+    src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
     pf = PythonPacketFunction(double_value, output_keys="result")
     pod = FunctionPod(pf)
     pipeline_db = InMemoryArrowDatabase()
@@ -50,7 +50,7 @@ def function_node_no_db():
             "value": pa.array([1, 2], type=pa.int64()),
         }
     )
-    src = ArrowTableSource(table, tag_columns=["key"])
+    src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
     pf = PythonPacketFunction(double_value, output_keys="result")
     pod = FunctionPod(pf)
     return FunctionNode(pod, src)

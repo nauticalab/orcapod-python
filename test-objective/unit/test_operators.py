@@ -170,10 +170,12 @@ class TestJoin:
         sa = ArrowTableSource(
             pa.table({"id": pa.array([2, 3], type=pa.int64()), "a": pa.array([10, 20], type=pa.int64())}),
             tag_columns=["id"],
+            infer_nullable=True,
         )
         sb = ArrowTableSource(
             pa.table({"id": pa.array([2, 3], type=pa.int64()), "b": pa.array([30, 40], type=pa.int64())}),
             tag_columns=["id"],
+            infer_nullable=True,
         )
         join = Join()
         result = join.process(sa, sb)

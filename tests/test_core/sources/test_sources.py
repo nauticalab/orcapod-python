@@ -40,6 +40,7 @@ def _make_arrow_source(record_id_column=None, source_id=None):
         tag_columns=["user_id"],
         record_id_column=record_id_column,
         source_id=source_id,
+        infer_nullable=True,
     )
 
 
@@ -68,8 +69,8 @@ class TestSourceId:
     def test_different_content_different_source_id(self):
         table_a = pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
         table_b = pa.table({"x": pa.array([4, 5, 6], type=pa.int64())})
-        src_a = ArrowTableSource(table=table_a)
-        src_b = ArrowTableSource(table=table_b)
+        src_a = ArrowTableSource(table=table_a, infer_nullable=True)
+        src_b = ArrowTableSource(table=table_b, infer_nullable=True)
         assert src_a.source_id != src_b.source_id
 
 
@@ -132,7 +133,7 @@ class TestArrowTableSourceRecordIdColumnValidation:
     def test_nonexistent_record_id_column_raises_at_construction(self):
         table = pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
         with pytest.raises(ValueError, match="record_id_column"):
-            ArrowTableSource(table=table, record_id_column="nonexistent")
+            ArrowTableSource(table=table, record_id_column="nonexistent", infer_nullable=True)
 
 
 # ---------------------------------------------------------------------------

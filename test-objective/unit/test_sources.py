@@ -42,7 +42,7 @@ class TestArrowTableSourceConstruction:
 
     def test_normal_construction(self):
         """A valid table with tag columns constructs successfully."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
         assert source is not None
 
     def test_empty_table_constructs_successfully(self):
@@ -53,7 +53,7 @@ class TestArrowTableSourceConstruction:
                 "age": pa.array([], type=pa.int64()),
             }
         )
-        source = ArrowTableSource(empty, tag_columns=["name"])
+        source = ArrowTableSource(empty, tag_columns=["name"], infer_nullable=True)
         assert source is not None
         assert source.as_table().num_rows == 0
 
@@ -61,25 +61,25 @@ class TestArrowTableSourceConstruction:
         """Specifying tag columns not in the table raises ValueError."""
         table = _simple_table()
         with pytest.raises(ValueError, match="tag_columns"):
-            ArrowTableSource(table, tag_columns=["nonexistent"])
+            ArrowTableSource(table, tag_columns=["nonexistent"], infer_nullable=True)
 
     def test_adds_system_tag_column(self):
         """The source auto-adds system tag columns to the underlying table."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
         table = source.as_table(all_info=True)
         system_tag_cols = [c for c in table.column_names if c.startswith("_tag_")]
         assert len(system_tag_cols) > 0
 
     def test_adds_source_info_columns(self):
         """The source adds source info columns (prefixed with _source_)."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
         table = source.as_table(columns=ColumnConfig(source=True))
         source_cols = [c for c in table.column_names if c.startswith("_source_")]
         assert len(source_cols) > 0
 
     def test_source_id_populated(self):
         """source_id property is populated (defaults to table hash)."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
         assert source.source_id is not None
         assert len(source.source_id) > 0
 
@@ -89,22 +89,23 @@ class TestArrowTableSourceConstruction:
             _simple_table(),
             tag_columns=["name"],
             source_id="my_source",
+            infer_nullable=True,
         )
         assert source.source_id == "my_source"
 
     def test_producer_is_none(self):
         """Root sources have producer == None."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
         assert source.producer is None
 
     def test_upstreams_is_empty(self):
         """Root sources have empty upstreams tuple."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
         assert source.upstreams == ()
 
     def test_no_tag_columns_valid(self):
         """Construction with no tag columns is valid (all columns are packets)."""
-        source = ArrowTableSource(_simple_table(), tag_columns=[])
+        source = ArrowTableSource(_simple_table(), tag_columns=[], infer_nullable=True)
         tag_keys, packet_keys = source.keys()
         assert tag_keys == ()
         assert "name" in packet_keys
@@ -128,14 +129,14 @@ class TestArrowTableSourceResolveField:
     @NOT_IMPLEMENTED
     def test_resolve_field_valid_record_id(self):
         """resolve_field works with valid positional record_id."""
-        source = ArrowTableSource(_simple_table(3), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(3), tag_columns=["name"], infer_nullable=True)
         value = source.resolve_field("row_0", "age")
         assert value == 20
 
     @NOT_IMPLEMENTED
     def test_resolve_field_second_row(self):
         """resolve_field returns data from the correct row."""
-        source = ArrowTableSource(_simple_table(3), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(3), tag_columns=["name"], infer_nullable=True)
         value = source.resolve_field("row_1", "age")
         assert value == 21
 
@@ -146,6 +147,7 @@ class TestArrowTableSourceResolveField:
             _simple_table(3),
             tag_columns=["name"],
             record_id_column="name",
+            infer_nullable=True,
         )
         value = source.resolve_field("name=n1", "age")
         assert value == 21
@@ -153,28 +155,28 @@ class TestArrowTableSourceResolveField:
     @NOT_IMPLEMENTED
     def test_resolve_field_missing_record_raises(self):
         """resolve_field raises FieldNotResolvableError for missing records."""
-        source = ArrowTableSource(_simple_table(3), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(3), tag_columns=["name"], infer_nullable=True)
         with pytest.raises(FieldNotResolvableError):
             source.resolve_field("row_999", "age")
 
     @NOT_IMPLEMENTED
     def test_resolve_field_missing_field_raises(self):
         """resolve_field raises FieldNotResolvableError for missing field names."""
-        source = ArrowTableSource(_simple_table(3), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(3), tag_columns=["name"], infer_nullable=True)
         with pytest.raises(FieldNotResolvableError):
             source.resolve_field("row_0", "nonexistent_field")
 
     @NOT_IMPLEMENTED
     def test_resolve_field_invalid_record_id_format(self):
         """resolve_field raises FieldNotResolvableError for invalid record_id format."""
-        source = ArrowTableSource(_simple_table(3), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(3), tag_columns=["name"], infer_nullable=True)
         with pytest.raises(FieldNotResolvableError):
             source.resolve_field("invalid_format", "age")
 
     @NOT_IMPLEMENTED
     def test_resolve_field_tag_column(self):
         """resolve_field can resolve tag column values too."""
-        source = ArrowTableSource(_simple_table(3), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(3), tag_columns=["name"], infer_nullable=True)
         value = source.resolve_field("row_0", "name")
         assert value == "n0"
 
@@ -184,7 +186,7 @@ class TestArrowTableSourceSchema:
 
     def test_pipeline_identity_structure_returns_schemas(self):
         """pipeline_identity_structure returns (tag_schema, packet_schema)."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
         result = source.pipeline_identity_structure()
         assert isinstance(result, tuple)
         assert len(result) == 2
@@ -193,21 +195,21 @@ class TestArrowTableSourceSchema:
         assert isinstance(packet_schema, Schema)
 
     def test_output_schema_returns_schemas(self):
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
         tag_schema, packet_schema = source.output_schema()
         assert "name" in tag_schema
         assert "age" in packet_schema
 
     def test_output_schema_types(self):
         """output_schema types match column data types."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
         tag_schema, packet_schema = source.output_schema()
         assert tag_schema["name"] is str
         assert packet_schema["age"] is int
 
     def test_keys_returns_correct_split(self):
         """keys() correctly separates tag and packet columns."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
         tag_keys, packet_keys = source.keys()
         assert "name" in tag_keys
         assert "age" in packet_keys
@@ -218,7 +220,7 @@ class TestArrowTableSourceIteration:
     """ArrowTableSource iter_packets and as_table behaviors."""
 
     def test_iter_packets_yields_tag_packet_pairs(self):
-        source = ArrowTableSource(_simple_table(3), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(3), tag_columns=["name"], infer_nullable=True)
         pairs = list(source.iter_packets())
         assert len(pairs) == 3
         for tag, packet in pairs:
@@ -226,27 +228,27 @@ class TestArrowTableSourceIteration:
             assert isinstance(packet, Packet)
 
     def test_as_table_has_expected_columns(self):
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
         table = source.as_table()
         assert "name" in table.column_names
         assert "age" in table.column_names
 
     def test_as_table_row_count(self):
         """as_table row count matches input table row count."""
-        source = ArrowTableSource(_simple_table(5), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(5), tag_columns=["name"], infer_nullable=True)
         table = source.as_table()
         assert table.num_rows == 5
 
     def test_as_table_all_info_has_more_columns(self):
         """as_table(all_info=True) has more columns than default."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
         table_default = source.as_table()
         table_all = source.as_table(all_info=True)
         assert table_all.num_columns > table_default.num_columns
 
     def test_iter_packets_count_matches_as_table_rows(self):
         """iter_packets count equals as_table row count."""
-        source = ArrowTableSource(_simple_table(4), tag_columns=["name"])
+        source = ArrowTableSource(_simple_table(4), tag_columns=["name"], infer_nullable=True)
         pairs = list(source.iter_packets())
         table = source.as_table()
         assert len(pairs) == table.num_rows

@@ -738,7 +738,7 @@ def test_function_node_has_node_uri():
         return x + 1
 
     table = pa.table({"id": pa.array(["a", "b"], type=pa.large_string()), "x": pa.array([1, 2], type=pa.int64())})
-    source = ArrowTableSource(table, tag_columns=["id"])
+    source = ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
     pf = PythonPacketFunction(add_one, output_keys="result")
     pod = FunctionPod(packet_function=pf)
 
@@ -784,8 +784,8 @@ def test_operator_node_has_node_uri():
     table_b = pa.table(
         {"key": pa.array(["a"], type=pa.large_string()), "val_b": pa.array([1], type=pa.int64())}
     )
-    src_a = ArrowTableSource(table_a, tag_columns=["key"])
-    src_b = ArrowTableSource(table_b, tag_columns=["key"])
+    src_a = ArrowTableSource(table_a, tag_columns=["key"], infer_nullable=True)
+    src_b = ArrowTableSource(table_b, tag_columns=["key"], infer_nullable=True)
 
     pipeline = Pipeline(name="test", pipeline_database=db)
     with pipeline:

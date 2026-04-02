@@ -43,7 +43,7 @@ def arrow_src():
             "value": pa.array(["a", "b", "c"], type=pa.large_string()),
         }
     )
-    return ArrowTableSource(table=table, tag_columns=["id"])
+    return ArrowTableSource(table=table, tag_columns=["id"], infer_nullable=True)
 
 
 @pytest.fixture
@@ -59,6 +59,7 @@ def arrow_src_with_record_id():
         tag_columns=["id"],
         record_id_column="id",
         source_id="arrow_with_rid",
+        infer_nullable=True,
     )
 
 
@@ -335,7 +336,7 @@ class TestSourceId:
 
     def test_explicit_source_id_honoured(self):
         table = pa.table({"x": pa.array([1, 2], type=pa.int64())})
-        src = ArrowTableSource(table=table, source_id="my_explicit_id")
+        src = ArrowTableSource(table=table, source_id="my_explicit_id", infer_nullable=True)
         assert src.source_id == "my_explicit_id"
 
     def test_source_id_in_provenance_tokens(self, arrow_src):
@@ -359,13 +360,13 @@ class TestContentHash:
 
     def test_same_data_same_content_hash(self):
         table = pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
-        src1 = ArrowTableSource(table=table)
-        src2 = ArrowTableSource(table=table)
+        src1 = ArrowTableSource(table=table, infer_nullable=True)
+        src2 = ArrowTableSource(table=table, infer_nullable=True)
         assert src1.content_hash() == src2.content_hash()
 
     def test_different_data_different_content_hash(self):
-        src1 = ArrowTableSource(table=pa.table({"x": pa.array([1], type=pa.int64())}))
-        src2 = ArrowTableSource(table=pa.table({"x": pa.array([2], type=pa.int64())}))
+        src1 = ArrowTableSource(table=pa.table({"x": pa.array([1], type=pa.int64())}), infer_nullable=True)
+        src2 = ArrowTableSource(table=pa.table({"x": pa.array([2], type=pa.int64())}), infer_nullable=True)
         assert src1.content_hash() != src2.content_hash()
 
 
@@ -382,19 +383,22 @@ class TestPipelineHash:
 
     def test_same_schema_same_pipeline_hash(self):
         table = pa.table({"x": pa.array([1, 2, 3], type=pa.int64())})
-        src1 = ArrowTableSource(table=table)
+        src1 = ArrowTableSource(table=table, infer_nullable=True)
         src2 = ArrowTableSource(
-            table=pa.table({"x": pa.array([99, 100, 101], type=pa.int64())})
+            table=pa.table({"x": pa.array([99, 100, 101], type=pa.int64())}),
+            infer_nullable=True,
         )
         # Same schema → same pipeline hash
         assert src1.pipeline_hash() == src2.pipeline_hash()
 
     def test_different_schema_different_pipeline_hash(self):
         src1 = ArrowTableSource(
-            table=pa.table({"x": pa.array([1, 2], type=pa.int64())})
+            table=pa.table({"x": pa.array([1, 2], type=pa.int64())}),
+            infer_nullable=True,
         )
         src2 = ArrowTableSource(
-            table=pa.table({"y": pa.array([1, 2], type=pa.int64())})
+            table=pa.table({"y": pa.array([1, 2], type=pa.int64())}),
+            infer_nullable=True,
         )
         assert src1.pipeline_hash() != src2.pipeline_hash()
 
@@ -408,7 +412,7 @@ class TestEdgeCases:
     def test_arrow_source_no_tag_columns(self):
         """A source with no tag columns is valid; all columns are packet columns."""
         table = pa.table({"a": pa.array([1, 2], type=pa.int64())})
-        src = ArrowTableSource(table=table)
+        src = ArrowTableSource(table=table, infer_nullable=True)
         tag_keys, packet_keys = src.keys()
         assert "a" in packet_keys
         assert tag_keys == ()
@@ -453,7 +457,7 @@ class TestEdgeCases:
                 "_tag_something": pa.array(["a", "b"], type=pa.large_string()),
             }
         )
-        src = ArrowTableSource(table=table)
+        src = ArrowTableSource(table=table, infer_nullable=True)
         # system columns should not appear in data keys
         tag_keys, packet_keys = src.keys()
         assert "_tag_something" not in tag_keys

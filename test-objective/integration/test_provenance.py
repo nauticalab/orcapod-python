@@ -26,7 +26,7 @@ from orcapod.types import ColumnConfig
 def _make_source(tag_data: dict, packet_data: dict, tag_columns: list[str]):
     all_data = {**tag_data, **packet_data}
     table = pa.table(all_data)
-    return ArrowTableSource(table, tag_columns=tag_columns)
+    return ArrowTableSource(table, tag_columns=tag_columns, infer_nullable=True)
 
 
 def _get_system_tag_columns(table: pa.Table) -> list[str]:

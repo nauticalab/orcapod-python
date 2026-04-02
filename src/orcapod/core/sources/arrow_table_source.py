@@ -17,6 +17,34 @@ class ArrowTableSource(RootSource):
     Uses ``SourceStreamBuilder`` to strip system columns, add per-row
     source-info provenance columns and a system tag column encoding the
     schema hash, then wraps the result in an ``ArrowTableStream``.
+
+    Nullable handling
+    -----------------
+    Arrow represents "this field has no nulls" and "this field may have nulls"
+    via a per-field ``nullable`` flag.  By default **all** Arrow fields are
+    ``nullable=True`` regardless of actual content, so a plain ``pa.table({...})``
+    or a Polars ``.to_arrow()`` result will always produce ``T | None`` schema
+    types unless the caller has explicitly constructed the schema.
+
+    ``ArrowTableSource`` therefore defaults to ``infer_nullable=False``: the
+    incoming table's schema is trusted as-is.  This is safe when the caller
+    has already set nullable flags deliberately (e.g. loaded from a typed
+    Parquet file, or produced by an upstream pipeline stage).
+
+    If you are passing a *raw* Arrow table whose schema carries only Arrow's
+    all-nullable default (``nullable=True`` everywhere), set
+    ``infer_nullable=True`` or call
+    ``table.cast(arrow_utils.infer_schema_nullable(table))`` yourself before
+    constructing the source.  ``infer_schema_nullable`` derives
+    ``nullable = (null_count > 0)`` per column — i.e. only columns that
+    *actually contain* nulls in the supplied data are marked nullable.
+
+    Note: other source classes (``DictSource``, ``ListSource``,
+    ``DataFrameSource``, ``CsvSource``, etc.) construct their Arrow tables
+    internally from non-Arrow inputs and always apply ``infer_schema_nullable``
+    automatically, because the all-nullable Arrow default is never intentional
+    in those paths.  ``ArrowTableSource`` is unique in accepting a pre-existing
+    ``pa.Table`` whose schema may already be deliberate.
     """
 
     def __init__(
@@ -25,16 +53,17 @@ class ArrowTableSource(RootSource):
         tag_columns: Collection[str] = (),
         system_tag_columns: Collection[str] = (),
         record_id_column: str | None = None,
-        infer_nullable: bool = True,
+        infer_nullable: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
 
         if infer_nullable:
-            # Arrow tables default all fields to nullable=True regardless of
-            # content; derive the correct flags from the actual data.
+            # Derive nullable from actual data: nullable=True only for columns
+            # that genuinely contain nulls.  Opt-in because the caller may have
+            # set nullable flags deliberately and we should not override them.
             table = table.cast(arrow_utils.infer_schema_nullable(table))
-        # else: schema is trusted as-is — caller has set nullable deliberately.
+        # else: schema is trusted as-is.
 
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(

@@ -150,6 +150,7 @@ class TestStreamColumnConfigConsistency:
                 }
             ),
             tag_columns=["id"],
+            infer_nullable=True,
         )
         tag_keys, packet_keys = source.keys()
         tag_schema, packet_schema = source.output_schema()
@@ -172,6 +173,7 @@ class TestStreamColumnConfigConsistency:
                 }
             ),
             tag_columns=["id"],
+            infer_nullable=True,
         )
         tag_keys, packet_keys = source.keys(all_info=True)
         tag_schema, packet_schema = source.output_schema(all_info=True)
@@ -192,6 +194,7 @@ class TestStreamColumnConfigConsistency:
                 }
             ),
             tag_columns=["id"],
+            infer_nullable=True,
         )
         default_table = source.as_table()
         all_info_table = source.as_table(all_info=True)

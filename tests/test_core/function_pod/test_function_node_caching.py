@@ -62,7 +62,7 @@ def _make_source_stream(
     table = pa.table(
         {k: pa.array([r[k] for r in rows], type=pa.int64()) for k in rows[0]}
     )
-    source = ArrowTableSource(table, tag_columns=tag_columns, source_id=source_id)
+    source = ArrowTableSource(table, tag_columns=tag_columns, source_id=source_id, infer_nullable=True)
     return source
 
 

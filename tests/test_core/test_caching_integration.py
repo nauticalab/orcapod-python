@@ -242,8 +242,8 @@ class TestSourcePodCaching:
                 "v": pa.array([2], type=pa.int64()),
             }
         )
-        s1 = ArrowTableSource(t1, tag_columns=["k"])
-        s2 = ArrowTableSource(t2, tag_columns=["k"])
+        s1 = ArrowTableSource(t1, tag_columns=["k"], infer_nullable=True)
+        s2 = ArrowTableSource(t2, tag_columns=["k"], infer_nullable=True)
         assert s1.source_id != s2.source_id
         assert s1.content_hash() != s2.content_hash()
 
@@ -254,8 +254,8 @@ class TestSourcePodCaching:
                 "v": pa.array([1], type=pa.int64()),
             }
         )
-        s1 = ArrowTableSource(t, tag_columns=["k"])
-        s2 = ArrowTableSource(t, tag_columns=["k"])
+        s1 = ArrowTableSource(t, tag_columns=["k"], infer_nullable=True)
+        s2 = ArrowTableSource(t, tag_columns=["k"], infer_nullable=True)
         assert s1.source_id == s2.source_id
         assert s1.content_hash() == s2.content_hash()
 

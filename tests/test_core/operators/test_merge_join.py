@@ -75,6 +75,7 @@ def left_source() -> ArrowTableSource:
             }
         ),
         tag_columns=["id"],
+        infer_nullable=True,
     )
 
 
@@ -90,6 +91,7 @@ def right_source() -> ArrowTableSource:
             }
         ),
         tag_columns=["id", "group"],
+        infer_nullable=True,
     )
 
 
@@ -260,6 +262,7 @@ class TestMergeJoinSourceColumns:
             ),
             tag_columns=["id"],
             source_id="east",
+            infer_nullable=True,
         )
         west = ArrowTableSource(
             pa.table(
@@ -271,6 +274,7 @@ class TestMergeJoinSourceColumns:
             ),
             tag_columns=["id"],
             source_id="west",
+            infer_nullable=True,
         )
 
         op = MergeJoin()
@@ -356,6 +360,7 @@ class TestMergeJoinCommutativity:
                 }
             ),
             tag_columns=["id"],
+            infer_nullable=True,
         )
         src_b = ArrowTableSource(
             pa.table(
@@ -365,6 +370,7 @@ class TestMergeJoinCommutativity:
                 }
             ),
             tag_columns=["id"],
+            infer_nullable=True,
         )
 
         # Verify same pipeline_hash (same schema)
@@ -496,6 +502,7 @@ class TestMergeJoinOutputSchema:
                 }
             ),
             tag_columns=["id"],
+            infer_nullable=True,
         )
         src_b = ArrowTableSource(
             pa.table(
@@ -505,6 +512,7 @@ class TestMergeJoinOutputSchema:
                 }
             ),
             tag_columns=["id"],
+            infer_nullable=True,
         )
 
         assert src_a.pipeline_hash().to_hex() == src_b.pipeline_hash().to_hex()
@@ -676,6 +684,7 @@ class TestMergeJoinSystemTags:
                 }
             ),
             tag_columns=["id"],
+            infer_nullable=True,
         )
         src_b = ArrowTableSource(
             pa.table(
@@ -685,6 +694,7 @@ class TestMergeJoinSystemTags:
                 }
             ),
             tag_columns=["id"],
+            infer_nullable=True,
         )
 
         # Same schema => same pipeline_hash
@@ -753,6 +763,7 @@ class TestMergeJoinSystemTags:
                 }
             ),
             tag_columns=["id"],
+            infer_nullable=True,
         )
         src_b = ArrowTableSource(
             pa.table(
@@ -762,6 +773,7 @@ class TestMergeJoinSystemTags:
                 }
             ),
             tag_columns=["id"],
+            infer_nullable=True,
         )
 
         op = MergeJoin()
@@ -796,6 +808,7 @@ class TestMergeJoinSystemTags:
             ),
             tag_columns=["id"],
             source_id="zzz_source",
+            infer_nullable=True,
         )
         src_b = ArrowTableSource(
             pa.table(
@@ -806,6 +819,7 @@ class TestMergeJoinSystemTags:
             ),
             tag_columns=["id"],
             source_id="aaa_source",
+            infer_nullable=True,
         )
 
         assert src_a.pipeline_hash().to_hex() == src_b.pipeline_hash().to_hex()

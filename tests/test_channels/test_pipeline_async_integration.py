@@ -89,8 +89,8 @@ def _build_pipeline() -> Pipeline:
     )
 
     with pipeline:
-        students = ArrowTableSource(STUDENTS, tag_columns=["student_id"])
-        grades = ArrowTableSource(GRADES, tag_columns=["student_id"])
+        students = ArrowTableSource(STUDENTS, tag_columns=["student_id"], infer_nullable=True)
+        grades = ArrowTableSource(GRADES, tag_columns=["student_id"], infer_nullable=True)
 
         joined = Join()(students, grades, label="join")
         compute_letter_grade.pod(joined, label="letter_grade")

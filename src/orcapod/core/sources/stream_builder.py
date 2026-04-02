@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.system_constants import constants
 from orcapod.types import ContentHash
-from orcapod.utils import arrow_data_utils, arrow_utils
+from orcapod.utils import arrow_data_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:

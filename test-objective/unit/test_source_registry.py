@@ -24,7 +24,7 @@ def _make_source(tag_val: str = "a", data_val: int = 1) -> ArrowTableSource:
             "data": pa.array([data_val], type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=["tag"])
+    return ArrowTableSource(table, tag_columns=["tag"], infer_nullable=True)
 
 
 # ---------------------------------------------------------------------------
