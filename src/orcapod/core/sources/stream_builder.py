@@ -70,6 +70,7 @@ class SourceStreamBuilder:
         source_id: str | None = None,
         record_id_column: str | None = None,
         system_tag_columns: Collection[str] = (),
+        respect_nullable: bool = False,
     ) -> SourceStreamResult:
         """Run the full enrichment pipeline.
 
@@ -111,11 +112,14 @@ class SourceStreamBuilder:
         non_sys = arrow_data_utils.drop_system_columns(table)
         tag_schema = non_sys.select(list(tag_columns_tuple)).schema
         packet_schema = non_sys.drop(list(tag_columns_tuple)).schema
-        # Normalise to non-nullable: raw Arrow tables default to nullable=True for
-        # all fields. arrow_schema_to_python_schema maps nullable=True → T | None,
-        # so we must strip nullability here to get plain Python types for hashing.
-        tag_schema = arrow_utils.make_schema_non_nullable(tag_schema)
-        packet_schema = arrow_utils.make_schema_non_nullable(packet_schema)
+        # By default, normalise to non-nullable: raw Arrow tables default to
+        # nullable=True for all fields. arrow_schema_to_python_schema maps
+        # nullable=True → T | None, so we strip nullability to get plain Python
+        # types for hashing. Set respect_nullable=True to opt-in to preserving
+        # Arrow nullable flags so that nullable=True fields yield T | None.
+        if not respect_nullable:
+            tag_schema = arrow_utils.make_schema_non_nullable(tag_schema)
+            packet_schema = arrow_utils.make_schema_non_nullable(packet_schema)
         tag_python = self._data_context.type_converter.arrow_schema_to_python_schema(
             tag_schema
         )
@@ -163,6 +167,7 @@ class SourceStreamBuilder:
             table=table,
             tag_columns=tag_columns_tuple,
             system_tag_columns=system_tag_columns_tuple,
+            respect_nullable=respect_nullable,
         )
 
         return SourceStreamResult(

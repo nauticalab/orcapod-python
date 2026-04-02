@@ -444,3 +444,58 @@ class TestArrowTableStreamIdentityStructure:
         s1 = ArrowTableStream(table, tag_columns=["id"], producer=src_a)
         s2 = ArrowTableStream(table, tag_columns=["id"], producer=src_b)
         assert s1.content_hash() != s2.content_hash()
+
+
+class TestArrowTableStreamRespectNullable:
+    """respect_nullable controls whether raw Arrow nullable=True becomes T | None."""
+
+    def _make_nullable_table(self) -> pa.Table:
+        """Arrow table where all fields default to nullable=True."""
+        return pa.table(
+            {
+                "tag": pa.array(["a"], type=pa.large_string()),
+                "val": pa.array([1], type=pa.int64()),
+            }
+        )
+
+    def test_default_strips_nullable_from_output_schema(self):
+        """Default respect_nullable=False: nullable=True fields → plain T."""
+        table = self._make_nullable_table()
+        # Confirm Arrow defaults to nullable=True
+        assert table.schema.field("val").nullable is True
+
+        stream = ArrowTableStream(table, tag_columns=["tag"])
+        _, packet_schema = stream.output_schema()
+        assert packet_schema["val"] is int
+
+    def test_respect_nullable_true_preserves_optional_types(self):
+        """respect_nullable=True: nullable=True fields → T | None."""
+        table = self._make_nullable_table()
+        stream = ArrowTableStream(table, tag_columns=["tag"], respect_nullable=True)
+        _, packet_schema = stream.output_schema()
+        assert packet_schema["val"] == int | None
+
+    def test_respect_nullable_false_overrides_explicit_nullable_false(self):
+        """Default respect_nullable=False strips nullable even from originally non-nullable fields.
+
+        ArrowTableStream's internal pipeline (prepare_prefixed_columns, etc.) normalises
+        all fields to nullable=True. respect_nullable=False (the default) then strips
+        that back to non-nullable, so the result is plain T regardless of the original
+        input schema.
+        """
+        table = pa.table(
+            {
+                "tag": pa.array(["a"], type=pa.large_string()),
+                "val": pa.array([1], type=pa.int64()),
+            },
+            schema=pa.schema(
+                [
+                    pa.field("tag", pa.large_string(), nullable=False),
+                    pa.field("val", pa.int64(), nullable=False),
+                ]
+            ),
+        )
+        # Default (respect_nullable=False) still strips to plain T
+        stream = ArrowTableStream(table, tag_columns=["tag"])
+        _, packet_schema = stream.output_schema()
+        assert packet_schema["val"] is int
