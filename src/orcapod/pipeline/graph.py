@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     import networkx as nx
     from orcapod.pipeline.serialization import DatabaseRegistry
     from orcapod.protocols.database_protocols import DatabaseRegistryProtocol
+    from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
 else:
     nx = LazyModule("networkx")
 
@@ -99,7 +100,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         self._scoped_pipeline_database: dbp.ArrowDatabaseProtocol | None = None
         self._status_database: dbp.ArrowDatabaseProtocol | None = None
         self._log_database: dbp.ArrowDatabaseProtocol | None = None
-        self._default_observer: Any = None
+        self._default_observer: ExecutionObserverProtocol | None = None
 
     # ------------------------------------------------------------------
     # Recording (TrackerProtocol)
@@ -399,7 +400,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         config: PipelineConfig | None = None,
         execution_engine: cp.PacketFunctionExecutorProtocol | None = None,
         execution_engine_opts: "dict[str, Any] | None" = None,
-        observer=None,
+        observer: ExecutionObserverProtocol | None = None,
     ) -> None:
         """Execute all compiled nodes.
 

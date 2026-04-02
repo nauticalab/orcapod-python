@@ -25,7 +25,7 @@ class NoOpArrowDatabase:
     def __init__(
         self,
         _path_prefix: tuple[str, ...] = (),
-        _root: "NoOpArrowDatabase | None" = None,
+        _root: NoOpArrowDatabase | None = None,
         _scoped_path: tuple[str, ...] = (),
     ) -> None:
         self._path_prefix = _path_prefix
@@ -108,7 +108,7 @@ class NoOpArrowDatabase:
             _scoped_path=new_scoped_path,
         )
 
-    def to_config(self) -> dict[str, Any]:
+    def to_config(self, db_registry: Any = None) -> dict[str, Any]:
         """Serialize database configuration to a JSON-compatible dict."""
         return {
             "type": "noop",

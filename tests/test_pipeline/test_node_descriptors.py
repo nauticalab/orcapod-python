@@ -152,7 +152,7 @@ class TestFunctionNodeFromDescriptor:
                 "packet": {k: str(v) for k, v in packet_schema.items()},
             },
             "function_pod": pod.to_config(),
-            "pipeline_path": list(node.pipeline_path),
+            "pipeline_path": list(node.node_identity_path),
             "result_record_path": list(node._cached_function_pod.record_path),
         }
         return node, descriptor, scoped_db
@@ -242,7 +242,7 @@ class TestOperatorNodeFromDescriptor:
             },
             "operator": op.to_config(),
             "cache_mode": "OFF",
-            "pipeline_path": list(node.pipeline_path),
+            "pipeline_path": list(node.node_identity_path),
         }
         loaded = OperatorNode.from_descriptor(
             descriptor=descriptor,

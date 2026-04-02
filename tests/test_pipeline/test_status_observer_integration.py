@@ -150,14 +150,10 @@ class TestFlatStatusStorage:
         orch = SyncPipelineOrchestrator()
         pipeline.run(orchestrator=orch, observer=obs)
 
-        # All status is now in a single flat table via get_status()
+        # All status is now aggregated via get_status()
         all_status = obs.get_status()
         assert all_status is not None
         assert all_status.num_rows == 2  # RUNNING + SUCCESS
-
-        # Node label is stored as a column for filtering
-        labels = set(all_status.column("_status_node_label").to_pylist())
-        assert "ident" in labels
 
 
 # ---------------------------------------------------------------------------
@@ -341,11 +337,6 @@ class TestMultipleFunctionNodesSeparateStatus:
         # Each node: 2 packets × 2 events = 4 rows per node → 8 total
         assert status.num_rows == 8
 
-        # Both node labels appear in the combined table
-        labels = set(status.column("_status_node_label").to_pylist())
-        assert "doubler" in labels
-        assert "tripler" in labels
-
 
 # ---------------------------------------------------------------------------
 # 9. get_status() returns combined status, filter by node_label column
@@ -353,7 +344,7 @@ class TestMultipleFunctionNodesSeparateStatus:
 
 
 class TestGetStatusNodeSpecific:
-    def test_get_status_filters_by_node_label_column(self):
+    def test_get_status_returns_rows_for_both_nodes(self):
         db = InMemoryArrowDatabase()
         source = _make_source(2)
 
@@ -377,20 +368,10 @@ class TestGetStatusNodeSpecific:
         orch = SyncPipelineOrchestrator()
         pipeline.run(orchestrator=orch, observer=obs)
 
-        # Retrieve all status and filter by node label
-        import pyarrow.compute as pc
-
         all_status = obs.get_status()
         assert all_status is not None
-
-        status1 = all_status.filter(pc.field("_status_node_label") == "doubler")
-        status2 = all_status.filter(pc.field("_status_node_label") == "tripler")
-
-        labels1 = set(status1.column("_status_node_label").to_pylist())
-        labels2 = set(status2.column("_status_node_label").to_pylist())
-
-        assert labels1 == {"doubler"}
-        assert labels2 == {"tripler"}
+        # Each node: 2 packets × 2 events = 4 rows per node → 8 total
+        assert all_status.num_rows == 8
 
 
 # ---------------------------------------------------------------------------
@@ -422,13 +403,14 @@ class TestStatusSchema:
         expected_system_cols = {
             "_status_id",
             "_status_run_id",
-            "_status_node_label",
-            "_status_node_hash",
             "_status_state",
             "_status_timestamp",
             "_status_error_summary",
         }
         assert expected_system_cols.issubset(set(status.column_names))
+        # Node identity is now in the path, not in columns
+        assert "_status_node_label" not in status.column_names
+        assert "_status_node_hash" not in status.column_names
 
         # Tag column should also be present
         assert "id" in status.column_names

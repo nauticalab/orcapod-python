@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from collections import defaultdict
 from collections.abc import Collection, Mapping
@@ -8,6 +10,7 @@ from orcapod.utils.lazy_module import LazyModule
 if TYPE_CHECKING:
     import pyarrow as pa
     import pyarrow.compute as pc
+    from orcapod.pipeline.serialization import DatabaseRegistry
 else:
     pa = LazyModule("pyarrow")
     pc = LazyModule("pyarrow.compute")
@@ -36,7 +39,7 @@ class InMemoryArrowDatabase:
         _shared_tables: "dict[str, pa.Table] | None" = None,
         _shared_pending_batches: "dict[str, pa.Table] | None" = None,
         _shared_pending_record_ids: "dict[str, set[str]] | None" = None,
-        _root: "InMemoryArrowDatabase | None" = None,
+        _root: InMemoryArrowDatabase | None = None,
         _scoped_path: tuple[str, ...] = (),
     ):
         self._path_prefix = _path_prefix
@@ -303,6 +306,24 @@ class InMemoryArrowDatabase:
             _scoped_path=new_scoped_path,
         )
 
+    def list_sources(self) -> list[tuple[str, ...]]:
+        """Return all stored record paths under this database's prefix.
+
+        Returns a sorted list of record path tuples, each relative to
+        this instance's prefix (consistent with ``DeltaTableDatabase.list_sources``).
+        """
+        prefix = "/".join(self._path_prefix)
+        prefix_slash = prefix + "/" if prefix else ""
+        seen: set[str] = set()
+        for key in list(self._tables.keys()) + list(self._pending_batches.keys()):
+            if prefix == "":
+                # Root instance: all keys are relative
+                seen.add(key)
+            elif key.startswith(prefix_slash):
+                # Strip the prefix and leading slash to get relative key
+                seen.add(key[len(prefix_slash):])
+        return sorted(tuple(k.split("/")) for k in seen if k)
+
     # ------------------------------------------------------------------
     # Read helpers
     # ------------------------------------------------------------------
@@ -389,7 +410,7 @@ class InMemoryArrowDatabase:
             return None
         return self._handle_record_id_column(filtered, record_id_column)
 
-    def to_config(self, db_registry=None) -> dict[str, Any]:
+    def to_config(self, db_registry: DatabaseRegistry | None = None) -> dict[str, Any]:
         """Serialize database configuration to a JSON-compatible dict.
 
         When called on a scoped instance (``self._root is not None``) with a

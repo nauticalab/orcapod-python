@@ -853,7 +853,7 @@ class DeltaTableDatabase:
 
         return dataset.to_table()
 
-    def to_config(self) -> dict[str, Any]:
+    def to_config(self, db_registry: Any = None) -> dict[str, Any]:
         """Serialize database configuration to a JSON-compatible dict."""
         config: dict[str, Any] = {
             "type": "delta_table",
@@ -961,7 +961,7 @@ class DeltaTableDatabase:
             try:
                 import deltalake as _dl
                 delta_table = _dl.DeltaTable(table_uri, storage_options=self._storage_options or None)
-            except Exception:
+            except (_dl.exceptions.TableNotFoundError, _dl.exceptions.DeltaProtocolError):
                 delta_table = None
 
             if delta_table is None:

@@ -333,10 +333,10 @@ class TestFunctionPodCaching:
         )
 
         # Same schema → same schema: component
-        assert fn_a.pipeline_path[-2] == fn_b.pipeline_path[-2]
-        assert fn_a.pipeline_path[-2].startswith("schema:")
+        assert fn_a.node_identity_path[-2] == fn_b.node_identity_path[-2]
+        assert fn_a.node_identity_path[-2].startswith("schema:")
         # Different data → different full path
-        assert fn_a.pipeline_path != fn_b.pipeline_path
+        assert fn_a.node_identity_path != fn_b.node_identity_path
 
     def test_cross_source_records_accumulate_in_shared_table(
         self, clinic_a, clinic_b, source_db, pipeline_db, result_db, pod
@@ -414,7 +414,7 @@ class TestOperatorPodCaching:
         )
         node.run()
         assert node.as_table().num_rows == 3
-        assert operator_db.get_all_records(node.pipeline_path) is None
+        assert operator_db.get_all_records(node.node_identity_path) is None
 
     def test_log_computes_and_writes(self, clinic_a, source_db, operator_db):
         patients, labs = self._make_joined_streams(clinic_a, source_db)
@@ -426,7 +426,7 @@ class TestOperatorPodCaching:
         )
         node.run()
         assert node.as_table().num_rows == 3
-        records = operator_db.get_all_records(node.pipeline_path)
+        records = operator_db.get_all_records(node.node_identity_path)
         assert records is not None
         assert records.num_rows == 3
 
@@ -504,7 +504,7 @@ class TestOperatorPodCaching:
             pipeline_database=operator_db,
             cache_mode=CacheMode.LOG,
         )
-        assert node_a.pipeline_path != node_b.pipeline_path
+        assert node_a.node_identity_path != node_b.node_identity_path
 
 
 # ---------------------------------------------------------------------------
@@ -552,7 +552,7 @@ class TestEndToEndPipeline:
             cache_mode=CacheMode.LOG,
         )
         op_node.run()
-        assert operator_db.get_all_records(op_node.pipeline_path).num_rows == 3
+        assert operator_db.get_all_records(op_node.node_identity_path).num_rows == 3
 
         # Step 4: REPLAY from operator cache
         op_replay = OperatorNode(
@@ -582,8 +582,8 @@ class TestEndToEndPipeline:
             result_database=result_db,
         )
         # Same schema → same schema: component; different data → different full path
-        assert fn_node.pipeline_path[-2] == fn_node_b.pipeline_path[-2]
-        assert fn_node.pipeline_path != fn_node_b.pipeline_path
+        assert fn_node.node_identity_path[-2] == fn_node_b.node_identity_path[-2]
+        assert fn_node.node_identity_path != fn_node_b.node_identity_path
         fn_node_b.run()
         # fn_node_b has its own path: 2 records from clinic B only
         assert fn_node_b.get_all_records().num_rows == 2

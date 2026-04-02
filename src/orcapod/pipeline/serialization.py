@@ -213,19 +213,21 @@ OPERATOR_REGISTRY: dict[str, type] = _build_operator_registry()
 PACKET_FUNCTION_REGISTRY: dict[str, type] = _build_packet_function_registry()
 
 
-def _build_observer_registry() -> dict[str, Any]:
-    from orcapod.pipeline.status_observer import StatusObserver
-    from orcapod.pipeline.logging_observer import LoggingObserver
-    from orcapod.pipeline.composite_observer import CompositeObserver
-
-    return {
-        "status":    lambda cfg, reg: StatusObserver.from_config(cfg, reg),
-        "logging":   lambda cfg, reg: LoggingObserver.from_config(cfg, reg),
-        "composite": lambda cfg, reg: CompositeObserver.from_config(cfg, reg),
-    }
+_observer_registry: dict[str, Any] | None = None
 
 
-OBSERVER_REGISTRY: dict[str, Any] = _build_observer_registry()
+def _get_observer_registry() -> dict[str, Any]:
+    global _observer_registry
+    if _observer_registry is None:
+        from orcapod.pipeline.status_observer import StatusObserver
+        from orcapod.pipeline.logging_observer import LoggingObserver
+        from orcapod.pipeline.composite_observer import CompositeObserver
+        _observer_registry = {
+            "status":    lambda cfg, reg: StatusObserver.from_config(cfg, reg),
+            "logging":   lambda cfg, reg: LoggingObserver.from_config(cfg, reg),
+            "composite": lambda cfg, reg: CompositeObserver.from_config(cfg, reg),
+        }
+    return _observer_registry
 
 
 def resolve_observer_from_config(config: dict, db_registry: dict | None = None) -> Any:
@@ -242,13 +244,14 @@ def resolve_observer_from_config(config: dict, db_registry: dict | None = None) 
     Raises:
         ValueError: If observer type is unknown.
     """
+    registry = _get_observer_registry()
     obs_type = config.get("type")
-    if obs_type not in OBSERVER_REGISTRY:
+    if obs_type not in registry:
         raise ValueError(
             f"Unknown observer type: {obs_type!r}. "
-            f"Known types: {sorted(OBSERVER_REGISTRY.keys())}"
+            f"Known types: {sorted(registry.keys())}"
         )
-    return OBSERVER_REGISTRY[obs_type](config, db_registry)
+    return registry[obs_type](config, db_registry)
 
 
 def _ensure_registries() -> None:

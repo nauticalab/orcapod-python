@@ -91,39 +91,35 @@ class ObservabilityReader:
         """Lazy-load and return the concatenated status DataFrame."""
         if self._status_df is None:
             frames = []
-            for table_dirs in self._status_tables.values():
+            for node_name, table_dirs in self._status_tables.items():
                 for table_dir in table_dirs:
-                    frames.append(pl.read_delta(str(table_dir)))
-            if frames:
-                self._status_df = pl.concat(frames, how="diagonal_relaxed")
-            else:
-                self._status_df = pl.DataFrame()
+                    df = pl.read_delta(str(table_dir))
+                    df = df.with_columns(pl.lit(node_name).alias("node_label"))
+                    frames.append(df)
+            self._status_df = pl.concat(frames, how="diagonal_relaxed") if frames else pl.DataFrame()
         return self._status_df
 
     def _get_logs_df(self) -> pl.DataFrame:
         """Lazy-load and return the concatenated logs DataFrame."""
         if self._logs_df is None:
             frames = []
-            for table_dirs in self._log_tables.values():
+            for node_name, table_dirs in self._log_tables.items():
                 for table_dir in table_dirs:
-                    frames.append(pl.read_delta(str(table_dir)))
-            if frames:
-                self._logs_df = pl.concat(frames, how="diagonal_relaxed")
-            else:
-                self._logs_df = pl.DataFrame()
+                    df = pl.read_delta(str(table_dir))
+                    df = df.with_columns(pl.lit(node_name).alias("node_label"))
+                    frames.append(df)
+            self._logs_df = pl.concat(frames, how="diagonal_relaxed") if frames else pl.DataFrame()
         return self._logs_df
 
     # -- Column rename mappings ------------------------------------------------
 
     _STATUS_RENAMES: ClassVar[dict[str, str]] = {
-        "_status_node_label": "node_label",
         "_status_state": "state",
         "_status_timestamp": "timestamp",
         "_status_error_summary": "error_summary",
     }
 
     _LOG_RENAMES: ClassVar[dict[str, str]] = {
-        "_log_node_label": "node_label",
         "_log_timestamp": "timestamp",
         "_log_success": "success",
         "_log_stdout_log": "stdout_log",
@@ -134,10 +130,10 @@ class ObservabilityReader:
 
     _DROP_PREFIXES: ClassVar[tuple[str, ...]] = ("__", "_tag_", "_tag::")
     _STATUS_DROP_EXACT: ClassVar[set[str]] = {
-        "_status_id", "_status_run_id", "_status_pipeline_uri", "_status_node_hash",
+        "_status_id", "_status_run_id", "_status_pipeline_uri",
     }
     _LOG_DROP_EXACT: ClassVar[set[str]] = {
-        "_log_id", "_log_run_id", "_log_node_hash",
+        "_log_id", "_log_run_id",
     }
 
     # -- Internal helpers ------------------------------------------------------
