@@ -111,6 +111,15 @@ class SourceStreamBuilder:
         non_sys = arrow_data_utils.drop_system_columns(table)
         tag_schema = non_sys.select(list(tag_columns_tuple)).schema
         packet_schema = non_sys.drop(list(tag_columns_tuple)).schema
+        # Normalise to non-nullable: raw Arrow tables default to nullable=True for
+        # all fields. arrow_schema_to_python_schema maps nullable=True → T | None,
+        # so we must strip nullability here to get plain Python types for hashing.
+        tag_schema = pa.schema(
+            [pa.field(f.name, f.type, nullable=False) for f in tag_schema]
+        )
+        packet_schema = pa.schema(
+            [pa.field(f.name, f.type, nullable=False) for f in packet_schema]
+        )
         tag_python = self._data_context.type_converter.arrow_schema_to_python_schema(
             tag_schema
         )

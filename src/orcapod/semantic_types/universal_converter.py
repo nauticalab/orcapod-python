@@ -202,13 +202,20 @@ class UniversalTypeConverter:
         """
         Convert an Arrow schema to a Python Schema (mapping of field names to types).
 
-        This uses the main conversion logic, using caches for known type conversion for
-        an improved performance.
+        ``nullable=True`` fields are reconstructed as ``T | None``; ``nullable=False``
+        fields are reconstructed as plain ``T``, completing the bidirectional
+        round-trip with ``python_schema_to_arrow_schema``.
+
+        Round-trip guarantee:
+            - ``int``       → ``nullable=False`` → ``int``
+            - ``int | None`` → ``nullable=True``  → ``int | None``
         """
         fields = {}
         for field in arrow_schema:
-            fields[field.name] = self.arrow_type_to_python_type(field.type)
-
+            python_type = self.arrow_type_to_python_type(field.type)
+            if field.nullable:
+                python_type = python_type | None
+            fields[field.name] = python_type
         return Schema(fields)
 
     def python_dicts_to_struct_dicts(

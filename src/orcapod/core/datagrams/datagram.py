@@ -233,8 +233,18 @@ class Datagram(ContentIdentifiableBase):
         """
         if self._data_python_schema is None:
             assert self._data_table is not None
+            # Cast the raw Arrow schema to non-nullable before converting to Python
+            # types. Arrow tables default to nullable=True for all fields, which
+            # is a storage convention rather than a semantic T | None declaration.
+            # arrow_schema_to_python_schema maps nullable=True → T | None and
+            # nullable=False → T, so we must normalise raw schemas to non-nullable
+            # to recover plain Python types instead of spurious Optional types.
+            raw_schema = self._data_table.schema
+            non_nullable_schema = pa.schema(
+                [pa.field(f.name, f.type, nullable=False) for f in raw_schema]
+            )
             self._data_python_schema = self.converter.arrow_schema_to_python_schema(
-                self._data_table.schema
+                non_nullable_schema
             )
         return self._data_python_schema
 
