@@ -117,9 +117,8 @@ class ArrowTableStream(StreamBase):
                 "No packet columns found in the table. At least one packet column is required."
             )
 
-        # Always respect Arrow nullable flags: nullable=True → T | None,
-        # nullable=False → T. The nullable-stripping concern belongs exclusively
-        # at the data ingestion boundary (SourceStreamBuilder.build).
+        # Respect Arrow nullable flags as-is (after optional inference above):
+        # nullable=True → T | None, nullable=False → T.
         tag_schema = pa.schema(
             f for f in self._table.schema if f.name in self._tag_columns
         )
