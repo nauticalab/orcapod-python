@@ -240,7 +240,7 @@ class LoggingObserver:
 
         try:
             sources = self._db.list_sources()
-        except (NotImplementedError, Exception):
+        except (AttributeError, NotImplementedError):
             return self._db.get_all_records(DEFAULT_LOG_PATH)
 
         parts = []

@@ -322,12 +322,12 @@ class TestMultipleFunctionNodesCombinedLogs:
 
 
 # ---------------------------------------------------------------------------
-# 9. get_logs() returns all logs; filter by _log_node_label for node-specific
+# 9. get_logs() returns all logs aggregated across all node sub-paths
 # ---------------------------------------------------------------------------
 
 
 class TestGetLogsNodeSpecific:
-    def test_get_logs_filters_by_node_label_column(self):
+    def test_get_logs_returns_rows_for_all_nodes(self):
         db = InMemoryArrowDatabase()
         source = _make_source(2)
 

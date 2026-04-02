@@ -197,8 +197,8 @@ class StatusObserver:
 
         try:
             sources = self._db.list_sources()
-        except (NotImplementedError, Exception):
-            # Fall back to direct read for DBs that don't support list_sources
+        except (AttributeError, NotImplementedError):
+            # Fall back to direct read for DBs that don't implement list_sources
             return self._db.get_all_records(DEFAULT_STATUS_PATH)
 
         parts = []
