@@ -104,6 +104,23 @@ def _get_python_to_arrow_map() -> dict:
     return _PYTHON_TO_ARROW_MAP
 
 
+def _is_optional_type(python_type: DataType) -> bool:
+    """Return True if python_type is T | None (Optional[T]).
+
+    Args:
+        python_type: A Python type annotation.
+
+    Returns:
+        True if the type has ``None`` as one of its union arms,
+        False otherwise (including for plain types and complex
+        non-optional unions).
+    """
+    origin = get_origin(python_type)
+    if origin is typing.Union or origin is types.UnionType:
+        return type(None) in get_args(python_type)
+    return False
+
+
 class UniversalTypeConverter:
     """
     Universal engine for Python ↔ Arrow type conversion with cached conversion functions.
@@ -153,14 +170,15 @@ class UniversalTypeConverter:
         """
         Convert a Python schema (dict of field names to data types) to an Arrow schema.
 
-        This uses the main conversion logic, using caches for known type conversion for
-        an improved performance.
+        Field nullability is derived from the Python type: ``T | None``
+        (Optional[T]) maps to ``nullable=True``; plain ``T`` maps to
+        ``nullable=False``.  This uses caches for type conversion.
         """
         fields = []
         for field_name, python_type in python_schema.items():
             arrow_type = self.python_type_to_arrow_type(python_type)
-            fields.append(pa.field(field_name, arrow_type))
-
+            nullable = _is_optional_type(python_type)
+            fields.append(pa.field(field_name, arrow_type, nullable=nullable))
         return pa.schema(fields)
 
     def arrow_type_to_python_type(self, arrow_type: pa.DataType) -> DataType:

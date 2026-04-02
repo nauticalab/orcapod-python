@@ -356,3 +356,29 @@ def test_schema_as_required_idempotent():
     once = s.as_required()
     twice = s.as_required().as_required()
     assert once == twice
+
+
+def test_python_schema_to_arrow_non_nullable():
+    """Plain types (no | None) must produce nullable=False Arrow fields."""
+    from orcapod.types import Schema
+
+    ctx = get_default_context()
+    schema = ctx.type_converter.python_schema_to_arrow_schema(
+        Schema({"a": int, "b": str, "c": float, "d": bool, "e": bytes})
+    )
+    for name in ("a", "b", "c", "d", "e"):
+        assert schema.field(name).nullable is False, (
+            f"Field '{name}' should be nullable=False for a plain type"
+        )
+
+
+def test_python_schema_to_arrow_optional_nullable():
+    """Optional types (T | None) must produce nullable=True Arrow fields."""
+    from orcapod.types import Schema
+
+    ctx = get_default_context()
+    schema = ctx.type_converter.python_schema_to_arrow_schema(
+        Schema({"x": int | None, "y": str | None})
+    )
+    assert schema.field("x").nullable is True
+    assert schema.field("y").nullable is True
