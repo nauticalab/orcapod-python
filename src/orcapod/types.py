@@ -244,6 +244,18 @@ class Schema(Mapping[str, DataType]):
         """
         return all(other.get(k) == v for k, v in self._data.items())
 
+    def as_required(self) -> Schema:
+        """Return a copy of this schema with all fields marked as required.
+
+        Strips optional-field metadata so the result reflects the structural
+        (Arrow-level) schema, where every field is unconditionally present.
+
+        Returns:
+            A new ``Schema`` containing the same fields and types but with
+            ``optional_fields`` set to the empty frozenset.
+        """
+        return Schema(self._data)
+
     # ==================== Convenience constructors ====================
 
     @classmethod
