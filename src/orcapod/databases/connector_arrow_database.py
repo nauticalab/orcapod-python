@@ -63,10 +63,10 @@ class ConnectorArrowDatabase:
         connector: DBConnectorProtocol,
         max_hierarchy_depth: int = 10,
         _path_prefix: tuple[str, ...] = (),
-        _shared_pending_batches: "dict[str, pa.Table] | None" = None,
-        _shared_pending_record_ids: "dict[str, set[str]] | None" = None,
-        _shared_pending_skip_existing: "dict[str, bool] | None" = None,
-        _root: "ConnectorArrowDatabase | None" = None,
+        _shared_pending_batches: dict[str, pa.Table] | None = None,
+        _shared_pending_record_ids: dict[str, set[str]] | None = None,
+        _shared_pending_skip_existing: dict[str, bool] | None = None,
+        _root: ConnectorArrowDatabase | None = None,
         _scoped_path: tuple[str, ...] = (),
     ) -> None:
         self._connector = connector
@@ -465,7 +465,7 @@ class ConnectorArrowDatabase:
 
     # ── Config ────────────────────────────────────────────────────────────────
 
-    def to_config(self) -> dict[str, Any]:
+    def to_config(self, db_registry: Any = None) -> dict[str, Any]:
         """Serialize configuration to a JSON-compatible dict."""
         return {
             "type": "connector_arrow_database",

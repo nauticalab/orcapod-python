@@ -142,9 +142,9 @@ class TestFlatLogStorage:
         logs = obs.get_logs()
         assert logs is not None
         assert logs.num_rows == 1
-        # Verify node label is stored as a column
-        assert "_log_node_label" in logs.column_names
-        assert logs.column("_log_node_label").to_pylist() == ["ident"]
+        # Node identity is now in the path, not in columns
+        assert "_log_node_label" not in logs.column_names
+        assert "_log_node_hash" not in logs.column_names
 
 
 # ---------------------------------------------------------------------------
@@ -320,10 +320,6 @@ class TestMultipleFunctionNodesCombinedLogs:
         # 2 packets × 2 nodes = 4 log rows total
         assert logs.num_rows == 4
 
-        # Both node labels appear in the combined table
-        node_labels = set(logs.column("_log_node_label").to_pylist())
-        assert node_labels == {"doubler", "tripler"}
-
 
 # ---------------------------------------------------------------------------
 # 9. get_logs() returns all logs; filter by _log_node_label for node-specific
@@ -357,22 +353,9 @@ class TestGetLogsNodeSpecific:
 
         logs = obs.get_logs()
         assert logs is not None
-
-        import pyarrow.compute as pc
-
-        # Filter by node label to get per-node logs
-        logs_doubler = logs.filter(
-            pc.equal(logs.column("_log_node_label"), "doubler")
-        )
-        logs_tripler = logs.filter(
-            pc.equal(logs.column("_log_node_label"), "tripler")
-        )
-
-        labels_doubler = set(logs_doubler.column("_log_node_label").to_pylist())
-        labels_tripler = set(logs_tripler.column("_log_node_label").to_pylist())
-
-        assert labels_doubler == {"doubler"}
-        assert labels_tripler == {"tripler"}
+        # Node identity is in path — row count confirms both nodes written
+        # 2 packets × 2 nodes = 4 log rows total
+        assert logs.num_rows == 4
 
 
 # ---------------------------------------------------------------------------

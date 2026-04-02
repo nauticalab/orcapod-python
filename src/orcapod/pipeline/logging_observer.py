@@ -24,8 +24,6 @@ Log schema (fixed columns):
 
     - ``_log_id`` (large_utf8): UUID unique to this log entry.
     - ``_log_run_id`` (large_utf8): UUID of the pipeline run (from ``on_run_start``).
-    - ``_log_node_label`` (large_utf8): Label of the function node.
-    - ``_log_node_hash`` (large_utf8): Content hash of the function node.
     - ``_log_stdout_log`` (large_utf8): Captured standard output.
     - ``_log_stderr_log`` (large_utf8): Captured standard error.
     - ``_log_python_logs`` (large_utf8): Python logging output captured during execution.
@@ -39,10 +37,10 @@ Log schema (fixed columns):
     columns.
 
 Log storage:
-    All logs are written to a single flat table at ``DEFAULT_LOG_PATH``
-    within the provided ``log_database``.  Pass a pre-scoped database
-    (via ``db.at("pipeline_name", "_log")``) to namespace logs.
-    Node identity is queryable via the ``_log_node_label`` column.
+    Logs are stored at ``DEFAULT_LOG_PATH`` within the node-identity-scoped
+    database.  When ``contextualize(*identity_path)`` is called, the database
+    is scoped via ``db.at(*identity_path)`` so each node writes to its own
+    storage path.  Node identity is encoded in the path, not in column values.
 """
 
 from __future__ import annotations
@@ -71,8 +69,7 @@ class PacketLogger:
     """Context-bound logger created by `_ContextualizedLoggingObserver` per packet.
 
     Holds all context needed to write a structured log row
-    (run_id, node_label, node_hash, tag data) so the caller only needs to
-    pass the `CapturedLogs` payload.
+    (run_id, tag data) so the caller only needs to pass the `CapturedLogs` payload.
 
     Tag data is stored as individual queryable columns (not JSON) alongside
     the fixed log columns.
@@ -87,14 +84,10 @@ class PacketLogger:
         log_path: tuple[str, ...],
         run_id: str,
         tag_data: dict[str, Any],
-        node_label: str = "",
-        node_hash: str = "",
     ) -> None:
         self._db = db
         self._log_path = log_path
         self._run_id = run_id
-        self._node_label = node_label
-        self._node_hash = node_hash
         self._tag_data = tag_data
 
     def record(self, **kwargs: Any) -> None:
@@ -114,8 +107,6 @@ class PacketLogger:
         columns: dict[str, pa.Array] = {
             "_log_id":         pa.array([log_id],               type=pa.large_utf8()),
             "_log_run_id":     pa.array([self._run_id],          type=pa.large_utf8()),
-            "_log_node_label": pa.array([self._node_label],      type=pa.large_utf8()),
-            "_log_node_hash":  pa.array([self._node_hash],       type=pa.large_utf8()),
             "_log_timestamp":  pa.array([timestamp],             type=pa.large_utf8()),
         }
 
@@ -139,8 +130,7 @@ class PacketLogger:
             self._db.add_record(self._log_path, log_id, row, flush=True)
         except Exception:
             logger.exception(
-                "LoggingObserver: failed to write log row for node=%s",
-                self._node_label,
+                "LoggingObserver: failed to write log row",
             )
 
 
@@ -180,8 +170,12 @@ class LoggingObserver:
         install_capture_streams()
 
     def contextualize(self, *identity_path: str) -> "_ContextualizedLoggingObserver":
-        """Return a contextualized wrapper bound to the given identity path."""
-        return _ContextualizedLoggingObserver(self._db, identity_path, self._current_run_id)
+        """Return a contextualized wrapper scoped to the given identity path."""
+        if not identity_path:
+            raise ValueError(
+                "LoggingObserver.contextualize() requires a non-empty identity_path."
+            )
+        return _ContextualizedLoggingObserver(self._db.at(*identity_path), self._current_run_id)
 
     # -- lifecycle hooks --
 
@@ -228,51 +222,40 @@ class LoggingObserver:
         tag: TagProtocol,
         packet: PacketProtocol,
     ) -> PacketLogger:
-        """Return a `PacketLogger` bound to *tag* context.
-
-        Warning:
-            This method **must** be called on a *contextualized* observer
-            (the object returned by `contextualize`), not on the root
-            ``LoggingObserver`` directly.  Calling it on the root observer
-            produces a ``PacketLogger`` where ``_log_node_label`` and
-            ``_log_node_hash`` are both written as ``""`` (empty string),
-            because no node identity has been stamped yet.
-
-            Correct usage (mirrors how ``FunctionNode`` calls it)::
-
-                ctx_obs = observer.contextualize(*identity_path)
-                pkt_logger = ctx_obs.create_packet_logger(tag, packet)
-        """
-        raise NotImplementedError(
-            "LoggingObserver.create_packet_logger() must not be called directly. "
-            "Call contextualize(*identity_path) first to get a bound observer."
-        )
+        """Return a `PacketLogger` bound to *tag* context using the root DB."""
+        return PacketLogger(db=self._db, log_path=DEFAULT_LOG_PATH, run_id=self._current_run_id, tag_data=dict(tag))
 
     # -- convenience --
 
     def get_logs(self) -> "pa.Table | None":
-        """Read all log rows from the database as a `pyarrow.Table`.
+        """Read all log rows aggregated across all node sub-paths.
 
-        Returns all log rows written to ``DEFAULT_LOG_PATH`` for this
-        observer's database, regardless of node.  Node-specific logs can
-        be filtered via the ``_log_node_label`` column.
-
-        Works across all ``ArrowDatabaseProtocol`` implementations because
-        it reads via the public ``get_all_records()`` API rather than
-        inspecting private in-memory fields.
+        Reads from all node-scoped sub-paths within this observer's database,
+        concatenating results. Falls back to a direct read for DBs that don't
+        support ``list_sources``.
 
         Returns ``None`` if no logs have been written yet.
         """
         import pyarrow as pa
 
-        tbl = self._db.get_all_records(DEFAULT_LOG_PATH)
-        if tbl is None or tbl.num_rows == 0:
+        try:
+            sources = self._db.list_sources()
+        except (NotImplementedError, Exception):
+            return self._db.get_all_records(DEFAULT_LOG_PATH)
+
+        parts = []
+        for src in sources:
+            if src[-len(DEFAULT_LOG_PATH):] == DEFAULT_LOG_PATH:
+                tbl = self._db.get_all_records(src)
+                if tbl is not None and tbl.num_rows > 0:
+                    if "__record_id" in tbl.schema.names:
+                        tbl = tbl.drop(["__record_id"])
+                    parts.append(tbl)
+        if not parts:
             return None
-        # Drop the internal record-id column if present
-        record_id_col = "__record_id"
-        if record_id_col in tbl.schema.names:
-            tbl = tbl.drop([record_id_col])
-        return tbl
+        if len(parts) == 1:
+            return parts[0]
+        return pa.concat_tables(parts, promote_options="default")
 
     # -- serialization --
 
@@ -287,10 +270,7 @@ class LoggingObserver:
         Returns:
             A dict with ``"type": "logging"`` and a ``"database"`` key.
         """
-        try:
-            db_config = self._db.to_config(db_registry=db_registry)
-        except TypeError:
-            db_config = self._db.to_config()
+        db_config = self._db.to_config(db_registry=db_registry)
         return {
             "type": "logging",
             "database": db_config,
@@ -324,29 +304,22 @@ class _ContextualizedLoggingObserver:
 
     One instance per node per run, created via LoggingObserver.contextualize().
     Must NOT be shared across concurrent node executions.
+
+    The database is pre-scoped to the node identity path so writes go to the
+    correct per-node storage location automatically.
     """
 
     def __init__(
         self,
         db: ArrowDatabaseProtocol,
-        identity_path: tuple[str, ...],
         run_id: str = "",
     ) -> None:
-        if not identity_path:
-            raise ValueError(
-                "_ContextualizedLoggingObserver requires a non-empty identity_path. "
-                "Call LoggingObserver.contextualize(*identity_path) with at least one component."
-            )
         self._db = db
-        self._identity_path = identity_path
         self._run_id = run_id
-        # Populated by on_node_start so create_packet_logger can stamp the right label/hash.
-        self._node_label: str = ""
-        self._node_hash: str = ""
 
     def contextualize(self, *identity_path: str) -> "_ContextualizedLoggingObserver":
-        """Re-contextualize with a new identity path."""
-        return _ContextualizedLoggingObserver(self._db, identity_path, self._run_id)
+        """Re-contextualize with a new identity path (scopes the DB)."""
+        return _ContextualizedLoggingObserver(self._db.at(*identity_path), self._run_id)
 
     def on_run_start(self, run_id: str, pipeline_uri: str = "") -> None:
         pass
@@ -355,8 +328,7 @@ class _ContextualizedLoggingObserver:
         pass
 
     def on_node_start(self, node_label: str, node_hash: str, tag_schema=None) -> None:
-        self._node_label = node_label
-        self._node_hash = node_hash
+        pass
 
     def on_node_end(self, node_label: str, node_hash: str) -> None:
         pass
@@ -386,8 +358,8 @@ class _ContextualizedLoggingObserver:
     ) -> PacketLogger:
         """Create a PacketLogger using context from this wrapper.
 
-        Logs are written at ``DEFAULT_LOG_PATH`` within the database.
-        Node identity (label and hash) are captured from ``on_node_start``.
+        Logs are written at ``DEFAULT_LOG_PATH`` within the scoped database.
+        Node identity is encoded in the database path, not in column values.
         """
         tag_data = dict(tag)
 
@@ -395,7 +367,5 @@ class _ContextualizedLoggingObserver:
             db=self._db,
             log_path=DEFAULT_LOG_PATH,
             run_id=self._run_id,
-            node_label=self._node_label,
-            node_hash=self._node_hash,
             tag_data=tag_data,
         )

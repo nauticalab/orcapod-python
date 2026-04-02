@@ -158,10 +158,6 @@ class TestContextualizeReturnsComposite:
         assert status is not None
         assert logs.num_rows == 4   # 2 nodes × 2 packets
         assert status.num_rows == 8  # 2 nodes × 2 × (RUNNING + SUCCESS)
-        # Both node labels appear in logs
-        node_labels = set(logs.column("_log_node_label").to_pylist())
-        assert "doubler" in node_labels
-        assert "tripler" in node_labels
 
 
 # ---------------------------------------------------------------------------

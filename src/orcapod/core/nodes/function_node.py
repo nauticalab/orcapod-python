@@ -161,7 +161,9 @@ class FunctionNode(StreamBase):
                 pipeline_database.
         """
         if result_database is None:
-            result_database = pipeline_database
+            # Default result database is pipeline_database scoped to "_result"
+            # so that results are stored separately from pipeline-level records.
+            result_database = pipeline_database.at("_result")
 
         # Always wrap the original function_pod (not a previous cached wrapper)
         self._cached_function_pod = CachedFunctionPod(
@@ -455,16 +457,6 @@ class FunctionNode(StreamBase):
             f"schema:{self.pipeline_hash().to_string()}",
             f"instance:{self.content_hash().to_string()}",
         )
-
-    @property
-    def pipeline_path(self) -> tuple[str, ...]:
-        """Return the full absolute storage path for this node.
-
-        This is the database's path prefix prepended to ``node_identity_path``.
-        Useful for inspecting or debugging where records are stored.
-        """
-        prefix = getattr(self._pipeline_database, "_path_prefix", ()) if self._pipeline_database is not None else ()
-        return prefix + self.node_identity_path
 
     @property
     def node_uri(self) -> tuple[str, ...]:

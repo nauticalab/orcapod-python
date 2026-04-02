@@ -1634,7 +1634,7 @@ class TestPLT1158UncachedOperatorStatus:
 
 
 def test_function_node_pipeline_path_two_level(tmp_path):
-    """pipeline_path must end with schema:... and instance:... components."""
+    """node_identity_path must end with schema:... and instance:... components."""
     db = InMemoryArrowDatabase()
 
     def add_one(y: int) -> int:
@@ -1658,7 +1658,7 @@ def test_function_node_pipeline_path_two_level(tmp_path):
     pipeline.compile()
 
     fn_node = pipeline._nodes["fn"]
-    path = fn_node.pipeline_path
+    path = fn_node.node_identity_path
 
     assert path[-2].startswith("schema:"), f"Expected schema:... got {path[-2]!r}"
     assert path[-1].startswith("instance:"), f"Expected instance:... got {path[-1]!r}"
@@ -1667,7 +1667,7 @@ def test_function_node_pipeline_path_two_level(tmp_path):
 
 
 def test_operator_node_pipeline_path_two_level(tmp_path):
-    """OperatorNode pipeline_path must also use two-level schema/instance formula."""
+    """OperatorNode node_identity_path must also use two-level schema/instance formula."""
     db = InMemoryArrowDatabase()
 
     table_a = pa.table(
@@ -1692,7 +1692,7 @@ def test_operator_node_pipeline_path_two_level(tmp_path):
     pipeline.compile()
 
     joined_node = pipeline._nodes["joined"]
-    path = joined_node.pipeline_path
+    path = joined_node.node_identity_path
 
     assert path[-2].startswith("schema:"), f"Expected schema:... got {path[-2]!r}"
     assert path[-1].startswith("instance:"), f"Expected instance:... got {path[-1]!r}"
@@ -1845,12 +1845,12 @@ def test_load_minimal_level_raises_clear_error(tmp_path):
         Pipeline.load(str(path))
 
 
-def test_load_operator_node_pipeline_path_has_pipeline_name_prefix(tmp_path):
-    """Operator loaded from a new-format save must use the pipeline name as path prefix.
+def test_load_operator_node_identity_path_has_schema_instance_components(tmp_path):
+    """Operator loaded from a new-format save must have a valid node_identity_path.
 
     In the new format, pipeline_path is never stored in node descriptors.
-    OperatorNode.from_descriptor() must take the prefix from databases["pipeline_path_prefix"]
-    rather than deriving it from the missing stored pipeline_path.
+    The pipeline name prefix lives in the database path, not in node_identity_path.
+    The node_identity_path must end with schema:... and instance:... components.
     """
     from orcapod.core.operators import SelectPacketColumns
 
@@ -1878,12 +1878,12 @@ def test_load_operator_node_pipeline_path_has_pipeline_name_prefix(tmp_path):
     loaded = Pipeline.load(str(path), mode="full")
 
     sel_node = loaded.compiled_nodes["sel"]
-    pp = sel_node.pipeline_path
-    # The pipeline_path must start with the pipeline name, not be empty or start
-    # with the operator's own URI component
-    assert len(pp) > 0 and pp[0] == "prefixtest", (
-        f"Expected pipeline_path to start with 'prefixtest', got {pp!r}"
-    )
+    pp = sel_node.node_identity_path
+    # The node_identity_path must be non-empty with schema:/instance: components.
+    # Pipeline name prefix is now encoded in the database path, not the identity path.
+    assert len(pp) >= 2, f"Expected non-empty node_identity_path, got {pp!r}"
+    assert pp[-2].startswith("schema:"), f"Expected schema:... got {pp[-2]!r}"
+    assert pp[-1].startswith("instance:"), f"Expected instance:... got {pp[-1]!r}"
 
 
 def test_load_raises_on_missing_result_database_registry_key(tmp_path):
@@ -1924,13 +1924,13 @@ def test_load_raises_on_missing_result_database_registry_key(tmp_path):
         Pipeline.load(str(path))
 
 
-def test_load_function_node_pipeline_path_prefers_hint_over_stored_pipeline_path(tmp_path):
-    """FunctionNode from_descriptor prefers the pipeline_path_prefix hint over derivation.
+def test_load_function_node_identity_path_has_schema_instance_components(tmp_path):
+    """FunctionNode loaded in full mode must have a valid node_identity_path.
 
-    When a pipeline_path IS stored in the descriptor (old-format saves), but the loader
-    also provides a pipeline_path_prefix hint, the hint must take priority. Deriving from
-    a stored old-format path (ending with node:{hash}, 1 component) with the new +2 suffix
-    logic over-strips by 1 and loses the pipeline-name prefix.
+    The node_identity_path is computed from the live pod (schema + content hash),
+    not from any stored pipeline_path in the descriptor. Even when a legacy
+    pipeline_path key is present in a descriptor (old-format saves), full-mode
+    loading computes node_identity_path from the pod directly.
     """
     csv_path = str(tmp_path / "data.csv")
     _write_csv(csv_path, [{"name": "alice", "y": 2}, {"name": "bob", "y": 4}])
@@ -1952,9 +1952,9 @@ def test_load_function_node_pipeline_path_prefers_hint_over_stored_pipeline_path
     path = tmp_path / "pipeline.json"
     pipeline.save(str(path))
 
-    # Inject a fake old-format pipeline_path (node: suffix, 1 component) into the
-    # function node descriptor. The +2 derivation logic would over-strip this and lose
-    # "prefixtest" from the prefix.
+    # Inject a legacy old-format pipeline_path into the descriptor to simulate
+    # an old-format save. In full mode, this stored value must be ignored in
+    # favour of the pod-derived identity path.
     with open(path) as f:
         data = json.load(f)
     fn_descriptor = next(v for v in data["nodes"].values() if v["node_type"] == "function")
@@ -1965,10 +1965,11 @@ def test_load_function_node_pipeline_path_prefers_hint_over_stored_pipeline_path
 
     loaded = Pipeline.load(str(path), mode="full")
     fn_node = loaded.compiled_nodes["fn"]
-    pp = fn_node.pipeline_path
-    assert len(pp) > 0 and pp[0] == "prefixtest", (
-        f"Expected pipeline_path to start with 'prefixtest', got {pp!r}"
-    )
+    pp = fn_node.node_identity_path
+    # In full mode, node_identity_path is computed from the pod (schema/instance)
+    assert len(pp) >= 2, f"Expected non-empty node_identity_path, got {pp!r}"
+    assert pp[-2].startswith("schema:"), f"Expected schema:... got {pp[-2]!r}"
+    assert pp[-1].startswith("instance:"), f"Expected instance:... got {pp[-1]!r}"
 
 
 # ---------------------------------------------------------------------------
