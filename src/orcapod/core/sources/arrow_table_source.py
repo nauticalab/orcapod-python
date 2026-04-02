@@ -25,14 +25,16 @@ class ArrowTableSource(RootSource):
         tag_columns: Collection[str] = (),
         system_tag_columns: Collection[str] = (),
         record_id_column: str | None = None,
+        infer_nullable: bool = True,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
 
-        # Infer nullable from actual data: Arrow tables default all fields to
-        # nullable=True regardless of content; derive the correct flags here
-        # before the builder, which trusts the schema as-is.
-        table = table.cast(arrow_utils.infer_schema_nullable(table))
+        if infer_nullable:
+            # Arrow tables default all fields to nullable=True regardless of
+            # content; derive the correct flags from the actual data.
+            table = table.cast(arrow_utils.infer_schema_nullable(table))
+        # else: schema is trusted as-is — caller has set nullable deliberately.
 
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(
