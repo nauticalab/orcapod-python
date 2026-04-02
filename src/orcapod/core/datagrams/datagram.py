@@ -240,9 +240,7 @@ class Datagram(ContentIdentifiableBase):
             # nullable=False → T, so we must normalise raw schemas to non-nullable
             # to recover plain Python types instead of spurious Optional types.
             raw_schema = self._data_table.schema
-            non_nullable_schema = pa.schema(
-                [pa.field(f.name, f.type, nullable=False) for f in raw_schema]
-            )
+            non_nullable_schema = arrow_utils.make_schema_non_nullable(raw_schema)
             self._data_python_schema = self.converter.arrow_schema_to_python_schema(
                 non_nullable_schema
             )

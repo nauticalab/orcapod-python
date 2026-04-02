@@ -730,5 +730,23 @@ def test_schema_normalization():
     print(f"\nData preserved: {table.to_pydict() == normalized_table.to_pydict()}")
 
 
+def make_schema_non_nullable(schema: "pa.Schema") -> "pa.Schema":
+    """Return a copy of *schema* with every field's ``nullable`` flag set to False.
+
+    Arrow tables default all fields to ``nullable=True`` as a storage convention.
+    When recovering Python types from a raw Arrow schema via
+    ``arrow_schema_to_python_schema``, callers should normalise the schema first
+    to prevent plain fields from being reconstructed as ``T | None``.
+
+    Args:
+        schema: The Arrow schema to normalise.
+
+    Returns:
+        A new ``pa.Schema`` with the same fields and types but ``nullable=False``
+        on every field.
+    """
+    return pa.schema([pa.field(f.name, f.type, nullable=False) for f in schema])
+
+
 if __name__ == "__main__":
     test_schema_normalization()

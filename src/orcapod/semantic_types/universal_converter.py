@@ -213,7 +213,7 @@ class UniversalTypeConverter:
         fields = {}
         for field in arrow_schema:
             python_type = self.arrow_type_to_python_type(field.type)
-            if field.nullable:
+            if field.nullable and python_type is not Any:
                 python_type = python_type | None
             fields[field.name] = python_type
         return Schema(fields)

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.system_constants import constants
 from orcapod.types import ContentHash
-from orcapod.utils import arrow_data_utils
+from orcapod.utils import arrow_data_utils, arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -114,12 +114,8 @@ class SourceStreamBuilder:
         # Normalise to non-nullable: raw Arrow tables default to nullable=True for
         # all fields. arrow_schema_to_python_schema maps nullable=True → T | None,
         # so we must strip nullability here to get plain Python types for hashing.
-        tag_schema = pa.schema(
-            [pa.field(f.name, f.type, nullable=False) for f in tag_schema]
-        )
-        packet_schema = pa.schema(
-            [pa.field(f.name, f.type, nullable=False) for f in packet_schema]
-        )
+        tag_schema = arrow_utils.make_schema_non_nullable(tag_schema)
+        packet_schema = arrow_utils.make_schema_non_nullable(packet_schema)
         tag_python = self._data_context.type_converter.arrow_schema_to_python_schema(
             tag_schema
         )
