@@ -745,7 +745,9 @@ def make_schema_non_nullable(schema: "pa.Schema") -> "pa.Schema":
         A new ``pa.Schema`` with the same fields and types but ``nullable=False``
         on every field.
     """
-    return pa.schema([pa.field(f.name, f.type, nullable=False) for f in schema])
+    return pa.schema(
+        [pa.field(f.name, f.type, nullable=False, metadata=f.metadata) for f in schema]
+    )
 
 
 if __name__ == "__main__":
