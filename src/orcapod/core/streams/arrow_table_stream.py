@@ -68,7 +68,10 @@ class ArrowTableStream(StreamBase):
                         [contexts.get_default_context_key()] * len(table),
                         pa.large_string(),
                     )
-                }
+                },
+                schema=pa.schema(
+                    [pa.field(constants.CONTEXT_KEY, pa.large_string(), nullable=False)]
+                ),
             )
 
         prefix_info = {constants.SOURCE_PREFIX: source_info}
@@ -223,7 +226,8 @@ class ArrowTableStream(StreamBase):
                 str(packet.content_hash()) for _, packet in self.iter_packets()
             ]
             output_table = output_table.append_column(
-                hash_column_name, pa.array(content_hashes, type=pa.large_string())
+                pa.field(hash_column_name, pa.large_string(), nullable=False),
+                pa.array(content_hashes, type=pa.large_string()),
             )
         if not columns_config.system_tags:
             # Check in original implementation
