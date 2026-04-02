@@ -127,7 +127,10 @@ class TestFunctionNodeColumnConfig:
             {
                 "id": pa.array([4, 3, 2, 1, 0], type=pa.int64()),
                 "x": pa.array([4, 3, 2, 1, 0], type=pa.int64()),
-            }
+            },
+            schema=pa.schema(
+                [pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]
+            ),
         )
         input_stream = ArrowTableStream(reversed_table, tag_columns=["id"])
         node = FunctionNode(

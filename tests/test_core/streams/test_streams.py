@@ -25,13 +25,24 @@ def make_table_stream(
     tag_columns: list[str] | None = None,
     n_rows: int = 3,
 ) -> ArrowTableStream:
-    """Create a minimal ArrowTableStream for testing."""
+    """Create a minimal ArrowTableStream for testing.
+
+    Uses explicit nullable=False schema to simulate data that has been
+    processed through SourceStreamBuilder (which normalizes nullable flags).
+    """
     tag_columns = tag_columns or ["id"]
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("value", pa.large_string(), nullable=False),
+        ]
+    )
     table = pa.table(
         {
             "id": pa.array(list(range(n_rows)), type=pa.int64()),
             "value": pa.array([f"v{i}" for i in range(n_rows)], type=pa.large_string()),
-        }
+        },
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=tag_columns)
 
@@ -231,10 +242,14 @@ class TestTableStreamOutputSchema:
         assert set(packet_schema.keys()) == set(packet_keys)
 
     def test_schema_values_are_types(self):
+        import types as _types
+
         stream = make_table_stream(tag_columns=["id"])
         tag_schema, packet_schema = stream.output_schema()
         for v in (*tag_schema.values(), *packet_schema.values()):
-            assert isinstance(v, type), f"Expected a type, got {v!r}"
+            assert isinstance(v, (type, _types.UnionType)), (
+                f"Expected a type or UnionType, got {v!r}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -446,43 +461,33 @@ class TestArrowTableStreamIdentityStructure:
         assert s1.content_hash() != s2.content_hash()
 
 
-class TestArrowTableStreamRespectNullable:
-    """respect_nullable controls whether raw Arrow nullable=True becomes T | None."""
+class TestArrowTableStreamNullablePreservation:
+    """ArrowTableStream always respects Arrow nullable flags.
 
-    def _make_nullable_table(self) -> pa.Table:
-        """Arrow table where all fields default to nullable=True."""
-        return pa.table(
+    nullable=True  → T | None in output_schema
+    nullable=False → T       in output_schema
+
+    The nullable-stripping concern belongs exclusively at the data ingestion
+    boundary (SourceStreamBuilder.build(respect_nullable=False)).
+    """
+
+    def test_nullable_true_fields_yield_optional_in_output_schema(self):
+        """nullable=True fields → T | None in output_schema."""
+        table = pa.table(
             {
                 "tag": pa.array(["a"], type=pa.large_string()),
                 "val": pa.array([1], type=pa.int64()),
             }
         )
-
-    def test_default_strips_nullable_from_output_schema(self):
-        """Default respect_nullable=False: nullable=True fields → plain T."""
-        table = self._make_nullable_table()
-        # Confirm Arrow defaults to nullable=True
+        # Arrow defaults to nullable=True
         assert table.schema.field("val").nullable is True
 
         stream = ArrowTableStream(table, tag_columns=["tag"])
         _, packet_schema = stream.output_schema()
-        assert packet_schema["val"] is int
-
-    def test_respect_nullable_true_preserves_optional_types(self):
-        """respect_nullable=True: nullable=True fields → T | None."""
-        table = self._make_nullable_table()
-        stream = ArrowTableStream(table, tag_columns=["tag"], respect_nullable=True)
-        _, packet_schema = stream.output_schema()
         assert packet_schema["val"] == int | None
 
-    def test_respect_nullable_false_overrides_explicit_nullable_false(self):
-        """Default respect_nullable=False strips nullable even from originally non-nullable fields.
-
-        ArrowTableStream's internal pipeline (prepare_prefixed_columns, etc.) normalises
-        all fields to nullable=True. respect_nullable=False (the default) then strips
-        that back to non-nullable, so the result is plain T regardless of the original
-        input schema.
-        """
+    def test_non_nullable_fields_yield_plain_type_in_output_schema(self):
+        """nullable=False fields → plain T in output_schema."""
         table = pa.table(
             {
                 "tag": pa.array(["a"], type=pa.large_string()),
@@ -495,7 +500,31 @@ class TestArrowTableStreamRespectNullable:
                 ]
             ),
         )
-        # Default (respect_nullable=False) still strips to plain T
+        assert table.schema.field("val").nullable is False
+
         stream = ArrowTableStream(table, tag_columns=["tag"])
         _, packet_schema = stream.output_schema()
+        assert packet_schema["val"] is int
+
+    def test_source_stream_builder_strips_nullable_by_default(self):
+        """Via SourceStreamBuilder.build() default respect_nullable=False, output_schema returns plain T."""
+        from orcapod.config import DEFAULT_CONFIG
+        from orcapod.contexts import resolve_context
+        from orcapod.core.sources.stream_builder import SourceStreamBuilder
+
+        ctx = resolve_context(None)
+        builder = SourceStreamBuilder(data_context=ctx, config=DEFAULT_CONFIG)
+
+        # Raw Arrow table with nullable=True (the default)
+        table = pa.table(
+            {
+                "tag": pa.array(["a"], type=pa.large_string()),
+                "val": pa.array([1], type=pa.int64()),
+            }
+        )
+        assert table.schema.field("val").nullable is True
+
+        result = builder.build(table, tag_columns=["tag"])
+        _, packet_schema = result.stream.output_schema()
+        # Despite nullable=True in the raw table, build() normalizes to non-nullable
         assert packet_schema["val"] is int

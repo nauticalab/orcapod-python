@@ -8,6 +8,7 @@ from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import ArrowTableStream
 from orcapod.protocols.core_protocols import PacketProtocol, StreamProtocol, TagProtocol
 from orcapod.types import ColumnConfig
+from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -70,6 +71,13 @@ class Batch(UnaryOperator):
             batched_data.append(next_batch)
 
         batched_table = pa.Table.from_pylist(batched_data)
+        # Rebuild schema with nullable=False to avoid spurious T | None types.
+        # pa.Table.cast() is not used here because list columns may fail validation.
+        new_schema = arrow_utils.make_schema_non_nullable(batched_table.schema)
+        batched_table = pa.Table.from_arrays(
+            [batched_table.column(i) for i in range(batched_table.num_columns)],
+            schema=new_schema,
+        )
         return ArrowTableStream(
             batched_table,
             tag_columns=tag_columns,

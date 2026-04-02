@@ -6,7 +6,7 @@ from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
-from orcapod.utils import arrow_data_utils, schema_utils
+from orcapod.utils import arrow_data_utils, arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -284,6 +284,13 @@ class MergeJoin(BinaryOperator):
         other_cols = [c for c in joined.column_names if c not in all_tag_keys]
         joined = joined.select(tag_cols + other_cols)
 
+        # Rebuild schema with nullable=False to avoid spurious T | None types.
+        # pa.Table.cast() is not used here because list columns may fail validation.
+        new_schema = arrow_utils.make_schema_non_nullable(joined.schema)
+        joined = pa.Table.from_arrays(
+            [joined.column(i) for i in range(joined.num_columns)],
+            schema=new_schema,
+        )
         return ArrowTableStream(
             joined,
             tag_columns=tuple(all_tag_keys),

@@ -58,27 +58,35 @@ def compute_letter_grade(name: str, score: int) -> str:
 
 
 def make_students() -> ArrowTableStream:
+    schema = pa.schema(
+        [
+            pa.field("student_id", pa.large_string(), nullable=False),
+            pa.field("name", pa.large_string(), nullable=False),
+        ]
+    )
     table = pa.table(
         {
-            "student_id": pa.array(
-                ["s1", "s2", "s3", "s4", "s5"], type=pa.large_string()
-            ),
-            "name": pa.array(
-                ["Alice", "Bob", "Carol", "Dave", "Eve"], type=pa.large_string()
-            ),
-        }
+            "student_id": pa.array(["s1", "s2", "s3", "s4", "s5"], type=pa.large_string()),
+            "name": pa.array(["Alice", "Bob", "Carol", "Dave", "Eve"], type=pa.large_string()),
+        },
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["student_id"])
 
 
 def make_grades() -> ArrowTableStream:
+    schema = pa.schema(
+        [
+            pa.field("student_id", pa.large_string(), nullable=False),
+            pa.field("score", pa.int64(), nullable=False),
+        ]
+    )
     table = pa.table(
         {
-            "student_id": pa.array(
-                ["s1", "s2", "s3", "s4", "s5"], type=pa.large_string()
-            ),
+            "student_id": pa.array(["s1", "s2", "s3", "s4", "s5"], type=pa.large_string()),
             "score": pa.array([95, 82, 67, 73, 55], type=pa.int64()),
-        }
+        },
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["student_id"])
 

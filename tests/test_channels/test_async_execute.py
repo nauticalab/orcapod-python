@@ -49,35 +49,51 @@ from orcapod.types import NodeConfig, PipelineConfig
 
 
 def make_stream(n: int = 3) -> ArrowTableStream:
-    """Stream with tag=id, packet=x (ints)."""
+    """Stream with tag=id, packet=x (ints). Uses nullable=False schema."""
+    schema = pa.schema(
+        [pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]
+    )
     table = pa.table(
-        {
-            "id": pa.array(list(range(n)), type=pa.int64()),
-            "x": pa.array(list(range(n)), type=pa.int64()),
-        }
+        {"id": pa.array(list(range(n)), type=pa.int64()), "x": pa.array(list(range(n)), type=pa.int64())},
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
 
 
 def make_two_col_stream(n: int = 3) -> ArrowTableStream:
-    """Stream with tag=id, packet={x, y}."""
+    """Stream with tag=id, packet={x, y}. Uses nullable=False schema."""
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("x", pa.int64(), nullable=False),
+            pa.field("y", pa.int64(), nullable=False),
+        ]
+    )
     table = pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
             "x": pa.array(list(range(n)), type=pa.int64()),
             "y": pa.array([i * 10 for i in range(n)], type=pa.int64()),
-        }
+        },
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
 
 
 def make_name_stream() -> ArrowTableStream:
-    """Stream with tag=id, packet=name (str)."""
+    """Stream with tag=id, packet=name (str). Uses nullable=False schema."""
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("name", pa.large_string(), nullable=False),
+        ]
+    )
     table = pa.table(
         {
             "id": pa.array([0, 1, 2], type=pa.int64()),
             "name": pa.array(["alice", "bob", "carol"], type=pa.large_string()),
-        }
+        },
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
 

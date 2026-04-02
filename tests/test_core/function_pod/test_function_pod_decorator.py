@@ -148,7 +148,14 @@ class TestFunctionPodDecoratorEndToEnd:
                     "id": pa.array(list(range(n)), type=pa.int64()),
                     "a": pa.array(list(range(n)), type=pa.int64()),
                     "b": pa.array(list(range(n)), type=pa.int64()),
-                }
+                },
+                schema=pa.schema(
+                    [
+                        pa.field("id", pa.int64(), nullable=False),
+                        pa.field("a", pa.int64(), nullable=False),
+                        pa.field("b", pa.int64(), nullable=False),
+                    ]
+                ),
             ),
             tag_columns=["id"],
         )

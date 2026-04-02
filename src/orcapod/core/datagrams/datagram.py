@@ -69,9 +69,7 @@ class Datagram(ContentIdentifiableBase):
         record_id: str | None = None,
         data_context: str | contexts.DataContext | None = None,
         config: Config | None = None,
-        respect_nullable: bool = False,
     ) -> None:
-        self._respect_nullable = respect_nullable
         if isinstance(data, pa.RecordBatch):
             data = pa.Table.from_batches([data])
 
@@ -231,26 +229,17 @@ class Datagram(ContentIdentifiableBase):
 
     def _ensure_python_schema(self) -> Schema:
         """
-        Ensure that Python schema is materialized and then returned
+        Ensure that Python schema is materialized and then returned.
+
+        Arrow nullable flags are always respected: nullable=True → T | None,
+        nullable=False → T. The nullable-stripping concern belongs exclusively
+        at the data ingestion boundary (SourceStreamBuilder.build).
         """
         if self._data_python_schema is None:
             assert self._data_table is not None
-            # By default, cast the raw Arrow schema to non-nullable before
-            # converting to Python types. Arrow tables default to nullable=True
-            # for all fields as a storage convention, not a semantic T | None
-            # declaration. arrow_schema_to_python_schema maps nullable=True →
-            # T | None and nullable=False → T, so we normalise to avoid spurious
-            # Optional types. Set respect_nullable=True (at construction time) to
-            # opt-in to preserving Arrow nullable flags so that nullable=True
-            # fields yield T | None in the Python schema.
             raw_schema = self._data_table.schema
-            effective_schema = (
-                raw_schema
-                if self._respect_nullable
-                else arrow_utils.make_schema_non_nullable(raw_schema)
-            )
             self._data_python_schema = self.converter.arrow_schema_to_python_schema(
-                effective_schema
+                raw_schema
             )
         return self._data_python_schema
 
@@ -751,7 +740,6 @@ class Datagram(ContentIdentifiableBase):
         # Fields from ContentIdentifiableBase / DataContextMixin
         new_d._data_context = self._data_context
         new_d._orcapod_config = self._orcapod_config
-        new_d._respect_nullable = self._respect_nullable
         new_d._content_hash_cache = (
             dict(self._content_hash_cache) if include_cache else {}
         )

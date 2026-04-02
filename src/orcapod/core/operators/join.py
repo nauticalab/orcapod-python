@@ -14,7 +14,7 @@ from orcapod.protocols.core_protocols import (
 )
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, ContentHash, Schema
-from orcapod.utils import arrow_data_utils, schema_utils
+from orcapod.utils import arrow_data_utils, arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -195,8 +195,34 @@ class Join(NonZeroInputOperator):
         reordered_columns = [col for col in table.column_names if col in tag_keys]
         reordered_columns += [col for col in table.column_names if col not in tag_keys]
 
+        result_table = table.select(reordered_columns)
+        # Restore nullable=False flags for columns that should never be null after
+        # an inner join. This includes:
+        # - User data columns (tag/packet): don't start with DATAGRAM_PREFIX ('_')
+        # - System tag columns (tag record IDs, source IDs): start with SYSTEM_TAG_PREFIX
+        # Source info columns (_source_*) may legitimately be null after cross-stream
+        # joins, so they are excluded.
+        source_prefix = constants.SOURCE_PREFIX
+        non_nullable_cols = {
+            col for col in result_table.column_names
+            if not col.startswith(source_prefix) and (
+                not col.startswith(constants.DATAGRAM_PREFIX)
+                or col.startswith(constants.SYSTEM_TAG_PREFIX)
+            )
+        }
+        if non_nullable_cols:
+            new_fields = []
+            for field in result_table.schema:
+                if field.name in non_nullable_cols:
+                    new_fields.append(
+                        pa.field(field.name, field.type, nullable=False, metadata=field.metadata)
+                    )
+                else:
+                    new_fields.append(field)
+            new_schema = pa.schema(new_fields, metadata=result_table.schema.metadata)
+            result_table = result_table.cast(new_schema)
         return ArrowTableStream(
-            table.select(reordered_columns),
+            result_table,
             tag_columns=tuple(tag_keys),
         )
 

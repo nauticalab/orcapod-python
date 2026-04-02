@@ -288,6 +288,10 @@ def get_compatible_type(type1: Any, type2: Any) -> Any:
     if type1 is type2:
         return type1
 
+    # Handle equal types (e.g., two separate `int | None` union objects)
+    if type1 == type2:
+        return type1
+
     # Handle None/NoneType
     if type1 is type(None) or type2 is type(None):
         # You might want to handle Optional types here

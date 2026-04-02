@@ -39,22 +39,31 @@ from orcapod.types import CacheMode, NodeConfig
 
 
 def make_stream(n: int = 5) -> ArrowTableStream:
+    schema = pa.schema(
+        [pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]
+    )
     table = pa.table(
-        {
-            "id": pa.array(list(range(n)), type=pa.int64()),
-            "x": pa.array(list(range(n)), type=pa.int64()),
-        }
+        {"id": pa.array(list(range(n)), type=pa.int64()), "x": pa.array(list(range(n)), type=pa.int64())},
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
 
 
 def make_two_col_stream(n: int = 3) -> ArrowTableStream:
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("x", pa.int64(), nullable=False),
+            pa.field("y", pa.int64(), nullable=False),
+        ]
+    )
     table = pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
             "x": pa.array(list(range(n)), type=pa.int64()),
             "y": pa.array([i * 10 + i for i in range(n)], type=pa.int64()),
-        }
+        },
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
 

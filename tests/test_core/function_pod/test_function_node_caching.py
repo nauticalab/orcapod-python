@@ -44,8 +44,11 @@ def _make_stream(
 ) -> ArrowTableStream:
     if tag_columns is None:
         tag_columns = ["id"]
+    keys = list(rows[0].keys())
+    schema = pa.schema([pa.field(k, pa.int64(), nullable=False) for k in keys])
     table = pa.table(
-        {k: pa.array([r[k] for r in rows], type=pa.int64()) for k in rows[0]}
+        {k: pa.array([r[k] for r in rows], type=pa.int64()) for k in keys},
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=tag_columns)
 

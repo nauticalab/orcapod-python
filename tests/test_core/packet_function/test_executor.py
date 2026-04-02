@@ -371,8 +371,11 @@ def _make_add_stream(rows: list[dict] | None = None):
 
     if rows is None:
         rows = [{"id": 0, "x": 1, "y": 2}, {"id": 1, "x": 3, "y": 4}]
+    keys = list(rows[0].keys())
+    schema = pa.schema([pa.field(k, pa.int64(), nullable=False) for k in keys])
     table = pa.table(
-        {k: pa.array([r[k] for r in rows], type=pa.int64()) for k in rows[0]}
+        {k: pa.array([r[k] for r in rows], type=pa.int64()) for k in keys},
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
 

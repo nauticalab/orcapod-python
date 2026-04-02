@@ -162,12 +162,15 @@ class SourceStreamBuilder:
             record_id_values,
         )
 
-        # 10. Wrap in ArrowTableStream.
+        # 10. Normalize table nullable flags if requested, then wrap in ArrowTableStream.
+        # ArrowTableStream always respects Arrow nullable flags, so the stripping
+        # must happen here — at the data ingestion boundary.
+        if not respect_nullable:
+            table = table.cast(arrow_utils.make_schema_non_nullable(table.schema))
         stream = ArrowTableStream(
             table=table,
             tag_columns=tag_columns_tuple,
             system_tag_columns=system_tag_columns_tuple,
-            respect_nullable=respect_nullable,
         )
 
         return SourceStreamResult(

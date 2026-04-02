@@ -213,7 +213,13 @@ class TestDerivedSourceRoundTrip:
                 "id": src.as_table().column("id"),
                 "x": src.as_table().column("result"),
                 # type: ignore[arg-type]
-            }
+            },
+            schema=pa.schema(
+                [
+                    pa.field("id", pa.int64(), nullable=False),
+                    pa.field("x", pa.int64(), nullable=False),
+                ]
+            ),
         )
 
         result_stream = ArrowTableStream(result_table, tag_columns=["id"])

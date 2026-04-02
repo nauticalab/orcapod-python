@@ -22,11 +22,18 @@ def _make_pod():
 
 
 def _make_stream(n=3):
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int64(), nullable=False),
+            pa.field("x", pa.int64(), nullable=False),
+        ]
+    )
     table = pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
             "x": pa.array(list(range(n)), type=pa.int64()),
-        }
+        },
+        schema=schema,
     )
     return ArrowTableStream(table, tag_columns=["id"])
 

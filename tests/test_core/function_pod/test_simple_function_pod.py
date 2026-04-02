@@ -188,7 +188,13 @@ class TestSimpleFunctionPodInputSchemaValidation:
                 {
                     "id": pa.array([0, 1], type=pa.int64()),
                     "x": pa.array([0, 1], type=pa.int64()),
-                }
+                },
+                schema=pa.schema(
+                    [
+                        pa.field("id", pa.int64(), nullable=False),
+                        pa.field("x", pa.int64(), nullable=False),
+                    ]
+                ),
             ),
             tag_columns=["id"],
         )
@@ -206,7 +212,13 @@ class TestSimpleFunctionPodInputSchemaValidation:
                 {
                     "id": pa.array([0, 1], type=pa.int64()),
                     "x": pa.array([3, 5], type=pa.int64()),
-                }
+                },
+                schema=pa.schema(
+                    [
+                        pa.field("id", pa.int64(), nullable=False),
+                        pa.field("x", pa.int64(), nullable=False),
+                    ]
+                ),
             ),
             tag_columns=["id"],
         )
@@ -248,7 +260,13 @@ class TestSimpleFunctionPodMultiStream:
                 {
                     "id": pa.array(list(range(n)), type=pa.int64()),
                     "x": pa.array(list(range(n)), type=pa.int64()),
-                }
+                },
+                schema=pa.schema(
+                    [
+                        pa.field("id", pa.int64(), nullable=False),
+                        pa.field("x", pa.int64(), nullable=False),
+                    ]
+                ),
             ),
             tag_columns=["id"],
         )
@@ -257,7 +275,13 @@ class TestSimpleFunctionPodMultiStream:
                 {
                     "id": pa.array(list(range(n)), type=pa.int64()),
                     "y": pa.array([i * 10 for i in range(n)], type=pa.int64()),
-                }
+                },
+                schema=pa.schema(
+                    [
+                        pa.field("id", pa.int64(), nullable=False),
+                        pa.field("y", pa.int64(), nullable=False),
+                    ]
+                ),
             ),
             tag_columns=["id"],
         )
