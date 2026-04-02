@@ -21,7 +21,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pyarrow as pa
-import pytest
 
 from orcapod.contexts import get_default_context
 from orcapod.hashing.arrow_hashers import StarfixArrowHasher
