@@ -539,7 +539,54 @@ def prepare_prefixed_columns(
     exclude_prefixes: Collection[str] = (),
     prefix_schemas: "dict[str, pa.Schema] | None" = None,
 ) -> tuple["pa.Table", dict[str, "pa.Table"]]:
-    """ """
+    """
+    Split a table into non-prefixed columns and per-prefix tables.
+
+    Columns whose names start with one of the configured prefixes are grouped
+    into a separate output table for that prefix, with the matching prefix
+    removed from each grouped column name. Columns that do not match any
+    prefix remain in the returned data table.
+
+    Args:
+        table: The input ``pyarrow.Table`` or ``pyarrow.RecordBatch`` whose
+            columns will be partitioned into a main data table and zero or more
+            prefix-specific tables.
+        prefix_info: Prefix configuration. This may be:
+
+            * a collection of prefix strings, in which case each prefix is used
+              with no additional per-prefix metadata; or
+            * a mapping from prefix string to metadata/``None``; or
+            * a mapping from prefix string to a mapping of per-column metadata.
+
+            The exact metadata values are consumed by the implementation when
+            constructing the per-prefix tables, but the keys define the set of
+            prefixes that will be recognized.
+        exclude_columns: Column names to omit from the constructed output.
+        exclude_prefixes: Prefix groups to skip entirely even if matching input
+            columns are present.
+        prefix_schemas: Optional mapping from prefix string to the
+            ``pyarrow.Schema`` that should be used when constructing that
+            prefix's output table. Each schema is expected to describe the
+            columns after the prefix has been removed (that is, it should match
+            the constructed column names, not the original names in ``table``).
+            When provided, the schema is used to preserve/define field order,
+            types, and nullability for that prefix table. If a provided schema
+            does not match the columns that are actually constructed for the
+            prefix (for example, missing fields, extra fields, or incompatible
+            names/types), table construction is not silently reconciled; the
+            underlying ``pyarrow`` schema/table operation will fail.
+
+    Returns:
+        A tuple ``(data_table, prefixed_tables)`` where ``data_table`` is a
+        ``pyarrow.Table`` containing the columns from ``table`` that were not
+        assigned to any prefix group, and ``prefixed_tables`` is a dictionary
+        mapping each recognized prefix to its constructed ``pyarrow.Table``.
+
+        Nullability is preserved from the source columns for columns copied
+        directly from ``table``. For columns created or reordered under an
+        explicit schema, the resulting field nullability follows the
+        corresponding ``pyarrow.Schema``/field definition used for that output.
+    """
     all_prefix_info = {}
     if isinstance(prefix_info, Mapping):
         for prefix, info in prefix_info.items():
@@ -769,7 +816,8 @@ def make_schema_non_nullable(schema: "pa.Schema") -> "pa.Schema":
         on every field.
     """
     return pa.schema(
-        [pa.field(f.name, f.type, nullable=False, metadata=f.metadata) for f in schema]
+        [pa.field(f.name, f.type, nullable=False, metadata=f.metadata) for f in schema],
+        metadata=schema.metadata,
     )
 
 
@@ -789,10 +837,18 @@ def infer_schema_nullable(table: "pa.Table") -> "pa.Schema":
     Returns:
         A new schema with nullable flags derived from actual null counts.
     """
-    return pa.schema([
-        pa.field(field.name, field.type, nullable=table.column(i).null_count > 0, metadata=field.metadata)
-        for i, field in enumerate(table.schema)
-    ])
+    return pa.schema(
+        [
+            pa.field(
+                field.name,
+                field.type,
+                nullable=table.column(i).null_count > 0,
+                metadata=field.metadata,
+            )
+            for i, field in enumerate(table.schema)
+        ],
+        metadata=table.schema.metadata,
+    )
 
 
 if __name__ == "__main__":
