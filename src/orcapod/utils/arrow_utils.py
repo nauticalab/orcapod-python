@@ -630,8 +630,17 @@ def prepare_prefixed_columns(
     data_table: pa.Table = pa.Table.from_arrays(data_columns, schema=data_schema)
     result_tables = {}
     for prefix in all_prefix_info:
+        # Build schema explicitly so nullable flags survive the construction.
+        # Columns whose values are entirely null (unknown source info) keep
+        # nullable=True; all others are marked nullable=False.
+        prefix_schema = pa.schema([
+            pa.field(name, col.type, nullable=col.null_count > 0)
+            for name, col in zip(
+                prefixed_column_names[prefix], prefixed_columns[prefix]
+            )
+        ])
         prefix_table = pa.Table.from_arrays(
-            prefixed_columns[prefix], names=prefixed_column_names[prefix]
+            prefixed_columns[prefix], schema=prefix_schema
         )
         result_tables[prefix] = normalize_table_to_large_types(prefix_table)
 

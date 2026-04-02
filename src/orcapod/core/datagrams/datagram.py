@@ -263,7 +263,9 @@ class Datagram(ContentIdentifiableBase):
         if self._context_table is None:
             import pyarrow as _pa
 
-            schema = _pa.schema({constants.CONTEXT_KEY: _pa.large_string()})
+            schema = _pa.schema(
+                [_pa.field(constants.CONTEXT_KEY, _pa.large_string(), nullable=False)]
+            )
             self._context_table = _pa.Table.from_pylist(
                 [{constants.CONTEXT_KEY: self._data_context.context_key}],
                 schema=schema,
