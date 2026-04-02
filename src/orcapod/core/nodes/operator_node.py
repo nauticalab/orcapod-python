@@ -346,14 +346,20 @@ class OperatorNode(StreamBase):
 
     @property
     def node_identity_path(self) -> tuple[str, ...]:
-        """Return the node identity path for DB record scoping.
+        """Return the node identity path for observer contextualization.
 
-        Returns ``()`` when no pipeline database is attached.
+        The identity path is ``operator.uri + (schema_hash, instance_hash)``
+        and is computable independently of whether a pipeline database is
+        attached.  Only ``pipeline_path`` (the full absolute storage path)
+        requires a DB.
+
+        Returns ``()`` only when the node is in a load-only state with no
+        live operator (deserialized descriptor without a real operator).
         """
         stored = getattr(self, "_stored_pipeline_path", None)
         if self._operator is None and stored is not None:
             return stored
-        if self._pipeline_database is None:
+        if self._operator is None:
             return ()
         return (
             self._operator.uri

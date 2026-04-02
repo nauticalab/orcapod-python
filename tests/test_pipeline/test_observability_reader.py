@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import polars as pl
@@ -17,8 +16,6 @@ def _make_fake_delta_table(path: Path) -> None:
 
 
 def test_discover_tables_finds_status_and_log_paths(tmp_path):
-    from orcapod.pipeline.observability_reader import ObservabilityReader
-
     # Create fake Delta tables at new-format paths (_status/_log not status/logs)
     _make_fake_delta_table(tmp_path / "my_pipeline" / "_status" / "my_pod" / "schema:abc" / "instance:xyz")
     _make_fake_delta_table(tmp_path / "my_pipeline" / "_log" / "my_pod" / "schema:abc" / "instance:xyz")

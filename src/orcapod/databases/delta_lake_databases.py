@@ -941,7 +941,10 @@ class DeltaTableDatabase:
         # Derive the absolute table URI directly from the key (already includes prefix).
         abs_path_components = tuple(record_key.split("/"))
         if not self._is_cloud:
-            table_uri = str(self._local_root.joinpath(*abs_path_components))
+            path = self._local_root
+            for component in abs_path_components:
+                path = path / self._sanitize_path_component(component)
+            table_uri = str(path)
         else:
             table_uri = self._root_uri.rstrip("/") + "/" + record_key
 
@@ -989,8 +992,10 @@ class DeltaTableDatabase:
             # Update cache
             self._delta_table_cache[record_key] = deltalake.DeltaTable(table_uri, storage_options=self._storage_options or None)
 
-            # invalidate record id cache (uses abs_path_components as the record_path)
-            self._invalidate_cache(abs_path_components)
+            # Invalidate the existing-IDs cache directly by record_key to avoid
+            # double-prefixing that would occur if _invalidate_cache() were used
+            # (it prepends _path_prefix again via _get_record_key).
+            self._cache_dirty[record_key] = True
 
         except Exception as e:
             logger.error(f"Error flushing batch for {record_key}: {e}")
@@ -1008,9 +1013,10 @@ class DeltaTableDatabase:
         """Return a new DeltaTableDatabase scoped to the given sub-path.
 
         The returned instance uses the same underlying filesystem root but
-        all reads and writes are relative to the extended prefix. Unlike
-        InMemoryArrowDatabase and ConnectorArrowDatabase, DeltaTableDatabase
-        does NOT share pending state — the filesystem is the shared storage.
+        all reads and writes are relative to the extended prefix.  The scoped
+        instance shares the root's ``_pending_batches`` and
+        ``_pending_record_ids`` dicts so that a ``flush()`` on the root is
+        visible to — and can flush — all scoped instances.
 
         Raises:
             TypeError: If any component is not a str.

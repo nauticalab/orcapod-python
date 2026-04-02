@@ -302,10 +302,11 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     rewired_input = persistent_node_map[input_hash]
                     node.upstreams = (rewired_input,)
 
-                    node.attach_databases(
-                        pipeline_database=pipeline_db,
-                        result_database=result_db,
-                    )
+                    if pipeline_db is not None:
+                        node.attach_databases(
+                            pipeline_database=pipeline_db,
+                            result_database=result_db,
+                        )
 
                     # Default to LocalExecutor so capture/logging works
                     # out of the box. Replaced if execution_engine is set.
@@ -322,9 +323,10 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     )
                     node.upstreams = rewired_inputs
 
-                    node.attach_databases(
-                        pipeline_database=pipeline_db,
-                    )
+                    if pipeline_db is not None:
+                        node.attach_databases(
+                            pipeline_database=pipeline_db,
+                        )
 
                 else:
                     raise TypeError(
