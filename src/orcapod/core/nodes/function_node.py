@@ -129,6 +129,9 @@ class FunctionNode(StreamBase):
         self._pipeline_database: ArrowDatabaseProtocol | None = None
         self._cached_function_pod: CachedFunctionPod | None = None
         self._output_schema_hash: str | None = None
+        # Stored identity path from a deserialized descriptor (read-only/UNAVAILABLE nodes).
+        # Always present so node_identity_path never uses getattr.
+        self._stored_pipeline_path: tuple[str, ...] = ()
 
         if pipeline_database is not None:
             self.attach_databases(
@@ -442,16 +445,13 @@ class FunctionNode(StreamBase):
 
         The identity path is ``pod.uri + (schema_hash, instance_hash)`` and
         is computable independently of whether a pipeline database is attached.
-        Only ``pipeline_path`` (the full absolute storage path) requires a DB.
 
-        Returns ``()`` only when the node is in a load-only state with no
-        live function pod (deserialized descriptor without a real pod).
+        In live mode (pod present) the path is computed from the pod.
+        In read-only/UNAVAILABLE mode (no pod) the path stored from the
+        deserialized descriptor is returned (empty tuple when absent).
         """
-        stored = getattr(self, "_stored_pipeline_path", None)
-        if self._packet_function is None and stored is not None:
-            return stored
         if self._packet_function is None:
-            return ()
+            return self._stored_pipeline_path
         pf = self._function_pod
         return pf.uri + (
             f"schema:{self.pipeline_hash().to_string()}",
