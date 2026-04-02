@@ -382,3 +382,32 @@ def test_python_schema_to_arrow_optional_nullable():
     )
     assert schema.field("x").nullable is True
     assert schema.field("y").nullable is True
+
+
+def test_arrow_schema_to_python_nullable_becomes_optional():
+    """nullable=True Arrow fields must reconstruct as T | None."""
+    ctx = get_default_context()
+    arrow_schema = pa.schema([pa.field("x", pa.int64(), nullable=True)])
+    python_schema = ctx.type_converter.arrow_schema_to_python_schema(arrow_schema)
+    assert python_schema["x"] == int | None
+
+
+def test_arrow_schema_to_python_non_nullable_stays_plain():
+    """nullable=False Arrow fields must reconstruct as plain T."""
+    ctx = get_default_context()
+    arrow_schema = pa.schema([pa.field("x", pa.int64(), nullable=False)])
+    python_schema = ctx.type_converter.arrow_schema_to_python_schema(arrow_schema)
+    assert python_schema["x"] == int
+
+
+def test_round_trip_preserves_optionality():
+    """Python schema → Arrow → Python schema is lossless for nullable/non-nullable."""
+    from orcapod.types import Schema
+
+    ctx = get_default_context()
+    original = Schema({"required": int, "nullable_field": int | None})
+    arrow = ctx.type_converter.python_schema_to_arrow_schema(original)
+    recovered = ctx.type_converter.arrow_schema_to_python_schema(arrow)
+
+    assert recovered["required"] == int
+    assert recovered["nullable_field"] == int | None

@@ -114,15 +114,26 @@ class ArrowTableStream(StreamBase):
                 "No packet columns found in the table. At least one packet column is required."
             )
 
+        # Cast all schemas to non-nullable: Arrow's default nullable=True is a
+        # storage convention, not a semantic declaration. The Python schema
+        # round-trip relies on nullable=False ↔ T and nullable=True ↔ T | None,
+        # so raw tables (where nullable=True is always the default) must be
+        # normalised to nullable=False to avoid spurious T | None types.
         tag_schema = pa.schema(
-            f for f in self._table.schema if f.name in self._tag_columns
+            pa.field(f.name, f.type, nullable=False)
+            for f in self._table.schema
+            if f.name in self._tag_columns
         )
         system_tag_schema = pa.schema(
-            f for f in self._table.schema if f.name in self._system_tag_columns
+            pa.field(f.name, f.type, nullable=False)
+            for f in self._table.schema
+            if f.name in self._system_tag_columns
         )
         all_tag_schema = arrow_utils.join_arrow_schemas(tag_schema, system_tag_schema)
         packet_schema = pa.schema(
-            f for f in self._table.schema if f.name in self._packet_columns
+            pa.field(f.name, f.type, nullable=False)
+            for f in self._table.schema
+            if f.name in self._packet_columns
         )
 
         self._tag_schema = tag_schema
