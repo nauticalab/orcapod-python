@@ -537,6 +537,7 @@ def prepare_prefixed_columns(
     | Mapping[str, Mapping[str, Any | None]],
     exclude_columns: Collection[str] = (),
     exclude_prefixes: Collection[str] = (),
+    prefix_schemas: "dict[str, pa.Schema] | None" = None,
 ) -> tuple["pa.Table", dict[str, "pa.Table"]]:
     """ """
     all_prefix_info = {}
@@ -577,6 +578,7 @@ def prepare_prefixed_columns(
 
     prefixed_column_names = defaultdict(list)
     prefixed_columns = defaultdict(list)
+    prefixed_column_nullables: dict[str, list[bool]] = defaultdict(list)
 
     target_column_names = [
         c
@@ -588,6 +590,7 @@ def prepare_prefixed_columns(
     for prefix, value_lut in all_prefix_info.items():
         target_prefixed_column_names = prefixed_column_names[prefix]
         target_prefixed_columns = prefixed_columns[prefix]
+        target_nullables = prefixed_column_nullables[prefix]
 
         for col_name in target_column_names:
             prefixed_col_name = f"{prefix}{col_name}"
@@ -599,7 +602,7 @@ def prepare_prefixed_columns(
                 value = value_lut
 
             if value is not None:
-                # Use value from source_info dictionary
+                # Concrete value supplied — column is never null.
                 # TODO: clean up the logic here
                 if not isinstance(value, str) and isinstance(value, Collection):
                     # TODO: this won't work other data types!!!
@@ -608,21 +611,27 @@ def prepare_prefixed_columns(
                     )
                 else:
                     column_values = pa.array([value] * num_rows, type=pa.large_string())
-            # if col_name is in existing_source_info, use that column
+                col_nullable = False
             elif col_name in existing_columns:
-                # Use existing prefixed column, but convert to large_string
+                # Pass-through from the source table — inherit its nullable flag.
                 existing_col = table[prefixed_col_name]
-
                 if existing_col.type == pa.string():
                     # Convert to large_string
                     column_values = pa.compute.cast(existing_col, pa.large_string())  # type: ignore
                 else:
                     column_values = existing_col
+                col_nullable = table.schema.field(prefixed_col_name).nullable
             else:
-                # Use null values
+                # No value available — column is genuinely all-null.
                 column_values = pa.array([None] * num_rows, type=pa.large_string())
+                col_nullable = True
+            # Safety: never declare non-nullable when the data actually has nulls
+            # (e.g. a pass-through column from a source that was non-nullable can
+            # gain nulls after a join populates only one side of the result).
+            col_nullable = col_nullable or bool(column_values.null_count > 0)
             target_prefixed_column_names.append(prefixed_col_name)
             target_prefixed_columns.append(column_values)
+            target_nullables.append(col_nullable)
 
     # Step 3: Create the final table, preserving nullable flags from the source table
     data_fields = [table.schema.field(name) for name in data_column_names]
@@ -630,18 +639,21 @@ def prepare_prefixed_columns(
     data_table: pa.Table = pa.Table.from_arrays(data_columns, schema=data_schema)
     result_tables = {}
     for prefix in all_prefix_info:
-        # Build schema explicitly so nullable flags survive the construction.
-        # Columns whose values are entirely null (unknown source info) keep
-        # nullable=True; all others are marked nullable=False.
-        prefix_schema = pa.schema([
-            pa.field(name, col.type, nullable=col.null_count > 0)
-            for name, col in zip(
-                prefixed_column_names[prefix], prefixed_columns[prefix]
-            )
-        ])
-        prefix_table = pa.Table.from_arrays(
-            prefixed_columns[prefix], schema=prefix_schema
-        )
+        # Use caller-supplied schema if provided; otherwise derive from intent
+        # recorded during column construction (value present → nullable=False,
+        # pass-through → inherit source field, all-null → nullable=True).
+        if prefix_schemas and prefix in prefix_schemas:
+            schema = prefix_schemas[prefix]
+        else:
+            schema = pa.schema([
+                pa.field(name, col.type, nullable=nullable)
+                for name, col, nullable in zip(
+                    prefixed_column_names[prefix],
+                    prefixed_columns[prefix],
+                    prefixed_column_nullables[prefix],
+                )
+            ])
+        prefix_table = pa.Table.from_arrays(prefixed_columns[prefix], schema=schema)
         result_tables[prefix] = normalize_table_to_large_types(prefix_table)
 
     return data_table, result_tables
