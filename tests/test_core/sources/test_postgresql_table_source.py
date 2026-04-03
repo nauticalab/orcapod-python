@@ -69,6 +69,7 @@ def _make_mock_connector(
 
     mock.get_table_names.return_value = table_names
     mock.get_pk_columns.return_value = pk_columns
+    mock.get_column_info.return_value = []
     mock.iter_batches.return_value = iter(batches)
     return mock
 

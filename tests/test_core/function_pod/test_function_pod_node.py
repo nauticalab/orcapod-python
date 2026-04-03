@@ -65,9 +65,9 @@ def _make_node_with_system_tags(
     )
     table = pa.table(
         {
-            "id": pa.array(list(range(n)), type=pa.int64()),
-            "run": pa.array([f"r{i}" for i in range(n)], type=pa.large_string()),
-            "x": pa.array(list(range(n)), type=pa.int64()),
+            "id": list(range(n)),
+            "run": [f"r{i}" for i in range(n)],
+            "x": list(range(n)),
         },
         schema=schema,
     )
@@ -350,8 +350,8 @@ class TestFunctionNodePipelineIdentity:
         stream_b = ArrowTableStream(
             pa.table(
                 {
-                    "id": pa.array([10, 11, 12], type=pa.int64()),
-                    "x": pa.array([100, 200, 300], type=pa.int64()),
+                    "id": [10, 11, 12],
+                    "x": [100, 200, 300],
                 },
                 schema=pa.schema(
                     [pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]

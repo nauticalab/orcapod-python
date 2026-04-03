@@ -75,9 +75,10 @@ class ListSource(RootSource):
             rows, python_schema=data_schema
         )
         if data_schema is None:
-            # No explicit schema — infer nullable from actual values.
-            # The type converter defaults all fields to nullable=True; derive
-            # the correct flags here so the builder can trust the schema as-is.
+            # Canonical pattern for Python-origin sources: the type converter
+            # defaults all fields to nullable=True. When no explicit schema is
+            # given, infer the correct nullable flags from actual data so the
+            # builder receives a reliable schema.
             arrow_table = arrow_table.cast(arrow_utils.infer_schema_nullable(arrow_table))
 
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)

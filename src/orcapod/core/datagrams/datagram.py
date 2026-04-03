@@ -261,12 +261,10 @@ class Datagram(ContentIdentifiableBase):
         Ensure context table is materialized and then returned (relevant for Arrow representation)
         """
         if self._context_table is None:
-            import pyarrow as _pa
-
-            schema = _pa.schema(
-                [_pa.field(constants.CONTEXT_KEY, _pa.large_string(), nullable=False)]
+            schema = pa.schema(
+                [pa.field(constants.CONTEXT_KEY, pa.large_string(), nullable=False)]
             )
-            self._context_table = _pa.Table.from_pylist(
+            self._context_table = pa.Table.from_pylist(
                 [{constants.CONTEXT_KEY: self._data_context.context_key}],
                 schema=schema,
             )

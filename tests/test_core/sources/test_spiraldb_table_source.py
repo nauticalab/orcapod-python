@@ -67,6 +67,7 @@ def _make_mock_connector(
     connector = MagicMock(name="MockSpiralDBConnector")
     connector.get_table_names.return_value = table_names
     connector.get_pk_columns.return_value = pk_columns
+    connector.get_column_info.return_value = []
     connector.iter_batches.return_value = iter(batches)
 
     # Simulate the closed-connector lifecycle: close() flips the flag and

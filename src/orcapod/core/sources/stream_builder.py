@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.system_constants import constants
 from orcapod.types import ContentHash
-from orcapod.utils import arrow_data_utils
+from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -97,7 +97,7 @@ class SourceStreamBuilder:
         system_tag_columns_tuple = tuple(system_tag_columns)
 
         # 1. Drop system columns from raw input.
-        table = arrow_data_utils.drop_system_columns(table)
+        table = arrow_utils.drop_system_columns(table)
 
         # 2. Validate tag_columns.
         missing_tags = set(tag_columns_tuple) - set(table.column_names)
@@ -117,7 +117,7 @@ class SourceStreamBuilder:
         # 4. Compute schema hash from tag/packet python schemas.
         # Nullable flags in the incoming table are trusted as-is — callers must
         # set them correctly before calling build().
-        non_sys = arrow_data_utils.drop_system_columns(table)
+        non_sys = arrow_utils.drop_system_columns(table)
         tag_schema = non_sys.select(list(tag_columns_tuple)).schema
         packet_schema = non_sys.drop(list(tag_columns_tuple)).schema
         tag_python = self._data_context.type_converter.arrow_schema_to_python_schema(
@@ -146,7 +146,7 @@ class SourceStreamBuilder:
         ]
 
         # 8. Add source-info provenance columns.
-        table = arrow_data_utils.add_source_info(
+        table = arrow_utils.add_source_info(
             table, source_info, exclude_columns=tag_columns_tuple
         )
 
@@ -155,7 +155,7 @@ class SourceStreamBuilder:
             _make_record_id(record_id_column, i, row)
             for i, row in enumerate(rows_as_dicts)
         ]
-        table = arrow_data_utils.add_system_tag_columns(
+        table = arrow_utils.add_system_tag_columns(
             table,
             schema_hash,
             source_id,
