@@ -237,9 +237,8 @@ class Datagram(ContentIdentifiableBase):
         """
         if self._data_python_schema is None:
             assert self._data_table is not None
-            raw_schema = self._data_table.schema
             self._data_python_schema = self.converter.arrow_schema_to_python_schema(
-                raw_schema
+                self._data_table.schema
             )
         return self._data_python_schema
 
