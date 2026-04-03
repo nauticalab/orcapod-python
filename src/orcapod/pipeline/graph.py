@@ -577,6 +577,62 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         combined = "\n".join(node_lines + edge_lines)
         return hashlib.sha256(combined.encode()).hexdigest()[:16]
 
+    def _write_dag_snapshot(
+        self,
+        run_id: str,
+        snapshot_time: str,
+    ) -> "Path | None":
+        """Write dag_snapshot.json to the pipeline-specific base directory.
+
+        Derives the target path from the scoped pipeline database's local
+        filesystem root.  Returns the :class:`~pathlib.Path` that was written,
+        or ``None`` if the database has no local filesystem root (cloud or
+        in-memory) or if no pipeline database is configured.
+
+        Args:
+            run_id: UUID string for this run (included in snapshot metadata).
+            snapshot_time: ISO-8601 UTC timestamp string (included in snapshot).
+
+        Returns:
+            The :class:`~pathlib.Path` of the written file, or ``None`` if skipped.
+        """
+        from orcapod.databases.delta_lake_databases import DeltaTableDatabase
+
+        scoped_db = self._scoped_pipeline_database
+        if scoped_db is None:
+            logger.debug("_write_dag_snapshot: no scoped pipeline database — skipping")
+            return None
+
+        if not isinstance(scoped_db, DeltaTableDatabase) or scoped_db._is_cloud:
+            logger.debug(
+                "_write_dag_snapshot: pipeline database has no local filesystem root — skipping"
+            )
+            return None
+
+        # Build the snapshot directory: {db root}/{pipeline name components}
+        snapshot_dir: Path = scoped_db._local_root
+        for component in scoped_db._path_prefix:
+            snapshot_dir = snapshot_dir / DeltaTableDatabase._sanitize_path_component(
+                component
+            )
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_path = snapshot_dir / "dag_snapshot.json"
+
+        try:
+            self.save(
+                str(snapshot_path),
+                level="standard",
+                run_id=run_id,
+                snapshot_time=snapshot_time,
+            )
+            logger.debug("dag_snapshot.json written to %s", snapshot_path)
+            return snapshot_path
+        except Exception as exc:
+            logger.warning(
+                "Failed to write dag_snapshot.json to %s: %s", snapshot_path, exc
+            )
+            return None
+
     def show_graph(self, **kwargs) -> str | None:
         """Render the pipeline's node graph.
 

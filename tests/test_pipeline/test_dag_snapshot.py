@@ -105,3 +105,91 @@ class TestSaveRunIdAndSnapshotTime:
         data = json.loads(out.read_text())
         assert data["pipeline"]["run_id"] is None
         assert data["pipeline"]["snapshot_time"] is None
+
+
+# ---------------------------------------------------------------------------
+# Task 2: _write_dag_snapshot() method
+# ---------------------------------------------------------------------------
+
+class TestWriteDagSnapshot:
+    def test_write_dag_snapshot_creates_file_at_correct_path(self, tmp_path):
+        """_write_dag_snapshot() creates dag_snapshot.json at
+        {db_root}/{pipeline_name}/dag_snapshot.json."""
+        db = DeltaTableDatabase(base_path=tmp_path / "db")
+        pipeline = _build_and_run_pipeline(db, run=False)
+
+        result = pipeline._write_dag_snapshot(
+            run_id="my-run-id",
+            snapshot_time="2026-01-01T00:00:00+00:00",
+        )
+
+        expected = tmp_path / "db" / "snap_test" / "dag_snapshot.json"
+        assert result == expected
+        assert expected.exists()
+
+    def test_write_dag_snapshot_content_is_valid_json(self, tmp_path):
+        """The snapshot file contains valid JSON with pipeline/nodes/edges."""
+        db = DeltaTableDatabase(base_path=tmp_path / "db")
+        pipeline = _build_and_run_pipeline(db, run=False)
+
+        pipeline._write_dag_snapshot(
+            run_id="my-run-id",
+            snapshot_time="2026-01-01T00:00:00+00:00",
+        )
+
+        snap = json.loads((tmp_path / "db" / "snap_test" / "dag_snapshot.json").read_text())
+        assert "pipeline" in snap
+        assert "nodes" in snap
+        assert "edges" in snap
+
+    def test_write_dag_snapshot_embeds_run_id(self, tmp_path):
+        """Snapshot includes the provided run_id."""
+        db = DeltaTableDatabase(base_path=tmp_path / "db")
+        pipeline = _build_and_run_pipeline(db, run=False)
+
+        pipeline._write_dag_snapshot(
+            run_id="embed-this-run-id",
+            snapshot_time="2026-01-01T00:00:00+00:00",
+        )
+
+        snap = json.loads((tmp_path / "db" / "snap_test" / "dag_snapshot.json").read_text())
+        assert snap["pipeline"]["run_id"] == "embed-this-run-id"
+
+    def test_write_dag_snapshot_embeds_snapshot_time(self, tmp_path):
+        """Snapshot includes the provided snapshot_time."""
+        db = DeltaTableDatabase(base_path=tmp_path / "db")
+        pipeline = _build_and_run_pipeline(db, run=False)
+
+        pipeline._write_dag_snapshot(
+            run_id="my-run-id",
+            snapshot_time="2026-04-03T12:00:00+00:00",
+        )
+
+        snap = json.loads((tmp_path / "db" / "snap_test" / "dag_snapshot.json").read_text())
+        assert snap["pipeline"]["snapshot_time"] == "2026-04-03T12:00:00+00:00"
+
+    def test_write_dag_snapshot_returns_none_for_in_memory_db(self):
+        """_write_dag_snapshot() returns None when using InMemoryArrowDatabase
+        (no local filesystem root)."""
+        db = InMemoryArrowDatabase()
+        pipeline = _build_and_run_pipeline(db, run=False)
+
+        result = pipeline._write_dag_snapshot(
+            run_id="my-run-id",
+            snapshot_time="2026-01-01T00:00:00+00:00",
+        )
+
+        assert result is None
+
+    def test_write_dag_snapshot_returns_none_without_pipeline_database(self):
+        """_write_dag_snapshot() returns None when no pipeline_database is set."""
+        src_a, _ = _make_two_sources()
+        pipeline = Pipeline(name="no_db", pipeline_database=None)
+        with pipeline:
+            _ = src_a  # just register the source
+
+        result = pipeline._write_dag_snapshot(
+            run_id="x",
+            snapshot_time="2026-01-01T00:00:00+00:00",
+        )
+        assert result is None
