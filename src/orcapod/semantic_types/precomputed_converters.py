@@ -135,7 +135,7 @@ class SemanticSchemaConverter:
         self,
         data: list[dict[str, Any]],
         arrow_schema: pa.Schema | None = None,
-    ) -> "pa.Table":
+    ) -> pa.Table:
         """
         Convert a list of Python dictionaries to an Arrow table using pre-computed converters.
 
@@ -146,8 +146,7 @@ class SemanticSchemaConverter:
                 when the caller needs to enforce specific field types or nullable
                 flags that differ from what was inferred at construction time.
         """
-        struct_dicts = self.python_dicts_to_struct_dicts(data)
-        return pa.Table.from_pylist(struct_dicts, schema=arrow_schema or self.arrow_schema)
+        return pa.Table.from_pylist(self.python_dicts_to_struct_dicts(data), schema=arrow_schema or self.arrow_schema)
 
     def arrow_table_to_python_dicts(self, table: pa.Table) -> list[dict[str, Any]]:
         """

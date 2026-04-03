@@ -28,23 +28,29 @@ class DictSource(RootSource):
         data: Collection[Mapping[str, DataValue]],
         tag_columns: Collection[str] = (),
         system_tag_columns: Collection[str] = (),
-        data_schema: SchemaLike | None = None,
-        arrow_schema: "pa.Schema | None" = None,
+        data_schema: SchemaLike | pa.Schema | None = None,
         source_id: str | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(source_id=source_id, **kwargs)
 
-        arrow_table = self.data_context.type_converter.python_dicts_to_arrow_table(
-            [dict(row) for row in data],
-            python_schema=data_schema,
-            arrow_schema=arrow_schema,
-        )
-        if data_schema is None and arrow_schema is None:
-            # No explicit schema — infer nullable from actual values.
-            # The type converter defaults all fields to nullable=True; derive
-            # the correct flags here so the builder can trust the schema as-is.
-            arrow_table = arrow_table.cast(arrow_utils.infer_schema_nullable(arrow_table))
+        # Accept either a Python SchemaLike (Mapping[str, type]) or a
+        # pa.Schema directly via data_schema; route to the converter accordingly.
+        if isinstance(data_schema, pa.Schema):
+            arrow_table = self.data_context.type_converter.python_dicts_to_arrow_table(
+                [dict(row) for row in data],
+                arrow_schema=data_schema,
+            )
+        else:
+            arrow_table = self.data_context.type_converter.python_dicts_to_arrow_table(
+                [dict(row) for row in data],
+                python_schema=data_schema,
+            )
+            if data_schema is None:
+                # No explicit schema — infer nullable from actual values.
+                # The type converter defaults all fields to nullable=True; derive
+                # the correct flags here so the builder can trust the schema as-is.
+                arrow_table = arrow_table.cast(arrow_utils.infer_schema_nullable(arrow_table))
 
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(
@@ -69,7 +75,7 @@ class DictSource(RootSource):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any], db_registry=None) -> "DictSource":
+    def from_config(cls, config: dict[str, Any], db_registry=None) -> DictSource:
         """Not supported — DictSource data cannot be reconstructed from config.
 
         Raises:
