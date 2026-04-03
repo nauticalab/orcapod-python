@@ -429,6 +429,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 ``_default_observer`` set during ``compile()`` is used.
         """
         from orcapod.types import ExecutorType, PipelineConfig
+        import uuid
+        from datetime import datetime, timezone
 
         explicit_config = config is not None
         config = config or PipelineConfig()
@@ -448,6 +450,13 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         if not self._compiled:
             self.compile()
 
+        # Generate stable run identity at run start (PLT-1161).
+        run_id = str(uuid.uuid4())
+        snapshot_time = datetime.now(timezone.utc).isoformat()
+
+        # Write DAG snapshot before any node executes (PLT-1161).
+        self._write_dag_snapshot(run_id, snapshot_time)
+
         if effective_engine is not None:
             self._apply_execution_engine(effective_engine, effective_opts)
 
@@ -461,6 +470,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 self._node_graph,
                 observer=effective_observer,
                 pipeline_uri=pipeline_uri,
+                run_id=run_id,
             )
         else:
             # Default to async when an execution engine is provided, unless
@@ -480,6 +490,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     self._node_graph,
                     observer=effective_observer,
                     pipeline_uri=pipeline_uri,
+                    run_id=run_id,
                 )
             else:
                 from orcapod.pipeline.sync_orchestrator import (
@@ -491,12 +502,13 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     self._node_graph,
                     observer=effective_observer,
                     pipeline_uri=pipeline_uri,
+                    run_id=run_id,
                 )
 
         self.flush()
 
         if self._auto_save_path is not None:
-            self.save(str(self._auto_save_path))
+            self.save(str(self._auto_save_path), run_id=run_id, snapshot_time=snapshot_time)
 
     def _apply_execution_engine(
         self,
