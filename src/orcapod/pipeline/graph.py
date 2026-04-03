@@ -601,7 +601,14 @@ class Pipeline(AutoRegisteringContextBasedTracker):
     # Serialization
     # ------------------------------------------------------------------
 
-    def save(self, path: str, level: Literal["minimal", "definition", "standard", "full"] = "standard") -> None:
+    def save(
+        self,
+        path: str,
+        level: Literal["minimal", "definition", "standard", "full"] = "standard",
+        *,
+        run_id: str | None = None,
+        snapshot_time: str | None = None,
+    ) -> None:
         """Serialize the pipeline to a JSON file.
 
         Args:
@@ -689,8 +696,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         # -- Pipeline block --
         pipeline_block: dict[str, Any] = {
             "name": list(self._name),
-            "run_id": None,
-            "snapshot_time": None,
+            "run_id": run_id,
+            "snapshot_time": snapshot_time,
         }
         if include_pipeline_dbs:
             # Save the scoped pipeline database (with pipeline-name prefix in base_path)
