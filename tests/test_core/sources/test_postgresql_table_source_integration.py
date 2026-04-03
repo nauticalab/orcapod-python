@@ -213,7 +213,7 @@ class TestPipelineIntegration:
             with conn.cursor() as cur:
                 cur.execute(
                     'CREATE TABLE "measurements" '
-                    '(session_id TEXT PRIMARY KEY, trial INTEGER, response REAL)'
+                    '(session_id TEXT PRIMARY KEY, trial INTEGER NOT NULL, response REAL NOT NULL)'
                 )
                 cur.executemany(
                     'INSERT INTO "measurements" VALUES (%s, %s, %s)',
