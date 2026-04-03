@@ -29,7 +29,7 @@ class CSVSource(RootSource):
         system_tag_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
-        schema: "pa.Schema | None" = None,
+        schema: pa.Schema | None = None,
         **kwargs: Any,
     ) -> None:
         import pyarrow.csv as pa_csv
@@ -74,7 +74,7 @@ class CSVSource(RootSource):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any], db_registry=None) -> "CSVSource":
+    def from_config(cls, config: dict[str, Any], db_registry=None) -> CSVSource:
         """Reconstruct a CSVSource from a config dict."""
         return cls(
             file_path=config["file_path"],

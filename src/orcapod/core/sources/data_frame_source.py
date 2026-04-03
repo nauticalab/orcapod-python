@@ -29,11 +29,11 @@ class DataFrameSource(RootSource):
 
     def __init__(
         self,
-        data: "FrameInitTypes",
+        data: FrameInitTypes,
         tag_columns: str | Collection[str] = (),
         system_tag_columns: Collection[str] = (),
         source_id: str | None = None,
-        schema: "pa.Schema | None" = None,
+        schema: pa.Schema | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(source_id=source_id, **kwargs)
@@ -92,7 +92,7 @@ class DataFrameSource(RootSource):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any], db_registry=None) -> "DataFrameSource":
+    def from_config(cls, config: dict[str, Any], db_registry=None) -> DataFrameSource:
         """Not supported — DataFrameSource cannot be reconstructed from config.
 
         Raises:
