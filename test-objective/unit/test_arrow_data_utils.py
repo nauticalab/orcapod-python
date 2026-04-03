@@ -1,4 +1,4 @@
-"""Specification-derived tests for arrow_data_utils.
+"""Specification-derived tests for arrow_utils (formerly arrow_data_utils).
 
 Tests system tag manipulation, source info, and column helper functions
 based on documented behavior in the design specification.
@@ -10,7 +10,7 @@ import pyarrow as pa
 import pytest
 
 from orcapod.system_constants import constants
-from orcapod.utils.arrow_data_utils import (
+from orcapod.utils.arrow_utils import (
     add_source_info,
     add_system_tag_columns,
     append_to_system_tags,
