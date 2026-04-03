@@ -110,7 +110,24 @@ class DBTableSource(RootSource):
         if not batches:
             raise ValueError(f"Table {table_name!r} is empty.")
         table: pa.Table = pa.Table.from_batches(batches)
-        table = table.cast(arrow_utils.infer_schema_nullable(table))
+        # Apply database-defined nullability: the connector's get_column_info
+        # returns the authoritative nullable flag per column from the DB schema.
+        col_infos = connector.get_column_info(table_name)
+        if col_infos:
+            db_nullable = {ci.name: ci.nullable for ci in col_infos}
+            db_schema = pa.schema([
+                pa.field(f.name, f.type, nullable=db_nullable.get(f.name, True))
+                for f in table.schema
+            ])
+            table = pa.Table.from_arrays(
+                [table.column(i) for i in range(table.num_columns)],
+                schema=db_schema,
+            )
+        else:
+            # No column info available — fall back to inferring nullable flags
+            # from actual data so columns without nulls are not spuriously marked
+            # nullable=True (Arrow's default).
+            table = table.cast(arrow_utils.infer_schema_nullable(table))
 
         # Step 4: Enrich via SourceStreamBuilder (same pipeline as all other RootSources)
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)

@@ -230,6 +230,52 @@ class TestDeltaTableSource:
             DeltaTableSource(delta_table_path=delta_path, record_id_column="no_col")
 
 
+@pytest.fixture
+def delta_mixed_nullable_path(tmp_path: Path) -> Path:
+    """Create a Delta table with a mix of nullable and non-nullable columns."""
+    from deltalake import write_deltalake
+
+    schema = pa.schema([
+        pa.field("id",    pa.int64(),        nullable=False),
+        pa.field("label", pa.large_string(), nullable=True),
+        pa.field("score", pa.float64(),      nullable=False),
+    ])
+    table = pa.table(
+        {"id": [1, 2], "label": ["a", "b"], "score": [1.0, 2.0]},
+        schema=schema,
+    )
+    dest = tmp_path / "delta_mixed"
+    write_deltalake(str(dest), table)
+    return dest
+
+
+class TestDeltaTableSourceNullability:
+    """DeltaTableSource must honour the nullable flags stored in the Delta log."""
+
+    def test_non_nullable_columns_produce_plain_python_types(
+        self, delta_mixed_nullable_path: Path
+    ) -> None:
+        """Columns declared NOT NULL in the Delta schema must map to T, not T | None."""
+        source = DeltaTableSource(
+            delta_mixed_nullable_path, tag_columns=["id"]
+        )
+        _, packet_schema = source.output_schema()
+        # score is nullable=False in the Delta schema → must be float, not float | None
+        assert packet_schema["score"] is float
+
+    def test_nullable_columns_produce_optional_python_types(
+        self, delta_mixed_nullable_path: Path
+    ) -> None:
+        """Columns declared nullable in the Delta schema must map to T | None."""
+        source = DeltaTableSource(
+            delta_mixed_nullable_path, tag_columns=["id"]
+        )
+        _, packet_schema = source.output_schema()
+        # label is nullable=True in the Delta schema → must be str | None
+        import types
+        assert packet_schema["label"] == str | None
+
+
 # ---------------------------------------------------------------------------
 # DataFrameSource — additional coverage
 # ---------------------------------------------------------------------------

@@ -11,9 +11,11 @@ from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import polars as pl
+    import pyarrow as pa
     from polars._typing import FrameInitTypes
 else:
     pl = LazyModule("polars")
+    pa = LazyModule("pyarrow")
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,7 @@ class DataFrameSource(RootSource):
         tag_columns: str | Collection[str] = (),
         system_tag_columns: Collection[str] = (),
         source_id: str | None = None,
+        schema: "pa.Schema | None" = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(source_id=source_id, **kwargs)
@@ -59,9 +62,12 @@ class DataFrameSource(RootSource):
             raise ValueError(f"TagProtocol column(s) not found in data: {missing}")
 
         arrow_table = df.to_arrow()
-        # Polars (like plain Arrow) defaults all fields to nullable=True; infer
-        # the correct flags from the actual data before passing to the builder.
-        arrow_table = arrow_table.cast(arrow_utils.infer_schema_nullable(arrow_table))
+        if schema is not None:
+            arrow_table = arrow_table.cast(schema)
+        else:
+            # Polars defaults all fields to nullable=True; infer the correct
+            # flags from the actual data before passing to the builder.
+            arrow_table = arrow_table.cast(arrow_utils.infer_schema_nullable(arrow_table))
 
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Collection
 from typing import TYPE_CHECKING, Any
 
@@ -9,6 +10,8 @@ from orcapod.utils import arrow_utils
 
 if TYPE_CHECKING:
     import pyarrow as pa
+
+logger = logging.getLogger(__name__)
 
 
 class ArrowTableSource(RootSource):
@@ -59,9 +62,10 @@ class ArrowTableSource(RootSource):
         super().__init__(**kwargs)
 
         if infer_nullable:
-            # Derive nullable from actual data: nullable=True only for columns
-            # that genuinely contain nulls.  Opt-in because the caller may have
-            # set nullable flags deliberately and we should not override them.
+            logger.debug(
+                "infer_nullable=True: deriving nullable flags from data "
+                "(nullable=True only for columns with null_count > 0)"
+            )
             table = table.cast(arrow_utils.infer_schema_nullable(table))
         # else: schema is trusted as-is.
 

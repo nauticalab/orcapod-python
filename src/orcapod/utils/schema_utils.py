@@ -284,12 +284,8 @@ def infer_schema_from_dict(
 
 
 def get_compatible_type(type1: Any, type2: Any) -> Any:
-    # Handle identical types
-    if type1 is type2:
-        return type1
-
-    # Handle equal types (e.g., two separate `int | None` union objects)
-    if type1 == type2:
+    # Handle identical or equal types (e.g., two separate `int | None` union objects)
+    if type1 is type2 or type1 == type2:
         return type1
 
     # Handle None/NoneType

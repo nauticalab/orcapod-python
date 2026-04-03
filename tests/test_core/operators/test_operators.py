@@ -1527,7 +1527,7 @@ class TestSortSystemTagValues:
         """Paired (source_id, record_id) columns sharing a provenance path
         should have their values sorted per row by (source_id, record_id) tuples."""
         from orcapod.system_constants import constants
-        from orcapod.utils.arrow_data_utils import sort_system_tag_values
+        from orcapod.utils.arrow_utils import sort_system_tag_values
 
         sid_0, rid_0 = self._make_paired_cols(constants, "abc::ph123", "0")
         sid_1, rid_1 = self._make_paired_cols(constants, "abc::ph123", "1")
@@ -1560,7 +1560,7 @@ class TestSortSystemTagValues:
     def test_does_not_sort_different_provenance_paths(self):
         """Columns with different provenance paths should NOT have their values sorted."""
         from orcapod.system_constants import constants
-        from orcapod.utils.arrow_data_utils import sort_system_tag_values
+        from orcapod.utils.arrow_utils import sort_system_tag_values
 
         # Two different provenance paths (different pipeline hashes)
         sid_a, rid_a = self._make_paired_cols(constants, "abc::ph_AAA", "0")
@@ -1585,7 +1585,7 @@ class TestSortSystemTagValues:
     def test_no_op_for_single_position_groups(self):
         """Groups with only one position should be left untouched."""
         from orcapod.system_constants import constants
-        from orcapod.utils.arrow_data_utils import sort_system_tag_values
+        from orcapod.utils.arrow_utils import sort_system_tag_values
 
         sid, rid = self._make_paired_cols(constants, "abc::ph123", "0")
 
@@ -1604,7 +1604,7 @@ class TestSortSystemTagValues:
     def test_preserves_non_system_tag_columns(self):
         """Non-system-tag columns should be completely unaffected."""
         from orcapod.system_constants import constants
-        from orcapod.utils.arrow_data_utils import sort_system_tag_values
+        from orcapod.utils.arrow_utils import sort_system_tag_values
 
         sid_0, rid_0 = self._make_paired_cols(constants, "abc::ph123", "0")
         sid_1, rid_1 = self._make_paired_cols(constants, "abc::ph123", "1")
@@ -1627,7 +1627,7 @@ class TestSortSystemTagValues:
     def test_three_way_group_sorts_correctly(self):
         """Three positions sharing the same provenance path should all be sorted together."""
         from orcapod.system_constants import constants
-        from orcapod.utils.arrow_data_utils import sort_system_tag_values
+        from orcapod.utils.arrow_utils import sort_system_tag_values
 
         sid_0, rid_0 = self._make_paired_cols(constants, "abc::ph123", "0")
         sid_1, rid_1 = self._make_paired_cols(constants, "abc::ph123", "1")

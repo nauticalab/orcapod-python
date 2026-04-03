@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.types import DataValue, SchemaLike
 from orcapod.utils import arrow_utils
+from orcapod.utils.lazy_module import LazyModule
+
+if TYPE_CHECKING:
+    import pyarrow as pa
+else:
+    pa = LazyModule("pyarrow")
 
 
 class DictSource(RootSource):
@@ -23,6 +29,7 @@ class DictSource(RootSource):
         tag_columns: Collection[str] = (),
         system_tag_columns: Collection[str] = (),
         data_schema: SchemaLike | None = None,
+        arrow_schema: "pa.Schema | None" = None,
         source_id: str | None = None,
         **kwargs: Any,
     ) -> None:
@@ -31,8 +38,9 @@ class DictSource(RootSource):
         arrow_table = self.data_context.type_converter.python_dicts_to_arrow_table(
             [dict(row) for row in data],
             python_schema=data_schema,
+            arrow_schema=arrow_schema,
         )
-        if data_schema is None:
+        if data_schema is None and arrow_schema is None:
             # No explicit schema — infer nullable from actual values.
             # The type converter defaults all fields to nullable=True; derive
             # the correct flags here so the builder can trust the schema as-is.

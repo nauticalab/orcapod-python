@@ -134,7 +134,7 @@ class SemanticSchemaConverter:
     def python_dicts_to_arrow_table(
         self,
         data: list[dict[str, Any]],
-        arrow_schema: "pa.Schema | None" = None,
+        arrow_schema: pa.Schema | None = None,
     ) -> "pa.Table":
         """
         Convert a list of Python dictionaries to an Arrow table using pre-computed converters.

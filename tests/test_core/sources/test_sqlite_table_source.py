@@ -29,7 +29,7 @@ import pytest
 def _create_table_with_pk(conn: sqlite3.Connection) -> None:
     """Create 'measurements' with single-column PK and insert 3 rows."""
     conn.execute(
-        "CREATE TABLE measurements (session_id TEXT PRIMARY KEY, trial INTEGER, response REAL)"
+        "CREATE TABLE measurements (session_id TEXT PRIMARY KEY, trial INTEGER NOT NULL, response REAL NOT NULL)"
     )
     conn.executemany(
         "INSERT INTO measurements VALUES (?, ?, ?)",

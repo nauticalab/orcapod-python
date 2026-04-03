@@ -6,7 +6,7 @@ from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
-from orcapod.utils import arrow_data_utils, arrow_utils, schema_utils
+from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -166,7 +166,7 @@ class MergeJoin(BinaryOperator):
         for stream, orig_idx in canonical:
             canon_pos = canonical.index((stream, orig_idx))
             table = stream.as_table(columns={"source": True, "system_tags": True})
-            table = arrow_data_utils.append_to_system_tags(
+            table = arrow_utils.append_to_system_tags(
                 table, f"{stream.pipeline_hash().to_hex(n_char)}:{canon_pos}"
             )
             tables[orig_idx] = table
@@ -182,9 +182,33 @@ class MergeJoin(BinaryOperator):
         # Find colliding packet columns
         colliding_keys = set(left_packet_keys) & set(right_packet_keys)
 
+        # Capture nullable flags from input schemas BEFORE Polars conversion.
+        # Polars' join discards nullable info (defaults all to True); we derive
+        # the output schema from the inputs instead of from data null counts.
+        # Only capture tag and packet columns — system tag and source columns
+        # are internally created with Arrow's all-nullable default; those fall
+        # through to null-count inference below.
+        captured_cols = set(left_tag_keys) | set(left_packet_keys) | set(right_tag_keys) | set(right_packet_keys)
+        left_nullable = {f.name: f.nullable for f in left_table.schema if f.name in captured_cols}
+        right_nullable = {f.name: f.nullable for f in right_table.schema if f.name in captured_cols}
+        # Build expected output nullable map
+        output_nullable: dict[str, bool] = {}
+        output_nullable.update(left_nullable)
+        for name, nullable in right_nullable.items():
+            if name not in output_nullable:
+                output_nullable[name] = nullable
+        # Merged (colliding) packet columns become 2-element lists — always non-null
+        for col in colliding_keys:
+            output_nullable[col] = False
+            source_col = f"{constants.SOURCE_PREFIX}{col}"
+            if source_col in output_nullable:
+                output_nullable[source_col] = False
+
         # Perform inner join via Polars on shared tag keys
         # Use a common key trick to ensure cartesian product if no shared tags
         COMMON_JOIN_KEY = "_common"
+        # COMMON_JOIN_KEY is a temporary column that gets dropped after the join
+        output_nullable.pop(COMMON_JOIN_KEY, None)
         left_table = left_table.add_column(
             0, COMMON_JOIN_KEY, pa.array([0] * len(left_table))
         )
@@ -276,7 +300,7 @@ class MergeJoin(BinaryOperator):
                 joined = joined.drop(suffixed_name)
 
         # Sort system tag values for same-pipeline-hash streams to ensure commutativity
-        joined = arrow_data_utils.sort_system_tag_values(joined)
+        joined = arrow_utils.sort_system_tag_values(joined)
 
         # Reorder: tag columns first, then packet columns
         all_tag_keys = set(left_tag_keys) | set(right_tag_keys)
@@ -284,16 +308,19 @@ class MergeJoin(BinaryOperator):
         other_cols = [c for c in joined.column_names if c not in all_tag_keys]
         joined = joined.select(tag_cols + other_cols)
 
-        # Derive nullable per column from actual null counts: only columns that
-        # genuinely contain nulls (e.g. legitimately Optional fields) are kept
-        # nullable=True; the rest become nullable=False.  This avoids both the
-        # "spurious T | None from Polars default" and the opposite mistake of
-        # forcing nullable=False on columns that actually have nulls.
-        # pa.Table.cast() is not used here because list columns may fail validation.
-        inferred_schema = arrow_utils.infer_schema_nullable(joined)
+        # Reconstruct schema from captured input nullable flags.
+        # Fall back to null-count inference for any unexpected columns.
+        result_schema = pa.schema([
+            pa.field(
+                col_name,
+                joined.schema.field(col_name).type,
+                nullable=output_nullable.get(col_name, joined.column(i).null_count > 0),
+            )
+            for i, col_name in enumerate(joined.column_names)
+        ])
         joined = pa.Table.from_arrays(
             [joined.column(i) for i in range(joined.num_columns)],
-            schema=inferred_schema,
+            schema=result_schema,
         )
         return ArrowTableStream(
             joined,

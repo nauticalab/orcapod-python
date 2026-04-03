@@ -29,6 +29,7 @@ class CSVSource(RootSource):
         system_tag_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
+        schema: "pa.Schema | None" = None,
         **kwargs: Any,
     ) -> None:
         import pyarrow.csv as pa_csv
@@ -39,7 +40,10 @@ class CSVSource(RootSource):
 
         self._file_path = file_path
         table: pa.Table = pa_csv.read_csv(file_path)
-        table = table.cast(arrow_utils.infer_schema_nullable(table))
+        if schema is not None:
+            table = table.cast(schema)
+        else:
+            table = table.cast(arrow_utils.infer_schema_nullable(table))
 
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(

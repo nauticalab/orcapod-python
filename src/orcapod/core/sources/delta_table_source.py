@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.types import PathLike
-from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -49,7 +48,8 @@ class DeltaTableSource(RootSource):
             raise ValueError(f"Delta table not found at {self._delta_table_path}")
 
         table: pa.Table = self._delta_table.to_pyarrow_dataset(as_large_types=True).to_table()
-        table = table.cast(arrow_utils.infer_schema_nullable(table))
+        # The Delta log stores field-level nullable flags; to_pyarrow_dataset()
+        # preserves them exactly — no inference needed.
 
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(

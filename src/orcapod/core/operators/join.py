@@ -14,7 +14,7 @@ from orcapod.protocols.core_protocols import (
 )
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, ContentHash, Schema
-from orcapod.utils import arrow_data_utils, arrow_utils, schema_utils
+from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -134,7 +134,7 @@ class Join(NonZeroInputOperator):
         )
         # trick to get cartesian product
         table = table.add_column(0, COMMON_JOIN_KEY, pa.array([0] * len(table)))
-        table = arrow_data_utils.append_to_system_tags(
+        table = arrow_utils.append_to_system_tags(
             table,
             f"{stream.pipeline_hash().to_hex(n_char)}:0",
         )
@@ -144,7 +144,7 @@ class Join(NonZeroInputOperator):
             next_table = next_stream.as_table(
                 columns={"source": True, "system_tags": True, "meta": True}
             )
-            next_table = arrow_data_utils.append_to_system_tags(
+            next_table = arrow_utils.append_to_system_tags(
                 next_table,
                 f"{next_stream.pipeline_hash().to_hex(n_char)}:{idx}",
             )
@@ -190,7 +190,7 @@ class Join(NonZeroInputOperator):
         table = table.drop(COMMON_JOIN_KEY)
 
         # Sort system tag values for same-pipeline-hash streams to ensure commutativity
-        table = arrow_data_utils.sort_system_tag_values(table)
+        table = arrow_utils.sort_system_tag_values(table)
 
         reordered_columns = [col for col in table.column_names if col in tag_keys]
         reordered_columns += [col for col in table.column_names if col not in tag_keys]
