@@ -342,3 +342,33 @@ class TestRayCaptureWrapper:
             os.write(1, b"")
         finally:
             os.close(original_stdout_fd)
+
+    def test_wrapper_name_defaults_to_capture(self):
+        """Without a name argument the wrapper keeps its default name."""
+        from orcapod.core.executors.capture_wrapper import make_capture_wrapper
+
+        wrapper = make_capture_wrapper()
+        assert wrapper.__name__ == "_capture"
+        assert wrapper.__qualname__.endswith("_capture")
+
+    def test_wrapper_name_set_by_argument(self):
+        """Passing name= overwrites __name__ and __qualname__."""
+        from orcapod.core.executors.capture_wrapper import make_capture_wrapper
+
+        wrapper = make_capture_wrapper(name="my_transform")
+        assert wrapper.__name__ == "my_transform"
+        assert wrapper.__qualname__ == "my_transform"
+
+    def test_named_wrapper_still_captures(self):
+        """A renamed wrapper must still capture output and return results."""
+        from orcapod.core.executors.capture_wrapper import make_capture_wrapper
+
+        wrapper = make_capture_wrapper(name="add_one")
+
+        def add_one(x):
+            print("hello")
+            return x + 1
+
+        raw, stdout, stderr, python_logs = wrapper(add_one, {"x": 5})
+        assert raw == 6
+        assert "hello" in stdout

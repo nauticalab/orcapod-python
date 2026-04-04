@@ -640,6 +640,63 @@ class TestRayExecutorInitialization:
             )
             assert result == 42
 
+    def test_get_remote_fn_caches_per_function_name(self):
+        """_get_remote_fn must return distinct remote wrappers for different
+        function names so Ray metrics report the correct name."""
+        from unittest.mock import MagicMock, call, patch
+
+        from orcapod.core.executors.ray import RayExecutor
+
+        mock_ray = MagicMock()
+        mock_ray.is_initialized.return_value = True
+        # ray.remote(**opts)(wrapper) returns a mock remote fn
+        mock_ray.remote.return_value = lambda wrapper: MagicMock(name=f"remote_{wrapper.__name__}")
+
+        with patch.dict("sys.modules", {"ray": mock_ray}):
+            executor = RayExecutor.__new__(RayExecutor)
+            executor._remote_opts = {}
+            executor._remote_fn_cache = {}
+            executor._remote_fn_cache_lock = __import__("threading").Lock()
+
+            fn_a = executor._get_remote_fn(mock_ray, "transform_a")
+            fn_b = executor._get_remote_fn(mock_ray, "transform_b")
+            fn_a_again = executor._get_remote_fn(mock_ray, "transform_a")
+
+            # Different names → different remote fns
+            assert fn_a is not fn_b
+            # Same name → cached (same object)
+            assert fn_a is fn_a_again
+
+    def test_get_remote_fn_sets_wrapper_name(self):
+        """The capture wrapper created by _get_remote_fn should carry the
+        original function name so Ray uses it in metrics labels."""
+        from unittest.mock import MagicMock, patch
+
+        from orcapod.core.executors.ray import RayExecutor
+
+        captured_wrappers = []
+
+        def fake_remote(**opts):
+            def decorator(wrapper):
+                captured_wrappers.append(wrapper)
+                return MagicMock()
+            return decorator
+
+        mock_ray = MagicMock()
+        mock_ray.is_initialized.return_value = True
+        mock_ray.remote = fake_remote
+
+        with patch.dict("sys.modules", {"ray": mock_ray}):
+            executor = RayExecutor.__new__(RayExecutor)
+            executor._remote_opts = {}
+            executor._remote_fn_cache = {}
+            executor._remote_fn_cache_lock = __import__("threading").Lock()
+
+            executor._get_remote_fn(mock_ray, "compute_features")
+
+            assert len(captured_wrappers) == 1
+            assert captured_wrappers[0].__name__ == "compute_features"
+
 
 # ===========================================================================
 # 7. PacketFunctionExecutorProtocol type safety
