@@ -180,7 +180,7 @@ class RayExecutor(PythonFunctionExecutorBase):
         import ray
 
         self._ensure_ray_initialized()
-        remote_fn = self._get_remote_fn(ray)
+        remote_fn = self._get_remote_fn(ray, fn.__name__)
         ref = remote_fn.options(name=fn.__name__).remote(fn, kwargs)
 
         try:
@@ -206,7 +206,7 @@ class RayExecutor(PythonFunctionExecutorBase):
         import ray
 
         self._ensure_ray_initialized()
-        remote_fn = self._get_remote_fn(ray)
+        remote_fn = self._get_remote_fn(ray, fn.__name__)
         ref = remote_fn.options(name=fn.__name__).remote(fn, kwargs)
 
         try:
@@ -225,26 +225,26 @@ class RayExecutor(PythonFunctionExecutorBase):
         self._record_success(stdout_log, stderr_log, python_logs, logger)
         return raw
 
-    def _get_remote_fn(self, ray: Any) -> Any:
+    def _get_remote_fn(self, ray: Any, fn_name: str) -> Any:
         """Return a cached Ray remote wrapper for the capture closure.
 
-        The capture wrapper's bytecode is identical on every invocation, so
-        it only needs to be remotized once per distinct set of remote options.
-        Caching avoids the non-trivial overhead of ``ray.remote()`` on every
-        packet.
+        The capture wrapper is created with ``fn_name`` so that Ray's
+        metrics and dashboard report the original function name instead
+        of the generic ``_capture``.  Wrappers are cached per distinct
+        ``(remote_opts, fn_name)`` pair.
 
         A ``threading.Lock`` guards population so that concurrent calls
         (``supports_concurrent_execution = True``) never redundantly call
         ``ray.remote()`` for the same option set.
         """
         opts = self._build_remote_opts()
-        cache_key = self._normalize_opts(opts)
+        cache_key = (self._normalize_opts(opts), fn_name)
         if cache_key not in self._remote_fn_cache:
             with self._remote_fn_cache_lock:
                 # Double-checked: another thread may have filled the slot
                 # while we waited for the lock.
                 if cache_key not in self._remote_fn_cache:
-                    wrapper = make_capture_wrapper()
+                    wrapper = make_capture_wrapper(name=fn_name)
                     self._remote_fn_cache[cache_key] = ray.remote(**opts)(wrapper)
         return self._remote_fn_cache[cache_key]
 

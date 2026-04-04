@@ -12,8 +12,14 @@ from collections.abc import Callable
 from typing import Any
 
 
-def make_capture_wrapper() -> Callable[..., Any]:
+def make_capture_wrapper(name: str | None = None) -> Callable[..., Any]:
     """Return a capture wrapper suitable for remote execution.
+
+    Args:
+        name: If provided, the wrapper's ``__name__`` and ``__qualname__``
+            are set to this value so that remote frameworks (e.g. Ray) report
+            the original function name in dashboards and metrics rather than
+            the generic ``_capture``.
 
     On success the wrapper returns a 4-tuple
     ``(raw_result, stdout_log, stderr_log, python_logs)``.
@@ -136,5 +142,9 @@ def make_capture_wrapper() -> Callable[..., Any]:
             ) from exc_info[0]
 
         return raw_result, cap_stdout, cap_stderr, python_logs
+
+    if name is not None:
+        _capture.__name__ = name
+        _capture.__qualname__ = name
 
     return _capture
