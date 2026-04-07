@@ -139,7 +139,8 @@ class TestFunctionNode:
             pipeline_database=pipeline_db,
             result_database=result_db,
         )
-        # First iteration computes all
+        # run() computes all; iter_packets() is read-only and serves from cache
+        node.run()
         packets = list(node.iter_packets())
         assert len(packets) == 3
 
