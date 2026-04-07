@@ -1119,6 +1119,7 @@ class FunctionNode(StreamBase):
             )
 
         # Drop internal columns (SOURCE_PREFIX is kept — ArrowTableStream needs it)
+        entry_ids_col = joined.column(PIPELINE_ENTRY_ID_COL).to_pylist()
         drop_cols = [
             c
             for c in joined.column_names
@@ -1127,8 +1128,6 @@ class FunctionNode(StreamBase):
             or c == constants.NODE_CONTENT_HASH_COL
         ]
         data_table = joined.drop([c for c in drop_cols if c in joined.column_names])
-
-        entry_ids_col = joined.column(PIPELINE_ENTRY_ID_COL).to_pylist()
         stream = ArrowTableStream(data_table, tag_columns=tag_keys)
 
         loaded: dict[str, tuple[TagProtocol, PacketProtocol]] = {}
