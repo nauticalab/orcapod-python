@@ -30,10 +30,12 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import pyarrow as pa
+    import pyarrow.compute as pc
 
     from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
 else:
     pa = LazyModule("pyarrow")
+    pc = LazyModule("pyarrow.compute")
 
 
 class OperatorNode(StreamBase):
@@ -181,7 +183,14 @@ class OperatorNode(StreamBase):
                 f"OperatorNode descriptor is missing required 'table_scope' field: "
                 f"{descriptor.get('label', '<unlabeled>')}"
             )
-        table_scope: Literal["pipeline_hash", "content_hash"] = descriptor["table_scope"]
+        raw_table_scope = descriptor["table_scope"]
+        if raw_table_scope not in ("pipeline_hash", "content_hash"):
+            raise ValueError(
+                f"OperatorNode descriptor has invalid 'table_scope' value "
+                f"{raw_table_scope!r} for {descriptor.get('label', '<unlabeled>')}; "
+                "expected one of ('pipeline_hash', 'content_hash')"
+            )
+        table_scope: Literal["pipeline_hash", "content_hash"] = raw_table_scope
 
         pipeline_db = databases.get("pipeline")
         cache_mode_str = descriptor.get("cache_mode", "off")
@@ -408,8 +417,8 @@ class OperatorNode(StreamBase):
         if col_name not in table.column_names:
             return table
         own_hash = self.content_hash().to_string()
-        mask = [v == own_hash for v in table.column(col_name).to_pylist()]
-        return table.filter(pa.array(mask))
+        mask = pc.equal(table.column(col_name), own_hash)
+        return table.filter(mask)
 
     @property
     def node_uri(self) -> tuple[str, ...]:
@@ -454,15 +463,16 @@ class OperatorNode(StreamBase):
             pa.array(record_hashes, type=pa.large_string()),
         )
 
-        # Add node content hash column for per-run disambiguation when using
-        # pipeline_hash table scope (multiple runs share the same table).
+        # Always write the node content hash column so every stored row carries a
+        # run identity.  When table_scope="pipeline_hash" this column is used at
+        # read time to filter rows belonging to the current run (multiple runs
+        # share the same table).  In content_hash scope each run has its own
+        # isolated table so the column is present in storage but filtering is
+        # never applied on reads.
         n_rows = output_table.num_rows
         output_table = output_table.append_column(
             constants.NODE_CONTENT_HASH_COL,
-            pa.array(
-                [self.content_hash().to_string()] * n_rows,
-                type=pa.large_string(),
-            ),
+            pa.repeat(self.content_hash().to_string(), n_rows).cast(pa.large_string()),
         )
 
         # Store (identical rows across runs naturally deduplicate)
