@@ -1048,6 +1048,94 @@ class FunctionNode(StreamBase):
     # Cache-only helpers (PLT-1156)
     # ------------------------------------------------------------------
 
+    def _load_cached_entries(
+        self,
+        entry_ids: list[str] | None = None,
+    ) -> "dict[str, tuple[TagProtocol, PacketProtocol]]":
+        """Load (tag, packet) pairs from pipeline DB + result DB.
+
+        Args:
+            entry_ids: If provided, load only these specific entry IDs.
+                If ``None``, load all records for this node.
+
+        Returns:
+            dict mapping entry_id → (tag, packet). Empty dict when either
+            database is None, records are empty, or no rows match.
+
+        Does NOT mutate ``_cached_output_packets``.
+        Callers merge via ``self._cached_output_packets.update(loaded)``.
+        """
+        if self._cached_function_pod is None or self._pipeline_database is None:
+            return {}
+
+        PIPELINE_ENTRY_ID_COL = "__pipeline_entry_id"
+
+        taginfo = self._pipeline_database.get_all_records(
+            self.node_identity_path,
+            record_id_column=PIPELINE_ENTRY_ID_COL,
+        )
+        results = self._cached_function_pod._result_database.get_all_records(
+            self._cached_function_pod.record_path,
+            record_id_column=constants.PACKET_RECORD_ID,
+        )
+
+        if taginfo is None or results is None:
+            return {}
+
+        taginfo = self._filter_by_content_hash(taginfo)
+        taginfo_schema = taginfo.schema
+        results_schema = results.schema
+
+        joined_df = pl.DataFrame(taginfo).join(
+            pl.DataFrame(results),
+            on=constants.PACKET_RECORD_ID,
+            how="inner",
+        )
+        if entry_ids is not None:
+            joined_df = joined_df.filter(
+                pl.col(PIPELINE_ENTRY_ID_COL).is_in(entry_ids)
+            )
+        joined = joined_df.to_arrow()
+        joined = arrow_utils.restore_schema_nullability(
+            joined, taginfo_schema, results_schema
+        )
+
+        if joined.num_rows == 0:
+            return {}
+
+        # Derive tag keys: prefer input_stream when available; fall back to
+        # taginfo column exclusion for CACHE_ONLY / deserialized nodes.
+        if self._input_stream is not None:
+            tag_keys = self._input_stream.keys()[0]
+        else:
+            tag_keys = tuple(
+                c
+                for c in taginfo.column_names
+                if not c.startswith(constants.META_PREFIX)
+                and not c.startswith(constants.SOURCE_PREFIX)
+                and not c.startswith(constants.SYSTEM_TAG_PREFIX)
+                and c != PIPELINE_ENTRY_ID_COL
+                and c != constants.NODE_CONTENT_HASH_COL
+            )
+
+        # Drop internal columns (SOURCE_PREFIX is kept — ArrowTableStream needs it)
+        drop_cols = [
+            c
+            for c in joined.column_names
+            if c.startswith(constants.META_PREFIX)
+            or c == PIPELINE_ENTRY_ID_COL
+            or c == constants.NODE_CONTENT_HASH_COL
+        ]
+        data_table = joined.drop([c for c in drop_cols if c in joined.column_names])
+
+        entry_ids_col = joined.column(PIPELINE_ENTRY_ID_COL).to_pylist()
+        stream = ArrowTableStream(data_table, tag_columns=tag_keys)
+
+        loaded: dict[str, tuple[TagProtocol, PacketProtocol]] = {}
+        for eid, (tag, packet) in zip(entry_ids_col, stream.iter_packets()):
+            loaded[eid] = (tag, packet)
+        return loaded
+
     def _load_all_cached_records(
         self,
     ) -> "tuple[tuple[str, ...], Any] | None":
