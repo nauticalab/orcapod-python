@@ -6,7 +6,6 @@ import re
 import sys
 from abc import abstractmethod
 from collections.abc import Callable, Iterable, Sequence
-from datetime import datetime, timezone
 import typing
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, TypeVar
 
@@ -27,7 +26,6 @@ from orcapod.protocols.core_protocols.executor import (
     PythonFunctionExecutorProtocol,
 )
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
-from orcapod.system_constants import constants
 from orcapod.types import DataValue, Schema, SchemaLike
 from orcapod.utils import schema_utils
 from orcapod.utils.git_utils import get_git_info_for_python_object
@@ -243,6 +241,16 @@ class PacketFunctionBase(TraceableBase, Generic[E]):
         """Raw data defining execution context"""
         ...
 
+    @abstractmethod
+    def get_function_variation_data_schema(self) -> Schema:
+        """Schema for the data returned by ``get_function_variation_data``."""
+        ...
+
+    @abstractmethod
+    def get_execution_data_schema(self) -> Schema:
+        """Schema for the data returned by ``get_execution_data``."""
+        ...
+
     # ==================== Executor ====================
 
     @property
@@ -365,8 +373,16 @@ class PythonPacketFunction(PacketFunctionBase[PythonFunctionExecutorProtocol]):
         input_schema: SchemaLike | None = None,
         output_schema: SchemaLike | Sequence[type] | None = None,
         label: str | None = None,
-        **kwargs,
+        data_context: str | DataContext | None = None,
+        config: Config | None = None,
+        executor: PythonFunctionExecutorProtocol | None = None,
     ) -> None:
+
+        # default to the basic PythonFunctionExecutor
+        if executor is None:
+            from orcapod.core.executors.local import LocalPythonFunctionExecutor
+            executor = LocalPythonFunctionExecutor()
+        
         self._function = function
         self._is_async = inspect.iscoroutinefunction(function)
 
@@ -405,7 +421,7 @@ class PythonPacketFunction(PacketFunctionBase[PythonFunctionExecutorProtocol]):
         assert function_name is not None
         self._function_name = function_name
 
-        super().__init__(label=label, version=version, **kwargs)
+        super().__init__(label=label, version=version, data_context=data_context, config=config, executor=executor)
 
         # extract input and output schema from the function signature
         self._input_schema, self._output_schema = schema_utils.extract_function_schemas(
@@ -417,13 +433,17 @@ class PythonPacketFunction(PacketFunctionBase[PythonFunctionExecutorProtocol]):
 
         # get git info for the function
         # TODO: turn this into optional addition
-        env_info = get_git_info_for_python_object(self._function)
+        env_info = get_git_info_for_python_object(self._function, try_cwd=True)
         if env_info is None:
             git_hash = "unknown"
         else:
             git_hash = env_info.get("git_commit_hash", "unknown")
             if env_info.get("git_repo_status") == "dirty":
                 git_hash += "-dirty"
+            if env_info.get("has_untracked_files") == "true":
+                git_hash += "-untracked"
+            if (git_source := env_info.get("git_source")) is not None and git_source != "function":
+                git_hash += f"-{git_source}"
         self._git_hash = git_hash
 
         semantic_hasher = self.data_context.semantic_hasher
@@ -451,11 +471,48 @@ class PythonPacketFunction(PacketFunctionBase[PythonFunctionExecutorProtocol]):
             "git_hash": self._git_hash,
         }
 
+    def get_function_variation_data_schema(self) -> Schema:
+        """Schema for the data returned by ``get_function_variation_data``."""
+        return Schema({
+            "function_name": str,
+            "function_signature_hash": str,
+            "function_content_hash": str,
+            "git_hash": str,
+        })
+
     def get_execution_data(self) -> dict[str, Any]:
-        """Raw data defining execution context - system computes hash"""
+        """Raw data defining execution context."""
+        import json
+
+        executor = self._executor
+        if executor is not None:
+            executor_data = executor.get_executor_data()
+            executor_type = str(executor_data.pop("executor_type", executor.executor_type_id))
+            executor_info = {
+                k: v if isinstance(v, str) else json.dumps(v) if isinstance(v, (dict, list)) else str(v)
+                for k, v in executor_data.items()
+            }
+        else:
+            executor_type = "none"
+            executor_info = {}
+
         python_version_info = sys.version_info
         python_version_str = f"{python_version_info.major}.{python_version_info.minor}.{python_version_info.micro}"
-        return {"python_version": python_version_str, "execution_context": "local"}
+        return {
+            "executor_type": executor_type,
+            "executor_info": executor_info,
+            "python_version": python_version_str,
+            "extra_info": {},
+        }
+
+    def get_execution_data_schema(self) -> Schema:
+        """Schema for the data returned by ``get_execution_data``."""
+        return Schema({
+            "executor_type": str,
+            "executor_info": dict[str, str],
+            "python_version": str,
+            "extra_info": dict[str, str],
+        })
 
     @property
     def input_packet_schema(self) -> Schema:
@@ -736,8 +793,14 @@ class PacketFunctionWrapper(PacketFunctionBase[E]):
     def get_function_variation_data(self) -> dict[str, Any]:
         return self._packet_function.get_function_variation_data()
 
+    def get_function_variation_data_schema(self) -> Schema:
+        return self._packet_function.get_function_variation_data_schema()
+
     def get_execution_data(self) -> dict[str, Any]:
         return self._packet_function.get_execution_data()
+
+    def get_execution_data_schema(self) -> Schema:
+        return self._packet_function.get_execution_data_schema()
 
     def to_config(self) -> dict[str, Any]:
         """Delegate serialization to the wrapped packet function."""

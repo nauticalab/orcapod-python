@@ -171,11 +171,14 @@ class ResultCache:
             i += 1
 
         # Add execution data columns
+        import json
+
         for k, v in execution_data.items():
+            str_v = v if isinstance(v, str) else json.dumps(v)
             data_table = data_table.add_column(
                 i,
                 f"{constants.PF_EXECUTION_PREFIX}{k}",
-                pa.array([v], type=pa.large_string()),
+                pa.array([str_v], type=pa.large_string()),
             )
             i += 1
 

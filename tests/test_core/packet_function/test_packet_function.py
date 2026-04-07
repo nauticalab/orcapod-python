@@ -382,16 +382,85 @@ class TestGetFunctionVariationData:
 class TestGetExecutionData:
     def test_returns_expected_keys(self, add_pf):
         data = add_pf.get_execution_data()
-        assert "python_version" in data
-        assert "execution_context" in data
+        assert set(data.keys()) == {
+            "executor_type",
+            "executor_info",
+            "python_version",
+            "extra_info",
+        }
 
     def test_python_version_matches_runtime(self, add_pf):
         vi = sys.version_info
         expected = f"{vi.major}.{vi.minor}.{vi.micro}"
         assert add_pf.get_execution_data()["python_version"] == expected
 
-    def test_execution_context_is_local(self, add_pf):
-        assert add_pf.get_execution_data()["execution_context"] == "local"
+    def test_executor_type_is_string(self):
+        pf = PythonPacketFunction(add, output_keys="result")
+        data = pf.get_execution_data()
+        assert isinstance(data["executor_type"], str)
+
+    def test_executor_info_is_dict_str_str(self):
+        pf = PythonPacketFunction(add, output_keys="result")
+        data = pf.get_execution_data()
+        assert isinstance(data["executor_info"], dict)
+        for k, v in data["executor_info"].items():
+            assert isinstance(k, str)
+            assert isinstance(v, str)
+
+    def test_extra_info_is_empty_dict(self):
+        pf = PythonPacketFunction(add, output_keys="result")
+        data = pf.get_execution_data()
+        assert data["extra_info"] == {}
+
+
+class TestExecutionDataSchema:
+    def test_execution_data_has_expected_keys(self):
+        pf = PythonPacketFunction(add, output_keys="result")
+        data = pf.get_execution_data()
+        assert set(data.keys()) == {
+            "executor_type",
+            "executor_info",
+            "python_version",
+            "extra_info",
+        }
+
+    def test_executor_type_is_string(self):
+        pf = PythonPacketFunction(add, output_keys="result")
+        data = pf.get_execution_data()
+        assert isinstance(data["executor_type"], str)
+
+    def test_executor_info_is_dict_str_str(self):
+        pf = PythonPacketFunction(add, output_keys="result")
+        data = pf.get_execution_data()
+        assert isinstance(data["executor_info"], dict)
+        for k, v in data["executor_info"].items():
+            assert isinstance(k, str)
+            assert isinstance(v, str)
+
+    def test_python_version_matches_sys(self):
+        pf = PythonPacketFunction(add, output_keys="result")
+        data = pf.get_execution_data()
+        expected = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        assert data["python_version"] == expected
+
+    def test_extra_info_is_empty_dict(self):
+        pf = PythonPacketFunction(add, output_keys="result")
+        data = pf.get_execution_data()
+        assert data["extra_info"] == {}
+
+    def test_execution_data_schema_matches_data_keys(self):
+        pf = PythonPacketFunction(add, output_keys="result")
+        data = pf.get_execution_data()
+        schema = pf.get_execution_data_schema()
+        assert set(schema.keys()) == set(data.keys())
+
+    def test_execution_data_schema_types(self):
+        pf = PythonPacketFunction(add, output_keys="result")
+        schema = pf.get_execution_data_schema()
+        assert schema["executor_type"] is str
+        assert schema["executor_info"] == dict[str, str]
+        assert schema["python_version"] is str
+        assert schema["extra_info"] == dict[str, str]
 
 
 # ---------------------------------------------------------------------------

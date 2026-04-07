@@ -22,7 +22,7 @@ import pytest
 
 from orcapod.channels import Channel
 from orcapod.core.datagrams import Packet
-from orcapod.core.executors import LocalExecutor, PythonFunctionExecutorBase
+from orcapod.core.executors import LocalPythonFunctionExecutor, PythonFunctionExecutorBase
 from orcapod.core.function_pod import FunctionPod, FunctionPodStream
 from orcapod.core.operators import SelectPacketColumns
 from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
@@ -242,7 +242,7 @@ class TestConcurrentFallbackInRunningLoop:
 
         pf = PythonPacketFunction(double, output_keys="result")
         # Attach an executor that reports concurrent support
-        executor = LocalExecutor()
+        executor = LocalPythonFunctionExecutor()
         pf.executor = executor
         pod = FunctionPod(pf)
 
@@ -545,21 +545,21 @@ class TestRayExecutorInitialization:
 
             assert new_exec._runtime_env == {"pip": ["numpy"]}
 
-    def test_get_execution_data_without_runtime_env(self):
-        """get_execution_data() omits runtime_env when not set."""
+    def test_get_executor_data_without_runtime_env(self):
+        """get_executor_data() reports runtime_env as False when not set."""
         mock_ray = MagicMock()
 
         with patch.dict("sys.modules", {"ray": mock_ray}):
             from orcapod.core.executors.ray import RayExecutor
 
             executor = RayExecutor(ray_address="ray://host:10001")
-            data = executor.get_execution_data()
+            data = executor.get_executor_data()
 
-            assert "runtime_env" not in data
+            assert data["runtime_env"] is False
             assert data["ray_address"] == "ray://host:10001"
 
-    def test_get_execution_data_with_runtime_env(self):
-        """get_execution_data() flags runtime_env presence as True."""
+    def test_get_executor_data_with_runtime_env(self):
+        """get_executor_data() flags runtime_env presence as True."""
         mock_ray = MagicMock()
 
         with patch.dict("sys.modules", {"ray": mock_ray}):
@@ -568,7 +568,7 @@ class TestRayExecutorInitialization:
             executor = RayExecutor(
                 runtime_env={"py_modules": ["my_mod"]},
             )
-            data = executor.get_execution_data()
+            data = executor.get_executor_data()
 
             assert data["runtime_env"] is True
             assert data["ray_address"] == "auto"
