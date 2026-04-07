@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Iterator, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from orcapod import contexts
 from orcapod.channels import Channel, ReadableChannel, WritableChannel
@@ -30,10 +30,12 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import pyarrow as pa
+    import pyarrow.compute as pc
 
     from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
 else:
     pa = LazyModule("pyarrow")
+    pc = LazyModule("pyarrow.compute")
 
 
 class OperatorNode(StreamBase):
@@ -75,6 +77,7 @@ class OperatorNode(StreamBase):
         # Optional DB params for persistent mode:
         pipeline_database: ArrowDatabaseProtocol | None = None,
         cache_mode: CacheMode = CacheMode.OFF,
+        table_scope: Literal["pipeline_hash", "content_hash"] = "pipeline_hash",
     ):
         if tracker_manager is None:
             tracker_manager = DEFAULT_TRACKER_MANAGER
@@ -108,6 +111,13 @@ class OperatorNode(StreamBase):
         self._stored_node_uri: tuple[str, ...] = ()
         self._stored_pipeline_path: tuple[str, ...] = ()
         self._descriptor: dict = {}
+        if table_scope not in ("pipeline_hash", "content_hash"):
+            raise ValueError(
+                f"Unknown table_scope {table_scope!r}. "
+                "Expected one of: 'pipeline_hash', 'content_hash'."
+            )
+        self._table_scope = table_scope
+        self._node_identity_path_cache: tuple[str, ...] | None = None
 
         if pipeline_database is not None:
             self.attach_databases(
@@ -134,6 +144,7 @@ class OperatorNode(StreamBase):
         self._cache_mode = cache_mode
 
         # Clear caches
+        self._node_identity_path_cache = None
         self.clear_cache()
         self._content_hash_cache.clear()
         self._pipeline_hash_cache.clear()
@@ -172,6 +183,20 @@ class OperatorNode(StreamBase):
         """
         from orcapod.pipeline.serialization import LoadStatus
 
+        if "table_scope" not in descriptor:
+            raise ValueError(
+                f"OperatorNode descriptor is missing required 'table_scope' field: "
+                f"{descriptor.get('label', '<unlabeled>')}"
+            )
+        raw_table_scope = descriptor["table_scope"]
+        if raw_table_scope not in ("pipeline_hash", "content_hash"):
+            raise ValueError(
+                f"OperatorNode descriptor has invalid 'table_scope' value "
+                f"{raw_table_scope!r} for {descriptor.get('label', '<unlabeled>')}; "
+                "expected one of ('pipeline_hash', 'content_hash')"
+            )
+        table_scope: Literal["pipeline_hash", "content_hash"] = raw_table_scope
+
         pipeline_db = databases.get("pipeline")
         cache_mode_str = descriptor.get("cache_mode", "off")
         try:
@@ -185,6 +210,7 @@ class OperatorNode(StreamBase):
                 operator=operator,
                 input_streams=input_streams,
                 label=descriptor.get("label"),
+                table_scope=table_scope,
             )
             if pipeline_db is not None:
                 node.attach_databases(
@@ -237,6 +263,8 @@ class OperatorNode(StreamBase):
         node._stored_pipeline_hash = descriptor.get("pipeline_hash")
         node._stored_pipeline_path = tuple(descriptor.get("pipeline_path", ()))
         node._stored_node_uri = tuple(descriptor.get("node_uri") or [])
+        node._table_scope = table_scope
+        node._node_identity_path_cache = None
 
         # Determine load status based on DB availability and cache mode.
         # An uncached operator (cache_mode=OFF) never writes records to the
@@ -354,23 +382,46 @@ class OperatorNode(StreamBase):
     def node_identity_path(self) -> tuple[str, ...]:
         """Return the node identity path for observer contextualization.
 
-        The identity path is ``operator.uri + (schema_hash, instance_hash)``
-        and is computable independently of whether a pipeline database is
-        attached.
+        When ``table_scope="pipeline_hash"`` (default) the path is
+        ``operator.uri + (schema:{pipeline_hash},)`` — all runs that share
+        the same pipeline structure use one shared table, with per-run
+        disambiguation via the ``_node_content_hash`` row-level column.
 
-        In live mode (operator present) the path is computed from the operator.
+        When ``table_scope="content_hash"`` the legacy path is returned:
+        ``operator.uri + (schema:{pipeline_hash}, instance:{content_hash})``.
+
         In read-only/UNAVAILABLE mode (no operator) the path stored from the
         deserialized descriptor is returned (empty tuple when absent).
         """
         if self._operator is None:
             return self._stored_pipeline_path
-        return (
-            self._operator.uri
-            + (
-                f"schema:{self.pipeline_hash().to_string()}",
-                f"instance:{self.content_hash().to_string()}",
+        if self._node_identity_path_cache is not None:
+            return self._node_identity_path_cache
+        path = self._operator.uri + (f"schema:{self.pipeline_hash().to_string()}",)
+        if self._table_scope != "pipeline_hash":
+            path += (f"instance:{self.content_hash().to_string()}",)
+        self._node_identity_path_cache = path
+        return path
+
+    def _filter_by_content_hash(self, table: pa.Table) -> pa.Table:
+        """Filter *table* to rows whose ``NODE_CONTENT_HASH_COL`` matches this node.
+
+        Only applied when ``table_scope="pipeline_hash"`` because in that mode
+        multiple runs share the same DB table and must be disambiguated at read
+        time.  In ``"content_hash"`` mode every run has its own table.
+        """
+        if self._table_scope != "pipeline_hash":
+            return table
+        col_name = constants.NODE_CONTENT_HASH_COL
+        if col_name not in table.column_names:
+            raise ValueError(
+                f"Cannot isolate records for table_scope='pipeline_hash': "
+                f"required column {col_name!r} is missing from the stored table. "
+                "This may indicate records written by an older version of the code."
             )
-        )
+        own_hash = self.content_hash().to_string()
+        mask = pc.equal(table.column(col_name), own_hash)
+        return table.filter(mask)
 
     @property
     def node_uri(self) -> tuple[str, ...]:
@@ -391,6 +442,7 @@ class OperatorNode(StreamBase):
         """Discard all in-memory cached state."""
         self._cached_output_stream = None
         self._cached_output_table = None
+        self._node_identity_path_cache = None
         self._update_modified_time()
 
     def _store_output_stream(self, stream: StreamProtocol) -> None:
@@ -399,14 +451,27 @@ class OperatorNode(StreamBase):
             columns={"source": True, "system_tags": True},
         )
 
-        # Per-row record hashes for dedup: hash(tag + packet + system_tag)
+        # Always append the node content hash column first so that it is included
+        # in the per-row HASH_COLUMN_NAME computation below.  This makes record IDs
+        # run-scoped: identical rows from different runs carry a different
+        # NODE_CONTENT_HASH_COL value and therefore hash to different record IDs,
+        # preventing skip_duplicates=True from silently dropping a later run's rows.
+        # When table_scope="pipeline_hash" this column is also used at read time by
+        # _filter_by_content_hash to isolate rows belonging to the current run.
+        # In content_hash scope each run has its own isolated table so the column
+        # is present in storage but filtering is never applied on reads.
+        n_rows = output_table.num_rows
+        output_table = output_table.append_column(
+            constants.NODE_CONTENT_HASH_COL,
+            pa.repeat(self.content_hash().to_string(), n_rows).cast(pa.large_string()),
+        )
+
+        # Per-row record hashes for dedup: hash(tag + packet + system_tags + node_content_hash).
         arrow_hasher = self.data_context.arrow_hasher
         record_hashes = []
         for batch in output_table.to_batches():
             for i in range(len(batch)):
-                record_hashes.append(
-                    arrow_hasher.hash_table(batch.slice(i, 1)).to_hex()
-                )
+                record_hashes.append(arrow_hasher.hash_table(batch.slice(i, 1)).to_hex())
 
         output_table = output_table.add_column(
             0,
@@ -414,7 +479,10 @@ class OperatorNode(StreamBase):
             pa.array(record_hashes, type=pa.large_string()),
         )
 
-        # Store (identical rows across runs naturally deduplicate)
+        # Store — record IDs are run-scoped (NODE_CONTENT_HASH_COL is included in
+        # the hash), so rows from different runs with identical output will have
+        # distinct record IDs and both be stored.  skip_duplicates=True still
+        # deduplicates exact re-runs of the same node within a single run.
         self._pipeline_database.add_records(
             self.node_identity_path,
             output_table,
@@ -422,7 +490,9 @@ class OperatorNode(StreamBase):
             skip_duplicates=True,
         )
 
-        self._cached_output_table = output_table.drop(self.HASH_COLUMN_NAME)
+        self._cached_output_table = output_table.drop(
+            [self.HASH_COLUMN_NAME, constants.NODE_CONTENT_HASH_COL]
+        )
 
     def _make_empty_table(self) -> "pa.Table":
         """Build a zero-row PyArrow table matching this node's full output schema.
@@ -470,7 +540,15 @@ class OperatorNode(StreamBase):
                 return None
             records_table = self._make_empty_table()
         else:
-            records_table = records
+            records_table = self._filter_by_content_hash(records)
+            # Drop internal columns that must not surface to stream consumers.
+            cols_to_drop = [
+                c
+                for c in [constants.NODE_CONTENT_HASH_COL, self.HASH_COLUMN_NAME]
+                if c in records_table.column_names
+            ]
+            if cols_to_drop:
+                records_table = records_table.drop(cols_to_drop)
         tag_keys = self.keys()[0]
         return ArrowTableStream(records_table, tag_columns=tag_keys)
 
@@ -568,6 +646,16 @@ class OperatorNode(StreamBase):
         records = self._pipeline_database.get_all_records(self.node_identity_path)
         if records is None:
             records = self._make_empty_table()
+        else:
+            records = self._filter_by_content_hash(records)
+            # Drop internal columns that must not surface to stream consumers.
+            cols_to_drop = [
+                c
+                for c in [constants.NODE_CONTENT_HASH_COL, self.HASH_COLUMN_NAME]
+                if c in records.column_names
+            ]
+            if cols_to_drop:
+                records = records.drop(cols_to_drop)
 
         tag_keys = self.keys()[0]
         self._cached_output_stream = ArrowTableStream(records, tag_columns=tag_keys)
@@ -664,9 +752,16 @@ class OperatorNode(StreamBase):
         if results is None:
             return None
 
+        results = self._filter_by_content_hash(results)
+
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
 
-        drop_columns = []
+        # Always drop internal row-level columns.
+        drop_columns = [
+            c
+            for c in [constants.NODE_CONTENT_HASH_COL, self.HASH_COLUMN_NAME]
+            if c in results.column_names
+        ]
         if not column_config.meta and not column_config.all_info:
             drop_columns.extend(
                 c for c in results.column_names if c.startswith(constants.META_PREFIX)

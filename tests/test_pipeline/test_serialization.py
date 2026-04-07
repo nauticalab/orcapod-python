@@ -1634,7 +1634,7 @@ class TestPLT1158UncachedOperatorStatus:
 
 
 def test_function_node_pipeline_path_two_level(tmp_path):
-    """node_identity_path must end with schema:... and instance:... components."""
+    """node_identity_path must end with schema:... component (pipeline_hash scope)."""
     db = InMemoryArrowDatabase()
 
     def add_one(y: int) -> int:
@@ -1660,14 +1660,13 @@ def test_function_node_pipeline_path_two_level(tmp_path):
     fn_node = pipeline._nodes["fn"]
     path = fn_node.node_identity_path
 
-    assert path[-2].startswith("schema:"), f"Expected schema:... got {path[-2]!r}"
-    assert path[-1].startswith("instance:"), f"Expected instance:... got {path[-1]!r}"
-    assert fn_node.pipeline_hash().to_string() in path[-2]
-    assert fn_node.content_hash().to_string() in path[-1]
+    assert path[-1].startswith("schema:"), f"Expected schema:... got {path[-1]!r}"
+    assert fn_node.pipeline_hash().to_string() in path[-1]
+    assert not any(seg.startswith("instance:") for seg in path)
 
 
 def test_operator_node_pipeline_path_two_level(tmp_path):
-    """OperatorNode node_identity_path must also use two-level schema/instance formula."""
+    """OperatorNode node_identity_path must end with schema:... component (pipeline_hash scope)."""
     db = InMemoryArrowDatabase()
 
     table_a = pa.table(
@@ -1694,10 +1693,9 @@ def test_operator_node_pipeline_path_two_level(tmp_path):
     joined_node = pipeline._nodes["joined"]
     path = joined_node.node_identity_path
 
-    assert path[-2].startswith("schema:"), f"Expected schema:... got {path[-2]!r}"
-    assert path[-1].startswith("instance:"), f"Expected instance:... got {path[-1]!r}"
-    assert joined_node.pipeline_hash().to_string() in path[-2]
-    assert joined_node.content_hash().to_string() in path[-1]
+    assert path[-1].startswith("schema:"), f"Expected schema:... got {path[-1]!r}"
+    assert joined_node.pipeline_hash().to_string() in path[-1]
+    assert not any(seg.startswith("instance:") for seg in path)
 
 
 # ---------------------------------------------------------------------------
@@ -1850,7 +1848,7 @@ def test_load_operator_node_identity_path_has_schema_instance_components(tmp_pat
 
     In the new format, pipeline_path is never stored in node descriptors.
     The pipeline name prefix lives in the database path, not in node_identity_path.
-    The node_identity_path must end with schema:... and instance:... components.
+    With pipeline_hash scope (default), the node_identity_path ends with schema:... only.
     """
     from orcapod.core.operators import SelectPacketColumns
 
@@ -1879,11 +1877,11 @@ def test_load_operator_node_identity_path_has_schema_instance_components(tmp_pat
 
     sel_node = loaded.compiled_nodes["sel"]
     pp = sel_node.node_identity_path
-    # The node_identity_path must be non-empty with schema:/instance: components.
+    # The node_identity_path must be non-empty ending with schema:... (pipeline_hash scope).
     # Pipeline name prefix is now encoded in the database path, not the identity path.
-    assert len(pp) >= 2, f"Expected non-empty node_identity_path, got {pp!r}"
-    assert pp[-2].startswith("schema:"), f"Expected schema:... got {pp[-2]!r}"
-    assert pp[-1].startswith("instance:"), f"Expected instance:... got {pp[-1]!r}"
+    assert len(pp) >= 1, f"Expected non-empty node_identity_path, got {pp!r}"
+    assert pp[-1].startswith("schema:"), f"Expected schema:... got {pp[-1]!r}"
+    assert not any(seg.startswith("instance:") for seg in pp)
 
 
 def test_load_raises_on_missing_result_database_registry_key(tmp_path):
@@ -1966,10 +1964,10 @@ def test_load_function_node_identity_path_has_schema_instance_components(tmp_pat
     loaded = Pipeline.load(str(path), mode="full")
     fn_node = loaded.compiled_nodes["fn"]
     pp = fn_node.node_identity_path
-    # In full mode, node_identity_path is computed from the pod (schema/instance)
-    assert len(pp) >= 2, f"Expected non-empty node_identity_path, got {pp!r}"
-    assert pp[-2].startswith("schema:"), f"Expected schema:... got {pp[-2]!r}"
-    assert pp[-1].startswith("instance:"), f"Expected instance:... got {pp[-1]!r}"
+    # In full mode, node_identity_path is computed from the pod (schema only, pipeline_hash scope)
+    assert len(pp) >= 1, f"Expected non-empty node_identity_path, got {pp!r}"
+    assert pp[-1].startswith("schema:"), f"Expected schema:... got {pp[-1]!r}"
+    assert not any(seg.startswith("instance:") for seg in pp)
 
 
 # ---------------------------------------------------------------------------

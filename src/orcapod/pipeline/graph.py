@@ -774,6 +774,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         """
         return {
             "function_config": node._function_pod.to_config(),
+            "table_scope": node._table_scope,
         }
 
     def _build_operator_descriptor(self, node: OperatorNode, level: str = "standard") -> dict[str, Any]:
@@ -788,6 +789,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         """
         result: dict[str, Any] = {
             "operator_config": node._operator.to_config(),
+            "table_scope": node._table_scope,
         }
         # cache_mode at standard+ only
         if level in ("standard", "full"):

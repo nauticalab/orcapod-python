@@ -309,8 +309,9 @@ class TestFunctionPodCaching:
     def test_cross_source_sharing_same_pipeline_path(
         self, clinic_a, clinic_b, source_db, pipeline_db, result_db, pod
     ):
-        """Different source identities, same schema → same schema: component but
-        different instance: components (different data → different content_hash)."""
+        """Different source identities, same schema → same pipeline_hash → same path.
+        With pipeline_hash scope (default), both nodes share a single DB table.
+        Per-run isolation is via the _node_content_hash row column."""
         patients_a, labs_a = clinic_a
         patients_b, labs_b = clinic_b
 
@@ -346,17 +347,17 @@ class TestFunctionPodCaching:
             result_database=result_db,
         )
 
-        # Same schema → same schema: component
-        assert fn_a.node_identity_path[-2] == fn_b.node_identity_path[-2]
-        assert fn_a.node_identity_path[-2].startswith("schema:")
-        # Different data → different full path
-        assert fn_a.node_identity_path != fn_b.node_identity_path
+        # Same schema → same pipeline_hash → SAME full path (shared table)
+        assert fn_a.node_identity_path == fn_b.node_identity_path
+        assert fn_a.node_identity_path[-1].startswith("schema:")
+        # Content hashes differ (different source data)
+        assert fn_a.content_hash() != fn_b.content_hash()
 
     def test_cross_source_records_accumulate_in_shared_table(
         self, clinic_a, clinic_b, source_db, pipeline_db, result_db, pod
     ):
-        """With the two-level formula, each pipeline writes to its own DB path.
-        Records from pipeline A and B are stored separately."""
+        """With pipeline_hash scope, A and B share one DB table.
+        get_all_records() filters by content_hash so each node sees only its own rows."""
         patients_a, labs_a = clinic_a
         patients_b, labs_b = clinic_b
 
@@ -485,7 +486,8 @@ class TestOperatorPodCaching:
     def test_content_hash_scoping_isolates_source_combinations(
         self, clinic_a, clinic_b, source_db, operator_db
     ):
-        """Different source combinations → different pipeline_paths."""
+        """Different source combinations, same schema → same pipeline_hash → shared path.
+        With pipeline_hash scope (default), per-run isolation is via _node_content_hash."""
         patients_a, labs_a = clinic_a
         patients_b, labs_b = clinic_b
 
@@ -518,7 +520,10 @@ class TestOperatorPodCaching:
             pipeline_database=operator_db,
             cache_mode=CacheMode.LOG,
         )
-        assert node_a.node_identity_path != node_b.node_identity_path
+        # Same schema → same pipeline_hash → SAME path (shared table)
+        assert node_a.node_identity_path == node_b.node_identity_path
+        # Per-run isolation is via content_hash
+        assert node_a.content_hash() != node_b.content_hash()
 
 
 # ---------------------------------------------------------------------------
@@ -595,11 +600,10 @@ class TestEndToEndPipeline:
             pipeline_database=pipeline_db,
             result_database=result_db,
         )
-        # Same schema → same schema: component; different data → different full path
-        assert fn_node.node_identity_path[-2] == fn_node_b.node_identity_path[-2]
-        assert fn_node.node_identity_path != fn_node_b.node_identity_path
+        # Same schema → same pipeline_hash → same path (shared table)
+        assert fn_node.node_identity_path == fn_node_b.node_identity_path
         fn_node_b.run()
-        # fn_node_b has its own path: 2 records from clinic B only
+        # get_all_records() filters by content_hash: fn_node_b sees only its 2 records
         assert fn_node_b.get_all_records().num_rows == 2
 
         # Verify source caches are populated

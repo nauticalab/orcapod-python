@@ -8,6 +8,7 @@ PF_EXECUTION_PREFIX = "pf_exec_"
 DATA_CONTEXT_KEY = "context_key"
 INPUT_PACKET_HASH_COL = "input_packet_hash"
 PACKET_RECORD_ID = "packet_id"
+NODE_CONTENT_HASH_COL = "node_content_hash"
 SYSTEM_TAG_PREFIX_NAME = "tag"
 SYSTEM_TAG_SOURCE_ID_FIELD = "source_id"
 SYSTEM_TAG_RECORD_ID_FIELD = "record_id"
@@ -66,6 +67,10 @@ class SystemConstant:
     @property
     def PACKET_RECORD_ID(self) -> str:
         return f"{self._global_prefix}{SYSTEM_COLUMN_PREFIX}{PACKET_RECORD_ID}"
+
+    @property
+    def NODE_CONTENT_HASH_COL(self) -> str:
+        return f"{self._global_prefix}{DATAGRAM_PREFIX}{NODE_CONTENT_HASH_COL}"
 
     @property
     def SYSTEM_TAG_PREFIX(self) -> str:
