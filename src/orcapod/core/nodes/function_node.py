@@ -117,13 +117,9 @@ class FunctionNode(StreamBase):
 
         self._input_stream = input_stream
 
-        # stream-level caching state (iterator acquired lazily on first use)
-        self._cached_input_iterator: (
-            Iterator[tuple[TagProtocol, PacketProtocol]] | None
-        ) = None
-        self._needs_iterator = True
+        # stream-level caching state
         self._cached_output_packets: dict[
-            str | int, tuple[TagProtocol, PacketProtocol | None]
+            str, tuple[TagProtocol, PacketProtocol | None]
         ] = {}
         self._cached_output_table: pa.Table | None = None
         self._cached_content_hash_column: pa.Array | None = None
@@ -355,8 +351,6 @@ class FunctionNode(StreamBase):
         node._packet_function = None
         node._input_stream = None
         node.tracker_manager = DEFAULT_TRACKER_MANAGER
-        node._cached_input_iterator = None
-        node._needs_iterator = True
         node._cached_output_packets = {}
         node._cached_output_table = None
         node._cached_content_hash_column = None
@@ -533,16 +527,7 @@ class FunctionNode(StreamBase):
     # Caching
     # ------------------------------------------------------------------
 
-    def _ensure_iterator(self) -> None:
-        """Lazily acquire the upstream iterator on first use."""
-        if self._needs_iterator:
-            self._cached_input_iterator = self._input_stream.iter_packets()
-            self._needs_iterator = False
-            self._update_modified_time()
-
     def clear_cache(self) -> None:
-        self._cached_input_iterator = None
-        self._needs_iterator = True
         self._cached_output_packets.clear()
         self._cached_output_table = None
         self._cached_content_hash_column = None
