@@ -6,7 +6,6 @@ RED phase: all tests in this file must fail before the helper exists.
 
 import pyarrow as pa
 import polars as pl
-import pytest
 
 from orcapod.utils import arrow_utils
 
@@ -62,7 +61,7 @@ class TestPolarsRoundTripLosesNullability:
         assert joined.schema.field("score").nullable is True
 
 
-class TestRestoreSchemaHullability:
+class TestRestoreSchemaNullability:
     """Unit tests for arrow_utils.restore_schema_nullability."""
 
     def test_restores_non_nullable_flags_after_polars_roundtrip(self):

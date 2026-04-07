@@ -649,11 +649,13 @@ class FunctionPodStream(StreamBase):
 
         if column_config.sort_by_tags:
             # TODO: reimplement using polars natively
+            output_table_schema = output_table.schema
             output_table = (
                 pl.DataFrame(output_table)
                 .sort(by=self.keys()[0], descending=False)
                 .to_arrow()
             )
+            output_table = arrow_utils.restore_schema_nullability(output_table, output_table_schema)
             # output_table = output_table.sort_by(
             #     [(column, "ascending") for column in self.keys()[0]]
             # )

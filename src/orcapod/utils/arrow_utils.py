@@ -1151,29 +1151,31 @@ def add_source_info(
     exclude_columns: Collection[str] = (),
 ) -> "pa.Table":
     """Add source information to an Arrow table."""
-    # Create a new column with the source information
+    # Create a base list of per-row source tokens; one entry per row.
     if source_info is None or isinstance(source_info, str):
-        source_column = [source_info] * table.num_rows
+        base_source = [source_info] * table.num_rows
     elif isinstance(source_info, Collection):
         if len(source_info) != table.num_rows:
             raise ValueError(
                 "Length of source_info collection must match number of rows in the table."
             )
-        source_column = source_info
+        base_source = list(source_info)
 
-    # identify columns for which source columns should be created
-
+    # For each data column, build an independent _source_<col> column from the
+    # base tokens.  We must NOT re-use the array produced for a previous column
+    # as input for the next one — doing so would accumulate column names
+    # (e.g. "src::col1::col2" instead of "src::col2").
     for col in table.column_names:
         if col.startswith(tuple(exclude_prefixes)) or col in exclude_columns:
             continue
-        source_column = pa.array(
-            [f"{source_val}::{col}" for source_val in source_column],
+        col_source = pa.array(
+            [f"{source_val}::{col}" for source_val in base_source],
             type=pa.large_string(),
         )
         # Source info columns are always computed strings, never null.
         table = table.append_column(
             pa.field(f"{constants.SOURCE_PREFIX}{col}", pa.large_string(), nullable=False),
-            source_column,
+            col_source,
         )
 
     return table

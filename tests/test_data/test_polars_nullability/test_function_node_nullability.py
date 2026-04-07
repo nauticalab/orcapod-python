@@ -7,7 +7,6 @@ RED phase: tests should fail before the fix is applied.
 # ruff: noqa: E501
 
 import pyarrow as pa
-import pytest
 
 import orcapod as op
 from orcapod.core.nodes.function_node import FunctionNode
