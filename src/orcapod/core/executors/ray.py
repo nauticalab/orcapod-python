@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.executors.base import PythonFunctionExecutorBase
+from orcapod.types import Schema
 from orcapod.core.executors.capture_wrapper import make_capture_wrapper
 
 if TYPE_CHECKING:
@@ -333,12 +334,19 @@ class RayExecutor(PythonFunctionExecutorBase):
             **merged,
         )
 
-    def get_execution_data(self) -> dict[str, Any]:
-        data: dict[str, Any] = {
-            "executor_type": self.executor_type_id,
+    def get_executor_data(self) -> dict[str, Any]:
+        executor_data = super().get_executor_data()
+        executor_data.update({
             "ray_address": self._ray_address or "auto",
-            **self._remote_opts,
-        }
-        if self._runtime_env is not None:
-            data["runtime_env"] = True  # flag presence without dumping contents
-        return data
+            "remote_opts": self._remote_opts,
+            "runtime_env": self._runtime_env is not None,
+        })
+        return executor_data
+
+    def get_executor_data_schema(self) -> Schema:
+        return Schema({
+            "executor_type": str,
+            "ray_address": str,
+            "remote_opts": dict[str, str],
+            "runtime_env": bool,
+        })
