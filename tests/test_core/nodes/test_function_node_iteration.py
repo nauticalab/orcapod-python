@@ -3,7 +3,6 @@
 After ENG-379:
 - iter_packets() is strictly read-only — never triggers computation
 - Computation only via run() / execute() / async_execute()
-- execute() supports a concurrent path via asyncio.gather
 """
 from __future__ import annotations
 
