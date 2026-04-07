@@ -61,11 +61,13 @@ class TestFunctionNodeStreamBasic:
     @pytest.fixture
     def node(self, double_pf) -> FunctionNode:
         db = InMemoryArrowDatabase()
-        return FunctionNode(
+        node = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
+        node.run()
+        return node
 
     def test_iter_packets_yields_correct_count(self, node):
         assert len(list(node.iter_packets())) == 3
@@ -117,6 +119,7 @@ class TestFunctionNodeStreamBasic:
 class TestFunctionNodeColumnConfig:
     def test_as_table_content_hash_column(self, double_pf):
         node = _make_node(double_pf, n=3)
+        node.run()
         table = node.as_table(columns={"content_hash": True})
         assert "_content_hash" in table.column_names
         assert len(table.column("_content_hash")) == 3
@@ -138,6 +141,7 @@ class TestFunctionNodeColumnConfig:
             input_stream=input_stream,
             pipeline_database=db,
         )
+        node.run()
         result = node.as_table(columns={"sort_by_tags": True})
         ids: list[int] = result.column("id").to_pylist()  # type: ignore[assignment]
         assert ids == sorted(ids)
@@ -166,6 +170,7 @@ class TestFunctionNodeInactive:
         n = 3
         db = InMemoryArrowDatabase()
         node1 = _make_node(double_pf, n=n, db=db)
+        node1.run()
         table1 = node1.as_table()
         assert len(table1) == n
 
@@ -242,8 +247,12 @@ class TestIterPacketsDbPhase:
         n = 4
         db = InMemoryArrowDatabase()
 
-        table1 = _make_node(double_pf, n=n, db=db).as_table()
-        table2 = _make_node(double_pf, n=n, db=db).as_table()
+        node1 = _make_node(double_pf, n=n, db=db)
+        node1.run()
+        table1 = node1.as_table()
+        node2 = _make_node(double_pf, n=n, db=db)
+        node2.run()
+        table2 = node2.as_table()
 
         assert sorted(table1.column("result").to_pylist()) == sorted(
             table2.column("result").to_pylist()
@@ -300,14 +309,18 @@ class TestIterPacketsMissingEntriesOnly:
         n = 4
         db = InMemoryArrowDatabase()
         _fill_node(_make_node(double_pf, n=2, db=db))
-        packets = list(_make_node(double_pf, n=n, db=db).iter_packets())
+        node = _make_node(double_pf, n=n, db=db)
+        node.run()
+        packets = list(node.iter_packets())
         assert len(packets) == n
 
     def test_partial_fill_all_values_correct(self, double_pf):
         n = 4
         db = InMemoryArrowDatabase()
         _fill_node(_make_node(double_pf, n=2, db=db))
-        table = _make_node(double_pf, n=n, db=db).as_table()
+        node = _make_node(double_pf, n=n, db=db)
+        node.run()
+        table = node.as_table()
         assert sorted(table.column("result").to_pylist()) == [0, 2, 4, 6]
 
     def test_partial_fill_as_table_after_run_on_same_node(self, double_pf):
@@ -401,7 +414,7 @@ class TestFunctionNodeStaleness:
 
     def test_clear_cache_resets_output_packets(self, double_pf):
         node = _make_node(double_pf, n=3)
-        list(node.iter_packets())
+        node.run()
         assert len(node._cached_output_packets) == 3
 
         node.clear_cache()
@@ -410,6 +423,7 @@ class TestFunctionNodeStaleness:
 
     def test_clear_cache_produces_same_results_on_re_iteration(self, double_pf):
         node = _make_node(double_pf, n=3)
+        node.run()
         table_before = node.as_table()
 
         node.clear_cache()
@@ -451,6 +465,7 @@ class TestFunctionNodeStaleness:
             input_stream=input_stream,
             pipeline_database=db,
         )
+        node.run()
         table_before = node.as_table()
         assert len(table_before) == 3
 
