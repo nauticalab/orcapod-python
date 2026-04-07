@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import types
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -1206,12 +1207,49 @@ class FunctionNode(StreamBase):
 
             converter = self.data_context.type_converter
 
-            struct_packets = converter.python_dicts_to_struct_dicts(all_packets)
             all_tags_as_tables: pa.Table = pa.Table.from_pylist(
                 all_tags, schema=tag_schema
             )
             if constants.CONTEXT_KEY in all_tags_as_tables.column_names:
                 all_tags_as_tables = all_tags_as_tables.drop([constants.CONTEXT_KEY])
+
+            # Convert packet dicts using the converter's struct conversion.
+            # When a precise Arrow schema is available, derive the Python schema
+            # from it to preserve generic types (e.g. dict[str, str] stored as
+            # Arrow maps) that inference cannot recover from round-tripped data.
+            # Exclude fields that don't round-trip cleanly:
+            # - Any-typed fields (e.g. timestamps) that the converter can't handle
+            # - dict-typed fields stored as Arrow maps (round-trip as list[struct])
+            # These are handled directly by pa.Table.from_pylist via the schema.
+            if packet_schema is not None:
+                import typing as _typing
+                packet_python_schema = converter.arrow_schema_to_python_schema(
+                    packet_schema
+                )
+
+                def _is_convertible(python_type: type) -> bool:
+                    if python_type is _typing.Any:
+                        return False
+                    origin = _typing.get_origin(python_type)
+                    args = _typing.get_args(python_type)
+                    if origin is types.UnionType and type(None) in args:
+                        non_none = [a for a in args if a is not type(None)]
+                        if len(non_none) == 1:
+                            return _is_convertible(non_none[0])
+                    if origin is dict:
+                        return False
+                    return True
+
+                convertible_schema = Schema({
+                    k: v for k, v in packet_python_schema.items()
+                    if _is_convertible(v)
+                })
+            else:
+                convertible_schema = None
+
+            struct_packets = converter.python_dicts_to_struct_dicts(
+                all_packets, python_schema=convertible_schema
+            )
             all_packets_as_tables: pa.Table = pa.Table.from_pylist(
                 struct_packets, schema=packet_schema
             )

@@ -20,6 +20,7 @@ Principles
 from __future__ import annotations
 
 import logging
+import types
 from collections.abc import Collection, Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Self, cast
 
@@ -185,19 +186,40 @@ class Datagram(ContentIdentifiableBase):
                     meta_table.select(keep), new_meta
                 )
 
-        # Store meta as dict (always); Arrow table is lazy.
-        # Derive schema via infer_python_schema_from_pylist_data (same as DictDatagram)
-        # to avoid typing.Any values that arrow_schema_to_python_schema may emit.
+        # Store meta as dict (always); keep the Arrow table when available.
+        # Use arrow_schema_to_python_schema to preserve precise generic types
+        # (e.g. dict[str, str] stored as map columns) that
+        # infer_python_schema_from_pylist_data cannot recover. For fields where
+        # the Arrow→Python conversion produces Any (e.g. timestamps), fall back
+        # to the inference result which gives concrete types like datetime.
         if meta_table is not None and meta_table.num_columns > 0:
             self._meta = meta_table.to_pylist()[0]
-            self._meta_python_schema = infer_python_schema_from_pylist_data(
+            arrow_derived = self.converter.arrow_schema_to_python_schema(
+                meta_table.schema
+            )
+            inferred = infer_python_schema_from_pylist_data(
                 [self._meta], default_type=str
             )
+            # Merge: prefer arrow_derived (precise generics), but use inferred
+            # for fields that arrow_derived maps to Any.
+            import typing
+            merged = {}
+            for k in arrow_derived:
+                atype = arrow_derived[k]
+                # Unwrap Optional to check the inner type
+                origin = typing.get_origin(atype)
+                args = typing.get_args(atype)
+                inner = args[0] if origin is types.UnionType and type(None) in args and len(args) == 2 else atype
+                if inner is typing.Any:
+                    merged[k] = inferred.get(k, atype)
+                else:
+                    merged[k] = atype
+            self._meta_python_schema = Schema(merged)
+            self._meta_table = meta_table
         else:
             self._meta = {}
             self._meta_python_schema = Schema.empty()
-
-        self._meta_table = None  # built lazily
+            self._meta_table = None
         self._context_table = None
 
     # ------------------------------------------------------------------
@@ -530,9 +552,28 @@ class Datagram(ContentIdentifiableBase):
         }
         new_d = self.copy(include_cache=False)
         new_d._meta = {**self._meta, **prefixed}
-        new_d._meta_python_schema = infer_python_schema_from_pylist_data(
-            [new_d._meta], default_type=str
+        # Preserve existing schema types for unchanged fields (avoids losing
+        # precise generic types like dict[str, str] that inference cannot
+        # recover). Only infer types for newly added fields.
+        new_inferred = infer_python_schema_from_pylist_data(
+            [prefixed], default_type=str
         )
+        merged = dict(self._meta_python_schema)
+        merged.update(new_inferred)
+        new_d._meta_python_schema = Schema(merged)
+        # If the existing meta table is materialized, append new columns to it
+        # rather than invalidating (avoids re-conversion of complex Arrow types
+        # like maps that don't round-trip cleanly through Python dicts).
+        if self._meta_table is not None:
+            new_cols_table = self.converter.python_dicts_to_arrow_table(
+                [prefixed], python_schema=Schema(new_inferred)
+            )
+            existing = self._meta_table
+            # Drop columns being overwritten
+            keep = [c for c in existing.column_names if c not in new_cols_table.column_names]
+            new_d._meta_table = arrow_utils.hstack_tables(
+                existing.select(keep), new_cols_table
+            )
         return new_d
 
     def drop_meta_columns(self, *keys: str, ignore_missing: bool = False) -> Self:
