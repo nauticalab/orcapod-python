@@ -611,7 +611,8 @@ class FunctionNode(StreamBase):
             if entry_id in cached:
                 tag_out, result = cached[entry_id]
                 ctx_obs.on_packet_end(node_label, tag, packet, result, cached=True)
-                output.append((tag_out, result))
+                if result is not None:
+                    output.append((tag_out, result))
             else:
                 pkt_logger = ctx_obs.create_packet_logger(tag, packet)
                 try:
@@ -720,6 +721,7 @@ class FunctionNode(StreamBase):
             eid: self._cached_output_packets[eid]
             for eid in entry_ids
             if eid in self._cached_output_packets
+            and self._cached_output_packets[eid][1] is not None
         }
 
     async def _async_process_packet_internal(
@@ -1162,10 +1164,15 @@ class FunctionNode(StreamBase):
                 f"FunctionNode {self.label!r} is unavailable: "
                 "no function pod and no database attached."
             )
-        if self._load_status == LoadStatus.CACHE_ONLY:
-            # Upstream is unavailable; computation requires a live input stream.
+        if self._load_status in (LoadStatus.CACHE_ONLY, LoadStatus.READ_ONLY):
+            # CACHE_ONLY: upstream unavailable; computation requires a live input stream.
+            # READ_ONLY: function pod is a proxy placeholder — cannot compute.
             # Callers should use iter_packets() to serve existing DB results.
             return
+        if self.is_stale:
+            # Discard any stale in-memory entries before a fresh computation run
+            # so that rerunning does not mix old cached entries with new results.
+            self.clear_cache()
         self.execute(self._input_stream)
 
     # ------------------------------------------------------------------

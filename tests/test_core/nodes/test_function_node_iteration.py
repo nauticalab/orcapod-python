@@ -133,8 +133,11 @@ class TestIterPacketsReadOnly:
         with pytest.raises(RuntimeError, match="unavailable"):
             node.run()
 
-    def test_execute_concurrent_error_policy_continue(self):
-        """execute() fires on_packet_crash per failing packet and returns successes when error_policy='continue'."""
+    def test_execute_error_policy_continue_skips_failures(self):
+        """execute() fires on_packet_crash per failing packet and returns successes when error_policy='continue'.
+
+        Uses LocalExecutor (non-concurrent) to test the sequential execute() path.
+        """
         errors = []
 
         def sometimes_fail(x: int) -> int:

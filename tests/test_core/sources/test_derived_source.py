@@ -173,7 +173,8 @@ class TestDerivedSourceRoundTrip:
     def test_derived_source_matches_node_output(self):
         """Data from DerivedSource must exactly match data from FunctionNode."""
         node = _make_node(n=5)
-        # Collect from node directly
+        node.run()
+        # Collect from node directly (iter_packets is read-only; run() must be called first)
         node_results = sorted(cast(int, p["result"]) for _, p in node.iter_packets())
 
         # Now get via DerivedSource
