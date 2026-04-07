@@ -232,6 +232,7 @@ class TestDerivedSourceRoundTrip:
         )
 
         # node2 doubles the already-doubled values: 0*2*2=0, 1*2*2=4, 2*2*2=8
+        node2.run()
         results = sorted(cast(int, p["result"]) for _, p in node2.iter_packets())
         assert results == [0, 4, 8]
 

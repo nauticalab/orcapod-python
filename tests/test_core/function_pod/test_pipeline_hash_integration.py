@@ -499,6 +499,7 @@ class TestPipelineDbScoping:
             input_stream=make_int_stream(n=5),
             pipeline_database=db,
         )
+        node2.run()
         results = sorted(cast(int, p["result"]) for _, p in node2.iter_packets())
         assert results == [0, 2, 4, 6, 8]
 

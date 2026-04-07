@@ -249,6 +249,7 @@ class TestPhase1Phase2PipelineEntryId:
             [{"id": 0, "x": 10}, {"id": 1, "x": 20}, {"id": 2, "x": 30}]
         )
         node2, _ = _make_node(stream2, db=db)
+        node2.run()
         results = list(node2.iter_packets())
 
         # Should yield 3 total: 2 from Phase 1 + 1 from Phase 2
@@ -279,6 +280,7 @@ class TestPhase1Phase2PipelineEntryId:
         assert node1.node_identity_path == node2.node_identity_path
         assert node1.node_identity_path[-1].startswith("schema:")
 
+        node2.run()
         results = list(node2.iter_packets())
 
         # Phase 1 finds no records for node2's content_hash → Phase 2 processes the row

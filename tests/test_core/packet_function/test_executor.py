@@ -488,6 +488,7 @@ class TestFunctionNodeExecutorAccess:
 
         node = FunctionNode(pod, _make_add_stream())
 
+        node.run()
         results = list(node.iter_packets())
         assert len(results) == 2
         assert results[0][1].as_dict()["result"] == 3
@@ -632,7 +633,11 @@ class TestConcurrentIteration:
         assert len(spy.async_calls) == 2
         assert len(spy.sync_calls) == 0
 
-    def test_function_node_uses_async_path(self):
+    def test_function_node_uses_sync_path_via_run(self):
+        """FunctionNode.run() delegates to execute(), which is always sequential
+        (synchronous). The async path is only used through async_execute() in the
+        async pipeline orchestrator. Even with a ConcurrentSpyExecutor attached,
+        run() → execute() → sync executor path."""
         from orcapod.core.function_pod import FunctionPod
         from orcapod.core.nodes import FunctionNode
 
@@ -641,13 +646,15 @@ class TestConcurrentIteration:
         pod = FunctionPod(pf)
 
         node = FunctionNode(pod, _make_add_stream())
+        node.run()
         results = list(node.iter_packets())
 
         assert len(results) == 2
         assert results[0][1].as_dict()["result"] == 3
         assert results[1][1].as_dict()["result"] == 7
-        assert len(spy.async_calls) == 2
-        assert len(spy.sync_calls) == 0
+        # execute() is always sequential — sync path used, not async
+        assert len(spy.sync_calls) == 2
+        assert len(spy.async_calls) == 0
 
     def test_non_concurrent_executor_uses_sync_path(self):
         """SpyExecutor has supports_concurrent_execution=False (default)."""
@@ -659,6 +666,7 @@ class TestConcurrentIteration:
         pod = FunctionPod(pf)
 
         node = FunctionNode(pod, _make_add_stream())
+        node.run()
         results = list(node.iter_packets())
 
         assert len(results) == 2
@@ -673,6 +681,7 @@ class TestConcurrentIteration:
         pod = FunctionPod(pf)
 
         node = FunctionNode(pod, _make_add_stream())
+        node.run()
         results = list(node.iter_packets())
 
         assert len(results) == 2
