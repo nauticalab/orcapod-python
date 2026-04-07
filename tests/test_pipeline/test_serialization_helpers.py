@@ -763,6 +763,7 @@ def test_function_node_stored_node_uri_from_descriptor():
         "label": "fn",
         "content_hash": "semantic_v0.1:abc",
         "pipeline_hash": "semantic_v0.1:def",
+        "table_scope": "pipeline_hash",
         "node_uri": ["add_one", "v0", "python.function.v0", "schema_repr"],
         "output_schema": {"tag": {"x": "int64"}, "packet": {"result": "int64"}},
         "data_context_key": "std:v0.1:default",

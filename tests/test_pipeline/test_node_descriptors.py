@@ -147,6 +147,7 @@ class TestFunctionNodeFromDescriptor:
             "content_hash": node.content_hash().to_string(),
             "pipeline_hash": node.pipeline_hash().to_string(),
             "data_context_key": node.data_context_key,
+            "table_scope": node._table_scope,
             "output_schema": {
                 "tag": {k: str(v) for k, v in tag_schema.items()},
                 "packet": {k: str(v) for k, v in packet_schema.items()},
@@ -198,6 +199,7 @@ class TestOperatorNodeFromDescriptor:
             "content_hash": "fake_hash",
             "pipeline_hash": "fake_pipeline_hash",
             "data_context_key": "std:v0.1:default",
+            "table_scope": "pipeline_hash",
             "output_schema": {
                 "tag": {"a": "int64"},
                 "packet": {"b": "int64", "c": "int64"},
@@ -236,6 +238,7 @@ class TestOperatorNodeFromDescriptor:
             "content_hash": node.content_hash().to_string(),
             "pipeline_hash": node.pipeline_hash().to_string(),
             "data_context_key": node.data_context_key,
+            "table_scope": node._table_scope,
             "output_schema": {
                 "tag": {"a": "int64"},
                 "packet": {"b": "int64", "c": "int64"},

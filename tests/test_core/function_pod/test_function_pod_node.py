@@ -116,10 +116,11 @@ class TestFunctionNodeConstruction:
         stream_hash = output_stream.content_hash().to_string()
         assert node_hash == stream_hash
 
-    def test_pipeline_path_ends_with_node_hash(self, node):
+    def test_pipeline_path_ends_with_schema_hash(self, node):
         path = node.node_identity_path
-        assert path[-2].startswith("schema:")
-        assert path[-1].startswith("instance:")
+        # With pipeline_hash scope (default): path ends with schema:{hash} only
+        assert path[-1].startswith("schema:")
+        assert not any(seg.startswith("instance:") for seg in path)
 
     def test_pipeline_path_contains_packet_function_uri(self, node):
         pf_uri = node._packet_function.uri
@@ -379,8 +380,9 @@ class TestFunctionNodePipelineIdentity:
         assert node.pipeline_hash() == node.pipeline_hash()
 
     def test_pipeline_node_hash_in_uri_is_schema_based(self, double_pf):
-        """node_identity_path uses schema:{pipeline_hash} and instance:{content_hash}.
-        Two nodes with same schema share the schema: component but differ in instance:."""
+        """node_identity_path uses only schema:{pipeline_hash} (pipeline_hash scope default).
+        Two nodes with same schema share the same full path; per-run isolation
+        is achieved via the _node_content_hash row column."""
         db = InMemoryArrowDatabase()
         node1 = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
@@ -392,12 +394,9 @@ class TestFunctionNodePipelineIdentity:
             input_stream=make_int_stream(n=99),  # different data
             pipeline_database=db,
         )
-        # Same schema → same schema: component
-        assert node1.node_identity_path[-2] == node2.node_identity_path[-2]
-        assert node1.node_identity_path[-2].startswith("schema:")
-        # Different data → different instance: component
-        assert node1.node_identity_path[-1] != node2.node_identity_path[-1]
-        assert node1.node_identity_path[-1].startswith("instance:")
+        # Same schema → same pipeline_hash → SAME full path
+        assert node1.node_identity_path == node2.node_identity_path
+        assert node1.node_identity_path[-1].startswith("schema:")
 
 
 # ---------------------------------------------------------------------------
@@ -659,8 +658,9 @@ class TestFunctionNodeIdentityPath:
         )
         pf_uri = node._packet_function.uri
         assert node.node_identity_path[: len(pf_uri)] == pf_uri
-        assert node.node_identity_path[-2].startswith("schema:")
-        assert node.node_identity_path[-1].startswith("instance:")
+        # With pipeline_hash scope (default): ends with schema:{hash} only
+        assert node.node_identity_path[-1].startswith("schema:")
+        assert not any(seg.startswith("instance:") for seg in node.node_identity_path)
 
 
 # ---------------------------------------------------------------------------
