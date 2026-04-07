@@ -685,80 +685,34 @@ class FunctionNode(StreamBase):
     ) -> dict[str, tuple[TagProtocol, PacketProtocol]]:
         """Retrieve cached results for specific pipeline entry IDs.
 
-        Looks up the pipeline DB and result DB, joins them, and filters
-        to the requested entry IDs. Returns a mapping from entry ID to
-        (tag, output_packet).
+        Checks in-memory cache first. Loads only truly missing entries from DB.
+        Add-only semantics: existing in-memory entries are never cleared or
+        overwritten (overwrite is safe since in-memory and DB entries for the
+        same entry_id are always semantically equivalent).
 
         Args:
             entry_ids: Pipeline entry IDs to look up.
 
         Returns:
-            Mapping from entry_id to (tag, output_packet) for found entries.
+            Mapping from entry_id to ``(tag, output_packet)`` for found entries.
             Empty dict if no DB is attached or no matches found.
         """
         if self._cached_function_pod is None or not entry_ids:
             return {}
 
-        self._require_pipeline_database()
+        missing = [eid for eid in entry_ids if eid not in self._cached_output_packets]
+        if missing:
+            loaded = self._load_cached_entries(missing)
+            self._cached_output_packets.update(loaded)
+            if loaded:
+                self._cached_output_table = None
+                self._cached_content_hash_column = None
 
-        PIPELINE_ENTRY_ID_COL = "__pipeline_entry_id"
-
-        taginfo = self._pipeline_database.get_all_records(
-            self.node_identity_path,
-            record_id_column=PIPELINE_ENTRY_ID_COL,
-        )
-        results = self._cached_function_pod._result_database.get_all_records(
-            self._cached_function_pod.record_path,
-            record_id_column=constants.PACKET_RECORD_ID,
-        )
-
-        if taginfo is None or results is None:
-            return {}
-
-        taginfo = self._filter_by_content_hash(taginfo)
-        taginfo_schema = taginfo.schema
-        results_schema = results.schema
-        filtered = (
-            pl.DataFrame(taginfo)
-            .join(
-                pl.DataFrame(results),
-                on=constants.PACKET_RECORD_ID,
-                how="inner",
-            )
-            .filter(pl.col(PIPELINE_ENTRY_ID_COL).is_in(entry_ids))
-            .to_arrow()
-        )
-        filtered = arrow_utils.restore_schema_nullability(filtered, taginfo_schema, results_schema)
-
-        if filtered.num_rows == 0:
-            return {}
-
-        tag_keys = self._input_stream.keys()[0]
-        drop_cols = [
-            c
-            for c in filtered.column_names
-            if c.startswith(constants.META_PREFIX)
-            or c == PIPELINE_ENTRY_ID_COL
-            or c == constants.NODE_CONTENT_HASH_COL
-        ]
-        data_table = filtered.drop([c for c in drop_cols if c in filtered.column_names])
-
-        stream = ArrowTableStream(data_table, tag_columns=tag_keys)
-        filtered_entry_ids = filtered.column(PIPELINE_ENTRY_ID_COL).to_pylist()
-
-        result_dict: dict[str, tuple[TagProtocol, PacketProtocol]] = {}
-        for entry_id, (tag, packet) in zip(filtered_entry_ids, stream.iter_packets()):
-            result_dict[entry_id] = (tag, packet)
-
-        # Populate internal cache with retrieved results (clear first to
-        # avoid duplicates on repeated orchestrator runs)
-        self._cached_output_packets.clear()
-        self._cached_output_table = None
-        self._cached_content_hash_column = None
-        for entry_id, (tag, packet) in result_dict.items():
-            next_idx = len(self._cached_output_packets)
-            self._cached_output_packets[next_idx] = (tag, packet)
-        return result_dict
+        return {
+            eid: self._cached_output_packets[eid]
+            for eid in entry_ids
+            if eid in self._cached_output_packets
+        }
 
     async def _async_process_packet_internal(
         self,
