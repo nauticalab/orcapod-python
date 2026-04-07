@@ -123,7 +123,7 @@ class FunctionNode(StreamBase):
         ) = None
         self._needs_iterator = True
         self._cached_output_packets: dict[
-            int, tuple[TagProtocol, PacketProtocol | None]
+            str | int, tuple[TagProtocol, PacketProtocol | None]
         ] = {}
         self._cached_output_table: pa.Table | None = None
         self._cached_content_hash_column: pa.Array | None = None
