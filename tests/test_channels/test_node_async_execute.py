@@ -678,12 +678,13 @@ class TestExecutePacketRouting:
         # Monkey-patch to verify routing through internal path
         original = node._process_packet_internal
 
-        def patched(tag, packet):
+        def patched(tag, packet, *, logger=None):
             call_log.append("_process_packet_internal")
-            return original(tag, packet)
+            return original(tag, packet, logger=logger)
 
         node._process_packet_internal = patched
 
+        node.run()  # computation now triggered via run(), not iter_packets()
         results = list(node.iter_packets())
         assert len(results) == 3
         assert len(call_log) == 3
