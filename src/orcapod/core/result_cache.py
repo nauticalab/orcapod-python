@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from orcapod.protocols.core_protocols import PacketProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
@@ -18,6 +18,8 @@ from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import pyarrow as pa
+
+    from orcapod.protocols.core_protocols.datagrams import DatagramProtocol
 else:
     pa = LazyModule("pyarrow")
 
@@ -139,48 +141,45 @@ class ResultCache:
         self,
         input_packet: PacketProtocol,
         output_packet: PacketProtocol,
-        variation_data: dict[str, Any],
-        execution_data: dict[str, Any],
+        variation_datagram: "DatagramProtocol",
+        execution_datagram: "DatagramProtocol",
         skip_duplicates: bool = False,
     ) -> None:
         """Store an output packet in the cache.
 
-        Stores the output packet data alongside function variation data,
-        execution data, input packet hash, and a timestamp.
+        Stores the output packet data alongside function variation and
+        execution metadata (as Datagrams), input packet hash, and a timestamp.
 
         Args:
             input_packet: The input packet (used for its content hash).
             output_packet: The computed output packet to store.
-            variation_data: Function variation metadata (e.g. function name,
-                signature hash, content hash, git hash).
-            execution_data: Execution environment metadata (e.g. python
-                version, execution context).
+            variation_datagram: Function variation metadata as a Datagram.
+            execution_datagram: Execution environment metadata as a Datagram.
             skip_duplicates: If True, silently skip if a record with the
                 same ID already exists.
         """
         data_table = output_packet.as_table(columns={"source": True, "context": True})
 
-        # Add function variation data columns
-        i = 0
-        for k, v in variation_data.items():
+        # Add variation and execution columns with prefixes.
+        # Use a running counter for insertion position since add_column shifts indices.
+        col_idx = 0
+        var_table = variation_datagram.as_table()
+        for name in var_table.column_names:
             data_table = data_table.add_column(
-                i,
-                f"{constants.PF_VARIATION_PREFIX}{k}",
-                pa.array([v], type=pa.large_string()),
+                col_idx,
+                f"{constants.PF_VARIATION_PREFIX}{name}",
+                var_table.column(name),
             )
-            i += 1
+            col_idx += 1
 
-        # Add execution data columns
-        import json
-
-        for k, v in execution_data.items():
-            str_v = v if isinstance(v, str) else json.dumps(v)
+        exec_table = execution_datagram.as_table()
+        for name in exec_table.column_names:
             data_table = data_table.add_column(
-                i,
-                f"{constants.PF_EXECUTION_PREFIX}{k}",
-                pa.array([str_v], type=pa.large_string()),
+                col_idx,
+                f"{constants.PF_EXECUTION_PREFIX}{name}",
+                exec_table.column(name),
             )
-            i += 1
+            col_idx += 1
 
         # Add input packet hash (position 0)
         data_table = data_table.add_column(

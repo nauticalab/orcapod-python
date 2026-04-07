@@ -15,7 +15,7 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
-from orcapod.core.datagrams import Packet
+from orcapod.core.datagrams import Datagram, Packet
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.result_cache import ResultCache
 from orcapod.databases import InMemoryArrowDatabase
@@ -50,11 +50,21 @@ def _compute_and_store(
     """Helper: compute output and store in cache."""
     output = pf.direct_call(input_packet)
     assert output is not None
+    variation_datagram = Datagram(
+        pf.get_function_variation_data(),
+        python_schema=pf.get_function_variation_data_schema(),
+        data_context=pf.data_context,
+    )
+    execution_datagram = Datagram(
+        pf.get_execution_data(),
+        python_schema=pf.get_execution_data_schema(),
+        data_context=pf.data_context,
+    )
     cache.store(
         input_packet,
         output,
-        variation_data=pf.get_function_variation_data(),
-        execution_data=pf.get_execution_data(),
+        variation_datagram=variation_datagram,
+        execution_datagram=execution_datagram,
     )
     return output
 
@@ -106,12 +116,17 @@ class TestLookupHit:
         input_pkt = Packet({"x": 10})
 
         output = pf.direct_call(input_pkt)
-        cache_a.store(
-            input_pkt,
-            output,
-            variation_data=pf.get_function_variation_data(),
-            execution_data=pf.get_execution_data(),
+        variation_datagram = Datagram(
+            pf.get_function_variation_data(),
+            python_schema=pf.get_function_variation_data_schema(),
+            data_context=pf.data_context,
         )
+        execution_datagram = Datagram(
+            pf.get_execution_data(),
+            python_schema=pf.get_execution_data_schema(),
+            data_context=pf.data_context,
+        )
+        cache_a.store(input_pkt, output, variation_datagram, execution_datagram)
 
         assert cache_a.lookup(input_pkt) is not None
         assert cache_b.lookup(input_pkt) is None
@@ -131,11 +146,21 @@ class TestConflictResolution:
 
         # Store a second result for the same input (simulating recomputation)
         output2 = pf.direct_call(input_pkt)
+        variation_datagram = Datagram(
+            pf.get_function_variation_data(),
+            python_schema=pf.get_function_variation_data_schema(),
+            data_context=pf.data_context,
+        )
+        execution_datagram = Datagram(
+            pf.get_execution_data(),
+            python_schema=pf.get_execution_data_schema(),
+            data_context=pf.data_context,
+        )
         cache.store(
             input_pkt,
             output2,
-            variation_data=pf.get_function_variation_data(),
-            execution_data=pf.get_execution_data(),
+            variation_datagram,
+            execution_datagram,
         )
 
         # Lookup should return the most recent
@@ -304,3 +329,30 @@ class TestGetAllRecords:
         records = cache.get_all_records(include_system_columns=False)
         assert records is not None
         assert constants.PACKET_RECORD_ID not in records.column_names
+
+
+# ---------------------------------------------------------------------------
+# Dict-typed columns (executor_info, extra_info)
+# ---------------------------------------------------------------------------
+
+
+class TestStoreDictColumns:
+    def test_executor_info_column_stored(self):
+        cache, db = _make_cache()
+        pf = _make_pf()
+        _compute_and_store(cache, pf, Packet({"x": 10}))
+
+        records = db.get_all_records(cache.record_path)
+        assert records is not None
+        exec_info_col = f"{constants.PF_EXECUTION_PREFIX}executor_info"
+        assert exec_info_col in records.column_names
+
+    def test_extra_info_column_stored(self):
+        cache, db = _make_cache()
+        pf = _make_pf()
+        _compute_and_store(cache, pf, Packet({"x": 10}))
+
+        records = db.get_all_records(cache.record_path)
+        assert records is not None
+        extra_info_col = f"{constants.PF_EXECUTION_PREFIX}extra_info"
+        assert extra_info_col in records.column_names

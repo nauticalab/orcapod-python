@@ -14,7 +14,7 @@ from uuid_utils import uuid7
 from orcapod.config import Config
 from orcapod.contexts import DataContext
 from orcapod.core.base import TraceableBase
-from orcapod.core.datagrams import Packet
+from orcapod.core.datagrams import Datagram, Packet
 from orcapod.hashing.hash_utils import (
     get_function_components,
     get_function_signature,
@@ -907,6 +907,20 @@ class CachedPacketFunction(PacketFunctionWrapper):
             auto_flush=True,
         )
 
+    def _build_metadata_datagrams(self) -> tuple[Datagram, Datagram]:
+        """Build variation and execution Datagrams for cache storage."""
+        variation_datagram = Datagram(
+            self.get_function_variation_data(),
+            python_schema=self.get_function_variation_data_schema(),
+            data_context=self.data_context,
+        )
+        execution_datagram = Datagram(
+            self.get_execution_data(),
+            python_schema=self.get_execution_data_schema(),
+            data_context=self.data_context,
+        )
+        return variation_datagram, execution_datagram
+
     def set_auto_flush(self, on: bool = True) -> None:
         """Set auto-flush behavior. If True, the database flushes after each record."""
         self._cache.set_auto_flush(on)
@@ -934,12 +948,8 @@ class CachedPacketFunction(PacketFunctionWrapper):
         output_packet = self._packet_function.call(packet, logger=logger)
         if output_packet is not None:
             if not skip_cache_insert:
-                self._cache.store(
-                    packet,
-                    output_packet,
-                    variation_data=self.get_function_variation_data(),
-                    execution_data=self.get_execution_data(),
-                )
+                var_dg, exec_dg = self._build_metadata_datagrams()
+                self._cache.store(packet, output_packet, var_dg, exec_dg)
             output_packet = output_packet.with_meta_columns(
                 **{self.RESULT_COMPUTED_FLAG: True}
             )
@@ -964,12 +974,8 @@ class CachedPacketFunction(PacketFunctionWrapper):
         output_packet = await self._packet_function.async_call(packet, logger=logger)
         if output_packet is not None:
             if not skip_cache_insert:
-                self._cache.store(
-                    packet,
-                    output_packet,
-                    variation_data=self.get_function_variation_data(),
-                    execution_data=self.get_execution_data(),
-                )
+                var_dg, exec_dg = self._build_metadata_datagrams()
+                self._cache.store(packet, output_packet, var_dg, exec_dg)
             output_packet = output_packet.with_meta_columns(
                 **{self.RESULT_COMPUTED_FLAG: True}
             )
@@ -994,11 +1000,12 @@ class CachedPacketFunction(PacketFunctionWrapper):
         skip_duplicates: bool = False,
     ) -> PacketProtocol:
         """Record the output packet against the input packet in the result store."""
+        var_dg, exec_dg = self._build_metadata_datagrams()
         self._cache.store(
             input_packet,
             output_packet,
-            variation_data=self.get_function_variation_data(),
-            execution_data=self.get_execution_data(),
+            var_dg,
+            exec_dg,
             skip_duplicates=skip_duplicates,
         )
         return output_packet
