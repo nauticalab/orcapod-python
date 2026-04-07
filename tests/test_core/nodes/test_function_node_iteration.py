@@ -7,7 +7,6 @@ After ENG-379:
 """
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import patch
 
 import pyarrow as pa
@@ -136,7 +135,7 @@ class TestIterPacketsReadOnly:
             node.run()
 
     def test_execute_concurrent_error_policy_continue(self):
-        """execute() concurrent path: on_packet_crash fires per failing packet with error_policy='continue'."""
+        """execute() fires on_packet_crash per failing packet and returns successes when error_policy='continue'."""
         errors = []
 
         def sometimes_fail(x: int) -> int:
@@ -145,7 +144,7 @@ class TestIterPacketsReadOnly:
             return x * 2
 
         pf = PythonPacketFunction(sometimes_fail, output_keys="result")
-        pf.executor = LocalExecutor()  # enables concurrent path
+        pf.executor = LocalExecutor()  # sets executor (LocalExecutor.supports_concurrent_execution is False)
         pod = FunctionPod(pf)
         db = InMemoryArrowDatabase()
         node = FunctionNode(pod, _make_source(n=3), pipeline_database=db)
