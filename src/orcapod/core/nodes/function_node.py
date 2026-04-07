@@ -653,25 +653,17 @@ class FunctionNode(StreamBase):
         self,
         tag: TagProtocol,
         packet: PacketProtocol,
-        cache_index: int | None = None,
         *,
         logger: PacketExecutionLoggerProtocol | None = None,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
         """Core compute + persist + cache.
 
-        Used by ``execute_packet``, ``execute``, and ``iter_packets``.
-        No input validation is performed — the caller guarantees correctness.
-        Exceptions propagate to the caller.
+        Used by ``execute_packet`` and ``execute``.
+        Stores result in ``_cached_output_packets`` keyed by entry_id.
+        Exceptions propagate to the caller — no error handling here.
 
         Returns:
             A ``(tag, output_packet)`` 2-tuple.
-
-        Args:
-            tag: The input tag.
-            packet: The input packet.
-            cache_index: Optional explicit index for the internal cache.
-                When ``None``, auto-assigns at ``len(_cached_output_packets)``.
-            logger: Optional packet execution logger.
         """
         if self._cached_function_pod is not None:
             tag_out, output_packet = self._cached_function_pod.process_packet(
@@ -695,13 +687,9 @@ class FunctionNode(StreamBase):
                 tag, packet, logger=logger
             )
 
-        # Cache internally and invalidate derived caches
-        idx = (
-            cache_index if cache_index is not None else len(self._cached_output_packets)
-        )
-        self._cached_output_packets[idx] = (tag_out, output_packet)
-        self._cached_input_iterator = None
-        self._needs_iterator = False
+        # Store by entry_id and invalidate derived caches
+        entry_id = self.compute_pipeline_entry_id(tag, packet)
+        self._cached_output_packets[entry_id] = (tag_out, output_packet)
         self._cached_output_table = None
         self._cached_content_hash_column = None
 
@@ -794,24 +782,16 @@ class FunctionNode(StreamBase):
         self,
         tag: TagProtocol,
         packet: PacketProtocol,
-        cache_index: int | None = None,
         *,
         logger: PacketExecutionLoggerProtocol | None = None,
     ) -> tuple[TagProtocol, PacketProtocol | None]:
         """Async counterpart of ``_process_packet_internal``.
 
-        Computes via async path, writes pipeline provenance, and caches
-        internally — no schema validation. Exceptions propagate.
+        Computes via async path, writes pipeline provenance, caches by entry_id.
+        Exceptions propagate.
 
         Returns:
             A ``(tag, output_packet)`` 2-tuple.
-
-        Args:
-            tag: The input tag.
-            packet: The input packet.
-            cache_index: Optional explicit index for the internal cache.
-                When ``None``, auto-assigns at ``len(_cached_output_packets)``.
-            logger: Optional packet execution logger.
         """
         if self._cached_function_pod is not None:
             tag_out, output_packet = (
@@ -839,13 +819,9 @@ class FunctionNode(StreamBase):
                 )
             )
 
-        # Cache internally and invalidate derived caches
-        idx = (
-            cache_index if cache_index is not None else len(self._cached_output_packets)
-        )
-        self._cached_output_packets[idx] = (tag_out, output_packet)
-        self._cached_input_iterator = None
-        self._needs_iterator = False
+        # Store by entry_id and invalidate derived caches
+        entry_id = self.compute_pipeline_entry_id(tag, packet)
+        self._cached_output_packets[entry_id] = (tag_out, output_packet)
         self._cached_output_table = None
         self._cached_content_hash_column = None
 
@@ -1408,7 +1384,7 @@ class FunctionNode(StreamBase):
             if loop is not None:
                 # Already in event loop — fall back to sequential sync
                 for i, tag, pkt in to_compute:
-                    self._process_packet_internal(tag, pkt, cache_index=i)
+                    self._process_packet_internal(tag, pkt)
             else:
 
                 async def _gather() -> list[tuple[TagProtocol, PacketProtocol | None]]:
@@ -1416,7 +1392,7 @@ class FunctionNode(StreamBase):
                         await asyncio.gather(
                             *[
                                 self._async_process_packet_internal(
-                                    tag, pkt, cache_index=i
+                                    tag, pkt
                                 )
                                 for i, tag, pkt in to_compute
                             ]
