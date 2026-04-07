@@ -1152,11 +1152,14 @@ class FunctionNode(StreamBase):
 
         ctx_obs.on_node_start(node_label, node_hash, tag_schema=None)
         try:
-            result = self._load_all_cached_records()
-            if result is not None:
-                tag_keys, data_table = result
-                stream = ArrowTableStream(data_table, tag_columns=tag_keys)
-                for tag, packet in stream.iter_packets():
+            loaded = self._load_cached_entries()
+            self._cached_output_packets.update(loaded)
+            if loaded:
+                self._cached_output_table = None
+                self._cached_content_hash_column = None
+
+            for tag, packet in self._cached_output_packets.values():
+                if packet is not None:
                     ctx_obs.on_packet_start(node_label, tag, packet)
                     ctx_obs.on_packet_end(node_label, tag, packet, packet, cached=True)
                     await output.send((tag, packet))
