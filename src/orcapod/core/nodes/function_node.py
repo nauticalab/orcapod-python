@@ -1233,119 +1233,59 @@ class FunctionNode(StreamBase):
     # ------------------------------------------------------------------
 
     def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
+        """Yield all computed (tag, packet) pairs for this node.
+
+        Strictly read-only — never triggers computation. Callers must call
+        ``run()`` or ``execute()`` first if they want results computed.
+
+        On the first call with an empty in-memory store and a DB attached,
+        hot-loads all existing records from the DB (one-shot, no recompute).
+
+        Raises:
+            RuntimeError: If ``load_status`` is UNAVAILABLE.
+        """
         from orcapod.pipeline.serialization import LoadStatus
 
         status = self.load_status
-        if status == LoadStatus.CACHE_ONLY:
-            yield from self._iter_all_from_database()
-            return
-
         if status == LoadStatus.UNAVAILABLE:
             raise RuntimeError(
                 f"FunctionNode {self.label!r} is unavailable: "
                 "no function pod and no database attached."
             )
 
+        if status == LoadStatus.CACHE_ONLY:
+            # Upstream unavailable; serve entirely from DB.
+            if not self._cached_output_packets:
+                loaded = self._load_cached_entries()
+                self._cached_output_packets.update(loaded)
+                if loaded:
+                    self._cached_output_table = None
+                    self._cached_content_hash_column = None
+            yield from (
+                (tag, pkt)
+                for tag, pkt in self._cached_output_packets.values()
+                if pkt is not None
+            )
+            return
+
+        # FULL / READ_ONLY — in-memory store may be populated from computation
+        # (via execute/run) or hot-loaded from DB.
         if self.is_stale:
             self.clear_cache()
-        self._ensure_iterator()
 
-        if self._cached_function_pod is not None:
-            # Two-phase iteration with DB backing
-            if self._cached_input_iterator is not None:
-                input_iter = self._cached_input_iterator
-                # --- Phase 1: yield already-computed results from the databases ---
-                # Retrieve pipeline records with their entry_ids (record IDs)
-                # and join with result records to reconstruct (tag, output_packet).
-                PIPELINE_ENTRY_ID_COL = "__pipeline_entry_id"
-                existing_entry_ids: set[str] = set()
+        if not self._cached_output_packets and self._cached_function_pod is not None:
+            # Hot-load from DB on the first call when store is empty.
+            loaded = self._load_cached_entries()
+            self._cached_output_packets.update(loaded)
+            if loaded:
+                self._cached_output_table = None
+                self._cached_content_hash_column = None
 
-                taginfo = self._pipeline_database.get_all_records(
-                    self.node_identity_path,
-                    record_id_column=PIPELINE_ENTRY_ID_COL,
-                )
-                results = self._cached_function_pod._result_database.get_all_records(
-                    self._cached_function_pod.record_path,
-                    record_id_column=constants.PACKET_RECORD_ID,
-                )
-
-                if taginfo is not None and results is not None:
-                    taginfo = self._filter_by_content_hash(taginfo)
-                    taginfo_schema = taginfo.schema
-                    results_schema = results.schema
-                    joined = (
-                        pl.DataFrame(taginfo)
-                        .join(
-                            pl.DataFrame(results),
-                            on=constants.PACKET_RECORD_ID,
-                            how="inner",
-                        )
-                        .to_arrow()
-                    )
-                    joined = arrow_utils.restore_schema_nullability(joined, taginfo_schema, results_schema)
-                    if joined.num_rows > 0:
-                        tag_keys = self._input_stream.keys()[0]
-                        # Collect pipeline entry_ids for Phase 2 skip check
-                        existing_entry_ids = set(
-                            cast(
-                                list[str],
-                                joined.column(PIPELINE_ENTRY_ID_COL).to_pylist(),
-                            )
-                        )
-                        # Drop internal columns before yielding as stream
-                        drop_cols = [
-                            c
-                            for c in joined.column_names
-                            if c.startswith(constants.META_PREFIX)
-                            or c == PIPELINE_ENTRY_ID_COL
-                            or c == constants.NODE_CONTENT_HASH_COL
-                        ]
-                        data_table = joined.drop(
-                            [c for c in drop_cols if c in joined.column_names]
-                        )
-                        existing_stream = ArrowTableStream(
-                            data_table, tag_columns=tag_keys
-                        )
-                        for i, (tag, packet) in enumerate(
-                            existing_stream.iter_packets()
-                        ):
-                            self._cached_output_packets[i] = (tag, packet)
-                            yield tag, packet
-
-                # --- Phase 2: process only missing input packets ---
-                # Skip inputs whose pipeline entry_id (tag+system_tags+packet_hash)
-                # already exists in the pipeline database.
-                for tag, packet in input_iter:
-                    entry_id = self.compute_pipeline_entry_id(tag, packet)
-                    if entry_id in existing_entry_ids:
-                        continue
-                    tag, output_packet = self._process_packet_internal(tag, packet)
-                    if output_packet is not None:
-                        yield tag, output_packet
-
-                self._cached_input_iterator = None
-            else:
-                # Yield from snapshot of complete cache
-                for i in range(len(self._cached_output_packets)):
-                    tag, packet = self._cached_output_packets[i]
-                    if packet is not None:
-                        yield tag, packet
-        else:
-            # Simple iteration without DB
-            if self._cached_input_iterator is not None:
-                if _executor_supports_concurrent(self._packet_function):
-                    yield from self._iter_packets_concurrent(
-                        self._cached_input_iterator
-                    )
-                else:
-                    yield from self._iter_packets_sequential(
-                        self._cached_input_iterator
-                    )
-            else:
-                for i in range(len(self._cached_output_packets)):
-                    tag, packet = self._cached_output_packets[i]
-                    if packet is not None:
-                        yield tag, packet
+        yield from (
+            (tag, pkt)
+            for tag, pkt in self._cached_output_packets.values()
+            if pkt is not None
+        )
 
     def _iter_packets_sequential(
         self, input_iter: Iterator[tuple[TagProtocol, PacketProtocol]]
