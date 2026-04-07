@@ -184,29 +184,18 @@ class TestInferSchemaNullable:
 
 
 class TestAddSourceInfo:
-    """add_source_info must produce one independent _source_<col> column per
-    data column, each derived from the original source token — not from the
-    output of a previous column's computation.
-
-    The regression being guarded against: source_column was overwritten inside
-    the per-column loop, so _source_col2 would contain "src::col1::col2"
-    instead of "src::col2".
-    """
+    """add_source_info must produce one _source_<col> column per data column
+    whose values are exactly '<source_token>::<col>' for every row."""
 
     def test_single_column_produces_correct_source_token(self):
-        """Baseline: a single data column gets _source_<col> = '<src>::<col>'."""
+        """_source_<col> value is '<src>::<col>' for every row."""
         table = pa.table({"x": pa.array([10, 20], type=pa.int64())})
         result = add_source_info(table, "mysrc")
 
-        source_vals = result.column("_source_x").to_pylist()
-        assert source_vals == ["mysrc::x", "mysrc::x"]
+        assert result.column("_source_x").to_pylist() == ["mysrc::x", "mysrc::x"]
 
-    def test_multi_column_each_source_derives_from_base_token(self):
-        """Each _source_<col> must equal '<src>::<col>', not '<src>::prev_col::<col>'.
-
-        With the bug present, _source_y would be "mysrc::x::y" because the loop
-        re-used the pa.array produced for _source_x as the starting point for _source_y.
-        """
+    def test_multi_column_each_source_column_uses_its_own_name(self):
+        """Each _source_<col> value is '<src>::<col>' — columns are independent."""
         table = pa.table({
             "x": pa.array([1, 2], type=pa.int64()),
             "y": pa.array([3, 4], type=pa.int64()),
@@ -215,18 +204,11 @@ class TestAddSourceInfo:
         result = add_source_info(table, "base")
 
         assert result.column("_source_x").to_pylist() == ["base::x", "base::x"]
-        assert result.column("_source_y").to_pylist() == ["base::y", "base::y"], (
-            "_source_y must be 'base::y', not 'base::x::y' — "
-            "each column must derive from the original source token, not from the "
-            "previous column's output array."
-        )
+        assert result.column("_source_y").to_pylist() == ["base::y", "base::y"]
         assert result.column("_source_z").to_pylist() == ["base::z", "base::z"]
 
-    def test_per_row_source_tokens_not_accumulated(self):
-        """Per-row source tokens are also built independently per column.
-
-        With the bug, row 0 of _source_b would be "src0::a::b" instead of "src0::b".
-        """
+    def test_per_row_source_tokens_combined_with_column_name(self):
+        """With a per-row source list, each row's token is '<row_src>::<col>'."""
         table = pa.table({
             "a": pa.array([10, 20], type=pa.int64()),
             "b": pa.array([30, 40], type=pa.int64()),
@@ -234,12 +216,10 @@ class TestAddSourceInfo:
         result = add_source_info(table, ["src0", "src1"])
 
         assert result.column("_source_a").to_pylist() == ["src0::a", "src1::a"]
-        assert result.column("_source_b").to_pylist() == ["src0::b", "src1::b"], (
-            "_source_b row 0 must be 'src0::b', not 'src0::a::b'."
-        )
+        assert result.column("_source_b").to_pylist() == ["src0::b", "src1::b"]
 
     def test_correct_number_of_source_columns_added(self):
-        """One _source_<col> column is added for each non-excluded data column."""
+        """Exactly one _source_<col> column is added per non-excluded data column."""
         table = pa.table({
             "p": pa.array([1], type=pa.int64()),
             "q": pa.array([2], type=pa.int64()),
@@ -247,8 +227,7 @@ class TestAddSourceInfo:
         })
         result = add_source_info(table, "s")
 
-        # Original 3 columns + 3 source columns = 6
-        assert result.num_columns == 6
+        assert result.num_columns == 6  # 3 data + 3 source
         assert "_source_p" in result.column_names
         assert "_source_q" in result.column_names
         assert "_source_r" in result.column_names
