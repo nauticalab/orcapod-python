@@ -1533,58 +1533,13 @@ class FunctionNode(StreamBase):
             ctx_obs.on_node_start(node_label, node_hash, tag_schema=tag_schema)
 
             if self._cached_function_pod is not None:
-                # DB-backed async execution:
                 # Phase 1: build cache lookup from pipeline DB
-                PIPELINE_ENTRY_ID_COL = "__pipeline_entry_id"
-                cached_by_entry_id: dict[
-                    str, tuple[TagProtocol, PacketProtocol]
-                ] = {}
-
-                taginfo = self._pipeline_database.get_all_records(
-                    self.node_identity_path,
-                    record_id_column=PIPELINE_ENTRY_ID_COL,
-                )
-                results = self._cached_function_pod._result_database.get_all_records(
-                    self._cached_function_pod.record_path,
-                    record_id_column=constants.PACKET_RECORD_ID,
-                )
-
-                if taginfo is not None and results is not None:
-                    taginfo = self._filter_by_content_hash(taginfo)
-                    taginfo_schema = taginfo.schema
-                    results_schema = results.schema
-                    joined = (
-                        pl.DataFrame(taginfo)
-                        .join(
-                            pl.DataFrame(results),
-                            on=constants.PACKET_RECORD_ID,
-                            how="inner",
-                        )
-                        .to_arrow()
-                    )
-                    joined = arrow_utils.restore_schema_nullability(joined, taginfo_schema, results_schema)
-                    if joined.num_rows > 0:
-                        tag_keys = self._input_stream.keys()[0]
-                        entry_ids_col = joined.column(
-                            PIPELINE_ENTRY_ID_COL
-                        ).to_pylist()
-                        drop_cols = [
-                            c
-                            for c in joined.column_names
-                            if c.startswith(constants.META_PREFIX)
-                            or c == PIPELINE_ENTRY_ID_COL
-                            or c == constants.NODE_CONTENT_HASH_COL
-                        ]
-                        data_table = joined.drop(
-                            [c for c in drop_cols if c in joined.column_names]
-                        )
-                        existing_stream = ArrowTableStream(
-                            data_table, tag_columns=tag_keys
-                        )
-                        for eid, (tag_out, pkt_out) in zip(
-                            entry_ids_col, existing_stream.iter_packets()
-                        ):
-                            cached_by_entry_id[eid] = (tag_out, pkt_out)
+                loaded = self._load_cached_entries()
+                self._cached_output_packets.update(loaded)
+                if loaded:
+                    self._cached_output_table = None
+                    self._cached_content_hash_column = None
+                cached_by_entry_id: dict[str, tuple[TagProtocol, PacketProtocol]] = dict(loaded)
 
                 # Phase 2: drive output from input channel — cached or compute
                 async def _process_one_db(
