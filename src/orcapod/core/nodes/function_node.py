@@ -46,8 +46,10 @@ from orcapod.protocols.observability_protocols import (
 if TYPE_CHECKING:
     import polars as pl
     import pyarrow as pa
+    import pyarrow.compute as pc
 else:
     pa = LazyModule("pyarrow")
+    pc = LazyModule("pyarrow.compute")
     pl = LazyModule("polars")
 
 
@@ -234,8 +236,8 @@ class FunctionNode(StreamBase):
         if col_name not in table.column_names:
             return table
         own_hash = self.content_hash().to_string()
-        mask = [v == own_hash for v in table.column(col_name).to_pylist()]
-        return table.filter(pa.array(mask))
+        mask = pc.equal(table.column(col_name), own_hash)
+        return table.filter(mask)
 
     # ------------------------------------------------------------------
     # from_descriptor — reconstruct from a serialized pipeline descriptor
@@ -279,7 +281,14 @@ class FunctionNode(StreamBase):
                 f"FunctionNode descriptor is missing required 'table_scope' field: "
                 f"{descriptor.get('label', '<unlabeled>')}"
             )
-        table_scope: Literal["pipeline_hash", "content_hash"] = descriptor["table_scope"]
+        raw_table_scope = descriptor["table_scope"]
+        if raw_table_scope not in ("pipeline_hash", "content_hash"):
+            raise ValueError(
+                f"FunctionNode descriptor has invalid 'table_scope' value "
+                f"{raw_table_scope!r} for {descriptor.get('label', '<unlabeled>')}; "
+                f"expected one of ('pipeline_hash', 'content_hash')"
+            )
+        table_scope = cast(Literal["pipeline_hash", "content_hash"], raw_table_scope)
 
         if function_pod is not None and input_stream is not None:
             # Full / READ_ONLY / CACHE_ONLY mode: construct normally via __init__.
