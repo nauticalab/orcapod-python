@@ -105,7 +105,8 @@ class TestFunctionNodeGetAllRecordsNullability:
 
 class TestFunctionNodeIterPacketsNullability:
     """FunctionNode.iter_packets must yield packets whose underlying Arrow schema
-    preserves non-nullable column constraints."""
+    preserves non-nullable column constraints. Uses _load_cached_entries to
+    simulate the CACHE_ONLY path used after save/load."""
 
     def test_iter_packets_from_database_preserves_non_nullable_output(self):
         """Packets loaded from DB via iter_packets carry non-nullable output schema."""
@@ -128,9 +129,10 @@ class TestFunctionNodeIterPacketsNullability:
         fn_nodes = _get_function_nodes(pipeline)
         fn_node = fn_nodes[0]
 
-        # Force a DB-backed iteration by going through _iter_all_from_database
+        # Force a DB-backed iteration by going through _load_cached_entries
         # (simulates the CACHE_ONLY path used after save/load)
-        packets_seen = list(fn_node._iter_all_from_database())
+        loaded = fn_node._load_cached_entries()
+        packets_seen = list(loaded.values())
         assert len(packets_seen) == 1, "Expected one packet from the database"
 
         _tag, packet = packets_seen[0]

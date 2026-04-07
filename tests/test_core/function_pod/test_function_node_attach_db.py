@@ -45,6 +45,7 @@ class TestFunctionNodeWithoutDatabase:
 
     def test_iter_packets_without_database(self):
         node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream(n=3))
+        node.run()
         results = list(node.iter_packets())
         assert len(results) == 3
         assert results[0][1]["result"] == 0
@@ -76,7 +77,7 @@ class TestFunctionNodeAttachDatabases:
 
     def test_attach_databases_clears_caches(self):
         node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream())
-        list(node.iter_packets())  # populate cache
+        node.run()  # populate cache
         assert len(node._cached_output_packets) > 0
         db = InMemoryArrowDatabase()
         node.attach_databases(pipeline_database=db, result_database=db)
@@ -107,6 +108,7 @@ class TestFunctionNodeAttachDatabases:
         node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream(n=2))
         db = InMemoryArrowDatabase()
         node.attach_databases(pipeline_database=db, result_database=db)
+        node.run()
         results = list(node.iter_packets())
         assert len(results) == 2
 
@@ -140,5 +142,6 @@ class TestFunctionNodeWithDatabase:
             pipeline_database=db,
             result_database=db,
         )
+        node.run()
         results = list(node.iter_packets())
         assert len(results) == 3
