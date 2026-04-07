@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from orcapod.core.datagrams import Datagram
 from orcapod.core.function_pod import WrappedFunctionPod
 from orcapod.core.result_cache import ResultCache
 from orcapod.protocols.core_protocols import (
@@ -95,12 +96,17 @@ class CachedFunctionPod(WrappedFunctionPod):
         tag, output = self._function_pod.process_packet(tag, packet, logger=logger)
         if output is not None:
             pf = self._function_pod.packet_function
-            self._cache.store(
-                packet,
-                output,
-                variation_data=pf.get_function_variation_data(),
-                execution_data=pf.get_execution_data(),
+            var_dg = Datagram(
+                pf.get_function_variation_data(),
+                python_schema=pf.get_function_variation_data_schema(),
+                data_context=pf.data_context,
             )
+            exec_dg = Datagram(
+                pf.get_execution_data(),
+                python_schema=pf.get_execution_data_schema(),
+                data_context=pf.data_context,
+            )
+            self._cache.store(packet, output, var_dg, exec_dg)
             output = output.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: True})
         return tag, output
 
@@ -128,12 +134,17 @@ class CachedFunctionPod(WrappedFunctionPod):
         )
         if output is not None:
             pf = self._function_pod.packet_function
-            self._cache.store(
-                packet,
-                output,
-                variation_data=pf.get_function_variation_data(),
-                execution_data=pf.get_execution_data(),
+            var_dg = Datagram(
+                pf.get_function_variation_data(),
+                python_schema=pf.get_function_variation_data_schema(),
+                data_context=pf.data_context,
             )
+            exec_dg = Datagram(
+                pf.get_execution_data(),
+                python_schema=pf.get_execution_data_schema(),
+                data_context=pf.data_context,
+            )
+            self._cache.store(packet, output, var_dg, exec_dg)
             output = output.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: True})
         return tag, output
 
