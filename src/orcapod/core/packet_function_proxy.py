@@ -178,11 +178,23 @@ class PacketFunctionProxy(PacketFunctionBase):
             return self._bound_function.get_function_variation_data()
         return {}
 
+    def get_function_variation_data_schema(self) -> Schema:
+        """Return function variation data schema from bound function, or empty schema."""
+        if self._bound_function is not None:
+            return self._bound_function.get_function_variation_data_schema()
+        return Schema({})
+
     def get_execution_data(self) -> dict[str, Any]:
         """Return execution data, or empty dict when unbound."""
         if self._bound_function is not None:
             return self._bound_function.get_execution_data()
         return {}
+
+    def get_execution_data_schema(self) -> Schema:
+        """Return execution data schema from bound function, or empty schema."""
+        if self._bound_function is not None:
+            return self._bound_function.get_execution_data_schema()
+        return Schema({})
 
     # ==================== Executor ====================
 

@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from orcapod.core.datagrams import Packet
-from orcapod.core.executors import LocalExecutor, PythonFunctionExecutorBase
+from orcapod.core.executors import LocalPythonFunctionExecutor, PythonFunctionExecutorBase
 from orcapod.core.packet_function import (
     PacketFunctionWrapper,
     PythonPacketFunction,
@@ -118,8 +118,8 @@ def spy_executor() -> SpyExecutor:
 
 
 @pytest.fixture
-def local_executor() -> LocalExecutor:
-    return LocalExecutor()
+def local_executor() -> LocalPythonFunctionExecutor:
+    return LocalPythonFunctionExecutor()
 
 
 # ---------------------------------------------------------------------------
@@ -139,9 +139,9 @@ class TestPythonFunctionExecutorBase:
         assert executor.supports("python.function.v0")
         assert not executor.supports("wasm.function.v0")
 
-    def test_get_execution_data_returns_type(self):
+    def test_get_executor_data_returns_type(self):
         executor = SpyExecutor()
-        data = executor.get_execution_data()
+        data = executor.get_executor_data()
         assert data["executor_type"] == "spy"
 
     def test_with_options_returns_new_instance(self):
@@ -164,28 +164,28 @@ class TestPythonFunctionExecutorBase:
 
 
 class TestLocalExecutor:
-    def test_executor_type_id(self, local_executor: LocalExecutor):
+    def test_executor_type_id(self, local_executor: LocalPythonFunctionExecutor):
         assert local_executor.executor_type_id == "local"
 
-    def test_supports_all_types(self, local_executor: LocalExecutor):
+    def test_supports_all_types(self, local_executor: LocalPythonFunctionExecutor):
         assert local_executor.supports("python.function.v0")
         assert local_executor.supports("anything.v99")
 
     def test_execute_callable_runs_function(
         self,
-        local_executor: LocalExecutor,
+        local_executor: LocalPythonFunctionExecutor,
     ):
         result = local_executor.execute_callable(add, {"x": 1, "y": 2})
         assert result == 3
 
-    def test_get_execution_data(self, local_executor: LocalExecutor):
-        data = local_executor.get_execution_data()
+    def test_get_executor_data(self, local_executor: LocalPythonFunctionExecutor):
+        data = local_executor.get_executor_data()
         assert data["executor_type"] == "local"
 
-    def test_with_options_returns_new_instance(self, local_executor: LocalExecutor):
+    def test_with_options_returns_new_instance(self, local_executor: LocalPythonFunctionExecutor):
         new_executor = local_executor.with_options()
         assert new_executor is not local_executor
-        assert isinstance(new_executor, LocalExecutor)
+        assert isinstance(new_executor, LocalPythonFunctionExecutor)
 
 
 # ---------------------------------------------------------------------------
@@ -194,8 +194,8 @@ class TestLocalExecutor:
 
 
 class TestExecutorProperty:
-    def test_default_executor_is_none(self, add_pf: PythonPacketFunction):
-        assert add_pf.executor is None
+    def test_default_executor_is_local(self, add_pf: PythonPacketFunction):
+        assert isinstance(add_pf.executor, LocalPythonFunctionExecutor)
 
     def test_set_executor(
         self, add_pf: PythonPacketFunction, spy_executor: SpyExecutor
@@ -345,7 +345,7 @@ class TestWrapperExecutorDelegation:
 
 class TestProtocolConformance:
     def test_local_executor_satisfies_protocol(self):
-        executor = LocalExecutor()
+        executor = LocalPythonFunctionExecutor()
         assert isinstance(executor, PacketFunctionExecutorProtocol)
 
     def test_spy_executor_satisfies_protocol(self):
@@ -354,7 +354,7 @@ class TestProtocolConformance:
 
     def test_packet_function_with_executor_satisfies_protocol(self):
         pf = PythonPacketFunction(add, output_keys="result")
-        pf.executor = LocalExecutor()
+        pf.executor = LocalPythonFunctionExecutor()
         assert isinstance(pf, PacketFunctionProtocol)
 
 
@@ -539,14 +539,14 @@ class TestFunctionPodDecoratorExecutor:
             def my_add(x: int, y: int) -> int:
                 return x + y
 
-    def test_decorator_without_executor_defaults_to_none(self):
+    def test_decorator_without_executor_defaults_to_local(self):
         from orcapod.core.function_pod import function_pod
 
         @function_pod(output_keys="result")
         def my_add(x: int, y: int) -> int:
             return x + y
 
-        assert my_add.pod.executor is None
+        assert isinstance(my_add.pod.executor, LocalPythonFunctionExecutor)
 
 
 # ---------------------------------------------------------------------------
@@ -729,7 +729,7 @@ class TestConcurrentIteration:
 
 class TestPythonFunctionExecutorProtocol:
     def test_local_executor_satisfies_protocol(self):
-        executor = LocalExecutor()
+        executor = LocalPythonFunctionExecutor()
         assert isinstance(executor, PythonFunctionExecutorProtocol)
 
     def test_spy_executor_satisfies_protocol(self):
@@ -737,12 +737,12 @@ class TestPythonFunctionExecutorProtocol:
         assert isinstance(executor, PythonFunctionExecutorProtocol)
 
     def test_execute_callable_runs_function(self):
-        executor = LocalExecutor()
+        executor = LocalPythonFunctionExecutor()
         result = executor.execute_callable(add, {"x": 3, "y": 4})
         assert result == 7
 
     def test_execute_callable_with_executor_options(self):
-        executor = LocalExecutor()
+        executor = LocalPythonFunctionExecutor()
         result = executor.execute_callable(
             add, {"x": 1, "y": 2}, executor_options={"num_cpus": 1}
         )
@@ -782,7 +782,7 @@ class TestGenericExecutorDispatch:
 
     def test_set_executor_accepts_compatible_protocol(self):
         pf = PythonPacketFunction(add, output_keys="result")
-        executor = LocalExecutor()
+        executor = LocalPythonFunctionExecutor()
         pf.set_executor(executor)
         assert pf.executor is executor
 
@@ -846,7 +846,7 @@ class TestLocalExecutorCallable:
         async def async_add(x: int, y: int) -> int:
             return x + y
 
-        executor = LocalExecutor()
+        executor = LocalPythonFunctionExecutor()
         result = executor.execute_callable(async_add, {"x": 5, "y": 3})
         assert result == 8
 
@@ -854,7 +854,7 @@ class TestLocalExecutorCallable:
         """LocalExecutor.async_execute_callable handles sync fns via run_in_executor."""
         import asyncio
 
-        executor = LocalExecutor()
+        executor = LocalPythonFunctionExecutor()
         result = asyncio.run(executor.async_execute_callable(add, {"x": 10, "y": 20}))
         assert result == 30
 
@@ -865,7 +865,7 @@ class TestLocalExecutorCallable:
         async def async_add(x: int, y: int) -> int:
             return x + y
 
-        executor = LocalExecutor()
+        executor = LocalPythonFunctionExecutor()
         result = asyncio.run(
             executor.async_execute_callable(async_add, {"x": 7, "y": 8})
         )
