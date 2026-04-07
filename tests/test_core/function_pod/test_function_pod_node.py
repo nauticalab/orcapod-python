@@ -302,11 +302,13 @@ class TestFunctionNodeStreamInterface:
     @pytest.fixture
     def node(self, double_pf) -> FunctionNode:
         db = InMemoryArrowDatabase()
-        return FunctionNode(
+        node = FunctionNode(
             function_pod=FunctionPod(packet_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
+        node.run()
+        return node
 
     def test_iter_packets_correct_values(self, node):
         assert [packet["result"] for _, packet in node.iter_packets()] == [0, 2, 4]
