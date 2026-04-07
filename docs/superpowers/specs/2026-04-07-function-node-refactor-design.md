@@ -134,69 +134,43 @@ def run(self) -> None:
 
 ### 5. `execute()` — Sync Computation (Orchestrator + `run()`)
 
+`execute()` is **always sequential** — there is no concurrent path. Any async/concurrent
+execution is handled exclusively by `async_execute()` (used by the async orchestrator).
+
 ```
 1. Observer: on_node_start (with tag_schema from input_stream)
 2. Collect all (tag, packet, entry_id) from input_stream.iter_packets()
-3. Selective DB reload for missing entries only:
-       missing = [eid for _, _, eid in upstream if eid not in _cached_output_packets]
-       if missing and DB attached:
-           loaded = _load_cached_entries(missing)
-           _cached_output_packets.update(loaded)
-4. Compute truly missing entries:
-       to_compute = [(tag, pkt, eid) for tag, pkt, eid in upstream
-                     if eid not in _cached_output_packets]
-       if _executor_supports_concurrent(self._packet_function) and to_compute:
-           inline concurrent gather (see below)
-       else:
-           for tag, pkt, eid in to_compute:
-               try:
-                   _process_packet_internal(tag, pkt)
-               except Exception as exc:
-                   log warning; on_packet_crash; re-raise if error_policy=="fail_fast"
-5. Build and return output — fire observer hooks for all packets:
-       output = []
+3. Hot-load missing entries from DB via get_cached_results() (side-effect only):
+       get_cached_results(entry_ids)  # populates _cached_output_packets
+4. Per-packet loop — fire on_packet_start before each packet:
        for tag, pkt, eid in upstream:
            on_packet_start(node_label, tag, pkt)
-           if eid in _cached_output_packets:
+           if eid in _cached_output_packets:   # includes None-output entries
                tag_out, result = _cached_output_packets[eid]
-               if result is not None:
-                   on_packet_end(..., cached=(eid not in to_compute_eids))
-                   output.append((tag_out, result))
-           # packets that failed and were not stored are silently skipped here
-6. on_node_end
+               on_packet_end(..., cached=True)
+               if result is not None: output.append((tag_out, result))
+           else:
+               try:
+                   _process_packet_internal(tag, pkt)  # stores result in _cached_output_packets
+               except Exception as exc:
+                   log warning; on_packet_crash; re-raise if error_policy=="fail_fast"
+               else:
+                   on_packet_end(..., cached=False)
+                   if result is not None: output.append((tag_out, result))
+5. on_node_end
+6. _update_modified_time()  # prevents is_stale from clearing cache on next iter_packets()
 7. return output
 ```
 
-**Observer hooks:** `on_packet_start` and `on_packet_end` fire for **every** packet including cache hits, preserving existing behavior. `cached=True` for DB-loaded results, `cached=False` for freshly computed ones.
+**Observer hooks:** `on_packet_start` fires **before** each packet's processing (including
+cache hits). `on_packet_end` fires for successes; `on_packet_crash` fires for failures.
+`cached=True` for entries already in `_cached_output_packets`; `cached=False` for freshly
+computed ones.
 
-**Concurrent path** — when `_executor_supports_concurrent(self._packet_function)` is True:
-
-```python
-async def _gather():
-    return await asyncio.gather(
-        *[self._async_process_packet_internal(tag, pkt) for tag, pkt, eid in to_compute],
-        return_exceptions=True,  # collect errors per-packet instead of stopping all
-    )
-
-try:
-    asyncio.get_running_loop()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        results = pool.submit(asyncio.run, _gather()).result()
-except RuntimeError:
-    results = asyncio.run(_gather())
-
-# Per-result error handling (mirrors sequential error_policy logic)
-for (tag, pkt, eid), result in zip(to_compute, results):
-    if isinstance(result, BaseException):
-        log warning; on_packet_crash(node_label, tag, pkt, result)
-        if error_policy == "fail_fast":
-            on_node_end(node_label, node_hash)
-            raise result
-    # successful results are already stored in _cached_output_packets
-    # by _async_process_packet_internal()
-```
-
-The `return_exceptions=True` flag ensures per-packet error handling consistent with the sequential path's `error_policy` behavior.
+**Note on `_cached_output_packets` membership:** The cache-hit check uses
+`_cached_output_packets` directly (not the filtered return value of `get_cached_results()`)
+so that entries with `None` outputs (function returned None) are treated as cache hits and
+are not recomputed on subsequent `execute()` calls.
 
 ### 6. `async_execute()` — Async Computation (Async Orchestrator)
 
@@ -301,7 +275,7 @@ def get_cached_results(
 7. `as_table()` on a fresh node with no `run()` and empty DB returns an empty table (0 rows, valid schema) — no computation triggered
 8. `run()` on a CACHE_ONLY node is a no-op (returns without error, no computation, no exception)
 9. `run()` on an UNAVAILABLE node raises `RuntimeError`
-10. `execute()` concurrent path: `on_packet_crash` fires per failing packet when `error_policy="continue"`; exception propagates on first failure when `error_policy="fail_fast"` (mirrors `test_regression_fixes.py::TestConcurrentFallbackInRunningLoop` for the new `execute()` path)
+10. `execute()` sequential path: `on_packet_crash` fires per failing packet when `error_policy="continue"`; exception propagates on first failure when `error_policy="fail_fast"` — test is named `test_execute_error_policy_continue_skips_failures` and uses `LocalExecutor` (non-concurrent) to exercise the sequential path
 
 ### Existing tests requiring full rewrite
 
@@ -322,7 +296,7 @@ The following tests **use `iter_packets()` as the sole computation trigger** and
   - Any test calling `node._iter_all_from_database()` directly — this method is removed; replace with `node._load_cached_entries()` or test via `iter_packets()` after DB population
 
 - `tests/test_core/test_regression_fixes.py`:
-  - `TestConcurrentFallbackInRunningLoop` — tests the removed `_iter_packets_concurrent` behavior; replace with a test targeting the concurrent path in `execute()` (covered by new test 10 above)
+  - `TestConcurrentFallbackInRunningLoop` — tests the removed `_iter_packets_concurrent` behavior; covered by `test_execute_error_policy_continue_skips_failures` in the new test file (sequential `execute()` path, no concurrent gather)
 
 ### Existing tests requiring minor updates (key type change only)
 
@@ -335,7 +309,7 @@ The following tests **use `iter_packets()` as the sole computation trigger** and
 
 ## Out of Scope
 
-- Concurrent execution control flag/argument for `execute()` → tracked in **ENG-381**
+- Concurrent execution in `execute()` (always sequential; async path is `async_execute()`) → any future concurrent `execute()` tracked in **ENG-381**
 - Refactoring `get_all_records()` to use `_load_cached_entries()` (different return type / responsibility)
 - Refactoring other node types (`OperatorNode`, `SourceNode`)
 - Lazy evaluation / deferred computation patterns
