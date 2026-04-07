@@ -1408,9 +1408,23 @@ class FunctionNode(StreamBase):
                 yield tag, packet
 
     def run(self) -> None:
-        """Eagerly process all input packets, filling the pipeline and result databases."""
-        for _ in self.iter_packets():
-            pass
+        """Eagerly compute all input packets, filling pipeline and result databases.
+
+        Raises:
+            RuntimeError: If ``load_status`` is UNAVAILABLE (no pod, no DB).
+        """
+        from orcapod.pipeline.serialization import LoadStatus
+
+        if self._load_status == LoadStatus.UNAVAILABLE:
+            raise RuntimeError(
+                f"FunctionNode {self.label!r} is unavailable: "
+                "no function pod and no database attached."
+            )
+        if self._load_status == LoadStatus.CACHE_ONLY:
+            # Upstream is unavailable; computation requires a live input stream.
+            # Callers should use iter_packets() to serve existing DB results.
+            return
+        self.execute(self._input_stream)
 
     # ------------------------------------------------------------------
     # as_table
