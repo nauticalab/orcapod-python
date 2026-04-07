@@ -111,6 +111,11 @@ class OperatorNode(StreamBase):
         self._stored_node_uri: tuple[str, ...] = ()
         self._stored_pipeline_path: tuple[str, ...] = ()
         self._descriptor: dict = {}
+        if table_scope not in ("pipeline_hash", "content_hash"):
+            raise ValueError(
+                f"Unknown table_scope {table_scope!r}. "
+                "Expected one of: 'pipeline_hash', 'content_hash'."
+            )
         self._table_scope: Literal["pipeline_hash", "content_hash"] = table_scope
         self._node_identity_path_cache: tuple[str, ...] | None = None
 
@@ -415,7 +420,11 @@ class OperatorNode(StreamBase):
             return table
         col_name = constants.NODE_CONTENT_HASH_COL
         if col_name not in table.column_names:
-            return table
+            raise ValueError(
+                f"Cannot isolate records for table_scope='pipeline_hash': "
+                f"required column {col_name!r} is missing from the stored table. "
+                "This may indicate records written by an older version of the code."
+            )
         own_hash = self.content_hash().to_string()
         mask = pc.equal(table.column(col_name), own_hash)
         return table.filter(mask)
@@ -448,14 +457,31 @@ class OperatorNode(StreamBase):
             columns={"source": True, "system_tags": True},
         )
 
-        # Per-row record hashes for dedup: hash(tag + packet + system_tag)
+        # Per-row record hashes for dedup: hash(tag + packet + system_tag).
+        # In pipeline_hash scope the table is shared across runs, so the content
+        # hash of this node is mixed into each row hash.  Without it, identical
+        # rows from different runs would share the same record ID and the second
+        # run's rows would be silently skipped by skip_duplicates=True, leaving
+        # _filter_by_content_hash with nothing to return for the later run.
         arrow_hasher = self.data_context.arrow_hasher
+        content_hash_suffix = (
+            self.content_hash().to_string() if self._table_scope == "pipeline_hash" else None
+        )
         record_hashes = []
         for batch in output_table.to_batches():
             for i in range(len(batch)):
-                record_hashes.append(
-                    arrow_hasher.hash_table(batch.slice(i, 1)).to_hex()
-                )
+                row_hash = arrow_hasher.hash_table(batch.slice(i, 1)).to_hex()
+                if content_hash_suffix is not None:
+                    # Combine row hash + node content hash into a single run-scoped ID
+                    # by hashing a tiny 1-row table containing both values.
+                    combined = pa.table(
+                        {
+                            "_row": pa.array([row_hash], type=pa.large_string()),
+                            "_run": pa.array([content_hash_suffix], type=pa.large_string()),
+                        }
+                    )
+                    row_hash = arrow_hasher.hash_table(combined).to_hex()
+                record_hashes.append(row_hash)
 
         output_table = output_table.add_column(
             0,

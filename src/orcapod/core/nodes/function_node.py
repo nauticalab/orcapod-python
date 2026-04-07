@@ -145,6 +145,11 @@ class FunctionNode(StreamBase):
         self._stored_pipeline_path: tuple[str, ...] = ()
         self._stored_result_record_path: tuple[str, ...] = ()
         self._descriptor: dict = {}
+        if table_scope not in ("pipeline_hash", "content_hash"):
+            raise ValueError(
+                f"Unknown table_scope {table_scope!r}. "
+                "Expected one of: 'pipeline_hash', 'content_hash'."
+            )
         self._table_scope: Literal["pipeline_hash", "content_hash"] = table_scope
         self._node_identity_path_cache: tuple[str, ...] | None = None
 
@@ -234,7 +239,11 @@ class FunctionNode(StreamBase):
             return table
         col_name = constants.NODE_CONTENT_HASH_COL
         if col_name not in table.column_names:
-            return table
+            raise ValueError(
+                f"Cannot isolate records for table_scope='pipeline_hash': "
+                f"required column {col_name!r} is missing from the stored table. "
+                "This may indicate records written by an older version of the code."
+            )
         own_hash = self.content_hash().to_string()
         mask = pc.equal(table.column(col_name), own_hash)
         return table.filter(mask)
@@ -857,20 +866,36 @@ class FunctionNode(StreamBase):
     ) -> str:
         """Compute a unique pipeline entry ID from tag + system tags + input packet hash.
 
-        This ID uniquely identifies a (tag, system_tags, input_packet) combination
-        and is used as the record ID in the pipeline database.
+        In ``table_scope="pipeline_hash"`` mode the node's own ``content_hash``
+        is also included so that two runs processing identical inputs each get a
+        distinct entry ID in the shared table.  Without this, the second run's
+        pipeline record would be silently skipped (duplicate entry_id check) and
+        ``_filter_by_content_hash`` would subsequently hide the first run's row
+        from the second run's view.
+
+        In ``table_scope="content_hash"`` mode each run has its own isolated
+        table, so the entry ID is scoped to (tag, system_tags, input_packet)
+        alone as before.
 
         Args:
             tag: The tag (including system tags).
             input_packet: The input packet.
 
         Returns:
-            A hash string uniquely identifying this combination.
+            A hash string uniquely identifying this combination (and run, when
+            in pipeline_hash scope).
         """
         tag_with_hash = tag.as_table(columns={"system_tags": True}).append_column(
             constants.INPUT_PACKET_HASH_COL,
             pa.array([input_packet.content_hash().to_string()], type=pa.large_string()),
         )
+        if self._table_scope == "pipeline_hash":
+            # Scope the entry ID to this run so that identical inputs across
+            # different runs produce distinct pipeline records in the shared table.
+            tag_with_hash = tag_with_hash.append_column(
+                constants.NODE_CONTENT_HASH_COL,
+                pa.array([self.content_hash().to_string()], type=pa.large_string()),
+            )
         return self.data_context.arrow_hasher.hash_table(tag_with_hash).to_string()
 
     def add_pipeline_record(
