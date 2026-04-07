@@ -743,7 +743,8 @@ class FunctionNode(StreamBase):
             return {}
 
         taginfo = self._filter_by_content_hash(taginfo)
-
+        taginfo_schema = taginfo.schema
+        results_schema = results.schema
         filtered = (
             pl.DataFrame(taginfo)
             .join(
@@ -754,6 +755,7 @@ class FunctionNode(StreamBase):
             .filter(pl.col(PIPELINE_ENTRY_ID_COL).is_in(entry_ids))
             .to_arrow()
         )
+        filtered = arrow_utils.restore_schema_nullability(filtered, taginfo_schema, results_schema)
 
         if filtered.num_rows == 0:
             return {}
@@ -987,12 +989,14 @@ class FunctionNode(StreamBase):
             return None
 
         taginfo = self._filter_by_content_hash(taginfo)
-
+        taginfo_schema = taginfo.schema
+        results_schema = results.schema
         joined = (
             pl.DataFrame(taginfo)
             .join(pl.DataFrame(results), on=constants.PACKET_RECORD_ID, how="inner")
             .to_arrow()
         )
+        joined = arrow_utils.restore_schema_nullability(joined, taginfo_schema, results_schema)
 
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
 
@@ -1072,7 +1076,8 @@ class FunctionNode(StreamBase):
             return None
 
         taginfo = self._filter_by_content_hash(taginfo)
-
+        taginfo_schema = taginfo.schema
+        results_schema = results.schema
         joined = (
             pl.DataFrame(taginfo)
             .join(
@@ -1082,6 +1087,7 @@ class FunctionNode(StreamBase):
             )
             .to_arrow()
         )
+        joined = arrow_utils.restore_schema_nullability(joined, taginfo_schema, results_schema)
 
         if joined.num_rows == 0:
             return None
@@ -1202,6 +1208,8 @@ class FunctionNode(StreamBase):
 
                 if taginfo is not None and results is not None:
                     taginfo = self._filter_by_content_hash(taginfo)
+                    taginfo_schema = taginfo.schema
+                    results_schema = results.schema
                     joined = (
                         pl.DataFrame(taginfo)
                         .join(
@@ -1211,6 +1219,7 @@ class FunctionNode(StreamBase):
                         )
                         .to_arrow()
                     )
+                    joined = arrow_utils.restore_schema_nullability(joined, taginfo_schema, results_schema)
                     if joined.num_rows > 0:
                         tag_keys = self._input_stream.keys()[0]
                         # Collect pipeline entry_ids for Phase 2 skip check
@@ -1435,11 +1444,13 @@ class FunctionNode(StreamBase):
             )
 
         if column_config.sort_by_tags:
+            output_table_schema = output_table.schema
             output_table = (
                 pl.DataFrame(output_table)
                 .sort(by=self.keys()[0], descending=False)
                 .to_arrow()
             )
+            output_table = arrow_utils.restore_schema_nullability(output_table, output_table_schema)
         return output_table
 
     # ------------------------------------------------------------------
@@ -1524,6 +1535,8 @@ class FunctionNode(StreamBase):
 
                 if taginfo is not None and results is not None:
                     taginfo = self._filter_by_content_hash(taginfo)
+                    taginfo_schema = taginfo.schema
+                    results_schema = results.schema
                     joined = (
                         pl.DataFrame(taginfo)
                         .join(
@@ -1533,6 +1546,7 @@ class FunctionNode(StreamBase):
                         )
                         .to_arrow()
                     )
+                    joined = arrow_utils.restore_schema_nullability(joined, taginfo_schema, results_schema)
                     if joined.num_rows > 0:
                         tag_keys = self._input_stream.keys()[0]
                         entry_ids_col = joined.column(

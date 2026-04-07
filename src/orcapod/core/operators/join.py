@@ -171,17 +171,33 @@ class Join(NonZeroInputOperator):
                         counter += 1
                         new_name = f"{col}_{counter}"
                     rename_map[col] = new_name
+
+            # Build a reference schema for next_table with rename_map applied to
+            # field names, preserving nullable flags — must be done BEFORE the
+            # rename so we capture the original schema.
+            next_ref_schema = pa.schema([
+                pa.field(rename_map.get(f.name, f.name), f.type, nullable=f.nullable, metadata=f.metadata)
+                for f in next_table.schema
+            ])
+
             if rename_map:
-                next_table = pl.DataFrame(next_table).rename(rename_map).to_arrow()
+                # Use Arrow-native rename to avoid an unnecessary Polars round-trip.
+                next_table = next_table.rename_columns(
+                    [rename_map.get(name, name) for name in next_table.column_names]
+                )
 
             common_tag_keys = tag_keys.intersection(next_tag_keys)
             common_tag_keys.add(COMMON_JOIN_KEY)
 
+            # Capture the left-side schema before the Polars join, which sets all
+            # fields to nullable=True regardless of the original schema.
+            table_ref_schema = table.schema
             table = (
                 pl.DataFrame(table)
                 .join(pl.DataFrame(next_table), on=list(common_tag_keys), how="inner")
                 .to_arrow()
             )
+            table = arrow_utils.restore_schema_nullability(table, table_ref_schema, next_ref_schema)
 
             tag_keys.update(next_tag_keys)
 
@@ -196,13 +212,6 @@ class Join(NonZeroInputOperator):
         reordered_columns += [col for col in table.column_names if col not in tag_keys]
 
         result_table = table.select(reordered_columns)
-        # Derive nullable per column from actual null counts so that:
-        # - Columns with no nulls (e.g. tag/packet fields after inner join) get
-        #   nullable=False, avoiding spurious T | None from Polars' all-True default.
-        # - Columns that genuinely contain nulls (e.g. Optional fields, or source
-        #   info columns after cross-stream joins) keep nullable=True, preventing
-        #   cast failures.
-        result_table = result_table.cast(arrow_utils.infer_schema_nullable(result_table))
         return ArrowTableStream(
             result_table,
             tag_columns=tuple(tag_keys),
