@@ -119,7 +119,7 @@ class FunctionNode(StreamBase):
 
         # stream-level caching state
         self._cached_output_packets: dict[
-            str | int, tuple[TagProtocol, PacketProtocol | None]
+            str, tuple[TagProtocol, PacketProtocol | None]
         ] = {}
         self._cached_output_table: pa.Table | None = None
         self._cached_content_hash_column: pa.Array | None = None
@@ -1107,91 +1107,6 @@ class FunctionNode(StreamBase):
             loaded[eid] = (tag, packet)
         return loaded
 
-    def _load_all_cached_records(
-        self,
-    ) -> "tuple[tuple[str, ...], Any] | None":
-        """Join pipeline DB and result DB; return (tag_keys, data_table).
-
-        Returns ``None`` when either database is empty or unavailable.
-        Does not access ``_input_stream``.
-        """
-        import polars as pl
-
-        if self._cached_function_pod is None or self._pipeline_database is None:
-            return None
-
-        PIPELINE_ENTRY_ID_COL = "__pipeline_entry_id"
-
-        taginfo = self._pipeline_database.get_all_records(
-            self.node_identity_path,
-            record_id_column=PIPELINE_ENTRY_ID_COL,
-        )
-        results = self._cached_function_pod._result_database.get_all_records(
-            self._cached_function_pod.record_path,
-            record_id_column=constants.PACKET_RECORD_ID,
-        )
-
-        if taginfo is None or results is None:
-            return None
-
-        taginfo = self._filter_by_content_hash(taginfo)
-        taginfo_schema = taginfo.schema
-        results_schema = results.schema
-        joined = (
-            pl.DataFrame(taginfo)
-            .join(
-                pl.DataFrame(results),
-                on=constants.PACKET_RECORD_ID,
-                how="inner",
-            )
-            .to_arrow()
-        )
-        joined = arrow_utils.restore_schema_nullability(joined, taginfo_schema, results_schema)
-
-        if joined.num_rows == 0:
-            return None
-
-        # Tag keys are the user-facing tag columns from the pipeline DB table.
-        # Exclude: meta columns (__*), source columns (_source_*),
-        # system-tag columns (e.g. __tag_*), the entry-ID column, and the
-        # node content hash column.
-        tag_keys = tuple(
-            c
-            for c in taginfo.column_names
-            if not c.startswith(constants.META_PREFIX)
-            and not c.startswith(constants.SOURCE_PREFIX)
-            and not c.startswith(constants.SYSTEM_TAG_PREFIX)
-            and c != PIPELINE_ENTRY_ID_COL
-            and c != constants.NODE_CONTENT_HASH_COL
-        )
-
-        drop_cols = [
-            c
-            for c in joined.column_names
-            if c.startswith(constants.META_PREFIX)
-            or c == PIPELINE_ENTRY_ID_COL
-            or c == constants.NODE_CONTENT_HASH_COL
-        ]
-        data_table = joined.drop([c for c in drop_cols if c in joined.column_names])
-        return tag_keys, data_table
-
-    def _iter_all_from_database(
-        self,
-    ) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
-        """Yield all cached (tag, packet) pairs from the DB.
-
-        Used in ``CACHE_ONLY`` mode when the upstream is unavailable.
-        Does not access ``_input_stream``.
-        """
-        result = self._load_all_cached_records()
-        if result is None:
-            return
-        tag_keys, data_table = result
-        stream = ArrowTableStream(data_table, tag_columns=tag_keys)
-        for i, (tag, packet) in enumerate(stream.iter_packets()):
-            self._cached_output_packets[i] = (tag, packet)
-            yield tag, packet
-
     async def _async_execute_cache_only(
         self,
         output: "WritableChannel[tuple[TagProtocol, PacketProtocol]]",
@@ -1285,66 +1200,6 @@ class FunctionNode(StreamBase):
             for tag, pkt in self._cached_output_packets.values()
             if pkt is not None
         )
-
-    def _iter_packets_sequential(
-        self, input_iter: Iterator[tuple[TagProtocol, PacketProtocol]]
-    ) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
-        for i, (tag, packet) in enumerate(input_iter):
-            if i in self._cached_output_packets:
-                tag, packet = self._cached_output_packets[i]
-                if packet is not None:
-                    yield tag, packet
-            else:
-                tag, output_packet = self._process_packet_internal(tag, packet)
-                if output_packet is not None:
-                    yield tag, output_packet
-        self._cached_input_iterator = None
-
-    def _iter_packets_concurrent(
-        self,
-        input_iter: Iterator[tuple[TagProtocol, PacketProtocol]],
-    ) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
-        """Collect remaining inputs, execute concurrently, and yield results in order."""
-
-        all_inputs: list[tuple[int, TagProtocol, PacketProtocol]] = []
-        to_compute: list[tuple[int, TagProtocol, PacketProtocol]] = []
-        for i, (tag, packet) in enumerate(input_iter):
-            all_inputs.append((i, tag, packet))
-            if i not in self._cached_output_packets:
-                to_compute.append((i, tag, packet))
-        self._cached_input_iterator = None
-
-        if to_compute:
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-
-            if loop is not None:
-                # Already in event loop — fall back to sequential sync
-                for i, tag, pkt in to_compute:
-                    self._process_packet_internal(tag, pkt)
-            else:
-
-                async def _gather() -> list[tuple[TagProtocol, PacketProtocol | None]]:
-                    return list(
-                        await asyncio.gather(
-                            *[
-                                self._async_process_packet_internal(
-                                    tag, pkt
-                                )
-                                for i, tag, pkt in to_compute
-                            ]
-                        )
-                    )
-
-                asyncio.run(_gather())
-
-        # Yield all results in order from internal cache
-        for idx in sorted(self._cached_output_packets.keys()):
-            tag, packet = self._cached_output_packets[idx]
-            if packet is not None:
-                yield tag, packet
 
     def run(self) -> None:
         """Eagerly compute all input packets, filling pipeline and result databases.
