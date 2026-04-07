@@ -568,16 +568,24 @@ class FunctionNode(StreamBase):
     ) -> list[tuple[TagProtocol, PacketProtocol]]:
         """Execute all packets from a stream: compute, persist, and cache.
 
+        Computation order:
+        1. Collect all (tag, packet, entry_id) from input_stream.
+        2. Load only missing entry_ids from DB (selective reload).
+        3. Compute truly missing entries — concurrent if executor supports it,
+           sequential otherwise.
+        4. Build output list, firing observer hooks for every packet.
+
         Args:
             input_stream: The input stream to process.
             observer: Optional execution observer for hooks.
-            error_policy: ``"continue"`` (default) skips failed packets;
+            error_policy: ``"continue"`` skips failed packets;
                 ``"fail_fast"`` re-raises on the first failure.
 
         Returns:
             Materialized list of (tag, output_packet) pairs, excluding
-            None outputs and failed packets.
+            ``None`` outputs and failed packets.
         """
+        import concurrent.futures
         from orcapod.pipeline.observer import NoOpObserver
 
         node_label = self.label
@@ -589,47 +597,99 @@ class FunctionNode(StreamBase):
         tag_schema = input_stream.output_schema(columns={"system_tags": True})[0]
         ctx_obs.on_node_start(node_label, node_hash, tag_schema=tag_schema)
 
-        # Gather entry IDs and check cache
-        upstream_entries = [
+        # --- Step 1: Collect upstream entries ---
+        upstream_entries: list[tuple[TagProtocol, PacketProtocol, str]] = [
             (tag, packet, self.compute_pipeline_entry_id(tag, packet))
             for tag, packet in input_stream.iter_packets()
         ]
-        entry_ids = [eid for _, _, eid in upstream_entries]
-        cached = self.get_cached_results(entry_ids=entry_ids)
 
-        output: list[tuple[TagProtocol, PacketProtocol]] = []
-        for tag, packet, entry_id in upstream_entries:
-            ctx_obs.on_packet_start(node_label, tag, packet)
+        # --- Step 2: Selective DB reload for missing entries ---
+        if self._cached_function_pod is not None:
+            missing_eids = [
+                eid
+                for _, _, eid in upstream_entries
+                if eid not in self._cached_output_packets
+            ]
+            if missing_eids:
+                loaded = self._load_cached_entries(missing_eids)
+                self._cached_output_packets.update(loaded)
+                if loaded:
+                    self._cached_output_table = None
+                    self._cached_content_hash_column = None
 
-            if entry_id in cached:
-                tag_out, result = cached[entry_id]
-                ctx_obs.on_packet_end(
-                    node_label, tag, packet, result, cached=True
+        # --- Step 3: Compute truly missing entries ---
+        to_compute = [
+            (tag, pkt, eid)
+            for tag, pkt, eid in upstream_entries
+            if eid not in self._cached_output_packets
+        ]
+
+        if to_compute and _executor_supports_concurrent(self._packet_function):
+            # Concurrent path: dispatch all missing packets via asyncio.gather
+            async def _gather():
+                return await asyncio.gather(
+                    *[
+                        self._async_process_packet_internal(tag, pkt)
+                        for tag, pkt, _ in to_compute
+                    ],
+                    return_exceptions=True,
                 )
-                output.append((tag_out, result))
-            else:
-                pkt_logger = ctx_obs.create_packet_logger(
-                    tag, packet
-                )
-                try:
-                    tag_out, result = self._process_packet_internal(
-                        tag, packet, logger=pkt_logger
+
+            try:
+                asyncio.get_running_loop()
+                # Already in event loop — run in a separate thread
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    gather_results = pool.submit(asyncio.run, _gather()).result()
+            except RuntimeError:
+                gather_results = asyncio.run(_gather())
+
+            for (tag, pkt, eid), result in zip(to_compute, gather_results):
+                if isinstance(result, BaseException):
+                    logger.warning(
+                        "Packet execution failed in %s: %s",
+                        node_label,
+                        result,
+                        exc_info=result,
                     )
+                    ctx_obs.on_packet_crash(node_label, tag, pkt, result)
+                    if error_policy == "fail_fast":
+                        ctx_obs.on_node_end(node_label, node_hash)
+                        raise result
+        else:
+            # Sequential path
+            for tag, pkt, eid in to_compute:
+                pkt_logger = ctx_obs.create_packet_logger(tag, pkt)
+                try:
+                    self._process_packet_internal(tag, pkt, logger=pkt_logger)
                 except Exception as exc:
                     logger.warning(
-                        "Packet execution failed in %s: %s", node_label, exc,
+                        "Packet execution failed in %s: %s",
+                        node_label,
+                        exc,
                         exc_info=True,
                     )
-                    ctx_obs.on_packet_crash(node_label, tag, packet, exc)
+                    ctx_obs.on_packet_crash(node_label, tag, pkt, exc)
                     if error_policy == "fail_fast":
                         ctx_obs.on_node_end(node_label, node_hash)
                         raise
-                else:
+
+        # --- Step 4: Build output, fire observer hooks for all packets ---
+        to_compute_eids = {eid for _, _, eid in to_compute}
+        output: list[tuple[TagProtocol, PacketProtocol]] = []
+        for tag, pkt, eid in upstream_entries:
+            ctx_obs.on_packet_start(node_label, tag, pkt)
+            if eid in self._cached_output_packets:
+                tag_out, result = self._cached_output_packets[eid]
+                if result is not None:
                     ctx_obs.on_packet_end(
-                        node_label, tag, packet, result, cached=False
+                        node_label,
+                        tag,
+                        pkt,
+                        result,
+                        cached=(eid not in to_compute_eids),
                     )
-                    if result is not None:
-                        output.append((tag_out, result))
+                    output.append((tag_out, result))
+            # Packets that failed are absent from _cached_output_packets — silently skipped
 
         ctx_obs.on_node_end(node_label, node_hash)
         return output
