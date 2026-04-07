@@ -967,8 +967,14 @@ def add_system_tag_columns(
     source_id_array = pa.array(source_ids, type=pa.large_string())
     record_id_array = pa.array(record_ids, type=pa.large_string())
 
-    table = table.append_column(source_id_col_name, source_id_array)
-    table = table.append_column(record_id_col_name, record_id_array)
+    # System tag columns are always computed, never null — declare nullable=False
+    # explicitly so the schema intent is not lost in Polars round-trips.
+    table = table.append_column(
+        pa.field(source_id_col_name, pa.large_string(), nullable=False), source_id_array
+    )
+    table = table.append_column(
+        pa.field(record_id_col_name, pa.large_string(), nullable=False), record_id_array
+    )
     return table
 
 
@@ -1164,7 +1170,11 @@ def add_source_info(
             [f"{source_val}::{col}" for source_val in source_column],
             type=pa.large_string(),
         )
-        table = table.append_column(f"{constants.SOURCE_PREFIX}{col}", source_column)
+        # Source info columns are always computed strings, never null.
+        table = table.append_column(
+            pa.field(f"{constants.SOURCE_PREFIX}{col}", pa.large_string(), nullable=False),
+            source_column,
+        )
 
     return table
 
