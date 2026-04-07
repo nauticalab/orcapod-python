@@ -485,7 +485,10 @@ class OperatorNode(StreamBase):
             pa.array(record_hashes, type=pa.large_string()),
         )
 
-        # Store (identical rows across runs naturally deduplicate)
+        # Store — record IDs are run-scoped (NODE_CONTENT_HASH_COL is included in
+        # the hash), so rows from different runs with identical output will have
+        # distinct record IDs and both be stored.  skip_duplicates=True still
+        # deduplicates exact re-runs of the same node within a single run.
         self._pipeline_database.add_records(
             self.node_identity_path,
             output_table,

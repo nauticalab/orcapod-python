@@ -733,7 +733,6 @@ class FunctionNode(StreamBase):
         self._require_pipeline_database()
 
         PIPELINE_ENTRY_ID_COL = "__pipeline_entry_id"
-        entry_id_set = set(entry_ids)
 
         taginfo = self._pipeline_database.get_all_records(
             self.node_identity_path,
@@ -749,23 +748,16 @@ class FunctionNode(StreamBase):
 
         taginfo = self._filter_by_content_hash(taginfo)
 
-        joined = (
+        filtered = (
             pl.DataFrame(taginfo)
             .join(
                 pl.DataFrame(results),
                 on=constants.PACKET_RECORD_ID,
                 how="inner",
             )
+            .filter(pl.col(PIPELINE_ENTRY_ID_COL).is_in(entry_ids))
             .to_arrow()
         )
-
-        if joined.num_rows == 0:
-            return {}
-
-        # Filter to requested entry IDs
-        all_entry_ids = joined.column(PIPELINE_ENTRY_ID_COL).to_pylist()
-        mask = [eid in entry_id_set for eid in all_entry_ids]
-        filtered = joined.filter(pa.array(mask))
 
         if filtered.num_rows == 0:
             return {}
@@ -781,7 +773,7 @@ class FunctionNode(StreamBase):
         data_table = filtered.drop([c for c in drop_cols if c in filtered.column_names])
 
         stream = ArrowTableStream(data_table, tag_columns=tag_keys)
-        filtered_entry_ids = [eid for eid, m in zip(all_entry_ids, mask) if m]
+        filtered_entry_ids = filtered.column(PIPELINE_ENTRY_ID_COL).to_pylist()
 
         result_dict: dict[str, tuple[TagProtocol, PacketProtocol]] = {}
         for entry_id, (tag, packet) in zip(filtered_entry_ids, stream.iter_packets()):
