@@ -166,12 +166,13 @@ class TestOperatorNodePipelinePath:
         # operator.uri is a tuple starting with the class name
         assert any("MapPackets" in segment for segment in path)
 
-    def test_pipeline_path_ends_with_node_hash(self, simple_stream):
+    def test_pipeline_path_ends_with_schema_hash(self, simple_stream):
         op = MapPackets({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
         path = node.node_identity_path
-        assert path[-2].startswith("schema:")
-        assert path[-1].startswith("instance:")
+        # With pipeline_hash scope (default): ends with schema:{hash} only
+        assert path[-1].startswith("schema:")
+        assert not any(seg.startswith("instance:") for seg in path)
 
     def test_no_tag_schema_hash_in_path(self, simple_stream):
         op = MapPackets({"x": "renamed_x"})

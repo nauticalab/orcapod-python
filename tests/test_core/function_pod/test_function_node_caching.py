@@ -258,9 +258,9 @@ class TestPhase1Phase2PipelineEntryId:
         assert result_values == [20, 40, 60]
 
     def test_same_packet_new_tag_triggers_phase2(self):
-        """With the two-level pipeline_path, nodes with different input data have
-        different pipeline_paths. node2 (id=1, x=10) has a different content_hash
-        than node1 (id=0, x=10), so each has its own pipeline DB path."""
+        """With pipeline_hash scope (default), nodes with same schema share one DB table.
+        node2 (id=1, x=10) has a different content_hash than node1 (id=0, x=10),
+        so Phase 1 finds no records for node2 and Phase 2 executes the packet."""
         db = InMemoryArrowDatabase()
 
         # First run: tag=0, x=10
@@ -275,20 +275,19 @@ class TestPhase1Phase2PipelineEntryId:
         stream2 = _make_stream([{"id": 1, "x": 10}])
         node2, _ = _make_node(stream2, db=db)
 
-        # Different data → different pipeline_path (different instance: component)
-        assert node1.node_identity_path != node2.node_identity_path
-        assert node1.node_identity_path[-2] == node2.node_identity_path[-2]  # same schema:
+        # Same schema → same pipeline_hash → SAME node_identity_path (shared table)
+        assert node1.node_identity_path == node2.node_identity_path
+        assert node1.node_identity_path[-1].startswith("schema:")
 
         results = list(node2.iter_packets())
 
-        # node2 has a different pipeline_path: Phase 1 finds no records for node2's path.
-        # Phase 2 processes the single row → 1 result
+        # Phase 1 finds no records for node2's content_hash → Phase 2 processes the row
         assert len(results) == 1
 
-        # node2's pipeline DB should have 1 record
-        pipeline_records = db.get_all_records(node2.node_identity_path)
-        assert pipeline_records is not None
-        assert pipeline_records.num_rows == 1
+        # Shared table now has 2 records (one per node/content_hash)
+        all_pipeline_records = db.get_all_records(node2.node_identity_path)
+        assert all_pipeline_records is not None
+        assert all_pipeline_records.num_rows == 2
 
         # Result DB should still have only 1 record (same packet hash, cache hit)
         result_records = node2._cached_function_pod._result_database.get_all_records(

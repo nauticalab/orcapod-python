@@ -81,6 +81,7 @@ class FunctionNode(StreamBase):
         # Optional DB params for persistent mode:
         pipeline_database: ArrowDatabaseProtocol | None = None,
         result_database: ArrowDatabaseProtocol | None = None,
+        table_scope: Literal["pipeline_hash", "content_hash"] = "pipeline_hash",
     ):
         if tracker_manager is None:
             tracker_manager = DEFAULT_TRACKER_MANAGER
@@ -142,6 +143,8 @@ class FunctionNode(StreamBase):
         self._stored_pipeline_path: tuple[str, ...] = ()
         self._stored_result_record_path: tuple[str, ...] = ()
         self._descriptor: dict = {}
+        self._table_scope: Literal["pipeline_hash", "content_hash"] = table_scope
+        self._node_identity_path_cache: tuple[str, ...] | None = None
 
         if pipeline_database is not None:
             self.attach_databases(
@@ -187,6 +190,7 @@ class FunctionNode(StreamBase):
         self._pipeline_database = pipeline_database
 
         # Clear all caches
+        self._node_identity_path_cache = None
         self.clear_cache()
         self._content_hash_cache.clear()
         self._pipeline_hash_cache.clear()
@@ -215,6 +219,23 @@ class FunctionNode(StreamBase):
                 "Either construct the pipeline with a pipeline_database argument, "
                 "or supply one via Pipeline.load(..., pipeline_database=<db>)."
             )
+
+    def _filter_by_content_hash(self, table: "pa.Table") -> "pa.Table":
+        """Filter *table* to rows whose ``_node_content_hash`` matches this node.
+
+        Only applied when ``table_scope="pipeline_hash"`` because in that mode
+        multiple runs share the same DB table and must be disambiguated at read
+        time.  In ``"content_hash"`` mode every run has its own table so no
+        filtering is needed.
+        """
+        if self._table_scope != "pipeline_hash":
+            return table
+        col_name = constants.NODE_CONTENT_HASH_COL
+        if col_name not in table.column_names:
+            return table
+        own_hash = self.content_hash().to_string()
+        mask = [v == own_hash for v in table.column(col_name).to_pylist()]
+        return table.filter(pa.array(mask))
 
     # ------------------------------------------------------------------
     # from_descriptor — reconstruct from a serialized pipeline descriptor
@@ -253,6 +274,13 @@ class FunctionNode(StreamBase):
         pipeline_db = databases.get("pipeline")
         result_db = databases.get("result")  # pre-scoped; None if not provided
 
+        if "table_scope" not in descriptor:
+            raise ValueError(
+                f"FunctionNode descriptor is missing required 'table_scope' field: "
+                f"{descriptor.get('label', '<unlabeled>')}"
+            )
+        table_scope: Literal["pipeline_hash", "content_hash"] = descriptor["table_scope"]
+
         if function_pod is not None and input_stream is not None:
             # Full / READ_ONLY / CACHE_ONLY mode: construct normally via __init__.
             node = cls(
@@ -261,6 +289,7 @@ class FunctionNode(StreamBase):
                 pipeline_database=pipeline_db,
                 result_database=result_db,
                 label=descriptor.get("label"),
+                table_scope=table_scope,
             )
             node._descriptor = descriptor
 
@@ -329,6 +358,8 @@ class FunctionNode(StreamBase):
         node._stored_result_record_path = tuple(
             descriptor.get("result_record_path", ())
         )
+        node._table_scope = table_scope
+        node._node_identity_path_cache = None
 
         # Determine load status based on DB availability
         node._load_status = LoadStatus.UNAVAILABLE
@@ -447,20 +478,31 @@ class FunctionNode(StreamBase):
     def node_identity_path(self) -> tuple[str, ...]:
         """Return the node identity path for observer contextualization.
 
-        The identity path is ``pod.uri + (schema_hash, instance_hash)`` and
-        is computable independently of whether a pipeline database is attached.
+        When ``table_scope="pipeline_hash"`` (default) the path is
+        ``pod.uri + (schema:{pipeline_hash},)`` — all runs that share the same
+        pipeline structure are routed to one shared table, with per-run
+        disambiguation via the ``_node_content_hash`` row-level column.
 
-        In live mode (pod present) the path is computed from the pod.
+        When ``table_scope="content_hash"`` the legacy path is returned:
+        ``pod.uri + (schema:{pipeline_hash}, instance:{content_hash})``.
+
         In read-only/UNAVAILABLE mode (no pod) the path stored from the
         deserialized descriptor is returned (empty tuple when absent).
         """
         if self._packet_function is None:
             return self._stored_pipeline_path
+        if self._node_identity_path_cache is not None:
+            return self._node_identity_path_cache
         pf = self._function_pod
-        return pf.uri + (
-            f"schema:{self.pipeline_hash().to_string()}",
-            f"instance:{self.content_hash().to_string()}",
-        )
+        if self._table_scope == "pipeline_hash":
+            path = pf.uri + (f"schema:{self.pipeline_hash().to_string()}",)
+        else:
+            path = pf.uri + (
+                f"schema:{self.pipeline_hash().to_string()}",
+                f"instance:{self.content_hash().to_string()}",
+            )
+        self._node_identity_path_cache = path
+        return path
 
     @property
     def node_uri(self) -> tuple[str, ...]:
@@ -490,6 +532,7 @@ class FunctionNode(StreamBase):
         self._cached_output_packets.clear()
         self._cached_output_table = None
         self._cached_content_hash_column = None
+        self._node_identity_path_cache = None
         self._update_modified_time()
 
     # ------------------------------------------------------------------
@@ -686,6 +729,8 @@ class FunctionNode(StreamBase):
         if taginfo is None or results is None:
             return {}
 
+        taginfo = self._filter_by_content_hash(taginfo)
+
         joined = (
             pl.DataFrame(taginfo)
             .join(
@@ -711,7 +756,9 @@ class FunctionNode(StreamBase):
         drop_cols = [
             c
             for c in filtered.column_names
-            if c.startswith(constants.META_PREFIX) or c == PIPELINE_ENTRY_ID_COL
+            if c.startswith(constants.META_PREFIX)
+            or c == PIPELINE_ENTRY_ID_COL
+            or c == constants.NODE_CONTENT_HASH_COL
         ]
         data_table = filtered.drop([c for c in drop_cols if c in filtered.column_names])
 
@@ -866,6 +913,9 @@ class FunctionNode(StreamBase):
                 constants.PACKET_RECORD_ID: pa.array(
                     [packet_record_id], type=pa.large_string()
                 ),
+                constants.NODE_CONTENT_HASH_COL: pa.array(
+                    [self.content_hash().to_string()], type=pa.large_string()
+                ),
                 f"{constants.META_PREFIX}input_packet{constants.CONTEXT_KEY}": pa.array(
                     [input_packet.data_context_key], type=pa.large_string()
                 ),
@@ -920,6 +970,8 @@ class FunctionNode(StreamBase):
         if results is None or taginfo is None:
             return None
 
+        taginfo = self._filter_by_content_hash(taginfo)
+
         joined = (
             pl.DataFrame(taginfo)
             .join(pl.DataFrame(results), on=constants.PACKET_RECORD_ID, how="inner")
@@ -929,6 +981,9 @@ class FunctionNode(StreamBase):
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
 
         drop_columns = []
+        # Always drop the node content hash column — it is an internal
+        # row-level discriminator, not a user-facing column.
+        drop_columns.append(constants.NODE_CONTENT_HASH_COL)
         if not column_config.meta and not column_config.all_info:
             drop_columns.extend(
                 c for c in joined.column_names if c.startswith(constants.META_PREFIX)
@@ -1000,6 +1055,8 @@ class FunctionNode(StreamBase):
         if taginfo is None or results is None:
             return None
 
+        taginfo = self._filter_by_content_hash(taginfo)
+
         joined = (
             pl.DataFrame(taginfo)
             .join(
@@ -1015,7 +1072,8 @@ class FunctionNode(StreamBase):
 
         # Tag keys are the user-facing tag columns from the pipeline DB table.
         # Exclude: meta columns (__*), source columns (_source_*),
-        # system-tag columns (e.g. __tag_*), and the entry-ID column.
+        # system-tag columns (e.g. __tag_*), the entry-ID column, and the
+        # node content hash column.
         tag_keys = tuple(
             c
             for c in taginfo.column_names
@@ -1023,12 +1081,15 @@ class FunctionNode(StreamBase):
             and not c.startswith(constants.SOURCE_PREFIX)
             and not c.startswith(constants.SYSTEM_TAG_PREFIX)
             and c != PIPELINE_ENTRY_ID_COL
+            and c != constants.NODE_CONTENT_HASH_COL
         )
 
         drop_cols = [
             c
             for c in joined.column_names
-            if c.startswith(constants.META_PREFIX) or c == PIPELINE_ENTRY_ID_COL
+            if c.startswith(constants.META_PREFIX)
+            or c == PIPELINE_ENTRY_ID_COL
+            or c == constants.NODE_CONTENT_HASH_COL
         ]
         data_table = joined.drop([c for c in drop_cols if c in joined.column_names])
         return tag_keys, data_table
@@ -1124,6 +1185,7 @@ class FunctionNode(StreamBase):
                 )
 
                 if taginfo is not None and results is not None:
+                    taginfo = self._filter_by_content_hash(taginfo)
                     joined = (
                         pl.DataFrame(taginfo)
                         .join(
@@ -1148,6 +1210,7 @@ class FunctionNode(StreamBase):
                             for c in joined.column_names
                             if c.startswith(constants.META_PREFIX)
                             or c == PIPELINE_ENTRY_ID_COL
+                            or c == constants.NODE_CONTENT_HASH_COL
                         ]
                         data_table = joined.drop(
                             [c for c in drop_cols if c in joined.column_names]
@@ -1444,6 +1507,7 @@ class FunctionNode(StreamBase):
                 )
 
                 if taginfo is not None and results is not None:
+                    taginfo = self._filter_by_content_hash(taginfo)
                     joined = (
                         pl.DataFrame(taginfo)
                         .join(
@@ -1463,6 +1527,7 @@ class FunctionNode(StreamBase):
                             for c in joined.column_names
                             if c.startswith(constants.META_PREFIX)
                             or c == PIPELINE_ENTRY_ID_COL
+                            or c == constants.NODE_CONTENT_HASH_COL
                         ]
                         data_table = joined.drop(
                             [c for c in drop_cols if c in joined.column_names]
