@@ -11,6 +11,9 @@ current implementation has two issues:
 2. **Execution data is incomplete and loosely defined** — `PythonPacketFunction.get_execution_data()`
    returns ad-hoc fields without a declared schema, and doesn't capture executor metadata.
 
+This is a greenfield project pre-v0.1.0 — no backward compatibility concerns with
+existing cached data. The old `execution_context` field is simply replaced.
+
 ## Design
 
 ### Execution data contract
@@ -43,7 +46,8 @@ Schema({
    chooses (e.g. `{"executor_type": "ray.v0", "ray_address": "auto", "remote_opts": {...}}`).
 2. **`PythonPacketFunction.get_execution_data()`** receives this dict, pops `executor_type`
    as a top-level string field, and stringifies all remaining values into a flat
-   `dict[str, str]` stored as `executor_info`.
+   `dict[str, str]` stored as `executor_info`. Stringification uses `str()` for simple
+   scalar values and `json.dumps()` for dicts, lists, and other compound types.
 3. The stringification responsibility sits in the PacketFunction, not the executor. Executors
    are free to return rich types.
 
@@ -120,11 +124,14 @@ def _build_metadata_datagrams(self) -> tuple[Datagram, Datagram]:
     return variation_datagram, execution_datagram
 ```
 
-The `data_context` comes from the PacketFunction (the invoking/orchestrating context).
+The `data_context` comes from `CachedPacketFunction.data_context`, which is inherited
+from `PacketFunctionBase` (via `TraceableBase`). In practice this is the wrapped
+function's data context, since `CachedPacketFunction` is constructed with it.
 
 ### Executor implementations
 
-No changes needed to executor implementations:
+No changes needed to executor data contracts. The existing `get_executor_data()` return
+values are consumed and stringified by `PythonPacketFunction`.
 
 - **`PythonFunctionExecutorBase`** — already returns `{"executor_type": self.executor_type_id}`.
   Schema method already returns `Schema({"executor_type": str})`.
@@ -132,18 +139,25 @@ No changes needed to executor implementations:
 - **`RayExecutor`** — already returns Ray-specific fields. These flow into `executor_info`
   after stringification by `PythonPacketFunction`.
 
+**Bug fix needed:** `RayExecutor.get_executor_data_schema()` currently attempts to mutate
+a `Schema` object (which is immutable). This must be fixed to construct a new `Schema`
+with the combined fields.
+
 ## Scope of changes
 
-1. **`PythonPacketFunction`** — update `get_execution_data()` and add
-   `get_execution_data_schema()`
+1. **`PythonPacketFunction`** — update `get_execution_data()` (replaces old
+   `execution_context` field with the new schema); add `get_execution_data_schema()`.
+   `get_function_variation_data_schema()` already exists — no change needed.
 2. **`PacketFunctionBase`** — add abstract `get_execution_data_schema()` and
-   `get_function_variation_data_schema()`
-3. **`PacketFunctionWrapper`** — delegate the two schema methods to the wrapped function
+   `get_function_variation_data_schema()` (aligning the base class with the protocol)
+3. **`PacketFunctionWrapper`** — add delegation for `get_function_variation_data_schema()`
+   and `get_execution_data_schema()` to the wrapped function (neither exists today)
 4. **`CachedPacketFunction`** — add `_build_metadata_datagrams()`, update `call()` /
    `async_call()` / `record_packet()` to use it
 5. **`ResultCache.store()`** — accept datagrams instead of raw dicts, use `.as_table()` +
    prefix renaming
-6. **Tests** — update any tests that call `store()` directly or mock execution/variation data
+6. **`RayExecutor.get_executor_data_schema()`** — fix immutable `Schema` mutation bug
+7. **Tests** — update any tests that call `store()` directly or mock execution/variation data
 
 ## Out of scope
 
