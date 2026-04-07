@@ -1242,6 +1242,9 @@ class FunctionNode(StreamBase):
                 all_tags.append(tag.as_dict(all_info=True))
                 all_packets.append(packet.as_dict(all_info=True))
 
+            if not all_tags:
+                self._cached_output_table = pa.table({})
+
             converter = self.data_context.type_converter
 
             struct_packets = converter.python_dicts_to_struct_dicts(all_packets)
@@ -1257,9 +1260,8 @@ class FunctionNode(StreamBase):
             self._cached_output_table = arrow_utils.hstack_tables(
                 all_tags_as_tables, all_packets_as_tables
             )
-        assert self._cached_output_table is not None, (
-            "_cached_output_table should not be None here."
-        )
+        if self._cached_output_table is None:
+            self._cached_output_table = pa.table({})
 
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
 
