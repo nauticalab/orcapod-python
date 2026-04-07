@@ -116,7 +116,7 @@ class OperatorNode(StreamBase):
                 f"Unknown table_scope {table_scope!r}. "
                 "Expected one of: 'pipeline_hash', 'content_hash'."
             )
-        self._table_scope: Literal["pipeline_hash", "content_hash"] = table_scope
+        self._table_scope = table_scope
         self._node_identity_path_cache: tuple[str, ...] | None = None
 
         if pipeline_database is not None:
@@ -397,20 +397,14 @@ class OperatorNode(StreamBase):
             return self._stored_pipeline_path
         if self._node_identity_path_cache is not None:
             return self._node_identity_path_cache
-        if self._table_scope == "pipeline_hash":
-            path = self._operator.uri + (
-                f"schema:{self.pipeline_hash().to_string()}",
-            )
-        else:
-            path = self._operator.uri + (
-                f"schema:{self.pipeline_hash().to_string()}",
-                f"instance:{self.content_hash().to_string()}",
-            )
+        path = self._operator.uri + (f"schema:{self.pipeline_hash().to_string()}",)
+        if self._table_scope != "pipeline_hash":
+            path += (f"instance:{self.content_hash().to_string()}",)
         self._node_identity_path_cache = path
         return path
 
-    def _filter_by_content_hash(self, table: "pa.Table") -> "pa.Table":
-        """Filter *table* to rows whose ``_node_content_hash`` matches this node.
+    def _filter_by_content_hash(self, table: pa.Table) -> pa.Table:
+        """Filter *table* to rows whose ``NODE_CONTENT_HASH_COL`` matches this node.
 
         Only applied when ``table_scope="pipeline_hash"`` because in that mode
         multiple runs share the same DB table and must be disambiguated at read
