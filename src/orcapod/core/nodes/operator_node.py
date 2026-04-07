@@ -457,48 +457,32 @@ class OperatorNode(StreamBase):
             columns={"source": True, "system_tags": True},
         )
 
-        # Per-row record hashes for dedup: hash(tag + packet + system_tag).
-        # In pipeline_hash scope the table is shared across runs, so the content
-        # hash of this node is mixed into each row hash.  Without it, identical
-        # rows from different runs would share the same record ID and the second
-        # run's rows would be silently skipped by skip_duplicates=True, leaving
-        # _filter_by_content_hash with nothing to return for the later run.
-        arrow_hasher = self.data_context.arrow_hasher
-        content_hash_suffix = (
-            self.content_hash().to_string() if self._table_scope == "pipeline_hash" else None
+        # Always append the node content hash column first so that it is included
+        # in the per-row HASH_COLUMN_NAME computation below.  This makes record IDs
+        # run-scoped: identical rows from different runs carry a different
+        # NODE_CONTENT_HASH_COL value and therefore hash to different record IDs,
+        # preventing skip_duplicates=True from silently dropping a later run's rows.
+        # When table_scope="pipeline_hash" this column is also used at read time by
+        # _filter_by_content_hash to isolate rows belonging to the current run.
+        # In content_hash scope each run has its own isolated table so the column
+        # is present in storage but filtering is never applied on reads.
+        n_rows = output_table.num_rows
+        output_table = output_table.append_column(
+            constants.NODE_CONTENT_HASH_COL,
+            pa.repeat(self.content_hash().to_string(), n_rows).cast(pa.large_string()),
         )
+
+        # Per-row record hashes for dedup: hash(tag + packet + system_tags + node_content_hash).
+        arrow_hasher = self.data_context.arrow_hasher
         record_hashes = []
         for batch in output_table.to_batches():
             for i in range(len(batch)):
-                row_hash = arrow_hasher.hash_table(batch.slice(i, 1)).to_hex()
-                if content_hash_suffix is not None:
-                    # Combine row hash + node content hash into a single run-scoped ID
-                    # by hashing a tiny 1-row table containing both values.
-                    combined = pa.table(
-                        {
-                            "_row": pa.array([row_hash], type=pa.large_string()),
-                            "_run": pa.array([content_hash_suffix], type=pa.large_string()),
-                        }
-                    )
-                    row_hash = arrow_hasher.hash_table(combined).to_hex()
-                record_hashes.append(row_hash)
+                record_hashes.append(arrow_hasher.hash_table(batch.slice(i, 1)).to_hex())
 
         output_table = output_table.add_column(
             0,
             self.HASH_COLUMN_NAME,
             pa.array(record_hashes, type=pa.large_string()),
-        )
-
-        # Always write the node content hash column so every stored row carries a
-        # run identity.  When table_scope="pipeline_hash" this column is used at
-        # read time to filter rows belonging to the current run (multiple runs
-        # share the same table).  In content_hash scope each run has its own
-        # isolated table so the column is present in storage but filtering is
-        # never applied on reads.
-        n_rows = output_table.num_rows
-        output_table = output_table.append_column(
-            constants.NODE_CONTENT_HASH_COL,
-            pa.repeat(self.content_hash().to_string(), n_rows).cast(pa.large_string()),
         )
 
         # Store (identical rows across runs naturally deduplicate)
