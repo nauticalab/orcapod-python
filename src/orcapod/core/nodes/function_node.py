@@ -119,7 +119,7 @@ class FunctionNode(StreamBase):
 
         # stream-level caching state
         self._cached_output_packets: dict[
-            str, tuple[TagProtocol, PacketProtocol | None]
+            str | int, tuple[TagProtocol, PacketProtocol | None]
         ] = {}
         self._cached_output_table: pa.Table | None = None
         self._cached_content_hash_column: pa.Array | None = None
@@ -758,9 +758,6 @@ class FunctionNode(StreamBase):
         for entry_id, (tag, packet) in result_dict.items():
             next_idx = len(self._cached_output_packets)
             self._cached_output_packets[next_idx] = (tag, packet)
-        self._cached_input_iterator = None
-        self._needs_iterator = False
-
         return result_dict
 
     async def _async_process_packet_internal(
