@@ -2238,6 +2238,7 @@ class TestSaveLoadRunRoundtrip:
         assert fn_node.load_status == LoadStatus.FULL
 
         # Run the loaded pipeline and compare results
+        loaded.run()
         loaded_results = sorted(
             p.as_dict()["result"] for _, p in fn_node.iter_packets()
         )
