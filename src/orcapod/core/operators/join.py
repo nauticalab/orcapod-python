@@ -174,14 +174,17 @@ class Join(NonZeroInputOperator):
 
             # Build a reference schema for next_table with rename_map applied to
             # field names, preserving nullable flags — must be done BEFORE the
-            # Polars rename call below, which loses all nullability information.
+            # rename so we capture the original schema.
             next_ref_schema = pa.schema([
                 pa.field(rename_map.get(f.name, f.name), f.type, nullable=f.nullable, metadata=f.metadata)
                 for f in next_table.schema
             ])
 
             if rename_map:
-                next_table = pl.DataFrame(next_table).rename(rename_map).to_arrow()
+                # Use Arrow-native rename to avoid an unnecessary Polars round-trip.
+                next_table = next_table.rename_columns(
+                    [rename_map.get(name, name) for name in next_table.column_names]
+                )
 
             common_tag_keys = tag_keys.intersection(next_tag_keys)
             common_tag_keys.add(COMMON_JOIN_KEY)

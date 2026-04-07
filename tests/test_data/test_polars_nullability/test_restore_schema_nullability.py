@@ -1,7 +1,7 @@
 """
-Unit tests for the restore_schema_nullability helper in arrow_utils.
-
-RED phase: all tests in this file must fail before the helper exists.
+These tests document that Polars round-trips and joins widen all Arrow field
+nullability to nullable=True, and verify that restore_schema_nullability
+correctly reapplies the original nullable flags from reference schemas.
 """
 
 import pyarrow as pa

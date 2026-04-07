@@ -1160,6 +1160,11 @@ def add_source_info(
                 "Length of source_info collection must match number of rows in the table."
             )
         base_source = list(source_info)
+    else:
+        raise TypeError(
+            f"source_info must be a str, a sized Collection[str], or None; "
+            f"got {type(source_info).__name__}"
+        )
 
     # For each data column, build an independent _source_<col> column from the
     # base tokens.  We must NOT re-use the array produced for a previous column

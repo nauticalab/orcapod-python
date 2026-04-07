@@ -1,8 +1,7 @@
 """
-Integration tests: FunctionNode and Join preserve non-nullable column constraints
-after the Arrow → Polars → Arrow round-trip that occurs during joins.
-
-RED phase: tests should fail before the fix is applied.
+Integration tests validating that FunctionNode and Join preserve nullable column
+constraints across the Arrow → Polars → Arrow round-trip that occurs during
+joins and cached-record retrieval.
 """
 # ruff: noqa: E501
 
