@@ -58,7 +58,7 @@
 After ENG-379:
 - iter_packets() is strictly read-only — never triggers computation
 - Computation only via run() / execute() / async_execute()
-- execute() supports a concurrent path via asyncio.gather
+- execute() is always sequential; async/concurrent path is only in async_execute()
 """
 from __future__ import annotations
 
@@ -190,8 +190,8 @@ class TestIterPacketsReadOnly:
         with pytest.raises(RuntimeError, match="unavailable"):
             node.run()
 
-    def test_execute_concurrent_error_policy_continue(self):
-        """execute() concurrent path: on_packet_crash fires per failing packet with error_policy='continue'."""
+    def test_execute_error_policy_continue_skips_failures(self):
+        """execute() sequential path: on_packet_crash fires per failing packet with error_policy='continue'."""
         errors = []
 
         def sometimes_fail(x: int) -> int:
@@ -200,7 +200,7 @@ class TestIterPacketsReadOnly:
             return x * 2
 
         pf = PythonPacketFunction(sometimes_fail, output_keys="result")
-        pf.executor = LocalExecutor()  # enables concurrent path
+        pf.executor = LocalExecutor()  # non-concurrent; tests sequential execute() path
         pod = FunctionPod(pf)
         db = InMemoryArrowDatabase()
         node = FunctionNode(pod, _make_source(n=3), pipeline_database=db)
@@ -603,7 +603,7 @@ def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
 python -m pytest tests/test_core/nodes/test_function_node_iteration.py -v 2>&1 | grep -E "PASS|FAIL|ERROR"
 ```
 
-Expected: Most of the 10 tests pass now. `test_execute_concurrent_error_policy_continue` may still fail (Task 9).
+Expected: Most of the 10 tests pass now. `test_execute_error_policy_continue_skips_failures` may still fail (Task 9).
 
 - [ ] **Step 3: Quick smoke-test on execute path**
 
@@ -842,7 +842,7 @@ git commit -m "refactor(ENG-379): simplify _async_execute_cache_only() using _lo
 
 ---
 
-## Task 9: Refactor `execute()` — selective DB reload + concurrent path
+## Task 9: Refactor `execute()` — selective DB reload (always sequential)
 
 **Files:**
 - Modify: `src/orcapod/core/nodes/function_node.py` — lines 577–650
@@ -1007,7 +1007,7 @@ Expected: PASS.
 - [ ] **Step 4: Run the concurrent execute test**
 
 ```bash
-python -m pytest tests/test_core/nodes/test_function_node_iteration.py::TestIterPacketsReadOnly::test_execute_concurrent_error_policy_continue -v 2>&1
+python -m pytest tests/test_core/nodes/test_function_node_iteration.py::TestIterPacketsReadOnly::test_execute_error_policy_continue_skips_failures -v 2>&1
 ```
 
 Expected: PASS.
@@ -1016,7 +1016,7 @@ Expected: PASS.
 
 ```bash
 git add src/orcapod/core/nodes/function_node.py
-git commit -m "refactor(ENG-379): refactor execute() with selective DB reload and concurrent path"
+git commit -m "refactor(ENG-379): refactor execute() with selective DB reload (always sequential)"
 ```
 
 ---
@@ -1084,7 +1084,7 @@ The following five methods are no longer used and should be deleted entirely:
 | Method | Location | Replaced by |
 |---|---|---|
 | `_iter_packets_sequential()` | ~line 1287 | `execute()` sequential path |
-| `_iter_packets_concurrent()` | ~line 1301 | `execute()` concurrent path |
+| `_iter_packets_concurrent()` | ~line 1301 | removed — concurrent path did not move to `execute()`; async execution is in `async_execute()` only |
 | `_iter_all_from_database()` | ~line 1119 | `_load_cached_entries()` |
 | `_load_all_cached_records()` | ~line 1051 | `_load_cached_entries()` |
 

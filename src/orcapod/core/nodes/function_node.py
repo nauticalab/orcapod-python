@@ -600,16 +600,20 @@ class FunctionNode(StreamBase):
         ]
         entry_ids = [eid for _, _, eid in upstream_entries]
 
-        # Hot-load any already-computed results from DB into the in-memory cache.
-        # This avoids recomputing packets that were persisted in a previous run.
-        cached = self.get_cached_results(entry_ids=entry_ids)
+        # Hot-load any already-computed results from DB into _cached_output_packets.
+        # get_cached_results() is called for its side effect (populating the
+        # in-memory cache); the returned dict is intentionally discarded here so
+        # that the per-packet cache-hit check below uses _cached_output_packets
+        # directly — which includes None-output entries (function returned None)
+        # and prevents spurious recomputation of already-processed packets.
+        self.get_cached_results(entry_ids=entry_ids)
 
         output: list[tuple[TagProtocol, PacketProtocol]] = []
         for tag, packet, entry_id in upstream_entries:
             ctx_obs.on_packet_start(node_label, tag, packet)
 
-            if entry_id in cached:
-                tag_out, result = cached[entry_id]
+            if entry_id in self._cached_output_packets:
+                tag_out, result = self._cached_output_packets[entry_id]
                 ctx_obs.on_packet_end(node_label, tag, packet, result, cached=True)
                 if result is not None:
                     output.append((tag_out, result))
