@@ -146,7 +146,7 @@ class TestIterPacketsReadOnly:
             return x * 2
 
         pf = PythonPacketFunction(sometimes_fail, output_keys="result")
-        pf.executor = LocalPythonFunctionExecutor()  # sets executor (LocalExecutor.supports_concurrent_execution is False)
+        pf.executor = LocalPythonFunctionExecutor()  # supports_concurrent_execution is False
         pod = FunctionPod(pf)
         db = InMemoryArrowDatabase()
         node = FunctionNode(pod, _make_source(n=3), pipeline_database=db)

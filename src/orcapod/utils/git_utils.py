@@ -46,11 +46,16 @@ def get_git_info(path):
             # Handle detached HEAD state
             branch_name = "HEAD (detached)"
 
+        # Check for untracked files (separate from is_dirty which only
+        # covers staged/unstaged changes to tracked files).
+        has_untracked_files = len(repo.untracked_files) > 0
+
         return {
             "is_repo": True,
             "commit_hash": commit_hash,
             "short_hash": short_hash,
             "is_dirty": is_dirty,
+            "has_untracked_files": has_untracked_files,
             "branch": branch_name,
             "repo_root": repo.working_dir,
         }

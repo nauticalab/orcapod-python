@@ -337,7 +337,7 @@ class TestGetAllRecords:
 
 
 class TestStoreDictColumns:
-    def test_executor_info_column_stored(self):
+    def test_executor_info_column_stored_as_map(self):
         cache, db = _make_cache()
         pf = _make_pf()
         _compute_and_store(cache, pf, Packet({"x": 10}))
@@ -346,8 +346,11 @@ class TestStoreDictColumns:
         assert records is not None
         exec_info_col = f"{constants.PF_EXECUTION_PREFIX}executor_info"
         assert exec_info_col in records.column_names
+        # dict[str, str] should be stored as an Arrow map (list of key-value structs)
+        field_type = records.schema.field(exec_info_col).type
+        assert pa.types.is_large_list(field_type), f"Expected large_list (map), got {field_type}"
 
-    def test_extra_info_column_stored(self):
+    def test_extra_info_column_stored_as_map(self):
         cache, db = _make_cache()
         pf = _make_pf()
         _compute_and_store(cache, pf, Packet({"x": 10}))
@@ -356,3 +359,6 @@ class TestStoreDictColumns:
         assert records is not None
         extra_info_col = f"{constants.PF_EXECUTION_PREFIX}extra_info"
         assert extra_info_col in records.column_names
+        # dict[str, str] should be stored as an Arrow map (list of key-value structs)
+        field_type = records.schema.field(extra_info_col).type
+        assert pa.types.is_large_list(field_type), f"Expected large_list (map), got {field_type}"
