@@ -188,11 +188,15 @@ class ResultCache:
             pa.array([input_packet.content_hash().to_string()], type=pa.large_string()),
         )
 
-        # Append timestamp
-        timestamp = datetime.now(timezone.utc)
+        # Append timestamp as ISO 8601 string.
+        # TODO: switch to pa.timestamp("us", tz="UTC") once the universal
+        # converter supports native Arrow timestamp ↔ Python datetime round-trip.
+        # ISO 8601 strings sort lexicographically in time order, so the
+        # conflict-resolution sort in lookup() still works correctly.
+        timestamp = datetime.now(timezone.utc).isoformat()
         data_table = data_table.append_column(
             constants.POD_TIMESTAMP,
-            pa.array([timestamp], type=pa.timestamp("us", tz="UTC")),
+            pa.array([timestamp], type=pa.large_string()),
         )
 
         self._result_database.add_record(
