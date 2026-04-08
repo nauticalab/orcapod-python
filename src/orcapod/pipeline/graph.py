@@ -429,6 +429,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 ``_default_observer`` set during ``compile()`` is used.
         """
         from orcapod.types import ExecutorType, PipelineConfig
+        import uuid
+        from datetime import datetime, timezone
 
         explicit_config = config is not None
         config = config or PipelineConfig()
@@ -448,6 +450,13 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         if not self._compiled:
             self.compile()
 
+        # Generate stable run identity at run start (PLT-1161).
+        run_id = str(uuid.uuid4())
+        snapshot_time = datetime.now(timezone.utc).isoformat()
+
+        # Write DAG snapshot before any node executes (PLT-1161).
+        self._write_dag_snapshot(run_id, snapshot_time)
+
         if effective_engine is not None:
             self._apply_execution_engine(effective_engine, effective_opts)
 
@@ -461,6 +470,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 self._node_graph,
                 observer=effective_observer,
                 pipeline_uri=pipeline_uri,
+                run_id=run_id,
             )
         else:
             # Default to async when an execution engine is provided, unless
@@ -480,6 +490,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     self._node_graph,
                     observer=effective_observer,
                     pipeline_uri=pipeline_uri,
+                    run_id=run_id,
                 )
             else:
                 from orcapod.pipeline.sync_orchestrator import (
@@ -491,12 +502,13 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     self._node_graph,
                     observer=effective_observer,
                     pipeline_uri=pipeline_uri,
+                    run_id=run_id,
                 )
 
         self.flush()
 
         if self._auto_save_path is not None:
-            self.save(str(self._auto_save_path))
+            self.save(str(self._auto_save_path), run_id=run_id, snapshot_time=snapshot_time)
 
     def _apply_execution_engine(
         self,
@@ -577,6 +589,62 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         combined = "\n".join(node_lines + edge_lines)
         return hashlib.sha256(combined.encode()).hexdigest()[:16]
 
+    def _write_dag_snapshot(
+        self,
+        run_id: str,
+        snapshot_time: str,
+    ) -> "Path | None":
+        """Write dag_snapshot.json to the pipeline-specific base directory.
+
+        Derives the target path from the scoped pipeline database's local
+        filesystem root.  Returns the :class:`~pathlib.Path` that was written,
+        or ``None`` if the database has no local filesystem root (cloud or
+        in-memory) or if no pipeline database is configured.
+
+        Args:
+            run_id: UUID string for this run (included in snapshot metadata).
+            snapshot_time: ISO-8601 UTC timestamp string (included in snapshot).
+
+        Returns:
+            The :class:`~pathlib.Path` of the written file, or ``None`` if skipped.
+        """
+        from orcapod.databases.delta_lake_databases import DeltaTableDatabase
+
+        scoped_db = self._scoped_pipeline_database
+        if scoped_db is None:
+            logger.debug("_write_dag_snapshot: no scoped pipeline database — skipping")
+            return None
+
+        if not isinstance(scoped_db, DeltaTableDatabase) or scoped_db._is_cloud:
+            logger.debug(
+                "_write_dag_snapshot: pipeline database has no local filesystem root — skipping"
+            )
+            return None
+
+        # Build the snapshot directory: {db root}/{pipeline name components}
+        snapshot_dir: Path = scoped_db._local_root
+        for component in scoped_db._path_prefix:
+            snapshot_dir = snapshot_dir / DeltaTableDatabase._sanitize_path_component(
+                component
+            )
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_path = snapshot_dir / "dag_snapshot.json"
+
+        try:
+            self.save(
+                str(snapshot_path),
+                level="standard",
+                run_id=run_id,
+                snapshot_time=snapshot_time,
+            )
+            logger.debug("dag_snapshot.json written to %s", snapshot_path)
+            return snapshot_path
+        except Exception as exc:
+            logger.warning(
+                "Failed to write dag_snapshot.json to %s: %s", snapshot_path, exc
+            )
+            return None
+
     def show_graph(self, **kwargs) -> str | None:
         """Render the pipeline's node graph.
 
@@ -601,7 +669,14 @@ class Pipeline(AutoRegisteringContextBasedTracker):
     # Serialization
     # ------------------------------------------------------------------
 
-    def save(self, path: str, level: Literal["minimal", "definition", "standard", "full"] = "standard") -> None:
+    def save(
+        self,
+        path: str,
+        level: Literal["minimal", "definition", "standard", "full"] = "standard",
+        *,
+        run_id: str | None = None,
+        snapshot_time: str | None = None,
+    ) -> None:
         """Serialize the pipeline to a JSON file.
 
         Args:
@@ -689,8 +764,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         # -- Pipeline block --
         pipeline_block: dict[str, Any] = {
             "name": list(self._name),
-            "run_id": None,
-            "snapshot_time": None,
+            "run_id": run_id,
+            "snapshot_time": snapshot_time,
         }
         if include_pipeline_dbs:
             # Save the scoped pipeline database (with pipeline-name prefix in base_path)
