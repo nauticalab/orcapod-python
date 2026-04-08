@@ -405,7 +405,17 @@ class UniversalTypeConverter:
                 type_name = getattr(python_type, "__name__")
                 if type_name in type_map:
                     return type_map[type_name]
-            raise ValueError(f"Unsupported Python type: {python_type}")
+            hint = ""
+            if python_type is Any:
+                hint = (
+                    " Hint: typing.Any usually appears when an Arrow type had "
+                    "no mapping in arrow_type_to_python_type (check warnings). "
+                    "It can also come from schema inference on empty containers "
+                    "(e.g. {} infers as dict[Any, Any])."
+                )
+            raise ValueError(
+                f"Unsupported Python type: {python_type}.{hint}"
+            )
 
         # Handle list types
         if origin is list:
@@ -576,7 +586,17 @@ class UniversalTypeConverter:
                 return typing.Union[tuple(child_types)]
 
         else:
-            # Default case for unsupported types
+            # Default case for unsupported types.
+            # NOTE: this silent fallback to Any can cause cryptic errors
+            # downstream when code tries to convert Any back to Arrow
+            # (e.g. "Unsupported Python type: typing.Any"). If you hit that,
+            # the root cause is likely an unmapped Arrow type here.
+            logger.warning(
+                "arrow_type_to_python_type: no mapping for Arrow type %r, "
+                "falling back to typing.Any. This may cause errors downstream "
+                "when converting back to Arrow.",
+                arrow_type,
+            )
             return Any
 
     def _get_or_create_typeddict_for_struct(
