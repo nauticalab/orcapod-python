@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
 
 
-class LocalExecutor(PythonFunctionExecutorBase):
+class LocalPythonFunctionExecutor(PythonFunctionExecutorBase):
     """Default executor -- runs the packet function directly in the current process.
 
     Supports all packet function types (``supported_function_type_ids``
@@ -127,9 +127,11 @@ class LocalExecutor(PythonFunctionExecutorBase):
             logger.record(**captured.as_dict())
         return raw_result
 
-    def with_options(self, **opts: Any) -> LocalExecutor:
+    def with_options(self, **opts: Any) -> LocalPythonFunctionExecutor:
         """Return a new ``LocalExecutor``.
 
         ``LocalExecutor`` carries no state, so options are ignored.
         """
-        return LocalExecutor()
+        return LocalPythonFunctionExecutor()
+
+

@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol, Self, runtime_checkable
 
+from orcapod.types import Schema
+
 if TYPE_CHECKING:
     from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
 
@@ -53,12 +55,16 @@ class PacketFunctionExecutorProtocol(Protocol):
         """
         ...
 
-    def get_execution_data(self) -> dict[str, Any]:
+    def get_executor_data(self) -> dict[str, Any]:
         """Return metadata describing the execution environment.
 
         Stored alongside results for observability/provenance but does not
         affect content or pipeline hashes.
         """
+        ...
+
+    def get_executor_data_schema(self) -> Schema:
+        """Return schema for the data returned by ``get_executor_data``."""
         ...
 
 

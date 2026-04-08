@@ -10,7 +10,7 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from orcapod.core.executors import LocalExecutor
+from orcapod.core.executors import LocalPythonFunctionExecutor
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
@@ -60,7 +60,7 @@ class TestSyncPipelineSuccessStatus:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result", executor=LocalExecutor())
+        pf = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_status", pipeline_database=db)
@@ -95,7 +95,7 @@ class TestFailingPacketsStatus:
         def failing(x: int) -> int:
             raise ValueError("boom")
 
-        pf = PythonPacketFunction(failing, output_keys="result", executor=LocalExecutor())
+        pf = PythonPacketFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_fail_status", pipeline_database=db)
@@ -139,7 +139,7 @@ class TestFlatStatusStorage:
         def identity(x: int) -> int:
             return x
 
-        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalExecutor())
+        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_flat_status", pipeline_database=db)
@@ -169,7 +169,7 @@ class TestQueryableTagColumns:
         def identity(x: int) -> int:
             return x
 
-        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalExecutor())
+        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_tags_status", pipeline_database=db)
@@ -202,7 +202,7 @@ class TestAsyncOrchestratorStatus:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result", executor=LocalExecutor())
+        pf = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_async_status", pipeline_database=db)
@@ -236,7 +236,7 @@ class TestFailFastErrorPolicy:
         def failing(x: int) -> int:
             raise RuntimeError("crash")
 
-        pf = PythonPacketFunction(failing, output_keys="result", executor=LocalExecutor())
+        pf = PythonPacketFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_failfast_status", pipeline_database=db)
@@ -279,7 +279,7 @@ class TestMixedSuccessFailure:
         def safe_div(x: int) -> float:
             return 100 / x  # x=0 will raise ZeroDivisionError
 
-        pf = PythonPacketFunction(safe_div, output_keys="result", executor=LocalExecutor())
+        pf = PythonPacketFunction(safe_div, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_mixed_status", pipeline_database=db)
@@ -318,9 +318,9 @@ class TestMultipleFunctionNodesSeparateStatus:
         def triple(result: int) -> int:
             return result * 3
 
-        pf1 = PythonPacketFunction(double, output_keys="result", executor=LocalExecutor())
+        pf1 = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod1 = FunctionPod(pf1)
-        pf2 = PythonPacketFunction(triple, output_keys="final", executor=LocalExecutor())
+        pf2 = PythonPacketFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
         pod2 = FunctionPod(pf2)
 
         pipeline = Pipeline(name="test_multi_status", pipeline_database=db)
@@ -355,9 +355,9 @@ class TestGetStatusNodeSpecific:
         def triple(result: int) -> int:
             return result * 3
 
-        pf1 = PythonPacketFunction(double, output_keys="result", executor=LocalExecutor())
+        pf1 = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod1 = FunctionPod(pf1)
-        pf2 = PythonPacketFunction(triple, output_keys="final", executor=LocalExecutor())
+        pf2 = PythonPacketFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
         pod2 = FunctionPod(pf2)
 
         pipeline = Pipeline(name="test_filter_status", pipeline_database=db)
@@ -388,7 +388,7 @@ class TestStatusSchema:
         def identity(x: int) -> int:
             return x
 
-        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalExecutor())
+        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_schema", pipeline_database=db)
@@ -430,7 +430,7 @@ class TestRunIdTracking:
         def identity(x: int) -> int:
             return x
 
-        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalExecutor())
+        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_runid", pipeline_database=db)

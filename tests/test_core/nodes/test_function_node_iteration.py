@@ -16,7 +16,7 @@ from orcapod.core.nodes import FunctionNode
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.core.executors import LocalExecutor
+from orcapod.core.executors import LocalPythonFunctionExecutor
 
 
 def _make_source(n: int = 3) -> ArrowTableSource:
@@ -146,7 +146,7 @@ class TestIterPacketsReadOnly:
             return x * 2
 
         pf = PythonPacketFunction(sometimes_fail, output_keys="result")
-        pf.executor = LocalExecutor()  # sets executor (LocalExecutor.supports_concurrent_execution is False)
+        pf.executor = LocalPythonFunctionExecutor()  # sets executor (LocalExecutor.supports_concurrent_execution is False)
         pod = FunctionPod(pf)
         db = InMemoryArrowDatabase()
         node = FunctionNode(pod, _make_source(n=3), pipeline_database=db)
