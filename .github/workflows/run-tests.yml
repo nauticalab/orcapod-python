@@ -9,6 +9,7 @@ on:
 
 jobs:
   test:
+    needs: license-check
     runs-on: ubuntu-latest
     strategy:
       matrix:
