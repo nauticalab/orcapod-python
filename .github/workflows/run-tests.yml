@@ -108,7 +108,7 @@ jobs:
       - name: Check dependency licenses
         run: >-
           uv run pip-licenses
-          --allow-only="MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;Python-2.0;PSF-2.0"
+          --allow-only="MIT;Apache-2.0;Apache Software License;BSD-2-Clause;BSD-3-Clause;BSD License;BSD;ISC;Python-2.0;PSF-2.0;Python Software Foundation License"
           --partial-match
 
   dependency-review:
