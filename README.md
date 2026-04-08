@@ -1,6 +1,12 @@
 # Orcapod Python
 Orcapod's Python library for developing reproducbile scientific pipelines.
 
+## Releasing
+
+To cut a release, tag a commit on `main` — `hatch-vcs` derives the version
+automatically and CI publishes to PyPI. See [RELEASING.md](RELEASING.md) for the
+full workflow.
+
 ## Continuous Integration
 
 This project uses GitHub Actions for continuous integration:
