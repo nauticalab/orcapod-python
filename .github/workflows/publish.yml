@@ -6,8 +6,29 @@ on:
       - "v[0-9]*.[0-9]*.[0-9]*"
 
 jobs:
+  license-check:
+    name: License check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # required: hatch-vcs runs during uv sync
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync --locked --dev
+
+      - name: Check dependency licenses
+        run: >-
+          uv run pip-licenses
+          --allow-only="MIT;Apache-2.0;Apache 2.0;Apache Software License;BSD-2-Clause;BSD-3-Clause;BSD License;BSD;ISC;LGPL-3.0-only;MPL-2.0;Mozilla Public License;Python-2.0;PSF-2.0;Python Software Foundation License;Unlicense"
+          --partial-match
+
   test:
     name: Test (Python ${{ matrix.python-version }})
+    needs: license-check
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
@@ -33,30 +54,9 @@ jobs:
       - name: Run tests
         run: uv run --python ${{ matrix.python-version }} pytest -m "not postgres" --tb=short -q
 
-  license-check:
-    name: License check
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0   # required: hatch-vcs runs during uv sync
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-
-      - name: Install dependencies
-        run: uv sync --locked --dev
-
-      - name: Check dependency licenses
-        run: >-
-          uv run pip-licenses
-          --allow-only="MIT;Apache-2.0;Apache 2.0;Apache Software License;BSD-2-Clause;BSD-3-Clause;BSD License;BSD;ISC;LGPL-3.0-only;MPL-2.0;Mozilla Public License;Python-2.0;PSF-2.0;Python Software Foundation License;Unlicense"
-          --partial-match
-
   build:
     name: Build distribution
-    needs: license-check
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
