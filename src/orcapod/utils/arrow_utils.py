@@ -1,4 +1,4 @@
-# TODO: move this to a separate module
+from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping, Collection
@@ -7,6 +7,7 @@ from typing import Any
 
 from typing import TYPE_CHECKING
 from orcapod.utils.lazy_module import LazyModule
+from orcapod.system_constants import constants
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -537,7 +538,41 @@ def prepare_prefixed_columns(
     exclude_columns: Collection[str] = (),
     exclude_prefixes: Collection[str] = (),
 ) -> tuple["pa.Table", dict[str, "pa.Table"]]:
-    """ """
+    """
+    Split a table into non-prefixed columns and per-prefix tables.
+
+    Columns whose names start with one of the configured prefixes are grouped
+    into a separate output table for that prefix, with the matching prefix
+    removed from each grouped column name. Columns that do not match any
+    prefix remain in the returned data table.
+
+    Args:
+        table: The input ``pyarrow.Table`` or ``pyarrow.RecordBatch`` whose
+            columns will be partitioned into a main data table and zero or more
+            prefix-specific tables.
+        prefix_info: Prefix configuration. This may be:
+
+            * a collection of prefix strings, in which case each prefix is used
+              with no additional per-prefix metadata; or
+            * a mapping from prefix string to metadata/``None``; or
+            * a mapping from prefix string to a mapping of per-column metadata.
+
+            The exact metadata values are consumed by the implementation when
+            constructing the per-prefix tables, but the keys define the set of
+            prefixes that will be recognized.
+        exclude_columns: Column names to omit from the constructed output.
+        exclude_prefixes: Prefix groups to skip entirely even if matching input
+            columns are present.
+
+    Returns:
+        A tuple ``(data_table, prefixed_tables)`` where ``data_table`` is a
+        ``pyarrow.Table`` containing the columns from ``table`` that were not
+        assigned to any prefix group, and ``prefixed_tables`` is a dictionary
+        mapping each recognized prefix to its constructed ``pyarrow.Table``.
+
+        Nullability is preserved from the source columns for columns copied
+        directly from ``table``.
+    """
     all_prefix_info = {}
     if isinstance(prefix_info, Mapping):
         for prefix, info in prefix_info.items():
@@ -576,6 +611,7 @@ def prepare_prefixed_columns(
 
     prefixed_column_names = defaultdict(list)
     prefixed_columns = defaultdict(list)
+    prefixed_column_nullables: dict[str, list[bool]] = defaultdict(list)
 
     target_column_names = [
         c
@@ -587,6 +623,7 @@ def prepare_prefixed_columns(
     for prefix, value_lut in all_prefix_info.items():
         target_prefixed_column_names = prefixed_column_names[prefix]
         target_prefixed_columns = prefixed_columns[prefix]
+        target_nullables = prefixed_column_nullables[prefix]
 
         for col_name in target_column_names:
             prefixed_col_name = f"{prefix}{col_name}"
@@ -598,7 +635,7 @@ def prepare_prefixed_columns(
                 value = value_lut
 
             if value is not None:
-                # Use value from source_info dictionary
+                # Concrete value supplied — column is never null.
                 # TODO: clean up the logic here
                 if not isinstance(value, str) and isinstance(value, Collection):
                     # TODO: this won't work other data types!!!
@@ -607,29 +644,43 @@ def prepare_prefixed_columns(
                     )
                 else:
                     column_values = pa.array([value] * num_rows, type=pa.large_string())
-            # if col_name is in existing_source_info, use that column
+                col_nullable = False
             elif col_name in existing_columns:
-                # Use existing prefixed column, but convert to large_string
+                # Pass-through from the source table — inherit its nullable flag.
                 existing_col = table[prefixed_col_name]
-
                 if existing_col.type == pa.string():
                     # Convert to large_string
                     column_values = pa.compute.cast(existing_col, pa.large_string())  # type: ignore
                 else:
                     column_values = existing_col
+                col_nullable = table.schema.field(prefixed_col_name).nullable
             else:
-                # Use null values
+                # No value available — column is genuinely all-null.
                 column_values = pa.array([None] * num_rows, type=pa.large_string())
+                col_nullable = True
+            # Safety: never declare non-nullable when the data actually has nulls
+            # (e.g. a pass-through column from a source that was non-nullable can
+            # gain nulls after a join populates only one side of the result).
+            col_nullable = col_nullable or bool(column_values.null_count > 0)
             target_prefixed_column_names.append(prefixed_col_name)
             target_prefixed_columns.append(column_values)
+            target_nullables.append(col_nullable)
 
-    # Step 3: Create the final table
-    data_table: pa.Table = pa.Table.from_arrays(data_columns, names=data_column_names)
+    # Step 3: Create the final table, preserving nullable flags from the source table
+    data_fields = [table.schema.field(name) for name in data_column_names]
+    data_schema = pa.schema(data_fields, metadata=table.schema.metadata)
+    data_table: pa.Table = pa.Table.from_arrays(data_columns, schema=data_schema)
     result_tables = {}
     for prefix in all_prefix_info:
-        prefix_table = pa.Table.from_arrays(
-            prefixed_columns[prefix], names=prefixed_column_names[prefix]
-        )
+        schema = pa.schema([
+            pa.field(name, col.type, nullable=nullable)
+            for name, col, nullable in zip(
+                prefixed_column_names[prefix],
+                prefixed_columns[prefix],
+                prefixed_column_nullables[prefix],
+            )
+        ])
+        prefix_table = pa.Table.from_arrays(prefixed_columns[prefix], schema=schema)
         result_tables[prefix] = normalize_table_to_large_types(prefix_table)
 
     return data_table, result_tables
@@ -727,6 +778,412 @@ def test_schema_normalization():
 
     # Verify data is preserved
     print(f"\nData preserved: {table.to_pydict() == normalized_table.to_pydict()}")
+
+
+def make_schema_non_nullable(schema: "pa.Schema") -> "pa.Schema":
+    """Return a copy of *schema* with every field's ``nullable`` flag set to False.
+
+    Arrow tables default all fields to ``nullable=True`` as a storage convention.
+    When recovering Python types from a raw Arrow schema via
+    ``arrow_schema_to_python_schema``, callers should normalise the schema first
+    to prevent plain fields from being reconstructed as ``T | None``.
+
+    Args:
+        schema: The Arrow schema to normalise.
+
+    Returns:
+        A new ``pa.Schema`` with the same fields and types but ``nullable=False``
+        on every field.
+    """
+    return pa.schema(
+        [pa.field(f.name, f.type, nullable=False, metadata=f.metadata) for f in schema],
+        metadata=schema.metadata,
+    )
+
+
+def infer_schema_nullable(table: "pa.Table") -> "pa.Schema":
+    """Return a schema where each field's nullable flag is inferred from actual data.
+
+    A field is marked ``nullable=True`` if its column contains any null values,
+    ``nullable=False`` otherwise.  This is the right heuristic when receiving
+    a raw Arrow table whose schema has not been set deliberately — Arrow and
+    Polars default all fields to ``nullable=True`` regardless of content, so
+    inferring from the data avoids spurious ``T | None`` types for columns
+    that never contain nulls.
+
+    Args:
+        table: Arrow table to inspect.
+
+    Returns:
+        A new schema with nullable flags derived from actual null counts.
+    """
+    return pa.schema(
+        [
+            pa.field(
+                field.name,
+                field.type,
+                nullable=table.column(i).null_count > 0,
+                metadata=field.metadata,
+            )
+            for i, field in enumerate(table.schema)
+        ],
+        metadata=table.schema.metadata,
+    )
+
+
+def restore_schema_nullability(
+    table: "pa.Table",
+    *reference_schemas: "pa.Schema",
+) -> "pa.Table":
+    """Restore nullable flags lost during an Arrow → Polars → Arrow round-trip.
+
+    Polars converts all Arrow fields to ``nullable=True`` when producing its
+    Arrow output.  This function repairs the resulting table by looking up each
+    field name in the supplied reference schemas and reinstating the original
+    ``nullable`` flag (and type) from those references.
+
+    Fields that are **not** found in any reference schema are left exactly as
+    Polars produced them (``nullable=True``), which is safe for internally
+    generated sentinel columns (e.g. ``_exists``, ``__pipeline_entry_id``).
+
+    When the same field name appears in multiple reference schemas the
+    **last-supplied** schema wins, so callers can pass ``(left_schema,
+    right_schema)`` and get right-side nullability for join-key columns that
+    appear in both.
+
+    Args:
+        table: Arrow table produced by a Polars round-trip (all fields
+            ``nullable=True``).
+        *reference_schemas: One or more Arrow schemas carrying the original
+            nullable flags.  Pass the schemas of every table that participated
+            in the Polars join/sort so that all columns are covered.
+
+    Returns:
+        A new Arrow table cast to the restored schema.  Data is unchanged;
+        only the schema metadata (nullability, field type, field metadata)
+        is corrected.
+
+    Raises:
+        pyarrow.ArrowInvalid: If a restored field type is incompatible with
+            the actual column data (should not happen for well-formed
+            round-trips, but surfaced to the caller rather than silently
+            discarded).
+
+    Example::
+
+        taginfo_schema = taginfo.schema
+        results_schema = results.schema
+        joined = (
+            pl.DataFrame(taginfo)
+            .join(pl.DataFrame(results), on="record_id", how="inner")
+            .to_arrow()
+        )
+        joined = arrow_utils.restore_schema_nullability(
+            joined, taginfo_schema, results_schema
+        )
+    """
+    # Build a name → Field lookup; later schemas override earlier ones.
+    field_lookup: dict[str, "pa.Field"] = {}
+    for schema in reference_schemas:
+        for field in schema:
+            field_lookup[field.name] = field
+
+    restored_fields = []
+    for field in table.schema:
+        ref = field_lookup.get(field.name)
+        if ref is not None:
+            restored_fields.append(
+                pa.field(field.name, ref.type, nullable=ref.nullable, metadata=ref.metadata)
+            )
+        else:
+            restored_fields.append(field)
+
+    restored_schema = pa.schema(restored_fields, metadata=table.schema.metadata)
+    return table.cast(restored_schema)
+
+
+def drop_columns_with_prefix(
+    table: "pa.Table",
+    prefix: str | tuple[str, ...],
+    exclude_columns: Collection[str] = (),
+) -> "pa.Table":
+    """Drop columns with a specific prefix from an Arrow table."""
+    columns_to_drop = [
+        col
+        for col in table.column_names
+        if col.startswith(prefix) and col not in exclude_columns
+    ]
+    return table.drop(columns=columns_to_drop)
+
+
+def drop_system_columns(
+    table: "pa.Table",
+    system_column_prefix: tuple[str, ...] = (
+        constants.META_PREFIX,
+        constants.DATAGRAM_PREFIX,
+    ),
+) -> "pa.Table":
+    return drop_columns_with_prefix(table, system_column_prefix)
+
+
+def get_system_columns(table: "pa.Table") -> "pa.Table":
+    """Get system columns from an Arrow table."""
+    return table.select(
+        [
+            col
+            for col in table.column_names
+            if col.startswith(constants.SYSTEM_TAG_PREFIX)
+        ]
+    )
+
+
+def add_system_tag_columns(
+    table: "pa.Table",
+    schema_hash: str,
+    source_ids: str | Collection[str],
+    record_ids: Collection[str],
+) -> "pa.Table":
+    """Add paired source_id and record_id system tag columns to an Arrow table."""
+    if not table.column_names:
+        raise ValueError("Table is empty")
+
+    # Normalize source_ids
+    if isinstance(source_ids, str):
+        source_ids = [source_ids] * table.num_rows
+    else:
+        source_ids = list(source_ids)
+        if len(source_ids) != table.num_rows:
+            raise ValueError(
+                "Length of source_ids must match number of rows in the table."
+            )
+
+    record_ids = list(record_ids)
+    if len(record_ids) != table.num_rows:
+        raise ValueError("Length of record_ids must match number of rows in the table.")
+
+    source_id_col_name = f"{constants.SYSTEM_TAG_SOURCE_ID_PREFIX}{constants.BLOCK_SEPARATOR}{schema_hash}"
+    record_id_col_name = f"{constants.SYSTEM_TAG_RECORD_ID_PREFIX}{constants.BLOCK_SEPARATOR}{schema_hash}"
+
+    source_id_array = pa.array(source_ids, type=pa.large_string())
+    record_id_array = pa.array(record_ids, type=pa.large_string())
+
+    # System tag columns are always computed, never null — declare nullable=False
+    # explicitly so the schema intent is not lost in Polars round-trips.
+    table = table.append_column(
+        pa.field(source_id_col_name, pa.large_string(), nullable=False), source_id_array
+    )
+    table = table.append_column(
+        pa.field(record_id_col_name, pa.large_string(), nullable=False), record_id_array
+    )
+    return table
+
+
+def append_to_system_tags(table: "pa.Table", value: str) -> "pa.Table":
+    """Append a value to the system tags column in an Arrow table."""
+    if not table.column_names:
+        raise ValueError("Table is empty")
+
+    column_name_map = {
+        c: f"{c}{constants.BLOCK_SEPARATOR}{value}"
+        if c.startswith(constants.SYSTEM_TAG_PREFIX)
+        else c
+        for c in table.column_names
+    }
+    return table.rename_columns(column_name_map)
+
+
+def _parse_system_tag_column(
+    col_name: str,
+) -> tuple[str, str, str] | None:
+    """Parse a system tag column name into (field_type, provenance_path, position).
+
+    For example:
+        _tag_source_id::abc123::def456:0
+        → field_type="source_id", provenance_path="abc123::def456", position="0"
+
+        _tag_record_id::abc123::def456:0
+        → field_type="record_id", provenance_path="abc123::def456", position="0"
+
+    Returns None if the column doesn't end with a :position suffix.
+    """
+    # Strip the trailing :position
+    base, sep, position = col_name.rpartition(constants.FIELD_SEPARATOR)
+    if not sep or not position.isdigit():
+        return None
+
+    # Determine field type by checking known prefixes
+    prefix = constants.SYSTEM_TAG_PREFIX
+    if not base.startswith(prefix):
+        return None
+
+    after_prefix = base[len(prefix) :]  # e.g. "source_id::abc123::def456"
+
+    # Extract field_type and provenance_path
+    # field_type is everything before the first BLOCK_SEPARATOR
+    field_type, block_sep, provenance_path = after_prefix.partition(
+        constants.BLOCK_SEPARATOR
+    )
+    if not block_sep:
+        return None
+
+    return field_type, provenance_path, position
+
+
+def sort_system_tag_values(table: "pa.Table") -> "pa.Table":
+    """Sort paired system tag values for columns that share the same provenance path.
+
+    System tag columns come in (source_id, record_id) pairs. Columns that differ
+    only by their canonical position (the final :N) represent streams with the same
+    pipeline_hash that were joined. For commutativity, paired (source_id, record_id)
+    tuples must be sorted together per row so that the result is independent of
+    input order.
+
+    Algorithm:
+    1. Parse each system tag column into (field_type, provenance_path, position)
+    2. Group by provenance_path — source_id and record_id at the same path+position
+       are paired
+    3. For each group with >1 position, sort per-row by (source_id, record_id) tuples
+    4. Assign sorted values back to both columns at each position
+    """
+    sys_tag_cols = [
+        c for c in table.column_names if c.startswith(constants.SYSTEM_TAG_PREFIX)
+    ]
+
+    if not sys_tag_cols:
+        return table
+
+    # Parse all system tag columns and group by provenance_path
+    # groups[provenance_path][position] = {field_type: col_name}
+    groups: dict[str, dict[str, dict[str, str]]] = {}
+    for col in sys_tag_cols:
+        parsed = _parse_system_tag_column(col)
+        if parsed is None:
+            continue
+        field_type, provenance_path, position = parsed
+        groups.setdefault(provenance_path, {}).setdefault(position, {})[field_type] = (
+            col
+        )
+
+    source_id_field = constants.SYSTEM_TAG_SOURCE_ID_PREFIX[
+        len(constants.SYSTEM_TAG_PREFIX) :
+    ]
+    record_id_field = constants.SYSTEM_TAG_RECORD_ID_PREFIX[
+        len(constants.SYSTEM_TAG_PREFIX) :
+    ]
+
+    # For each provenance_path group with >1 position, sort paired tuples per row
+    for provenance_path, positions in groups.items():
+        if len(positions) <= 1:
+            continue
+
+        # Sort positions numerically
+        sorted_positions = sorted(positions.keys(), key=int)
+
+        # Collect paired column names for each position
+        paired_cols: list[tuple[str | None, str | None]] = []
+        for pos in sorted_positions:
+            field_map = positions[pos]
+            sid_col = field_map.get(source_id_field)
+            rid_col = field_map.get(record_id_field)
+            paired_cols.append((sid_col, rid_col))
+
+        # Get values for all paired columns
+        sid_values = []
+        rid_values = []
+        for sid_col, rid_col in paired_cols:
+            sid_values.append(
+                table.column(sid_col).to_pylist()
+                if sid_col
+                else [None] * table.num_rows
+            )
+            rid_values.append(
+                table.column(rid_col).to_pylist()
+                if rid_col
+                else [None] * table.num_rows
+            )
+
+        # Sort per row by (source_id, record_id) tuples
+        n_positions = len(sorted_positions)
+        sorted_sid: list[list] = [[] for _ in range(n_positions)]
+        sorted_rid: list[list] = [[] for _ in range(n_positions)]
+
+        for row_idx in range(table.num_rows):
+            row_tuples = [
+                (sid_values[pos_idx][row_idx], rid_values[pos_idx][row_idx])
+                for pos_idx in range(n_positions)
+            ]
+            row_tuples.sort()
+            for pos_idx, (sid_val, rid_val) in enumerate(row_tuples):
+                sorted_sid[pos_idx].append(sid_val)
+                sorted_rid[pos_idx].append(rid_val)
+
+        # Replace columns with sorted values
+        for pos_idx, (sid_col, rid_col) in enumerate(paired_cols):
+            if sid_col:
+                orig_type = table.column(sid_col).type
+                tbl_idx = table.column_names.index(sid_col)
+                table = table.drop(sid_col)
+                table = table.add_column(
+                    tbl_idx,
+                    sid_col,
+                    pa.array(sorted_sid[pos_idx], type=orig_type),
+                )
+            if rid_col:
+                orig_type = table.column(rid_col).type
+                tbl_idx = table.column_names.index(rid_col)
+                table = table.drop(rid_col)
+                table = table.add_column(
+                    tbl_idx,
+                    rid_col,
+                    pa.array(sorted_rid[pos_idx], type=orig_type),
+                )
+
+    return table
+
+
+def add_source_info(
+    table: "pa.Table",
+    source_info: str | Collection[str] | None,
+    exclude_prefixes: Collection[str] = (
+        constants.META_PREFIX,
+        constants.DATAGRAM_PREFIX,
+    ),
+    exclude_columns: Collection[str] = (),
+) -> "pa.Table":
+    """Add source information to an Arrow table."""
+    # Create a base list of per-row source tokens; one entry per row.
+    if source_info is None or isinstance(source_info, str):
+        base_source = [source_info] * table.num_rows
+    elif isinstance(source_info, Collection):
+        if len(source_info) != table.num_rows:
+            raise ValueError(
+                "Length of source_info collection must match number of rows in the table."
+            )
+        base_source = list(source_info)
+    else:
+        raise TypeError(
+            f"source_info must be a str, a sized Collection[str], or None; "
+            f"got {type(source_info).__name__}"
+        )
+
+    # For each data column, build an independent _source_<col> column from the
+    # base tokens.  We must NOT re-use the array produced for a previous column
+    # as input for the next one — doing so would accumulate column names
+    # (e.g. "src::col1::col2" instead of "src::col2").
+    for col in table.column_names:
+        if col.startswith(tuple(exclude_prefixes)) or col in exclude_columns:
+            continue
+        col_source = pa.array(
+            [f"{source_val}::{col}" for source_val in base_source],
+            type=pa.large_string(),
+        )
+        # Source info columns are always computed strings, never null.
+        table = table.append_column(
+            pa.field(f"{constants.SOURCE_PREFIX}{col}", pa.large_string(), nullable=False),
+            col_source,
+        )
+
+    return table
 
 
 if __name__ == "__main__":

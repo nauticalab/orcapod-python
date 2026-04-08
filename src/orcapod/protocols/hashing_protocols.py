@@ -1,172 +1,239 @@
 """Hash strategy protocols for dependency injection."""
 
-import uuid
+from __future__ import annotations
+
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from orcapod.types import PathLike, PythonSchema
+from orcapod.types import ContentHash, PathLike, Schema
 
 if TYPE_CHECKING:
     import pyarrow as pa
 
 
-@dataclass(frozen=True, slots=True)
-class ContentHash:
-    method: str
-    digest: bytes
+@runtime_checkable
+class DataContextAwareProtocol(Protocol):
+    """Protocol for objects aware of their data context."""
 
-    # TODO: make the default char count configurable
-    def to_hex(self, char_count: int | None = 20) -> str:
-        """Convert digest to hex string, optionally truncated."""
-        hex_str = self.digest.hex()
-        return hex_str[:char_count] if char_count else hex_str
-
-    def to_int(self, hexdigits: int = 20) -> int:
+    @property
+    def data_context_key(self) -> str:
         """
-        Convert digest to integer representation.
-
-        Args:
-            hexdigits: Number of hex digits to use (truncates if needed)
+        Return the data context key associated with this object.
 
         Returns:
-            Integer representation of the hash
+            str: The data context key
         """
-        hex_str = self.to_hex()[:hexdigits]
-        return int(hex_str, 16)
-
-    def to_uuid(self, namespace: uuid.UUID = uuid.NAMESPACE_OID) -> uuid.UUID:
-        """
-        Convert digest to UUID format.
-
-        Args:
-            namespace: UUID namespace for uuid5 generation
-
-        Returns:
-            UUID derived from this hash
-        """
-        # Using uuid5 with the hex string ensures deterministic UUIDs
-        return uuid.uuid5(namespace, self.to_hex())
-
-    def to_base64(self) -> str:
-        """Convert digest to base64 string."""
-        import base64
-
-        return base64.b64encode(self.digest).decode("ascii")
-
-    def to_string(self, prefix_method: bool = True) -> str:
-        """Convert digest to a string representation."""
-        if prefix_method:
-            return f"{self.method}:{self.to_hex()}"
-        return self.to_hex()
-
-    def __str__(self) -> str:
-        return self.to_string()
-
-    @classmethod
-    def from_string(cls, hash_string: str) -> "ContentHash":
-        """Parse 'method:hex_digest' format."""
-        method, hex_digest = hash_string.split(":", 1)
-        return cls(method, bytes.fromhex(hex_digest))
-
-    def display_name(self, length: int = 8) -> str:
-        """Return human-friendly display like 'arrow_v2.1:1a2b3c4d'."""
-        return f"{self.method}:{self.to_hex(length)}"
+        ...
 
 
 @runtime_checkable
-class ContentIdentifiable(Protocol):
-    """Protocol for objects that can provide an identity structure."""
+class PipelineElementProtocol(Protocol):
+    """
+    Protocol for objects that have a stable identity as an element in a
+    pipeline graph — determined by schema and upstream topology, not by
+    data content.
+
+    This is a parallel identity chain to ContentIdentifiableProtocol.
+    Where content identity captures the precise, data-inclusive identity of
+    an object, pipeline identity captures only what is structurally meaningful
+    for pipeline database path scoping: the schemas and the recursive topology
+    of the upstream computation.
+
+    The base case (RootSource) returns a hash of (tag_schema, packet_schema).
+    Every other element recurses through the pipeline_hash() of its upstream
+    inputs, with the hash values themselves (ContentHash objects) used as
+    terminal leaves so no special hasher mode is required.
+
+    Two sources with identical schemas processed through the same function pod
+    graph will produce the same pipeline_hash() at every downstream node,
+    enabling automatic multi-source table sharing in the pipeline database.
+    """
+
+    def pipeline_identity_structure(self) -> Any:
+        """
+        Return a structure representing this element's pipeline identity.
+
+        At source nodes (base case): return (tag_schema, packet_schema).
+        At all other nodes: return a structure containing references to
+        upstream pipeline elements and/or packet functions as raw objects.
+        The pipeline resolver threaded through pipeline_hash() ensures that
+        PipelineElementProtocol objects are resolved via pipeline_hash() and
+        other ContentIdentifiable objects via content_hash(), both using the
+        same hasher throughout the computation.
+        """
+        ...
+
+    def pipeline_hash(self, hasher=None) -> ContentHash:
+        """
+        Return the pipeline-level hash of this element, computed from
+        pipeline_identity_structure() and cached by hasher_id.
+
+        Args:
+            hasher: Optional semantic hasher to use.  When omitted, resolved
+                from the element's data_context.
+        """
+        ...
+
+
+@runtime_checkable
+class ContentIdentifiableProtocol(Protocol):
+    """
+    Protocol for objects that can express their semantic identity as a plain
+    Python structure.
+
+    This is the only method a class needs to implement to participate in the
+    content-based hashing system. The returned structure is recursively
+    resolved by the SemanticHasherProtocol -- any nested ContentIdentifiableProtocol objects
+    within the structure will themselves be expanded and hashed, producing a
+    Merkle-tree-like composition of hashes.
+
+    The method should return a deterministic structure whose value depends
+    only on the semantic content of the object -- not on memory addresses,
+    object IDs, or other incidental runtime state.
+    """
 
     def identity_structure(self) -> Any:
         """
-        Return a structure that represents the identity of this object.
+        Return a structure that represents the semantic identity of this object.
+
+        The returned value may be any Python object:
+          - Primitives (str, int, float, bool, None) are used as-is.
+          - Collections (list, dict, set, tuple) are recursively traversed.
+          - Nested ContentIdentifiableProtocol objects are recursively resolved by
+            the SemanticHasherProtocol: their identity structure is hashed to a
+            ContentHash hex token, which is then embedded in place of the
+            object in the parent structure.
+          - Any type that has a registered TypeHandlerProtocol in the
+            SemanticHasherProtocol's registry is handled by that handler.
 
         Returns:
-            Any: A structure representing this object's content.
+            Any: A structure representing this object's semantic content.
                  Should be deterministic and include all identity-relevant data.
-                 Return None to indicate no custom identity is available.
         """
         ...
 
-    def content_hash(self) -> ContentHash:
+    def content_hash(self, hasher: SemanticHasherProtocol | None = None) -> ContentHash:
         """
-        Compute a hash based on the content of this object.
-
-        Returns:
-            bytes: A byte representation of the hash based on the content.
-                   If no identity structure is provided, return None.
-        """
-        ...
-
-    def __eq__(self, other: object) -> bool:
-        """
-        Equality check that compares the identity structures of two objects.
+        Returns the content hash.
 
         Args:
-            other (object): The object to compare with.
-
-        Returns:
-            bool: True if the identity structures are equal, False otherwise.
-        """
-        ...
-
-    def __hash__(self) -> int:
-        """
-        Hash implementation that uses the identity structure if provided,
-        otherwise falls back to the default hash.
-
-        Returns:
-            int: A hash value based on either content or identity.
+            hasher: Optional semantic hasher to use for the entire recursive
+                computation.  When omitted, resolved from the object's
+                data_context (or injected hasher for mixin-based objects).
+                The same hasher propagates to all nested ContentIdentifiable
+                objects, ensuring one consistent context per computation.
         """
         ...
 
 
-class ObjectHasher(Protocol):
-    """Protocol for general object hashing."""
+class TypeHandlerProtocol(Protocol):
+    """
+    Protocol for type-specific serialization handlers used by SemanticHasherProtocol.
 
-    # TODO: consider more explicitly stating types of objects accepted
-    def hash_object(self, obj: Any) -> ContentHash:
+    A TypeHandlerProtocol converts a specific Python type into a value that
+    ``hash_object`` can process.  Handlers are registered with a
+    TypeHandlerRegistry and looked up via MRO-aware resolution.
+
+    The returned value is passed directly back to ``hash_object``, so it may
+    be anything that ``hash_object`` understands:
+
+      - A primitive (None, bool, int, float, str) -- hashed directly.
+      - A structure (list, tuple, dict, set, frozenset) -- expanded and hashed.
+      - A ContentHash -- treated as a terminal; returned as-is without
+        re-hashing.  Use this when the handler has already computed the
+        definitive hash of the object (e.g. hashing a file's content).
+      - A ContentIdentifiableProtocol -- its identity_structure() will be called.
+      - Another registered type -- dispatched through the registry.
+    """
+
+    def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
         """
-        Hash an object to a byte representation. Object hasher must be
-        able to handle ContentIdentifiable objects to hash them based on their
-        identity structure. If compressed=True, the content identifiable object
-        is immediately replaced with its compressed string identity and used in the
-        computation of containing identity structure.
+        Convert *obj* into a value that ``hash_object`` can process.
 
         Args:
-            obj (Any): The object to hash.
+            obj:    The object to handle.
+            hasher: The SemanticHasherProtocol, available if the handler needs to
+                    hash sub-objects explicitly via ``hasher.hash_object()``.
 
         Returns:
-            bytes: The byte representation of the hash.
+            Any value accepted by ``hash_object``: a primitive, structure,
+            ContentHash, ContentIdentifiableProtocol, or another registered type.
+        """
+        ...
+
+
+class SemanticHasherProtocol(Protocol):
+    """
+    Protocol for the semantic content-based hasher.
+
+    ``hash_object(obj)`` is the single recursive entry point.  It produces a
+    ContentHash for any Python object using the following dispatch:
+
+      - ContentHash        → terminal; returned as-is
+      - Primitive          → JSON-serialised and hashed directly
+      - Structure          → structurally expanded (type-tagged), then hashed
+      - Handler match      → handler.handle() returns a new value; recurse
+      - ContentIdentifiableProtocol→ identity_structure() returns a value; recurse
+      - Unknown            → TypeError (strict) or best-effort string (lenient)
+
+    Containers are type-tagged before hashing so that list, tuple, dict, set,
+    and namedtuple produce distinct hashes even when their elements are equal.
+
+    Unknown types raise TypeError by default (strict mode).  Set
+    strict=False on construction to fall back to a best-effort string
+    representation with a warning instead.
+    """
+
+    def hash_object(
+        self,
+        obj: Any,
+        resolver: Callable[[Any], ContentHash] | None = None,
+    ) -> ContentHash:
+        """
+        Hash *obj* based on its semantic content.
+
+        Args:
+            obj: The object to hash.
+            resolver: Optional callable invoked for any ContentIdentifiable
+                object encountered during hashing.  When provided it overrides
+                the default obj.content_hash() call, allowing the caller to
+                control which identity chain is used and to propagate a
+                consistent hasher through the full recursive computation.
+
+        Returns:
+            ContentHash: Stable, content-based hash of the object.
         """
         ...
 
     @property
     def hasher_id(self) -> str:
         """
-        Returns a unique identifier/name assigned to the hasher
+        Returns a unique identifier/name for this hasher instance.
+
+        The hasher_id is embedded in every ContentHash produced by this
+        hasher, allowing hashes from different versions or configurations
+        to be distinguished.
         """
         ...
 
 
-class FileContentHasher(Protocol):
+class FileContentHasherProtocol(Protocol):
     """Protocol for file-related hashing."""
 
     def hash_file(self, file_path: PathLike) -> ContentHash: ...
 
 
-class ArrowHasher(Protocol):
+@runtime_checkable
+class ArrowHasherProtocol(Protocol):
     """Protocol for hashing arrow packets."""
 
-    def get_hasher_id(self) -> str: ...
+    @property
+    def hasher_id(self) -> str: ...
 
-    def hash_table(
-        self, table: "pa.Table | pa.RecordBatch", prefix_hasher_id: bool = True
-    ) -> ContentHash: ...
+    def hash_table(self, table: "pa.Table | pa.RecordBatch") -> ContentHash: ...
 
 
-class StringCacher(Protocol):
+class StringCacherProtocol(Protocol):
     """Protocol for caching string key value pairs."""
 
     def get_cached(self, cache_key: str) -> str | None: ...
@@ -174,21 +241,21 @@ class StringCacher(Protocol):
     def clear_cache(self) -> None: ...
 
 
-class FunctionInfoExtractor(Protocol):
+class FunctionInfoExtractorProtocol(Protocol):
     """Protocol for extracting function information."""
 
     def extract_function_info(
         self,
         func: Callable[..., Any],
         function_name: str | None = None,
-        input_typespec: PythonSchema | None = None,
-        output_typespec: PythonSchema | None = None,
+        input_typespec: Schema | None = None,
+        output_typespec: Schema | None = None,
         exclude_function_signature: bool = False,
         exclude_function_body: bool = False,
     ) -> dict[str, Any]: ...
 
 
-class SemanticTypeHasher(Protocol):
+class SemanticTypeHasherProtocol(Protocol):
     """Abstract base class for semantic type-specific hashers."""
 
     @property
@@ -203,6 +270,6 @@ class SemanticTypeHasher(Protocol):
         """Hash a column with this semantic type and return the hash bytes an an array"""
         ...
 
-    def set_cacher(self, cacher: StringCacher) -> None:
+    def set_cacher(self, cacher: StringCacherProtocol) -> None:
         """Add a string cacher for caching hash values."""
         ...

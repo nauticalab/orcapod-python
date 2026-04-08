@@ -1,511 +1,218 @@
+from __future__ import annotations
+
 from abc import abstractmethod
 from collections.abc import Collection, Iterator
 from typing import TYPE_CHECKING, Any
 
-
-from orcapod.core.kernels import TrackedKernelBase
-from orcapod.core.streams import (
-    KernelStream,
-    StatefulStreamBase,
-)
-from orcapod.protocols import core_protocols as cp
-from orcapod.types import PythonSchema
-from orcapod.utils.lazy_module import LazyModule
+from orcapod import contexts
+from orcapod.config import Config
+from orcapod.core.streams.base import StreamBase
+from orcapod.protocols.core_protocols import StreamProtocol
+from orcapod.types import ColumnConfig, Schema
 
 if TYPE_CHECKING:
     import pyarrow as pa
-else:
-    pa = LazyModule("pyarrow")
+
+    from orcapod.core.sources.cached_source import CachedSource
+    from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 
 
-class InvocationBase(TrackedKernelBase, StatefulStreamBase):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        # Cache the KernelStream for reuse across all stream method calls
-        self._cached_kernel_stream: KernelStream | None = None
+class RootSource(StreamBase):
+    """Abstract base class for all root sources in Orcapod.
 
-    def computed_label(self) -> str | None:
-        return None
+    A RootSource is a pure stream — the root of a computational graph, producing
+    data from an external source (file, database, in-memory data, etc.) with no
+    upstream dependencies.
 
-    @abstractmethod
-    def kernel_identity_structure(
-        self, streams: Collection[cp.Stream] | None = None
-    ) -> Any: ...
+    As a StreamProtocol:
+    - ``source`` returns ``None`` (no upstream source pod)
+    - ``upstreams`` is always empty
+    - ``keys``, ``output_schema``, ``iter_packets``, ``as_table`` delegate to
+      ``self._stream`` by default; concrete subclasses may override them.
 
-    # Redefine the reference to ensure subclass would provide a concrete implementation
-    @property
-    @abstractmethod
-    def reference(self) -> tuple[str, ...]:
-        """Return the unique identifier for the kernel."""
-        ...
+    As a PipelineElementProtocol:
+    - ``pipeline_identity_structure()`` returns ``(tag_schema, packet_schema)``
+      — schema-only, no data content — forming the base case of the pipeline
+      identity Merkle chain.
 
-    # =========================== Kernel Methods ===========================
+    Source identity:
+        Every source has a ``source_id`` — a canonical name that determines the
+        source's content identity and is used in the ``SourceRegistry`` so that
+        provenance tokens embedded in downstream data can be resolved back to the
+        originating source object.
 
-    # The following are inherited from TrackedKernelBase as abstract methods.
-    # @abstractmethod
-    # def forward(self, *streams: dp.Stream) -> dp.Stream:
-    #     """
-    #     Pure computation: return a static snapshot of the data.
+        Concrete subclasses must ensure ``_source_id`` is set by the end of
+        ``__init__``.  File-backed sources (DeltaTableSource, CSVSource) default
+        to the file path; ``ArrowTableSource`` defaults to the table's data hash.
 
-    #     This is the core method that subclasses must implement.
-    #     Each call should return a fresh stream representing the current state of the data.
-    #     This is what KernelStream calls when it needs to refresh its data.
-    #     """
-    #     ...
+    Field resolution:
+        All sources expose ``resolve_field(record_id, field_name)``.  The default
+        implementation raises ``NotImplementedError``; concrete subclasses
+        that back addressable data should override it.
 
-    # @abstractmethod
-    # def kernel_output_types(self, *streams: dp.Stream) -> tuple[TypeSpec, TypeSpec]:
-    #     """Return the tag and packet types this source produces."""
-    #     ...
-
-    # @abstractmethod
-    # def kernel_identity_structure(
-    #     self, streams: Collection[dp.Stream] | None = None
-    # ) -> dp.Any: ...
-
-    def prepare_output_stream(
-        self, *streams: cp.Stream, label: str | None = None
-    ) -> KernelStream:
-        if self._cached_kernel_stream is None:
-            self._cached_kernel_stream = super().prepare_output_stream(
-                *streams, label=label
-            )
-        return self._cached_kernel_stream
-
-    def track_invocation(self, *streams: cp.Stream, label: str | None = None) -> None:
-        raise NotImplementedError("Behavior for track invocation is not determined")
-
-    # ==================== Stream Protocol (Delegation) ====================
-
-    @property
-    def source(self) -> cp.Kernel | None:
-        """Sources are their own source."""
-        return self
-
-    # @property
-    # def upstreams(self) -> tuple[cp.Stream, ...]: ...
-
-    def keys(
-        self, include_system_tags: bool = False
-    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        """Delegate to the cached KernelStream."""
-        return self().keys(include_system_tags=include_system_tags)
-
-    def types(
-        self, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
-        """Delegate to the cached KernelStream."""
-        return self().types(include_system_tags=include_system_tags)
-
-    @property
-    def last_modified(self):
-        """Delegate to the cached KernelStream."""
-        return self().last_modified
-
-    @property
-    def is_current(self) -> bool:
-        """Delegate to the cached KernelStream."""
-        return self().is_current
-
-    def __iter__(self) -> Iterator[tuple[cp.Tag, cp.Packet]]:
-        """
-        Iterate over the cached KernelStream.
-
-        This allows direct iteration over the source as if it were a stream.
-        """
-        return self().iter_packets()
-
-    def iter_packets(
-        self,
-        execution_engine: cp.ExecutionEngine | None = None,
-        execution_engine_opts: dict[str, Any] | None = None,
-    ) -> Iterator[tuple[cp.Tag, cp.Packet]]:
-        """Delegate to the cached KernelStream."""
-        return self().iter_packets(
-            execution_engine=execution_engine,
-            execution_engine_opts=execution_engine_opts,
-        )
-
-    def as_table(
-        self,
-        include_data_context: bool = False,
-        include_source: bool = False,
-        include_system_tags: bool = False,
-        include_content_hash: bool | str = False,
-        sort_by_tags: bool = True,
-        execution_engine: cp.ExecutionEngine | None = None,
-        execution_engine_opts: dict[str, Any] | None = None,
-    ) -> "pa.Table":
-        """Delegate to the cached KernelStream."""
-        return self().as_table(
-            include_data_context=include_data_context,
-            include_source=include_source,
-            include_system_tags=include_system_tags,
-            include_content_hash=include_content_hash,
-            sort_by_tags=sort_by_tags,
-            execution_engine=execution_engine,
-            execution_engine_opts=execution_engine_opts,
-        )
-
-    def flow(
-        self,
-        execution_engine: cp.ExecutionEngine | None = None,
-        execution_engine_opts: dict[str, Any] | None = None,
-    ) -> Collection[tuple[cp.Tag, cp.Packet]]:
-        """Delegate to the cached KernelStream."""
-        return self().flow(
-            execution_engine=execution_engine,
-            execution_engine_opts=execution_engine_opts,
-        )
-
-    def run(
-        self,
-        *args: Any,
-        execution_engine: cp.ExecutionEngine | None = None,
-        execution_engine_opts: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> None:
-        """
-        Run the source node, executing the contained source.
-
-        This is a no-op for sources since they are not executed like pods.
-        """
-        self().run(
-            *args,
-            execution_engine=execution_engine,
-            execution_engine_opts=execution_engine_opts,
-            **kwargs,
-        )
-
-    async def run_async(
-        self,
-        *args: Any,
-        execution_engine: cp.ExecutionEngine | None = None,
-        execution_engine_opts: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> None:
-        """
-        Run the source node asynchronously, executing the contained source.
-
-        This is a no-op for sources since they are not executed like pods.
-        """
-        await self().run_async(
-            *args,
-            execution_engine=execution_engine,
-            execution_engine_opts=execution_engine_opts,
-            **kwargs,
-        )
-
-    # ==================== LiveStream Protocol (Delegation) ====================
-
-    def refresh(self, force: bool = False) -> bool:
-        """Delegate to the cached KernelStream."""
-        return self().refresh(force=force)
-
-    def invalidate(self) -> None:
-        """Delegate to the cached KernelStream."""
-        return self().invalidate()
-
-
-class SourceBase(TrackedKernelBase, StatefulStreamBase):
-    """
-    Base class for sources that act as both Kernels and LiveStreams.
-
-    Design Philosophy:
-    1. Source is fundamentally a Kernel (data loader)
-    2. forward() returns static snapshots as a stream (pure computation)
-    3. __call__() returns a cached KernelStream (live, tracked)
-    4. All stream methods delegate to the cached KernelStream
-
-    This ensures that direct source iteration and source() iteration
-    are identical and both benefit from KernelStream's lifecycle management.
+    Concrete subclasses must set ``self._stream`` in their ``__init__`` to get
+    the default stream delegation behavior. They may also override
+    ``identity_structure()``.
     """
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        # Cache the KernelStream for reuse across all stream method calls
-        self._cached_kernel_stream: KernelStream | None = None
-        self._schema_hash: str | None = None
+    def __init__(
+        self,
+        source_id: str | None = None,
+        label: str | None = None,
+        data_context: str | contexts.DataContext | None = None,
+        config: Config | None = None,
+    ) -> None:
+        super().__init__(
+            label=label,
+            data_context=data_context,
+            config=config,
+        )
+        self._source_id = source_id
 
-    # reset, so that computed label won't be used from StatefulStreamBase
-    def computed_label(self) -> str | None:
-        return None
-
-    def schema_hash(self) -> str:
-        if self._schema_hash is None:
-            self._schema_hash = self.data_context.object_hasher.hash_object(
-                (self.tag_types(), self.packet_types())
-            ).to_hex(self.orcapod_config.schema_hash_n_char)
-        return self._schema_hash
-
-    def kernel_identity_structure(
-        self, streams: Collection[cp.Stream] | None = None
-    ) -> Any:
-        if streams is not None:
-            # when checked for invocation id, act as a source
-            # and just return the output packet types
-            # _, packet_types = self.stream.types()
-            # return packet_types
-            return self.schema_hash()
-        # otherwise, return the identity structure of the stream
-        return self.source_identity_structure()
+    # -------------------------------------------------------------------------
+    # Source identity
+    # -------------------------------------------------------------------------
 
     @property
     def source_id(self) -> str:
-        return ":".join(self.reference)
+        """Canonical name for this source used in the registry and provenance
+        strings. If not set, raises ``ValueError``.
+        """
+        if self._source_id is None:
+            raise ValueError("source_id is not set")
+        return self._source_id
 
-    # Redefine the reference to ensure subclass would provide a concrete implementation
-    @property
-    @abstractmethod
-    def reference(self) -> tuple[str, ...]:
-        """Return the unique identifier for the kernel."""
-        ...
+    # -------------------------------------------------------------------------
+    # Content identity
+    # -------------------------------------------------------------------------
 
-    def kernel_output_types(
-        self, *streams: cp.Stream, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
-        return self.source_output_types(include_system_tags=include_system_tags)
+    def identity_structure(self) -> Any:
+        """Default identity based on class name, output schema, and source_id."""
+        return (self.__class__.__name__, self.output_schema(), self.source_id)
 
-    @abstractmethod
-    def source_identity_structure(self) -> Any: ...
+    # -------------------------------------------------------------------------
+    # Field resolution
+    # -------------------------------------------------------------------------
 
-    @abstractmethod
-    def source_output_types(self, include_system_tags: bool = False) -> Any: ...
+    def resolve_field(self, record_id: str, field_name: str) -> Any:
+        """Resolve a field value for a record.
 
-    # =========================== Kernel Methods ===========================
+        Not implemented by default. Subclasses that back addressable data
+        should override this method.
 
-    # The following are inherited from TrackedKernelBase as abstract methods.
-    # @abstractmethod
-    # def forward(self, *streams: dp.Stream) -> dp.Stream:
-    #     """
-    #     Pure computation: return a static snapshot of the data.
+        Raises:
+            NotImplementedError: Always, by default.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not implement resolve_field. "
+            f"Cannot resolve field {field_name!r} for record {record_id!r}."
+        )
 
-    #     This is the core method that subclasses must implement.
-    #     Each call should return a fresh stream representing the current state of the data.
-    #     This is what KernelStream calls when it needs to refresh its data.
-    #     """
-    #     ...
+    # -------------------------------------------------------------------------
+    # PipelineElementProtocol — schema-only identity (base case of Merkle chain)
+    # -------------------------------------------------------------------------
 
-    # @abstractmethod
-    # def kernel_output_types(self, *streams: dp.Stream) -> tuple[TypeSpec, TypeSpec]:
-    #     """Return the tag and packet types this source produces."""
-    #     ...
+    def _identity_config(self) -> dict[str, Any]:
+        """Return identity fields for inclusion in ``to_config()`` output.
 
-    # @abstractmethod
-    # def kernel_identity_structure(
-    #     self, streams: Collection[dp.Stream] | None = None
-    # ) -> dp.Any: ...
+        These fields allow ``SourceProxy`` to be constructed when the source
+        cannot be reconstructed from config, preserving identity hashes and
+        schemas for downstream consumers.
+        """
+        from orcapod.pipeline.serialization import serialize_schema
 
-    def validate_inputs(self, *streams: cp.Stream) -> None:
-        """Sources take no input streams."""
-        if len(streams) > 0:
-            raise ValueError(
-                f"{self.__class__.__name__} is a source and takes no input streams"
-            )
+        tag_schema, packet_schema = self.output_schema()
+        type_converter = self.data_context.type_converter
+        return {
+            "content_hash": self.content_hash().to_string(),
+            "pipeline_hash": self.pipeline_hash().to_string(),
+            "tag_schema": serialize_schema(tag_schema, type_converter),
+            "packet_schema": serialize_schema(packet_schema, type_converter),
+        }
 
-    def prepare_output_stream(
-        self, *streams: cp.Stream, label: str | None = None
-    ) -> KernelStream:
-        if self._cached_kernel_stream is None:
-            self._cached_kernel_stream = super().prepare_output_stream(
-                *streams, label=label
-            )
-        return self._cached_kernel_stream
+    def pipeline_identity_structure(self) -> Any:
+        """Return (tag_schema, packet_schema) as the pipeline identity for this
+        source.  Schema-only: no data content is included, so sources with
+        identical schemas share the same pipeline hash and therefore the same
+        pipeline database table.
+        """
+        tag_schema, packet_schema = self.output_schema()
+        return (tag_schema, packet_schema)
 
-    def track_invocation(self, *streams: cp.Stream, label: str | None = None) -> None:
-        if not self._skip_tracking and self._tracker_manager is not None:
-            self._tracker_manager.record_source_invocation(self, label=label)
-
-    # ==================== Stream Protocol (Delegation) ====================
-
-    @property
-    def source(self) -> cp.Kernel | None:
-        """Sources are their own source."""
-        return self
+    # -------------------------------------------------------------------------
+    # StreamProtocol protocol
+    # -------------------------------------------------------------------------
 
     @property
-    def upstreams(self) -> tuple[cp.Stream, ...]:
+    def producer(self) -> None:
+        """Root sources have no upstream source pod."""
+        return None
+
+    @property
+    def upstreams(self) -> tuple[StreamProtocol, ...]:
         """Sources have no upstream dependencies."""
         return ()
 
-    def keys(
-        self, include_system_tags: bool = False
-    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        """Delegate to the cached KernelStream."""
-        return self().keys(include_system_tags=include_system_tags)
+    # -------------------------------------------------------------------------
+    # Stream delegation defaults
+    # -------------------------------------------------------------------------
 
-    def types(
-        self, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
-        """Delegate to the cached KernelStream."""
-        return self().types(include_system_tags=include_system_tags)
-
-    @property
-    def last_modified(self):
-        """Delegate to the cached KernelStream."""
-        return self().last_modified
-
-    @property
-    def is_current(self) -> bool:
-        """Delegate to the cached KernelStream."""
-        return self().is_current
-
-    def __iter__(self) -> Iterator[tuple[cp.Tag, cp.Packet]]:
-        """
-        Iterate over the cached KernelStream.
-
-        This allows direct iteration over the source as if it were a stream.
-        """
-        return self().iter_packets()
-
-    def iter_packets(
+    def output_schema(
         self,
-        execution_engine: cp.ExecutionEngine | None = None,
-        execution_engine_opts: dict[str, Any] | None = None,
-    ) -> Iterator[tuple[cp.Tag, cp.Packet]]:
-        """Delegate to the cached KernelStream."""
-        return self().iter_packets(
-            execution_engine=execution_engine,
-            execution_engine_opts=execution_engine_opts,
-        )
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]:
+        """Delegate to the underlying stream's output_schema."""
+        return self._stream.output_schema(columns=columns, all_info=all_info)
+
+    def keys(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        """Delegate to the underlying stream's keys."""
+        return self._stream.keys(columns=columns, all_info=all_info)
+
+    def iter_packets(self):
+        """Delegate to the underlying stream's iter_packets."""
+        return self._stream.iter_packets()
 
     def as_table(
         self,
-        include_data_context: bool = False,
-        include_source: bool = False,
-        include_system_tags: bool = False,
-        include_content_hash: bool | str = False,
-        sort_by_tags: bool = True,
-        execution_engine: cp.ExecutionEngine | None = None,
-        execution_engine_opts: dict[str, Any] | None = None,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
     ) -> "pa.Table":
-        """Delegate to the cached KernelStream."""
-        return self().as_table(
-            include_data_context=include_data_context,
-            include_source=include_source,
-            include_system_tags=include_system_tags,
-            include_content_hash=include_content_hash,
-            sort_by_tags=sort_by_tags,
-            execution_engine=execution_engine,
-            execution_engine_opts=execution_engine_opts,
-        )
+        """Delegate to the underlying stream's as_table."""
+        return self._stream.as_table(columns=columns, all_info=all_info)
 
-    def flow(
-        self,
-        execution_engine: cp.ExecutionEngine | None = None,
-        execution_engine_opts: dict[str, Any] | None = None,
-    ) -> Collection[tuple[cp.Tag, cp.Packet]]:
-        """Delegate to the cached KernelStream."""
-        return self().flow(
-            execution_engine=execution_engine,
-            execution_engine_opts=execution_engine_opts,
-        )
+    # -------------------------------------------------------------------------
+    # Convenience — caching
+    # -------------------------------------------------------------------------
 
-    def run(
+    def cached(
         self,
-        *args: Any,
-        execution_engine: cp.ExecutionEngine | None = None,
-        execution_engine_opts: dict[str, Any] | None = None,
+        cache_database: ArrowDatabaseProtocol,
+        cache_path_prefix: tuple[str, ...] = (),
         **kwargs: Any,
-    ) -> None:
-        """
-        Run the source node, executing the contained source.
+    ) -> CachedSource:
+        """Return a ``CachedSource`` wrapping this source.
 
-        This is a no-op for sources since they are not executed like pods.
+        Args:
+            cache_database: Database to store cached records in.
+            cache_path_prefix: Path prefix for the cache table.
+            **kwargs: Additional keyword arguments passed to ``CachedSource``.
+
+        Returns:
+            A ``CachedSource`` that caches this source's output.
         """
-        self().run(
-            *args,
-            execution_engine=execution_engine,
-            execution_engine_opts=execution_engine_opts,
+        from orcapod.core.sources.cached_source import CachedSource
+
+        return CachedSource(
+            source=self,
+            cache_database=cache_database,
+            cache_path_prefix=cache_path_prefix,
             **kwargs,
         )
-
-    async def run_async(
-        self,
-        *args: Any,
-        execution_engine: cp.ExecutionEngine | None = None,
-        execution_engine_opts: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> None:
-        """
-        Run the source node asynchronously, executing the contained source.
-
-        This is a no-op for sources since they are not executed like pods.
-        """
-        await self().run_async(
-            *args,
-            execution_engine=execution_engine,
-            execution_engine_opts=execution_engine_opts,
-            **kwargs,
-        )
-
-    # ==================== LiveStream Protocol (Delegation) ====================
-
-    def refresh(self, force: bool = False) -> bool:
-        """Delegate to the cached KernelStream."""
-        return self().refresh(force=force)
-
-    def invalidate(self) -> None:
-        """Delegate to the cached KernelStream."""
-        return self().invalidate()
-
-    # ==================== Source Protocol ====================
-
-    def reset_cache(self) -> None:
-        """
-        Clear the cached KernelStream, forcing a fresh one on next access.
-
-        Useful when the underlying data source has fundamentally changed
-        (e.g., file path changed, database connection reset).
-        """
-        if self._cached_kernel_stream is not None:
-            self._cached_kernel_stream.invalidate()
-        self._cached_kernel_stream = None
-
-
-class StreamSource(SourceBase):
-    def __init__(self, stream: cp.Stream, label: str | None = None, **kwargs) -> None:
-        """
-        A placeholder source based on stream
-        This is used to represent a kernel that has no computation.
-        """
-        label = label or stream.label
-        self.stream = stream
-        super().__init__(label=label, **kwargs)
-
-    def source_output_types(
-        self, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
-        """
-        Returns the types of the tag and packet columns in the stream.
-        This is useful for accessing the types of the columns in the stream.
-        """
-        return self.stream.types(include_system_tags=include_system_tags)
-
-    @property
-    def reference(self) -> tuple[str, ...]:
-        return ("stream", self.stream.content_hash().to_string())
-
-    def forward(self, *args: Any, **kwargs: Any) -> cp.Stream:
-        """
-        Forward the stream through the stub kernel.
-        This is a no-op and simply returns the stream.
-        """
-        return self.stream
-
-    def source_identity_structure(self) -> Any:
-        return self.stream.identity_structure()
-
-    # def __hash__(self) -> int:
-    #     # TODO: resolve the logic around identity structure on a stream / stub kernel
-    #     """
-    #     Hash the StubKernel based on its label and stream.
-    #     This is used to uniquely identify the StubKernel in the tracker.
-    #     """
-    #     identity_structure = self.identity_structure()
-    #     if identity_structure is None:
-    #         return hash(self.stream)
-    #     return identity_structure
-
-
-# ==================== Example Implementation ====================

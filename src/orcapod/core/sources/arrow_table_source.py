@@ -1,132 +1,115 @@
+from __future__ import annotations
+
+import logging
 from collections.abc import Collection
 from typing import TYPE_CHECKING, Any
 
-
-from orcapod.core.streams import TableStream
-from orcapod.protocols import core_protocols as cp
-from orcapod.types import PythonSchema
-from orcapod.utils.lazy_module import LazyModule
-from orcapod.core.system_constants import constants
-from orcapod.core import arrow_data_utils
-from orcapod.core.sources.source_registry import GLOBAL_SOURCE_REGISTRY, SourceRegistry
-
-from orcapod.core.sources.base import SourceBase
+from orcapod.core.sources.base import RootSource
+from orcapod.core.sources.stream_builder import SourceStreamBuilder
+from orcapod.utils import arrow_utils
 
 if TYPE_CHECKING:
     import pyarrow as pa
-else:
-    pa = LazyModule("pyarrow")
+
+logger = logging.getLogger(__name__)
 
 
-class ArrowTableSource(SourceBase):
-    """Construct source from a collection of dictionaries"""
+class ArrowTableSource(RootSource):
+    """A source backed by an in-memory PyArrow Table.
 
-    SOURCE_ID = "arrow"
+    Uses ``SourceStreamBuilder`` to strip system columns, add per-row
+    source-info provenance columns and a system tag column encoding the
+    schema hash, then wraps the result in an ``ArrowTableStream``.
+
+    Nullable handling
+    -----------------
+    Arrow represents "this field has no nulls" and "this field may have nulls"
+    via a per-field ``nullable`` flag.  By default **all** Arrow fields are
+    ``nullable=True`` regardless of actual content, so a plain ``pa.table({...})``
+    or a Polars ``.to_arrow()`` result will always produce ``T | None`` schema
+    types unless the caller has explicitly constructed the schema.
+
+    ``ArrowTableSource`` therefore defaults to ``infer_nullable=False``: the
+    incoming table's schema is trusted as-is.  This is safe when the caller
+    has already set nullable flags deliberately (e.g. loaded from a typed
+    Parquet file, or produced by an upstream pipeline stage).
+
+    If you are passing a *raw* Arrow table whose schema carries only Arrow's
+    all-nullable default (``nullable=True`` everywhere), set
+    ``infer_nullable=True`` or call
+    ``table.cast(arrow_utils.infer_schema_nullable(table))`` yourself before
+    constructing the source.  ``infer_schema_nullable`` derives
+    ``nullable = (null_count > 0)`` per column — i.e. only columns that
+    *actually contain* nulls in the supplied data are marked nullable.
+
+    Note: other source classes (``DictSource``, ``ListSource``,
+    ``DataFrameSource``, ``CsvSource``, etc.) construct their Arrow tables
+    internally from non-Arrow inputs and always apply ``infer_schema_nullable``
+    automatically, because the all-nullable Arrow default is never intentional
+    in those paths.  ``ArrowTableSource`` is unique in accepting a pre-existing
+    ``pa.Table`` whose schema may already be deliberate.
+    """
 
     def __init__(
         self,
-        arrow_table: "pa.Table",
+        table: "pa.Table",
         tag_columns: Collection[str] = (),
-        source_name: str | None = None,
-        source_registry: SourceRegistry | None = None,
-        auto_register: bool = True,
-        preserve_system_columns: bool = False,
-        **kwargs,
-    ):
+        system_tag_columns: Collection[str] = (),
+        record_id_column: str | None = None,
+        infer_nullable: bool = False,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
 
-        # clean the table, dropping any system columns
-        # TODO: consider special treatment of system columns if provided
-        if not preserve_system_columns:
-            arrow_table = arrow_data_utils.drop_system_columns(arrow_table)
-
-        non_system_columns = arrow_data_utils.drop_system_columns(arrow_table)
-        tag_schema = non_system_columns.select(tag_columns).schema
-        # FIXME: ensure tag_columns are found among non system columns
-        packet_schema = non_system_columns.drop(list(tag_columns)).schema
-
-        tag_python_schema = (
-            self.data_context.type_converter.arrow_schema_to_python_schema(tag_schema)
-        )
-        packet_python_schema = (
-            self.data_context.type_converter.arrow_schema_to_python_schema(
-                packet_schema
+        if infer_nullable:
+            logger.debug(
+                "infer_nullable=True: deriving nullable flags from data "
+                "(nullable=True only for columns with null_count > 0)"
             )
+            table = table.cast(arrow_utils.infer_schema_nullable(table))
+        # else: schema is trusted as-is.
+
+        builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
+        result = builder.build(
+            table,
+            tag_columns=tag_columns,
+            source_id=self._source_id,
+            record_id_column=record_id_column,
+            system_tag_columns=system_tag_columns,
         )
 
-        schema_hash = self.data_context.object_hasher.hash_object(
-            (tag_python_schema, packet_python_schema)
-        ).to_hex(char_count=self.orcapod_config.schema_hash_n_char)
+        self._stream = result.stream
+        self._schema_hash = result.schema_hash
+        self._table_hash = result.table_hash
+        self._tag_columns = result.tag_columns
+        self._system_tag_columns = result.system_tag_columns
+        self._record_id_column = record_id_column
 
-        self.tag_columns = [
-            col for col in tag_columns if col in arrow_table.column_names
-        ]
+        if self._source_id is None:
+            self._source_id = result.source_id
 
-        self.table_hash = self.data_context.arrow_hasher.hash_table(arrow_table)
+    def to_config(self, db_registry=None) -> dict[str, Any]:
+        """Serialize metadata-only config (in-memory table is not serializable)."""
+        return {
+            "source_type": "arrow_table",
+            "tag_columns": list(self._tag_columns),
+            "source_id": self.source_id,
+            **self._identity_config(),
+        }
 
-        if source_name is None:
-            # TODO: determine appropriate config name
-            source_name = self.content_hash().to_hex(
-                char_count=self.orcapod_config.path_hash_n_char
-            )
+    @classmethod
+    def from_config(cls, config: dict[str, Any], db_registry=None) -> ArrowTableSource:
+        """Not supported — ArrowTableSource cannot be reconstructed from config.
 
-        self._source_name = source_name
-
-        row_index = list(range(arrow_table.num_rows))
-
-        source_info = [
-            f"{self.source_id}{constants.BLOCK_SEPARATOR}row_{i}" for i in row_index
-        ]
-
-        # add source info
-        arrow_table = arrow_data_utils.add_source_info(
-            arrow_table, source_info, exclude_columns=tag_columns
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError(
+            "ArrowTableSource cannot be reconstructed from config — "
+            "the in-memory Arrow table is not serializable."
         )
-
-        arrow_table = arrow_data_utils.add_system_tag_column(
-            arrow_table, f"source{constants.FIELD_SEPARATOR}{schema_hash}", source_info
-        )
-
-        self._table = arrow_table
-
-        self._table_stream = TableStream(
-            table=self._table,
-            tag_columns=self.tag_columns,
-            source=self,
-            upstreams=(),
-        )
-
-        # Auto-register with global registry
-        if auto_register:
-            registry = source_registry or GLOBAL_SOURCE_REGISTRY
-            registry.register(self.source_id, self)
-
-    @property
-    def reference(self) -> tuple[str, ...]:
-        return ("arrow_table", f"source_{self._source_name}")
 
     @property
     def table(self) -> "pa.Table":
-        return self._table
-
-    def source_identity_structure(self) -> Any:
-        return (self.__class__.__name__, self.tag_columns, self.table_hash)
-
-    def get_all_records(
-        self, include_system_columns: bool = False
-    ) -> "pa.Table | None":
-        return self().as_table(include_source=include_system_columns)
-
-    def forward(self, *streams: cp.Stream) -> cp.Stream:
-        """
-        Load data from file and return a static stream.
-
-        This is called by forward() and creates a fresh snapshot each time.
-        """
-        return self._table_stream
-
-    def source_output_types(
-        self, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
-        """Return tag and packet types based on provided typespecs."""
-        return self._table_stream.types(include_system_tags=include_system_tags)
+        """Return the enriched table (with source-info and system tags)."""
+        return self._stream.as_table(columns={"source": True, "system_tags": True})

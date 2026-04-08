@@ -1,5 +1,5 @@
 """
-OrcaPod Data Context System
+Orcapod Data Context System
 
 This package manages versioned data contexts that define how data
 should be interpreted and processed throughout the OrcaPod system.
@@ -7,7 +7,7 @@ should be interpreted and processed throughout the OrcaPod system.
 A DataContext contains:
 - Semantic type registry for handling structured data types
 - Arrow hasher for hashing Arrow tables
-- Object hasher for general object hashing
+- Semantic hasher for general Python object hashing
 - Versioning information for reproducibility
 
 Example usage:
@@ -25,10 +25,13 @@ Example usage:
     versions = get_available_contexts()
 """
 
-from .core import DataContext, ContextValidationError, ContextResolutionError
-from .registry import JSONDataContextRegistry
 from typing import Any
-from orcapod.protocols import hashing_protocols as hp, semantic_types_protocols as sp
+
+from orcapod.protocols import hashing_protocols as hp
+from orcapod.protocols import semantic_types_protocols as sp
+
+from .core import ContextResolutionError, ContextValidationError, DataContext
+from .registry import JSONDataContextRegistry
 
 # Global registry instance (lazily initialized)
 _registry: JSONDataContextRegistry | None = None
@@ -165,27 +168,27 @@ def get_default_context() -> DataContext:
     return resolve_context()
 
 
-def get_default_object_hasher() -> hp.ObjectHasher:
+def get_default_semantic_hasher() -> hp.SemanticHasherProtocol:
     """
-    Get the default object hasher.
+    Get the default semantic hasher.
 
     Returns:
-        ObjectHasher instance for the default context
+        SemanticHasherProtocol instance for the default context
     """
-    return get_default_context().object_hasher
+    return get_default_context().semantic_hasher
 
 
-def get_default_arrow_hasher() -> hp.ArrowHasher:
+def get_default_arrow_hasher() -> hp.ArrowHasherProtocol:
     """
     Get the default arrow hasher.
 
     Returns:
-        ArrowHasher instance for the default context
+        ArrowHasherProtocol instance for the default context
     """
     return get_default_context().arrow_hasher
 
 
-def get_default_type_converter() -> "sp.TypeConverter":
+def get_default_type_converter() -> "sp.TypeConverterProtocol":
     """
     Get the default type converter.
 

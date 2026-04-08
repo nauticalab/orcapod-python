@@ -1,0 +1,872 @@
+"""
+Tests for the packet function executor system.
+
+Covers:
+- PythonFunctionExecutorBase (supports, get_execution_data)
+- LocalExecutor (in-process execution)
+- Executor as property on PacketFunctionBase (get/set/validation)
+- Executor routing in call() / direct_call()
+- Executor delegation through PacketFunctionWrapper / CachedPacketFunction
+- Custom executor with restricted type support
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from orcapod.core.datagrams import Packet
+from orcapod.core.executors import LocalPythonFunctionExecutor, PythonFunctionExecutorBase
+from orcapod.core.packet_function import (
+    PacketFunctionWrapper,
+    PythonPacketFunction,
+)
+from orcapod.protocols.core_protocols import (
+    PacketFunctionExecutorProtocol,
+    PacketFunctionProtocol,
+    PacketProtocol,
+    PythonFunctionExecutorProtocol,
+)
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def add(x: int, y: int) -> int:
+    return x + y
+
+
+def noop(x: int) -> int:
+    return x
+
+
+class SpyExecutor(PythonFunctionExecutorBase):
+    """Executor that records calls for testing."""
+
+    def __init__(self, supported_types: frozenset[str] | None = None) -> None:
+        self._supported = supported_types or frozenset()
+        self.calls: list[tuple[Any, Any]] = []
+
+    @property
+    def executor_type_id(self) -> str:
+        return "spy"
+
+    def supported_function_type_ids(self) -> frozenset[str]:
+        return self._supported
+
+    def execute(
+        self,
+        packet_function: PacketFunctionProtocol,
+        packet: PacketProtocol,
+    ) -> "PacketProtocol | None":
+        self.calls.append((packet_function, packet))
+        return packet_function.direct_call(packet)
+
+    def execute_callable(self, fn, kwargs, executor_options=None, **kw):
+        self.calls.append((fn, kwargs))
+        return fn(**kwargs)
+
+
+class PythonOnlyExecutor(PythonFunctionExecutorBase):
+    """Executor that only supports python.function.v0."""
+
+    @property
+    def executor_type_id(self) -> str:
+        return "python-only"
+
+    def supported_function_type_ids(self) -> frozenset[str]:
+        return frozenset({"python.function.v0"})
+
+    def execute_callable(self, fn, kwargs, executor_options=None, **kw):
+        return fn(**kwargs)
+
+
+class NonPythonExecutor(PythonFunctionExecutorBase):
+    """Executor that explicitly does NOT support python.function.v0."""
+
+    @property
+    def executor_type_id(self) -> str:
+        return "non-python"
+
+    def supported_function_type_ids(self) -> frozenset[str]:
+        return frozenset({"wasm.function.v0"})
+
+    def execute_callable(self, fn, kwargs, executor_options=None, **kw):
+        return fn(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def add_pf() -> PythonPacketFunction:
+    return PythonPacketFunction(add, output_keys="result")
+
+
+@pytest.fixture
+def add_packet() -> Packet:
+    return Packet({"x": 1, "y": 2})
+
+
+@pytest.fixture
+def spy_executor() -> SpyExecutor:
+    return SpyExecutor()
+
+
+@pytest.fixture
+def local_executor() -> LocalPythonFunctionExecutor:
+    return LocalPythonFunctionExecutor()
+
+
+# ---------------------------------------------------------------------------
+# 1. PythonFunctionExecutorBase
+# ---------------------------------------------------------------------------
+
+
+class TestPythonFunctionExecutorBase:
+    def test_supports_all_when_empty_frozenset(self):
+        executor = SpyExecutor(supported_types=frozenset())
+        assert executor.supports("python.function.v0")
+        assert executor.supports("wasm.function.v0")
+        assert executor.supports("anything")
+
+    def test_supports_restricted_types(self):
+        executor = PythonOnlyExecutor()
+        assert executor.supports("python.function.v0")
+        assert not executor.supports("wasm.function.v0")
+
+    def test_get_executor_data_returns_type(self):
+        executor = SpyExecutor()
+        data = executor.get_executor_data()
+        assert data["executor_type"] == "spy"
+
+    def test_with_options_returns_new_instance(self):
+        executor = SpyExecutor()
+        new_executor = executor.with_options()
+        assert new_executor is not executor
+        assert isinstance(new_executor, SpyExecutor)
+
+    def test_with_options_preserves_state(self):
+        executor = SpyExecutor(supported_types=frozenset({"python.function.v0"}))
+        new_executor = executor.with_options()
+        assert new_executor.supported_function_type_ids() == frozenset(
+            {"python.function.v0"}
+        )
+
+
+# ---------------------------------------------------------------------------
+# 2. LocalExecutor
+# ---------------------------------------------------------------------------
+
+
+class TestLocalExecutor:
+    def test_executor_type_id(self, local_executor: LocalPythonFunctionExecutor):
+        assert local_executor.executor_type_id == "local"
+
+    def test_supports_all_types(self, local_executor: LocalPythonFunctionExecutor):
+        assert local_executor.supports("python.function.v0")
+        assert local_executor.supports("anything.v99")
+
+    def test_execute_callable_runs_function(
+        self,
+        local_executor: LocalPythonFunctionExecutor,
+    ):
+        result = local_executor.execute_callable(add, {"x": 1, "y": 2})
+        assert result == 3
+
+    def test_get_executor_data(self, local_executor: LocalPythonFunctionExecutor):
+        data = local_executor.get_executor_data()
+        assert data["executor_type"] == "local"
+
+    def test_with_options_returns_new_instance(self, local_executor: LocalPythonFunctionExecutor):
+        new_executor = local_executor.with_options()
+        assert new_executor is not local_executor
+        assert isinstance(new_executor, LocalPythonFunctionExecutor)
+
+
+# ---------------------------------------------------------------------------
+# 3. Executor as property on PacketFunctionBase
+# ---------------------------------------------------------------------------
+
+
+class TestExecutorProperty:
+    def test_default_executor_is_local(self, add_pf: PythonPacketFunction):
+        assert isinstance(add_pf.executor, LocalPythonFunctionExecutor)
+
+    def test_set_executor(
+        self, add_pf: PythonPacketFunction, spy_executor: SpyExecutor
+    ):
+        add_pf.executor = spy_executor
+        assert add_pf.executor is spy_executor
+
+    def test_unset_executor_to_none(
+        self, add_pf: PythonPacketFunction, spy_executor: SpyExecutor
+    ):
+        add_pf.executor = spy_executor
+        add_pf.executor = None
+        assert add_pf.executor is None
+
+    def test_set_compatible_executor(self, add_pf: PythonPacketFunction):
+        executor = PythonOnlyExecutor()
+        add_pf.executor = executor
+        assert add_pf.executor is executor
+
+    def test_set_incompatible_executor_raises(self, add_pf: PythonPacketFunction):
+        executor = NonPythonExecutor()
+        with pytest.raises(TypeError, match="does not support"):
+            add_pf.executor = executor
+
+    def test_executor_via_constructor(self):
+        executor = PythonOnlyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=executor)
+        assert pf.executor is executor
+
+
+# ---------------------------------------------------------------------------
+# 4. Executor routing in call() / direct_call()
+# ---------------------------------------------------------------------------
+
+
+class TestExecutorRouting:
+    def test_call_without_executor_uses_direct_call(
+        self, add_pf: PythonPacketFunction, add_packet: Packet
+    ):
+        result = add_pf.call(add_packet)
+        assert result is not None
+        assert result.as_dict()["result"] == 3
+
+    def test_call_with_executor_routes_through_executor(
+        self,
+        add_pf: PythonPacketFunction,
+        add_packet: Packet,
+        spy_executor: SpyExecutor,
+    ):
+        add_pf.executor = spy_executor
+        result = add_pf.call(add_packet)
+        assert result is not None
+        assert result.as_dict()["result"] == 3
+        assert len(spy_executor.calls) == 1
+
+    def test_direct_call_bypasses_executor(
+        self,
+        add_pf: PythonPacketFunction,
+        add_packet: Packet,
+        spy_executor: SpyExecutor,
+    ):
+        add_pf.executor = spy_executor
+        result = add_pf.direct_call(add_packet)
+        assert result is not None
+        assert result.as_dict()["result"] == 3
+        # Executor was NOT called
+        assert len(spy_executor.calls) == 0
+
+    def test_swapping_executor_changes_routing(
+        self, add_pf: PythonPacketFunction, add_packet: Packet
+    ):
+        spy1 = SpyExecutor()
+        spy2 = SpyExecutor()
+
+        add_pf.executor = spy1
+        add_pf.call(add_packet)
+        assert len(spy1.calls) == 1
+        assert len(spy2.calls) == 0
+
+        add_pf.executor = spy2
+        add_pf.call(add_packet)
+        assert len(spy1.calls) == 1
+        assert len(spy2.calls) == 1
+
+    def test_unsetting_executor_reverts_to_direct(
+        self,
+        add_pf: PythonPacketFunction,
+        add_packet: Packet,
+        spy_executor: SpyExecutor,
+    ):
+        add_pf.executor = spy_executor
+        add_pf.call(add_packet)
+        assert len(spy_executor.calls) == 1
+
+        add_pf.executor = None
+        add_pf.call(add_packet)
+        # No additional executor calls
+        assert len(spy_executor.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# 5. Executor delegation through wrappers
+# ---------------------------------------------------------------------------
+
+
+class TestWrapperExecutorDelegation:
+    def test_wrapper_executor_reads_from_wrapped(self, add_pf: PythonPacketFunction):
+        spy = SpyExecutor()
+        add_pf.executor = spy
+
+        class SimpleWrapper(PacketFunctionWrapper):
+            pass
+
+        wrapper = SimpleWrapper(add_pf, version="v0.0")
+        assert wrapper.executor is spy
+
+    def test_wrapper_executor_set_targets_wrapped(self, add_pf: PythonPacketFunction):
+        spy = SpyExecutor()
+
+        class SimpleWrapper(PacketFunctionWrapper):
+            pass
+
+        wrapper = SimpleWrapper(add_pf, version="v0.0")
+        wrapper.executor = spy
+        assert add_pf.executor is spy
+
+    def test_wrapper_call_routes_through_inner_executor(
+        self, add_pf: PythonPacketFunction, add_packet: Packet
+    ):
+        spy = SpyExecutor()
+        add_pf.executor = spy
+
+        class SimpleWrapper(PacketFunctionWrapper):
+            pass
+
+        wrapper = SimpleWrapper(add_pf, version="v0.0")
+        result = wrapper.call(add_packet)
+        assert result is not None
+        assert result.as_dict()["result"] == 3
+        assert len(spy.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# 6. Protocol conformance
+# ---------------------------------------------------------------------------
+
+
+class TestProtocolConformance:
+    def test_local_executor_satisfies_protocol(self):
+        executor = LocalPythonFunctionExecutor()
+        assert isinstance(executor, PacketFunctionExecutorProtocol)
+
+    def test_spy_executor_satisfies_protocol(self):
+        executor = SpyExecutor()
+        assert isinstance(executor, PacketFunctionExecutorProtocol)
+
+    def test_packet_function_with_executor_satisfies_protocol(self):
+        pf = PythonPacketFunction(add, output_keys="result")
+        pf.executor = LocalPythonFunctionExecutor()
+        assert isinstance(pf, PacketFunctionProtocol)
+
+
+# ---------------------------------------------------------------------------
+# 7. Executor access through FunctionPod / FunctionNode
+# ---------------------------------------------------------------------------
+
+
+def _make_add_stream(rows: list[dict] | None = None):
+    """Helper to create an ArrowTableStream suitable for the ``add`` function."""
+    import pyarrow as pa
+
+    from orcapod.core.streams.arrow_table_stream import ArrowTableStream
+
+    if rows is None:
+        rows = [{"id": 0, "x": 1, "y": 2}, {"id": 1, "x": 3, "y": 4}]
+    keys = list(rows[0].keys())
+    schema = pa.schema([pa.field(k, pa.int64(), nullable=False) for k in keys])
+    table = pa.table(
+        {k: pa.array([r[k] for r in rows], type=pa.int64()) for k in keys},
+        schema=schema,
+    )
+    return ArrowTableStream(table, tag_columns=["id"])
+
+
+class TestFunctionPodExecutorAccess:
+    def test_pod_executor_reads_from_packet_function(self):
+        from orcapod.core.function_pod import FunctionPod
+
+        spy = SpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result")
+        pf.executor = spy
+        pod = FunctionPod(pf)
+        assert pod.executor is spy
+
+    def test_pod_executor_set_targets_packet_function(self):
+        from orcapod.core.function_pod import FunctionPod
+
+        spy = SpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result")
+        pod = FunctionPod(pf)
+        pod.executor = spy
+        assert pf.executor is spy
+
+    def test_pod_executor_swap(self):
+        from orcapod.core.function_pod import FunctionPod
+
+        spy = SpyExecutor()
+        spy2 = SpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result")
+        pf.executor = spy
+        pod = FunctionPod(pf)
+        pod.executor = spy2
+        assert pf.executor is spy2
+
+    def test_pod_process_uses_executor(self):
+        from orcapod.core.function_pod import FunctionPod
+
+        spy = SpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result")
+        pf.executor = spy
+        pod = FunctionPod(pf)
+
+        stream = _make_add_stream()
+        output_stream = pod.process(stream)
+
+        results = list(output_stream.iter_packets())
+        assert len(results) == 2
+        assert results[0][1].as_dict()["result"] == 3
+        assert results[1][1].as_dict()["result"] == 7
+        assert len(spy.calls) == 2
+
+
+class TestFunctionPodStreamExecutorAccess:
+    def test_stream_executor_reads_from_packet_function(self):
+        from orcapod.core.function_pod import FunctionPod
+
+        spy = SpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result")
+        pf.executor = spy
+        pod = FunctionPod(pf)
+
+        stream = pod.process(_make_add_stream())
+        assert stream.executor is spy
+
+    def test_stream_executor_set_targets_packet_function(self):
+        from orcapod.core.function_pod import FunctionPod
+
+        spy = SpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result")
+        pod = FunctionPod(pf)
+
+        stream = pod.process(_make_add_stream())
+        stream.executor = spy
+        assert pf.executor is spy
+
+
+class TestFunctionNodeExecutorAccess:
+    def test_node_executor_reads_from_packet_function(self):
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.nodes import FunctionNode
+
+        spy = SpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result")
+        pf.executor = spy
+        pod = FunctionPod(pf)
+
+        node = FunctionNode(pod, _make_add_stream())
+        assert node.executor is spy
+
+    def test_node_executor_set_targets_packet_function(self):
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.nodes import FunctionNode
+
+        spy = SpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result")
+        pod = FunctionPod(pf)
+
+        node = FunctionNode(pod, _make_add_stream())
+        node.executor = spy
+        assert pf.executor is spy
+
+    def test_node_iter_uses_executor(self):
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.nodes import FunctionNode
+
+        spy = SpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result")
+        pf.executor = spy
+        pod = FunctionPod(pf)
+
+        node = FunctionNode(pod, _make_add_stream())
+
+        node.run()
+        results = list(node.iter_packets())
+        assert len(results) == 2
+        assert results[0][1].as_dict()["result"] == 3
+        assert len(spy.calls) == 2
+
+
+# ---------------------------------------------------------------------------
+# 8. function_pod decorator with executor
+# ---------------------------------------------------------------------------
+
+
+class TestFunctionPodDecoratorExecutor:
+    def test_decorator_with_executor(self):
+        from orcapod.core.function_pod import function_pod
+
+        spy = SpyExecutor()
+
+        @function_pod(output_keys="result", executor=spy)
+        def my_add(x: int, y: int) -> int:
+            return x + y
+
+        assert my_add.pod.executor is spy
+
+    def test_decorator_executor_routes_through_executor(self):
+        from orcapod.core.function_pod import function_pod
+
+        spy = SpyExecutor()
+
+        @function_pod(output_keys="result", executor=spy)
+        def my_add(x: int, y: int) -> int:
+            return x + y
+
+        stream = _make_add_stream()
+        output = my_add.pod.process(stream)
+        results = list(output.iter_packets())
+        assert len(results) == 2
+        assert results[0][1].as_dict()["result"] == 3
+        assert len(spy.calls) == 2
+
+    def test_decorator_incompatible_executor_raises(self):
+        from orcapod.core.function_pod import function_pod
+
+        executor = NonPythonExecutor()
+
+        with pytest.raises(TypeError, match="does not support"):
+
+            @function_pod(output_keys="result", executor=executor)
+            def my_add(x: int, y: int) -> int:
+                return x + y
+
+    def test_decorator_without_executor_defaults_to_local(self):
+        from orcapod.core.function_pod import function_pod
+
+        @function_pod(output_keys="result")
+        def my_add(x: int, y: int) -> int:
+            return x + y
+
+        assert isinstance(my_add.pod.executor, LocalPythonFunctionExecutor)
+
+
+# ---------------------------------------------------------------------------
+# 9. Constructor validation
+# ---------------------------------------------------------------------------
+
+
+class TestConstructorValidation:
+    def test_constructor_validates_compatible_executor(self):
+        executor = PythonOnlyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=executor)
+        assert pf.executor is executor
+
+    def test_constructor_rejects_incompatible_executor(self):
+        executor = NonPythonExecutor()
+        with pytest.raises(TypeError, match="does not support"):
+            PythonPacketFunction(add, output_keys="result", executor=executor)
+
+
+# ---------------------------------------------------------------------------
+# 10. Concurrent iteration
+# ---------------------------------------------------------------------------
+
+
+class ConcurrentSpyExecutor(PythonFunctionExecutorBase):
+    """Executor that supports concurrent execution and tracks sync vs async calls."""
+
+    def __init__(self) -> None:
+        self.sync_calls: list[Any] = []
+        self.async_calls: list[Any] = []
+
+    @property
+    def executor_type_id(self) -> str:
+        return "concurrent-spy"
+
+    def supported_function_type_ids(self) -> frozenset[str]:
+        return frozenset()
+
+    @property
+    def supports_concurrent_execution(self) -> bool:
+        return True
+
+    def execute(
+        self,
+        packet_function: PacketFunctionProtocol,
+        packet: PacketProtocol,
+    ) -> "PacketProtocol | None":
+        self.sync_calls.append(packet)
+        return packet_function.direct_call(packet)
+
+    async def async_execute(
+        self,
+        packet_function: PacketFunctionProtocol,
+        packet: PacketProtocol,
+    ) -> "PacketProtocol | None":
+        self.async_calls.append(packet)
+        return packet_function.direct_call(packet)
+
+    def execute_callable(self, fn, kwargs, executor_options=None, **kw):
+        self.sync_calls.append(kwargs)
+        return fn(**kwargs)
+
+    async def async_execute_callable(self, fn, kwargs, executor_options=None, **kw):
+        self.async_calls.append(kwargs)
+        return fn(**kwargs)
+
+
+class TestConcurrentIteration:
+    def test_function_pod_stream_uses_async_path(self):
+        from orcapod.core.function_pod import FunctionPod
+
+        spy = ConcurrentSpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pod = FunctionPod(pf)
+
+        stream = _make_add_stream()
+        output_stream = pod.process(stream)
+        results = list(output_stream.iter_packets())
+
+        assert len(results) == 2
+        assert results[0][1].as_dict()["result"] == 3
+        assert results[1][1].as_dict()["result"] == 7
+        # Should have used async path, not sync
+        assert len(spy.async_calls) == 2
+        assert len(spy.sync_calls) == 0
+
+    def test_function_node_uses_sync_path_via_run(self):
+        """FunctionNode.run() delegates to execute(), which is always sequential
+        (synchronous). The async path is only used through async_execute() in the
+        async pipeline orchestrator. Even with a ConcurrentSpyExecutor attached,
+        run() → execute() → sync executor path."""
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.nodes import FunctionNode
+
+        spy = ConcurrentSpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pod = FunctionPod(pf)
+
+        node = FunctionNode(pod, _make_add_stream())
+        node.run()
+        results = list(node.iter_packets())
+
+        assert len(results) == 2
+        assert results[0][1].as_dict()["result"] == 3
+        assert results[1][1].as_dict()["result"] == 7
+        # execute() is always sequential — sync path used, not async
+        assert len(spy.sync_calls) == 2
+        assert len(spy.async_calls) == 0
+
+    def test_non_concurrent_executor_uses_sync_path(self):
+        """SpyExecutor has supports_concurrent_execution=False (default)."""
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.nodes import FunctionNode
+
+        spy = SpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pod = FunctionPod(pf)
+
+        node = FunctionNode(pod, _make_add_stream())
+        node.run()
+        results = list(node.iter_packets())
+
+        assert len(results) == 2
+        # SpyExecutor.execute was called (sync path)
+        assert len(spy.calls) == 2
+
+    def test_no_executor_uses_sync_path(self):
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.nodes import FunctionNode
+
+        pf = PythonPacketFunction(add, output_keys="result")
+        pod = FunctionPod(pf)
+
+        node = FunctionNode(pod, _make_add_stream())
+        node.run()
+        results = list(node.iter_packets())
+
+        assert len(results) == 2
+        assert results[0][1].as_dict()["result"] == 3
+
+    def test_concurrent_results_preserve_order(self):
+        """Results should come back in the same order as inputs."""
+        from orcapod.core.function_pod import FunctionPod
+
+        spy = ConcurrentSpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pod = FunctionPod(pf)
+
+        rows = [{"id": i, "x": i, "y": i * 10} for i in range(5)]
+        stream = _make_add_stream(rows)
+        output = pod.process(stream)
+        results = [tag_pkt[1].as_dict()["result"] for tag_pkt in output.iter_packets()]
+        assert results == [0, 11, 22, 33, 44]
+
+    def test_second_iteration_uses_cache(self):
+        """After concurrent first pass, second call yields from cache."""
+        from orcapod.core.function_pod import FunctionPod
+
+        spy = ConcurrentSpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pod = FunctionPod(pf)
+
+        stream = _make_add_stream()
+        output_stream = pod.process(stream)
+
+        # First iteration: concurrent
+        first = list(output_stream.iter_packets())
+        assert len(spy.async_calls) == 2
+
+        # Second iteration: from cache, no new executor calls
+        second = list(output_stream.iter_packets())
+        assert len(spy.async_calls) == 2  # unchanged
+        assert len(first) == len(second)
+
+
+# ---------------------------------------------------------------------------
+# 11. PythonFunctionExecutorProtocol conformance
+# ---------------------------------------------------------------------------
+
+
+class TestPythonFunctionExecutorProtocol:
+    def test_local_executor_satisfies_protocol(self):
+        executor = LocalPythonFunctionExecutor()
+        assert isinstance(executor, PythonFunctionExecutorProtocol)
+
+    def test_spy_executor_satisfies_protocol(self):
+        executor = SpyExecutor()
+        assert isinstance(executor, PythonFunctionExecutorProtocol)
+
+    def test_execute_callable_runs_function(self):
+        executor = LocalPythonFunctionExecutor()
+        result = executor.execute_callable(add, {"x": 3, "y": 4})
+        assert result == 7
+
+    def test_execute_callable_with_executor_options(self):
+        executor = LocalPythonFunctionExecutor()
+        result = executor.execute_callable(
+            add, {"x": 1, "y": 2}, executor_options={"num_cpus": 1}
+        )
+        assert result == 3
+
+
+# ---------------------------------------------------------------------------
+# 12. Type-safe executor dispatch via Generic[E] + __init_subclass__
+# ---------------------------------------------------------------------------
+
+
+class _NotAnExecutor:
+    """A class that does NOT satisfy PythonFunctionExecutorProtocol."""
+
+    @property
+    def executor_type_id(self) -> str:
+        return "fake"
+
+    def supported_function_type_ids(self) -> frozenset[str]:
+        return frozenset()
+
+    def supports(self, packet_function_type_id: str) -> bool:
+        return True
+
+
+class TestGenericExecutorDispatch:
+    def test_python_pf_resolves_executor_protocol(self):
+        """PythonPacketFunction should have resolved PythonFunctionExecutorProtocol."""
+        assert (
+            PythonPacketFunction._resolved_executor_protocol
+            is PythonFunctionExecutorProtocol
+        )
+
+    def test_wrapper_does_not_resolve_protocol(self):
+        """PacketFunctionWrapper[E] should NOT resolve a protocol (E is unbound)."""
+        assert PacketFunctionWrapper._resolved_executor_protocol is None
+
+    def test_set_executor_accepts_compatible_protocol(self):
+        pf = PythonPacketFunction(add, output_keys="result")
+        executor = LocalPythonFunctionExecutor()
+        pf.set_executor(executor)
+        assert pf.executor is executor
+
+    def test_set_executor_accepts_none(self):
+        spy = SpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pf.set_executor(None)
+        assert pf.executor is None
+
+    def test_set_executor_rejects_non_conforming_protocol(self):
+        """An object that doesn't implement PythonFunctionExecutorProtocol is rejected."""
+        pf = PythonPacketFunction(add, output_keys="result")
+        fake = _NotAnExecutor()
+        with pytest.raises(TypeError, match="requires an executor implementing"):
+            pf.set_executor(fake)
+
+    def test_call_routes_through_execute_callable(self):
+        """PythonPacketFunction.call() should use execute_callable, not execute."""
+        spy = SpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        packet = Packet({"x": 1, "y": 2})
+        result = pf.call(packet)
+        assert result is not None
+        assert result.as_dict()["result"] == 3
+        assert len(spy.calls) == 1
+
+    def test_call_with_inactive_function_returns_none(self):
+        """When the function is inactive and executor is set, call returns None."""
+        spy = SpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pf.set_active(False)
+        packet = Packet({"x": 1, "y": 2})
+        result = pf.call(packet)
+        assert result is None
+        assert len(spy.calls) == 0
+
+    def test_async_call_routes_through_async_execute_callable(self):
+        """PythonPacketFunction.async_call() should use async_execute_callable."""
+        import asyncio
+
+        spy = ConcurrentSpyExecutor()
+        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        packet = Packet({"x": 1, "y": 2})
+        result = asyncio.run(pf.async_call(packet))
+        assert result is not None
+        assert result.as_dict()["result"] == 3
+        assert len(spy.async_calls) == 1
+        assert len(spy.sync_calls) == 0
+
+
+# ---------------------------------------------------------------------------
+# 13. LocalExecutor execute_callable with async function
+# ---------------------------------------------------------------------------
+
+
+class TestLocalExecutorCallable:
+    def test_execute_callable_with_async_fn(self):
+        """LocalExecutor.execute_callable handles async functions via asyncio.run."""
+        import asyncio
+
+        async def async_add(x: int, y: int) -> int:
+            return x + y
+
+        executor = LocalPythonFunctionExecutor()
+        result = executor.execute_callable(async_add, {"x": 5, "y": 3})
+        assert result == 8
+
+    def test_async_execute_callable_with_sync_fn(self):
+        """LocalExecutor.async_execute_callable handles sync fns via run_in_executor."""
+        import asyncio
+
+        executor = LocalPythonFunctionExecutor()
+        result = asyncio.run(executor.async_execute_callable(add, {"x": 10, "y": 20}))
+        assert result == 30
+
+    def test_async_execute_callable_with_async_fn(self):
+        """LocalExecutor.async_execute_callable awaits async functions directly."""
+        import asyncio
+
+        async def async_add(x: int, y: int) -> int:
+            return x + y
+
+        executor = LocalPythonFunctionExecutor()
+        result = asyncio.run(
+            executor.async_execute_callable(async_add, {"x": 7, "y": 8})
+        )
+        assert result == 15

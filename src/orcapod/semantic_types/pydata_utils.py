@@ -2,8 +2,9 @@
 # dictionary of lists
 
 from types import UnionType
-from typing import Any, Union, get_origin, get_args
-from orcapod.types import PythonSchema
+from typing import Any, Union
+
+from orcapod.types import DataType, Schema
 
 
 def pylist_to_pydict(pylist: list[dict]) -> dict:
@@ -81,7 +82,7 @@ def pydict_to_pylist(pydict: dict) -> list[dict]:
 def infer_python_schema_from_pylist_data(
     data: list[dict],
     default_type: type = str,
-) -> PythonSchema:
+) -> Schema:
     """
     Infer schema from sample data (best effort).
 
@@ -96,9 +97,9 @@ def infer_python_schema_from_pylist_data(
     For production use, explicit schemas are recommended.
     """
     if not data:
-        return {}
+        return Schema({})
 
-    schema = {}
+    schema_data = {}
 
     # Get all possible field names
     all_fields = []
@@ -121,27 +122,29 @@ def infer_python_schema_from_pylist_data(
 
         if not non_none_values:
             # Handle case where all values are None
-            schema[field_name] = default_type | None
+            schema_data[field_name] = default_type | None
             continue
 
         # Infer type from non-None values
         inferred_type = _infer_type_from_values(non_none_values)
 
         if inferred_type is None:
-            schema[field_name] = default_type | None
+            schema_data[field_name] = default_type | None
         elif has_none:
             # Wrap with Optional if None values present
-            schema[field_name] = inferred_type | None if inferred_type != Any else Any
+            schema_data[field_name] = (
+                inferred_type | None if inferred_type != Any else Any
+            )
         else:
-            schema[field_name] = inferred_type
+            schema_data[field_name] = inferred_type
 
-    return schema
+    return Schema(schema_data)
 
 
 def infer_python_schema_from_pydict_data(
     data: dict[str, list[Any]],
     default_type: type = str,
-) -> PythonSchema:
+) -> Schema:
     """
     Infer schema from columnar sample data (best effort).
 
@@ -156,15 +159,15 @@ def infer_python_schema_from_pydict_data(
     For production use, explicit schemas are recommended.
     """
     if not data:
-        return {}
+        return Schema({})
 
-    schema: PythonSchema = {}
+    schema_data: dict[str, DataType] = {}
 
     # Infer type for each field
     for field_name, field_values in data.items():
         if not field_values:
             # Handle case where field has empty list
-            schema[field_name] = default_type | None
+            schema_data[field_name] = default_type | None
             continue
 
         # Separate None and non-None values
@@ -173,22 +176,22 @@ def infer_python_schema_from_pydict_data(
 
         if not non_none_values:
             # Handle case where all values are None
-            schema[field_name] = default_type | None
+            schema_data[field_name] = default_type | None
             continue
 
         # Infer type from non-None values
         inferred_type = _infer_type_from_values(non_none_values)
 
         if inferred_type is None:
-            schema[field_name] = default_type | None
+            schema_data[field_name] = default_type | None
         elif has_none:
             # Wrap with Optional if None values present
             # TODO: consider the case of Any
-            schema[field_name] = inferred_type | None
+            schema_data[field_name] = inferred_type | None
         else:
-            schema[field_name] = inferred_type
+            schema_data[field_name] = inferred_type
 
-    return schema
+    return Schema(schema_data)
 
 
 # TODO: reconsider this type hint -- use of Any effectively renders this type hint useless

@@ -1,12 +1,14 @@
-from orcapod.protocols import core_protocols as cp
-from orcapod.core.streams import TableStream
-from orcapod.types import PythonSchema
-from typing import Any, TYPE_CHECKING
-from orcapod.utils.lazy_module import LazyModule
-from collections.abc import Mapping
-from orcapod.errors import InputValidationError
-from orcapod.core.system_constants import constants
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any
+
+from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import UnaryOperator
+from orcapod.core.streams import ArrowTableStream
+from orcapod.errors import InputValidationError
+from orcapod.protocols.core_protocols import PacketProtocol, StreamProtocol, TagProtocol
+from orcapod.system_constants import constants
+from orcapod.types import ColumnConfig, Schema
+from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -28,7 +30,21 @@ class MapPackets(UnaryOperator):
         self.drop_unmapped = drop_unmapped
         super().__init__(**kwargs)
 
-    def op_forward(self, stream: cp.Stream) -> cp.Stream:
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this MapPackets operator to a config dict.
+
+        Returns:
+            A dict with ``class_name``, ``module_path``, and ``config`` keys,
+            where ``config`` contains ``name_map`` and ``drop_unmapped``.
+        """
+        config = super().to_config()
+        config["config"] = {
+            "name_map": dict(self.name_map),
+            "drop_unmapped": self.drop_unmapped,
+        }
+        return config
+
+    def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         tag_columns, packet_columns = stream.keys()
         unmapped_columns = set(packet_columns) - set(self.name_map.keys())
 
@@ -37,7 +53,7 @@ class MapPackets(UnaryOperator):
             return stream
 
         table = stream.as_table(
-            include_source=True, include_system_tags=True, sort_by_tags=False
+            columns={"source": True, "system_tags": True, "sort_by_tags": False}
         )
 
         name_map = {
@@ -64,15 +80,9 @@ class MapPackets(UnaryOperator):
         if self.drop_unmapped and unmapped_columns:
             renamed_table = renamed_table.drop_columns(list(unmapped_columns))
 
-        return TableStream(
-            renamed_table, tag_columns=tag_columns, source=self, upstreams=(stream,)
-        )
+        return ArrowTableStream(renamed_table, tag_columns=tag_columns)
 
-    def op_validate_inputs(self, stream: cp.Stream) -> None:
-        """
-        This method should be implemented by subclasses to validate the inputs to the operator.
-        It takes two streams as input and raises an error if the inputs are not valid.
-        """
+    def validate_unary_input(self, stream: StreamProtocol) -> None:
         # verify that renamed value does NOT collide with other columns
         tag_columns, packet_columns = stream.keys()
         relevant_source = []
@@ -95,28 +105,60 @@ class MapPackets(UnaryOperator):
                 message += f"overlapping tag columns: {overlapping_tag_columns}."
             raise InputValidationError(message)
 
-    def op_output_types(
-        self, stream: cp.Stream, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
-        tag_typespec, packet_typespec = stream.types(
-            include_system_tags=include_system_tags
+    def unary_output_schema(
+        self,
+        stream: StreamProtocol,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]:
+        tag_schema, packet_schema = stream.output_schema(
+            columns=columns, all_info=all_info
         )
 
-        # Create new packet typespec with renamed keys
-        new_packet_typespec = {
+        # Create new packet schema with renamed keys
+        new_packet_schema = {
             self.name_map.get(k, k): v
-            for k, v in packet_typespec.items()
+            for k, v in packet_schema.items()
             if k in self.name_map or not self.drop_unmapped
         }
 
-        return tag_typespec, new_packet_typespec
+        return tag_schema, Schema(new_packet_schema)
 
-    def op_identity_structure(self, stream: cp.Stream | None = None) -> Any:
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        **kwargs: Any,
+    ) -> None:
+        """Streaming: rename packet columns per row without materializing."""
+        try:
+            rename_map: dict[str, str] | None = None
+            unmapped: list[str] | None = None
+            async for tag, packet in inputs[0]:
+                if rename_map is None:
+                    pkt_keys = packet.keys()
+                    rename_map = {
+                        k: self.name_map[k] for k in pkt_keys if k in self.name_map
+                    }
+                    if self.drop_unmapped:
+                        unmapped = [k for k in pkt_keys if k not in self.name_map]
+                if not rename_map:
+                    await output.send((tag, packet))
+                else:
+                    new_pkt = packet.rename(rename_map)
+                    if unmapped:
+                        new_pkt = new_pkt.drop(*unmapped)
+                    await output.send((tag, new_pkt))
+        finally:
+            await output.close()
+
+    def identity_structure(self) -> Any:
         return (
             self.__class__.__name__,
             self.name_map,
             self.drop_unmapped,
-        ) + ((stream,) if stream is not None else ())
+        )
 
 
 class MapTags(UnaryOperator):
@@ -133,7 +175,21 @@ class MapTags(UnaryOperator):
         self.drop_unmapped = drop_unmapped
         super().__init__(**kwargs)
 
-    def op_forward(self, stream: cp.Stream) -> cp.Stream:
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this MapTags operator to a config dict.
+
+        Returns:
+            A dict with ``class_name``, ``module_path``, and ``config`` keys,
+            where ``config`` contains ``name_map`` and ``drop_unmapped``.
+        """
+        config = super().to_config()
+        config["config"] = {
+            "name_map": dict(self.name_map),
+            "drop_unmapped": self.drop_unmapped,
+        }
+        return config
+
+    def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
         tag_columns, packet_columns = stream.keys()
         missing_tags = set(tag_columns) - set(self.name_map.keys())
 
@@ -141,7 +197,9 @@ class MapTags(UnaryOperator):
             # nothing to rename in the tags, return stream as is
             return stream
 
-        table = stream.as_table(include_source=True, include_system_tags=True)
+        table = stream.as_table(
+            columns={"source": True, "system_tags": True, "sort_by_tags": False}
+        )
 
         name_map = {
             tc: self.name_map.get(tc, tc)
@@ -158,11 +216,12 @@ class MapTags(UnaryOperator):
             # drop any tags that are not in the name map
             renamed_table = renamed_table.drop_columns(list(missing_tags))
 
-        return TableStream(
-            renamed_table, tag_columns=new_tag_columns, source=self, upstreams=(stream,)
+        return ArrowTableStream(
+            renamed_table,
+            tag_columns=new_tag_columns,
         )
 
-    def op_validate_inputs(self, stream: cp.Stream) -> None:
+    def validate_unary_input(self, stream: StreamProtocol) -> None:
         """
         This method should be implemented by subclasses to validate the inputs to the operator.
         It takes two streams as input and raises an error if the inputs are not valid.
@@ -187,30 +246,56 @@ class MapTags(UnaryOperator):
                 message += f"overlapping packet columns: {overlapping_packet_columns}."
             raise InputValidationError(message)
 
-    def op_output_types(
-        self, stream: cp.Stream, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
-        tag_typespec, packet_typespec = stream.types(
-            include_system_tags=include_system_tags
+    def unary_output_schema(
+        self,
+        stream: StreamProtocol,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]:
+        tag_schema, packet_schema = stream.output_schema(
+            columns=columns, all_info=all_info
         )
 
-        # Create new packet typespec with renamed keys
-        new_tag_typespec = {self.name_map.get(k, k): v for k, v in tag_typespec.items()}
-
-        # Create new packet typespec with renamed keys
-        new_tag_typespec = {
+        new_tag_schema = {
             self.name_map.get(k, k): v
-            for k, v in tag_typespec.items()
+            for k, v in tag_schema.items()
             if k in self.name_map or not self.drop_unmapped
         }
 
-        return new_tag_typespec, packet_typespec
+        return Schema(new_tag_schema), packet_schema
 
-        return new_tag_typespec, packet_typespec
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        **kwargs: Any,
+    ) -> None:
+        """Streaming: rename tag columns per row without materializing."""
+        try:
+            rename_map: dict[str, str] | None = None
+            unmapped: list[str] | None = None
+            async for tag, packet in inputs[0]:
+                if rename_map is None:
+                    tag_keys = tag.keys()
+                    rename_map = {
+                        k: self.name_map[k] for k in tag_keys if k in self.name_map
+                    }
+                    if self.drop_unmapped:
+                        unmapped = [k for k in tag_keys if k not in self.name_map]
+                if not rename_map:
+                    await output.send((tag, packet))
+                else:
+                    new_tag = tag.rename(rename_map)
+                    if unmapped:
+                        new_tag = new_tag.drop(*unmapped)
+                    await output.send((new_tag, packet))
+        finally:
+            await output.close()
 
-    def op_identity_structure(self, stream: cp.Stream | None = None) -> Any:
+    def identity_structure(self) -> Any:
         return (
             self.__class__.__name__,
             self.name_map,
             self.drop_unmapped,
-        ) + ((stream,) if stream is not None else ())
+        )

@@ -1,13 +1,13 @@
-from typing import Protocol, runtime_checkable
 from contextlib import AbstractContextManager
-from orcapod.protocols.core_protocols.kernel import Kernel
-from orcapod.protocols.core_protocols.pods import Pod
-from orcapod.protocols.core_protocols.source import Source
-from orcapod.protocols.core_protocols.streams import Stream
+from typing import Protocol, runtime_checkable
+
+from orcapod.protocols.core_protocols.function_pod import FunctionPodProtocol
+from orcapod.protocols.core_protocols.operator_pod import OperatorPodProtocol
+from orcapod.protocols.core_protocols.streams import StreamProtocol
 
 
 @runtime_checkable
-class Tracker(Protocol):
+class TrackerProtocol(Protocol):
     """
     Records kernel invocations and stream creation for computational graph tracking.
 
@@ -49,52 +49,19 @@ class Tracker(Protocol):
         """
         ...
 
-    def record_kernel_invocation(
-        self, kernel: Kernel, upstreams: tuple[Stream, ...], label: str | None = None
+    def record_operator_pod_invocation(
+        self,
+        pod: OperatorPodProtocol,
+        upstreams: tuple[StreamProtocol, ...] = (),
+        label: str | None = None,
     ) -> None:
         """
-        Record a kernel invocation in the computational graph.
-
-        This method is called whenever a kernel is invoked. The tracker
-        should record:
-        - The kernel and its properties
-        - The input streams that were used as input
-        - Timing and performance information
-        - Any relevant metadata
-
-        Args:
-            kernel: The kernel that was invoked
-            upstreams: The input streams used for this invocation
-        """
-        ...
-
-    def record_source_invocation(
-        self, source: Source, label: str | None = None
-    ) -> None:
-        """
-        Record a source invocation in the computational graph.
-
-        This method is called whenever a source is invoked. The tracker
-        should record:
-        - The source and its properties
-        - Timing and performance information
-        - Any relevant metadata
-
-        Args:
-            source: The source that was invoked
-        """
-        ...
-
-    def record_pod_invocation(
-        self, pod: Pod, upstreams: tuple[Stream, ...], label: str | None = None
-    ) -> None:
-        """
-        Record a pod invocation in the computational graph.
+        Record an operator pod invocation in the computational graph.
 
         This method is called whenever a pod is invoked. The tracker
         should record:
         - The pod and its properties
-        - The upstream streams that were used as input
+        - The input streams that were used as input. If no streams are provided, the pod is considered a source pod.
         - Timing and performance information
         - Any relevant metadata
 
@@ -104,13 +71,35 @@ class Tracker(Protocol):
         """
         ...
 
+    def record_function_pod_invocation(
+        self,
+        pod: FunctionPodProtocol,
+        input_stream: StreamProtocol,
+        label: str | None = None,
+    ) -> None:
+        """
+        Record a function pod invocation in the computational graph.
+
+        This method is called whenever a function pod is invoked. The tracker
+        should record:
+        - The function pod and its properties
+        - The input stream that was used as input. If no streams are provided, the pod is considered a source pod.
+        - Timing and performance information
+        - Any relevant metadata
+
+        Args:
+            pod: The function pod that was invoked
+            input_stream: The input stream used for this invocation
+        """
+        ...
+
 
 @runtime_checkable
-class TrackerManager(Protocol):
+class TrackerManagerProtocol(Protocol):
     """
     Manages multiple trackers and coordinates their activity.
 
-    The TrackerManager provides a centralized way to:
+    The TrackerManagerProtocol provides a centralized way to:
     - Register and manage multiple trackers
     - Coordinate recording across all active trackers
     - Provide a single interface for graph recording
@@ -123,7 +112,7 @@ class TrackerManager(Protocol):
     - Performance optimization (selective tracking)
     """
 
-    def get_active_trackers(self) -> list[Tracker]:
+    def get_active_trackers(self) -> list[TrackerProtocol]:
         """
         Get all currently active trackers.
 
@@ -131,11 +120,11 @@ class TrackerManager(Protocol):
         providing the list of trackers that will receive recording events.
 
         Returns:
-            list[Tracker]: List of trackers that are currently recording
+            list[TrackerProtocol]: List of trackers that are currently recording
         """
         ...
 
-    def register_tracker(self, tracker: Tracker) -> None:
+    def register_tracker(self, tracker: TrackerProtocol) -> None:
         """
         Register a new tracker in the system.
 
@@ -148,7 +137,7 @@ class TrackerManager(Protocol):
         """
         ...
 
-    def deregister_tracker(self, tracker: Tracker) -> None:
+    def deregister_tracker(self, tracker: TrackerProtocol) -> None:
         """
         Remove a tracker from the system.
 
@@ -163,50 +152,43 @@ class TrackerManager(Protocol):
         """
         ...
 
-    def record_kernel_invocation(
-        self, kernel: Kernel, upstreams: tuple[Stream, ...], label: str | None = None
+    def record_operator_pod_invocation(
+        self,
+        pod: OperatorPodProtocol,
+        upstreams: tuple[StreamProtocol, ...] = (),
+        label: str | None = None,
     ) -> None:
         """
-        Record a stream in all active trackers.
+        Record operator pod invocation in all active trackers.
 
-        This method broadcasts the stream recording to all currently
+        This method broadcasts the operator pod invocation recording to all currently
         active and registered trackers. It provides a single point
         of entry for recording events, simplifying kernel implementations.
 
         Args:
-            stream: The stream to record in all active trackers
+            pod: The operator pod to record in all active trackers
+            upstreams: The upstream streams to record in all active trackers
+            label: The label to associate with the recording
         """
         ...
 
-    def record_source_invocation(
-        self, source: Source, label: str | None = None
+    def record_function_pod_invocation(
+        self,
+        pod: FunctionPodProtocol,
+        input_stream: StreamProtocol,
+        label: str | None = None,
     ) -> None:
         """
-        Record a source invocation in the computational graph.
+        Record a function pod invocation in all active trackers.
 
-        This method is called whenever a source is invoked. The tracker
-        should record:
-        - The source and its properties
-        - Timing and performance information
-        - Any relevant metadata
-
-        Args:
-            source: The source that was invoked
-        """
-        ...
-
-    def record_pod_invocation(
-        self, pod: Pod, upstreams: tuple[Stream, ...], label: str | None = None
-    ) -> None:
-        """
-        Record a stream in all active trackers.
-
-        This method broadcasts the stream recording to all currently`
+        This method broadcasts the function pod invocation recording to all currently
         active and registered trackers. It provides a single point
         of entry for recording events, simplifying kernel implementations.
 
         Args:
-            stream: The stream to record in all active trackers
+            pod: The function pod to record in all active trackers
+            input_stream: The input stream to record in all active trackers
+            label: The label to associate with the recording
         """
         ...
 

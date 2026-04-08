@@ -1,113 +1,87 @@
+from __future__ import annotations
+
 from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, Any
 
-
-from orcapod.protocols import core_protocols as cp
-from orcapod.types import DataValue, PythonSchema, PythonSchemaLike
+from orcapod.core.sources.base import RootSource
+from orcapod.core.sources.stream_builder import SourceStreamBuilder
+from orcapod.types import DataValue, SchemaLike
+from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
-from orcapod.core.system_constants import constants
-from orcapod.core.sources.arrow_table_source import ArrowTableSource
 
 if TYPE_CHECKING:
     import pyarrow as pa
 else:
     pa = LazyModule("pyarrow")
 
-from orcapod.core.sources.base import SourceBase
 
+class DictSource(RootSource):
+    """A source backed by a collection of Python dictionaries.
 
-def add_source_field(
-    record: dict[str, DataValue], source_info: str
-) -> dict[str, DataValue]:
-    """Add source information to a record."""
-    # for all "regular" fields, add source info
-    for key in record.keys():
-        if not key.startswith(constants.META_PREFIX) and not key.startswith(
-            constants.DATAGRAM_PREFIX
-        ):
-            record[f"{constants.SOURCE_PREFIX}{key}"] = f"{source_info}:{key}"
-    return record
-
-
-def split_fields_with_prefixes(
-    record, prefixes: Collection[str]
-) -> tuple[dict[str, DataValue], dict[str, DataValue]]:
-    """Split fields in a record into two dictionaries based on prefixes."""
-    matching = {}
-    non_matching = {}
-    for key, value in record.items():
-        if any(key.startswith(prefix) for prefix in prefixes):
-            matching[key] = value
-        else:
-            non_matching[key] = value
-    return matching, non_matching
-
-
-def split_system_columns(
-    data: list[dict[str, DataValue]],
-) -> tuple[list[dict[str, DataValue]], list[dict[str, DataValue]]]:
-    system_columns: list[dict[str, DataValue]] = []
-    non_system_columns: list[dict[str, DataValue]] = []
-    for record in data:
-        sys_cols, non_sys_cols = split_fields_with_prefixes(
-            record, [constants.META_PREFIX, constants.DATAGRAM_PREFIX]
-        )
-        system_columns.append(sys_cols)
-        non_system_columns.append(non_sys_cols)
-    return system_columns, non_system_columns
-
-
-class DictSource(SourceBase):
-    """Construct source from a collection of dictionaries"""
+    Each dict becomes one (tag, packet) pair in the stream. The dicts are
+    converted to an Arrow table via the data-context type converter, then
+    enriched by ``SourceStreamBuilder`` (source-info, schema-hash, system tags).
+    """
 
     def __init__(
         self,
         data: Collection[Mapping[str, DataValue]],
         tag_columns: Collection[str] = (),
         system_tag_columns: Collection[str] = (),
-        source_name: str | None = None,
-        data_schema: PythonSchemaLike | None = None,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-        arrow_table = self.data_context.type_converter.python_dicts_to_arrow_table(
-            [dict(e) for e in data], python_schema=data_schema
-        )
-        self._table_source = ArrowTableSource(
+        data_schema: SchemaLike | pa.Schema | None = None,
+        source_id: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(source_id=source_id, **kwargs)
+
+        # Accept either a Python SchemaLike (Mapping[str, type]) or a
+        # pa.Schema directly via data_schema; route to the converter accordingly.
+        if isinstance(data_schema, pa.Schema):
+            arrow_table = self.data_context.type_converter.python_dicts_to_arrow_table(
+                [dict(row) for row in data],
+                arrow_schema=data_schema,
+            )
+        else:
+            arrow_table = self.data_context.type_converter.python_dicts_to_arrow_table(
+                [dict(row) for row in data],
+                python_schema=data_schema,
+            )
+            if data_schema is None:
+                # No explicit schema — infer nullable from actual values.
+                # The type converter defaults all fields to nullable=True; derive
+                # the correct flags here so the builder can trust the schema as-is.
+                arrow_table = arrow_table.cast(arrow_utils.infer_schema_nullable(arrow_table))
+
+        builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
+        result = builder.build(
             arrow_table,
             tag_columns=tag_columns,
-            source_name=source_name,
+            source_id=self._source_id,
             system_tag_columns=system_tag_columns,
         )
 
-    @property
-    def reference(self) -> tuple[str, ...]:
-        # TODO: provide more thorough implementation
-        return ("dict",) + self._table_source.reference[1:]
+        self._stream = result.stream
+        self._tag_columns = result.tag_columns
+        if self._source_id is None:
+            self._source_id = result.source_id
 
-    def source_identity_structure(self) -> Any:
-        return self._table_source.source_identity_structure()
+    def to_config(self, db_registry=None) -> dict[str, Any]:
+        """Serialize metadata-only config (data is not serializable)."""
+        return {
+            "source_type": "dict",
+            "tag_columns": list(self._tag_columns),
+            "source_id": self.source_id,
+            **self._identity_config(),
+        }
 
-    def get_all_records(
-        self, include_system_columns: bool = False
-    ) -> "pa.Table | None":
-        return self._table_source.get_all_records(
-            include_system_columns=include_system_columns
-        )
+    @classmethod
+    def from_config(cls, config: dict[str, Any], db_registry=None) -> DictSource:
+        """Not supported — DictSource data cannot be reconstructed from config.
 
-    def forward(self, *streams: cp.Stream) -> cp.Stream:
+        Raises:
+            NotImplementedError: Always.
         """
-        Load data from file and return a static stream.
-
-        This is called by forward() and creates a fresh snapshot each time.
-        """
-        return self._table_source.forward(*streams)
-
-    def source_output_types(
-        self, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
-        """Return tag and packet types based on provided typespecs."""
-        # TODO: add system tag
-        return self._table_source.source_output_types(
-            include_system_tags=include_system_tags
+        raise NotImplementedError(
+            "DictSource cannot be reconstructed from config — "
+            "original data is not serializable."
         )

@@ -1,13 +1,8 @@
-from .arrow_datagram import ArrowDatagram
-from .arrow_tag_packet import ArrowTag, ArrowPacket
-from .dict_datagram import DictDatagram
-from .dict_tag_packet import DictTag, DictPacket
+from .datagram import Datagram
+from .tag_packet import Packet, Tag
 
 __all__ = [
-    "ArrowDatagram",
-    "ArrowTag",
-    "ArrowPacket",
-    "DictDatagram",
-    "DictTag",
-    "DictPacket",
+    "Datagram",
+    "Tag",
+    "Packet",
 ]

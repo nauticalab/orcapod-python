@@ -1,5 +1,7 @@
-import pytest
 from unittest.mock import Mock
+
+import pytest
+
 from orcapod.semantic_types import semantic_registry
 
 

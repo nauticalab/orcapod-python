@@ -7,7 +7,12 @@ the context management system.
 
 from dataclasses import dataclass
 
-from orcapod.protocols import hashing_protocols as hp, semantic_types_protocols as sp
+from orcapod.hashing.semantic_hashing.type_handler_registry import TypeHandlerRegistry
+from orcapod.protocols.hashing_protocols import (
+    ArrowHasherProtocol,
+    SemanticHasherProtocol,
+)
+from orcapod.protocols.semantic_types_protocols import TypeConverterProtocol
 
 
 @dataclass
@@ -25,15 +30,17 @@ class DataContext:
         description: Human-readable description of this context
         semantic_type_registry: Registry of semantic type converters
         arrow_hasher: Arrow table hasher for this context
-        object_hasher: General object hasher for this context
+        semantic_hasher: General semantic hasher for this context
+        type_handler_registry: Registry of TypeHandlerProtocol instances for SemanticHasherProtocol
     """
 
     context_key: str
     version: str
     description: str
-    type_converter: sp.TypeConverter
-    arrow_hasher: hp.ArrowHasher
-    object_hasher: hp.ObjectHasher
+    type_converter: TypeConverterProtocol
+    arrow_hasher: ArrowHasherProtocol
+    semantic_hasher: SemanticHasherProtocol  # this is the currently the JSON hasher
+    type_handler_registry: TypeHandlerRegistry
 
 
 class ContextValidationError(Exception):

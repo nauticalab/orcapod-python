@@ -1,7 +1,10 @@
-import git
+from __future__ import annotations
+
 import inspect
 from typing import Any
-import git.exc
+from orcapod.utils.lazy_module import LazyModule
+
+git = LazyModule("git")
 
 
 def is_git_repo(path):
@@ -32,10 +35,9 @@ def get_git_info(path):
         commit_hash = repo.head.commit.hexsha
         short_hash = repo.head.commit.hexsha[:7]
 
-        # Check if repository is dirty
+        # Check if repository is dirty (staged or unstaged changes only;
+        # untracked_files=False avoids a slow git ls-files subprocess call)
         is_dirty = repo.is_dirty(untracked_files=False)
-        # Check if there are untracked files
-        has_untracked_files = len(repo.untracked_files) > 0
 
         # Get current branch name
         try:
@@ -44,12 +46,9 @@ def get_git_info(path):
             # Handle detached HEAD state
             branch_name = "HEAD (detached)"
 
-        # Get more detailed dirty status
-        dirty_details = {
-            "staged": len(repo.index.diff("HEAD")) > 0,
-            "unstaged": len(repo.index.diff(None)) > 0,
-            "untracked": len(repo.untracked_files) > 0,
-        }
+        # Check for untracked files (separate from is_dirty which only
+        # covers staged/unstaged changes to tracked files).
+        has_untracked_files = len(repo.untracked_files) > 0
 
         return {
             "is_repo": True,
@@ -58,8 +57,6 @@ def get_git_info(path):
             "is_dirty": is_dirty,
             "has_untracked_files": has_untracked_files,
             "branch": branch_name,
-            "dirty_details": dirty_details,
-            "untracked_files": repo.untracked_files,
             "repo_root": repo.working_dir,
         }
 
@@ -67,19 +64,29 @@ def get_git_info(path):
         return None
 
 
-def get_git_info_for_python_object(python_object) -> dict[str, Any] | None:
+def get_git_info_for_python_object(python_object, try_cwd:bool=False) -> dict[str, Any] | None:
     """Get git info for the file where the python object is defined"""
     try:
         file_path = inspect.getfile(python_object)
         git_info = get_git_info(file_path)
+        git_source = "function"
         if git_info is None:
-            return None
+                # If the file isn't in a git repo, optionally try the current working directory
+            if try_cwd:
+                git_info = get_git_info(".")
+
+            if git_info is None:
+                return None
+        
+            git_source = "cwd"
+            
         env_info = {}
         env_info["git_commit_hash"] = git_info.get("commit_hash")
         env_info["git_repo_status"] = "dirty" if git_info.get("is_dirty") else "clean"
         env_info["has_untracked_files"] = (
             "true" if git_info.get("has_untracked_files") else "false"
         )
+        env_info["git_source"] = git_source
         return env_info
     except TypeError:
         return None

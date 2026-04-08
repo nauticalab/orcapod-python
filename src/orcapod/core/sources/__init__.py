@@ -1,16 +1,34 @@
-from .base import SourceBase
+from .base import RootSource
 from .arrow_table_source import ArrowTableSource
-from .delta_table_source import DeltaTableSource
-from .dict_source import DictSource
+from .cached_source import CachedSource
+from .csv_source import CSVSource
 from .data_frame_source import DataFrameSource
-from .source_registry import SourceRegistry, GLOBAL_SOURCE_REGISTRY
+from .db_table_source import DBTableSource
+from .delta_table_source import DeltaTableSource
+from .derived_source import DerivedSource
+from .dict_source import DictSource
+from .list_source import ListSource
+from .source_registry import GLOBAL_SOURCE_REGISTRY, SourceRegistry
+from .source_proxy import SourceProxy
+from .spiraldb_table_source import SpiralDBTableSource
+from .sqlite_table_source import SQLiteTableSource
+from .postgresql_table_source import PostgreSQLTableSource
 
 __all__ = [
-    "SourceBase",
-    "DataFrameSource",
+    "RootSource",
     "ArrowTableSource",
+    "CachedSource",
+    "CSVSource",
+    "DataFrameSource",
+    "DBTableSource",
     "DeltaTableSource",
+    "DerivedSource",
     "DictSource",
+    "ListSource",
     "SourceRegistry",
+    "SourceProxy",
+    "SpiralDBTableSource",
+    "SQLiteTableSource",
+    "PostgreSQLTableSource",
     "GLOBAL_SOURCE_REGISTRY",
 ]

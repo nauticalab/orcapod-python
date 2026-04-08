@@ -1,10 +1,12 @@
-from typing import cast
-import pytest
-import pyarrow as pa
-import numpy as np
 from pathlib import Path
-from orcapod.semantic_types import universal_converter
+from typing import cast
+
+import numpy as np
+import pyarrow as pa
+import pytest
+
 from orcapod.contexts import get_default_context
+from orcapod.semantic_types import universal_converter
 
 
 def test_python_type_to_arrow_type_basic():
@@ -29,6 +31,44 @@ def test_python_type_to_arrow_type_custom():
     field = arrow_type[0]
     assert field.name == "path"
     assert field.type == pa.large_string()
+
+
+def test_python_type_to_arrow_type_upath():
+    from upath import UPath
+
+    arrow_type = universal_converter.python_type_to_arrow_type(UPath)
+    # Should be a StructType with field 'upath' of type large_string
+    assert isinstance(arrow_type, pa.StructType)
+    assert len(arrow_type) == 1
+    field = arrow_type[0]
+    assert field.name == "upath"
+    assert field.type == pa.large_string()
+
+
+def test_optional_upath_converter():
+    """Test that Optional[UPath] correctly converts UPath values."""
+    from upath import UPath
+
+    to_arrow, to_python = universal_converter.get_conversion_functions(UPath | None)
+
+    # Test with UPath value
+    path = UPath("/tmp/test.txt")
+    result = to_arrow(path)
+    assert result == {"upath": "/tmp/test.txt"}
+
+    # Test with None
+    assert to_arrow(None) is None
+
+
+def test_complex_union_raises_error():
+    """Test that complex unions (multiple non-None types) raise ValueError."""
+    from upath import UPath
+
+    with pytest.raises(ValueError, match="Complex unions"):
+        universal_converter.get_conversion_functions(UPath | Path)
+
+    with pytest.raises(ValueError, match="Complex unions"):
+        universal_converter.python_type_to_arrow_type(UPath | Path)
 
 
 def test_python_type_to_arrow_type_context():
@@ -298,3 +338,77 @@ def test_inspect_arrow_schema_dict_str_list():
     to_arrow_struct, to_python = universal_converter.get_conversion_functions(typ)
     arr = to_arrow_struct(py_val)
     assert arr == [{"key": "test", "value": [1, 2]}]
+
+
+def test_schema_as_required_strips_optional_fields():
+    from orcapod.types import Schema
+
+    s = Schema({"a": int, "b": str}, optional_fields=["b"])
+    result = s.as_required()
+    assert result == Schema({"a": int, "b": str})
+    assert result.optional_fields == frozenset()
+
+
+def test_schema_as_required_idempotent():
+    from orcapod.types import Schema
+
+    s = Schema({"a": int, "b": str}, optional_fields=["a", "b"])
+    once = s.as_required()
+    twice = s.as_required().as_required()
+    assert once == twice
+
+
+def test_python_schema_to_arrow_non_nullable():
+    """Plain types (no | None) must produce nullable=False Arrow fields."""
+    from orcapod.types import Schema
+
+    ctx = get_default_context()
+    schema = ctx.type_converter.python_schema_to_arrow_schema(
+        Schema({"a": int, "b": str, "c": float, "d": bool, "e": bytes})
+    )
+    for name in ("a", "b", "c", "d", "e"):
+        assert schema.field(name).nullable is False, (
+            f"Field '{name}' should be nullable=False for a plain type"
+        )
+
+
+def test_python_schema_to_arrow_optional_nullable():
+    """Optional types (T | None) must produce nullable=True Arrow fields."""
+    from orcapod.types import Schema
+
+    ctx = get_default_context()
+    schema = ctx.type_converter.python_schema_to_arrow_schema(
+        Schema({"x": int | None, "y": str | None})
+    )
+    assert schema.field("x").nullable is True
+    assert schema.field("y").nullable is True
+
+
+def test_arrow_schema_to_python_nullable_becomes_optional():
+    """nullable=True Arrow fields must reconstruct as T | None."""
+    ctx = get_default_context()
+    arrow_schema = pa.schema([pa.field("x", pa.int64(), nullable=True)])
+    python_schema = ctx.type_converter.arrow_schema_to_python_schema(arrow_schema)
+    assert python_schema["x"] == int | None
+
+
+def test_arrow_schema_to_python_non_nullable_stays_plain():
+    """nullable=False Arrow fields must reconstruct as plain T."""
+    ctx = get_default_context()
+    arrow_schema = pa.schema([pa.field("x", pa.int64(), nullable=False)])
+    python_schema = ctx.type_converter.arrow_schema_to_python_schema(arrow_schema)
+    assert python_schema["x"] == int
+
+
+def test_round_trip_preserves_optionality():
+    """Python schema → Arrow → Python schema is lossless for nullable/non-nullable."""
+    from orcapod.types import Schema
+
+    ctx = get_default_context()
+    original = Schema({"required": int, "nullable_field": int | None})
+    arrow = ctx.type_converter.python_schema_to_arrow_schema(original)
+    recovered = ctx.type_converter.arrow_schema_to_python_schema(arrow)
+
+    assert recovered["required"] == int
+    assert recovered["nullable_field"] == int | None
+    assert recovered == original

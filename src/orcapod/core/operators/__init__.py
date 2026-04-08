@@ -1,17 +1,19 @@
-from .join import Join
-from .semijoin import SemiJoin
-from .mappers import MapTags, MapPackets
 from .batch import Batch
 from .column_selection import (
-    SelectTagColumns,
-    SelectPacketColumns,
-    DropTagColumns,
     DropPacketColumns,
+    DropTagColumns,
+    SelectPacketColumns,
+    SelectTagColumns,
 )
 from .filters import PolarsFilter
+from .join import Join
+from .mappers import MapPackets, MapTags
+from .merge_join import MergeJoin
+from .semijoin import SemiJoin
 
 __all__ = [
     "Join",
+    "MergeJoin",
     "SemiJoin",
     "MapTags",
     "MapPackets",

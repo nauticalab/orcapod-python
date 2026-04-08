@@ -1,5 +1,7 @@
-import pytest
 from pathlib import Path, PosixPath
+
+import pytest
+
 from orcapod.semantic_types import pydata_utils
 
 

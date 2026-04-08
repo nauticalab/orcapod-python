@@ -1,290 +1,200 @@
-from orcapod.core.kernels import TrackedKernelBase
-from orcapod.protocols import core_protocols as cp
-from orcapod.types import PythonSchema
+from __future__ import annotations
+
+import asyncio
 from abc import abstractmethod
+from collections.abc import Collection, Sequence
 from typing import Any
-from collections.abc import Collection
+
+from orcapod.channels import ReadableChannel, WritableChannel
+from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
+from orcapod.protocols.core_protocols import (
+    ArgumentGroup,
+    PacketProtocol,
+    StreamProtocol,
+    TagProtocol,
+)
+from orcapod.types import ColumnConfig, ContentHash, Schema
 
 
-class Operator(TrackedKernelBase):
-    """
-    Base class for all operators.
-    Operators are a special type of kernel that can be used to perform operations on streams.
+class UnaryOperator(StaticOutputOperatorPod):
+    """Base class for all unary operators."""
 
-    They are defined as a callable that takes a (possibly empty) collection of streams as the input
-    and returns a new stream as output (note that output stream is always singular).
-    """
+    @abstractmethod
+    def validate_unary_input(self, stream: StreamProtocol) -> None:
+        """Validate the single input stream.
 
+        Raises:
+            ValueError: If the input stream is not valid for this operator.
+        """
+        ...
 
-class UnaryOperator(Operator):
-    """
-    Base class for all operators.
-    """
+    @abstractmethod
+    def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
+        """Process a single input stream and return a new output stream."""
+        ...
 
-    def check_unary_input(
+    @abstractmethod
+    def unary_output_schema(
         self,
-        streams: Collection[cp.Stream],
-    ) -> None:
-        """
-        Check that the inputs to the unary operator are valid.
-        """
+        stream: StreamProtocol,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]:
+        """Return the (tag, packet) output schemas for the given input stream."""
+        ...
+
+    def validate_inputs(self, *streams: StreamProtocol) -> None:
         if len(streams) != 1:
             raise ValueError("UnaryOperator requires exactly one input stream.")
-
-    def validate_inputs(self, *streams: cp.Stream) -> None:
-        self.check_unary_input(streams)
         stream = streams[0]
-        return self.op_validate_inputs(stream)
+        return self.validate_unary_input(stream)
 
-    def forward(self, *streams: cp.Stream) -> cp.Stream:
-        """
-        Forward method for unary operators.
-        It expects exactly one stream as input.
-        """
+    def static_process(self, *streams: StreamProtocol) -> StreamProtocol:
+        """Forward to ``unary_static_process`` with the single input stream."""
         stream = streams[0]
-        return self.op_forward(stream)
+        return self.unary_static_process(stream)
 
-        # TODO: complete substream implementation
-        # Substream implementation pending
-        # stream = streams[0]
-        # # visit each substream
-        # output_substreams = []
-        # for substream_id in stream.substream_identities:
-        #     substream = stream.get_substream(substream_id)
-        #     output_substreams.append(self.op_forward(substream))
-
-        # # at the moment only single output substream is supported
-        # if len(output_substreams) != 1:
-        #     raise NotImplementedError(
-        #         "Support for multiple output substreams is not implemented yet."
-        #     )
-        # return output_substreams[0]
-
-    def kernel_output_types(
-        self, *streams: cp.Stream, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
-        stream = streams[0]
-        return self.op_output_types(stream, include_system_tags=include_system_tags)
-
-    def kernel_identity_structure(
-        self, streams: Collection[cp.Stream] | None = None
-    ) -> Any:
-        """
-        Return a structure that represents the identity of this operator.
-        This is used to ensure that the operator can be uniquely identified in the computational graph.
-        """
-        if streams is not None:
-            stream = list(streams)[0]
-            return self.op_identity_structure(stream)
-        return self.op_identity_structure()
-
-    @abstractmethod
-    def op_validate_inputs(self, stream: cp.Stream) -> None:
-        """
-        This method should be implemented by subclasses to validate the inputs to the operator.
-        It takes two streams as input and raises an error if the inputs are not valid.
-        """
-        ...
-
-    @abstractmethod
-    def op_forward(self, stream: cp.Stream) -> cp.Stream:
-        """
-        This method should be implemented by subclasses to define the specific behavior of the binary operator.
-        It takes two streams as input and returns a new stream as output.
-        """
-        ...
-
-    @abstractmethod
-    def op_output_types(
-        self, stream: cp.Stream, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
-        """
-        This method should be implemented by subclasses to return the typespecs of the input and output streams.
-        It takes two streams as input and returns a tuple of typespecs.
-        """
-        ...
-
-    @abstractmethod
-    def op_identity_structure(self, stream: cp.Stream | None = None) -> Any:
-        """
-        This method should be implemented by subclasses to return a structure that represents the identity of the operator.
-        It takes two streams as input and returns a tuple containing the operator name and a set of streams.
-        """
-        ...
-
-
-class BinaryOperator(Operator):
-    """
-    Base class for all operators.
-    """
-
-    def check_binary_inputs(
+    def output_schema(
         self,
-        streams: Collection[cp.Stream],
+        *streams: StreamProtocol,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]:
+        stream = streams[0]
+        return self.unary_output_schema(stream, columns=columns, all_info=all_info)
+
+    def argument_symmetry(self, streams: Collection[StreamProtocol]) -> ArgumentGroup:
+        # return single stream as a tuple
+        return (tuple(streams)[0],)
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        *,
+        input_pipeline_hashes: Sequence[ContentHash] | None = None,
     ) -> None:
-        """
-        Check that the inputs to the binary operator are valid.
-        This method is called before the forward method to ensure that the inputs are valid.
-        """
-        if len(streams) != 2:
-            raise ValueError("BinaryOperator requires exactly two input streams.")
+        """Barrier-mode: collect single input, run unary_static_process, emit."""
+        try:
+            rows = await inputs[0].collect()
+            stream = self._materialize_to_stream(rows)
+            result = self.static_process(stream)
+            for tag, packet in result.iter_packets():
+                await output.send((tag, packet))
+        finally:
+            await output.close()
 
-    def validate_inputs(self, *streams: cp.Stream) -> None:
-        self.check_binary_inputs(streams)
-        left_stream, right_stream = streams
-        return self.op_validate_inputs(left_stream, right_stream)
 
-    def forward(self, *streams: cp.Stream) -> cp.Stream:
-        """
-        Forward method for binary operators.
-        It expects exactly two streams as input.
-        """
-        left_stream, right_stream = streams
-        return self.op_forward(left_stream, right_stream)
+class BinaryOperator(StaticOutputOperatorPod):
+    """Base class for all binary operators."""
 
-    def kernel_output_types(
-        self, *streams: cp.Stream, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
+    @abstractmethod
+    def validate_binary_inputs(
+        self, left_stream: StreamProtocol, right_stream: StreamProtocol
+    ) -> None:
+        """Validate the two input streams.
+
+        Raises:
+            ValueError: If the inputs are not valid for this operator.
+        """
+        ...
+
+    @abstractmethod
+    def binary_static_process(
+        self, left_stream: StreamProtocol, right_stream: StreamProtocol
+    ) -> StreamProtocol:
+        """Process two input streams and return a new output stream."""
+        ...
+
+    @abstractmethod
+    def binary_output_schema(
+        self,
+        left_stream: StreamProtocol,
+        right_stream: StreamProtocol,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]: ...
+
+    @abstractmethod
+    def is_commutative(self) -> bool:
+        """Return True if the operator is commutative (order of inputs does not matter)."""
+        ...
+
+    def static_process(self, *streams: StreamProtocol) -> StreamProtocol:
+        """Forward to ``binary_static_process`` with two input streams."""
         left_stream, right_stream = streams
-        return self.op_output_types(
-            left_stream, right_stream, include_system_tags=include_system_tags
+        return self.binary_static_process(left_stream, right_stream)
+
+    def output_schema(
+        self,
+        *streams: StreamProtocol,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]:
+        left_stream, right_stream = streams
+        return self.binary_output_schema(
+            left_stream, right_stream, columns=columns, all_info=all_info
         )
 
-    def kernel_identity_structure(
-        self, streams: Collection[cp.Stream] | None = None
-    ) -> Any:
-        """
-        Return a structure that represents the identity of this operator.
-        This is used to ensure that the operator can be uniquely identified in the computational graph.
-        """
-        if streams is not None:
-            left_stream, right_stream = streams
-            self.op_identity_structure(left_stream, right_stream)
-        return self.op_identity_structure()
+    def validate_inputs(self, *streams: StreamProtocol) -> None:
+        if len(streams) != 2:
+            raise ValueError("BinaryOperator requires exactly two input streams.")
+        left_stream, right_stream = streams
+        self.validate_binary_inputs(left_stream, right_stream)
 
-    @abstractmethod
-    def op_validate_inputs(
-        self, left_stream: cp.Stream, right_stream: cp.Stream
+    def argument_symmetry(self, streams: Collection[StreamProtocol]) -> ArgumentGroup:
+        if self.is_commutative():
+            # return as symmetric group
+            return frozenset(streams)
+        else:
+            # return as ordered group
+            return tuple(streams)
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        *,
+        input_pipeline_hashes: Sequence[ContentHash] | None = None,
     ) -> None:
-        """
-        This method should be implemented by subclasses to validate the inputs to the operator.
-        It takes two streams as input and raises an error if the inputs are not valid.
-        """
-        ...
-
-    @abstractmethod
-    def op_forward(self, left_stream: cp.Stream, right_stream: cp.Stream) -> cp.Stream:
-        """
-        This method should be implemented by subclasses to define the specific behavior of the binary operator.
-        It takes two streams as input and returns a new stream as output.
-        """
-        ...
-
-    @abstractmethod
-    def op_output_types(
-        self,
-        left_stream: cp.Stream,
-        right_stream: cp.Stream,
-        include_system_tags: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
-        """
-        This method should be implemented by subclasses to return the typespecs of the input and output streams.
-        It takes two streams as input and returns a tuple of typespecs.
-        """
-        ...
-
-    @abstractmethod
-    def op_identity_structure(
-        self,
-        left_stream: cp.Stream | None = None,
-        right_stream: cp.Stream | None = None,
-    ) -> Any:
-        """
-        This method should be implemented by subclasses to return a structure that represents the identity of the operator.
-        It takes two streams as input and returns a tuple containing the operator name and a set of streams.
-        """
-        ...
+        """Barrier-mode: collect both inputs concurrently, run binary_static_process, emit."""
+        try:
+            left_rows, right_rows = await asyncio.gather(
+                inputs[0].collect(), inputs[1].collect()
+            )
+            left_stream = self._materialize_to_stream(left_rows)
+            right_stream = self._materialize_to_stream(right_rows)
+            result = self.static_process(left_stream, right_stream)
+            for tag, packet in result.iter_packets():
+                await output.send((tag, packet))
+        finally:
+            await output.close()
 
 
-class NonZeroInputOperator(Operator):
-    """
-    Operators that work with at least one input stream.
-    This is useful for operators that can take a variable number of (but at least one ) input streams,
-    such as joins, unions, etc.
+class NonZeroInputOperator(StaticOutputOperatorPod):
+    """Base class for operators that require at least one input stream.
+
+    Useful for operators that accept a variable number of input streams,
+    such as joins and unions.
     """
 
-    def verify_non_zero_input(
+    @abstractmethod
+    def validate_nonzero_inputs(
         self,
-        streams: Collection[cp.Stream],
+        *streams: StreamProtocol,
     ) -> None:
+        """Validate the input streams.
+
+        Raises:
+            ValueError: If the inputs are not valid for this operator.
         """
-        Check that the inputs to the variable inputs operator are valid.
-        This method is called before the forward method to ensure that the inputs are valid.
-        """
+        ...
+
+    def validate_inputs(self, *streams: StreamProtocol) -> None:
         if len(streams) == 0:
             raise ValueError(
                 f"Operator {self.__class__.__name__} requires at least one input stream."
             )
-
-    def validate_inputs(self, *streams: cp.Stream) -> None:
-        self.verify_non_zero_input(streams)
-        return self.op_validate_inputs(*streams)
-
-    def forward(self, *streams: cp.Stream) -> cp.Stream:
-        """
-        Forward method for variable inputs operators.
-        It expects at least one stream as input.
-        """
-        return self.op_forward(*streams)
-
-    def kernel_output_types(
-        self, *streams: cp.Stream, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
-        return self.op_output_types(*streams, include_system_tags=include_system_tags)
-
-    def kernel_identity_structure(
-        self, streams: Collection[cp.Stream] | None = None
-    ) -> Any:
-        """
-        Return a structure that represents the identity of this operator.
-        This is used to ensure that the operator can be uniquely identified in the computational graph.
-        """
-        return self.op_identity_structure(streams)
-
-    @abstractmethod
-    def op_validate_inputs(self, *streams: cp.Stream) -> None:
-        """
-        This method should be implemented by subclasses to validate the inputs to the operator.
-        It takes two streams as input and raises an error if the inputs are not valid.
-        """
-        ...
-
-    @abstractmethod
-    def op_forward(self, *streams: cp.Stream) -> cp.Stream:
-        """
-        This method should be implemented by subclasses to define the specific behavior of the non-zero input operator.
-        It takes variable number of streams as input and returns a new stream as output.
-        """
-        ...
-
-    @abstractmethod
-    def op_output_types(
-        self, *streams: cp.Stream, include_system_tags: bool = False
-    ) -> tuple[PythonSchema, PythonSchema]:
-        """
-        This method should be implemented by subclasses to return the typespecs of the input and output streams.
-        It takes at least one stream as input and returns a tuple of typespecs.
-        """
-        ...
-
-    @abstractmethod
-    def op_identity_structure(
-        self, streams: Collection[cp.Stream] | None = None
-    ) -> Any:
-        """
-        This method should be implemented by subclasses to return a structure that represents the identity of the operator.
-        It takes zero or more streams as input and returns a tuple containing the operator name and a set of streams.
-        If zero, it should return identity of the operator itself.
-        If one or more, it should return a identity structure approrpiate for the operator invoked on the given streams.
-        """
-        ...
+        self.validate_nonzero_inputs(*streams)

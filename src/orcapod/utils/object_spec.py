@@ -1,6 +1,5 @@
 import importlib
 from typing import Any
-from weakref import ref
 
 
 def parse_objectspec(
@@ -21,6 +20,8 @@ def parse_objectspec(
                 return ref_lut[ref_key]
             else:
                 raise ValueError(f"Unknown reference: {ref_key}")
+        elif "_type" in obj_spec:
+            return _resolve_type_from_spec(obj_spec)
         else:
             # Recursively process dict
             return {
@@ -33,6 +34,19 @@ def parse_objectspec(
 
     else:
         return obj_spec
+
+
+def _resolve_type_from_spec(spec: dict[str, Any]) -> type:
+    """Resolve a ``{"_type": "module.ClassName"}`` spec to the actual Python type.
+
+    Bare names without a dot (e.g. ``"bytes"``) are resolved from ``builtins``.
+    """
+    type_str: str = spec["_type"]
+    if "." not in type_str:
+        type_str = f"builtins.{type_str}"
+    module_name, _, attr_name = type_str.rpartition(".")
+    module = importlib.import_module(module_name)
+    return getattr(module, attr_name)
 
 
 def _create_instance_from_spec(

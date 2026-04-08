@@ -1,0 +1,52 @@
+site_name: Orcapod
+site_description: Intuitive and powerful library for highly reproducible scientific data pipelines
+repo_url: https://github.com/walkerlab/orcapod-python
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - search.suggest
+    - content.code.copy
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_source: true
+            show_bases: true
+            members_order: source
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.details
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Concepts:
+    - Sources: concepts/sources.md
+    - Streams: concepts/streams.md
+    - Operators: concepts/operators.md
+    - Function Pods: concepts/function-pods.md
+    - Identity & Hashing: concepts/identity.md
+  - API Reference:
+    - Overview: api/index.md
+    - Sources: api/sources.md
+    - Streams: api/streams.md
+    - Operators: api/operators.md
+    - Function Pods: api/function-pods.md
+    - Databases: api/databases.md
+    - Nodes: api/nodes.md
+    - Pipeline: api/pipeline.md
+    - Types: api/types.md

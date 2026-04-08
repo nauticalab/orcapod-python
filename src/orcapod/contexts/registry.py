@@ -5,21 +5,29 @@ This module contains the core registry that loads and manages
 data contexts from JSON files with validation and caching.
 """
 
+from __future__ import annotations
+
+import importlib.util
 import json
-
-
+import logging
 from pathlib import Path
 from typing import Any
-import logging
+
+_JSONSCHEMA_AVAILABLE = importlib.util.find_spec("jsonschema") is not None
+
+from orcapod.contexts.core import (
+    ContextResolutionError,
+    ContextValidationError,
+    DataContext,
+)
 from orcapod.utils.object_spec import parse_objectspec
-from .core import DataContext, ContextValidationError, ContextResolutionError
 
 logger = logging.getLogger(__name__)
 
-try:
-    import jsonschema
-except ImportError:
-    jsonschema = None
+# Check jsonschema availability once at import time so the "not available"
+# message is emitted at most once per process (not once per spec file).
+_JSONSCHEMA_AVAILABLE = importlib.util.find_spec("jsonschema") is not None
+if not _JSONSCHEMA_AVAILABLE:
     logger.info("jsonschema not available, skipping schema validation")
 
 
@@ -142,14 +150,16 @@ class JSONDataContextRegistry:
             "version",
             "type_converter",
             "arrow_hasher",
-            "object_hasher",
+            "semantic_hasher",
+            "type_handler_registry",
         ]
         missing_fields = [field for field in required_fields if field not in spec]
         if missing_fields:
             raise ContextValidationError(f"Missing required fields: {missing_fields}")
 
         # Validate against JSON schema if available
-        if self._schema and jsonschema is not None:
+        if self._schema and _JSONSCHEMA_AVAILABLE:
+            import jsonschema  # noqa: PLC0415 – deferred to keep startup fast
             try:
                 jsonschema.validate(spec, self._schema)
             except jsonschema.ValidationError as e:
@@ -257,35 +267,31 @@ class JSONDataContextRegistry:
                     f"Failed to resolve context '{context_string}': {e}"
                 )
 
+    # Top-level keys that are metadata, not instantiable components.
+    _METADATA_KEYS = frozenset({"context_key", "version", "description", "metadata"})
+
     def _create_context_from_spec(self, spec: dict[str, Any]) -> DataContext:
-        """Create DataContext instance from validated specification."""
+        """Create DataContext instance from validated specification.
+
+        All top-level keys whose value is a dict with a ``_class`` entry are
+        built in JSON order and added to a shared ``ref_lut``.  This means
+        new versioned components (e.g. ``file_hasher``, ``function_info_extractor``)
+        can be added to the JSON without touching this method — they are
+        instantiated automatically and become available as ``_ref`` targets for
+        later components in the same file.
+        """
         try:
-            # Parse each component using ObjectSpec
             context_key = spec["context_key"]
             version = spec["version"]
             description = spec.get("description", "")
-            ref_lut = {}
+            ref_lut: dict[str, Any] = {}
 
-            logger.debug(f"Creating type converter for {version}")
-            ref_lut["semantic_registry"] = parse_objectspec(
-                spec["semantic_registry"],
-                ref_lut=ref_lut,
-            )
-
-            logger.debug(f"Creating type converter for {version}")
-            ref_lut["type_converter"] = parse_objectspec(
-                spec["type_converter"], ref_lut=ref_lut
-            )
-
-            logger.debug(f"Creating arrow hasher for {version}")
-            ref_lut["arrow_hasher"] = parse_objectspec(
-                spec["arrow_hasher"], ref_lut=ref_lut
-            )
-
-            logger.debug(f"Creating object hasher for {version}")
-            ref_lut["object_hasher"] = parse_objectspec(
-                spec["object_hasher"], ref_lut=ref_lut
-            )
+            for key, value in spec.items():
+                if key in self._METADATA_KEYS:
+                    continue
+                if isinstance(value, dict) and "_class" in value:
+                    logger.debug(f"Creating {key} for context {version}")
+                    ref_lut[key] = parse_objectspec(value, ref_lut=ref_lut)
 
             return DataContext(
                 context_key=context_key,
@@ -293,7 +299,8 @@ class JSONDataContextRegistry:
                 description=description,
                 type_converter=ref_lut["type_converter"],
                 arrow_hasher=ref_lut["arrow_hasher"],
-                object_hasher=ref_lut["object_hasher"],
+                semantic_hasher=ref_lut["semantic_hasher"],
+                type_handler_registry=ref_lut["type_handler_registry"],
             )
 
         except Exception as e:

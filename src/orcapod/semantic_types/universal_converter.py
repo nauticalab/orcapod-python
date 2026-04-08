@@ -9,21 +9,21 @@ This provides a comprehensive, self-contained system that:
 5. Integrates seamlessly with semantic type registries
 """
 
-import types
-from typing import TypedDict, Any
-import typing
-from collections.abc import Callable, Mapping
+from __future__ import annotations
+
 import hashlib
 import logging
+import types
+import typing
+from collections.abc import Callable, Mapping
+
+# Handle generic types
+from typing import TYPE_CHECKING, Any, TypedDict, get_args, get_origin
+
 from orcapod.contexts import DataContext, resolve_context
 from orcapod.semantic_types.semantic_registry import SemanticTypeRegistry
 from orcapod.semantic_types.type_inference import infer_python_schema_from_pylist_data
-
-# Handle generic types
-from typing import get_origin, get_args
-
-from typing import TYPE_CHECKING
-from orcapod.types import DataType, PythonSchemaLike
+from orcapod.types import DataType, Schema, SchemaLike
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -35,59 +35,90 @@ else:
 logger = logging.getLogger(__name__)
 
 
-# Basic type mapping for Python -> Arrow conversion
-_PYTHON_TO_ARROW_MAP = {
-    # Python built-ins
-    int: pa.int64(),
-    float: pa.float64(),
-    str: pa.large_string(),  # Use large_string by default for Polars compatibility
-    bool: pa.bool_(),
-    bytes: pa.large_binary(),  # Use large_binary by default for Polars compatibility
-    # String representations (for when we get type names as strings)
-    "int": pa.int64(),
-    "float": pa.float64(),
-    "str": pa.large_string(),
-    "bool": pa.bool_(),
-    "bytes": pa.large_binary(),
-    # Specific integer types
-    "int8": pa.int8(),
-    "int16": pa.int16(),
-    "int32": pa.int32(),
-    "int64": pa.int64(),
-    "uint8": pa.uint8(),
-    "uint16": pa.uint16(),
-    "uint32": pa.uint32(),
-    "uint64": pa.uint64(),
-    # Specific float types
-    "float32": pa.float32(),
-    "float64": pa.float64(),
-    # Date/time types
-    "date": pa.date32(),
-    "datetime": pa.timestamp("us"),
-    "timestamp": pa.timestamp("us"),
-}
+# Basic type mapping for Python -> Arrow conversion.
+# Built lazily on first use so that importing this module does not trigger a
+# pyarrow (or numpy) import.  Call _get_python_to_arrow_map() instead of
+# referencing _PYTHON_TO_ARROW_MAP directly.
+_PYTHON_TO_ARROW_MAP: "dict | None" = None
 
-# Add numpy types if available
-try:
-    import numpy as np
 
-    _PYTHON_TO_ARROW_MAP.update(
-        {
-            np.int8: pa.int8(),
-            np.int16: pa.int16(),
-            np.int32: pa.int32(),
-            np.int64: pa.int64(),
-            np.uint8: pa.uint8(),
-            np.uint16: pa.uint16(),
-            np.uint32: pa.uint32(),
-            np.uint64: pa.uint64(),
-            np.float32: pa.float32(),
-            np.float64: pa.float64(),
-            np.bool_: pa.bool_(),
-        }
-    )
-except ImportError:
-    pass
+def _get_python_to_arrow_map() -> dict:
+    """Return the Python→Arrow type map, building it on first call."""
+    global _PYTHON_TO_ARROW_MAP
+    if _PYTHON_TO_ARROW_MAP is not None:
+        return _PYTHON_TO_ARROW_MAP
+
+    _PYTHON_TO_ARROW_MAP = {
+        # Python built-ins
+        int: pa.int64(),
+        float: pa.float64(),
+        str: pa.large_string(),  # Use large_string by default for Polars compatibility
+        bool: pa.bool_(),
+        bytes: pa.large_binary(),  # Use large_binary by default for Polars compatibility
+        # String representations (for when we get type names as strings)
+        "int": pa.int64(),
+        "float": pa.float64(),
+        "str": pa.large_string(),
+        "bool": pa.bool_(),
+        "bytes": pa.large_binary(),
+        # Specific integer types
+        "int8": pa.int8(),
+        "int16": pa.int16(),
+        "int32": pa.int32(),
+        "int64": pa.int64(),
+        "uint8": pa.uint8(),
+        "uint16": pa.uint16(),
+        "uint32": pa.uint32(),
+        "uint64": pa.uint64(),
+        # Specific float types
+        "float32": pa.float32(),
+        "float64": pa.float64(),
+        # Date/time types
+        "date": pa.date32(),
+        "datetime": pa.timestamp("us"),
+        "timestamp": pa.timestamp("us"),
+    }
+
+    # Add numpy types if available
+    try:
+        import numpy as np
+
+        _PYTHON_TO_ARROW_MAP.update(
+            {
+                np.int8: pa.int8(),
+                np.int16: pa.int16(),
+                np.int32: pa.int32(),
+                np.int64: pa.int64(),
+                np.uint8: pa.uint8(),
+                np.uint16: pa.uint16(),
+                np.uint32: pa.uint32(),
+                np.uint64: pa.uint64(),
+                np.float32: pa.float32(),
+                np.float64: pa.float64(),
+                np.bool_: pa.bool_(),
+            }
+        )
+    except ImportError:
+        pass
+
+    return _PYTHON_TO_ARROW_MAP
+
+
+def _is_optional_type(python_type: DataType) -> bool:
+    """Return True if python_type is T | None (Optional[T]).
+
+    Args:
+        python_type: A Python type annotation.
+
+    Returns:
+        True if the type has ``None`` as one of its union arms,
+        False otherwise (including for plain types and complex
+        non-optional unions).
+    """
+    origin = get_origin(python_type)
+    if origin is typing.Union or origin is types.UnionType:
+        return type(None) in get_args(python_type)
+    return False
 
 
 class UniversalTypeConverter:
@@ -135,19 +166,19 @@ class UniversalTypeConverter:
 
         return arrow_type
 
-    def python_schema_to_arrow_schema(
-        self, python_schema: PythonSchemaLike
-    ) -> pa.Schema:
+    def python_schema_to_arrow_schema(self, python_schema: SchemaLike) -> pa.Schema:
         """
-        Convert a Python schema (dict of field names to types) to an Arrow schema.
+        Convert a Python schema (dict of field names to data types) to an Arrow schema.
 
-        This uses the main conversion logic and caches results for performance.
+        Field nullability is derived from the Python type: ``T | None``
+        (Optional[T]) maps to ``nullable=True``; plain ``T`` maps to
+        ``nullable=False``.  This uses caches for type conversion.
         """
         fields = []
         for field_name, python_type in python_schema.items():
             arrow_type = self.python_type_to_arrow_type(python_type)
-            fields.append(pa.field(field_name, arrow_type))
-
+            nullable = _is_optional_type(python_type)
+            fields.append(pa.field(field_name, arrow_type, nullable=nullable))
         return pa.schema(fields)
 
     def arrow_type_to_python_type(self, arrow_type: pa.DataType) -> DataType:
@@ -167,32 +198,40 @@ class UniversalTypeConverter:
 
         return python_type
 
-    def arrow_schema_to_python_schema(self, arrow_schema: pa.Schema) -> dict[str, type]:
+    def arrow_schema_to_python_schema(self, arrow_schema: pa.Schema) -> Schema:
         """
-        Convert an Arrow schema to a Python schema (dict of field names to types).
+        Convert an Arrow schema to a Python Schema (mapping of field names to types).
 
-        This uses the main conversion logic and caches results for performance.
+        ``nullable=True`` fields are reconstructed as ``T | None``; ``nullable=False``
+        fields are reconstructed as plain ``T``, completing the bidirectional
+        round-trip with ``python_schema_to_arrow_schema``.
+
+        Round-trip guarantee:
+            - ``int``       → ``nullable=False`` → ``int``
+            - ``int | None`` → ``nullable=True``  → ``int | None``
         """
-        python_schema = {}
+        fields = {}
         for field in arrow_schema:
             python_type = self.arrow_type_to_python_type(field.type)
-            python_schema[field.name] = python_type
-
-        return python_schema
+            if field.nullable and python_type is not Any:
+                python_type = python_type | None
+            fields[field.name] = python_type
+        return Schema(fields)
 
     def python_dicts_to_struct_dicts(
         self,
         python_dicts: list[dict[str, Any]],
-        python_schema: PythonSchemaLike | None = None,
+        python_schema: SchemaLike | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Convert a list of Python dictionaries to an Arrow table.
+        Convert a list of Python dictionaries to Arrow compatible list of structural dicts.
 
         This uses the main conversion logic and caches results for performance.
         """
         if python_schema is None:
             python_schema = infer_python_schema_from_pylist_data(python_dicts)
 
+        # prepare a LUT of converters from Python to Arrow-compatible data type
         converters = {
             field_name: self.get_python_to_arrow_converter(python_type)
             for field_name, python_type in python_schema.items()
@@ -216,7 +255,7 @@ class UniversalTypeConverter:
         arrow_schema: pa.Schema,
     ) -> list[dict[str, Any]]:
         """
-        Convert a list of Arrow structs to Python dictionaries.
+        Convert a list of Arrow-compatible structural dictionaries to Python dictionaries.
 
         This uses the main conversion logic and caches results for performance.
         """
@@ -241,7 +280,7 @@ class UniversalTypeConverter:
     def python_dicts_to_arrow_table(
         self,
         python_dicts: list[dict[str, Any]],
-        python_schema: PythonSchemaLike | None = None,
+        python_schema: SchemaLike | None = None,
         arrow_schema: "pa.Schema | None" = None,
     ) -> pa.Table:
         """
@@ -340,8 +379,9 @@ class UniversalTypeConverter:
     def _convert_python_to_arrow(self, python_type: DataType) -> pa.DataType:
         """Core Python → Arrow type conversion logic."""
 
-        if python_type in _PYTHON_TO_ARROW_MAP:
-            return _PYTHON_TO_ARROW_MAP[python_type]
+        type_map = _get_python_to_arrow_map()
+        if python_type in type_map:
+            return type_map[python_type]
 
         # Check semantic registry for registered types
         if self.semantic_registry:
@@ -363,9 +403,19 @@ class UniversalTypeConverter:
             # Handle string type names
             if hasattr(python_type, "__name__"):
                 type_name = getattr(python_type, "__name__")
-                if type_name in _PYTHON_TO_ARROW_MAP:
-                    return _PYTHON_TO_ARROW_MAP[type_name]
-            raise ValueError(f"Unsupported Python type: {python_type}")
+                if type_name in type_map:
+                    return type_map[type_name]
+            hint = ""
+            if python_type is Any:
+                hint = (
+                    " Hint: typing.Any usually appears when an Arrow type had "
+                    "no mapping in arrow_type_to_python_type (check warnings). "
+                    "It can also come from schema inference on empty containers "
+                    "(e.g. {} infers as dict[Any, Any])."
+                )
+            raise ValueError(
+                f"Unsupported Python type: {python_type}.{hint}"
+            )
 
         # Handle list types
         if origin is list:
@@ -406,13 +456,15 @@ class UniversalTypeConverter:
 
         # Handle Union/Optional types
         elif origin is typing.Union or origin is types.UnionType:
-            if len(args) == 2 and type(None) in args:
+            non_none_types = [t for t in args if t is not type(None)]
+            if len(non_none_types) == 1:
                 # Optional[T] → just T (nullability handled at field level)
-                non_none_type = args[0] if args[1] is type(None) else args[1]
-                return self.python_type_to_arrow_type(non_none_type)
+                return self.python_type_to_arrow_type(non_none_types[0])
             else:
-                # Complex unions → use first type as fallback
-                return self.python_type_to_arrow_type(args[0])
+                raise ValueError(
+                    f"Complex unions with multiple non-None types are not supported: {python_type}. "
+                    f"Only Optional[T] (i.e., T | None) is allowed."
+                )
 
         # Handle set types → lists
         elif origin is set:
@@ -534,7 +586,17 @@ class UniversalTypeConverter:
                 return typing.Union[tuple(child_types)]
 
         else:
-            # Default case for unsupported types
+            # Default case for unsupported types.
+            # NOTE: this silent fallback to Any can cause cryptic errors
+            # downstream when code tries to convert Any back to Arrow
+            # (e.g. "Unsupported Python type: typing.Any"). If you hit that,
+            # the root cause is likely an unmapped Arrow type here.
+            logger.warning(
+                "arrow_type_to_python_type: no mapping for Arrow type %r, "
+                "falling back to typing.Any. This may cause errors downstream "
+                "when converting back to Arrow.",
+                arrow_type,
+            )
             return Any
 
     def _get_or_create_typeddict_for_struct(
@@ -565,7 +627,7 @@ class UniversalTypeConverter:
 
         return typeddict_class
 
-    # TODO: consider setting type of field_specs to PythonSchema
+    # TODO: consider setting type of field_specs to Schema
     def _generate_unique_type_name(self, field_specs: Mapping[str, DataType]) -> str:
         """Generate a unique name for TypedDict based on field specifications."""
 
@@ -634,7 +696,7 @@ class UniversalTypeConverter:
             element_converter = self.get_python_to_arrow_converter(args[0])
             return (
                 lambda value: [element_converter(item) for item in value]
-                if value
+                if value is not None
                 else []
             )
 
@@ -646,7 +708,7 @@ class UniversalTypeConverter:
                     {"key": key_converter(k), "value": value_converter(v)}
                     for k, v in value.items()
                 ]
-                if value
+                if value is not None
                 else []
             )
 
@@ -661,6 +723,19 @@ class UniversalTypeConverter:
                 return lambda value: {
                     f"f{i}": converters[i](item) for i, item in enumerate(value)
                 }
+
+        # Handle Optional[T] unions; complex unions (e.g., A | B) are not currently supported
+        elif origin is typing.Union or origin is types.UnionType:
+            non_none_types = [t for t in args if t is not type(None)]
+            if len(non_none_types) == 1:
+                # Optional[T] - use converter for T, pass through None
+                inner_converter = self.get_python_to_arrow_converter(non_none_types[0])
+                return lambda value: inner_converter(value) if value is not None else None
+            else:
+                raise ValueError(
+                    f"Complex unions with multiple non-None types are not supported: {python_type}. "
+                    f"Only Optional[T] (i.e., T | None) is allowed."
+                )
 
         else:
             # Default passthrough

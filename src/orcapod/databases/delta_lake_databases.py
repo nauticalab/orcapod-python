@@ -1,19 +1,22 @@
+from __future__ import annotations
+
 import logging
 from collections import defaultdict
 from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from deltalake import DeltaTable, write_deltalake
-from deltalake.exceptions import TableNotFoundError
-
 from orcapod.utils.lazy_module import LazyModule
+from orcapod.databases.storage_utils import is_cloud_uri, parse_base_path
 
 if TYPE_CHECKING:
+    import deltalake
     import polars as pl
     import pyarrow as pa
     import pyarrow.compute as pc
+    from upath import UPath
 else:
+    deltalake = LazyModule("deltalake")
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")
     pc = LazyModule("pyarrow.compute")
@@ -41,32 +44,51 @@ class DeltaTableDatabase:
 
     def __init__(
         self,
-        base_path: str | Path,
+        base_path: str | Path | UPath,
+        storage_options: dict[str, str] | None = None,
         create_base_path: bool = True,
         batch_size: int = 1000,
         max_hierarchy_depth: int = 10,
         allow_schema_evolution: bool = True,
+        _path_prefix: tuple[str, ...] = (),
+        _root: "DeltaTableDatabase | None" = None,
+        _scoped_path: tuple[str, ...] = (),
+        _shared_pending_batches: "dict[str, pa.Table] | None" = None,
+        _shared_pending_record_ids: "defaultdict[str, set[str]] | None" = None,
     ):
-        self.base_path = Path(base_path)
+        self._root_uri, self._storage_options = parse_base_path(base_path, storage_options)
+        self._is_cloud: bool = is_cloud_uri(self._root_uri)
+        self._path_prefix = _path_prefix
+        self._root = _root
+        self._scoped_path = _scoped_path
         self.batch_size = batch_size
         self.max_hierarchy_depth = max_hierarchy_depth
         self.allow_schema_evolution = allow_schema_evolution
 
-        if create_base_path:
-            self.base_path.mkdir(parents=True, exist_ok=True)
-        elif not self.base_path.exists():
-            raise ValueError(
-                f"Base path {self.base_path} does not exist and create_base_path=False"
-            )
+        if not self._is_cloud:
+            # _local_root is the absolute filesystem root (for list_sources, mkdir, etc.)
+            # NOTE: do NOT access self._local_root on cloud instances.
+            self._local_root = Path(self._root_uri)
+            if create_base_path:
+                self._local_root.mkdir(parents=True, exist_ok=True)
+            elif not self._local_root.exists():
+                raise ValueError(
+                    f"Base path {self._local_root} does not exist and create_base_path=False"
+                )
+        # For cloud paths: create_base_path is silently ignored (no directory needed).
 
-        # Cache for Delta tables to avoid repeated initialization
-        self._delta_table_cache: dict[str, DeltaTable] = {}
-
-        # Batch management
-        self._pending_batches: dict[str, pa.Table] = {}
-        self._pending_record_ids: dict[str, set[str]] = defaultdict(set)
+        self._delta_table_cache: dict[str, deltalake.DeltaTable] = {}
+        # Shared pending state — when constructed via at(), these dicts are shared
+        # with the root instance so that root.flush() can flush all scoped writes.
+        if _shared_pending_batches is not None:
+            self._pending_batches = _shared_pending_batches
+        else:
+            self._pending_batches: dict[str, pa.Table] = {}
+        if _shared_pending_record_ids is not None:
+            self._pending_record_ids = _shared_pending_record_ids
+        else:
+            self._pending_record_ids: dict[str, set[str]] = defaultdict(set)
         self._existing_ids_cache: dict[str, set[str]] = defaultdict(set)
-        # TODO: reconsider this approach as this is NOT serializable
         self._cache_dirty: dict[str, bool] = defaultdict(lambda: True)
 
     def _clear_pending(self):
@@ -76,15 +98,45 @@ class DeltaTableDatabase:
         # Note: next_row_index continues incrementing
 
     def _get_record_key(self, record_path: tuple[str, ...]) -> str:
-        """Generate cache key for source storage."""
-        return "/".join(record_path)
+        """Generate cache key for source storage.
 
-    def _get_table_path(self, record_path: tuple[str, ...]) -> Path:
-        """Get the filesystem path for a given source path."""
-        path = self.base_path
-        for subpath in record_path:
-            path = path / subpath
-        return path
+        The key includes the full path (prefix + record_path) so that scoped
+        instances that share pending state with the root can be correctly flushed
+        from the root.
+        """
+        return "/".join(self._path_prefix + record_path)
+
+    @staticmethod
+    def _sanitize_path_component(component: str) -> str:
+        """Sanitize a path component for the current OS.
+
+        On Windows, colons are not allowed in filenames (reserved for drive
+        letters). Replace them with '!' so that URIs containing ':' can still
+        be stored safely on all platforms.
+        """
+        import sys
+
+        if sys.platform == "win32":
+            return component.replace(":", "!")
+        return component
+
+    def _get_table_uri(self, record_path: tuple[str, ...], create_dir: bool = False) -> str:
+        """Get the URI for a given record path, incorporating base_path prefix.
+
+        Args:
+            record_path: Tuple of path components (relative to base_path).
+            create_dir: If True, create the local directory (no-op for cloud paths).
+        """
+        full_path = self._path_prefix + record_path  # prefix applied once, here only
+        if self._is_cloud:
+            return self._root_uri.rstrip("/") + "/" + "/".join(full_path)
+        else:
+            path = self._local_root
+            for subpath in full_path:
+                path = path / self._sanitize_path_component(subpath)
+            if create_dir:
+                path.mkdir(parents=True, exist_ok=True)
+            return str(path)
 
     def _validate_record_path(self, record_path: tuple[str, ...]) -> None:
         # TODO: consider removing this as path creation can be tried directly
@@ -100,9 +152,11 @@ class DeltaTableDatabase:
         if not record_path:
             raise ValueError("Source path cannot be empty")
 
-        if len(record_path) > self.max_hierarchy_depth:
+        if len(self._path_prefix) + len(record_path) > self.max_hierarchy_depth:
             raise ValueError(
-                f"Source path depth {len(record_path)} exceeds maximum {self.max_hierarchy_depth}"
+                f"Source path depth {len(record_path)} exceeds maximum "
+                f"{self.max_hierarchy_depth - len(self._path_prefix)} "
+                f"(base_path uses {len(self._path_prefix)} components)"
             )
 
         # Validate path components
@@ -112,14 +166,17 @@ class DeltaTableDatabase:
                     f"Source path component {i} is invalid: {repr(component)}"
                 )
 
-            # Check for filesystem-unsafe characters
-            unsafe_chars = ["/", "\\", ":", "*", "?", '"', "<", ">", "|", "\0"]
+            # Check for filesystem-unsafe characters.
+            # Note: ':' is handled by _sanitize_path_component (replaced with '!' on Windows)
+            # and is allowed here so that semantic-version hash paths (e.g. "semantic_v0.1:abc123")
+            # can be stored cross-platform.
+            unsafe_chars = ["/", "\\", "*", "?", '"', "<", ">", "|", "\0"]
             if any(char in component for char in unsafe_chars):
                 raise ValueError(
                     f"Source path {record_path} component {component} contains invalid characters: {repr(component)}"
                 )
 
-    def _get_delta_table(self, record_path: tuple[str, ...]) -> DeltaTable | None:
+    def _get_delta_table(self, record_path: tuple[str, ...]) -> deltalake.DeltaTable | None:
         """
         Get an existing Delta table, either from cache or by loading it.
 
@@ -127,10 +184,10 @@ class DeltaTableDatabase:
             record_path: Tuple of path components
 
         Returns:
-            DeltaTable instance or None if table doesn't exist
+            deltalake.DeltaTable instance or None if table doesn't exist
         """
         record_key = self._get_record_key(record_path)
-        table_path = self._get_table_path(record_path)
+        table_uri = self._get_table_uri(record_path)
 
         # Check cache first
         if dt := self._delta_table_cache.get(record_key):
@@ -138,11 +195,11 @@ class DeltaTableDatabase:
 
         try:
             # Try to load existing table
-            delta_table = DeltaTable(str(table_path))
+            delta_table = deltalake.DeltaTable(table_uri, storage_options=self._storage_options or None)
             self._delta_table_cache[record_key] = delta_table
             logger.debug(f"Loaded existing Delta table for {record_key}")
             return delta_table
-        except TableNotFoundError:
+        except deltalake.exceptions.TableNotFoundError:
             # Table doesn't exist
             return None
         except Exception as e:
@@ -153,8 +210,8 @@ class DeltaTableDatabase:
             raise
 
     def _ensure_record_id_column(
-        self, arrow_data: "pa.Table", record_id: str
-    ) -> "pa.Table":
+        self, arrow_data: pa.Table, record_id: str
+    ) -> pa.Table:
         """Ensure the table has an record id column."""
         if self.RECORD_ID_COLUMN not in arrow_data.column_names:
             # Add record_id column at the beginning
@@ -162,15 +219,15 @@ class DeltaTableDatabase:
             arrow_data = arrow_data.add_column(0, self.RECORD_ID_COLUMN, key_array)
         return arrow_data
 
-    def _remove_record_id_column(self, arrow_data: "pa.Table") -> "pa.Table":
+    def _remove_record_id_column(self, arrow_data: pa.Table) -> pa.Table:
         """Remove the record id column if it exists."""
         if self.RECORD_ID_COLUMN in arrow_data.column_names:
             arrow_data = arrow_data.drop([self.RECORD_ID_COLUMN])
         return arrow_data
 
     def _handle_record_id_column(
-        self, arrow_data: "pa.Table", record_id_column: str | None = None
-    ) -> "pa.Table":
+        self, arrow_data: pa.Table, record_id_column: str | None = None
+    ) -> pa.Table:
         """
         Handle record_id column based on add_record_id_column parameter.
 
@@ -276,7 +333,7 @@ class DeltaTableDatabase:
         self,
         record_path: tuple[str, ...],
         record_id: str,
-        record: "pa.Table",
+        record: pa.Table,
         skip_duplicates: bool = False,
         flush: bool = False,
         schema_handling: Literal["merge", "error", "coerce"] = "error",
@@ -315,6 +372,8 @@ class DeltaTableDatabase:
         Raises:
             ValueError: If any record IDs already exist and skip_duplicates=False
         """
+        self._validate_record_path(record_path)
+
         if records.num_rows == 0:
             return
 
@@ -692,7 +751,7 @@ class DeltaTableDatabase:
     def get_records_by_ids(
         self,
         record_path: tuple[str, ...],
-        record_ids: "Collection[str] | pl.Series | pa.Array",
+        record_ids: Collection[str] | pl.Series | pa.Array,
         record_id_column: str | None = None,
         flush: bool = False,
     ) -> "pa.Table | None":
@@ -750,10 +809,10 @@ class DeltaTableDatabase:
 
     def _read_delta_table(
         self,
-        delta_table: DeltaTable,
+        delta_table: deltalake.DeltaTable,
         filters: list | None = None,
-        expression: "pc.Expression | None" = None,
-    ) -> "pa.Table":
+        expression: pc.Expression | None = None,
+    ) -> pa.Table:
         """
         Read table using to_pyarrow_dataset with original schema preservation.
 
@@ -794,25 +853,80 @@ class DeltaTableDatabase:
 
         return dataset.to_table()
 
+    def to_config(self, db_registry: Any = None) -> dict[str, Any]:
+        """Serialize database configuration to a JSON-compatible dict."""
+        config: dict[str, Any] = {
+            "type": "delta_table",
+            "root_uri": self._root_uri,           # renamed from "base_path"
+            "base_path": list(self._path_prefix),  # new: relative prefix tuple
+            "batch_size": self.batch_size,
+            "max_hierarchy_depth": self.max_hierarchy_depth,
+            "allow_schema_evolution": self.allow_schema_evolution,
+        }
+        if self._storage_options:
+            config["storage_options"] = self._storage_options
+        return config
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "DeltaTableDatabase":
+        """Reconstruct a DeltaTableDatabase from a config dict.
+
+        Supports both the current format (``"root_uri"`` for the storage root,
+        ``"base_path"`` as a list for the scoping prefix) and the legacy format
+        produced before ENG-341 (``"base_path"`` as a URI string, no prefix).
+        """
+        if "root_uri" in config:
+            # Current format (post-ENG-341)
+            root_uri = config["root_uri"]
+            base_path_value = config.get("base_path", [])
+            _path_prefix = tuple(base_path_value) if isinstance(base_path_value, list) else ()
+        else:
+            # Legacy format (pre-ENG-341): "base_path" was the root URI string
+            root_uri = config["base_path"]
+            _path_prefix = ()
+        return cls(
+            base_path=root_uri,
+            storage_options=config.get("storage_options"),
+            create_base_path=True,
+            batch_size=config.get("batch_size", 1000),
+            max_hierarchy_depth=config.get("max_hierarchy_depth", 10),
+            allow_schema_evolution=config.get("allow_schema_evolution", True),
+            _path_prefix=_path_prefix,
+        )
+
     def flush(self) -> None:
         """Flush all pending batches."""
-        # TODO: capture and re-raise exceptions at the end
+        errors: list[tuple[str, Exception]] = []
         for record_key in list(self._pending_batches.keys()):
-            record_path = tuple(record_key.split("/"))
             try:
-                self.flush_batch(record_path)
+                self._flush_by_key(record_key)
             except Exception as e:
                 logger.error(f"Error flushing batch for {record_key}: {e}")
+                errors.append((record_key, e))
+        if errors:
+            failed_keys = [k for k, _ in errors]
+            raise RuntimeError(
+                f"Failed to flush {len(errors)} batch(es): {failed_keys}"
+            ) from errors[0][1]
 
     def flush_batch(self, record_path: tuple[str, ...]) -> None:
         """
         Flush pending batch for a specific source path.
 
         Args:
-            record_path: Tuple of path components
+            record_path: Tuple of path components (relative to this instance's prefix)
+        """
+        record_key = self._get_record_key(record_path)
+        self._flush_by_key(record_key)
+
+    def _flush_by_key(self, record_key: str) -> None:
+        """Flush a pending batch identified by its absolute record_key (prefix + path).
+
+        This method is safe to call from any instance (root or scoped) since the
+        key already encodes the full path. The URI is derived directly from the key
+        without applying any instance-level prefix.
         """
         logger.debug("Flushing triggered!!")
-        record_key = self._get_record_key(record_path)
 
         if (
             record_key not in self._pending_batches
@@ -822,25 +936,42 @@ class DeltaTableDatabase:
 
         # Get all pending records
         pending_batch = self._pending_batches.pop(record_key)
-        pending_ids = self._pending_record_ids.pop(record_key)
+        pending_ids = self._pending_record_ids.pop(record_key, set())
+
+        # Derive the absolute table URI directly from the key (already includes prefix).
+        abs_path_components = tuple(record_key.split("/"))
+        if not self._is_cloud:
+            path = self._local_root
+            for component in abs_path_components:
+                path = path / self._sanitize_path_component(component)
+            table_uri = str(path)
+        else:
+            table_uri = self._root_uri.rstrip("/") + "/" + record_key
 
         try:
             # Combine all tables in the batch
             combined_table = pending_batch.combine_chunks()
 
-            table_path = self._get_table_path(record_path)
-            table_path.mkdir(parents=True, exist_ok=True)
+            # Ensure parent directory exists (local only)
+            if not self._is_cloud:
+                import os
+                os.makedirs(table_uri, exist_ok=True)
 
-            # Check if table exists
-            delta_table = self._get_delta_table(record_path)
+            # Check if Delta table exists at this URI
+            try:
+                import deltalake as _dl
+                delta_table = _dl.DeltaTable(table_uri, storage_options=self._storage_options or None)
+            except (_dl.exceptions.TableNotFoundError, _dl.exceptions.DeltaProtocolError):
+                delta_table = None
 
             if delta_table is None:
                 # TODO: reconsider mode="overwrite" here
-                write_deltalake(
-                    table_path,
+                deltalake.write_deltalake(
+                    table_uri,
                     combined_table,
                     mode="overwrite",
                     schema_mode="merge" if self.allow_schema_evolution else "overwrite",
+                    storage_options=self._storage_options or None,
                 )
                 logger.debug(
                     f"Created new Delta table for {record_key} with {len(combined_table)} records"
@@ -859,10 +990,12 @@ class DeltaTableDatabase:
                 )
 
             # Update cache
-            self._delta_table_cache[record_key] = DeltaTable(str(table_path))
+            self._delta_table_cache[record_key] = deltalake.DeltaTable(table_uri, storage_options=self._storage_options or None)
 
-            # invalide record id cache
-            self._invalidate_cache(record_path)
+            # Invalidate the existing-IDs cache directly by record_key to avoid
+            # double-prefixing that would occur if _invalidate_cache() were used
+            # (it prepends _path_prefix again via _get_record_key).
+            self._cache_dirty[record_key] = True
 
         except Exception as e:
             logger.error(f"Error flushing batch for {record_key}: {e}")
@@ -870,3 +1003,100 @@ class DeltaTableDatabase:
             self._pending_batches[record_key] = pending_batch
             self._pending_record_ids[record_key] = pending_ids
             raise
+
+    @property
+    def base_path(self) -> tuple[str, ...]:
+        """The current relative root of this database view (always () for root instances)."""
+        return self._path_prefix
+
+    def at(self, *path_components: str) -> "DeltaTableDatabase":
+        """Return a new DeltaTableDatabase scoped to the given sub-path.
+
+        The returned instance uses the same underlying filesystem root but
+        all reads and writes are relative to the extended prefix.  The scoped
+        instance shares the root's ``_pending_batches`` and
+        ``_pending_record_ids`` dicts so that a ``flush()`` on the root is
+        visible to — and can flush — all scoped instances.
+
+        Raises:
+            TypeError: If any component is not a str.
+            ValueError: If any component is empty, is ``'.'`` or ``'..'``, or
+                contains filesystem-unsafe characters (``/``, ``\\``, ``*``,
+                ``?``, ``"``, ``<``, ``>``, ``|``, ``\\0``).
+        """
+        _unsafe_chars = ["/", "\\", "*", "?", '"', "<", ">", "|", "\0"]
+        for i, component in enumerate(path_components):
+            if not isinstance(component, str):
+                raise TypeError(
+                    f"at() path component {i} must be str, got {type(component)!r}"
+                )
+            if not component:
+                raise ValueError(f"at() path component {i} must not be empty")
+            if component in (".", ".."):
+                raise ValueError(
+                    f"at() path component {repr(component)}: '.' and '..' are not allowed"
+                )
+            if any(char in component for char in _unsafe_chars):
+                raise ValueError(
+                    f"at() path component {repr(component)} contains invalid characters"
+                )
+        new_root = self._root if self._root is not None else self
+        new_scoped_path = self._scoped_path + path_components
+        # Propagate shared pending state to the scoped instance so that
+        # root.flush() is visible to — and can flush — all scoped instances.
+        root_instance = new_root
+        return DeltaTableDatabase(
+            base_path=self._root_uri,
+            storage_options=self._storage_options,
+            batch_size=self.batch_size,
+            max_hierarchy_depth=self.max_hierarchy_depth,
+            allow_schema_evolution=self.allow_schema_evolution,
+            _path_prefix=self._path_prefix + path_components,
+            _root=new_root,
+            _scoped_path=new_scoped_path,
+            _shared_pending_batches=root_instance._pending_batches,
+            _shared_pending_record_ids=root_instance._pending_record_ids,
+        )
+
+    def list_sources(self) -> list[tuple[str, ...]]:
+        """
+        List all record paths that contain a valid Delta table under base_path.
+
+        Returns:
+            List of record_path tuples (e.g. [("alpha",), ("beta", "sub")]).
+
+        Raises:
+            NotImplementedError: For cloud base paths (filesystem walk not supported).
+        """
+        if self._is_cloud:
+            raise NotImplementedError(
+                "list_sources() is not supported for cloud storage paths"
+            )
+
+        sources: list[tuple[str, ...]] = []
+
+        def _scan(current_path: Path, path_components: tuple[str, ...]) -> None:
+            if len(path_components) >= self.max_hierarchy_depth:
+                return
+            try:
+                items = list(current_path.iterdir())
+            except OSError as e:
+                logger.warning("Could not list directory %s during list_sources scan: %s", current_path, e)
+                return
+            for item in items:
+                if not item.is_dir():
+                    continue
+                components = path_components + (item.name,)
+                try:
+                    deltalake.DeltaTable(str(item), storage_options=self._storage_options or None)
+                    sources.append(components)
+                except deltalake.exceptions.TableNotFoundError:
+                    _scan(item, components)
+
+        # Build the effective scoped root directory
+        scoped_root = self._local_root
+        for component in self._path_prefix:
+            scoped_root = scoped_root / self._sanitize_path_component(component)
+
+        _scan(scoped_root, ())
+        return sources

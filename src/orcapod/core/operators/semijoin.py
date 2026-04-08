@@ -1,11 +1,14 @@
-from orcapod.protocols import core_protocols as cp
-from orcapod.core.streams import TableStream
-from orcapod.utils import types_utils
-from orcapod.types import PythonSchema
-from typing import Any, TYPE_CHECKING
-from orcapod.utils.lazy_module import LazyModule
-from orcapod.errors import InputValidationError
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
+
+from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import BinaryOperator
+from orcapod.core.streams import ArrowTableStream
+from orcapod.errors import InputValidationError
+from orcapod.protocols.core_protocols import PacketProtocol, StreamProtocol, TagProtocol
+from orcapod.types import ColumnConfig, Schema
+from orcapod.utils import schema_utils
+from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -27,57 +30,34 @@ class SemiJoin(BinaryOperator):
     The output stream preserves the schema of the left stream exactly.
     """
 
-    @property
-    def kernel_id(self) -> tuple[str, ...]:
-        """
-        Returns a unique identifier for the kernel.
-        This is used to identify the kernel in the computational graph.
-        """
-        return (f"{self.__class__.__name__}",)
-
-    def op_identity_structure(
-        self,
-        left_stream: cp.Stream | None = None,
-        right_stream: cp.Stream | None = None,
-    ) -> Any:
-        """
-        Return a structure that represents the identity of this operator.
-        Unlike Join, SemiJoin depends on the order of streams (left vs right).
-        """
-        id_struct = (self.__class__.__name__,)
-        if left_stream is not None and right_stream is not None:
-            # Order matters for semi-join: (left_stream, right_stream)
-            id_struct += (left_stream, right_stream)
-        return id_struct
-
-    def op_forward(self, left_stream: cp.Stream, right_stream: cp.Stream) -> cp.Stream:
+    def binary_static_process(
+        self, left_stream: StreamProtocol, right_stream: StreamProtocol
+    ) -> StreamProtocol:
         """
         Performs a semi-join between left and right streams.
         Returns entries from left stream that have matching entries in right stream.
         """
-        left_tag_typespec, left_packet_typespec = left_stream.types()
-        right_tag_typespec, right_packet_typespec = right_stream.types()
+        left_tag_schema, left_packet_schema = left_stream.output_schema()
+        right_tag_schema, right_packet_schema = right_stream.output_schema()
 
         # Find overlapping columns across all columns (tags + packets)
-        left_all_typespec = types_utils.union_typespecs(
-            left_tag_typespec, left_packet_typespec
+        left_all_schema = schema_utils.union_schemas(
+            left_tag_schema, left_packet_schema
         )
-        right_all_typespec = types_utils.union_typespecs(
-            right_tag_typespec, right_packet_typespec
+        right_all_schema = schema_utils.union_schemas(
+            right_tag_schema, right_packet_schema
         )
 
         common_keys = tuple(
-            types_utils.intersection_typespecs(
-                left_all_typespec, right_all_typespec
-            ).keys()
+            schema_utils.intersection_schemas(left_all_schema, right_all_schema).keys()
         )
 
         # If no overlapping columns, return the left stream unmodified
         if not common_keys:
             return left_stream
 
-        # include source info for left stream
-        left_table = left_stream.as_table(include_source=True)
+        # include source info and system tags for left stream
+        left_table = left_stream.as_table(columns={"source": True, "system_tags": True})
 
         # Get the right table for matching
         right_table = right_stream.as_table()
@@ -88,53 +68,147 @@ class SemiJoin(BinaryOperator):
             keys=list(common_keys),
             join_type="left semi",
         )
+        # Re-apply left table's schema to restore nullable flags that Arrow join may have reset
+        semi_joined_table = semi_joined_table.cast(left_table.schema)
 
-        return TableStream(
+        return ArrowTableStream(
             semi_joined_table,
-            tag_columns=tuple(left_tag_typespec.keys()),
-            source=self,
-            upstreams=(left_stream, right_stream),
+            tag_columns=tuple(left_tag_schema.keys()),
         )
 
-    def op_output_types(
+    def binary_output_schema(
         self,
-        left_stream: cp.Stream,
-        right_stream: cp.Stream,
-        include_system_tags: bool = False,
-    ) -> tuple[PythonSchema, PythonSchema]:
+        left_stream: StreamProtocol,
+        right_stream: StreamProtocol,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]:
         """
         Returns the output types for the semi-join operation.
         The output preserves the exact schema of the left stream.
         """
         # Semi-join preserves the left stream's schema exactly
-        return left_stream.types(include_system_tags=include_system_tags)
+        return left_stream.output_schema(columns=columns, all_info=all_info)
 
-    def op_validate_inputs(
-        self, left_stream: cp.Stream, right_stream: cp.Stream
+    def validate_binary_inputs(
+        self, left_stream: StreamProtocol, right_stream: StreamProtocol
     ) -> None:
         """
         Validates that the input streams are compatible for semi-join.
         Checks that overlapping columns have compatible types.
+
+        Stores the common keys so that ``async_execute`` can use them
+        to determine the correct empty-right behavior without data.
         """
         try:
-            left_tag_typespec, left_packet_typespec = left_stream.types()
-            right_tag_typespec, right_packet_typespec = right_stream.types()
+            left_tag_schema, left_packet_schema = left_stream.output_schema()
+            right_tag_schema, right_packet_schema = right_stream.output_schema()
 
             # Check that overlapping columns have compatible types across all columns
-            left_all_typespec = types_utils.union_typespecs(
-                left_tag_typespec, left_packet_typespec
+            left_all_schema = schema_utils.union_schemas(
+                left_tag_schema, left_packet_schema
             )
-            right_all_typespec = types_utils.union_typespecs(
-                right_tag_typespec, right_packet_typespec
+            right_all_schema = schema_utils.union_schemas(
+                right_tag_schema, right_packet_schema
             )
 
-            # intersection_typespecs will raise an error if types are incompatible
-            types_utils.intersection_typespecs(left_all_typespec, right_all_typespec)
+            # intersection_schemas will raise an error if types are incompatible
+            common = schema_utils.intersection_schemas(
+                left_all_schema, right_all_schema
+            )
+            self._validated_common_keys: tuple[str, ...] = tuple(common.keys())
 
         except Exception as e:
             raise InputValidationError(
                 f"Input streams are not compatible for semi-join: {e}"
             ) from e
 
-    def __repr__(self) -> str:
-        return "SemiJoin()"
+    def is_commutative(self) -> bool:
+        return False
+
+    def _common_keys_from_schema(self) -> tuple[str, ...]:
+        """Return the common keys computed during input validation.
+
+        Falls back to an empty tuple if validation hasn't been called
+        (shouldn't happen in normal pipeline execution).
+        """
+        return getattr(self, "_validated_common_keys", ())
+
+    async def async_execute(
+        self,
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        **kwargs: Any,
+    ) -> None:
+        """Build-probe: collect right input, then stream left through a hash lookup.
+
+        Phase 1 — Build: collect all rows from the right (filter) channel and
+        index them by the common-key values.
+        Phase 2 — Probe: stream left rows one at a time; for each row whose
+        common-key values appear in the right-side index, emit immediately.
+
+        Falls back to barrier mode when the right input is empty (schema
+        cannot be inferred from data) or when there are no common keys.
+        """
+        try:
+            left_ch, right_ch = inputs[0], inputs[1]
+
+            # Phase 1: Build right-side lookup
+            right_rows = await right_ch.collect()
+
+            if not right_rows:
+                # Empty right: determine common keys from the validated
+                # input schemas (set during __init__) to match sync semantics.
+                # Common keys exist → empty result; no common keys → pass left through.
+                common = self._common_keys_from_schema()
+                if common:
+                    # Drain left channel (discard) — result is empty
+                    await left_ch.collect()
+                    return
+                # No common keys — pass all left rows through unchanged
+                async for tag, packet in left_ch:
+                    await output.send((tag, packet))
+                return
+
+            # Determine right-side keys from first row
+            right_tag_keys = set(right_rows[0][0].keys())
+            right_pkt_keys = set(right_rows[0][1].keys())
+            right_all_keys = right_tag_keys | right_pkt_keys
+
+            # Phase 2: Probe — stream left rows
+            common_keys: tuple[str, ...] | None = None
+            right_lookup: set[tuple] | None = None
+
+            async for tag, packet in left_ch:
+                if common_keys is None:
+                    # First left row — determine common keys and build index
+                    left_tag_keys = set(tag.keys())
+                    left_pkt_keys = set(packet.keys())
+                    left_all_keys = left_tag_keys | left_pkt_keys
+                    common_keys = tuple(sorted(left_all_keys & right_all_keys))
+
+                    if not common_keys:
+                        # No common keys — pass all left rows through
+                        await output.send((tag, packet))
+                        async for t, p in left_ch:
+                            await output.send((t, p))
+                        return
+
+                    # Build right-side lookup
+                    right_lookup = set()
+                    for rt, rp in right_rows:
+                        rd = rt.as_dict()
+                        rd.update(rp.as_dict())
+                        right_lookup.add(tuple(rd[k] for k in common_keys))
+
+                # Probe
+                ld = tag.as_dict()
+                ld.update(packet.as_dict())
+                if tuple(ld[k] for k in common_keys) in right_lookup:  # type: ignore[arg-type]
+                    await output.send((tag, packet))
+        finally:
+            await output.close()
+
+    def identity_structure(self) -> Any:
+        return self.__class__.__name__

@@ -1,0 +1,1466 @@
+"""FunctionNode — stream node for packet function invocations with optional DB persistence."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any, Literal, cast
+
+from orcapod import contexts
+from orcapod.channels import ReadableChannel, WritableChannel
+from orcapod.config import Config
+from orcapod.core.cached_function_pod import CachedFunctionPod
+from orcapod.core.streams.arrow_table_stream import ArrowTableStream
+from orcapod.core.streams.base import StreamBase
+from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
+from orcapod.protocols.core_protocols import (
+    FunctionPodProtocol,
+    PacketFunctionExecutorProtocol,
+    PacketFunctionProtocol,
+    PacketProtocol,
+    StreamProtocol,
+    TagProtocol,
+    TrackerManagerProtocol,
+)
+from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
+from orcapod.system_constants import constants
+from orcapod.types import (
+    ColumnConfig,
+    ContentHash,
+    NodeConfig,
+    PipelineConfig,
+    Schema,
+    resolve_concurrency,
+)
+from orcapod.utils import arrow_utils, schema_utils
+from orcapod.utils.lazy_module import LazyModule
+
+logger = logging.getLogger(__name__)
+
+from orcapod.protocols.observability_protocols import (
+    ExecutionObserverProtocol,
+    PacketExecutionLoggerProtocol,
+)
+
+if TYPE_CHECKING:
+    import polars as pl
+    import pyarrow as pa
+    import pyarrow.compute as pc
+else:
+    pa = LazyModule("pyarrow")
+    pc = LazyModule("pyarrow.compute")
+    pl = LazyModule("polars")
+
+
+def _executor_supports_concurrent(
+    packet_function: PacketFunctionProtocol,
+) -> bool:
+    """Return True if the packet function's executor supports concurrent execution."""
+    executor = packet_function.executor
+    return executor is not None and executor.supports_concurrent_execution
+
+
+class FunctionNode(StreamBase):
+    """Stream node representing a packet function invocation with optional DB persistence.
+
+    When constructed without database parameters, provides the core stream
+    interface (identity, schema, iteration) without any persistence.  When
+    databases are provided (either at construction or via ``attach_databases``),
+    adds result caching via ``CachedFunctionPod``, pipeline record storage,
+    and two-phase iteration (cached first, then compute missing).
+    """
+
+    node_type = "function"
+
+    def __init__(
+        self,
+        function_pod: FunctionPodProtocol,
+        input_stream: StreamProtocol,
+        tracker_manager: TrackerManagerProtocol | None = None,
+        label: str | None = None,
+        config: Config | None = None,
+        # Optional DB params for persistent mode:
+        pipeline_database: ArrowDatabaseProtocol | None = None,
+        result_database: ArrowDatabaseProtocol | None = None,
+        table_scope: Literal["pipeline_hash", "content_hash"] = "pipeline_hash",
+    ):
+        if tracker_manager is None:
+            tracker_manager = DEFAULT_TRACKER_MANAGER
+        self.tracker_manager = tracker_manager
+        self._packet_function = function_pod.packet_function
+
+        # FunctionPod used for the `producer` property and pipeline identity
+        self._function_pod = function_pod
+        super().__init__(label=label, config=config)
+
+        # validate the input stream — skip for UNAVAILABLE streams because their
+        # stored schema uses serialized type strings (e.g. 'int64') that the
+        # schema-compatibility checker cannot handle, and we will never actually
+        # iterate such a stream (CACHE_ONLY mode reads directly from the DB).
+        from orcapod.pipeline.serialization import LoadStatus
+
+        _stream_unavailable = (
+            hasattr(input_stream, "load_status")
+            and input_stream.load_status == LoadStatus.UNAVAILABLE
+        )
+        if not _stream_unavailable:
+            _, incoming_packet_types = input_stream.output_schema()
+            expected_packet_schema = self._packet_function.input_packet_schema
+            if not schema_utils.check_schema_compatibility(
+                incoming_packet_types, expected_packet_schema
+            ):
+                raise ValueError(
+                    f"Incoming packet data type {incoming_packet_types} from {input_stream} "
+                    f"is not compatible with expected input schema {expected_packet_schema}"
+                )
+
+        self._input_stream = input_stream
+
+        # stream-level caching state
+        self._cached_output_packets: dict[
+            str, tuple[TagProtocol, PacketProtocol | None]
+        ] = {}
+        self._cached_output_table: pa.Table | None = None
+        self._cached_content_hash_column: pa.Array | None = None
+
+        # DB persistence state (initially None; set via __init__ params or attach_databases)
+        self._pipeline_database: ArrowDatabaseProtocol | None = None
+        self._cached_function_pod: CachedFunctionPod | None = None
+        self._output_schema_hash: str | None = None
+
+        # Descriptor fields — populated by from_descriptor() for read-only/UNAVAILABLE
+        # nodes. Initialized here so they are always present on the concrete class
+        # (avoids getattr access for possibly-absent attributes).
+        from orcapod.pipeline.serialization import LoadStatus
+        self._load_status: LoadStatus = LoadStatus.FULL
+        self._stored_content_hash: str | None = None
+        self._stored_pipeline_hash: str | None = None
+        self._stored_schema: dict = {}
+        self._stored_node_uri: tuple[str, ...] = ()
+        self._stored_pipeline_path: tuple[str, ...] = ()
+        self._stored_result_record_path: tuple[str, ...] = ()
+        self._descriptor: dict = {}
+        if table_scope not in ("pipeline_hash", "content_hash"):
+            raise ValueError(
+                f"Unknown table_scope {table_scope!r}. "
+                "Expected one of: 'pipeline_hash', 'content_hash'."
+            )
+        self._table_scope = table_scope
+        self._node_identity_path_cache: tuple[str, ...] | None = None
+
+        if pipeline_database is not None:
+            self.attach_databases(
+                pipeline_database=pipeline_database,
+                result_database=result_database,
+            )
+
+    # ------------------------------------------------------------------
+    # attach_databases
+    # ------------------------------------------------------------------
+
+    def attach_databases(
+        self,
+        pipeline_database: ArrowDatabaseProtocol,
+        result_database: ArrowDatabaseProtocol | None = None,
+    ) -> None:
+        """Attach databases for persistent caching and pipeline records.
+
+        Creates a ``CachedFunctionPod`` wrapping the original function pod
+        for result caching.  The pipeline database is used separately for
+        pipeline-level provenance records (tag + packet hash).
+
+        The databases are expected to be pre-scoped by the pipeline (via
+        ``db.at(*pipeline_name).at("_result")`` etc.) so no additional path
+        prefix is needed here.
+
+        Args:
+            pipeline_database: Database for pipeline records.
+            result_database: Database for cached results. Defaults to
+                pipeline_database.
+        """
+        if result_database is None:
+            # Default result database is pipeline_database scoped to "_result"
+            # so that results are stored separately from pipeline-level records.
+            result_database = pipeline_database.at("_result")
+
+        # Always wrap the original function_pod (not a previous cached wrapper)
+        self._cached_function_pod = CachedFunctionPod(
+            self._function_pod,
+            result_database=result_database,
+        )
+
+        self._pipeline_database = pipeline_database
+
+        # Clear all caches
+        self._node_identity_path_cache = None
+        self.clear_cache()
+        self._content_hash_cache.clear()
+        self._pipeline_hash_cache.clear()
+
+        # Compute output schema hash
+        self._output_schema_hash = self.data_context.semantic_hasher.hash_object(
+            self._packet_function.output_packet_schema
+        ).to_string()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _require_pipeline_database(self) -> None:
+        """Raise a clear RuntimeError if no pipeline database is attached.
+
+        Called at the top of methods that unconditionally access
+        ``self._pipeline_database``.  Provides an actionable error message
+        instead of an opaque ``AttributeError: 'NoneType' object has no
+        attribute ...`` when a definition-level pipeline is executed without
+        supplying a database.
+        """
+        if self._pipeline_database is None:
+            raise RuntimeError(
+                f"FunctionNode '{self.label}' has no pipeline database attached. "
+                "Either construct the pipeline with a pipeline_database argument, "
+                "or supply one via Pipeline.load(..., pipeline_database=<db>)."
+            )
+
+    def _filter_by_content_hash(self, table: pa.Table) -> pa.Table:
+        """Filter *table* to rows whose ``NODE_CONTENT_HASH_COL`` matches this node.
+
+        Only applied when ``table_scope="pipeline_hash"`` because in that mode
+        multiple runs share the same DB table and must be disambiguated at read
+        time.  In ``"content_hash"`` mode every run has its own table so no
+        filtering is needed.
+        """
+        if self._table_scope != "pipeline_hash":
+            return table
+        col_name = constants.NODE_CONTENT_HASH_COL
+        if col_name not in table.column_names:
+            raise ValueError(
+                f"Cannot isolate records for table_scope='pipeline_hash': "
+                f"required column {col_name!r} is missing from the stored table. "
+                "This may indicate records written by an older version of the code."
+            )
+        own_hash = self.content_hash().to_string()
+        mask = pc.equal(table.column(col_name), own_hash)
+        return table.filter(mask)
+
+    # ------------------------------------------------------------------
+    # from_descriptor — reconstruct from a serialized pipeline descriptor
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_descriptor(
+        cls,
+        descriptor: dict[str, Any],
+        function_pod: FunctionPodProtocol | None,
+        input_stream: StreamProtocol | None,
+        databases: dict[str, Any],
+    ) -> "FunctionNode":
+        """Construct a FunctionNode from a serialized descriptor.
+
+        When *function_pod* and *input_stream* are both provided the node
+        operates in full mode -- constructed normally via ``__init__``.
+        When *function_pod* is ``None`` the node is created in read-only
+        mode with metadata from the descriptor; computation methods will
+        raise ``RuntimeError``.
+
+        Args:
+            descriptor: The serialized node descriptor dict.
+            function_pod: An optional live function pod.  ``None`` for
+                read-only mode.
+            input_stream: An optional live input stream.  ``None`` for
+                read-only mode.
+            databases: Mapping of database role names (``"pipeline"``,
+                ``"result"``) to database instances.
+
+        Returns:
+            A new ``FunctionNode`` instance.
+        """
+        from orcapod.pipeline.serialization import LoadStatus
+
+        pipeline_db = databases.get("pipeline")
+        result_db = databases.get("result")  # pre-scoped; None if not provided
+
+        if "table_scope" not in descriptor:
+            raise ValueError(
+                f"FunctionNode descriptor is missing required 'table_scope' field: "
+                f"{descriptor.get('label', '<unlabeled>')}"
+            )
+        raw_table_scope = descriptor["table_scope"]
+        if raw_table_scope not in ("pipeline_hash", "content_hash"):
+            raise ValueError(
+                f"FunctionNode descriptor has invalid 'table_scope' value "
+                f"{raw_table_scope!r} for {descriptor.get('label', '<unlabeled>')}; "
+                f"expected one of ('pipeline_hash', 'content_hash')"
+            )
+        table_scope = cast(Literal["pipeline_hash", "content_hash"], raw_table_scope)
+
+        if function_pod is not None and input_stream is not None:
+            # Full / READ_ONLY / CACHE_ONLY mode: construct normally via __init__.
+            node = cls(
+                function_pod=function_pod,
+                input_stream=input_stream,
+                pipeline_database=pipeline_db,
+                result_database=result_db,
+                label=descriptor.get("label"),
+                table_scope=table_scope,
+            )
+            node._descriptor = descriptor
+
+            # Determine mode based on upstream availability and function type.
+            from orcapod.core.packet_function_proxy import PacketFunctionProxy
+
+            input_unavailable = (
+                hasattr(input_stream, "load_status")
+                and input_stream.load_status == LoadStatus.UNAVAILABLE
+            )
+            if input_unavailable:
+                node._load_status = LoadStatus.CACHE_ONLY
+            elif isinstance(function_pod.packet_function, PacketFunctionProxy):
+                node._load_status = LoadStatus.READ_ONLY
+            else:
+                node._load_status = LoadStatus.FULL
+            return node
+
+        # Read-only mode: bypass __init__, set minimum required state
+        node = cls.__new__(cls)
+
+        # From LabelableMixin
+        node._label = descriptor.get("label")
+
+        # From DataContextMixin
+        node._data_context = contexts.resolve_context(
+            descriptor.get("data_context_key")
+        )
+        from orcapod.config import DEFAULT_CONFIG
+
+        node._orcapod_config = DEFAULT_CONFIG
+
+        # From ContentIdentifiableBase
+        node._content_hash_cache = {}
+        node._cached_int_hash = None
+
+        # From PipelineElementBase
+        node._pipeline_hash_cache = {}
+
+        # From TemporalMixin
+        node._modified_time = None
+
+        # From FunctionNode
+        node._function_pod = None
+        node._packet_function = None
+        node._input_stream = None
+        node.tracker_manager = DEFAULT_TRACKER_MANAGER
+        node._cached_output_packets = {}
+        node._cached_output_table = None
+        node._cached_content_hash_column = None
+
+        # DB persistence state
+        node._pipeline_database = pipeline_db
+        node._cached_function_pod = None
+        node._output_schema_hash = None
+
+        # Descriptor metadata for read-only access
+        node._descriptor = descriptor
+        node._stored_schema = descriptor.get("output_schema", {})
+        node._stored_content_hash = descriptor.get("content_hash")
+        node._stored_pipeline_hash = descriptor.get("pipeline_hash")
+        node._stored_pipeline_path = tuple(descriptor.get("pipeline_path", ()))
+        node._stored_node_uri = tuple(descriptor.get("node_uri") or [])
+        node._stored_result_record_path = tuple(
+            descriptor.get("result_record_path", ())
+        )
+        node._table_scope = table_scope
+        node._node_identity_path_cache = None
+
+        # Determine load status based on DB availability
+        node._load_status = LoadStatus.UNAVAILABLE
+        if pipeline_db is not None:
+            node._load_status = LoadStatus.READ_ONLY
+
+        return node
+
+    # ------------------------------------------------------------------
+    # load_status
+    # ------------------------------------------------------------------
+
+    @property
+    def load_status(self) -> Any:
+        """Return the load status of this node.
+
+        Returns:
+            The ``LoadStatus`` enum value indicating how this node was
+            loaded.  Defaults to ``FULL`` for nodes created via
+            ``__init__``.
+        """
+        return self._load_status
+
+    # ------------------------------------------------------------------
+    # Core properties
+    # ------------------------------------------------------------------
+
+    @property
+    def producer(self) -> FunctionPodProtocol:
+        return self._function_pod
+
+    @property
+    def data_context(self) -> contexts.DataContext:
+        return contexts.resolve_context(self._function_pod.data_context_key)
+
+    @property
+    def data_context_key(self) -> str:
+        return self._function_pod.data_context_key
+
+    @property
+    def executor(self) -> PacketFunctionExecutorProtocol | None:
+        """The executor set on the underlying packet function."""
+        return self._packet_function.executor
+
+    @executor.setter
+    def executor(self, executor: PacketFunctionExecutorProtocol | None) -> None:
+        """Set or clear the executor on the underlying packet function."""
+        self._packet_function.executor = executor
+
+    @property
+    def upstreams(self) -> tuple[StreamProtocol, ...]:
+        return (self._input_stream,)
+
+    @upstreams.setter
+    def upstreams(self, value: tuple[StreamProtocol, ...]) -> None:
+        if len(value) != 1:
+            raise ValueError("FunctionPod can only have one upstream")
+        self._input_stream = value[0]
+
+    # ------------------------------------------------------------------
+    # Read-only overrides (for deserialized nodes without live function_pod)
+    # ------------------------------------------------------------------
+
+    def content_hash(self, hasher=None) -> ContentHash:
+        """Return the content hash, using stored value in read-only mode."""
+        if self._function_pod is None and self._stored_content_hash is not None:
+            from orcapod.types import ContentHash as CH
+
+            return CH.from_string(self._stored_content_hash)
+        return super().content_hash(hasher)
+
+    def pipeline_hash(self, hasher=None) -> ContentHash:
+        """Return the pipeline hash, using stored value in read-only mode."""
+        if self._function_pod is None and self._stored_pipeline_hash is not None:
+            from orcapod.types import ContentHash as CH
+
+            return CH.from_string(self._stored_pipeline_hash)
+        return super().pipeline_hash(hasher)
+
+    def output_schema(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[Schema, Schema]:
+        """Return output schema, using stored value in read-only mode."""
+        if self._function_pod is None:
+            tag = Schema(self._stored_schema.get("tag", {}))
+            packet = Schema(self._stored_schema.get("packet", {}))
+            return tag, packet
+        tag_schema = self._input_stream.output_schema(
+            columns=columns, all_info=all_info
+        )[0]
+        return tag_schema, self._packet_function.output_packet_schema
+
+    def keys(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        if self._function_pod is None:
+            tag_keys = tuple(self._stored_schema.get("tag", {}).keys())
+            packet_keys = tuple(self._stored_schema.get("packet", {}).keys())
+            return tag_keys, packet_keys
+        tag_schema, packet_schema = self.output_schema(
+            columns=columns, all_info=all_info
+        )
+        return tuple(tag_schema.keys()), tuple(packet_schema.keys())
+
+    # ------------------------------------------------------------------
+    # Pipeline path
+    # ------------------------------------------------------------------
+
+    @property
+    def node_identity_path(self) -> tuple[str, ...]:
+        """Return the node identity path for observer contextualization.
+
+        When ``table_scope="pipeline_hash"`` (default) the path is
+        ``pod.uri + (schema:{pipeline_hash},)`` — all runs that share the same
+        pipeline structure are routed to one shared table, with per-run
+        disambiguation via the ``_node_content_hash`` row-level column.
+
+        When ``table_scope="content_hash"`` the legacy path is returned:
+        ``pod.uri + (schema:{pipeline_hash}, instance:{content_hash})``.
+
+        In read-only/UNAVAILABLE mode (no pod) the path stored from the
+        deserialized descriptor is returned (empty tuple when absent).
+        """
+        if self._packet_function is None:
+            return self._stored_pipeline_path
+        if self._node_identity_path_cache is not None:
+            return self._node_identity_path_cache
+        pf = self._function_pod
+        path = pf.uri + (f"schema:{self.pipeline_hash().to_string()}",)
+        if self._table_scope != "pipeline_hash":
+            path += (f"instance:{self.content_hash().to_string()}",)
+        self._node_identity_path_cache = path
+        return path
+
+    @property
+    def node_uri(self) -> tuple[str, ...]:
+        """Canonical URI tuple identifying this computation.
+
+        Identical to ``packet_function.uri`` at runtime.
+        Returns stored value in read-only (deserialized) mode.
+        """
+        if self._packet_function is None:
+            return self._stored_node_uri
+        return self._packet_function.uri
+
+    # ------------------------------------------------------------------
+    # Caching
+    # ------------------------------------------------------------------
+
+    def clear_cache(self) -> None:
+        self._cached_output_packets.clear()
+        self._cached_output_table = None
+        self._cached_content_hash_column = None
+        self._node_identity_path_cache = None
+        self._update_modified_time()
+
+    # ------------------------------------------------------------------
+    # Packet processing
+    # ------------------------------------------------------------------
+
+    def execute_packet(
+        self,
+        tag: TagProtocol,
+        packet: PacketProtocol,
+    ) -> tuple[TagProtocol, PacketProtocol | None]:
+        """Execute a single packet: compute, persist, and cache.
+
+        Internal method for orchestrators. The caller must guarantee that
+        the tag and packet conform to the expected input schema (matching
+        ``self._input_stream``). No validation is performed.
+
+        Args:
+            tag: The tag associated with the packet.
+            packet: The input packet to process.
+
+        Returns:
+            A ``(tag, output_packet)`` tuple.
+        """
+        tag_out, result = self._process_packet_internal(tag, packet)
+        return tag_out, result
+
+    def execute(
+        self,
+        input_stream: StreamProtocol,
+        *,
+        observer: ExecutionObserverProtocol | None = None,
+        error_policy: Literal["continue", "fail_fast"] = "continue",
+    ) -> list[tuple[TagProtocol, PacketProtocol]]:
+        """Execute all packets from a stream: compute, persist, and cache.
+
+        For each packet: fire ``on_packet_start``, check the in-memory cache
+        (populated from DB if needed), compute if missing, fire
+        ``on_packet_end`` or ``on_packet_crash``.
+
+        Args:
+            input_stream: The input stream to process.
+            observer: Optional execution observer for hooks.
+            error_policy: ``"continue"`` skips failed packets;
+                ``"fail_fast"`` re-raises on the first failure.
+
+        Returns:
+            Materialized list of (tag, output_packet) pairs, excluding
+            ``None`` outputs and failed packets.
+        """
+        from orcapod.pipeline.observer import NoOpObserver
+
+        node_label = self.label
+        node_hash = self.content_hash().to_string()
+
+        obs = observer if observer is not None else NoOpObserver()
+        ctx_obs = obs.contextualize(*self.node_identity_path)
+
+        tag_schema = input_stream.output_schema(columns={"system_tags": True})[0]
+        ctx_obs.on_node_start(node_label, node_hash, tag_schema=tag_schema)
+
+        # Collect upstream entries and resolve entry_ids
+        upstream_entries: list[tuple[TagProtocol, PacketProtocol, str]] = [
+            (tag, packet, self.compute_pipeline_entry_id(tag, packet))
+            for tag, packet in input_stream.iter_packets()
+        ]
+        entry_ids = [eid for _, _, eid in upstream_entries]
+
+        # Hot-load any already-computed results from DB into _cached_output_packets.
+        # get_cached_results() is called for its side effect (populating the
+        # in-memory cache); the returned dict is intentionally discarded here so
+        # that the per-packet cache-hit check below uses _cached_output_packets
+        # directly — which includes None-output entries (function returned None)
+        # and prevents spurious recomputation of already-processed packets.
+        self.get_cached_results(entry_ids=entry_ids)
+
+        output: list[tuple[TagProtocol, PacketProtocol]] = []
+        for tag, packet, entry_id in upstream_entries:
+            ctx_obs.on_packet_start(node_label, tag, packet)
+
+            if entry_id in self._cached_output_packets:
+                tag_out, result = self._cached_output_packets[entry_id]
+                ctx_obs.on_packet_end(node_label, tag, packet, result, cached=True)
+                if result is not None:
+                    output.append((tag_out, result))
+            else:
+                pkt_logger = ctx_obs.create_packet_logger(tag, packet)
+                try:
+                    tag_out, result = self._process_packet_internal(
+                        tag, packet, logger=pkt_logger
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Packet execution failed in %s: %s",
+                        node_label,
+                        exc,
+                        exc_info=True,
+                    )
+                    ctx_obs.on_packet_crash(node_label, tag, packet, exc)
+                    if error_policy == "fail_fast":
+                        ctx_obs.on_node_end(node_label, node_hash)
+                        raise
+                else:
+                    ctx_obs.on_packet_end(
+                        node_label, tag, packet, result, cached=False
+                    )
+                    if result is not None:
+                        output.append((tag_out, result))
+
+        ctx_obs.on_node_end(node_label, node_hash)
+        # Mark this node as freshly computed so subsequent iter_packets() calls
+        # skip the is_stale check and serve results directly from the in-memory cache.
+        self._update_modified_time()
+        return output
+
+    def _process_packet_internal(
+        self,
+        tag: TagProtocol,
+        packet: PacketProtocol,
+        *,
+        logger: PacketExecutionLoggerProtocol | None = None,
+    ) -> tuple[TagProtocol, PacketProtocol | None]:
+        """Core compute + persist + cache.
+
+        Used by ``execute_packet`` and ``execute``.
+        Stores result in ``_cached_output_packets`` keyed by entry_id.
+        Exceptions propagate to the caller — no error handling here.
+
+        Returns:
+            A ``(tag, output_packet)`` 2-tuple.
+        """
+        if self._cached_function_pod is not None:
+            tag_out, output_packet = self._cached_function_pod.process_packet(
+                tag, packet, logger=logger
+            )
+
+            if output_packet is not None:
+                result_computed = bool(
+                    output_packet.get_meta_value(
+                        self._cached_function_pod.RESULT_COMPUTED_FLAG, False
+                    )
+                )
+                self.add_pipeline_record(
+                    tag,
+                    packet,
+                    packet_record_id=output_packet.datagram_id,
+                    computed=result_computed,
+                )
+        else:
+            tag_out, output_packet = self._function_pod.process_packet(
+                tag, packet, logger=logger
+            )
+
+        # Store by entry_id and invalidate derived caches
+        entry_id = self.compute_pipeline_entry_id(tag, packet)
+        self._cached_output_packets[entry_id] = (tag_out, output_packet)
+        self._cached_output_table = None
+        self._cached_content_hash_column = None
+
+        return tag_out, output_packet
+
+    def get_cached_results(
+        self, entry_ids: list[str]
+    ) -> dict[str, tuple[TagProtocol, PacketProtocol]]:
+        """Retrieve cached results for specific pipeline entry IDs.
+
+        Checks in-memory cache first. Loads only truly missing entries from DB.
+        Add-only semantics: existing in-memory entries are never cleared or
+        overwritten (overwrite is safe since in-memory and DB entries for the
+        same entry_id are always semantically equivalent).
+
+        Args:
+            entry_ids: Pipeline entry IDs to look up.
+
+        Returns:
+            Mapping from entry_id to ``(tag, output_packet)`` for found entries.
+            Empty dict if no DB is attached or no matches found.
+        """
+        if self._cached_function_pod is None or not entry_ids:
+            return {}
+
+        missing = [eid for eid in entry_ids if eid not in self._cached_output_packets]
+        if missing:
+            loaded = self._load_cached_entries(missing)
+            self._cached_output_packets.update(loaded)
+            if loaded:
+                self._cached_output_table = None
+                self._cached_content_hash_column = None
+
+        return {
+            eid: self._cached_output_packets[eid]
+            for eid in entry_ids
+            if eid in self._cached_output_packets
+            and self._cached_output_packets[eid][1] is not None
+        }
+
+    async def _async_process_packet_internal(
+        self,
+        tag: TagProtocol,
+        packet: PacketProtocol,
+        *,
+        logger: PacketExecutionLoggerProtocol | None = None,
+    ) -> tuple[TagProtocol, PacketProtocol | None]:
+        """Async counterpart of ``_process_packet_internal``.
+
+        Computes via async path, writes pipeline provenance, caches by entry_id.
+        Exceptions propagate.
+
+        Returns:
+            A ``(tag, output_packet)`` 2-tuple.
+        """
+        if self._cached_function_pod is not None:
+            tag_out, output_packet = (
+                await self._cached_function_pod.async_process_packet(
+                    tag, packet, logger=logger
+                )
+            )
+
+            if output_packet is not None:
+                result_computed = bool(
+                    output_packet.get_meta_value(
+                        self._cached_function_pod.RESULT_COMPUTED_FLAG, False
+                    )
+                )
+                self.add_pipeline_record(
+                    tag,
+                    packet,
+                    packet_record_id=output_packet.datagram_id,
+                    computed=result_computed,
+                )
+        else:
+            tag_out, output_packet = (
+                await self._function_pod.async_process_packet(
+                    tag, packet, logger=logger
+                )
+            )
+
+        # Store by entry_id and invalidate derived caches
+        entry_id = self.compute_pipeline_entry_id(tag, packet)
+        self._cached_output_packets[entry_id] = (tag_out, output_packet)
+        self._cached_output_table = None
+        self._cached_content_hash_column = None
+
+        return tag_out, output_packet
+
+    def compute_pipeline_entry_id(
+        self, tag: TagProtocol, input_packet: PacketProtocol
+    ) -> str:
+        """Compute a unique pipeline entry ID from tag + system tags + input packet hash.
+
+        ``NODE_CONTENT_HASH_COL`` is always included so that two runs processing
+        identical inputs each get a distinct entry ID, regardless of table scope.
+        This prevents the second run's pipeline record from being silently skipped
+        by the duplicate entry_id check.
+
+        Args:
+            tag: The tag (including system tags).
+            input_packet: The input packet.
+
+        Returns:
+            A hash string uniquely identifying this (tag, input_packet, node run)
+            combination.
+        """
+        tag_with_hash = (
+            tag.as_table(columns={"system_tags": True})
+            .append_column(
+                constants.INPUT_PACKET_HASH_COL,
+                pa.array([input_packet.content_hash().to_string()], type=pa.large_string()),
+            )
+            .append_column(
+                constants.NODE_CONTENT_HASH_COL,
+                pa.array([self.content_hash().to_string()], type=pa.large_string()),
+            )
+        )
+        return self.data_context.arrow_hasher.hash_table(tag_with_hash).to_string()
+
+    def add_pipeline_record(
+        self,
+        tag: TagProtocol,
+        input_packet: PacketProtocol,
+        packet_record_id: str,
+        computed: bool,
+        skip_cache_lookup: bool = False,
+    ) -> None:
+        """Add a pipeline record to the database for a processed packet.
+
+        The pipeline record stores:
+        - Tag columns (including system tags)
+        - All source columns of the input packet (provenance, not data)
+        - Output packet record ID (for joining with result records)
+        - Input packet data context key
+        - Whether the result was freshly computed or cached
+        """
+        self._require_pipeline_database()
+        entry_id = self.compute_pipeline_entry_id(tag, input_packet)
+
+        # Check for existing entry
+        existing_record = None
+        if not skip_cache_lookup:
+            existing_record = self._pipeline_database.get_record_by_id(
+                self.node_identity_path,
+                entry_id,
+            )
+
+        if existing_record is not None:
+            logger.debug(
+                f"Record with entry_id {entry_id} already exists. Skipping addition."
+            )
+            return
+
+        # Extract source columns only (no data columns) from the input packet
+        input_table_with_source = input_packet.as_table(columns={"source": True})
+        source_col_names = [
+            c
+            for c in input_table_with_source.column_names
+            if c.startswith(constants.SOURCE_PREFIX)
+        ]
+        input_source_table = input_table_with_source.select(source_col_names)
+
+        # Build the meta columns table
+        meta_table = pa.table(
+            {
+                constants.PACKET_RECORD_ID: pa.array(
+                    [packet_record_id], type=pa.large_string()
+                ),
+                constants.NODE_CONTENT_HASH_COL: pa.array(
+                    [self.content_hash().to_string()], type=pa.large_string()
+                ),
+                f"{constants.META_PREFIX}input_packet{constants.CONTEXT_KEY}": pa.array(
+                    [input_packet.data_context_key], type=pa.large_string()
+                ),
+                f"{constants.META_PREFIX}computed": pa.array(
+                    [computed], type=pa.bool_()
+                ),
+            }
+        )
+
+        # Combine: tag (with system tags) + input source columns + meta columns
+        combined_record = arrow_utils.hstack_tables(
+            tag.as_table(columns={"system_tags": True}),
+            input_source_table,
+            meta_table,
+        )
+
+        self._pipeline_database.add_record(
+            self.node_identity_path,
+            entry_id,
+            combined_record,
+            skip_duplicates=False,
+        )
+
+    # ------------------------------------------------------------------
+    # Records and sources
+    # ------------------------------------------------------------------
+
+    def get_all_records(
+        self,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> pa.Table | None:
+        """Return all computed results joined with their pipeline tag records.
+
+        Args:
+            columns: Column configuration controlling which groups are included.
+            all_info: Shorthand to include all info columns.
+
+        Returns:
+            A PyArrow table of joined results, or ``None`` if no database is
+            attached or no records exist.
+        """
+        if self._cached_function_pod is None:
+            return None
+
+        results = self._cached_function_pod._result_database.get_all_records(
+            self._cached_function_pod.record_path,
+            record_id_column=constants.PACKET_RECORD_ID,
+        )
+        taginfo = self._pipeline_database.get_all_records(self.node_identity_path)
+
+        if results is None or taginfo is None:
+            return None
+
+        taginfo = self._filter_by_content_hash(taginfo)
+        taginfo_schema = taginfo.schema
+        results_schema = results.schema
+        joined = (
+            pl.DataFrame(taginfo)
+            .join(pl.DataFrame(results), on=constants.PACKET_RECORD_ID, how="inner")
+            .to_arrow()
+        )
+        joined = arrow_utils.restore_schema_nullability(joined, taginfo_schema, results_schema)
+
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+
+        drop_columns = []
+        # Always drop the node content hash column — it is an internal
+        # row-level discriminator, not a user-facing column.
+        drop_columns.append(constants.NODE_CONTENT_HASH_COL)
+        if not column_config.meta and not column_config.all_info:
+            drop_columns.extend(
+                c for c in joined.column_names if c.startswith(constants.META_PREFIX)
+            )
+        if not column_config.source and not column_config.all_info:
+            drop_columns.extend(
+                c for c in joined.column_names if c.startswith(constants.SOURCE_PREFIX)
+            )
+        if not column_config.system_tags and not column_config.all_info:
+            drop_columns.extend(
+                c
+                for c in joined.column_names
+                if c.startswith(constants.SYSTEM_TAG_PREFIX)
+            )
+        if drop_columns:
+            joined = joined.drop([c for c in drop_columns if c in joined.column_names])
+
+        return joined if joined.num_rows > 0 else None
+
+    def as_source(self):
+        """Return a DerivedSource backed by the DB records of this node.
+
+        Raises:
+            RuntimeError: If no database is attached.
+        """
+        if self._pipeline_database is None:
+            raise RuntimeError("Cannot create a DerivedSource without a database")
+
+        from orcapod.core.sources.derived_source import DerivedSource
+
+        path_str = "/".join(self.node_identity_path)
+        content_frag = self.content_hash().to_string()[:16]
+        source_id = f"{path_str}:{content_frag}"
+        return DerivedSource(
+            origin=self,
+            source_id=source_id,
+            data_context=self.data_context_key,
+            config=self.orcapod_config,
+        )
+
+    # ------------------------------------------------------------------
+    # Cache-only helpers (PLT-1156)
+    # ------------------------------------------------------------------
+
+    def _load_cached_entries(
+        self,
+        entry_ids: list[str] | None = None,
+    ) -> "dict[str, tuple[TagProtocol, PacketProtocol]]":
+        """Load (tag, packet) pairs from pipeline DB + result DB.
+
+        Args:
+            entry_ids: If provided, load only these specific entry IDs.
+                If ``None``, load all records for this node.
+
+        Returns:
+            dict mapping entry_id → (tag, packet). Empty dict when either
+            database is None, records are empty, or no rows match.
+
+        Does NOT mutate ``_cached_output_packets``.
+        Callers merge via ``self._cached_output_packets.update(loaded)``.
+        """
+        if self._cached_function_pod is None or self._pipeline_database is None:
+            return {}
+
+        PIPELINE_ENTRY_ID_COL = "__pipeline_entry_id"
+
+        taginfo = self._pipeline_database.get_all_records(
+            self.node_identity_path,
+            record_id_column=PIPELINE_ENTRY_ID_COL,
+        )
+        results = self._cached_function_pod._result_database.get_all_records(
+            self._cached_function_pod.record_path,
+            record_id_column=constants.PACKET_RECORD_ID,
+        )
+
+        if taginfo is None or results is None:
+            return {}
+
+        taginfo = self._filter_by_content_hash(taginfo)
+        taginfo_schema = taginfo.schema
+        results_schema = results.schema
+
+        joined_df = pl.DataFrame(taginfo).join(
+            pl.DataFrame(results),
+            on=constants.PACKET_RECORD_ID,
+            how="inner",
+        )
+        if entry_ids is not None:
+            joined_df = joined_df.filter(
+                pl.col(PIPELINE_ENTRY_ID_COL).is_in(entry_ids)
+            )
+        joined = joined_df.to_arrow()
+        joined = arrow_utils.restore_schema_nullability(
+            joined, taginfo_schema, results_schema
+        )
+
+        if joined.num_rows == 0:
+            return {}
+
+        # Derive tag keys: prefer input_stream when available; fall back to
+        # taginfo column exclusion for CACHE_ONLY / deserialized nodes.
+        if self._input_stream is not None:
+            tag_keys = self._input_stream.keys()[0]
+        else:
+            tag_keys = tuple(
+                c
+                for c in taginfo.column_names
+                if not c.startswith(constants.META_PREFIX)
+                and not c.startswith(constants.SOURCE_PREFIX)
+                and not c.startswith(constants.SYSTEM_TAG_PREFIX)
+                and c != PIPELINE_ENTRY_ID_COL
+                and c != constants.NODE_CONTENT_HASH_COL
+            )
+
+        # Drop internal columns (SOURCE_PREFIX is kept — ArrowTableStream needs it)
+        entry_ids_col = joined.column(PIPELINE_ENTRY_ID_COL).to_pylist()
+        drop_cols = [
+            c
+            for c in joined.column_names
+            if c.startswith(constants.META_PREFIX)
+            or c == PIPELINE_ENTRY_ID_COL
+            or c == constants.NODE_CONTENT_HASH_COL
+        ]
+        data_table = joined.drop([c for c in drop_cols if c in joined.column_names])
+        stream = ArrowTableStream(data_table, tag_columns=tag_keys)
+
+        loaded: dict[str, tuple[TagProtocol, PacketProtocol]] = {}
+        for eid, (tag, packet) in zip(entry_ids_col, stream.iter_packets()):
+            loaded[eid] = (tag, packet)
+        return loaded
+
+    async def _async_execute_cache_only(
+        self,
+        output: "WritableChannel[tuple[TagProtocol, PacketProtocol]]",
+        *,
+        observer: Any | None = None,
+    ) -> None:
+        """Send all DB-cached (tag, packet) pairs to *output*.
+
+        Used in ``CACHE_ONLY`` mode when the upstream is unavailable.
+        Does not access ``_input_stream``.
+        """
+        from orcapod.pipeline.observer import NoOpObserver
+
+        obs = observer if observer is not None else NoOpObserver()
+        node_label = self.label
+        node_hash = self.content_hash().to_string()
+        ctx_obs = obs.contextualize(*self.node_identity_path)
+
+        ctx_obs.on_node_start(node_label, node_hash, tag_schema=None)
+        try:
+            loaded = self._load_cached_entries()
+            self._cached_output_packets.update(loaded)
+            if loaded:
+                self._cached_output_table = None
+                self._cached_content_hash_column = None
+
+            for tag, packet in self._cached_output_packets.values():
+                if packet is not None:
+                    ctx_obs.on_packet_start(node_label, tag, packet)
+                    ctx_obs.on_packet_end(node_label, tag, packet, packet, cached=True)
+                    await output.send((tag, packet))
+            ctx_obs.on_node_end(node_label, node_hash)
+        finally:
+            await output.close()
+
+    # ------------------------------------------------------------------
+    # Iteration
+    # ------------------------------------------------------------------
+
+    def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
+        """Yield all computed (tag, packet) pairs for this node.
+
+        Strictly read-only — never triggers computation. Callers must call
+        ``run()`` or ``execute()`` first if they want results computed.
+
+        On the first call with an empty in-memory store and a DB attached,
+        hot-loads all existing records from the DB (one-shot, no recompute).
+
+        Raises:
+            RuntimeError: If ``load_status`` is UNAVAILABLE.
+        """
+        from orcapod.pipeline.serialization import LoadStatus
+
+        status = self.load_status
+        if status == LoadStatus.UNAVAILABLE:
+            raise RuntimeError(
+                f"FunctionNode {self.label!r} is unavailable: "
+                "no function pod and no database attached."
+            )
+
+        if status == LoadStatus.CACHE_ONLY:
+            # Upstream unavailable; serve entirely from DB.
+            if not self._cached_output_packets:
+                loaded = self._load_cached_entries()
+                self._cached_output_packets.update(loaded)
+                if loaded:
+                    self._cached_output_table = None
+                    self._cached_content_hash_column = None
+            yield from (
+                (tag, pkt)
+                for tag, pkt in self._cached_output_packets.values()
+                if pkt is not None
+            )
+            return
+
+        # FULL / READ_ONLY — in-memory store may be populated from computation
+        # (via execute/run) or hot-loaded from DB.
+        if self.is_stale:
+            self.clear_cache()
+
+        if not self._cached_output_packets and self._cached_function_pod is not None:
+            # Hot-load from DB on the first call when store is empty.
+            loaded = self._load_cached_entries()
+            self._cached_output_packets.update(loaded)
+            if loaded:
+                self._cached_output_table = None
+                self._cached_content_hash_column = None
+
+        yield from (
+            (tag, pkt)
+            for tag, pkt in self._cached_output_packets.values()
+            if pkt is not None
+        )
+
+    def run(self) -> None:
+        """Eagerly compute all input packets, filling pipeline and result databases.
+
+        Raises:
+            RuntimeError: If ``load_status`` is UNAVAILABLE (no pod, no DB).
+        """
+        from orcapod.pipeline.serialization import LoadStatus
+
+        if self._load_status == LoadStatus.UNAVAILABLE:
+            raise RuntimeError(
+                f"FunctionNode {self.label!r} is unavailable: "
+                "no function pod and no database attached."
+            )
+        if self._load_status in (LoadStatus.CACHE_ONLY, LoadStatus.READ_ONLY):
+            # CACHE_ONLY: upstream unavailable; computation requires a live input stream.
+            # READ_ONLY: function pod is a proxy placeholder — cannot compute.
+            # Callers should use iter_packets() to serve existing DB results.
+            return
+        if self.is_stale:
+            # Discard any stale in-memory entries before a fresh computation run
+            # so that rerunning does not mix old cached entries with new results.
+            self.clear_cache()
+        self.execute(self._input_stream)
+
+    # ------------------------------------------------------------------
+    # as_table
+    # ------------------------------------------------------------------
+
+    def as_table(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> pa.Table:
+        if self._cached_output_table is None:
+            all_tags = []
+            all_packets = []
+            tag_schema, packet_schema = None, None
+            for tag, packet in self.iter_packets():
+                if tag_schema is None:
+                    tag_schema = tag.arrow_schema(all_info=True)
+                if packet_schema is None:
+                    packet_schema = packet.arrow_schema(all_info=True)
+                all_tags.append(tag.as_dict(all_info=True))
+                all_packets.append(packet.as_dict(all_info=True))
+
+            if not all_tags:
+                self._cached_output_table = pa.table({})
+
+            converter = self.data_context.type_converter
+
+            # Derive the Python schema from the Arrow schema when available,
+            # rather than re-inferring from dict values. This preserves precise
+            # types for empty containers (e.g. {} infers as dict[Any, Any] but
+            # the Arrow schema knows it's dict[str, str]).
+            packet_python_schema = (
+                converter.arrow_schema_to_python_schema(packet_schema)
+                if packet_schema is not None
+                else None
+            )
+            struct_packets = converter.python_dicts_to_struct_dicts(
+                all_packets, python_schema=packet_python_schema
+            )
+            all_tags_as_tables: pa.Table = pa.Table.from_pylist(
+                all_tags, schema=tag_schema
+            )
+            if constants.CONTEXT_KEY in all_tags_as_tables.column_names:
+                all_tags_as_tables = all_tags_as_tables.drop([constants.CONTEXT_KEY])
+            all_packets_as_tables: pa.Table = pa.Table.from_pylist(
+                struct_packets, schema=packet_schema
+            )
+
+            self._cached_output_table = arrow_utils.hstack_tables(
+                all_tags_as_tables, all_packets_as_tables
+            )
+        if self._cached_output_table is None:
+            self._cached_output_table = pa.table({})
+
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+
+        drop_columns = []
+        if not column_config.system_tags:
+            drop_columns.extend(
+                [
+                    c
+                    for c in self._cached_output_table.column_names
+                    if c.startswith(constants.SYSTEM_TAG_PREFIX)
+                ]
+            )
+        if not column_config.source:
+            drop_columns.extend(f"{constants.SOURCE_PREFIX}{c}" for c in self.keys()[1])
+        if not column_config.context:
+            drop_columns.append(constants.CONTEXT_KEY)
+        if not column_config.meta:
+            drop_columns.extend(
+                c
+                for c in self._cached_output_table.column_names
+                if c.startswith(constants.META_PREFIX)
+            )
+        elif not isinstance(column_config.meta, bool):
+            # Collection[str]: keep only meta columns matching the specified prefixes
+            drop_columns.extend(
+                c
+                for c in self._cached_output_table.column_names
+                if c.startswith(constants.META_PREFIX)
+                and not any(c.startswith(p) for p in column_config.meta)
+            )
+        output_table = self._cached_output_table.drop(
+            [c for c in drop_columns if c in self._cached_output_table.column_names]
+        )
+
+        if column_config.content_hash:
+            if self._cached_content_hash_column is None:
+                content_hashes = []
+                for tag, packet in self.iter_packets():
+                    content_hashes.append(packet.content_hash().to_string())
+                self._cached_content_hash_column = pa.array(
+                    content_hashes, type=pa.large_string()
+                )
+            assert self._cached_content_hash_column is not None, (
+                "_cached_content_hash_column should not be None here."
+            )
+            hash_column_name = (
+                "_content_hash"
+                if column_config.content_hash is True
+                else column_config.content_hash
+            )
+            output_table = output_table.append_column(
+                hash_column_name, self._cached_content_hash_column
+            )
+
+        if column_config.sort_by_tags:
+            output_table_schema = output_table.schema
+            output_table = (
+                pl.DataFrame(output_table)
+                .sort(by=self.keys()[0], descending=False)
+                .to_arrow()
+            )
+            output_table = arrow_utils.restore_schema_nullability(output_table, output_table_schema)
+        return output_table
+
+    # ------------------------------------------------------------------
+    # Async channel execution
+    # ------------------------------------------------------------------
+
+    async def async_execute(
+        self,
+        input_channel: ReadableChannel[tuple[TagProtocol, PacketProtocol]],
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        *,
+        observer: ExecutionObserverProtocol | None = None,
+    ) -> None:
+        """Streaming async execution for FunctionNode.
+
+        When a database is attached, uses two-phase execution: replay cached
+        results first, then compute missing packets concurrently.  Otherwise,
+        routes each packet through ``async_process_packet`` directly.
+
+        In ``CACHE_ONLY`` mode the upstream is unavailable; all cached results
+        are served directly from persistent storage without touching the input
+        channel.
+
+        Args:
+            input_channel: Single readable channel of (tag, packet) pairs.
+            output: Writable channel for output (tag, packet) pairs.
+            observer: Optional execution observer for hooks.
+        """
+        from orcapod.pipeline.serialization import LoadStatus
+
+        status = self.load_status
+        if status == LoadStatus.CACHE_ONLY:
+            await self._async_execute_cache_only(output, observer=observer)
+            return
+
+        if status == LoadStatus.UNAVAILABLE:
+            await output.close()
+            raise RuntimeError(
+                f"FunctionNode {self.label!r} is unavailable: "
+                "no function pod and no database attached."
+            )
+
+        from orcapod.pipeline.observer import NoOpObserver
+
+        node_label = self.label
+        node_hash = self.content_hash().to_string()
+
+        obs = observer if observer is not None else NoOpObserver()
+        ctx_obs = obs.contextualize(*self.node_identity_path)
+
+        try:
+            # Resolve concurrency limit from node config (pipeline config is not
+            # threaded through the orchestrator, so we fall back to defaults).
+            node_config = getattr(self._function_pod, "node_config", NodeConfig())
+            max_concurrency = resolve_concurrency(node_config, PipelineConfig())
+
+            sem = (
+                asyncio.Semaphore(max_concurrency)
+                if max_concurrency is not None
+                else None
+            )
+
+            tag_schema = self._input_stream.output_schema(columns={"system_tags": True})[0]
+            ctx_obs.on_node_start(node_label, node_hash, tag_schema=tag_schema)
+
+            if self._cached_function_pod is not None:
+                # Phase 1: build cache lookup from pipeline DB
+                loaded = self._load_cached_entries()
+                self._cached_output_packets.update(loaded)
+                if loaded:
+                    self._cached_output_table = None
+                    self._cached_content_hash_column = None
+                cached_by_entry_id: dict[str, tuple[TagProtocol, PacketProtocol]] = dict(loaded)
+
+                # Phase 2: drive output from input channel — cached or compute
+                async def _process_one_db(
+                    tag: TagProtocol, packet: PacketProtocol
+                ) -> None:
+                    entry_id = self.compute_pipeline_entry_id(tag, packet)
+                    if entry_id in cached_by_entry_id:
+                        tag_out, result_packet = cached_by_entry_id[entry_id]
+                        ctx_obs.on_packet_start(node_label, tag, packet)
+                        ctx_obs.on_packet_end(
+                            node_label, tag, packet, result_packet, cached=True
+                        )
+                        await output.send((tag_out, result_packet))
+                    else:
+                        await self._async_execute_one_packet(
+                            tag, packet, output,
+                            observer=ctx_obs,
+                            node_label=node_label,
+                            node_hash=node_hash,
+                        )
+
+                async with asyncio.TaskGroup() as tg:
+                    async for tag, packet in input_channel:
+                        async def _guarded_db(
+                            t: TagProtocol = tag, p: PacketProtocol = packet
+                        ) -> None:
+                            try:
+                                await _process_one_db(t, p)
+                            finally:
+                                if sem is not None:
+                                    sem.release()
+
+                        if sem is not None:
+                            await sem.acquire()
+                        tg.create_task(_guarded_db())
+            else:
+                # Simple async execution without DB
+                async with asyncio.TaskGroup() as tg:
+                    async for tag, packet in input_channel:
+                        async def _guarded_simple(
+                            t: TagProtocol = tag, p: PacketProtocol = packet
+                        ) -> None:
+                            try:
+                                await self._async_execute_one_packet(
+                                    t, p, output,
+                                    observer=ctx_obs,
+                                    node_label=node_label,
+                                    node_hash=node_hash,
+                                )
+                            finally:
+                                if sem is not None:
+                                    sem.release()
+
+                        if sem is not None:
+                            await sem.acquire()
+                        tg.create_task(_guarded_simple())
+
+            ctx_obs.on_node_end(node_label, node_hash)
+        finally:
+            await output.close()
+
+    async def _async_execute_one_packet(
+        self,
+        tag: TagProtocol,
+        packet: PacketProtocol,
+        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        *,
+        observer: ExecutionObserverProtocol,
+        node_label: str,
+        node_hash: str,
+    ) -> None:
+        """Process one non-cached packet in the async execute path."""
+        observer.on_packet_start(node_label, tag, packet)
+        pkt_logger = observer.create_packet_logger(tag, packet)
+
+        try:
+            tag_out, result_packet = await self._async_process_packet_internal(
+                tag, packet, logger=pkt_logger
+            )
+        except Exception as exc:
+            logger.warning(
+                "Packet execution failed in %s: %s", node_label, exc,
+                exc_info=True,
+            )
+            observer.on_packet_crash(node_label, tag, packet, exc)
+        else:
+            observer.on_packet_end(
+                node_label, tag, packet, result_packet, cached=False
+            )
+            if result_packet is not None:
+                await output.send((tag_out, result_packet))
+
+    def __repr__(self) -> str:
+        return (
+            f"{type(self).__name__}(packet_function={self._packet_function!r}, "
+            f"input_stream={self._input_stream!r})"
+        )
