@@ -10,7 +10,7 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from orcapod.core.executors import LocalExecutor
+from orcapod.core.executors import LocalPythonFunctionExecutor
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
@@ -60,7 +60,7 @@ class TestSyncPipelineSuccessLogs:
             print(f"doubling {x}")
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result", executor=LocalExecutor())
+        pf = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_logs", pipeline_database=db)
@@ -92,7 +92,7 @@ class TestFailingPacketsLogged:
         def failing(x: int) -> int:
             raise ValueError("boom")
 
-        pf = PythonPacketFunction(failing, output_keys="result", executor=LocalExecutor())
+        pf = PythonPacketFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_fail", pipeline_database=db)
@@ -128,7 +128,7 @@ class TestFlatLogStorage:
         def identity(x: int) -> int:
             return x
 
-        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalExecutor())
+        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_flat", pipeline_database=db)
@@ -160,7 +160,7 @@ class TestQueryableTagColumns:
         def identity(x: int) -> int:
             return x
 
-        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalExecutor())
+        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_tags", pipeline_database=db)
@@ -194,7 +194,7 @@ class TestAsyncOrchestratorLogs:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result", executor=LocalExecutor())
+        pf = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_async_logs", pipeline_database=db)
@@ -225,7 +225,7 @@ class TestFailFastErrorPolicy:
         def failing(x: int) -> int:
             raise RuntimeError("crash")
 
-        pf = PythonPacketFunction(failing, output_keys="result", executor=LocalExecutor())
+        pf = PythonPacketFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_failfast", pipeline_database=db)
@@ -266,7 +266,7 @@ class TestMixedSuccessFailure:
         def safe_div(x: int) -> float:
             return 100 / x
 
-        pf = PythonPacketFunction(safe_div, output_keys="result", executor=LocalExecutor())
+        pf = PythonPacketFunction(safe_div, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_mixed", pipeline_database=db)
@@ -302,9 +302,9 @@ class TestMultipleFunctionNodesCombinedLogs:
         def triple(result: int) -> int:
             return result * 3
 
-        pf1 = PythonPacketFunction(double, output_keys="result", executor=LocalExecutor())
+        pf1 = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod1 = FunctionPod(pf1)
-        pf2 = PythonPacketFunction(triple, output_keys="final", executor=LocalExecutor())
+        pf2 = PythonPacketFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
         pod2 = FunctionPod(pf2)
 
         pipeline = Pipeline(name="test_multi", pipeline_database=db)
@@ -338,9 +338,9 @@ class TestGetLogsNodeSpecific:
         def triple(result: int) -> int:
             return result * 3
 
-        pf1 = PythonPacketFunction(double, output_keys="result", executor=LocalExecutor())
+        pf1 = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod1 = FunctionPod(pf1)
-        pf2 = PythonPacketFunction(triple, output_keys="final", executor=LocalExecutor())
+        pf2 = PythonPacketFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
         pod2 = FunctionPod(pf2)
 
         pipeline = Pipeline(name="test_filter", pipeline_database=db)

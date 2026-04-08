@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 import pyarrow as pa
 
-from orcapod.core.executors import LocalExecutor
+from orcapod.core.executors import LocalPythonFunctionExecutor
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.packet_function import PythonPacketFunction
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
@@ -53,7 +53,7 @@ class TestLoggingAndStatusTogether:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result", executor=LocalExecutor())
+        pf = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_composite", pipeline_database=pipeline_db)
@@ -93,7 +93,7 @@ class TestCreatePacketLoggerDelegation:
             print("hello")
             return x
 
-        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalExecutor())
+        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_logger_delegation", pipeline_database=pipeline_db)
@@ -132,9 +132,9 @@ class TestContextualizeReturnsComposite:
         def triple(result: int) -> int:
             return result * 3
 
-        pf1 = PythonPacketFunction(double, output_keys="result", executor=LocalExecutor())
+        pf1 = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod1 = FunctionPod(pf1)
-        pf2 = PythonPacketFunction(triple, output_keys="final", executor=LocalExecutor())
+        pf2 = PythonPacketFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
         pod2 = FunctionPod(pf2)
 
         pipeline = Pipeline(name="test_ctx_composite", pipeline_database=pipeline_db)
@@ -174,7 +174,7 @@ class TestCompositeWithFailures:
         def failing(x: int) -> int:
             raise ValueError("boom")
 
-        pf = PythonPacketFunction(failing, output_keys="result", executor=LocalExecutor())
+        pf = PythonPacketFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_composite_fail", pipeline_database=pipeline_db)

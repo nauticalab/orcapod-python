@@ -60,8 +60,16 @@ class PacketFunctionProtocol(
         """Raw data defining function variation - system computes hash"""
         ...
 
+    def get_function_variation_data_schema(self) -> Schema:
+        """Schema for the data returned by ``get_function_variation_data``."""
+        ...
+
     def get_execution_data(self) -> dict[str, Any]:
         """Raw data defining execution context - system computes hash"""
+        ...
+
+    def get_execution_data_schema(self) -> Schema:
+        """Schema for the data returned by ``get_execution_data``."""
         ...
 
     # ==================== Executor ====================

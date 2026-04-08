@@ -5,6 +5,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from orcapod.types import Schema
+
 if TYPE_CHECKING:
     from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
 
@@ -105,10 +107,16 @@ class PythonFunctionExecutorBase(ABC):
         """
         return self.execute_callable(fn, kwargs, executor_options, logger=logger)
 
-    def get_execution_data(self) -> dict[str, Any]:
+    def get_executor_data(self) -> dict[str, Any]:
         """Return metadata describing the execution environment.
 
         Recorded alongside results for observability but does not affect
         content or pipeline hashes.  The default returns the executor type id.
         """
         return {"executor_type": self.executor_type_id}
+
+    def get_executor_data_schema(self) -> Schema:
+        """Return schema for the data returned by ``get_executor_data``."""
+        return Schema({
+            "executor_type": str
+        })
