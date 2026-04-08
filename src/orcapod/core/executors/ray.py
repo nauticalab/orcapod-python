@@ -344,9 +344,16 @@ class RayExecutor(PythonFunctionExecutorBase):
         return executor_data
 
     def get_executor_data_schema(self) -> Schema:
+        """Schema reflecting actual return types of ``get_executor_data``.
+
+        Note: ``remote_opts`` values are ``Any`` (ints, nested dicts, etc.)
+        but the PacketFunction layer stringifies them into ``dict[str, str]``
+        before storage. The schema here describes the pre-stringification
+        executor output.
+        """
         return Schema({
             "executor_type": str,
             "ray_address": str,
-            "remote_opts": dict[str, str],
+            "remote_opts": dict[str, Any],
             "runtime_env": bool,
         })
