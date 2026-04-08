@@ -128,9 +128,9 @@ class LocalPythonFunctionExecutor(PythonFunctionExecutorBase):
         return raw_result
 
     def with_options(self, **opts: Any) -> LocalPythonFunctionExecutor:
-        """Return a new ``LocalExecutor``.
+        """Return a new ``LocalPythonFunctionExecutor``.
 
-        ``LocalExecutor`` carries no state, so options are ignored.
+        ``LocalPythonFunctionExecutor`` carries no state, so options are ignored.
         """
         return LocalPythonFunctionExecutor()
 

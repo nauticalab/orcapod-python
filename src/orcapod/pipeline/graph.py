@@ -309,7 +309,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                             result_database=result_db,
                         )
 
-                    # Default to LocalExecutor so capture/logging works
+                    # Default to LocalPythonFunctionExecutor so capture/logging works
                     # out of the box. Replaced if execution_engine is set.
                     if node.executor is None:
                         from orcapod.core.executors.local import LocalPythonFunctionExecutor
