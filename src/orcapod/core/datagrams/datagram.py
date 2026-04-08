@@ -20,7 +20,6 @@ Principles
 from __future__ import annotations
 
 import logging
-import types
 from collections.abc import Collection, Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Self, cast
 
@@ -187,34 +186,22 @@ class Datagram(ContentIdentifiableBase):
                 )
 
         # Store meta as dict (always); keep the Arrow table when available.
-        # Use arrow_schema_to_python_schema to preserve precise generic types
-        # (e.g. dict[str, str] stored as map columns) that
-        # infer_python_schema_from_pylist_data cannot recover. For fields where
-        # the Arrow→Python conversion produces Any (e.g. timestamps), fall back
-        # to the inference result which gives concrete types like datetime.
+        # IMPORTANT: use the universal converter (not raw to_pylist()) to
+        # convert Arrow → Python so that complex types round-trip correctly.
+        # For example, Arrow map columns (used for dict[str, str]) become
+        # list[struct] via to_pylist() but proper Python dicts via the
+        # converter. Without the converter, downstream schema inference
+        # produces list[Any] which cannot be converted back to Arrow.
+        #
+        # Derive the Python schema from the Arrow schema (not from inference)
+        # to preserve precise types even for empty containers (e.g. an empty
+        # dict {} would infer as dict[Any, Any] but the Arrow schema knows
+        # it's dict[str, str]).
         if meta_table is not None and meta_table.num_columns > 0:
-            self._meta = meta_table.to_pylist()[0]
-            arrow_derived = self.converter.arrow_schema_to_python_schema(
+            self._meta = self.converter.arrow_table_to_python_dicts(meta_table)[0]
+            self._meta_python_schema = self.converter.arrow_schema_to_python_schema(
                 meta_table.schema
             )
-            inferred = infer_python_schema_from_pylist_data(
-                [self._meta], default_type=str
-            )
-            # Merge: prefer arrow_derived (precise generics), but use inferred
-            # for fields that arrow_derived maps to Any.
-            import typing
-            merged = {}
-            for k in arrow_derived:
-                atype = arrow_derived[k]
-                # Unwrap Optional to check the inner type
-                origin = typing.get_origin(atype)
-                args = typing.get_args(atype)
-                inner = args[0] if origin is types.UnionType and type(None) in args and len(args) == 2 else atype
-                if inner is typing.Any:
-                    merged[k] = inferred.get(k, atype)
-                else:
-                    merged[k] = atype
-            self._meta_python_schema = Schema(merged)
             self._meta_table = meta_table
         else:
             self._meta = {}
@@ -552,28 +539,16 @@ class Datagram(ContentIdentifiableBase):
         }
         new_d = self.copy(include_cache=False)
         new_d._meta = {**self._meta, **prefixed}
-        # Preserve existing schema types for unchanged fields (avoids losing
-        # precise generic types like dict[str, str] that inference cannot
-        # recover). Only infer types for newly added fields.
+        # Preserve existing schema types for unchanged fields. This avoids
+        # re-inference which can lose precise types (e.g. an empty dict {}
+        # infers as dict[Any, Any] instead of dict[str, str], and
+        # arrow-derived types like timestamps may use Any).
         new_inferred = infer_python_schema_from_pylist_data(
             [prefixed], default_type=str
         )
         merged = dict(self._meta_python_schema)
         merged.update(new_inferred)
         new_d._meta_python_schema = Schema(merged)
-        # If the existing meta table is materialized, append new columns to it
-        # rather than invalidating (avoids re-conversion of complex Arrow types
-        # like maps that don't round-trip cleanly through Python dicts).
-        if self._meta_table is not None:
-            new_cols_table = self.converter.python_dicts_to_arrow_table(
-                [prefixed], python_schema=Schema(new_inferred)
-            )
-            existing = self._meta_table
-            # Drop columns being overwritten
-            keep = [c for c in existing.column_names if c not in new_cols_table.column_names]
-            new_d._meta_table = arrow_utils.hstack_tables(
-                existing.select(keep), new_cols_table
-            )
         return new_d
 
     def drop_meta_columns(self, *keys: str, ignore_missing: bool = False) -> Self:
@@ -588,9 +563,11 @@ class Datagram(ContentIdentifiableBase):
             )
         new_d = self.copy(include_cache=False)
         new_d._meta = {k: v for k, v in self._meta.items() if k not in prefixed}
-        new_d._meta_python_schema = infer_python_schema_from_pylist_data(
-            [new_d._meta], default_type=str
-        )
+        # Preserve existing schema types for remaining fields (see
+        # with_meta_columns for rationale).
+        new_d._meta_python_schema = Schema({
+            k: v for k, v in self._meta_python_schema.items() if k not in prefixed
+        })
         return new_d
 
     # ------------------------------------------------------------------
