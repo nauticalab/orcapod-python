@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=64", "wheel", "setuptools-scm>=8"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
 
 [project]
 name = "orcapod"
@@ -38,7 +38,7 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/walkerlab/orcapod-python"
+Homepage = "https://github.com/nauticalab/orcapod-python"
 
 [project.optional-dependencies]
 redis = ["redis>=6.2.0"]
@@ -50,11 +50,14 @@ spiraldb = [
 all = ["orcapod[redis]", "orcapod[ray]", "orcapod[postgresql]", "orcapod[spiraldb]"]
 
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.hatch.version]
+source = "vcs"
 
-[tool.setuptools_scm]
-version_file = "src/orcapod/_version.py"
+[tool.hatch.build.hooks.vcs]
+version-file = "src/orcapod/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/orcapod"]
 
 
 [dependency-groups]
@@ -80,6 +83,7 @@ dev = [
     "redis>=6.2.0",
     "ruff>=0.14.4",
     "testcontainers[minio]>=4.0.0",
+    "pip-licenses>=5.0.0",
     "tqdm>=4.67.1",
     "mkdocs-material>=9.7.5",
     "mkdocstrings[python]>=1.0.3",
