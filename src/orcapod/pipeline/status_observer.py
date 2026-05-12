@@ -31,7 +31,7 @@ Status schema (fixed columns):
     - ``_status_timestamp`` (large_utf8): ISO-8601 UTC timestamp.
     - ``_status_error_summary`` (large_utf8): Brief error on ``FAILED``; ``None`` otherwise.
 
-    In addition, each key key from the data's key becomes a separate
+    In addition, each field from the data's Key becomes a separate
     ``large_utf8`` column (queryable, not JSON-encoded).  Key columns use
     bare names (no prefix), so they are always distinguishable from fixed
     columns.

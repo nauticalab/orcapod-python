@@ -174,7 +174,7 @@ class MergeJoin(BinaryOperator):
         left_table = tables[0]
         right_table = tables[1]
 
-        # Determine shared key keys for inner join
+        # Determine shared key-schema columns for inner join
         left_key_keys, left_data_keys = left_stream.keys()
         right_key_keys, right_data_keys = right_stream.keys()
         shared_key_keys = set(left_key_keys) & set(right_key_keys)
@@ -204,7 +204,7 @@ class MergeJoin(BinaryOperator):
             if source_col in output_nullable:
                 output_nullable[source_col] = False
 
-        # Perform inner join via Polars on shared key keys
+        # Perform inner join via Polars on shared key-schema columns
         # Use a common key trick to ensure cartesian product if no shared keys
         COMMON_JOIN_KEY = "_common"
         # COMMON_JOIN_KEY is a temporary column that gets dropped after the join

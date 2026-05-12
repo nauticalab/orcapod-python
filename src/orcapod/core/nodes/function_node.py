@@ -1029,7 +1029,7 @@ class FunctionNode(StreamBase):
         if joined.num_rows == 0:
             return {}
 
-        # Derive key keys: prefer input_stream when available; fall back to
+        # Derive key-schema columns: prefer input_stream when available; fall back to
         # taginfo column exclusion for CACHE_ONLY / deserialized nodes.
         if self._input_stream is not None:
             key_keys = self._input_stream.keys()[0]

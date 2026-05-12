@@ -274,7 +274,7 @@ class Join(NonZeroInputOperator):
         Three or more inputs: staggered pairwise binary joins in
         canonical order — ``join(join(x, y), z)`` — matching
         ``static_process``'s iterative accumulation.  Each binary join
-        uses the per-pair intersection of key keys, so partially
+        uses the per-pair intersection of key-schema columns, so partially
         overlapping key schemas are handled correctly.
 
         Args:
@@ -349,7 +349,7 @@ class Join(NonZeroInputOperator):
         Each input's system keys are pre-renamed, then binary joins are
         chained in canonical order.  Per-pair join keys are computed
         naturally by each binary join (intersection of its two inputs'
-        key keys), so partially overlapping key schemas produce the
+        key-schema columns), so partially overlapping key schemas produce the
         same results as the sync path.
 
         Intermediate results flow through channels, so downstream joins
@@ -482,7 +482,7 @@ class Join(NonZeroInputOperator):
                     key, pkt = item
                     other = 1 - side
 
-                    # Determine shared key keys once we have rows from both sides
+                    # Determine shared key-schema columns once we have rows from both sides
                     if shared_keys is None:
                         if not buffers[other]:
                             buffers[side].append((key, pkt))
@@ -534,7 +534,7 @@ class Join(NonZeroInputOperator):
         block_sep: str,
         sys_prefix: str,
     ) -> None:
-        """Read rows and rename system-key keys by appending the per-input suffix.
+        """Read rows and rename system-key columns by appending the per-input suffix.
 
         Used as a pre-processing step in ``_staggered_join`` so that
         downstream binary joins can pass system keys through without

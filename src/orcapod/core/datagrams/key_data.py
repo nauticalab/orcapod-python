@@ -98,7 +98,7 @@ class Key(Datagram):
             else:
                 extracted_sys_keys = {}
         else:
-            # Dict path: extract system-key keys before calling super()
+            # Dict path: extract system-key columns before calling super()
             data_only = {
                 k: v
                 for k, v in data.items()

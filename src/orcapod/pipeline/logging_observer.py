@@ -31,7 +31,7 @@ Log schema (fixed columns):
     - ``_log_success`` (bool): ``True`` if the data function returned normally.
     - ``_log_timestamp`` (large_utf8): ISO-8601 UTC timestamp when ``record()`` was called.
 
-    In addition, each key key from the data's key becomes a separate
+    In addition, each field from the data's Key becomes a separate
     ``large_utf8`` column (queryable, not JSON-encoded).  Key columns use
     bare names (no prefix), so they are always distinguishable from fixed
     columns.
@@ -121,7 +121,7 @@ class DataLogger:
                     type=pa.large_utf8(),
                 )
 
-        # Dynamic key columns — each key key becomes its own column (unprefixed)
+        # Dynamic key columns — each Key field becomes its own column (unprefixed)
         for key, value in self._key_data.items():
             columns[key] = pa.array([str(value)], type=pa.large_utf8())
 
