@@ -22,7 +22,7 @@ from orcapod.types import Schema
 
 
 def make_table_stream(
-    tag_columns: list[str] | None = None,
+    key_columns: list[str] | None = None,
     n_rows: int = 3,
 ) -> ArrowTableStream:
     """Create a minimal ArrowTableStream for testing.
@@ -30,7 +30,7 @@ def make_table_stream(
     Uses explicit nullable=False schema to simulate data that has been
     processed through SourceStreamBuilder (which normalizes nullable flags).
     """
-    tag_columns = tag_columns or ["id"]
+    key_columns = key_columns or ["id"]
     schema = pa.schema(
         [
             pa.field("id", pa.int64(), nullable=False),
@@ -44,7 +44,7 @@ def make_table_stream(
         },
         schema=schema,
     )
-    return ArrowTableStream(table, tag_columns=tag_columns)
+    return ArrowTableStream(table, key_columns=key_columns)
 
 
 # ---------------------------------------------------------------------------
@@ -142,16 +142,16 @@ class TestStreamProtocolConformance:
 
     def test_stream_has_keys_method(self):
         stream = make_table_stream()
-        tag_keys, data_keys = stream.keys()
-        assert isinstance(tag_keys, tuple)
+        key_keys, data_keys = stream.keys()
+        assert isinstance(key_keys, tuple)
         assert isinstance(data_keys, tuple)
 
     def test_stream_has_output_schema_method(self):
         from orcapod.types import Schema
 
         stream = make_table_stream()
-        tag_schema, data_schema = stream.output_schema()
-        assert isinstance(tag_schema, Schema)
+        key_schema, data_schema = stream.output_schema()
+        assert isinstance(key_schema, Schema)
         assert isinstance(data_schema, Schema)
 
     def test_stream_has_iter_data_method(self):
@@ -159,7 +159,7 @@ class TestStreamProtocolConformance:
         it = stream.iter_data()
         # must be iterable
         pair = next(it)
-        assert len(pair) == 2  # (TagProtocol, DataProtocol)
+        assert len(pair) == 2  # (KeyProtocol, DataProtocol)
 
     def test_stream_has_as_table_method(self):
         stream = make_table_stream()
@@ -177,23 +177,23 @@ class TestTableStreamConstruction:
         stream = make_table_stream()
         assert stream is not None
 
-    def test_tag_and_data_columns_are_separated(self):
-        stream = make_table_stream(tag_columns=["id"])
-        tag_keys, data_keys = stream.keys()
-        assert "id" in tag_keys
+    def test_key_and_data_columns_are_separated(self):
+        stream = make_table_stream(key_columns=["id"])
+        key_keys, data_keys = stream.keys()
+        assert "id" in key_keys
         assert "value" in data_keys
         assert "id" not in data_keys
 
-    def test_missing_tag_column_raises(self):
+    def test_missing_key_column_raises(self):
         table = pa.table({"value": pa.array([1, 2])})
         with pytest.raises(ValueError):
-            ArrowTableStream(table, tag_columns=["nonexistent"])
+            ArrowTableStream(table, key_columns=["nonexistent"])
 
     def test_no_data_column_raises(self):
-        # A table where all columns are tags → no data columns → should raise
+        # A table where all columns are keys → no data columns → should raise
         table = pa.table({"id": pa.array([1, 2])})
         with pytest.raises(ValueError):
-            ArrowTableStream(table, tag_columns=["id"])
+            ArrowTableStream(table, key_columns=["id"])
 
     def test_producer_defaults_to_none(self):
         stream = make_table_stream()
@@ -210,21 +210,21 @@ class TestTableStreamConstruction:
 
 
 class TestTableStreamKeys:
-    def test_returns_correct_tag_keys(self):
-        stream = make_table_stream(tag_columns=["id"])
-        tag_keys, _ = stream.keys()
-        assert tag_keys == ("id",)
+    def test_returns_correct_key_keys(self):
+        stream = make_table_stream(key_columns=["id"])
+        key_keys, _ = stream.keys()
+        assert key_keys == ("id",)
 
     def test_returns_correct_data_keys(self):
-        stream = make_table_stream(tag_columns=["id"])
+        stream = make_table_stream(key_columns=["id"])
         _, data_keys = stream.keys()
         assert data_keys == ("value",)
 
-    def test_no_tag_columns(self):
+    def test_no_key_columns(self):
         table = pa.table({"a": pa.array([1]), "b": pa.array([2])})
-        stream = ArrowTableStream(table, tag_columns=[])
-        tag_keys, data_keys = stream.keys()
-        assert tag_keys == ()
+        stream = ArrowTableStream(table, key_columns=[])
+        key_keys, data_keys = stream.keys()
+        assert key_keys == ()
         assert set(data_keys) == {"a", "b"}
 
 
@@ -235,18 +235,18 @@ class TestTableStreamKeys:
 
 class TestTableStreamOutputSchema:
     def test_schema_keys_match_column_keys(self):
-        stream = make_table_stream(tag_columns=["id"])
-        tag_schema, data_schema = stream.output_schema()
-        tag_keys, data_keys = stream.keys()
-        assert set(tag_schema.keys()) == set(tag_keys)
+        stream = make_table_stream(key_columns=["id"])
+        key_schema, data_schema = stream.output_schema()
+        key_keys, data_keys = stream.keys()
+        assert set(key_schema.keys()) == set(key_keys)
         assert set(data_schema.keys()) == set(data_keys)
 
     def test_schema_values_are_types(self):
         import types as _types
 
-        stream = make_table_stream(tag_columns=["id"])
-        tag_schema, data_schema = stream.output_schema()
-        for v in (*tag_schema.values(), *data_schema.values()):
+        stream = make_table_stream(key_columns=["id"])
+        key_schema, data_schema = stream.output_schema()
+        for v in (*key_schema.values(), *data_schema.values()):
             assert isinstance(v, (type, _types.UnionType)), (
                 f"Expected a type or UnionType, got {v!r}"
             )
@@ -264,32 +264,32 @@ class TestTableStreamIterDatas:
         pairs = list(stream.iter_data())
         assert len(pairs) == n
 
-    def test_each_pair_has_tag_and_data(self):
+    def test_each_pair_has_key_and_data(self):
         from orcapod.protocols.core_protocols.datagrams import (
             DataProtocol,
-            TagProtocol,
+            KeyProtocol,
         )
 
         stream = make_table_stream()
-        for tag, data in stream.iter_data():
-            assert isinstance(tag, TagProtocol)
+        for key, data in stream.iter_data():
+            assert isinstance(key, KeyProtocol)
             assert isinstance(data, DataProtocol)
 
-    def test_tag_contains_tag_column(self):
-        stream = make_table_stream(tag_columns=["id"])
-        for tag, _ in stream.iter_data():
-            assert "id" in tag.keys()
+    def test_key_contains_key_column(self):
+        stream = make_table_stream(key_columns=["id"])
+        for key, _ in stream.iter_data():
+            assert "id" in key.keys()
 
     def test_data_contains_data_column(self):
-        stream = make_table_stream(tag_columns=["id"])
+        stream = make_table_stream(key_columns=["id"])
         for _, data in stream.iter_data():
             assert "value" in data.keys()
 
     def test_values_are_correct(self):
-        stream = make_table_stream(tag_columns=["id"], n_rows=3)
+        stream = make_table_stream(key_columns=["id"], n_rows=3)
         pairs = list(stream.iter_data())
-        for i, (tag, data) in enumerate(pairs):
-            assert tag["id"] == i
+        for i, (key, data) in enumerate(pairs):
+            assert key["id"] == i
             assert data["value"] == f"v{i}"
 
     def test_iteration_is_repeatable(self):
@@ -318,7 +318,7 @@ class TestTableStreamAsTable:
         assert len(stream.as_table()) == n
 
     def test_table_contains_all_columns(self):
-        stream = make_table_stream(tag_columns=["id"])
+        stream = make_table_stream(key_columns=["id"])
         table = stream.as_table()
         assert "id" in table.column_names
         assert "value" in table.column_names
@@ -367,8 +367,8 @@ class TestArrowTableStreamIdentityStructure:
                 "value": pa.array([10, 20, 30], type=pa.int64()),
             }
         )
-        s1 = ArrowTableStream(table, tag_columns=["id"])
-        s2 = ArrowTableStream(table, tag_columns=["id"])
+        s1 = ArrowTableStream(table, key_columns=["id"])
+        s2 = ArrowTableStream(table, key_columns=["id"])
         assert s1.content_hash() == s2.content_hash()
 
     def test_no_producer_different_data_different_hash(self):
@@ -385,8 +385,8 @@ class TestArrowTableStreamIdentityStructure:
                 "value": pa.array([10, 20, 99], type=pa.int64()),
             }
         )
-        s1 = ArrowTableStream(t1, tag_columns=["id"])
-        s2 = ArrowTableStream(t2, tag_columns=["id"])
+        s1 = ArrowTableStream(t1, key_columns=["id"])
+        s2 = ArrowTableStream(t2, key_columns=["id"])
         assert s1.content_hash() != s2.content_hash()
 
     def test_no_producer_identity_structure_contains_table(self):
@@ -423,7 +423,7 @@ class TestArrowTableStreamIdentityStructure:
                 "v": pa.array([10, 20], type=pa.int64()),
             }
         )
-        stream = ArrowTableStream(table, tag_columns=["id"], producer=src)
+        stream = ArrowTableStream(table, key_columns=["id"], producer=src)
         structure = stream.identity_structure()
         assert structure[0] is src
 
@@ -442,8 +442,8 @@ class TestArrowTableStreamIdentityStructure:
                 "v": pa.array([30, 40], type=pa.int64()),
             }
         )
-        s1 = ArrowTableStream(t1, tag_columns=["id"], producer=src)
-        s2 = ArrowTableStream(t2, tag_columns=["id"], producer=src)
+        s1 = ArrowTableStream(t1, key_columns=["id"], producer=src)
+        s2 = ArrowTableStream(t2, key_columns=["id"], producer=src)
         assert s1.content_hash() == s2.content_hash()
 
     def test_with_different_producers_different_hash(self):
@@ -456,8 +456,8 @@ class TestArrowTableStreamIdentityStructure:
                 "v": pa.array([10, 20], type=pa.int64()),
             }
         )
-        s1 = ArrowTableStream(table, tag_columns=["id"], producer=src_a)
-        s2 = ArrowTableStream(table, tag_columns=["id"], producer=src_b)
+        s1 = ArrowTableStream(table, key_columns=["id"], producer=src_a)
+        s2 = ArrowTableStream(table, key_columns=["id"], producer=src_b)
         assert s1.content_hash() != s2.content_hash()
 
 
@@ -476,14 +476,14 @@ class TestArrowTableStreamNullablePreservation:
         """nullable=True fields → T | None in output_schema."""
         table = pa.table(
             {
-                "tag": pa.array(["a"], type=pa.large_string()),
+                "key": pa.array(["a"], type=pa.large_string()),
                 "val": pa.array([1], type=pa.int64()),
             }
         )
         # Arrow defaults to nullable=True
         assert table.schema.field("val").nullable is True
 
-        stream = ArrowTableStream(table, tag_columns=["tag"])
+        stream = ArrowTableStream(table, key_columns=["key"])
         _, data_schema = stream.output_schema()
         assert data_schema["val"] == int | None
 
@@ -491,19 +491,19 @@ class TestArrowTableStreamNullablePreservation:
         """nullable=False fields → plain T in output_schema."""
         table = pa.table(
             {
-                "tag": pa.array(["a"], type=pa.large_string()),
+                "key": pa.array(["a"], type=pa.large_string()),
                 "val": pa.array([1], type=pa.int64()),
             },
             schema=pa.schema(
                 [
-                    pa.field("tag", pa.large_string(), nullable=False),
+                    pa.field("key", pa.large_string(), nullable=False),
                     pa.field("val", pa.int64(), nullable=False),
                 ]
             ),
         )
         assert table.schema.field("val").nullable is False
 
-        stream = ArrowTableStream(table, tag_columns=["tag"])
+        stream = ArrowTableStream(table, key_columns=["key"])
         _, data_schema = stream.output_schema()
         assert data_schema["val"] is int
 
@@ -520,7 +520,7 @@ class TestArrowTableStreamNullablePreservation:
         # Raw Arrow table with nullable=True (the default)
         table = pa.table(
             {
-                "tag": pa.array(["a"], type=pa.large_string()),
+                "key": pa.array(["a"], type=pa.large_string()),
                 "val": pa.array([1], type=pa.int64()),
             }
         )
@@ -528,6 +528,6 @@ class TestArrowTableStreamNullablePreservation:
 
         # Caller infers nullable before handing off to builder
         table = table.cast(arrow_utils.infer_schema_nullable(table))
-        result = builder.build(table, tag_columns=["tag"])
+        result = builder.build(table, key_columns=["key"])
         _, data_schema = result.stream.output_schema()
         assert data_schema["val"] is int

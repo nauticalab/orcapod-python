@@ -1,7 +1,7 @@
 """SpiralDBTableSource — a read-only RootSource backed by a SpiralDB table.
 
 Wraps a SpiralDB table as an OrcaPod Source. The table's primary-key
-(key-schema) columns are used as tag columns by default.
+(key-schema) columns are used as key columns by default.
 
 Requires the ``spiraldb`` optional extra: ``pip install orcapod[spiraldb]``.
 Authentication is handled externally — run ``spiral login`` once to store
@@ -9,7 +9,7 @@ credentials in ``~/.config/pyspiral/auth.json``.
 
 Example::
 
-    # Default dataset, PK columns become tag columns automatically
+    # Default dataset, PK columns become key columns automatically
     source = SpiralDBTableSource("my-project-123456", "spike_data")
 
     # Explicit dataset
@@ -17,20 +17,20 @@ Example::
         "my-project-123456", "spike_data", dataset="prod"
     )
 
-    # Override tag columns
+    # Override key columns
     source = SpiralDBTableSource(
-        "my-project-123456", "spike_data", tag_columns=["session_id"]
+        "my-project-123456", "spike_data", key_columns=["session_id"]
     )
 
 Note:
     SpiralDB enforces non-null values in key-schema columns at storage time,
-    so NULL values in PK (tag) columns are not expected in practice.  If a
+    so NULL values in PK (key) columns are not expected in practice.  If a
     table is written with NULL key columns via an external tool, those NULLs
-    will be propagated into the tag columns as-is.
+    will be propagated into the key columns as-is.
 
-    Tables with no key schema and no explicit ``tag_columns`` will raise
+    Tables with no key schema and no explicit ``key_columns`` will raise
     ``ValueError`` at construction time.  Either define a key schema on the
-    SpiralDB table or supply explicit ``tag_columns``.
+    SpiralDB table or supply explicit ``key_columns``.
 """
 from __future__ import annotations
 
@@ -52,15 +52,15 @@ class SpiralDBTableSource(DBTableSource):
 
     1. Opens a ``SpiralDBConnector`` for *project_id* and *dataset*.
     2. Validates the table exists.
-    3. Resolves tag columns:
+    3. Resolves key columns:
 
-       - If *tag_columns* is provided, uses them as-is.
+       - If *key_columns* is provided, uses them as-is.
        - Otherwise uses the table's primary-key (key-schema) columns.
        - Raises ``ValueError`` if the table has no key schema and no
-         explicit *tag_columns* are given.
+         explicit *key_columns* are given.
 
     4. Delegates to ``DBTableSource.__init__`` for fetching and stream
-       building (source-info provenance, schema hash, system tags).
+       building (source-info provenance, schema hash, system keys).
     5. Closes the connector — all data is eagerly loaded into memory, so
        the connection is released immediately.
 
@@ -68,10 +68,10 @@ class SpiralDBTableSource(DBTableSource):
         project_id: SpiralDB project identifier (e.g. ``"my-project-123456"``).
         table_name: Name of the SpiralDB table to expose as a source.
         dataset: Dataset within the project. Defaults to ``"default"``.
-        tag_columns: Columns to use as tag columns. If ``None`` (default),
+        key_columns: Columns to use as key columns. If ``None`` (default),
             the table's primary-key (key-schema) columns are used. Raises
             ``ValueError`` if the table has no key schema.
-        system_tag_columns: Additional system-level tag columns.
+        system_key_columns: Additional system-level key columns.
         record_id_column: Column for stable per-row record IDs in provenance.
         source_id: Canonical source name for the registry and provenance
             tokens. Defaults to *table_name*.
@@ -84,7 +84,7 @@ class SpiralDBTableSource(DBTableSource):
 
     Raises:
         ValueError: If the table is not found, has no primary-key columns
-            and no explicit *tag_columns* are given, or the table is empty.
+            and no explicit *key_columns* are given, or the table is empty.
     """
 
     def __init__(
@@ -92,8 +92,8 @@ class SpiralDBTableSource(DBTableSource):
         project_id: str,
         table_name: str,
         dataset: str = "default",
-        tag_columns: Collection[str] | None = None,
-        system_tag_columns: Collection[str] = (),
+        key_columns: Collection[str] | None = None,
+        system_key_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
         label: str | None = None,
@@ -112,17 +112,17 @@ class SpiralDBTableSource(DBTableSource):
         )
 
         try:
-            resolved_tags: list[str] | None = (
-                list(tag_columns) if tag_columns is not None else None
+            resolved_keys: list[str] | None = (
+                list(key_columns) if key_columns is not None else None
             )
 
             # DBTableSource handles PK resolution and raises ValueError when
-            # the table has no key schema and no explicit tag_columns are given.
+            # the table has no key schema and no explicit key_columns are given.
             super().__init__(
                 connector,
                 table_name,
-                tag_columns=resolved_tags,
-                system_tag_columns=system_tag_columns,
+                key_columns=resolved_keys,
+                system_key_columns=system_key_columns,
                 record_id_column=record_id_column,
                 source_id=source_id,
                 label=label,
@@ -153,8 +153,8 @@ class SpiralDBTableSource(DBTableSource):
             "dataset": self._dataset,
             "overrides": self._overrides,
             "table_name": self._table_name,
-            "tag_columns": list(self._tag_columns),
-            "system_tag_columns": list(self._system_tag_columns),
+            "key_columns": list(self._key_columns),
+            "system_key_columns": list(self._system_key_columns),
             "record_id_column": self._record_id_column,
             "source_id": self.source_id,
             **self._identity_config(),
@@ -174,8 +174,8 @@ class SpiralDBTableSource(DBTableSource):
             project_id=config["project_id"],
             table_name=config["table_name"],
             dataset=config.get("dataset", "default"),
-            tag_columns=config.get("tag_columns"),
-            system_tag_columns=config.get("system_tag_columns", ()),
+            key_columns=config.get("key_columns"),
+            system_key_columns=config.get("system_key_columns", ()),
             record_id_column=config.get("record_id_column"),
             source_id=config.get("source_id"),
             label=config.get("label"),

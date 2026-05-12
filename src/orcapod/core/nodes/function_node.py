@@ -20,7 +20,7 @@ from orcapod.protocols.core_protocols import (
     DataFunctionProtocol,
     DataProtocol,
     StreamProtocol,
-    TagProtocol,
+    KeyProtocol,
     TrackerManagerProtocol,
 )
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
@@ -119,7 +119,7 @@ class FunctionNode(StreamBase):
 
         # stream-level caching state
         self._cached_output_datas: dict[
-            str, tuple[TagProtocol, DataProtocol | None]
+            str, tuple[KeyProtocol, DataProtocol | None]
         ] = {}
         self._cached_output_table: pa.Table | None = None
         self._cached_content_hash_column: pa.Array | None = None
@@ -168,7 +168,7 @@ class FunctionNode(StreamBase):
 
         Creates a ``CachedFunctionPod`` wrapping the original function pod
         for result caching.  The pipeline database is used separately for
-        pipeline-level provenance records (tag + data hash).
+        pipeline-level provenance records (key + data hash).
 
         The databases are expected to be pre-scoped by the pipeline (via
         ``db.at(*pipeline_name).at("_result")`` etc.) so no additional path
@@ -459,13 +459,13 @@ class FunctionNode(StreamBase):
     ) -> tuple[Schema, Schema]:
         """Return output schema, using stored value in read-only mode."""
         if self._function_pod is None:
-            tag = Schema(self._stored_schema.get("tag", {}))
+            key = Schema(self._stored_schema.get("key", {}))
             data = Schema(self._stored_schema.get("data", {}))
-            return tag, data
-        tag_schema = self._input_stream.output_schema(
+            return key, data
+        key_schema = self._input_stream.output_schema(
             columns=columns, all_info=all_info
         )[0]
-        return tag_schema, self._data_function.output_data_schema
+        return key_schema, self._data_function.output_data_schema
 
     def keys(
         self,
@@ -474,13 +474,13 @@ class FunctionNode(StreamBase):
         all_info: bool = False,
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         if self._function_pod is None:
-            tag_keys = tuple(self._stored_schema.get("tag", {}).keys())
+            key_keys = tuple(self._stored_schema.get("key", {}).keys())
             data_keys = tuple(self._stored_schema.get("data", {}).keys())
-            return tag_keys, data_keys
-        tag_schema, data_schema = self.output_schema(
+            return key_keys, data_keys
+        key_schema, data_schema = self.output_schema(
             columns=columns, all_info=all_info
         )
-        return tuple(tag_schema.keys()), tuple(data_schema.keys())
+        return tuple(key_schema.keys()), tuple(data_schema.keys())
 
     # ------------------------------------------------------------------
     # Pipeline path
@@ -540,24 +540,24 @@ class FunctionNode(StreamBase):
 
     def execute_data(
         self,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
-    ) -> tuple[TagProtocol, DataProtocol | None]:
+    ) -> tuple[KeyProtocol, DataProtocol | None]:
         """Execute a single data: compute, persist, and cache.
 
         Internal method for orchestrators. The caller must guarantee that
-        the tag and data conform to the expected input schema (matching
+        the key and data conform to the expected input schema (matching
         ``self._input_stream``). No validation is performed.
 
         Args:
-            tag: The tag associated with the data.
+            key: The key associated with the data.
             data: The input data to process.
 
         Returns:
-            A ``(tag, output_data)`` tuple.
+            A ``(key, output_data)`` tuple.
         """
-        tag_out, result = self._process_data_internal(tag, data)
-        return tag_out, result
+        key_out, result = self._process_data_internal(key, data)
+        return key_out, result
 
     def execute(
         self,
@@ -565,7 +565,7 @@ class FunctionNode(StreamBase):
         *,
         observer: ExecutionObserverProtocol | None = None,
         error_policy: Literal["continue", "fail_fast"] = "continue",
-    ) -> list[tuple[TagProtocol, DataProtocol]]:
+    ) -> list[tuple[KeyProtocol, DataProtocol]]:
         """Execute all data from a stream: compute, persist, and cache.
 
         For each data: fire ``on_data_start``, check the in-memory cache
@@ -579,7 +579,7 @@ class FunctionNode(StreamBase):
                 ``"fail_fast"`` re-raises on the first failure.
 
         Returns:
-            Materialized list of (tag, output_data) pairs, excluding
+            Materialized list of (key, output_data) pairs, excluding
             ``None`` outputs and failed data.
         """
         from orcapod.pipeline.observer import NoOpObserver
@@ -590,13 +590,13 @@ class FunctionNode(StreamBase):
         obs = observer if observer is not None else NoOpObserver()
         ctx_obs = obs.contextualize(*self.node_identity_path)
 
-        tag_schema = input_stream.output_schema(columns={"system_tags": True})[0]
-        ctx_obs.on_node_start(node_label, node_hash, tag_schema=tag_schema)
+        key_schema = input_stream.output_schema(columns={"system_keys": True})[0]
+        ctx_obs.on_node_start(node_label, node_hash, key_schema=key_schema)
 
         # Collect upstream entries and resolve entry_ids
-        upstream_entries: list[tuple[TagProtocol, DataProtocol, str]] = [
-            (tag, data, self.compute_pipeline_entry_id(tag, data))
-            for tag, data in input_stream.iter_data()
+        upstream_entries: list[tuple[KeyProtocol, DataProtocol, str]] = [
+            (key, data, self.compute_pipeline_entry_id(key, data))
+            for key, data in input_stream.iter_data()
         ]
         entry_ids = [eid for _, _, eid in upstream_entries]
 
@@ -608,20 +608,20 @@ class FunctionNode(StreamBase):
         # and prevents spurious recomputation of already-processed data.
         self.get_cached_results(entry_ids=entry_ids)
 
-        output: list[tuple[TagProtocol, DataProtocol]] = []
-        for tag, data, entry_id in upstream_entries:
-            ctx_obs.on_data_start(node_label, tag, data)
+        output: list[tuple[KeyProtocol, DataProtocol]] = []
+        for key, data, entry_id in upstream_entries:
+            ctx_obs.on_data_start(node_label, key, data)
 
             if entry_id in self._cached_output_datas:
-                tag_out, result = self._cached_output_datas[entry_id]
-                ctx_obs.on_data_end(node_label, tag, data, result, cached=True)
+                key_out, result = self._cached_output_datas[entry_id]
+                ctx_obs.on_data_end(node_label, key, data, result, cached=True)
                 if result is not None:
-                    output.append((tag_out, result))
+                    output.append((key_out, result))
             else:
-                pkt_logger = ctx_obs.create_data_logger(tag, data)
+                pkt_logger = ctx_obs.create_data_logger(key, data)
                 try:
-                    tag_out, result = self._process_data_internal(
-                        tag, data, logger=pkt_logger
+                    key_out, result = self._process_data_internal(
+                        key, data, logger=pkt_logger
                     )
                 except Exception as exc:
                     logger.warning(
@@ -630,16 +630,16 @@ class FunctionNode(StreamBase):
                         exc,
                         exc_info=True,
                     )
-                    ctx_obs.on_data_crash(node_label, tag, data, exc)
+                    ctx_obs.on_data_crash(node_label, key, data, exc)
                     if error_policy == "fail_fast":
                         ctx_obs.on_node_end(node_label, node_hash)
                         raise
                 else:
                     ctx_obs.on_data_end(
-                        node_label, tag, data, result, cached=False
+                        node_label, key, data, result, cached=False
                     )
                     if result is not None:
-                        output.append((tag_out, result))
+                        output.append((key_out, result))
 
         ctx_obs.on_node_end(node_label, node_hash)
         # Mark this node as freshly computed so subsequent iter_data() calls
@@ -649,11 +649,11 @@ class FunctionNode(StreamBase):
 
     def _process_data_internal(
         self,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
         *,
         logger: DataExecutionLoggerProtocol | None = None,
-    ) -> tuple[TagProtocol, DataProtocol | None]:
+    ) -> tuple[KeyProtocol, DataProtocol | None]:
         """Core compute + persist + cache.
 
         Used by ``execute_data`` and ``execute``.
@@ -661,11 +661,11 @@ class FunctionNode(StreamBase):
         Exceptions propagate to the caller — no error handling here.
 
         Returns:
-            A ``(tag, output_data)`` 2-tuple.
+            A ``(key, output_data)`` 2-tuple.
         """
         if self._cached_function_pod is not None:
-            tag_out, output_data = self._cached_function_pod.process_data(
-                tag, data, logger=logger
+            key_out, output_data = self._cached_function_pod.process_data(
+                key, data, logger=logger
             )
 
             if output_data is not None:
@@ -675,27 +675,27 @@ class FunctionNode(StreamBase):
                     )
                 )
                 self.add_pipeline_record(
-                    tag,
+                    key,
                     data,
                     data_record_id=output_data.datagram_id,
                     computed=result_computed,
                 )
         else:
-            tag_out, output_data = self._function_pod.process_data(
-                tag, data, logger=logger
+            key_out, output_data = self._function_pod.process_data(
+                key, data, logger=logger
             )
 
         # Store by entry_id and invalidate derived caches
-        entry_id = self.compute_pipeline_entry_id(tag, data)
-        self._cached_output_datas[entry_id] = (tag_out, output_data)
+        entry_id = self.compute_pipeline_entry_id(key, data)
+        self._cached_output_datas[entry_id] = (key_out, output_data)
         self._cached_output_table = None
         self._cached_content_hash_column = None
 
-        return tag_out, output_data
+        return key_out, output_data
 
     def get_cached_results(
         self, entry_ids: list[str]
-    ) -> dict[str, tuple[TagProtocol, DataProtocol]]:
+    ) -> dict[str, tuple[KeyProtocol, DataProtocol]]:
         """Retrieve cached results for specific pipeline entry IDs.
 
         Checks in-memory cache first. Loads only truly missing entries from DB.
@@ -707,7 +707,7 @@ class FunctionNode(StreamBase):
             entry_ids: Pipeline entry IDs to look up.
 
         Returns:
-            Mapping from entry_id to ``(tag, output_data)`` for found entries.
+            Mapping from entry_id to ``(key, output_data)`` for found entries.
             Empty dict if no DB is attached or no matches found.
         """
         if self._cached_function_pod is None or not entry_ids:
@@ -730,23 +730,23 @@ class FunctionNode(StreamBase):
 
     async def _async_process_data_internal(
         self,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
         *,
         logger: DataExecutionLoggerProtocol | None = None,
-    ) -> tuple[TagProtocol, DataProtocol | None]:
+    ) -> tuple[KeyProtocol, DataProtocol | None]:
         """Async counterpart of ``_process_data_internal``.
 
         Computes via async path, writes pipeline provenance, caches by entry_id.
         Exceptions propagate.
 
         Returns:
-            A ``(tag, output_data)`` 2-tuple.
+            A ``(key, output_data)`` 2-tuple.
         """
         if self._cached_function_pod is not None:
-            tag_out, output_data = (
+            key_out, output_data = (
                 await self._cached_function_pod.async_process_data(
-                    tag, data, logger=logger
+                    key, data, logger=logger
                 )
             )
 
@@ -757,30 +757,30 @@ class FunctionNode(StreamBase):
                     )
                 )
                 self.add_pipeline_record(
-                    tag,
+                    key,
                     data,
                     data_record_id=output_data.datagram_id,
                     computed=result_computed,
                 )
         else:
-            tag_out, output_data = (
+            key_out, output_data = (
                 await self._function_pod.async_process_data(
-                    tag, data, logger=logger
+                    key, data, logger=logger
                 )
             )
 
         # Store by entry_id and invalidate derived caches
-        entry_id = self.compute_pipeline_entry_id(tag, data)
-        self._cached_output_datas[entry_id] = (tag_out, output_data)
+        entry_id = self.compute_pipeline_entry_id(key, data)
+        self._cached_output_datas[entry_id] = (key_out, output_data)
         self._cached_output_table = None
         self._cached_content_hash_column = None
 
-        return tag_out, output_data
+        return key_out, output_data
 
     def compute_pipeline_entry_id(
-        self, tag: TagProtocol, input_data: DataProtocol
+        self, key: KeyProtocol, input_data: DataProtocol
     ) -> str:
-        """Compute a unique pipeline entry ID from tag + system tags + input data hash.
+        """Compute a unique pipeline entry ID from key + system keys + input data hash.
 
         ``NODE_CONTENT_HASH_COL`` is always included so that two runs processing
         identical inputs each get a distinct entry ID, regardless of table scope.
@@ -788,15 +788,15 @@ class FunctionNode(StreamBase):
         by the duplicate entry_id check.
 
         Args:
-            tag: The tag (including system tags).
+            key: The key (including system keys).
             input_data: The input data.
 
         Returns:
-            A hash string uniquely identifying this (tag, input_data, node run)
+            A hash string uniquely identifying this (key, input_data, node run)
             combination.
         """
-        tag_with_hash = (
-            tag.as_table(columns={"system_tags": True})
+        key_with_hash = (
+            key.as_table(columns={"system_keys": True})
             .append_column(
                 constants.INPUT_DATA_HASH_COL,
                 pa.array([input_data.content_hash().to_string()], type=pa.large_string()),
@@ -806,11 +806,11 @@ class FunctionNode(StreamBase):
                 pa.array([self.content_hash().to_string()], type=pa.large_string()),
             )
         )
-        return self.data_context.arrow_hasher.hash_table(tag_with_hash).to_string()
+        return self.data_context.arrow_hasher.hash_table(key_with_hash).to_string()
 
     def add_pipeline_record(
         self,
-        tag: TagProtocol,
+        key: KeyProtocol,
         input_data: DataProtocol,
         data_record_id: str,
         computed: bool,
@@ -819,14 +819,14 @@ class FunctionNode(StreamBase):
         """Add a pipeline record to the database for a processed data.
 
         The pipeline record stores:
-        - Tag columns (including system tags)
+        - Key columns (including system keys)
         - All source columns of the input data (provenance, not data)
         - Output data record ID (for joining with result records)
         - Input data data context key
         - Whether the result was freshly computed or cached
         """
         self._require_pipeline_database()
-        entry_id = self.compute_pipeline_entry_id(tag, input_data)
+        entry_id = self.compute_pipeline_entry_id(key, input_data)
 
         # Check for existing entry
         existing_record = None
@@ -869,9 +869,9 @@ class FunctionNode(StreamBase):
             }
         )
 
-        # Combine: tag (with system tags) + input source columns + meta columns
+        # Combine: key (with system keys) + input source columns + meta columns
         combined_record = arrow_utils.hstack_tables(
-            tag.as_table(columns={"system_tags": True}),
+            key.as_table(columns={"system_keys": True}),
             input_source_table,
             meta_table,
         )
@@ -892,7 +892,7 @@ class FunctionNode(StreamBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> pa.Table | None:
-        """Return all computed results joined with their pipeline tag records.
+        """Return all computed results joined with their pipeline key records.
 
         Args:
             columns: Column configuration controlling which groups are included.
@@ -938,11 +938,11 @@ class FunctionNode(StreamBase):
             drop_columns.extend(
                 c for c in joined.column_names if c.startswith(constants.SOURCE_PREFIX)
             )
-        if not column_config.system_tags and not column_config.all_info:
+        if not column_config.system_keys and not column_config.all_info:
             drop_columns.extend(
                 c
                 for c in joined.column_names
-                if c.startswith(constants.SYSTEM_TAG_PREFIX)
+                if c.startswith(constants.SYSTEM_KEY_PREFIX)
             )
         if drop_columns:
             joined = joined.drop([c for c in drop_columns if c in joined.column_names])
@@ -977,15 +977,15 @@ class FunctionNode(StreamBase):
     def _load_cached_entries(
         self,
         entry_ids: list[str] | None = None,
-    ) -> "dict[str, tuple[TagProtocol, DataProtocol]]":
-        """Load (tag, data) pairs from pipeline DB + result DB.
+    ) -> "dict[str, tuple[KeyProtocol, DataProtocol]]":
+        """Load (key, data) pairs from pipeline DB + result DB.
 
         Args:
             entry_ids: If provided, load only these specific entry IDs.
                 If ``None``, load all records for this node.
 
         Returns:
-            dict mapping entry_id → (tag, data). Empty dict when either
+            dict mapping entry_id → (key, data). Empty dict when either
             database is None, records are empty, or no rows match.
 
         Does NOT mutate ``_cached_output_datas``.
@@ -1029,17 +1029,17 @@ class FunctionNode(StreamBase):
         if joined.num_rows == 0:
             return {}
 
-        # Derive tag keys: prefer input_stream when available; fall back to
+        # Derive key keys: prefer input_stream when available; fall back to
         # taginfo column exclusion for CACHE_ONLY / deserialized nodes.
         if self._input_stream is not None:
-            tag_keys = self._input_stream.keys()[0]
+            key_keys = self._input_stream.keys()[0]
         else:
-            tag_keys = tuple(
+            key_keys = tuple(
                 c
                 for c in taginfo.column_names
                 if not c.startswith(constants.META_PREFIX)
                 and not c.startswith(constants.SOURCE_PREFIX)
-                and not c.startswith(constants.SYSTEM_TAG_PREFIX)
+                and not c.startswith(constants.SYSTEM_KEY_PREFIX)
                 and c != PIPELINE_ENTRY_ID_COL
                 and c != constants.NODE_CONTENT_HASH_COL
             )
@@ -1054,20 +1054,20 @@ class FunctionNode(StreamBase):
             or c == constants.NODE_CONTENT_HASH_COL
         ]
         data_table = joined.drop([c for c in drop_cols if c in joined.column_names])
-        stream = ArrowTableStream(data_table, tag_columns=tag_keys)
+        stream = ArrowTableStream(data_table, key_columns=key_keys)
 
-        loaded: dict[str, tuple[TagProtocol, DataProtocol]] = {}
-        for eid, (tag, data) in zip(entry_ids_col, stream.iter_data()):
-            loaded[eid] = (tag, data)
+        loaded: dict[str, tuple[KeyProtocol, DataProtocol]] = {}
+        for eid, (key, data) in zip(entry_ids_col, stream.iter_data()):
+            loaded[eid] = (key, data)
         return loaded
 
     async def _async_execute_cache_only(
         self,
-        output: "WritableChannel[tuple[TagProtocol, DataProtocol]]",
+        output: "WritableChannel[tuple[KeyProtocol, DataProtocol]]",
         *,
         observer: Any | None = None,
     ) -> None:
-        """Send all DB-cached (tag, data) pairs to *output*.
+        """Send all DB-cached (key, data) pairs to *output*.
 
         Used in ``CACHE_ONLY`` mode when the upstream is unavailable.
         Does not access ``_input_stream``.
@@ -1079,7 +1079,7 @@ class FunctionNode(StreamBase):
         node_hash = self.content_hash().to_string()
         ctx_obs = obs.contextualize(*self.node_identity_path)
 
-        ctx_obs.on_node_start(node_label, node_hash, tag_schema=None)
+        ctx_obs.on_node_start(node_label, node_hash, key_schema=None)
         try:
             loaded = self._load_cached_entries()
             self._cached_output_datas.update(loaded)
@@ -1087,11 +1087,11 @@ class FunctionNode(StreamBase):
                 self._cached_output_table = None
                 self._cached_content_hash_column = None
 
-            for tag, data in self._cached_output_datas.values():
+            for key, data in self._cached_output_datas.values():
                 if data is not None:
-                    ctx_obs.on_data_start(node_label, tag, data)
-                    ctx_obs.on_data_end(node_label, tag, data, data, cached=True)
-                    await output.send((tag, data))
+                    ctx_obs.on_data_start(node_label, key, data)
+                    ctx_obs.on_data_end(node_label, key, data, data, cached=True)
+                    await output.send((key, data))
             ctx_obs.on_node_end(node_label, node_hash)
         finally:
             await output.close()
@@ -1100,8 +1100,8 @@ class FunctionNode(StreamBase):
     # Iteration
     # ------------------------------------------------------------------
 
-    def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
-        """Yield all computed (tag, data) pairs for this node.
+    def iter_data(self) -> Iterator[tuple[KeyProtocol, DataProtocol]]:
+        """Yield all computed (key, data) pairs for this node.
 
         Strictly read-only — never triggers computation. Callers must call
         ``run()`` or ``execute()`` first if they want results computed.
@@ -1130,8 +1130,8 @@ class FunctionNode(StreamBase):
                     self._cached_output_table = None
                     self._cached_content_hash_column = None
             yield from (
-                (tag, pkt)
-                for tag, pkt in self._cached_output_datas.values()
+                (key, pkt)
+                for key, pkt in self._cached_output_datas.values()
                 if pkt is not None
             )
             return
@@ -1150,8 +1150,8 @@ class FunctionNode(StreamBase):
                 self._cached_content_hash_column = None
 
         yield from (
-            (tag, pkt)
-            for tag, pkt in self._cached_output_datas.values()
+            (key, pkt)
+            for key, pkt in self._cached_output_datas.values()
             if pkt is not None
         )
 
@@ -1190,18 +1190,18 @@ class FunctionNode(StreamBase):
         all_info: bool = False,
     ) -> pa.Table:
         if self._cached_output_table is None:
-            all_tags = []
+            all_keys = []
             all_data = []
-            tag_schema, data_schema = None, None
-            for tag, data in self.iter_data():
-                if tag_schema is None:
-                    tag_schema = tag.arrow_schema(all_info=True)
+            key_schema, data_schema = None, None
+            for key, data in self.iter_data():
+                if key_schema is None:
+                    key_schema = key.arrow_schema(all_info=True)
                 if data_schema is None:
                     data_schema = data.arrow_schema(all_info=True)
-                all_tags.append(tag.as_dict(all_info=True))
+                all_keys.append(key.as_dict(all_info=True))
                 all_data.append(data.as_dict(all_info=True))
 
-            if not all_tags:
+            if not all_keys:
                 self._cached_output_table = pa.table({})
 
             converter = self.data_context.type_converter
@@ -1218,17 +1218,17 @@ class FunctionNode(StreamBase):
             struct_data = converter.python_dicts_to_struct_dicts(
                 all_data, python_schema=data_python_schema
             )
-            all_tags_as_tables: pa.Table = pa.Table.from_pylist(
-                all_tags, schema=tag_schema
+            all_keys_as_tables: pa.Table = pa.Table.from_pylist(
+                all_keys, schema=key_schema
             )
-            if constants.CONTEXT_KEY in all_tags_as_tables.column_names:
-                all_tags_as_tables = all_tags_as_tables.drop([constants.CONTEXT_KEY])
+            if constants.CONTEXT_KEY in all_keys_as_tables.column_names:
+                all_keys_as_tables = all_keys_as_tables.drop([constants.CONTEXT_KEY])
             all_data_as_tables: pa.Table = pa.Table.from_pylist(
                 struct_data, schema=data_schema
             )
 
             self._cached_output_table = arrow_utils.hstack_tables(
-                all_tags_as_tables, all_data_as_tables
+                all_keys_as_tables, all_data_as_tables
             )
         if self._cached_output_table is None:
             self._cached_output_table = pa.table({})
@@ -1236,12 +1236,12 @@ class FunctionNode(StreamBase):
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
 
         drop_columns = []
-        if not column_config.system_tags:
+        if not column_config.system_keys:
             drop_columns.extend(
                 [
                     c
                     for c in self._cached_output_table.column_names
-                    if c.startswith(constants.SYSTEM_TAG_PREFIX)
+                    if c.startswith(constants.SYSTEM_KEY_PREFIX)
                 ]
             )
         if not column_config.source:
@@ -1269,7 +1269,7 @@ class FunctionNode(StreamBase):
         if column_config.content_hash:
             if self._cached_content_hash_column is None:
                 content_hashes = []
-                for tag, data in self.iter_data():
+                for key, data in self.iter_data():
                     content_hashes.append(data.content_hash().to_string())
                 self._cached_content_hash_column = pa.array(
                     content_hashes, type=pa.large_string()
@@ -1286,7 +1286,7 @@ class FunctionNode(StreamBase):
                 hash_column_name, self._cached_content_hash_column
             )
 
-        if column_config.sort_by_tags:
+        if column_config.sort_by_keys:
             output_table_schema = output_table.schema
             output_table = (
                 pl.DataFrame(output_table)
@@ -1302,8 +1302,8 @@ class FunctionNode(StreamBase):
 
     async def async_execute(
         self,
-        input_channel: ReadableChannel[tuple[TagProtocol, DataProtocol]],
-        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+        input_channel: ReadableChannel[tuple[KeyProtocol, DataProtocol]],
+        output: WritableChannel[tuple[KeyProtocol, DataProtocol]],
         *,
         observer: ExecutionObserverProtocol | None = None,
     ) -> None:
@@ -1318,8 +1318,8 @@ class FunctionNode(StreamBase):
         channel.
 
         Args:
-            input_channel: Single readable channel of (tag, data) pairs.
-            output: Writable channel for output (tag, data) pairs.
+            input_channel: Single readable channel of (key, data) pairs.
+            output: Writable channel for output (key, data) pairs.
             observer: Optional execution observer for hooks.
         """
         from orcapod.pipeline.serialization import LoadStatus
@@ -1356,8 +1356,8 @@ class FunctionNode(StreamBase):
                 else None
             )
 
-            tag_schema = self._input_stream.output_schema(columns={"system_tags": True})[0]
-            ctx_obs.on_node_start(node_label, node_hash, tag_schema=tag_schema)
+            key_schema = self._input_stream.output_schema(columns={"system_keys": True})[0]
+            ctx_obs.on_node_start(node_label, node_hash, key_schema=key_schema)
 
             if self._cached_function_pod is not None:
                 # Phase 1: build cache lookup from pipeline DB
@@ -1366,32 +1366,32 @@ class FunctionNode(StreamBase):
                 if loaded:
                     self._cached_output_table = None
                     self._cached_content_hash_column = None
-                cached_by_entry_id: dict[str, tuple[TagProtocol, DataProtocol]] = dict(loaded)
+                cached_by_entry_id: dict[str, tuple[KeyProtocol, DataProtocol]] = dict(loaded)
 
                 # Phase 2: drive output from input channel — cached or compute
                 async def _process_one_db(
-                    tag: TagProtocol, data: DataProtocol
+                    key: KeyProtocol, data: DataProtocol
                 ) -> None:
-                    entry_id = self.compute_pipeline_entry_id(tag, data)
+                    entry_id = self.compute_pipeline_entry_id(key, data)
                     if entry_id in cached_by_entry_id:
-                        tag_out, result_data = cached_by_entry_id[entry_id]
-                        ctx_obs.on_data_start(node_label, tag, data)
+                        key_out, result_data = cached_by_entry_id[entry_id]
+                        ctx_obs.on_data_start(node_label, key, data)
                         ctx_obs.on_data_end(
-                            node_label, tag, data, result_data, cached=True
+                            node_label, key, data, result_data, cached=True
                         )
-                        await output.send((tag_out, result_data))
+                        await output.send((key_out, result_data))
                     else:
                         await self._async_execute_one_data(
-                            tag, data, output,
+                            key, data, output,
                             observer=ctx_obs,
                             node_label=node_label,
                             node_hash=node_hash,
                         )
 
                 async with asyncio.TaskGroup() as tg:
-                    async for tag, data in input_channel:
+                    async for key, data in input_channel:
                         async def _guarded_db(
-                            t: TagProtocol = tag, p: DataProtocol = data
+                            t: KeyProtocol = key, p: DataProtocol = data
                         ) -> None:
                             try:
                                 await _process_one_db(t, p)
@@ -1405,9 +1405,9 @@ class FunctionNode(StreamBase):
             else:
                 # Simple async execution without DB
                 async with asyncio.TaskGroup() as tg:
-                    async for tag, data in input_channel:
+                    async for key, data in input_channel:
                         async def _guarded_simple(
-                            t: TagProtocol = tag, p: DataProtocol = data
+                            t: KeyProtocol = key, p: DataProtocol = data
                         ) -> None:
                             try:
                                 await self._async_execute_one_data(
@@ -1430,34 +1430,34 @@ class FunctionNode(StreamBase):
 
     async def _async_execute_one_data(
         self,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
-        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+        output: WritableChannel[tuple[KeyProtocol, DataProtocol]],
         *,
         observer: ExecutionObserverProtocol,
         node_label: str,
         node_hash: str,
     ) -> None:
         """Process one non-cached data in the async execute path."""
-        observer.on_data_start(node_label, tag, data)
-        pkt_logger = observer.create_data_logger(tag, data)
+        observer.on_data_start(node_label, key, data)
+        pkt_logger = observer.create_data_logger(key, data)
 
         try:
-            tag_out, result_data = await self._async_process_data_internal(
-                tag, data, logger=pkt_logger
+            key_out, result_data = await self._async_process_data_internal(
+                key, data, logger=pkt_logger
             )
         except Exception as exc:
             logger.warning(
                 "Data execution failed in %s: %s", node_label, exc,
                 exc_info=True,
             )
-            observer.on_data_crash(node_label, tag, data, exc)
+            observer.on_data_crash(node_label, key, data, exc)
         else:
             observer.on_data_end(
-                node_label, tag, data, result_data, cached=False
+                node_label, key, data, result_data, cached=False
             )
             if result_data is not None:
-                await output.send((tag_out, result_data))
+                await output.send((key_out, result_data))
 
     def __repr__(self) -> str:
         return (

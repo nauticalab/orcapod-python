@@ -17,14 +17,14 @@ from orcapod.pipeline import AsyncPipelineOrchestrator, Pipeline
 from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
 
 
-def _make_source(tag_col, data_col, data):
+def _make_source(key_col, data_col, data):
     table = pa.table(
         {
-            tag_col: pa.array(data[tag_col], type=pa.large_string()),
+            key_col: pa.array(data[key_col], type=pa.large_string()),
             data_col: pa.array(data[data_col], type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
+    return ArrowTableSource(table, key_columns=[key_col], infer_nullable=True)
 
 
 def double_value(value: int) -> int:
@@ -136,12 +136,12 @@ class TestSyncOrchestratorObserver:
                 events.append(("node_start", node_label))
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
-            def on_data_start(self, node_label, tag, data):
+            def on_data_start(self, node_label, key, data):
                 events.append(("data_start",))
-            def on_data_end(self, node_label, tag, input_pkt, output_pkt, cached):
+            def on_data_end(self, node_label, key, input_pkt, output_pkt, cached):
                 events.append(("data_end", cached))
-            def on_data_crash(self, node_label, tag, data, exc): pass
-            def create_data_logger(self, tag, data, **kwargs):
+            def on_data_crash(self, node_label, key, data, exc): pass
+            def create_data_logger(self, key, data, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
             def contextualize(self, *identity_path):
@@ -217,12 +217,12 @@ class TestPipelineRunIntegration:
                 events.append(("node_start", node_label))
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
-            def on_data_start(self, node_label, tag, data):
+            def on_data_start(self, node_label, key, data):
                 events.append(("data_start",))
-            def on_data_end(self, node_label, tag, input_pkt, output_pkt, cached):
+            def on_data_end(self, node_label, key, input_pkt, output_pkt, cached):
                 events.append(("data_end",))
-            def on_data_crash(self, node_label, tag, data, exc): pass
-            def create_data_logger(self, tag, data, **kwargs):
+            def on_data_crash(self, node_label, key, data, exc): pass
+            def create_data_logger(self, key, data, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
             def contextualize(self, *identity_path):
@@ -351,8 +351,8 @@ class TestMaterializedStreamIdentity:
         stream = SyncPipelineOrchestrator._materialize_as_stream(buf, op_node)
         assert stream.content_hash() == op_node.content_hash()
 
-    def test_materialized_stream_preserves_system_tags(self):
-        """System tag column names in materialized stream should match original."""
+    def test_materialized_stream_preserves_system_keys(self):
+        """System key column names in materialized stream should match original."""
         src_a = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
         src_b = _make_source("key", "score", {"key": ["a", "b"], "score": [100, 200]})
         from orcapod.core.operators.join import Join
@@ -365,13 +365,13 @@ class TestMaterializedStreamIdentity:
 
         stream = SyncPipelineOrchestrator._materialize_as_stream(buf, op_node)
 
-        expected_tag_schema = op_node.output_schema(columns={"system_tags": True})[0]
-        actual_tag_schema = stream.output_schema(columns={"system_tags": True})[0]
-        assert expected_tag_schema == actual_tag_schema
+        expected_key_schema = op_node.output_schema(columns={"system_keys": True})[0]
+        actual_key_schema = stream.output_schema(columns={"system_keys": True})[0]
+        assert expected_key_schema == actual_key_schema
 
-    def test_operator_with_materialized_upstream_produces_correct_system_tags(self):
+    def test_operator_with_materialized_upstream_produces_correct_system_keys(self):
         """When an operator receives a materialized stream, its output system
-        tags should embed the correct pipeline hashes (same as if it received
+        keys should embed the correct pipeline hashes (same as if it received
         the original stream)."""
         src_a = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
         src_b = _make_source("key", "score", {"key": ["a", "b"], "score": [100, 200]})
@@ -392,11 +392,11 @@ class TestMaterializedStreamIdentity:
         join_node = ON(join_op, input_streams=[src_a, src_b])
         join_node.run()
 
-        # Compare system tag schemas — should match
+        # Compare system key schemas — should match
         orch_join = orch_pipeline.compiled_nodes["join"]
-        orch_tag_schema = orch_join.output_schema(columns={"system_tags": True})[0]
-        pull_tag_schema = join_node.output_schema(columns={"system_tags": True})[0]
-        assert orch_tag_schema == pull_tag_schema
+        orch_key_schema = orch_join.output_schema(columns={"system_keys": True})[0]
+        pull_key_schema = join_node.output_schema(columns={"system_keys": True})[0]
+        assert orch_key_schema == pull_key_schema
 
 
 class TestSyncObserverInjection:
@@ -427,12 +427,12 @@ class TestSyncObserverInjection:
                 events.append(("node_start", node_label))
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
-            def on_data_start(self, node_label, tag, data):
+            def on_data_start(self, node_label, key, data):
                 events.append(("data_start", node_label))
-            def on_data_end(self, node_label, tag, input_pkt, output_pkt, cached):
+            def on_data_end(self, node_label, key, input_pkt, output_pkt, cached):
                 events.append(("data_end", node_label, cached))
-            def on_data_crash(self, node_label, tag, data, exc): pass
-            def create_data_logger(self, tag, data, **kwargs):
+            def on_data_crash(self, node_label, key, data, exc): pass
+            def create_data_logger(self, key, data, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
             def contextualize(self, *identity_path):
@@ -471,12 +471,12 @@ class TestSyncObserverInjection:
             def on_run_end(self, run_id): pass
             def on_node_start(self, node_label, node_hash, **kwargs): pass
             def on_node_end(self, node_label, node_hash, **kwargs): pass
-            def on_data_start(self, node_label, tag, data): pass
-            def on_data_end(self, node_label, tag, input_pkt, output_pkt, cached):
+            def on_data_start(self, node_label, key, data): pass
+            def on_data_end(self, node_label, key, input_pkt, output_pkt, cached):
                 if node_label == "doubler":
                     events1.append(cached)
-            def on_data_crash(self, node_label, tag, data, exc): pass
-            def create_data_logger(self, tag, data, **kwargs):
+            def on_data_crash(self, node_label, key, data, exc): pass
+            def create_data_logger(self, key, data, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
             def contextualize(self, *identity_path):
@@ -493,12 +493,12 @@ class TestSyncObserverInjection:
             def on_run_end(self, run_id): pass
             def on_node_start(self, node_label, node_hash, **kwargs): pass
             def on_node_end(self, node_label, node_hash, **kwargs): pass
-            def on_data_start(self, node_label, tag, data): pass
-            def on_data_end(self, node_label, tag, input_pkt, output_pkt, cached):
+            def on_data_start(self, node_label, key, data): pass
+            def on_data_end(self, node_label, key, input_pkt, output_pkt, cached):
                 if node_label == "doubler":
                     events2.append(cached)
-            def on_data_crash(self, node_label, tag, data, exc): pass
-            def create_data_logger(self, tag, data, **kwargs):
+            def on_data_crash(self, node_label, key, data, exc): pass
+            def create_data_logger(self, key, data, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
             def contextualize(self, *identity_path):
@@ -528,10 +528,10 @@ class TestSyncObserverInjection:
                 node_order.append(("start", node_label))
             def on_node_end(self, node_label, node_hash, **kwargs):
                 node_order.append(("end", node_label))
-            def on_data_start(self, node_label, tag, data): pass
-            def on_data_end(self, node_label, tag, input_pkt, output_pkt, cached): pass
-            def on_data_crash(self, node_label, tag, data, exc): pass
-            def create_data_logger(self, tag, data, **kwargs):
+            def on_data_start(self, node_label, key, data): pass
+            def on_data_end(self, node_label, key, input_pkt, output_pkt, cached): pass
+            def on_data_crash(self, node_label, key, data, exc): pass
+            def create_data_logger(self, key, data, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
             def contextualize(self, *identity_path):

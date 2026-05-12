@@ -74,16 +74,16 @@ class ObservabilityReader:
         return sorted(self._status_tables.keys())
 
     @property
-    def tag_columns(self) -> list[str]:
-        """Inferred user tag column names."""
+    def key_columns(self) -> list[str]:
+        """Inferred user key column names."""
         status = self._get_status_df()
         return sorted(
             col for col in status.columns
             if not col.startswith("__")
             and not col.startswith("_status_")
             and not col.startswith("_log_")
-            and not col.startswith("_tag_")
-            and not col.startswith("_tag::")
+            and not col.startswith("_key_")
+            and not col.startswith("_key::")
             and col != "node_label"
         )
 
@@ -128,7 +128,7 @@ class ObservabilityReader:
         "_log_traceback": "traceback",
     }
 
-    _DROP_PREFIXES: ClassVar[tuple[str, ...]] = ("__", "_tag_", "_tag::")
+    _DROP_PREFIXES: ClassVar[tuple[str, ...]] = ("__", "_key_", "_key::")
     _STATUS_DROP_EXACT: ClassVar[set[str]] = {
         "_status_id", "_status_run_id", "_status_pipeline_uri",
     }
@@ -180,7 +180,7 @@ class ObservabilityReader:
         previously computed successful results.
 
         Returns:
-            DataFrame with columns: ``node_label``, tag columns,
+            DataFrame with columns: ``node_label``, key columns,
             ``state``, ``timestamp``, ``error_summary``.
         """
         df = self._get_status_df()
@@ -189,7 +189,7 @@ class ObservabilityReader:
         df = self._clean_status_df(df)
 
         # Deduplicate to latest status per (node, input)
-        group_cols = ["node_label"] + self.tag_columns
+        group_cols = ["node_label"] + self.key_columns
         group_cols = [c for c in group_cols if c in df.columns]
         df = df.sort("timestamp").unique(subset=group_cols, keep="last")
 
@@ -207,14 +207,14 @@ class ObservabilityReader:
         """Full log entries for a node.
 
         Returns all log fields: stdout, stderr, python logs, traceback,
-        success status, and timestamp, alongside tag columns.
+        success status, and timestamp, alongside key columns.
 
         Args:
             node: Node name to query. Use ``reader.nodes`` to see
                 available names.
 
         Returns:
-            DataFrame with columns: ``node_label``, tag columns,
+            DataFrame with columns: ``node_label``, key columns,
             ``stdout_log``, ``stderr_log``, ``python_logs``,
             ``traceback``, ``success``, ``timestamp``.
 

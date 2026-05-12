@@ -24,14 +24,14 @@ class DataFrameSource(RootSource):
     """A source backed by a Polars DataFrame (or any Polars-compatible data).
 
     The DataFrame is converted to an Arrow table and enriched by
-    ``SourceStreamBuilder`` (source-info, schema-hash, system tags).
+    ``SourceStreamBuilder`` (source-info, schema-hash, system keys).
     """
 
     def __init__(
         self,
         data: FrameInitTypes,
-        tag_columns: str | Collection[str] = (),
-        system_tag_columns: Collection[str] = (),
+        key_columns: str | Collection[str] = (),
+        system_key_columns: Collection[str] = (),
         source_id: str | None = None,
         schema: pa.Schema | None = None,
         **kwargs: Any,
@@ -51,15 +51,15 @@ class DataFrameSource(RootSource):
             )
             df = df.with_columns([pl.from_arrow(c) for c in sub_table])
 
-        if isinstance(tag_columns, str):
-            tag_columns = [tag_columns]
-        tag_columns = list(tag_columns)
+        if isinstance(key_columns, str):
+            key_columns = [key_columns]
+        key_columns = list(key_columns)
 
         df = polars_data_utils.drop_system_columns(df)
 
-        missing = set(tag_columns) - set(df.columns)
+        missing = set(key_columns) - set(df.columns)
         if missing:
-            raise ValueError(f"TagProtocol column(s) not found in data: {missing}")
+            raise ValueError(f"KeyProtocol column(s) not found in data: {missing}")
 
         arrow_table = df.to_arrow()
         if schema is not None:
@@ -72,13 +72,13 @@ class DataFrameSource(RootSource):
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(
             arrow_table,
-            tag_columns=tag_columns,
+            key_columns=key_columns,
             source_id=self._source_id,
-            system_tag_columns=system_tag_columns,
+            system_key_columns=system_key_columns,
         )
 
         self._stream = result.stream
-        self._tag_columns = result.tag_columns
+        self._key_columns = result.key_columns
         if self._source_id is None:
             self._source_id = result.source_id
 
@@ -86,7 +86,7 @@ class DataFrameSource(RootSource):
         """Serialize metadata-only config (DataFrame is not serializable)."""
         return {
             "source_type": "data_frame",
-            "tag_columns": list(self._tag_columns),
+            "key_columns": list(self._key_columns),
             "source_id": self.source_id,
             **self._identity_config(),
         }

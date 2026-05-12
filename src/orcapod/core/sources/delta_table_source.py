@@ -22,14 +22,14 @@ class DeltaTableSource(RootSource):
 
     The table is read once at construction time using ``deltalake``'s
     PyArrow integration. The resulting Arrow table is enriched by
-    ``SourceStreamBuilder`` (source-info, schema-hash, system tags).
+    ``SourceStreamBuilder`` (source-info, schema-hash, system keys).
     """
 
     def __init__(
         self,
         delta_table_path: PathLike,
-        tag_columns: Collection[str] = (),
-        system_tag_columns: Collection[str] = (),
+        key_columns: Collection[str] = (),
+        system_key_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
         **kwargs: Any,
@@ -54,15 +54,15 @@ class DeltaTableSource(RootSource):
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(
             table,
-            tag_columns=tag_columns,
+            key_columns=key_columns,
             source_id=self._source_id,
             record_id_column=record_id_column,
-            system_tag_columns=system_tag_columns,
+            system_key_columns=system_key_columns,
         )
 
         self._stream = result.stream
-        self._tag_columns = result.tag_columns
-        self._system_tag_columns = result.system_tag_columns
+        self._key_columns = result.key_columns
+        self._system_key_columns = result.system_key_columns
         self._record_id_column = record_id_column
         if self._source_id is None:
             self._source_id = result.source_id
@@ -72,8 +72,8 @@ class DeltaTableSource(RootSource):
         return {
             "source_type": "delta_table",
             "delta_table_path": str(self._delta_table_path),
-            "tag_columns": list(self._tag_columns),
-            "system_tag_columns": list(self._system_tag_columns),
+            "key_columns": list(self._key_columns),
+            "system_key_columns": list(self._system_key_columns),
             "record_id_column": self._record_id_column,
             "source_id": self.source_id,
             **self._identity_config(),
@@ -84,8 +84,8 @@ class DeltaTableSource(RootSource):
         """Reconstruct a DeltaTableSource from a config dict."""
         return cls(
             delta_table_path=config["delta_table_path"],
-            tag_columns=config.get("tag_columns", ()),
-            system_tag_columns=config.get("system_tag_columns", ()),
+            key_columns=config.get("key_columns", ()),
+            system_key_columns=config.get("system_key_columns", ()),
             record_id_column=config.get("record_id_column"),
             source_id=config.get("source_id"),
         )

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Collection, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from orcapod.protocols.core_protocols.datagrams import DataProtocol, TagProtocol
+from orcapod.protocols.core_protocols.datagrams import DataProtocol, KeyProtocol
 from orcapod.protocols.core_protocols.traceable import TraceableProtocol
 from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 from orcapod.types import ColumnConfig, Schema
@@ -21,7 +21,7 @@ class StreamProtocol(TraceableProtocol, PipelineElementProtocol, Protocol):
     """
     Base protocol for all streams in Orcapod.
 
-    Streams represent sequences of (TagProtocol, DataProtocol) pairs flowing through the
+    Streams represent sequences of (KeyProtocol, DataProtocol) pairs flowing through the
     computational graph. They are the fundamental data structure connecting
     kernels and carrying both data and metadata.
 
@@ -30,7 +30,7 @@ class StreamProtocol(TraceableProtocol, PipelineElementProtocol, Protocol):
     - Live: Dynamic streams that stay current with upstream dependencies
 
     All streams provide:
-    - Iteration over (tag, data) pairs
+    - Iteration over (key, data) pairs
     - Type information and schema access
     - Lineage information (source kernel and upstream streams)
     - Basic caching and freshness tracking
@@ -78,7 +78,7 @@ class StreamProtocol(TraceableProtocol, PipelineElementProtocol, Protocol):
         """
         Available keys/fields in the stream content.
 
-        Returns the field names present in both tags and data.
+        Returns the field names present in both keys and data.
         This provides schema information without requiring type details,
         useful for:
         - Schema inspection and exploration
@@ -86,7 +86,7 @@ class StreamProtocol(TraceableProtocol, PipelineElementProtocol, Protocol):
         - Field validation and mapping
 
         Returns:
-            tuple[tuple[str, ...], tuple[str, ...]]: (tag_keys, data_keys)
+            tuple[tuple[str, ...], tuple[str, ...]]: (key_keys, data_keys)
         """
         ...
 
@@ -99,38 +99,38 @@ class StreamProtocol(TraceableProtocol, PipelineElementProtocol, Protocol):
         """
         Type specifications for the stream content.
 
-        Returns the type schema for both tags and data in this stream.
+        Returns the type schema for both keys and data in this stream.
         This information is used for:
         - Type checking and validation
         - Schema inference and planning
         - Compatibility checking between kernels
 
         Returns:
-            tuple[Schema, Schema]: (tag_types, data_types)
+            tuple[Schema, Schema]: (key_types, data_types)
         """
         ...
 
-    def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+    def iter_data(self) -> Iterator[tuple[KeyProtocol, DataProtocol]]:
         """
-        Generates explicit iterator over (tag, data) pairs in the stream.
+        Generates explicit iterator over (key, data) pairs in the stream.
 
         Note that multiple invocation of `iter_data` may not always
         return an identical iterator.
 
         Yields:
-            tuple[TagProtocol, DataProtocol]: Sequential (tag, data) pairs
+            tuple[KeyProtocol, DataProtocol]: Sequential (key, data) pairs
         """
         ...
 
-    def async_iter_data(self) -> AsyncIterator[tuple[TagProtocol, DataProtocol]]:
+    def async_iter_data(self) -> AsyncIterator[tuple[KeyProtocol, DataProtocol]]:
         """
-        Generates asynchronous iterator over (tag, data) pairs in the stream.
+        Generates asynchronous iterator over (key, data) pairs in the stream.
 
         Note that multiple invocation of `async_iter_data` may not always
         return an identical iterator.
 
         Yields:
-            tuple[tagProtocol, DataProtcol]: Asynchrnous sequential (tag, data) pairs
+            tuple[tagProtocol, DataProtcol]: Asynchrnous sequential (key, data) pairs
 
         """
         ...
@@ -144,7 +144,7 @@ class StreamProtocol(TraceableProtocol, PipelineElementProtocol, Protocol):
         """
         Convert the entire stream to a PyArrow Table.
 
-        Materializes all (tag, data) pairs into a single table for
+        Materializes all (key, data) pairs into a single table for
         analysis and processing. This operation may be expensive for
         large streams or live streams that need computation.
 
@@ -205,9 +205,9 @@ class StreamWithOperationsProtocol(StreamProtocol, Protocol):
 
     def flow(
         self,
-    ) -> Sequence[tuple[TagProtocol, DataProtocol]]:
+    ) -> Sequence[tuple[KeyProtocol, DataProtocol]]:
         """
-        Return the entire stream as a collection of (tag, data) pairs.
+        Return the entire stream as a collection of (key, data) pairs.
 
         This method materializes the stream content into a list or similar
         collection type. It is useful for small streams or when you need
@@ -226,7 +226,7 @@ class StreamWithOperationsProtocol(StreamProtocol, Protocol):
         Join this stream with another stream.
 
         Combines two streams into a single stream by merging their content.
-        The resulting stream contains all (tag, data) pairs from both
+        The resulting stream contains all (key, data) pairs from both
         streams, preserving their order.
 
         Args:
@@ -244,8 +244,8 @@ class StreamWithOperationsProtocol(StreamProtocol, Protocol):
         Perform a semi-join with another stream.
 
         This operation filters this stream to only include data that have
-        corresponding tags in the other stream. The resulting stream contains
-        all (tag, data) pairs from this stream that match tags in the other.
+        corresponding keys in the other stream. The resulting stream contains
+        all (key, data) pairs from this stream that match keys in the other.
 
         Args:
             other_stream: The other stream to semi-join with this one.
@@ -255,14 +255,14 @@ class StreamWithOperationsProtocol(StreamProtocol, Protocol):
         """
         ...
 
-    def map_tags(
+    def map_keys(
         self,
         name_map: Mapping[str, str],
         drop_unmapped: bool = True,
         label: str | None = None,
     ) -> "StreamProtocol":
         """
-        Map tag names in this stream to new names based on the provided mapping.
+        Map key names in this stream to new names based on the provided mapping.
         """
         ...
 
@@ -285,15 +285,15 @@ class StreamWithOperationsProtocol(StreamProtocol, Protocol):
         **constraints: Any,
     ) -> "StreamProtocol": ...
 
-    def select_tag_columns(
+    def select_key_columns(
         self,
-        tag_columns: str | Collection[str],
+        key_columns: str | Collection[str],
         strict: bool = True,
         label: str | None = None,
     ) -> "StreamProtocol":
         """
-        Select the specified tag columns from the stream. A ValueError is raised
-        if one or more specified tag columns do not exist in the stream unless strict = False.
+        Select the specified key columns from the stream. A ValueError is raised
+        if one or more specified key columns do not exist in the stream unless strict = False.
         """
         ...
 
@@ -304,20 +304,20 @@ class StreamWithOperationsProtocol(StreamProtocol, Protocol):
         label: str | None = None,
     ) -> "StreamProtocol":
         """
-        Select the specified tag columns from the stream. A ValueError is raised
-        if one or more specified tag columns do not exist in the stream unless strict = False.
+        Select the specified key columns from the stream. A ValueError is raised
+        if one or more specified key columns do not exist in the stream unless strict = False.
         """
         ...
 
-    def drop_tag_columns(
+    def drop_key_columns(
         self,
-        tag_columns: str | Collection[str],
+        key_columns: str | Collection[str],
         strict: bool = True,
         label: str | None = None,
     ) -> "StreamProtocol":
         """
-        Drop the specified tag columns from the stream. A ValueError is raised
-        if one or more specified tag columns do not exist in the stream unless strict = False.
+        Drop the specified key columns from the stream. A ValueError is raised
+        if one or more specified key columns do not exist in the stream unless strict = False.
         """
         ...
 
@@ -343,17 +343,17 @@ class StreamWithOperationsProtocol(StreamProtocol, Protocol):
         """
         Batch the stream into groups of the specified size.
 
-        This operation groups (tag, data) pairs into batches for more
-        efficient processing. Each batch is represented as a single (tag, data)
-        pair where the tag is a list of tags and the data is a list of data.
+        This operation groups (key, data) pairs into batches for more
+        efficient processing. Each batch is represented as a single (key, data)
+        pair where the key is a list of keys and the data is a list of data.
 
         Args:
-            batch_size: Number of (tag, data) pairs per batch. If 0, all
+            batch_size: Number of (key, data) pairs per batch. If 0, all
                         pairs are included in a single batch.
             drop_partial_batch: If True, drop the last batch if it has fewer
                              than batch_size pairs.
 
         Returns:
-            Self: New stream containing batched (tag, data) pairs.
+            Self: New stream containing batched (key, data) pairs.
         """
         ...

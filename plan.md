@@ -16,13 +16,13 @@ Add `async_execute` to all four Node classes. Add cache-aware `async_call` to
 
 ```
 _FunctionPodBase (TraceableBase)
-  ├── process_data(tag, data)       → calls data_function.call(data)
+  ├── process_data(key, data)       → calls data_function.call(data)
   ├── FunctionPod
   │     ├── process() → FunctionPodStream
   │     └── async_execute()             → calls data_function.async_call(data) DIRECTLY
   │
   FunctionPodStream (StreamBase)
-  │   ├── _iter_data_sequential()    → calls _function_pod.process_data(tag, data) ✓
+  │   ├── _iter_data_sequential()    → calls _function_pod.process_data(key, data) ✓
   │   └── _iter_data_concurrent()    → calls _execute_concurrent(data_function, ...) DIRECTLY
   │
   FunctionNode (StreamBase)
@@ -31,10 +31,10 @@ _FunctionPodBase (TraceableBase)
   │   └── (no async_execute)
   │
   PersistentFunctionNode (FunctionNode)
-      ├── process_data(tag, data)   → calls _data_function.call(data, skip_cache_*=...)
+      ├── process_data(key, data)   → calls _data_function.call(data, skip_cache_*=...)
       │                                   then add_pipeline_record(...)
       ├── iter_data()                → Phase 1: replay from DB
-      │                                   Phase 2: calls self.process_data(tag, data) ✓
+      │                                   Phase 2: calls self.process_data(key, data) ✓
       └── (no async_execute)
 
 OperatorNode (StreamBase)
@@ -86,14 +86,14 @@ execution paths go through them — sequential, concurrent, and async. No direct
 `data_function.call()` or `data_function.async_call()` calls outside of these methods.
 
 ```
-_FunctionPodBase.process_data(tag, pkt)         → data_function.call(pkt)
-_FunctionPodBase.async_process_data(tag, pkt)    → await data_function.async_call(pkt)
+_FunctionPodBase.process_data(key, pkt)         → data_function.call(pkt)
+_FunctionPodBase.async_process_data(key, pkt)    → await data_function.async_call(pkt)
 
-FunctionNode.process_data(tag, pkt)              → self._function_pod.process_data(tag, pkt)
-FunctionNode.async_process_data(tag, pkt)        → await self._function_pod.async_process_data(tag, pkt)
+FunctionNode.process_data(key, pkt)              → self._function_pod.process_data(key, pkt)
+FunctionNode.async_process_data(key, pkt)        → await self._function_pod.async_process_data(key, pkt)
 
-PersistentFunctionNode.process_data(tag, pkt)    → cache check → self._function_pod.process_data → pipeline record
-PersistentFunctionNode.async_process_data(tag, pkt) → cache check → await self._function_pod.async_process_data → pipeline record
+PersistentFunctionNode.process_data(key, pkt)    → cache check → self._function_pod.process_data → pipeline record
+PersistentFunctionNode.async_process_data(key, pkt) → cache check → await self._function_pod.async_process_data → pipeline record
 ```
 
 Wait — there's a subtlety with PersistentFunctionNode. Today its `process_data` calls
@@ -105,11 +105,11 @@ needs to pass `skip_cache_*` kwargs that the base `process_data` doesn't accept.
 The cleanest structure:
 
 ```
-PersistentFunctionNode.process_data(tag, pkt)
+PersistentFunctionNode.process_data(key, pkt)
   → self._data_function.call(pkt, skip_cache_*=...)    # CachedDataFunction (sync)
   → self.add_pipeline_record(...)                         # pipeline DB (sync)
 
-PersistentFunctionNode.async_process_data(tag, pkt)
+PersistentFunctionNode.async_process_data(key, pkt)
   → await self._data_function.async_call(pkt, skip_cache_*=...)  # CachedDataFunction (async)
   → self.add_pipeline_record(...)                                   # pipeline DB (sync)
 ```
@@ -128,17 +128,17 @@ through `process_data` (sync).
 For **FunctionPodStream**, the target is the pod:
 ```python
 # concurrent
-await self._function_pod.async_process_data(tag, pkt)
+await self._function_pod.async_process_data(key, pkt)
 # fallback
-self._function_pod.process_data(tag, pkt)
+self._function_pod.process_data(key, pkt)
 ```
 
 For **FunctionNode**, the target is `self` — so overrides (PersistentFunctionNode) kick in:
 ```python
 # concurrent
-await self.async_process_data(tag, pkt)
+await self.async_process_data(key, pkt)
 # fallback
-self.process_data(tag, pkt)
+self.process_data(key, pkt)
 ```
 
 This means PersistentFunctionNode's concurrent path **automatically** gets cache checks +
@@ -184,10 +184,10 @@ Add alongside existing `process_data` (after line 180):
 
 ```python
 async def async_process_data(
-    self, tag: TagProtocol, data: DataProtocol
-) -> tuple[TagProtocol, DataProtocol | None]:
+    self, key: KeyProtocol, data: DataProtocol
+) -> tuple[KeyProtocol, DataProtocol | None]:
     """Async counterpart of ``process_data``."""
-    return tag, await self.data_function.async_call(data)
+    return key, await self.data_function.async_call(data)
 ```
 
 ### Step 2: Fix `FunctionPod.async_execute` to use `async_process_data`
@@ -197,11 +197,11 @@ async def async_process_data(
 Change the `process_one` inner function (lines 315-322):
 
 ```python
-async def process_one(tag: TagProtocol, data: DataProtocol) -> None:
+async def process_one(key: KeyProtocol, data: DataProtocol) -> None:
     try:
-        tag, result_data = await self.async_process_data(tag, data)
+        key, result_data = await self.async_process_data(key, data)
         if result_data is not None:
-            await output.send((tag, result_data))
+            await output.send((key, result_data))
     finally:
         if sem is not None:
             sem.release()
@@ -217,16 +217,16 @@ routing:
 ```python
 def _iter_data_concurrent(
     self,
-) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+) -> Iterator[tuple[KeyProtocol, DataProtocol]]:
     """Collect remaining inputs, execute concurrently, and yield results in order."""
     input_iter = self._cached_input_iterator
 
-    all_inputs: list[tuple[int, TagProtocol, DataProtocol]] = []
-    to_compute: list[tuple[int, TagProtocol, DataProtocol]] = []
-    for i, (tag, data) in enumerate(input_iter):
-        all_inputs.append((i, tag, data))
+    all_inputs: list[tuple[int, KeyProtocol, DataProtocol]] = []
+    to_compute: list[tuple[int, KeyProtocol, DataProtocol]] = []
+    for i, (key, data) in enumerate(input_iter):
+        all_inputs.append((i, key, data))
         if i not in self._cached_output_datas:
-            to_compute.append((i, tag, data))
+            to_compute.append((i, key, data))
     self._cached_input_iterator = None
 
     if to_compute:
@@ -238,30 +238,30 @@ def _iter_data_concurrent(
         if loop is not None:
             # Already in event loop — fall back to sequential sync
             results = [
-                self._function_pod.process_data(tag, pkt)
-                for _, tag, pkt in to_compute
+                self._function_pod.process_data(key, pkt)
+                for _, key, pkt in to_compute
             ]
         else:
             # No event loop — run concurrently via asyncio.run
-            async def _gather() -> list[tuple[TagProtocol, DataProtocol | None]]:
+            async def _gather() -> list[tuple[KeyProtocol, DataProtocol | None]]:
                 return list(
                     await asyncio.gather(
                         *[
-                            self._function_pod.async_process_data(tag, pkt)
-                            for _, tag, pkt in to_compute
+                            self._function_pod.async_process_data(key, pkt)
+                            for _, key, pkt in to_compute
                         ]
                     )
                 )
 
             results = asyncio.run(_gather())
 
-        for (i, _, _), (tag, output_data) in zip(to_compute, results):
-            self._cached_output_datas[i] = (tag, output_data)
+        for (i, _, _), (key, output_data) in zip(to_compute, results):
+            self._cached_output_datas[i] = (key, output_data)
 
     for i, *_ in all_inputs:
-        tag, data = self._cached_output_datas[i]
+        key, data = self._cached_output_datas[i]
         if data is not None:
-            yield tag, data
+            yield key, data
 ```
 
 **Note:** The method signature drops the `data_function` parameter — it no longer needs
@@ -270,7 +270,7 @@ it since it routes through `self._function_pod`.
 The `iter_data` method that calls this also needs updating — remove the `pf` argument:
 
 ```python
-def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+def iter_data(self) -> Iterator[tuple[KeyProtocol, DataProtocol]]:
     if self.is_stale:
         self.clear_cache()
     if self._cached_input_iterator is not None:
@@ -280,9 +280,9 @@ def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
             yield from self._iter_data_sequential()
     else:
         for i in range(len(self._cached_output_datas)):
-            tag, data = self._cached_output_datas[i]
+            key, data = self._cached_output_datas[i]
             if data is not None:
-                yield tag, data
+                yield key, data
 ```
 
 ### Step 4: Fix `FunctionNode._iter_data_sequential` to use `process_data`
@@ -292,12 +292,12 @@ def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
 Change line 831 from:
 ```python
 output_data = self._data_function.call(data)
-self._cached_output_datas[i] = (tag, output_data)
+self._cached_output_datas[i] = (key, output_data)
 ```
 to:
 ```python
-tag, output_data = self.process_data(tag, data)
-self._cached_output_datas[i] = (tag, output_data)
+key, output_data = self.process_data(key, data)
+self._cached_output_datas[i] = (key, output_data)
 ```
 
 ### Step 5: Fix `FunctionNode._iter_data_concurrent` to use `async_process_data`
@@ -309,16 +309,16 @@ Same transformation as Step 3, but routing through `self` instead of `self._func
 ```python
 def _iter_data_concurrent(
     self,
-) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+) -> Iterator[tuple[KeyProtocol, DataProtocol]]:
     """Collect remaining inputs, execute concurrently, and yield results in order."""
     input_iter = self._cached_input_iterator
 
-    all_inputs: list[tuple[int, TagProtocol, DataProtocol]] = []
-    to_compute: list[tuple[int, TagProtocol, DataProtocol]] = []
-    for i, (tag, data) in enumerate(input_iter):
-        all_inputs.append((i, tag, data))
+    all_inputs: list[tuple[int, KeyProtocol, DataProtocol]] = []
+    to_compute: list[tuple[int, KeyProtocol, DataProtocol]] = []
+    for i, (key, data) in enumerate(input_iter):
+        all_inputs.append((i, key, data))
         if i not in self._cached_output_datas:
-            to_compute.append((i, tag, data))
+            to_compute.append((i, key, data))
     self._cached_input_iterator = None
 
     if to_compute:
@@ -330,30 +330,30 @@ def _iter_data_concurrent(
         if loop is not None:
             # Already in event loop — fall back to sequential sync
             results = [
-                self.process_data(tag, pkt)
-                for _, tag, pkt in to_compute
+                self.process_data(key, pkt)
+                for _, key, pkt in to_compute
             ]
         else:
             # No event loop — run concurrently via asyncio.run
-            async def _gather() -> list[tuple[TagProtocol, DataProtocol | None]]:
+            async def _gather() -> list[tuple[KeyProtocol, DataProtocol | None]]:
                 return list(
                     await asyncio.gather(
                         *[
-                            self.async_process_data(tag, pkt)
-                            for _, tag, pkt in to_compute
+                            self.async_process_data(key, pkt)
+                            for _, key, pkt in to_compute
                         ]
                     )
                 )
 
             results = asyncio.run(_gather())
 
-        for (i, _, _), (tag, output_data) in zip(to_compute, results):
-            self._cached_output_datas[i] = (tag, output_data)
+        for (i, _, _), (key, output_data) in zip(to_compute, results):
+            self._cached_output_datas[i] = (key, output_data)
 
     for i, *_ in all_inputs:
-        tag, data = self._cached_output_datas[i]
+        key, data = self._cached_output_datas[i]
         if data is not None:
-            yield tag, data
+            yield key, data
 ```
 
 **Critical difference from Step 3:** Uses `self.process_data` / `self.async_process_data`
@@ -376,16 +376,16 @@ FunctionNode currently has no `process_data`. Add delegation to the function pod
 
 ```python
 def process_data(
-    self, tag: TagProtocol, data: DataProtocol
-) -> tuple[TagProtocol, DataProtocol | None]:
+    self, key: KeyProtocol, data: DataProtocol
+) -> tuple[KeyProtocol, DataProtocol | None]:
     """Process a single data by delegating to the function pod."""
-    return self._function_pod.process_data(tag, data)
+    return self._function_pod.process_data(key, data)
 
 async def async_process_data(
-    self, tag: TagProtocol, data: DataProtocol
-) -> tuple[TagProtocol, DataProtocol | None]:
+    self, key: KeyProtocol, data: DataProtocol
+) -> tuple[KeyProtocol, DataProtocol | None]:
     """Async counterpart of ``process_data``."""
-    return await self._function_pod.async_process_data(tag, data)
+    return await self._function_pod.async_process_data(key, data)
 ```
 
 ### Step 8: Add `FunctionNode.async_execute`
@@ -397,15 +397,15 @@ Sequential streaming through `async_process_data`:
 ```python
 async def async_execute(
     self,
-    inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
-    output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+    inputs: Sequence[ReadableChannel[tuple[KeyProtocol, DataProtocol]]],
+    output: WritableChannel[tuple[KeyProtocol, DataProtocol]],
 ) -> None:
     """Streaming async execution — process each data via async_process_data."""
     try:
-        async for tag, data in inputs[0]:
-            tag, result_data = await self.async_process_data(tag, data)
+        async for key, data in inputs[0]:
+            key, result_data = await self.async_process_data(key, data)
             if result_data is not None:
-                await output.send((tag, result_data))
+                await output.send((key, result_data))
     finally:
         await output.close()
 ```
@@ -453,11 +453,11 @@ PersistentFunctionNode already has `process_data` (line 1027-1066) which calls
 ```python
 async def async_process_data(
     self,
-    tag: TagProtocol,
+    key: KeyProtocol,
     data: DataProtocol,
     skip_cache_lookup: bool = False,
     skip_cache_insert: bool = False,
-) -> tuple[TagProtocol, DataProtocol | None]:
+) -> tuple[KeyProtocol, DataProtocol | None]:
     """Async counterpart of ``process_data``.
 
     Uses the CachedDataFunction's async_call for computation + result caching.
@@ -476,13 +476,13 @@ async def async_process_data(
             )
         )
         self.add_pipeline_record(
-            tag,
+            key,
             data,
             data_record_id=output_data.datagram_id,
             computed=result_computed,
         )
 
-    return tag, output_data
+    return key, output_data
 ```
 
 ### Step 11: Add `PersistentFunctionNode.async_execute` (two-phase)
@@ -494,8 +494,8 @@ Overrides `FunctionNode.async_execute`:
 ```python
 async def async_execute(
     self,
-    inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
-    output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+    inputs: Sequence[ReadableChannel[tuple[KeyProtocol, DataProtocol]]],
+    output: WritableChannel[tuple[KeyProtocol, DataProtocol]],
 ) -> None:
     """Two-phase async execution: replay cached, then compute missing."""
     try:
@@ -503,24 +503,24 @@ async def async_execute(
         existing = self.get_all_records(columns={"meta": True})
         computed_hashes: set[str] = set()
         if existing is not None and existing.num_rows > 0:
-            tag_keys = self._input_stream.keys()[0]
+            key_keys = self._input_stream.keys()[0]
             hash_col = constants.INPUT_DATA_HASH_COL
             computed_hashes = set(
                 cast(list[str], existing.column(hash_col).to_pylist())
             )
             data_table = existing.drop([hash_col])
-            existing_stream = ArrowTableStream(data_table, tag_columns=tag_keys)
-            for tag, data in existing_stream.iter_data():
-                await output.send((tag, data))
+            existing_stream = ArrowTableStream(data_table, key_columns=key_keys)
+            for key, data in existing_stream.iter_data():
+                await output.send((key, data))
 
         # Phase 2: process data not already in the DB
-        async for tag, data in inputs[0]:
+        async for key, data in inputs[0]:
             input_hash = data.content_hash().to_string()
             if input_hash in computed_hashes:
                 continue
-            tag, output_data = await self.async_process_data(tag, data)
+            key, output_data = await self.async_process_data(key, data)
             if output_data is not None:
-                await output.send((tag, output_data))
+                await output.send((key, output_data))
     finally:
         await output.close()
 ```
@@ -534,8 +534,8 @@ Direct pass-through:
 ```python
 async def async_execute(
     self,
-    inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
-    output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+    inputs: Sequence[ReadableChannel[tuple[KeyProtocol, DataProtocol]]],
+    output: WritableChannel[tuple[KeyProtocol, DataProtocol]],
 ) -> None:
     """Delegate to operator's async_execute."""
     await self._operator.async_execute(inputs, output)
@@ -549,7 +549,7 @@ async def async_execute(
 def _store_output_stream(self, stream: StreamProtocol) -> None:
     """Materialize stream and store in the pipeline database with per-row dedup."""
     output_table = stream.as_table(
-        columns={"source": True, "system_tags": True},
+        columns={"source": True, "system_keys": True},
     )
 
     arrow_hasher = self.data_context.arrow_hasher
@@ -595,8 +595,8 @@ def _compute_and_store(self) -> None:
 ```python
 async def async_execute(
     self,
-    inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
-    output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+    inputs: Sequence[ReadableChannel[tuple[KeyProtocol, DataProtocol]]],
+    output: WritableChannel[tuple[KeyProtocol, DataProtocol]],
 ) -> None:
     """Async execution with cache mode handling.
 
@@ -608,13 +608,13 @@ async def async_execute(
         if self._cache_mode == CacheMode.REPLAY:
             self._replay_from_cache()
             assert self._cached_output_stream is not None
-            for tag, data in self._cached_output_stream.iter_data():
-                await output.send((tag, data))
+            for key, data in self._cached_output_stream.iter_data():
+                await output.send((key, data))
             return  # finally block closes output
 
         # OFF or LOG: delegate to operator, forward results downstream
-        intermediate = Channel[tuple[TagProtocol, DataProtocol]]()
-        collected: list[tuple[TagProtocol, DataProtocol]] = []
+        intermediate = Channel[tuple[KeyProtocol, DataProtocol]]()
+        collected: list[tuple[KeyProtocol, DataProtocol]] = []
 
         async def forward() -> None:
             async for item in intermediate.reader:
@@ -737,16 +737,16 @@ uv run pytest tests/ -x
 **Sync sequential path:**
 ```
 FunctionPodStream._iter_data_sequential
-  → self._function_pod.process_data(tag, pkt)       # already correct
+  → self._function_pod.process_data(key, pkt)       # already correct
     → data_function.call(pkt)
 
 FunctionNode._iter_data_sequential
-  → self.process_data(tag, pkt)                      # CHANGED: was _data_function.call(pkt)
-    → self._function_pod.process_data(tag, pkt)
+  → self.process_data(key, pkt)                      # CHANGED: was _data_function.call(pkt)
+    → self._function_pod.process_data(key, pkt)
       → data_function.call(pkt)
 
 PersistentFunctionNode._iter_data_sequential (inherited from FunctionNode)
-  → self.process_data(tag, pkt)                      # polymorphism kicks in
+  → self.process_data(key, pkt)                      # polymorphism kicks in
     → CachedDataFunction.call(pkt, skip_cache_*=...) # cache check + compute + record
     → self.add_pipeline_record(...)                     # pipeline DB
 ```
@@ -755,21 +755,21 @@ PersistentFunctionNode._iter_data_sequential (inherited from FunctionNode)
 ```
 FunctionPodStream._iter_data_concurrent
   → asyncio.run(gather(
-        self._function_pod.async_process_data(tag, pkt) ...   # CHANGED: was _execute_concurrent
+        self._function_pod.async_process_data(key, pkt) ...   # CHANGED: was _execute_concurrent
     ))
   OR (if event loop running):
-    self._function_pod.process_data(tag, pkt) ...             # fallback
+    self._function_pod.process_data(key, pkt) ...             # fallback
 
 FunctionNode._iter_data_concurrent
   → asyncio.run(gather(
-        self.async_process_data(tag, pkt) ...                 # CHANGED: was _execute_concurrent
+        self.async_process_data(key, pkt) ...                 # CHANGED: was _execute_concurrent
     ))
   OR (if event loop running):
-    self.process_data(tag, pkt) ...                           # fallback
+    self.process_data(key, pkt) ...                           # fallback
 
 PersistentFunctionNode._iter_data_concurrent (inherited from FunctionNode)
   → asyncio.run(gather(
-        self.async_process_data(tag, pkt) ...                 # polymorphism kicks in
+        self.async_process_data(key, pkt) ...                 # polymorphism kicks in
           → await CachedDataFunction.async_call(pkt)          # cache + compute
           → self.add_pipeline_record(...)                       # pipeline DB
     ))
@@ -778,18 +778,18 @@ PersistentFunctionNode._iter_data_concurrent (inherited from FunctionNode)
 **Async execution path:**
 ```
 FunctionPod.async_execute
-  → await self.async_process_data(tag, pkt)          # CHANGED: was data_function.async_call
+  → await self.async_process_data(key, pkt)          # CHANGED: was data_function.async_call
     → await data_function.async_call(pkt)
 
 FunctionNode.async_execute                              # NEW
-  → await self.async_process_data(tag, pkt)
-    → await self._function_pod.async_process_data(tag, pkt)
+  → await self.async_process_data(key, pkt)
+    → await self._function_pod.async_process_data(key, pkt)
       → await data_function.async_call(pkt)
 
 PersistentFunctionNode.async_execute                    # NEW (two-phase)
   Phase 1: emit from DB
   Phase 2:
-    → await self.async_process_data(tag, pkt)         # polymorphic override
+    → await self.async_process_data(key, pkt)         # polymorphic override
       → await CachedDataFunction.async_call(pkt)      # cache + compute
       → self.add_pipeline_record(...)                   # pipeline DB (sync)
 

@@ -1,11 +1,11 @@
 """
-Tag and Data — datagram subclasses with system-tags and source-info support.
+Key and Data — datagram subclasses with system-keys and source-info support.
 
-``Tag``
-    Extends ``Datagram`` with *system tags*: metadata fields whose names start with
-    ``constants.SYSTEM_TAG_PREFIX``.  System tags travel alongside the primary data
+``Key``
+    Extends ``Datagram`` with *system keys*: metadata fields whose names start with
+    ``constants.SYSTEM_KEY_PREFIX``.  System keys travel alongside the primary data
     but are excluded from content hashing and structural operations unless explicitly
-    requested via ``ColumnConfig(system_tags=True)``.
+    requested via ``ColumnConfig(system_keys=True)``.
 
 ``Data``
     Extends ``Datagram`` with *source information*: provenance tokens (strings or None)
@@ -37,27 +37,27 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Tag
+# Key
 # ---------------------------------------------------------------------------
 
 
-class Tag(Datagram):
+class Key(Datagram):
     """
-    Datagram with system-tags support.
+    Datagram with system-keys support.
 
-    System tags are metadata fields whose names begin with
-    ``constants.SYSTEM_TAG_PREFIX``.  They are excluded from the primary data
+    System keys are metadata fields whose names begin with
+    ``constants.SYSTEM_KEY_PREFIX``.  They are excluded from the primary data
     representation (and therefore from content hashing) unless the caller requests
-    them via ``ColumnConfig(system_tags=True)``.
+    them via ``ColumnConfig(system_keys=True)``.
 
     Accepts the same inputs as ``Datagram`` (dict or Arrow table/batch).
-    System-tag fields found in the input are automatically extracted.
+    System-key fields found in the input are automatically extracted.
     """
 
     def __init__(
         self,
         data: "Mapping[str, DataValue] | pa.Table | pa.RecordBatch",
-        system_tags: "Mapping[str, DataValue] | None" = None,
+        system_keys: "Mapping[str, DataValue] | None" = None,
         meta_info: "Mapping[str, DataValue] | None" = None,
         python_schema: "SchemaLike | None" = None,
         data_context: "str | contexts.DataContext | None" = None,
@@ -69,11 +69,11 @@ class Tag(Datagram):
         if isinstance(data, _pa.RecordBatch):
             data = _pa.Table.from_batches([data])
 
-        extracted_sys_tags: dict[str, DataValue]
+        extracted_sys_keys: dict[str, DataValue]
 
         if isinstance(data, _pa.Table):
-            # Arrow path: call super() first, then extract system-tag columns from
-            # self._data_table (same pattern as the legacy ArrowTag).
+            # Arrow path: call super() first, then extract system-key columns from
+            # self._data_table (same pattern as the legacy ArrowKey).
             super().__init__(
                 data,
                 meta_info=meta_info,
@@ -81,33 +81,33 @@ class Tag(Datagram):
                 record_id=record_id,
                 **kwargs,
             )
-            sys_tag_cols = [
+            sys_key_cols = [
                 c
                 for c in self._data_table.column_names  # type: ignore[union-attr]
-                if c.startswith(constants.SYSTEM_TAG_PREFIX)
+                if c.startswith(constants.SYSTEM_KEY_PREFIX)
             ]
-            if sys_tag_cols:
-                extracted_sys_tags = (
+            if sys_key_cols:
+                extracted_sys_keys = (
                     self._data_context.type_converter.arrow_table_to_python_dicts(
-                        self._data_table.select(sys_tag_cols)  # type: ignore[union-attr]
+                        self._data_table.select(sys_key_cols)  # type: ignore[union-attr]
                     )[0]
                 )
-                self._data_table = self._data_table.drop_columns(sys_tag_cols)  # type: ignore[union-attr]
+                self._data_table = self._data_table.drop_columns(sys_key_cols)  # type: ignore[union-attr]
                 # Invalidate derived caches
                 self._data_arrow_schema = None
             else:
-                extracted_sys_tags = {}
+                extracted_sys_keys = {}
         else:
-            # Dict path: extract system-tag keys before calling super()
+            # Dict path: extract system-key keys before calling super()
             data_only = {
                 k: v
                 for k, v in data.items()
-                if not k.startswith(constants.SYSTEM_TAG_PREFIX)
+                if not k.startswith(constants.SYSTEM_KEY_PREFIX)
             }
-            extracted_sys_tags = {
+            extracted_sys_keys = {
                 k: v
                 for k, v in data.items()
-                if k.startswith(constants.SYSTEM_TAG_PREFIX)
+                if k.startswith(constants.SYSTEM_KEY_PREFIX)
             }
             super().__init__(
                 data_only,
@@ -118,28 +118,28 @@ class Tag(Datagram):
                 **kwargs,
             )
 
-        self._system_tags: dict[str, DataValue] = {
-            **extracted_sys_tags,
-            **(system_tags or {}),
+        self._system_keys: dict[str, DataValue] = {
+            **extracted_sys_keys,
+            **(system_keys or {}),
         }
-        self._system_tags_python_schema: Schema = infer_python_schema_from_pylist_data(
-            [self._system_tags], default_type=str
+        self._system_keys_python_schema: Schema = infer_python_schema_from_pylist_data(
+            [self._system_keys], default_type=str
         )
-        self._system_tags_table: "pa.Table | None" = None
+        self._system_keys_table: "pa.Table | None" = None
 
     # ------------------------------------------------------------------
     # Internal helper
     # ------------------------------------------------------------------
 
-    def _ensure_system_tags_table(self) -> "pa.Table":
-        if self._system_tags_table is None:
-            self._system_tags_table = (
+    def _ensure_system_keys_table(self) -> "pa.Table":
+        if self._system_keys_table is None:
+            self._system_keys_table = (
                 self._data_context.type_converter.python_dicts_to_arrow_table(
-                    [self._system_tags],
-                    python_schema=self._system_tags_python_schema,
+                    [self._system_keys],
+                    python_schema=self._system_keys_python_schema,
                 )
             )
-        return self._system_tags_table
+        return self._system_keys_table
 
     # ------------------------------------------------------------------
     # Overrides
@@ -153,8 +153,8 @@ class Tag(Datagram):
     ) -> tuple[str, ...]:
         keys = super().keys(columns=columns, all_info=all_info)
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
-        if column_config.system_tags:
-            keys += tuple(self._system_tags.keys())
+        if column_config.system_keys:
+            keys += tuple(self._system_keys.keys())
         return keys
 
     def schema(
@@ -165,8 +165,8 @@ class Tag(Datagram):
     ) -> Schema:
         schema = super().schema(columns=columns, all_info=all_info)
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
-        if column_config.system_tags:
-            return Schema({**schema, **self._system_tags_python_schema})
+        if column_config.system_keys:
+            return Schema({**schema, **self._system_keys_python_schema})
         return schema
 
     def arrow_schema(
@@ -177,9 +177,9 @@ class Tag(Datagram):
     ) -> "pa.Schema":
         schema = super().arrow_schema(columns=columns, all_info=all_info)
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
-        if column_config.system_tags and self._system_tags:
+        if column_config.system_keys and self._system_keys:
             return arrow_utils.join_arrow_schemas(
-                schema, self._ensure_system_tags_table().schema
+                schema, self._ensure_system_keys_table().schema
             )
         return schema
 
@@ -191,8 +191,8 @@ class Tag(Datagram):
     ) -> "dict[str, DataValue]":
         result = super().as_dict(columns=columns, all_info=all_info)
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
-        if column_config.system_tags:
-            result.update(self._system_tags)
+        if column_config.system_keys:
+            result.update(self._system_keys)
         return result
 
     def as_table(
@@ -203,13 +203,13 @@ class Tag(Datagram):
     ) -> "pa.Table":
         table = super().as_table(columns=columns, all_info=all_info)
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
-        if column_config.system_tags and self._system_tags:
-            table = arrow_utils.hstack_tables(table, self._ensure_system_tags_table())
+        if column_config.system_keys and self._system_keys:
+            table = arrow_utils.hstack_tables(table, self._ensure_system_keys_table())
         return table
 
-    def system_tags(self) -> "dict[str, DataValue]":
-        """Return a copy of the system-tags dict."""
-        return dict(self._system_tags)
+    def system_keys(self) -> "dict[str, DataValue]":
+        """Return a copy of the system-keys dict."""
+        return dict(self._system_keys)
 
     def as_datagram(
         self,
@@ -224,11 +224,11 @@ class Tag(Datagram):
         )
 
     def copy(self, include_cache: bool = True, preserve_id: bool = False) -> Self:
-        new_tag = super().copy(include_cache=include_cache, preserve_id=preserve_id)
-        new_tag._system_tags = dict(self._system_tags)
-        new_tag._system_tags_python_schema = self._system_tags_python_schema
-        new_tag._system_tags_table = self._system_tags_table if include_cache else None
-        return new_tag
+        new_key = super().copy(include_cache=include_cache, preserve_id=preserve_id)
+        new_key._system_keys = dict(self._system_keys)
+        new_key._system_keys_python_schema = self._system_keys_python_schema
+        new_key._system_keys_table = self._system_keys_table if include_cache else None
+        return new_key
 
 
 # ---------------------------------------------------------------------------

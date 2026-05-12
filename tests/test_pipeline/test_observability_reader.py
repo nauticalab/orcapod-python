@@ -84,8 +84,8 @@ def _status_row(
         "_status_error_summary": error_summary,
         "subject": subject,
         "session_date": session_date,
-        "_tag::source_id::abc123:0": "tag_val",
-        "_tag::record_id::abc123:0": "tag_rec",
+        "_key::source_id::abc123:0": "key_val",
+        "_key::record_id::abc123:0": "key_rec",
     }
 
 
@@ -114,8 +114,8 @@ def _log_row(
         "_log_timestamp": timestamp,
         "subject": subject,
         "session_date": session_date,
-        "_tag::source_id::abc123:0": "tag_val",
-        "_tag::record_id::abc123:0": "tag_rec",
+        "_key::source_id::abc123:0": "key_val",
+        "_key::record_id::abc123:0": "key_rec",
     }
 
 
@@ -169,9 +169,9 @@ class TestDiscovery:
         reader = ObservabilityReader(results_root)
         assert reader.nodes == ["node_a", "node_b", "node_c"]
 
-    def test_discovers_tag_columns(self, results_root: Path):
+    def test_discovers_key_columns(self, results_root: Path):
         reader = ObservabilityReader(results_root)
-        assert reader.tag_columns == ["session_date", "subject"]
+        assert reader.key_columns == ["session_date", "subject"]
 
     def test_raises_on_missing_root(self, tmp_path: Path):
         with pytest.raises(ValueError, match="does not exist"):
@@ -213,8 +213,8 @@ class TestStatus:
         assert "error_summary" in df.columns
         for col in df.columns:
             assert not col.startswith("_status_")
-            assert not col.startswith("_tag::")
-            assert not col.startswith("_tag_")
+            assert not col.startswith("_key::")
+            assert not col.startswith("_key_")
             assert not col.startswith("__")
 
     def test_includes_failed_with_error_summary(self, results_root: Path):
@@ -249,8 +249,8 @@ class TestLogs:
         assert "session_date" in df.columns
         for col in df.columns:
             assert not col.startswith("_log_")
-            assert not col.startswith("_tag::")
-            assert not col.startswith("_tag_")
+            assert not col.startswith("_key::")
+            assert not col.startswith("_key_")
             assert not col.startswith("__")
 
     def test_filters_to_requested_node(self, results_root: Path):

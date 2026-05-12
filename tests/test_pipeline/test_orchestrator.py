@@ -39,17 +39,17 @@ from orcapod.pipeline import AsyncPipelineOrchestrator, Pipeline
 
 
 def _make_source(
-    tag_col: str,
+    key_col: str,
     data_col: str,
     data: dict,
 ) -> ArrowTableSource:
     table = pa.table(
         {
-            tag_col: pa.array(data[tag_col], type=pa.large_string()),
+            key_col: pa.array(data[key_col], type=pa.large_string()),
             data_col: pa.array(data[data_col], type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
+    return ArrowTableSource(table, key_columns=[key_col], infer_nullable=True)
 
 
 def _make_two_sources():
@@ -110,8 +110,8 @@ class TestOperatorNodeAsyncExecute:
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
 
-        for tag, data in src.iter_data():
-            await input_ch.writer.send((tag, data))
+        for key, data in src.iter_data():
+            await input_ch.writer.send((key, data))
         await input_ch.writer.close()
 
         await op_node.async_execute([input_ch.reader], output_ch.writer)
@@ -136,8 +136,8 @@ class TestFunctionNodeAsyncExecute:
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
 
-        for tag, data in src.iter_data():
-            await input_ch.writer.send((tag, data))
+        for key, data in src.iter_data():
+            await input_ch.writer.send((key, data))
         await input_ch.writer.close()
 
         await node.async_execute(input_ch.reader, output_ch.writer)
@@ -467,7 +467,7 @@ class TestAsyncOrchestratorErrorPropagation:
         crashes = []
 
         class CrashRecorder(NoOpObserver):
-            def on_data_crash(self, node_label, tag, data, error):
+            def on_data_crash(self, node_label, key, data, error):
                 crashes.append(error)
 
         pipeline.compile()
@@ -500,12 +500,12 @@ class TestAsyncOrchestratorObserverInjection:
                 events.append(("node_start", node_label))
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
-            def on_data_start(self, node_label, tag, data):
+            def on_data_start(self, node_label, key, data):
                 events.append(("data_start", node_label))
-            def on_data_end(self, node_label, tag, input_pkt, output_pkt, cached):
+            def on_data_end(self, node_label, key, input_pkt, output_pkt, cached):
                 events.append(("data_end", node_label, cached))
-            def on_data_crash(self, node_label, tag, data, exc): pass
-            def create_data_logger(self, tag, data, **kwargs):
+            def on_data_crash(self, node_label, key, data, exc): pass
+            def create_data_logger(self, key, data, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
             def contextualize(self, *identity_path):
@@ -557,12 +557,12 @@ class TestAsyncOrchestratorObserverInjection:
                 events.append(("node_start", node_label))
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
-            def on_data_start(self, node_label, tag, data):
+            def on_data_start(self, node_label, key, data):
                 events.append(("data_start", node_label))
-            def on_data_end(self, node_label, tag, input_pkt, output_pkt, cached):
+            def on_data_end(self, node_label, key, input_pkt, output_pkt, cached):
                 events.append(("data_end", node_label))
-            def on_data_crash(self, node_label, tag, data, exc): pass
-            def create_data_logger(self, tag, data, **kwargs):
+            def on_data_crash(self, node_label, key, data, exc): pass
+            def create_data_logger(self, key, data, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
             def contextualize(self, *identity_path):

@@ -34,14 +34,14 @@ from orcapod.protocols.core_protocols import DataFunctionProtocol, DataProtocol
 # ---------------------------------------------------------------------------
 
 
-def _make_source(tag_col: str, data_col: str, data: dict) -> ArrowTableSource:
+def _make_source(key_col: str, data_col: str, data: dict) -> ArrowTableSource:
     table = pa.table(
         {
-            tag_col: pa.array(data[tag_col], type=pa.large_string()),
+            key_col: pa.array(data[key_col], type=pa.large_string()),
             data_col: pa.array(data[data_col], type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
+    return ArrowTableSource(table, key_columns=[key_col], infer_nullable=True)
 
 
 def _make_two_sources():
@@ -793,7 +793,7 @@ class TestHashChainDetaching:
 
     def test_detached_pipeline_hash_is_schema_only(self, pipeline_db):
         """DerivedSource inherits RootSource.pipeline_identity_structure()
-        = (tag_schema, data_schema), breaking the upstream Merkle chain."""
+        = (key_schema, data_schema), breaking the upstream Merkle chain."""
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
@@ -808,7 +808,7 @@ class TestHashChainDetaching:
         derived_src = pipe.adder.as_source()
         # DerivedSource pipeline_hash should be the RootSource base case
         # (schema-only, no upstream topology)
-        tag_schema, data_schema = derived_src.output_schema()
+        key_schema, data_schema = derived_src.output_schema()
         # Pipeline hash should NOT equal the origin node's pipeline hash
         assert derived_src.pipeline_hash() != pipe.adder.pipeline_hash()
         # But two DerivedSources with same schema should share pipeline_hash
@@ -869,7 +869,7 @@ class TestHashChainDetaching:
         pod_add = FunctionPod(data_function=pf_add)
         pf_double = PythonDataFunction(double_value, output_keys="doubled")
 
-        # Pipeline A: sources → join → adder (schema: tag=key, data=total)
+        # Pipeline A: sources → join → adder (schema: key=key, data=total)
         db_a = InMemoryArrowDatabase()
         pipe_a = Pipeline(name="pipe_a", pipeline_database=db_a)
         with pipe_a:
@@ -886,14 +886,14 @@ class TestHashChainDetaching:
             FunctionPod(data_function=pf_double)(renamed, label="doubler")
 
         # Branch 2: pipeline from a fresh ArrowTableSource with identical schema
-        # Same schema as DerivedSource: tag=key (large_string), data=total (int64)
+        # Same schema as DerivedSource: key=key (large_string), data=total (int64)
         fresh_table = pa.table(
             {
                 "key": pa.array(["x", "y"], type=pa.large_string()),
                 "total": pa.array([999, 888], type=pa.int64()),
             }
         )
-        fresh_src = ArrowTableSource(fresh_table, tag_columns=["key"], infer_nullable=True)
+        fresh_src = ArrowTableSource(fresh_table, key_columns=["key"], infer_nullable=True)
         db_fresh = InMemoryArrowDatabase()
         pipe_fresh = Pipeline(name="fresh_pipe", pipeline_database=db_fresh)
         with pipe_fresh:
@@ -1445,7 +1445,7 @@ class TestSourceNodesInPipeline:
                     "value": pa.array([10], type=pa.int64()),
                 }
             ),
-            tag_columns=["key"],
+            key_columns=["key"],
             label="my_source",
             infer_nullable=True,
         )

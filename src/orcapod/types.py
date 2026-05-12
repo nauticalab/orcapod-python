@@ -3,7 +3,7 @@
 Defines the fundamental data types, type aliases, and data structures used
 throughout the OrcaPod framework, including:
 
-    - Type aliases for data values, schemas, paths, and tags.
+    - Type aliases for data values, schemas, paths, and keys.
     - ``Schema`` -- an immutable, hashable mapping of field names to Python types.
     - ``ContentHash`` -- a content-addressable hash pairing a method name with
       a raw digest, with convenience conversions to hex, int, UUID, and base64.
@@ -42,9 +42,9 @@ PathLike: TypeAlias = str | os.PathLike
 ``os.PathLike``)."""
 
 # TODO: accomodate other common data types such as datetime
-TagValue: TypeAlias = int | str | None | Collection["TagValue"]
-"""A tag metadata value: an int, string, ``None``, or an arbitrarily nested
-collection thereof. Tags are used to label and organise data and
+KeyValue: TypeAlias = int | str | None | Collection["KeyValue"]
+"""A key metadata value: an int, string, ``None``, or an arbitrarily nested
+collection thereof. Keys are used to label and organise data and
 datagrams."""
 
 PathSet: TypeAlias = PathLike | Collection[PathLike | None]
@@ -358,7 +358,7 @@ class CacheMode(Enum):
 @dataclass(frozen=True, slots=True)
 class ColumnConfig:
     """
-    Configuration for column inclusion in DatagramProtocol/DataProtocol/TagProtocol operations.
+    Configuration for column inclusion in DatagramProtocol/DataProtocol/KeyProtocol operations.
 
     Controls which column types to include when converting to tables, dicts,
     or querying keys/types.
@@ -371,7 +371,7 @@ class ColumnConfig:
                 (prefix '__' is added automatically if not present)
         context: Include context column
         source: Include source info columns (DataProtocol only, ignored for others)
-        system_tags: Include system tag columns (TagProtocol only, ignored for others)
+        system_keys: Include system key columns (KeyProtocol only, ignored for others)
         all_info: Include all available columns (overrides other settings)
 
     Examples:
@@ -394,9 +394,9 @@ class ColumnConfig:
     meta: bool | Collection[str] = False
     context: bool = False
     source: bool = False  # Only relevant for DataProtocol
-    system_tags: bool = False  # Only relevant for TagProtocol
+    system_keys: bool = False  # Only relevant for KeyProtocol
     content_hash: bool | str = False  # Only relevant for DataProtocol
-    sort_by_tags: bool = False  # Only relevant for TagProtocol
+    sort_by_keys: bool = False  # Only relevant for KeyProtocol
     all_info: bool = False
 
     @classmethod
@@ -406,9 +406,9 @@ class ColumnConfig:
             meta=True,
             context=True,
             source=True,
-            system_tags=True,
+            system_keys=True,
             content_hash=True,
-            sort_by_tags=True,
+            sort_by_keys=True,
             all_info=True,
         )
 

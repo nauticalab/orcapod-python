@@ -144,7 +144,7 @@ _SEMANTIC_SCRIPT = textwrap.dedent("""\
         "list":        [1, 2, 3],
         "nested_dict": {"a": 1, "b": [2, 3], "c": {"d": 4}},
         "set":         [1, 2, 3],   # hashed as set equivalent
-        "tuple":       [1, 2, 3],   # distinguished by type tag inside hasher
+        "tuple":       [1, 2, 3],   # distinguished by type key inside hasher
         "empty_list":  [],
         "empty_dict":  {},
     }

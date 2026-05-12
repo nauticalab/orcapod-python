@@ -15,13 +15,13 @@ class TestCSVSourceConfig:
         csv_file.write_text("a,b\n1,2\n3,4\n")
         source = CSVSource(
             file_path=str(csv_file),
-            tag_columns=["a"],
+            key_columns=["a"],
             source_id="test_csv",
         )
         config = source.to_config()
         assert config["source_type"] == "csv"
         assert config["file_path"] == str(csv_file)
-        assert config["tag_columns"] == ["a"]
+        assert config["key_columns"] == ["a"]
         assert config["source_id"] == "test_csv"
 
     def test_round_trip(self, tmp_path):
@@ -29,7 +29,7 @@ class TestCSVSourceConfig:
         csv_file.write_text("a,b\n1,2\n3,4\n")
         source = CSVSource(
             file_path=str(csv_file),
-            tag_columns=["a"],
+            key_columns=["a"],
         )
         config = source.to_config()
         restored = CSVSource.from_config(config)
@@ -41,18 +41,18 @@ class TestDictSourceConfig:
     def test_to_config(self):
         source = DictSource(
             data=[{"a": 1, "b": 2}, {"a": 3, "b": 4}],
-            tag_columns=["a"],
+            key_columns=["a"],
             source_id="test_dict",
         )
         config = source.to_config()
         assert config["source_type"] == "dict"
-        assert config["tag_columns"] == ["a"]
+        assert config["key_columns"] == ["a"]
         assert config["source_id"] == "test_dict"
 
     def test_from_config_raises(self):
         config = {
             "source_type": "dict",
-            "tag_columns": ["a"],
+            "key_columns": ["a"],
             "source_id": "test_dict",
         }
         with pytest.raises(NotImplementedError):
@@ -61,7 +61,7 @@ class TestDictSourceConfig:
 
 class TestArrowTableSourceConfig:
     def test_from_config_raises(self):
-        config = {"source_type": "arrow_table", "tag_columns": ["a"]}
+        config = {"source_type": "arrow_table", "key_columns": ["a"]}
         with pytest.raises(NotImplementedError):
             ArrowTableSource.from_config(config)
 
@@ -83,7 +83,7 @@ class TestDeltaTableSourceConfig:
         write_deltalake(delta_path, table)
         source = DeltaTableSource(
             delta_table_path=delta_path,
-            tag_columns=["a"],
+            key_columns=["a"],
             source_id="test_delta",
         )
         config = source.to_config()
@@ -99,7 +99,7 @@ class TestDeltaTableSourceConfig:
         write_deltalake(delta_path, table)
         source = DeltaTableSource(
             delta_table_path=delta_path,
-            tag_columns=["a"],
+            key_columns=["a"],
         )
         config = source.to_config()
         restored = DeltaTableSource.from_config(config)
@@ -112,7 +112,7 @@ class TestCachedSourceConfig:
         from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
 
         inner = DictSource(
-            data=[{"a": 1, "b": 2}], tag_columns=["a"], source_id="inner"
+            data=[{"a": 1, "b": 2}], key_columns=["a"], source_id="inner"
         )
         cache_db = InMemoryArrowDatabase()
         source = CachedSource(source=inner, cache_database=cache_db)

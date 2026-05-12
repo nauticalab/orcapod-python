@@ -17,7 +17,7 @@ from collections.abc import Mapping
 import pyarrow as pa
 import pytest
 
-from orcapod.core.datagrams import Data, Tag
+from orcapod.core.datagrams import Data, Key
 from orcapod.core.function_pod import FunctionPodStream, FunctionPod
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams import ArrowTableStream
@@ -50,18 +50,18 @@ class TestSimpleFunctionPodProtocolConformance:
         double_pod.validate_inputs(make_int_stream())
 
     def test_has_process_data_method(self, double_pod):
-        tag = Tag({"id": 0})
+        key = Key({"id": 0})
         data = Data({"x": 5})
-        out_tag, out_data = double_pod.process_data(tag, data)
-        assert out_tag is tag
+        out_key, out_data = double_pod.process_data(key, data)
+        assert out_key is key
         assert out_data is not None
 
     def test_has_argument_symmetry_method(self, double_pod):
         double_pod.argument_symmetry([make_int_stream()])
 
     def test_has_output_schema_method(self, double_pod):
-        tag_schema, data_schema = double_pod.output_schema(make_int_stream())
-        assert isinstance(tag_schema, Mapping)
+        key_schema, data_schema = double_pod.output_schema(make_int_stream())
+        assert isinstance(key_schema, Mapping)
         assert isinstance(data_schema, Mapping)
 
 
@@ -145,7 +145,7 @@ class TestSimpleFunctionPodInputSchemaValidation:
                     "z": pa.array([0, 1, 2], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
         )
         with pytest.raises(ValueError):
             double_pod.process(stream)
@@ -158,7 +158,7 @@ class TestSimpleFunctionPodInputSchemaValidation:
                     "x": pa.array(["a", "b", "c"], type=pa.large_string()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
         )
         with pytest.raises(ValueError):
             double_pod.process(stream)
@@ -171,7 +171,7 @@ class TestSimpleFunctionPodInputSchemaValidation:
                     "x": pa.array([0, 1], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
         )
         with pytest.raises(ValueError):
             add_pod.process(stream)
@@ -196,7 +196,7 @@ class TestSimpleFunctionPodInputSchemaValidation:
                     ]
                 ),
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
         )
         pod.validate_inputs(stream)
 
@@ -220,7 +220,7 @@ class TestSimpleFunctionPodInputSchemaValidation:
                     ]
                 ),
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
         )
         table = pod.process(stream).as_table()
         assert table.column("result").to_pylist() == [13, 15]
@@ -232,17 +232,17 @@ class TestSimpleFunctionPodInputSchemaValidation:
 
 
 class TestSimpleFunctionPodProcessData:
-    def test_returns_tag_and_data_tuple(self, double_pod):
-        result = double_pod.process_data(Tag({"id": 0}), Data({"x": 7}))
+    def test_returns_key_and_data_tuple(self, double_pod):
+        result = double_pod.process_data(Key({"id": 0}), Data({"x": 7}))
         assert len(result) == 2
 
-    def test_output_tag_is_input_tag(self, double_pod):
-        tag = Tag({"id": 42})
-        out_tag, _ = double_pod.process_data(tag, Data({"x": 3}))
-        assert out_tag is tag
+    def test_output_key_is_input_key(self, double_pod):
+        key = Key({"id": 42})
+        out_key, _ = double_pod.process_data(key, Data({"x": 3}))
+        assert out_key is key
 
     def test_output_data_has_correct_value(self, double_pod):
-        _, out_data = double_pod.process_data(Tag({"id": 0}), Data({"x": 6}))
+        _, out_data = double_pod.process_data(Key({"id": 0}), Data({"x": 6}))
         assert out_data is not None
         assert out_data["result"] == 12  # 6 * 2
 
@@ -268,7 +268,7 @@ class TestSimpleFunctionPodMultiStream:
                     ]
                 ),
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
         )
         stream_y = ArrowTableStream(
             pa.table(
@@ -283,7 +283,7 @@ class TestSimpleFunctionPodMultiStream:
                     ]
                 ),
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
         )
         result = add_pod.process(stream_x, stream_y)
         assert isinstance(result, FunctionPodStream)

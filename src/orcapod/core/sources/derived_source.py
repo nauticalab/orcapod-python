@@ -78,12 +78,12 @@ class DerivedSource(RootSource):
             records = self._origin.get_all_records()
             if records is None:
                 # Build empty table with correct schema
-                tag_schema, data_schema = self._origin.output_schema()
-                tag_keys = self._origin.keys()[0]
+                key_schema, data_schema = self._origin.output_schema()
+                key_keys = self._origin.keys()[0]
                 tc = self.data_context.type_converter
                 fields = [
-                    pa.field(k, tc.python_type_to_arrow_type(tag_schema[k]))
-                    for k in tag_keys
+                    pa.field(k, tc.python_type_to_arrow_type(key_schema[k]))
+                    for k in key_keys
                 ]
                 fields += [
                     pa.field(k, tc.python_type_to_arrow_type(v))
@@ -96,8 +96,8 @@ class DerivedSource(RootSource):
                 )
             else:
                 self._cached_table = records
-        tag_keys = self._origin.keys()[0]
-        return ArrowTableStream(self._cached_table, tag_columns=tag_keys)
+        key_keys = self._origin.keys()[0]
+        return ArrowTableStream(self._cached_table, key_columns=key_keys)
 
     def iter_data(self):
         return self._get_stream().iter_data()

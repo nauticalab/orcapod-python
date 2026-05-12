@@ -15,7 +15,7 @@ from collections.abc import Mapping
 import pyarrow as pa
 
 from orcapod.protocols.core_protocols import StreamProtocol
-from orcapod.protocols.core_protocols.datagrams import DataProtocol, TagProtocol
+from orcapod.protocols.core_protocols.datagrams import DataProtocol, KeyProtocol
 
 from ..conftest import make_int_stream
 
@@ -55,15 +55,15 @@ class TestFunctionPodStreamProtocolConformance:
         assert isinstance(double_pod.process(make_int_stream()).upstreams, tuple)
 
     def test_has_keys_method(self, double_pod):
-        tag_keys, data_keys = double_pod.process(make_int_stream()).keys()
-        assert isinstance(tag_keys, tuple)
+        key_keys, data_keys = double_pod.process(make_int_stream()).keys()
+        assert isinstance(key_keys, tuple)
         assert isinstance(data_keys, tuple)
 
     def test_has_output_schema_method(self, double_pod):
-        tag_schema, data_schema = double_pod.process(
+        key_schema, data_schema = double_pod.process(
             make_int_stream()
         ).output_schema()
-        assert isinstance(tag_schema, Mapping)
+        assert isinstance(key_schema, Mapping)
         assert isinstance(data_schema, Mapping)
 
     def test_has_iter_data_method(self, double_pod):
@@ -80,9 +80,9 @@ class TestFunctionPodStreamProtocolConformance:
 
 
 class TestFunctionPodStreamKeysAndSchema:
-    def test_tag_keys_come_from_input_stream(self, double_pod):
-        tag_keys, _ = double_pod.process(make_int_stream()).keys()
-        assert "id" in tag_keys
+    def test_key_keys_come_from_input_stream(self, double_pod):
+        key_keys, _ = double_pod.process(make_int_stream()).keys()
+        assert "id" in key_keys
 
     def test_data_keys_come_from_function_output(self, double_pod):
         _, data_keys = double_pod.process(make_int_stream()).keys()
@@ -94,9 +94,9 @@ class TestFunctionPodStreamKeysAndSchema:
 
     def test_output_schema_keys_match_keys_method(self, double_pod):
         stream = double_pod.process(make_int_stream())
-        tag_keys, data_keys = stream.keys()
-        tag_schema, data_schema = stream.output_schema()
-        assert set(tag_schema.keys()) == set(tag_keys)
+        key_keys, data_keys = stream.keys()
+        key_schema, data_schema = stream.output_schema()
+        assert set(key_schema.keys()) == set(key_keys)
         assert set(data_schema.keys()) == set(data_keys)
 
     def test_data_schema_type_is_correct(self, double_pod):
@@ -114,9 +114,9 @@ class TestFunctionPodStreamIterDatas:
         n = 5
         assert len(list(double_pod.process(make_int_stream(n=n)).iter_data())) == n
 
-    def test_each_pair_has_tag_and_data(self, double_pod):
-        for tag, data in double_pod.process(make_int_stream()).iter_data():
-            assert isinstance(tag, TagProtocol)
+    def test_each_pair_has_key_and_data(self, double_pod):
+        for key, data in double_pod.process(make_int_stream()).iter_data():
+            assert isinstance(key, KeyProtocol)
             assert isinstance(data, DataProtocol)
 
     def test_output_data_values_are_doubled(self, double_pod):
@@ -149,7 +149,7 @@ class TestFunctionPodStreamAsTable:
         n = 4
         assert len(double_pod.process(make_int_stream(n=n)).as_table()) == n
 
-    def test_table_contains_tag_columns(self, double_pod):
+    def test_table_contains_key_columns(self, double_pod):
         assert "id" in double_pod.process(make_int_stream()).as_table().column_names
 
     def test_table_contains_data_columns(self, double_pod):

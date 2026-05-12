@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
-from orcapod.protocols.core_protocols import TagProtocol
+from orcapod.protocols.core_protocols import KeyProtocol
 from orcapod.types import SchemaLike
 from orcapod.utils import arrow_utils
 
@@ -16,22 +16,22 @@ if TYPE_CHECKING:
 class ListSource(RootSource):
     """A source backed by a Python list.
 
-    Each element in the list becomes one (tag, data) pair. The element is
-    stored as the data under ``name``; the tag is either the element's index
-    (default) or the dict returned by ``tag_function(element, index)``.
+    Each element in the list becomes one (key, data) pair. The element is
+    stored as the data under ``name``; the key is either the element's index
+    (default) or the dict returned by ``key_function(element, index)``.
     """
 
     @staticmethod
-    def _default_tag(element: Any, idx: int) -> dict[str, Any]:
+    def _default_key(element: Any, idx: int) -> dict[str, Any]:
         return {"element_index": idx}
 
     def __init__(
         self,
         name: str,
         data: list[Any],
-        tag_function: Callable[[Any, int], dict[str, Any] | TagProtocol] | None = None,
-        expected_tag_keys: Collection[str] | None = None,
-        tag_function_hash_mode: Literal["content", "signature", "name"] = "name",
+        key_function: Callable[[Any, int], dict[str, Any] | KeyProtocol] | None = None,
+        expected_key_keys: Collection[str] | None = None,
+        key_function_hash_mode: Literal["content", "signature", "name"] = "name",
         data_schema: SchemaLike | None = None,
         source_id: str | None = None,
         **kwargs: Any,
@@ -40,34 +40,34 @@ class ListSource(RootSource):
 
         self.name = name
         self._elements = list(data)
-        self._tag_function_hash_mode = tag_function_hash_mode
+        self._key_function_hash_mode = key_function_hash_mode
 
-        if tag_function is None:
-            tag_function = self.__class__._default_tag
-            if expected_tag_keys is None:
-                expected_tag_keys = ["element_index"]
+        if key_function is None:
+            key_function = self.__class__._default_key
+            if expected_key_keys is None:
+                expected_key_keys = ["element_index"]
 
-        self._tag_function = tag_function
-        self._expected_tag_keys = (
-            tuple(expected_tag_keys) if expected_tag_keys is not None else None
+        self._key_function = key_function
+        self._expected_key_keys = (
+            tuple(expected_key_keys) if expected_key_keys is not None else None
         )
 
-        # Hash the tag function for identity purposes.
-        self._tag_function_hash = self._hash_tag_function()
+        # Hash the key function for identity purposes.
+        self._key_function_hash = self._hash_key_function()
 
-        # Build rows: each row is tag_fields merged with {name: element}.
+        # Build rows: each row is key_fields merged with {name: element}.
         rows = []
         for idx, element in enumerate(self._elements):
-            tag_fields = tag_function(element, idx)
-            if hasattr(tag_fields, "as_dict"):
-                tag_fields = tag_fields.as_dict()
-            row = dict(tag_fields)
+            key_fields = key_function(element, idx)
+            if hasattr(key_fields, "as_dict"):
+                key_fields = key_fields.as_dict()
+            row = dict(key_fields)
             row[name] = element
             rows.append(row)
 
-        tag_columns = (
-            list(self._expected_tag_keys)
-            if self._expected_tag_keys is not None
+        key_columns = (
+            list(self._expected_key_keys)
+            if self._expected_key_keys is not None
             else [k for k in (rows[0].keys() if rows else []) if k != name]
         )
 
@@ -84,7 +84,7 @@ class ListSource(RootSource):
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(
             arrow_table,
-            tag_columns=tag_columns,
+            key_columns=key_columns,
             source_id=self._source_id,
         )
 
@@ -92,23 +92,23 @@ class ListSource(RootSource):
         if self._source_id is None:
             self._source_id = result.source_id
 
-    def _hash_tag_function(self) -> str:
-        """Produce a stable hash string for the tag function."""
-        if self._tag_function_hash_mode == "name":
-            fn = self._tag_function
+    def _hash_key_function(self) -> str:
+        """Produce a stable hash string for the key function."""
+        if self._key_function_hash_mode == "name":
+            fn = self._key_function
             return f"{fn.__module__}.{fn.__qualname__}"
-        elif self._tag_function_hash_mode == "signature":
+        elif self._key_function_hash_mode == "signature":
             import inspect
 
-            return str(inspect.signature(self._tag_function))
+            return str(inspect.signature(self._key_function))
         else:  # "content"
             import inspect
 
-            src = inspect.getsource(self._tag_function)
+            src = inspect.getsource(self._key_function)
             return self.data_context.semantic_hasher.hash_object(src).to_hex()
 
     def identity_structure(self) -> Any:
-        """Return identity including class name, field name, elements, and tag
+        """Return identity including class name, field name, elements, and key
         function hash.
         """
         try:
@@ -119,7 +119,7 @@ class ListSource(RootSource):
             self.__class__.__name__,
             self.name,
             elements_repr,
-            self._tag_function_hash,
+            self._key_function_hash,
         )
 
     def to_config(self, db_registry=None) -> dict[str, Any]:

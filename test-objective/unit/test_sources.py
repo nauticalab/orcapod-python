@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pyarrow as pa
 import pytest
 
-from orcapod.core.datagrams import Data, Tag
+from orcapod.core.datagrams import Data, Key
 from orcapod.core.sources import ArrowTableSource
 from orcapod.core.sources.derived_source import DerivedSource
 from orcapod.core.sources.dict_source import DictSource
@@ -41,8 +41,8 @@ class TestArrowTableSourceConstruction:
     """ArrowTableSource construction behaviors."""
 
     def test_normal_construction(self):
-        """A valid table with tag columns constructs successfully."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
+        """A valid table with key columns constructs successfully."""
+        source = ArrowTableSource(_simple_table(), key_columns=["name"], infer_nullable=True)
         assert source is not None
 
     def test_empty_table_constructs_successfully(self):
@@ -53,33 +53,33 @@ class TestArrowTableSourceConstruction:
                 "age": pa.array([], type=pa.int64()),
             }
         )
-        source = ArrowTableSource(empty, tag_columns=["name"], infer_nullable=True)
+        source = ArrowTableSource(empty, key_columns=["name"], infer_nullable=True)
         assert source is not None
         assert source.as_table().num_rows == 0
 
-    def test_missing_tag_columns_raises_value_error(self):
-        """Specifying tag columns not in the table raises ValueError."""
+    def test_missing_key_columns_raises_value_error(self):
+        """Specifying key columns not in the table raises ValueError."""
         table = _simple_table()
-        with pytest.raises(ValueError, match="tag_columns"):
-            ArrowTableSource(table, tag_columns=["nonexistent"], infer_nullable=True)
+        with pytest.raises(ValueError, match="key_columns"):
+            ArrowTableSource(table, key_columns=["nonexistent"], infer_nullable=True)
 
-    def test_adds_system_tag_column(self):
-        """The source auto-adds system tag columns to the underlying table."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
+    def test_adds_system_key_column(self):
+        """The source auto-adds system key columns to the underlying table."""
+        source = ArrowTableSource(_simple_table(), key_columns=["name"], infer_nullable=True)
         table = source.as_table(all_info=True)
-        system_tag_cols = [c for c in table.column_names if c.startswith("_tag_")]
-        assert len(system_tag_cols) > 0
+        system_key_cols = [c for c in table.column_names if c.startswith("_key_")]
+        assert len(system_key_cols) > 0
 
     def test_adds_source_info_columns(self):
         """The source adds source info columns (prefixed with _source_)."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
+        source = ArrowTableSource(_simple_table(), key_columns=["name"], infer_nullable=True)
         table = source.as_table(columns=ColumnConfig(source=True))
         source_cols = [c for c in table.column_names if c.startswith("_source_")]
         assert len(source_cols) > 0
 
     def test_source_id_populated(self):
         """source_id property is populated (defaults to table hash)."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
+        source = ArrowTableSource(_simple_table(), key_columns=["name"], infer_nullable=True)
         assert source.source_id is not None
         assert len(source.source_id) > 0
 
@@ -87,7 +87,7 @@ class TestArrowTableSourceConstruction:
         """Explicit source_id is preserved."""
         source = ArrowTableSource(
             _simple_table(),
-            tag_columns=["name"],
+            key_columns=["name"],
             source_id="my_source",
             infer_nullable=True,
         )
@@ -95,19 +95,19 @@ class TestArrowTableSourceConstruction:
 
     def test_producer_is_none(self):
         """Root sources have producer == None."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
+        source = ArrowTableSource(_simple_table(), key_columns=["name"], infer_nullable=True)
         assert source.producer is None
 
     def test_upstreams_is_empty(self):
         """Root sources have empty upstreams tuple."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
+        source = ArrowTableSource(_simple_table(), key_columns=["name"], infer_nullable=True)
         assert source.upstreams == ()
 
-    def test_no_tag_columns_valid(self):
-        """Construction with no tag columns is valid (all columns are data)."""
-        source = ArrowTableSource(_simple_table(), tag_columns=[], infer_nullable=True)
-        tag_keys, data_keys = source.keys()
-        assert tag_keys == ()
+    def test_no_key_columns_valid(self):
+        """Construction with no key columns is valid (all columns are data)."""
+        source = ArrowTableSource(_simple_table(), key_columns=[], infer_nullable=True)
+        key_keys, data_keys = source.keys()
+        assert key_keys == ()
         assert "name" in data_keys
         assert "age" in data_keys
 
@@ -129,14 +129,14 @@ class TestArrowTableSourceResolveField:
     @NOT_IMPLEMENTED
     def test_resolve_field_valid_record_id(self):
         """resolve_field works with valid positional record_id."""
-        source = ArrowTableSource(_simple_table(3), tag_columns=["name"], infer_nullable=True)
+        source = ArrowTableSource(_simple_table(3), key_columns=["name"], infer_nullable=True)
         value = source.resolve_field("row_0", "age")
         assert value == 20
 
     @NOT_IMPLEMENTED
     def test_resolve_field_second_row(self):
         """resolve_field returns data from the correct row."""
-        source = ArrowTableSource(_simple_table(3), tag_columns=["name"], infer_nullable=True)
+        source = ArrowTableSource(_simple_table(3), key_columns=["name"], infer_nullable=True)
         value = source.resolve_field("row_1", "age")
         assert value == 21
 
@@ -145,7 +145,7 @@ class TestArrowTableSourceResolveField:
         """resolve_field works with named record_id column."""
         source = ArrowTableSource(
             _simple_table(3),
-            tag_columns=["name"],
+            key_columns=["name"],
             record_id_column="name",
             infer_nullable=True,
         )
@@ -155,28 +155,28 @@ class TestArrowTableSourceResolveField:
     @NOT_IMPLEMENTED
     def test_resolve_field_missing_record_raises(self):
         """resolve_field raises FieldNotResolvableError for missing records."""
-        source = ArrowTableSource(_simple_table(3), tag_columns=["name"], infer_nullable=True)
+        source = ArrowTableSource(_simple_table(3), key_columns=["name"], infer_nullable=True)
         with pytest.raises(FieldNotResolvableError):
             source.resolve_field("row_999", "age")
 
     @NOT_IMPLEMENTED
     def test_resolve_field_missing_field_raises(self):
         """resolve_field raises FieldNotResolvableError for missing field names."""
-        source = ArrowTableSource(_simple_table(3), tag_columns=["name"], infer_nullable=True)
+        source = ArrowTableSource(_simple_table(3), key_columns=["name"], infer_nullable=True)
         with pytest.raises(FieldNotResolvableError):
             source.resolve_field("row_0", "nonexistent_field")
 
     @NOT_IMPLEMENTED
     def test_resolve_field_invalid_record_id_format(self):
         """resolve_field raises FieldNotResolvableError for invalid record_id format."""
-        source = ArrowTableSource(_simple_table(3), tag_columns=["name"], infer_nullable=True)
+        source = ArrowTableSource(_simple_table(3), key_columns=["name"], infer_nullable=True)
         with pytest.raises(FieldNotResolvableError):
             source.resolve_field("invalid_format", "age")
 
     @NOT_IMPLEMENTED
-    def test_resolve_field_tag_column(self):
-        """resolve_field can resolve tag column values too."""
-        source = ArrowTableSource(_simple_table(3), tag_columns=["name"], infer_nullable=True)
+    def test_resolve_field_key_column(self):
+        """resolve_field can resolve key column values too."""
+        source = ArrowTableSource(_simple_table(3), key_columns=["name"], infer_nullable=True)
         value = source.resolve_field("row_0", "name")
         assert value == "n0"
 
@@ -185,33 +185,33 @@ class TestArrowTableSourceSchema:
     """ArrowTableSource schema and identity behaviors."""
 
     def test_pipeline_identity_structure_returns_schemas(self):
-        """pipeline_identity_structure returns (tag_schema, data_schema)."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
+        """pipeline_identity_structure returns (key_schema, data_schema)."""
+        source = ArrowTableSource(_simple_table(), key_columns=["name"], infer_nullable=True)
         result = source.pipeline_identity_structure()
         assert isinstance(result, tuple)
         assert len(result) == 2
-        tag_schema, data_schema = result
-        assert isinstance(tag_schema, Schema)
+        key_schema, data_schema = result
+        assert isinstance(key_schema, Schema)
         assert isinstance(data_schema, Schema)
 
     def test_output_schema_returns_schemas(self):
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
-        tag_schema, data_schema = source.output_schema()
-        assert "name" in tag_schema
+        source = ArrowTableSource(_simple_table(), key_columns=["name"], infer_nullable=True)
+        key_schema, data_schema = source.output_schema()
+        assert "name" in key_schema
         assert "age" in data_schema
 
     def test_output_schema_types(self):
         """output_schema types match column data types."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
-        tag_schema, data_schema = source.output_schema()
-        assert tag_schema["name"] is str
+        source = ArrowTableSource(_simple_table(), key_columns=["name"], infer_nullable=True)
+        key_schema, data_schema = source.output_schema()
+        assert key_schema["name"] is str
         assert data_schema["age"] is int
 
     def test_keys_returns_correct_split(self):
-        """keys() correctly separates tag and data columns."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
-        tag_keys, data_keys = source.keys()
-        assert "name" in tag_keys
+        """keys() correctly separates key and data columns."""
+        source = ArrowTableSource(_simple_table(), key_columns=["name"], infer_nullable=True)
+        key_keys, data_keys = source.keys()
+        assert "name" in key_keys
         assert "age" in data_keys
         assert "name" not in data_keys
 
@@ -219,36 +219,36 @@ class TestArrowTableSourceSchema:
 class TestArrowTableSourceIteration:
     """ArrowTableSource iter_data and as_table behaviors."""
 
-    def test_iter_data_yields_tag_data_pairs(self):
-        source = ArrowTableSource(_simple_table(3), tag_columns=["name"], infer_nullable=True)
+    def test_iter_data_yields_key_data_pairs(self):
+        source = ArrowTableSource(_simple_table(3), key_columns=["name"], infer_nullable=True)
         pairs = list(source.iter_data())
         assert len(pairs) == 3
-        for tag, data in pairs:
-            assert isinstance(tag, Tag)
+        for key, data in pairs:
+            assert isinstance(key, Key)
             assert isinstance(data, Data)
 
     def test_as_table_has_expected_columns(self):
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
+        source = ArrowTableSource(_simple_table(), key_columns=["name"], infer_nullable=True)
         table = source.as_table()
         assert "name" in table.column_names
         assert "age" in table.column_names
 
     def test_as_table_row_count(self):
         """as_table row count matches input table row count."""
-        source = ArrowTableSource(_simple_table(5), tag_columns=["name"], infer_nullable=True)
+        source = ArrowTableSource(_simple_table(5), key_columns=["name"], infer_nullable=True)
         table = source.as_table()
         assert table.num_rows == 5
 
     def test_as_table_all_info_has_more_columns(self):
         """as_table(all_info=True) has more columns than default."""
-        source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
+        source = ArrowTableSource(_simple_table(), key_columns=["name"], infer_nullable=True)
         table_default = source.as_table()
         table_all = source.as_table(all_info=True)
         assert table_all.num_columns > table_default.num_columns
 
     def test_iter_data_count_matches_as_table_rows(self):
         """iter_data count equals as_table row count."""
-        source = ArrowTableSource(_simple_table(4), tag_columns=["name"], infer_nullable=True)
+        source = ArrowTableSource(_simple_table(4), key_columns=["name"], infer_nullable=True)
         pairs = list(source.iter_data())
         table = source.as_table()
         assert len(pairs) == table.num_rows
@@ -265,68 +265,68 @@ class TestDictSource:
     def test_construction_from_list_of_dicts(self):
         """DictSource can be constructed from a collection of dicts."""
         data = [{"x": 1, "y": "a"}, {"x": 2, "y": "b"}]
-        source = DictSource(data=data, tag_columns=["x"])
+        source = DictSource(data=data, key_columns=["x"])
         assert source is not None
 
     def test_delegates_to_arrow_table_source(self):
         """DictSource produces valid iter_data output."""
         data = [{"x": 1, "y": "a"}, {"x": 2, "y": "b"}]
-        source = DictSource(data=data, tag_columns=["x"])
+        source = DictSource(data=data, key_columns=["x"])
         pairs = list(source.iter_data())
         assert len(pairs) == 2
 
     def test_keys_correct(self):
         data = [{"x": 1, "y": "a"}]
-        source = DictSource(data=data, tag_columns=["x"])
-        tag_keys, data_keys = source.keys()
-        assert "x" in tag_keys
+        source = DictSource(data=data, key_columns=["x"])
+        key_keys, data_keys = source.keys()
+        assert "x" in key_keys
         assert "y" in data_keys
 
     def test_source_id_populated(self):
         data = [{"x": 1, "y": "a"}]
-        source = DictSource(data=data, tag_columns=["x"])
+        source = DictSource(data=data, key_columns=["x"])
         assert source.source_id is not None
         assert len(source.source_id) > 0
 
     def test_producer_is_none(self):
         data = [{"x": 1, "y": "a"}]
-        source = DictSource(data=data, tag_columns=["x"])
+        source = DictSource(data=data, key_columns=["x"])
         assert source.producer is None
 
     def test_upstreams_is_empty(self):
         data = [{"x": 1, "y": "a"}]
-        source = DictSource(data=data, tag_columns=["x"])
+        source = DictSource(data=data, key_columns=["x"])
         assert source.upstreams == ()
 
     def test_output_schema(self):
         """DictSource output_schema delegates correctly."""
         data = [{"x": 1, "y": "a"}]
-        source = DictSource(data=data, tag_columns=["x"])
-        tag_schema, data_schema = source.output_schema()
-        assert "x" in tag_schema
+        source = DictSource(data=data, key_columns=["x"])
+        key_schema, data_schema = source.output_schema()
+        assert "x" in key_schema
         assert "y" in data_schema
 
     def test_as_table_has_correct_rows(self):
         """DictSource as_table returns correct number of rows."""
         data = [{"x": 1, "y": "a"}, {"x": 2, "y": "b"}, {"x": 3, "y": "c"}]
-        source = DictSource(data=data, tag_columns=["x"])
+        source = DictSource(data=data, key_columns=["x"])
         table = source.as_table()
         assert table.num_rows == 3
 
-    def test_iter_data_yields_tag_data_pairs(self):
+    def test_iter_data_yields_key_data_pairs(self):
         """DictSource iter_data yields proper types."""
         data = [{"x": 1, "y": "a"}]
-        source = DictSource(data=data, tag_columns=["x"])
+        source = DictSource(data=data, key_columns=["x"])
         pairs = list(source.iter_data())
         assert len(pairs) == 1
-        tag, data = pairs[0]
-        assert isinstance(tag, Tag)
+        key, data = pairs[0]
+        assert isinstance(key, Key)
         assert isinstance(data, Data)
 
     def test_multiple_data_columns(self):
         """DictSource handles multiple data columns."""
-        data = [{"tag": 1, "a": "x", "b": 10}]
-        source = DictSource(data=data, tag_columns=["tag"])
+        data = [{"key": 1, "a": "x", "b": 10}]
+        source = DictSource(data=data, key_columns=["key"])
         _, data_keys = source.keys()
         assert "a" in data_keys
         assert "b" in data_keys
@@ -350,27 +350,27 @@ class TestListSource:
         pairs = list(source.iter_data())
         assert len(pairs) == 3
 
-    def test_default_tag_is_element_index(self):
-        """Default tag function produces element_index tag."""
+    def test_default_key_is_element_index(self):
+        """Default key function produces element_index key."""
         source = ListSource(name="item", data=["a", "b"])
-        tag_keys, _ = source.keys()
-        assert "element_index" in tag_keys
+        key_keys, _ = source.keys()
+        assert "element_index" in key_keys
 
     def test_empty_list_raises_value_error(self):
         """An empty list raises ValueError (empty table)."""
         with pytest.raises(ValueError):
             ListSource(name="item", data=[])
 
-    def test_custom_tag_function(self):
-        """Custom tag_function is used for tag generation."""
+    def test_custom_key_function(self):
+        """Custom key_function is used for key generation."""
         source = ListSource(
             name="item",
             data=["a", "b"],
-            tag_function=lambda el, idx: {"pos": idx * 10},
-            expected_tag_keys=["pos"],
+            key_function=lambda el, idx: {"pos": idx * 10},
+            expected_key_keys=["pos"],
         )
-        tag_keys, _ = source.keys()
-        assert "pos" in tag_keys
+        key_keys, _ = source.keys()
+        assert "pos" in key_keys
 
     def test_data_column_name_matches(self):
         """The data column is named after the 'name' parameter."""
@@ -407,10 +407,10 @@ class TestListSource:
         assert len(pairs) == 3
 
     def test_output_schema(self):
-        """ListSource output_schema has tag and data fields."""
+        """ListSource output_schema has key and data fields."""
         source = ListSource(name="item", data=["a", "b"])
-        tag_schema, data_schema = source.output_schema()
-        assert "element_index" in tag_schema
+        key_schema, data_schema = source.output_schema()
+        assert "element_index" in key_schema
         assert "item" in data_schema
 
 
@@ -429,10 +429,10 @@ class TestDerivedSource:
             to_string=MagicMock(return_value="abcdef1234567890")
         )
         mock_origin.output_schema.return_value = (
-            Schema({"tag_col": str}),
+            Schema({"key_col": str}),
             Schema({"data_col": int}),
         )
-        mock_origin.keys.return_value = (("tag_col",), ("data_col",))
+        mock_origin.keys.return_value = (("key_col",), ("data_col",))
         mock_origin.get_all_records.return_value = records
         return mock_origin
 
@@ -448,7 +448,7 @@ class TestDerivedSource:
         mock_origin = self._make_mock_origin(records=None)
         source = DerivedSource(origin=mock_origin)
         table = source.as_table()
-        assert "tag_col" in table.column_names
+        assert "key_col" in table.column_names
         assert "data_col" in table.column_names
 
     def test_source_id_derived_prefix(self):
@@ -467,23 +467,23 @@ class TestDerivedSource:
         """output_schema delegates to origin node."""
         mock_origin = self._make_mock_origin(records=None)
         source = DerivedSource(origin=mock_origin)
-        tag_schema, data_schema = source.output_schema()
-        assert "tag_col" in tag_schema
+        key_schema, data_schema = source.output_schema()
+        assert "key_col" in key_schema
         assert "data_col" in data_schema
 
     def test_keys_delegates_to_origin(self):
         """keys() delegates to origin node."""
         mock_origin = self._make_mock_origin(records=None)
         source = DerivedSource(origin=mock_origin)
-        tag_keys, data_keys = source.keys()
-        assert "tag_col" in tag_keys
+        key_keys, data_keys = source.keys()
+        assert "key_col" in key_keys
         assert "data_col" in data_keys
 
     def test_after_run_with_records(self):
         """After run(), DerivedSource presents the computed records."""
         records_table = pa.table(
             {
-                "tag_col": pa.array(["a", "b"], type=pa.large_string()),
+                "key_col": pa.array(["a", "b"], type=pa.large_string()),
                 "data_col": pa.array([1, 2], type=pa.int64()),
             }
         )

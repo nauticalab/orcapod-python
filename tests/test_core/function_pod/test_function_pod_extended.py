@@ -2,7 +2,7 @@
 Extended tests for function_pod.py covering:
 - _FunctionPodBase — handle_input_streams
 - WrappedFunctionPod — delegation, uri, validate_inputs, output_schema, process
-- FunctionPodStream — as_table() with content_hash and sort_by_tags column configs
+- FunctionPodStream — as_table() with content_hash and sort_by_keys column configs
 - function_pod decorator with result_database — creates CachedDataFunction, caching works
 """
 
@@ -45,14 +45,14 @@ class TestTrackedDataFunctionPodHandleInputStreams:
                 {"id": pa.array([0, 1], type=pa.int64()), "x": pa.array([0, 1], type=pa.int64())},
                 schema=pa.schema([pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]),
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
         )
         stream_y = ArrowTableStream(
             pa.table(
                 {"id": pa.array([0, 1], type=pa.int64()), "y": pa.array([10, 20], type=pa.int64())},
                 schema=pa.schema([pa.field("id", pa.int64(), nullable=False), pa.field("y", pa.int64(), nullable=False)]),
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
         )
         result = add_pod.handle_input_streams(stream_x, stream_y)
         assert isinstance(result, StreamProtocol)
@@ -144,12 +144,12 @@ class TestFunctionPodStreamContentHash:
 
 
 # ---------------------------------------------------------------------------
-# 4. FunctionPodStream — as_table() with sort_by_tags column config
+# 4. FunctionPodStream — as_table() with sort_by_keys column config
 # ---------------------------------------------------------------------------
 
 
-class TestFunctionPodStreamSortByTags:
-    def test_sort_by_tags_returns_sorted_table(self, double_pod):
+class TestFunctionPodStreamSortByKeys:
+    def test_sort_by_keys_returns_sorted_table(self, double_pod):
         n = 5
         schema = pa.schema([pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)])
         table = pa.table(
@@ -159,8 +159,8 @@ class TestFunctionPodStreamSortByTags:
             },
             schema=schema,
         )
-        stream = double_pod.process(ArrowTableStream(table, tag_columns=["id"]))
-        result = stream.as_table(columns={"sort_by_tags": True})
+        stream = double_pod.process(ArrowTableStream(table, key_columns=["id"]))
+        result = stream.as_table(columns={"sort_by_keys": True})
         ids: list[int] = result.column("id").to_pylist()  # type: ignore[assignment]
         assert ids == sorted(ids)
 
@@ -175,7 +175,7 @@ class TestFunctionPodStreamSortByTags:
             },
             schema=schema,
         )
-        stream = double_pod.process(ArrowTableStream(table, tag_columns=["id"]))
+        stream = double_pod.process(ArrowTableStream(table, key_columns=["id"]))
         result = stream.as_table()
         ids: list[int] = result.column("id").to_pylist()  # type: ignore[assignment]
         assert ids == reversed_ids

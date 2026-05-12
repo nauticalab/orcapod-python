@@ -45,7 +45,7 @@ from orcapod.types import NodeConfig
 
 
 def make_stream(n: int = 3) -> ArrowTableStream:
-    """Stream with tag=id, data=x (ints). Uses nullable=False schema."""
+    """Stream with key=id, data=x (ints). Uses nullable=False schema."""
     schema = pa.schema(
         [pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]
     )
@@ -53,12 +53,12 @@ def make_stream(n: int = 3) -> ArrowTableStream:
         {"id": pa.array(list(range(n)), type=pa.int64()), "x": pa.array(list(range(n)), type=pa.int64())},
         schema=schema,
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 async def feed_stream_to_channel(stream: ArrowTableStream, ch: Channel) -> None:
-    for tag, data in stream.iter_data():
-        await ch.writer.send((tag, data))
+    for key, data in stream.iter_data():
+        await ch.writer.send((key, data))
     await ch.writer.close()
 
 
@@ -101,7 +101,7 @@ class TestAsyncExecuteChannelCloseOnError:
     @pytest.mark.asyncio
     async def test_unary_operator_closes_channel_on_error(self):
         """When a data function raises, process_data catches the exception
-        and returns (tag, None).  The output channel is closed
+        and returns (key, None).  The output channel is closed
         normally and no exception propagates."""
 
         def failing(x: int) -> int:
@@ -260,7 +260,7 @@ class TestConcurrentFallbackInRunningLoop:
         )
         from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 
-        stream = ArrowTableStream(table, tag_columns=["id"])
+        stream = ArrowTableStream(table, key_columns=["id"])
         return pod.process(stream), pod
 
     @pytest.mark.asyncio
@@ -360,7 +360,7 @@ class TestMaterializePreservesSourceInfo:
                 {"id": 0, "x": 10},
                 {"id": 1, "x": 20},
             ],
-            tag_columns=["id"],
+            key_columns=["id"],
         )
 
         rows = list(source.iter_data())
@@ -389,7 +389,7 @@ class TestMaterializePreservesSourceInfo:
             data=[
                 {"id": 0, "x": 10},
             ],
-            tag_columns=["id"],
+            key_columns=["id"],
         )
         rows = list(source.iter_data())
 

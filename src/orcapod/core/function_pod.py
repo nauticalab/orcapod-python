@@ -22,7 +22,7 @@ from orcapod.protocols.core_protocols import (
     DataProtocol,
     PodProtocol,
     StreamProtocol,
-    TagProtocol,
+    KeyProtocol,
     TrackerManagerProtocol,
 )
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
@@ -144,36 +144,36 @@ class _FunctionPodBase(TraceableBase):
 
     def process_data(
         self,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
         *,
         logger: DataExecutionLoggerProtocol | None = None,
-    ) -> tuple[TagProtocol, DataProtocol | None]:
+    ) -> tuple[KeyProtocol, DataProtocol | None]:
         """Process a single data using the pod's data function.
 
         Args:
-            tag: The tag associated with the data.
+            key: The key associated with the data.
             data: The input data to process.
             logger: Optional DataExecutionLoggerProtocol for
                 recording captured I/O.
 
         Returns:
-            A ``(tag, output_data)`` tuple; output_data is ``None`` if
+            A ``(key, output_data)`` tuple; output_data is ``None`` if
             the function filters the data out.
         """
         result = self.data_function.call(data, logger=logger)
-        return tag, result
+        return key, result
 
     async def async_process_data(
         self,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
         *,
         logger: DataExecutionLoggerProtocol | None = None,
-    ) -> tuple[TagProtocol, DataProtocol | None]:
+    ) -> tuple[KeyProtocol, DataProtocol | None]:
         """Async counterpart of ``process_data``."""
         result = await self.data_function.async_call(data, logger=logger)
-        return tag, result
+        return key, result
 
     def handle_input_streams(self, *streams: StreamProtocol) -> StreamProtocol:
         """Handle multiple input streams by joining them if necessary.
@@ -225,7 +225,7 @@ class _FunctionPodBase(TraceableBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        tag_schema, incoming_data_schema = self.multi_stream_handler().output_schema(
+        key_schema, incoming_data_schema = self.multi_stream_handler().output_schema(
             *streams, columns=columns, all_info=all_info
         )
         # validate that incoming_data_schema is valid
@@ -233,7 +233,7 @@ class _FunctionPodBase(TraceableBase):
         # The output schema of the FunctionPodProtocol is determined by the data function
         # TODO: handle and extend to include additional columns
         # Namely, the source columns
-        return tag_schema, self.data_function.output_data_schema
+        return key_schema, self.data_function.output_data_schema
 
 
 class FunctionPod(_FunctionPodBase):
@@ -343,13 +343,13 @@ class FunctionPod(_FunctionPodBase):
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[KeyProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[KeyProtocol, DataProtocol]],
         pipeline_config: PipelineConfig | None = None,
     ) -> None:
         """Streaming async execution with per-data concurrency control.
 
-        Each input (tag, data) is processed independently. A semaphore
+        Each input (key, data) is processed independently. A semaphore
         controls how many data are in-flight concurrently.
         """
         try:
@@ -362,11 +362,11 @@ class FunctionPod(_FunctionPodBase):
                 else None
             )
 
-            async def process_one(tag: TagProtocol, data: DataProtocol) -> None:
+            async def process_one(key: KeyProtocol, data: DataProtocol) -> None:
                 try:
-                    tag, result_data = await self.async_process_data(tag, data)
+                    key, result_data = await self.async_process_data(key, data)
                     if result_data is not None:
-                        await output.send((tag, result_data))
+                        await output.send((key, result_data))
                 except Exception as e:
                     # Swallow data-level errors so remaining data continue.
                     logger.debug("Data processing failed, skipping: %s", e, exc_info=True)
@@ -375,10 +375,10 @@ class FunctionPod(_FunctionPodBase):
                         sem.release()
 
             async with asyncio.TaskGroup() as tg:
-                async for tag, data in inputs[0]:
+                async for key, data in inputs[0]:
                     if sem is not None:
                         await sem.acquire()
-                    tg.create_task(process_one(tag, data))
+                    tg.create_task(process_one(key, data))
         finally:
             await output.close()
 
@@ -396,13 +396,13 @@ class FunctionPodStream(StreamBase):
         # Iterator acquired lazily on first use to avoid triggering upstream
         # computation during construction.
         self._cached_input_iterator: (
-            Iterator[tuple[TagProtocol, DataProtocol]] | None
+            Iterator[tuple[KeyProtocol, DataProtocol]] | None
         ) = None
         self._needs_iterator = True
 
         # DataProtocol-level caching (for the output data)
         self._cached_output_datas: dict[
-            int, tuple[TagProtocol, DataProtocol | None]
+            int, tuple[KeyProtocol, DataProtocol | None]
         ] = {}
         self._cached_output_table: pa.Table | None = None
         self._cached_content_hash_column: pa.Array | None = None
@@ -440,11 +440,11 @@ class FunctionPodStream(StreamBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        tag_schema, data_schema = self.output_schema(
+        key_schema, data_schema = self.output_schema(
             columns=columns, all_info=all_info
         )
 
-        return tuple(tag_schema.keys()), tuple(data_schema.keys())
+        return tuple(key_schema.keys()), tuple(data_schema.keys())
 
     def output_schema(
         self,
@@ -472,10 +472,10 @@ class FunctionPodStream(StreamBase):
         self._cached_content_hash_column = None
         self._update_modified_time()
 
-    def __iter__(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+    def __iter__(self) -> Iterator[tuple[KeyProtocol, DataProtocol]]:
         return self.iter_data()
 
-    def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+    def iter_data(self) -> Iterator[tuple[KeyProtocol, DataProtocol]]:
         if self.is_stale:
             self.clear_cache()
         self._ensure_iterator()
@@ -487,45 +487,45 @@ class FunctionPodStream(StreamBase):
         else:
             # Yield from snapshot of complete cache
             for i in range(len(self._cached_output_datas)):
-                tag, data = self._cached_output_datas[i]
+                key, data = self._cached_output_datas[i]
                 if data is not None:
-                    yield tag, data
+                    yield key, data
 
     def _iter_data_sequential(
         self,
-    ) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+    ) -> Iterator[tuple[KeyProtocol, DataProtocol]]:
         input_iter = self._cached_input_iterator
         assert input_iter is not None
-        for i, (tag, data) in enumerate(input_iter):
+        for i, (key, data) in enumerate(input_iter):
             if i in self._cached_output_datas:
                 # Use cached result
-                tag, data = self._cached_output_datas[i]
+                key, data = self._cached_output_datas[i]
                 if data is not None:
-                    yield tag, data
+                    yield key, data
             else:
                 # Process data
-                tag, output_data = self._function_pod.process_data(tag, data)
-                self._cached_output_datas[i] = (tag, output_data)
+                key, output_data = self._function_pod.process_data(key, data)
+                self._cached_output_datas[i] = (key, output_data)
                 if output_data is not None:
-                    yield tag, output_data
+                    yield key, output_data
 
         # Mark completion by releasing the iterator
         self._cached_input_iterator = None
 
     def _iter_data_concurrent(
         self,
-    ) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+    ) -> Iterator[tuple[KeyProtocol, DataProtocol]]:
         """Collect remaining inputs, execute concurrently, and yield results in order."""
         input_iter = self._cached_input_iterator
         assert input_iter is not None
 
         # Materialise remaining inputs and separate cached from uncached.
-        all_inputs: list[tuple[int, TagProtocol, DataProtocol]] = []
-        to_compute: list[tuple[int, TagProtocol, DataProtocol]] = []
-        for i, (tag, data) in enumerate(input_iter):
-            all_inputs.append((i, tag, data))
+        all_inputs: list[tuple[int, KeyProtocol, DataProtocol]] = []
+        to_compute: list[tuple[int, KeyProtocol, DataProtocol]] = []
+        for i, (key, data) in enumerate(input_iter):
+            all_inputs.append((i, key, data))
             if i not in self._cached_output_datas:
-                to_compute.append((i, tag, data))
+                to_compute.append((i, key, data))
         self._cached_input_iterator = None
 
         # Submit uncached data concurrently via async_process_data.
@@ -538,31 +538,31 @@ class FunctionPodStream(StreamBase):
             if loop is not None:
                 # Already in event loop — fall back to sequential sync
                 results = [
-                    self._function_pod.process_data(tag, pkt)
-                    for _, tag, pkt in to_compute
+                    self._function_pod.process_data(key, pkt)
+                    for _, key, pkt in to_compute
                 ]
             else:
 
-                async def _gather() -> list[tuple[TagProtocol, DataProtocol | None]]:
+                async def _gather() -> list[tuple[KeyProtocol, DataProtocol | None]]:
                     return list(
                         await asyncio.gather(
                             *[
-                                self._function_pod.async_process_data(tag, pkt)
-                                for _, tag, pkt in to_compute
+                                self._function_pod.async_process_data(key, pkt)
+                                for _, key, pkt in to_compute
                             ]
                         )
                     )
 
                 results = asyncio.run(_gather())
 
-            for (i, _, _), (tag, output_data) in zip(to_compute, results):
-                self._cached_output_datas[i] = (tag, output_data)
+            for (i, _, _), (key, output_data) in zip(to_compute, results):
+                self._cached_output_datas[i] = (key, output_data)
 
         # Yield everything in original order.
         for i, *_ in all_inputs:
-            tag, data = self._cached_output_datas[i]
+            key, data = self._cached_output_datas[i]
             if data is not None:
-                yield tag, data
+                yield key, data
 
     def as_table(
         self,
@@ -571,34 +571,34 @@ class FunctionPodStream(StreamBase):
         all_info: bool = False,
     ) -> pa.Table:
         if self._cached_output_table is None:
-            all_tags = []
+            all_keys = []
             all_data = []
-            tag_schema, data_schema = None, None
-            for tag, data in self.iter_data():
-                if tag_schema is None:
-                    tag_schema = tag.arrow_schema(all_info=True)
+            key_schema, data_schema = None, None
+            for key, data in self.iter_data():
+                if key_schema is None:
+                    key_schema = key.arrow_schema(all_info=True)
                 if data_schema is None:
                     data_schema = data.arrow_schema(all_info=True)
                 # TODO: make use of arrow_compat dict
-                all_tags.append(tag.as_dict(all_info=True))
+                all_keys.append(key.as_dict(all_info=True))
                 all_data.append(data.as_dict(all_info=True))
 
             # TODO: re-verify the implemetation of this conversion
             converter = self.data_context.type_converter
 
             struct_data = converter.python_dicts_to_struct_dicts(all_data)
-            all_tags_as_tables: pa.Table = pa.Table.from_pylist(
-                all_tags, schema=tag_schema
+            all_keys_as_tables: pa.Table = pa.Table.from_pylist(
+                all_keys, schema=key_schema
             )
-            # drop context key column from tags table (guard: column absent on empty stream)
-            if constants.CONTEXT_KEY in all_tags_as_tables.column_names:
-                all_tags_as_tables = all_tags_as_tables.drop([constants.CONTEXT_KEY])
+            # drop context key column from keys table (guard: column absent on empty stream)
+            if constants.CONTEXT_KEY in all_keys_as_tables.column_names:
+                all_keys_as_tables = all_keys_as_tables.drop([constants.CONTEXT_KEY])
             all_data_as_tables: pa.Table = pa.Table.from_pylist(
                 struct_data, schema=data_schema
             )
 
             self._cached_output_table = arrow_utils.hstack_tables(
-                all_tags_as_tables, all_data_as_tables
+                all_keys_as_tables, all_data_as_tables
             )
         assert self._cached_output_table is not None, (
             "_cached_output_table should not be None here."
@@ -607,13 +607,13 @@ class FunctionPodStream(StreamBase):
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
 
         drop_columns = []
-        if not column_config.system_tags:
-            # TODO: get system tags more effiicently
+        if not column_config.system_keys:
+            # TODO: get system keys more effiicently
             drop_columns.extend(
                 [
                     c
                     for c in self._cached_output_table.column_names
-                    if c.startswith(constants.SYSTEM_TAG_PREFIX)
+                    if c.startswith(constants.SYSTEM_KEY_PREFIX)
                 ]
             )
         if not column_config.source:
@@ -630,7 +630,7 @@ class FunctionPodStream(StreamBase):
             if self._cached_content_hash_column is None:
                 content_hashes = []
                 # TODO: verify that order will be preserved
-                for tag, data in self.iter_data():
+                for key, data in self.iter_data():
                     content_hashes.append(data.content_hash().to_string())
                 self._cached_content_hash_column = pa.array(
                     content_hashes, type=pa.large_string()
@@ -647,7 +647,7 @@ class FunctionPodStream(StreamBase):
                 hash_column_name, self._cached_content_hash_column
             )
 
-        if column_config.sort_by_tags:
+        if column_config.sort_by_keys:
             # TODO: reimplement using polars natively
             output_table_schema = output_table.schema
             output_table = (

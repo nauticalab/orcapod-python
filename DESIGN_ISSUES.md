@@ -30,7 +30,7 @@ gaps rather than intentional choices:
 
 Note: merging into `TraceableBase` is correct at the *computation-node* level.
 `ContentIdentifiableBase` (which `TraceableBase` builds on) should **not** absorb
-`PipelineElementBase` — data datagrams (`Tag`, `Data`) are legitimately content-identifiable
+`PipelineElementBase` — data datagrams (`Key`, `Data`) are legitimately content-identifiable
 without being pipeline elements.
 
 **Fix:** Added `PipelineElementBase` to `TraceableBase`'s bases. Added
@@ -193,7 +193,7 @@ duplication that diverges silently over time.
 ### F5 — `FunctionPodStream` and `FunctionPodNodeStream` are near-identical copy-pastes
 **Status:** open
 **Severity:** medium
-`iter_data`, `as_table` (including content_hash and sort_by_tags logic), `keys`,
+`iter_data`, `as_table` (including content_hash and sort_by_keys logic), `keys`,
 `output_schema`, `source`, and `upstreams` are duplicated almost line-for-line. The only
 behavioural differences are:
 - `FunctionPodNodeStream` has `refresh_cache()`
@@ -219,7 +219,7 @@ is `self`.
 **Severity:** medium
 The method checks for an existing record with `get_record_by_id` and skips insertion if found.
 But it then calls `add_record(..., skip_duplicates=False)`, which will raise on a duplicate. A
-race between the lookup and the insert (e.g. two concurrent processes handling the same tag+data)
+race between the lookup and the insert (e.g. two concurrent processes handling the same key+data)
 would cause a crash instead of a graceful skip. Should use `skip_duplicates=True` for consistency
 with the intent.
 
@@ -251,22 +251,22 @@ Fix: change `ValueError` to `InputValidationError`.
 
 ---
 
-### F12 — System tag columns excluded from cache entry ID
+### F12 — System key columns excluded from cache entry ID
 **Status:** open
 **Severity:** high
 
-`FunctionPodNode.record_data_for_cache()` (line ~1077) builds a tag table for entry-ID
-computation but excludes system tag columns:
+`FunctionPodNode.record_data_for_cache()` (line ~1077) builds a key table for entry-ID
+computation but excludes system key columns:
 ```python
-# TODO: add system tag columns
+# TODO: add system key columns
 ```
 
-Two data with identical user tags but different provenance (arriving from different
-pipeline branches, thus having different system tags) produce the same cache key. This can
+Two data with identical user keys but different provenance (arriving from different
+pipeline branches, thus having different system keys) produce the same cache key. This can
 cause cache collisions where a result computed for one pipeline branch is returned for
 another.
 
-Fix: include system tag columns in the `tag_with_hash` table before computing the entry ID hash.
+Fix: include system key columns in the `key_with_hash` table before computing the entry ID hash.
 
 ---
 
@@ -289,7 +289,7 @@ incomplete schema, inconsistent with `as_table()` which does include source colu
 **Status:** open
 **Severity:** medium
 
-`as_table()` (line ~568) converts Arrow → Polars → sort → Arrow when sorting by tags:
+`as_table()` (line ~568) converts Arrow → Polars → sort → Arrow when sorting by keys:
 ```python
 # TODO: reimplement using polars natively
 ```
@@ -307,11 +307,11 @@ even when results are already stored in the result/pipeline databases.  This def
 of the two-database design (result DB + pipeline DB) used to cache computed outputs.
 
 **Fix:** Refactored `iter_data` to first call `FunctionPodNode.get_all_records(columns={"meta": True})`
-to load already-computed (tag, output-data) pairs from the databases (mirroring the legacy
+to load already-computed (key, output-data) pairs from the databases (mirroring the legacy
 `PodNodeStream` design), yield those via `TableStream`, then collect the set of already-processed
 `INPUT_PACKET_HASH` values and only call `process_data` for input data not yet in the DB.
 Also added `FunctionPodNode.get_all_records(columns, all_info)` using `ColumnConfig` to control
-which column groups (meta, source, system_tags) are returned.
+which column groups (meta, source, system_keys) are returned.
 
 ---
 
@@ -375,7 +375,7 @@ Delegating sources make this worse:
 - `DeltaTableSource` sets `source_name = resolved.name` but never sets `source_id` → same issue
 
 Additionally, delegating sources all return `self._arrow_source.identity_structure()` which is
-`("ArrowTableSource", tag_columns, table_hash)`. This means the outer source type (CSV, Delta,
+`("ArrowTableSource", key_columns, table_hash)`. This means the outer source type (CSV, Delta,
 etc.) is invisible to the content hash, and `source_id` (defaulting to content hash) will be
 identical for a CSVSource and an ArrowTableSource with the same data.
 
@@ -391,9 +391,9 @@ Added `computed_label()` to `RootSource` returning `_explicit_source_id`.
 **Status:** resolved
 **Severity:** high
 Both `FunctionPodStream.as_table()` and `FunctionPodNodeStream.as_table()` unconditionally call
-`.drop([constants.CONTEXT_KEY])` on the tags table built from the accumulated data. When the
+`.drop([constants.CONTEXT_KEY])` on the keys table built from the accumulated data. When the
 stream is empty (e.g. because the data function is inactive), `iter_data()` yields nothing,
-`tag_schema` stays `None`, and `pa.Table.from_pylist([], schema=None)` produces a zero-column
+`key_schema` stays `None`, and `pa.Table.from_pylist([], schema=None)` produces a zero-column
 table. The subsequent `.drop([constants.CONTEXT_KEY])` then raises `KeyError` because the column
 does not exist.
 
@@ -439,7 +439,7 @@ Relevant for future streaming/chunked processing of large datasets.
 **Status:** open
 **Severity:** medium
 
-`SelectTagColumns`, `SelectDataColumns`, `DropTagColumns`, `DropDataColumns` (in
+`SelectKeyColumns`, `SelectDataColumns`, `DropKeyColumns`, `DropDataColumns` (in
 `column_selection.py:58`, `137`, `214`, `292`) and `PolarsFilterByDataColumns`
 (`filters.py:135`) each have near-identical `validate_unary_input()` implementations. All are
 marked:
@@ -447,7 +447,7 @@ marked:
 # TODO: remove redundant logic
 ```
 
-The only difference between them is which key set (tag vs. data) is checked and the error
+The only difference between them is which key set (key vs. data) is checked and the error
 message text. A shared parameterized validation helper would eliminate the duplication.
 
 ---
@@ -469,14 +469,14 @@ Three categories of improvement are planned:
    independently:
    - ~~`PolarsFilter` — evaluate predicate per row, emit or drop immediately~~ (kept barrier:
      Polars expressions require DataFrame context for evaluation)
-   - `MapTags` / `MapData` — rename columns per row, emit immediately ✅
-   - `SelectTagColumns` / `SelectDataColumns` — project columns per row, emit immediately ✅
-   - `DropTagColumns` / `DropDataColumns` — drop columns per row, emit immediately ✅
+   - `MapKeys` / `MapData` — rename columns per row, emit immediately ✅
+   - `SelectKeyColumns` / `SelectDataColumns` — project columns per row, emit immediately ✅
+   - `DropKeyColumns` / `DropDataColumns` — drop columns per row, emit immediately ✅
 
 2. **Incremental overrides (stateful, eager emit)** — for multi-input operators that can
    produce partial results before all inputs are consumed:
    - `Join` — symmetric hash join for 2 inputs (streaming, with correct
-     system-tag name-extending via `input_pipeline_hashes` passed directly
+     system-key name-extending via `input_pipeline_hashes` passed directly
      to `async_execute`); barrier fallback for N>2 inputs via `static_process`. ✅
    - `MergeJoin` — kept barrier: complex column-merging logic
    - `SemiJoin` — build right, stream left through hash lookup ✅
@@ -487,7 +487,7 @@ Three categories of improvement are planned:
 
 **Remaining:** `PolarsFilter` (barrier), `MergeJoin` (barrier) could receive incremental
 overrides in the future but require careful handling of Polars expression evaluation and
-system-tag evolution respectively.
+system-key evolution respectively.
 
 ---
 
@@ -509,10 +509,10 @@ A naïve decomposition into `FunctionPod + Join` works but has unnecessary overh
 1. **Materialization waste** — FunctionPod produces an intermediate stream that is only created
    to be immediately joined back. AddResult can compute new columns and merge them into the
    original data in a single pass, with no intermediate stream.
-2. **Redundant tag matching** — Join must re-match tags that trivially correspond (they came
-   from the same input row). AddResult already holds the (tag, data) pair and can skip the
+2. **Redundant key matching** — Join must re-match keys that trivially correspond (they came
+   from the same input row). AddResult already holds the (key, data) pair and can skip the
    matching entirely.
-3. **Simpler async path** — streams row-by-row like FunctionPod: read (tag, data), call
+3. **Simpler async path** — streams row-by-row like FunctionPod: read (key, data), call
    the data function, merge original data columns + new columns, emit. No broadcast,
    passthrough channel, or rejoin wiring needed.
 
@@ -561,7 +561,7 @@ await AddResult(grade_pf).async_execute([input_ch], output_ch)
 
 #### Implementation notes
 
-- `output_schema()` returns `(input_tag_schema, input_data_schema | function_output_schema)`
+- `output_schema()` returns `(input_key_schema, input_data_schema | function_output_schema)`
   — the union of original data columns and new computed columns.
 - Must raise `InputValidationError` if function output keys collide with existing data
   column names (same constraint as Join on overlapping data columns).

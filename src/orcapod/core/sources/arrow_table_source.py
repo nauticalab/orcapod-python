@@ -18,7 +18,7 @@ class ArrowTableSource(RootSource):
     """A source backed by an in-memory PyArrow Table.
 
     Uses ``SourceStreamBuilder`` to strip system columns, add per-row
-    source-info provenance columns and a system tag column encoding the
+    source-info provenance columns and a system key column encoding the
     schema hash, then wraps the result in an ``ArrowTableStream``.
 
     Nullable handling
@@ -53,8 +53,8 @@ class ArrowTableSource(RootSource):
     def __init__(
         self,
         table: "pa.Table",
-        tag_columns: Collection[str] = (),
-        system_tag_columns: Collection[str] = (),
+        key_columns: Collection[str] = (),
+        system_key_columns: Collection[str] = (),
         record_id_column: str | None = None,
         infer_nullable: bool = False,
         **kwargs: Any,
@@ -72,17 +72,17 @@ class ArrowTableSource(RootSource):
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(
             table,
-            tag_columns=tag_columns,
+            key_columns=key_columns,
             source_id=self._source_id,
             record_id_column=record_id_column,
-            system_tag_columns=system_tag_columns,
+            system_key_columns=system_key_columns,
         )
 
         self._stream = result.stream
         self._schema_hash = result.schema_hash
         self._table_hash = result.table_hash
-        self._tag_columns = result.tag_columns
-        self._system_tag_columns = result.system_tag_columns
+        self._key_columns = result.key_columns
+        self._system_key_columns = result.system_key_columns
         self._record_id_column = record_id_column
 
         if self._source_id is None:
@@ -92,7 +92,7 @@ class ArrowTableSource(RootSource):
         """Serialize metadata-only config (in-memory table is not serializable)."""
         return {
             "source_type": "arrow_table",
-            "tag_columns": list(self._tag_columns),
+            "key_columns": list(self._key_columns),
             "source_id": self.source_id,
             **self._identity_config(),
         }
@@ -111,5 +111,5 @@ class ArrowTableSource(RootSource):
 
     @property
     def table(self) -> "pa.Table":
-        """Return the enriched table (with source-info and system tags)."""
-        return self._stream.as_table(columns={"source": True, "system_tags": True})
+        """Return the enriched table (with source-info and system keys)."""
+        return self._stream.as_table(columns={"source": True, "system_keys": True})

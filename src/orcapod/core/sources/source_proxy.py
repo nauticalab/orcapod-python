@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
     import pyarrow as pa
 
-    from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
+    from orcapod.protocols.core_protocols import DataProtocol, KeyProtocol
     from orcapod.types import ColumnConfig
 
 
@@ -37,7 +37,7 @@ class SourceProxy(RootSource):
         source_id: The original source's canonical ID.
         content_hash_str: The original source's content hash string.
         pipeline_hash_str: The original source's pipeline hash string.
-        tag_schema: The original source's tag schema.
+        key_schema: The original source's key schema.
         data_schema: The original source's data schema.
         expected_class_name: Class name of the original source (e.g.
             ``"ArrowTableSource"``).  Informational and used for validation
@@ -51,7 +51,7 @@ class SourceProxy(RootSource):
         source_id: str,
         content_hash_str: str,
         pipeline_hash_str: str,
-        tag_schema: Schema,
+        key_schema: Schema,
         data_schema: Schema,
         expected_class_name: str | None = None,
         source_config: dict[str, Any] | None = None,
@@ -60,7 +60,7 @@ class SourceProxy(RootSource):
         super().__init__(source_id=source_id, label=label)
         self._content_hash_str = content_hash_str
         self._pipeline_hash_str = pipeline_hash_str
-        self._tag_schema = tag_schema
+        self._key_schema = key_schema
         self._data_schema = data_schema
         self._expected_class_name = expected_class_name
         self._source_config = source_config or {}
@@ -89,7 +89,7 @@ class SourceProxy(RootSource):
         """Bind a live source to this proxy, enabling data access.
 
         The source must match this proxy's identity — same ``source_id``,
-        ``content_hash``, ``pipeline_hash``, tag schema keys, and data
+        ``content_hash``, ``pipeline_hash``, key schema keys, and data
         schema keys.  If ``expected_class_name`` is set, the source's class
         name must also match.
 
@@ -163,7 +163,7 @@ class SourceProxy(RootSource):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        return (self._tag_schema, self._data_schema)
+        return (self._key_schema, self._data_schema)
 
     def keys(
         self,
@@ -172,7 +172,7 @@ class SourceProxy(RootSource):
         all_info: bool = False,
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         return (
-            tuple(self._tag_schema.keys()),
+            tuple(self._key_schema.keys()),
             tuple(self._data_schema.keys()),
         )
 
@@ -191,7 +191,7 @@ class SourceProxy(RootSource):
             )
         return self._delegate
 
-    def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+    def iter_data(self) -> Iterator[tuple[KeyProtocol, DataProtocol]]:
         return self._require_delegate().iter_data()
 
     def as_table(

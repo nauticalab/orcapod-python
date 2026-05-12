@@ -16,15 +16,15 @@ from orcapod.core.sources.source_registry import SourceRegistry
 # ---------------------------------------------------------------------------
 
 
-def _make_source(tag_val: str = "a", data_val: int = 1) -> ArrowTableSource:
+def _make_source(key_val: str = "a", data_val: int = 1) -> ArrowTableSource:
     """Create a minimal ArrowTableSource for registry testing."""
     table = pa.table(
         {
-            "tag": pa.array([tag_val], type=pa.large_string()),
+            "key": pa.array([key_val], type=pa.large_string()),
             "data": pa.array([data_val], type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=["tag"], infer_nullable=True)
+    return ArrowTableSource(table, key_columns=["key"], infer_nullable=True)
 
 
 # ---------------------------------------------------------------------------

@@ -30,7 +30,7 @@ def simple_pipeline(tmp_path):
     db = DeltaTableDatabase(base_path=str(tmp_path / "pipeline_db"))
     source = DictSource(
         data=[{"x": 1, "y": 2}, {"x": 3, "y": 4}],
-        tag_columns=["x"],
+        key_columns=["x"],
         source_id="test_source",
     )
     pf = PythonDataFunction(
@@ -62,8 +62,8 @@ def multi_source_pipeline(tmp_path):
             "score": pa.array([100, 200], type=pa.int64()),
         }
     )
-    src_a = ArrowTableSource(table_a, tag_columns=["key"], source_id="src_a", infer_nullable=True)
-    src_b = ArrowTableSource(table_b, tag_columns=["key"], source_id="src_b", infer_nullable=True)
+    src_a = ArrowTableSource(table_a, key_columns=["key"], source_id="src_a", infer_nullable=True)
+    src_b = ArrowTableSource(table_b, key_columns=["key"], source_id="src_b", infer_nullable=True)
 
     def add_values(value: int, score: int) -> dict[str, int]:
         return {"total": value + score}
@@ -178,8 +178,8 @@ class TestPipelineSave:
                 f"Node {node_hash} missing fields: "
                 f"{required_fields - set(descriptor.keys())}"
             )
-            # output_schema has tag and data sub-dicts
-            assert "tag" in descriptor["output_schema"]
+            # output_schema has key and data sub-dicts
+            assert "key" in descriptor["output_schema"]
             assert "data" in descriptor["output_schema"]
 
     def test_save_source_node_fields(self, simple_pipeline):
@@ -268,7 +268,7 @@ class TestPipelineSave:
 
         source = DictSource(
             data=[{"x": 1, "y": 2}],
-            tag_columns=["x"],
+            key_columns=["x"],
             source_id="test_source",
         )
         pf = PythonDataFunction(
@@ -369,7 +369,7 @@ class TestPipelineSaveLoadIntegration:
         db = DeltaTableDatabase(base_path=db_path)
         source = DictSource(
             data=[{"x": 1, "y": 2}, {"x": 3, "y": 4}],
-            tag_columns=["x"],
+            key_columns=["x"],
             source_id="test_source",
         )
         pf = PythonDataFunction(
@@ -400,7 +400,7 @@ class TestPipelineSaveLoadIntegration:
         db = DeltaTableDatabase(base_path=db_path)
         source = DictSource(
             data=[{"x": 1, "y": 2}, {"x": 3, "y": 4}],
-            tag_columns=["x"],
+            key_columns=["x"],
             source_id="test_source",
         )
         pf = PythonDataFunction(
@@ -429,10 +429,10 @@ class TestPipelineSaveLoadIntegration:
         """Save/load a pipeline with an operator node."""
         db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
         source1 = DictSource(
-            data=[{"a": 1, "b": 10}], tag_columns=["a"], source_id="s1"
+            data=[{"a": 1, "b": 10}], key_columns=["a"], source_id="s1"
         )
         source2 = DictSource(
-            data=[{"a": 1, "c": 20}], tag_columns=["a"], source_id="s2"
+            data=[{"a": 1, "c": 20}], key_columns=["a"], source_id="s2"
         )
         pipeline = Pipeline(name="test", pipeline_database=db)
         with pipeline:
@@ -471,7 +471,7 @@ def _make_csv_pipeline(tmp_path):
     db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
     source = CSVSource(
         file_path=csv_path,
-        tag_columns=["x"],
+        key_columns=["x"],
         source_id="csv_source",
     )
     pf = PythonDataFunction(
@@ -552,11 +552,11 @@ class TestReadOnlyMode:
         source_node = [
             n for n in loaded._persistent_node_map.values() if n.node_type == "source"
         ][0]
-        tag_schema, data_schema = source_node.output_schema()
-        assert isinstance(tag_schema, Schema)
+        key_schema, data_schema = source_node.output_schema()
+        assert isinstance(key_schema, Schema)
         assert isinstance(data_schema, Schema)
-        # The original source has tag=["x"], data=["y"]
-        assert "x" in tag_schema
+        # The original source has key=["x"], data=["y"]
+        assert "x" in key_schema
         assert "y" in data_schema
 
     def test_read_only_source_returns_stored_keys(self, simple_pipeline):
@@ -571,8 +571,8 @@ class TestReadOnlyMode:
         source_node = [
             n for n in loaded._persistent_node_map.values() if n.node_type == "source"
         ][0]
-        tag_keys, data_keys = source_node.keys()
-        assert "x" in tag_keys
+        key_keys, data_keys = source_node.keys()
+        assert "x" in key_keys
         assert "y" in data_keys
 
     def test_read_only_source_iter_data_raises(self, simple_pipeline):
@@ -615,10 +615,10 @@ class TestReadOnlyMode:
         loaded = Pipeline.load(str(path), mode="read_only")
 
         fn = loaded.compiled_nodes["transform"]
-        tag_schema, data_schema = fn.output_schema()
-        assert isinstance(tag_schema, Schema)
+        key_schema, data_schema = fn.output_schema()
+        assert isinstance(key_schema, Schema)
         assert isinstance(data_schema, Schema)
-        assert "x" in tag_schema
+        assert "x" in key_schema
         assert "result" in data_schema
 
     def test_read_only_function_returns_stored_keys(self, simple_pipeline):
@@ -631,8 +631,8 @@ class TestReadOnlyMode:
         loaded = Pipeline.load(str(path), mode="read_only")
 
         fn = loaded.compiled_nodes["transform"]
-        tag_keys, data_keys = fn.keys()
-        assert "x" in tag_keys
+        key_keys, data_keys = fn.keys()
+        assert "x" in key_keys
         assert "result" in data_keys
 
     def test_read_only_function_returns_stored_hashes(self, simple_pipeline):
@@ -662,10 +662,10 @@ class TestReadOnlyMode:
         """
         db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
         source1 = DictSource(
-            data=[{"a": 1, "b": 10}], tag_columns=["a"], source_id="s1"
+            data=[{"a": 1, "b": 10}], key_columns=["a"], source_id="s1"
         )
         source2 = DictSource(
-            data=[{"a": 1, "c": 20}], tag_columns=["a"], source_id="s2"
+            data=[{"a": 1, "c": 20}], key_columns=["a"], source_id="s2"
         )
         pipeline = Pipeline(name="test", pipeline_database=db)
         with pipeline:
@@ -682,10 +682,10 @@ class TestReadOnlyMode:
         assert op_node.load_status == LoadStatus.UNAVAILABLE
 
         # Stored metadata is still accessible
-        tag_schema, data_schema = op_node.output_schema()
-        assert isinstance(tag_schema, Schema)
+        key_schema, data_schema = op_node.output_schema()
+        assert isinstance(key_schema, Schema)
         assert isinstance(data_schema, Schema)
-        assert "a" in tag_schema
+        assert "a" in key_schema
 
     def test_read_only_pipeline_is_compiled(self, simple_pipeline):
         """A read-only loaded pipeline reports as compiled."""
@@ -804,10 +804,10 @@ class TestFullMode:
         """
         db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
         source1 = DictSource(
-            data=[{"a": 1, "b": 10}], tag_columns=["a"], source_id="s1"
+            data=[{"a": 1, "b": 10}], key_columns=["a"], source_id="s1"
         )
         source2 = DictSource(
-            data=[{"a": 1, "c": 20}], tag_columns=["a"], source_id="s2"
+            data=[{"a": 1, "c": 20}], key_columns=["a"], source_id="s2"
         )
         pipeline = Pipeline(name="test", pipeline_database=db)
         with pipeline:
@@ -865,7 +865,7 @@ class TestFullMode:
         # 2 rows in the CSV
         assert len(data) == 2
         # Each data should have a "result" key
-        for tag, data in data:
+        for key, data in data:
             assert "result" in data.keys()
 
     def test_full_mode_csv_function_as_table(self, tmp_path):
@@ -902,7 +902,7 @@ class TestCachedSourceWithSourceProxyRoundTrip:
 
         source = DictSource(
             data=[{"x": 1, "y": 10}, {"x": 2, "y": 20}],
-            tag_columns=["x"],
+            key_columns=["x"],
             source_id="dict_src",
         )
         cached_source = CachedSource(source, cache_database=cache_db)
@@ -956,7 +956,7 @@ class TestCachedSourceWithSourceProxyRoundTrip:
 
         source = DictSource(
             data=[{"x": 1, "y": 5}, {"x": 2, "y": 15}],
-            tag_columns=["x"],
+            key_columns=["x"],
             source_id="dict_src2",
         )
         cached_source = CachedSource(source, cache_database=cache_db)
@@ -1008,8 +1008,8 @@ class TestLoadEdgeCases:
     def test_load_multi_source_operator_pipeline_read_only(self, tmp_path):
         """Multi-source pipeline with operator loads in read_only with correct status."""
         db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
-        src1 = DictSource(data=[{"k": 1, "v1": 10}], tag_columns=["k"], source_id="s1")
-        src2 = DictSource(data=[{"k": 1, "v2": 20}], tag_columns=["k"], source_id="s2")
+        src1 = DictSource(data=[{"k": 1, "v1": 10}], key_columns=["k"], source_id="s1")
+        src2 = DictSource(data=[{"k": 1, "v2": 20}], key_columns=["k"], source_id="s2")
         pipeline = Pipeline(name="multi", pipeline_database=db)
         with pipeline:
             joined = Join().process(src1, src2, label="join_node")
@@ -1076,7 +1076,7 @@ class TestLoadEdgeCases:
         """Pipeline with separate result_database round-trips correctly."""
         pipeline_db = DeltaTableDatabase(base_path=str(tmp_path / "pdb"))
         result_db = DeltaTableDatabase(base_path=str(tmp_path / "fdb"))
-        source = DictSource(data=[{"x": 1, "y": 2}], tag_columns=["x"], source_id="s")
+        source = DictSource(data=[{"x": 1, "y": 2}], key_columns=["x"], source_id="s")
         pf = PythonDataFunction(
             function=transform_func,
             output_keys=["result"],
@@ -1157,7 +1157,7 @@ class TestPipelineLoadWithUnavailableFunction:
         db = DeltaTableDatabase(base_path=db_path)
         source = CSVSource(
             file_path=csv_path,
-            tag_columns=["name"],
+            key_columns=["name"],
             source_id="people",
         )
         pf = PythonDataFunction(
@@ -1194,7 +1194,7 @@ class TestPipelineLoadWithUnavailableFunction:
         db = DeltaTableDatabase(base_path=db_path)
         source = CSVSource(
             file_path=csv_path,
-            tag_columns=["name"],
+            key_columns=["name"],
             source_id="people",
         )
         pf = PythonDataFunction(
@@ -1313,7 +1313,7 @@ class TestCacheOnlyMode:
         db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
         source = DictSource(
             data=source_data,
-            tag_columns=["x"],
+            key_columns=["x"],
             source_id="test_source",
         )
         pf = PythonDataFunction(
@@ -1417,7 +1417,7 @@ class TestCacheOnlyMode:
         db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
         source = CSVSource(
             file_path=csv_path,
-            tag_columns=["x"],
+            key_columns=["x"],
             source_id="csv_source",
         )
         pf = PythonDataFunction(
@@ -1504,7 +1504,7 @@ class TestPLT1158UncachedOperatorStatus:
                 {"id": 2, "x": 30, "y": 40},
                 {"id": 3, "x": 60, "y": 10},
             ],
-            tag_columns=["id"],
+            key_columns=["id"],
             source_id="data1",
         )
         data2 = DictSource(
@@ -1512,7 +1512,7 @@ class TestPLT1158UncachedOperatorStatus:
                 {"id": 2, "z": 30},
                 {"id": 3, "z": 50},
             ],
-            tag_columns=["id"],
+            key_columns=["id"],
             source_id="data2",
         )
 
@@ -1648,7 +1648,7 @@ def test_function_node_pipeline_path_two_level(tmp_path):
     pod = FunctionPod(data_function=pf)
     source = DictSource(
         data=[{"x": 1, "y": 2}, {"x": 3, "y": 4}],
-        tag_columns=["x"],
+        key_columns=["x"],
         source_id="test_src",
     )
 
@@ -1681,8 +1681,8 @@ def test_operator_node_pipeline_path_two_level(tmp_path):
             "score": pa.array([100, 200], type=pa.int64()),
         }
     )
-    src_a = ArrowTableSource(table_a, tag_columns=["key"], source_id="src_a", infer_nullable=True)
-    src_b = ArrowTableSource(table_b, tag_columns=["key"], source_id="src_b", infer_nullable=True)
+    src_a = ArrowTableSource(table_a, key_columns=["key"], source_id="src_a", infer_nullable=True)
+    src_b = ArrowTableSource(table_b, key_columns=["key"], source_id="src_b", infer_nullable=True)
     join = Join()
 
     pipeline = Pipeline(name="test", pipeline_database=db)
@@ -1724,7 +1724,7 @@ def _make_simple_pipeline_for_level_tests(tmp_path):
         function_name="transform_func",
     )
     pod = FunctionPod(data_function=pf)
-    source = DictSource(data=[{"x": 1, "y": 2}], tag_columns=["x"], source_id="s")
+    source = DictSource(data=[{"x": 1, "y": 2}], key_columns=["x"], source_id="s")
     pipeline = Pipeline(name="p", pipeline_database=db)
     with pipeline:
         pod.process(source, label="fn")
@@ -1856,7 +1856,7 @@ def test_load_operator_node_identity_path_has_schema_instance_components(tmp_pat
     _write_csv(csv_path, [{"name": "alice", "y": 2}, {"name": "bob", "y": 4}])
 
     db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
-    source = CSVSource(file_path=csv_path, tag_columns=["name"], source_id="people")
+    source = CSVSource(file_path=csv_path, key_columns=["name"], source_id="people")
     pf = PythonDataFunction(
         function=transform_func,
         output_keys="result",
@@ -1893,7 +1893,7 @@ def test_load_raises_on_missing_result_database_registry_key(tmp_path):
     """
     pipeline_db = DeltaTableDatabase(base_path=str(tmp_path / "pdb"))
     result_db = DeltaTableDatabase(base_path=str(tmp_path / "fdb"))
-    source = DictSource(data=[{"x": 1, "y": 2}], tag_columns=["x"], source_id="s")
+    source = DictSource(data=[{"x": 1, "y": 2}], key_columns=["x"], source_id="s")
     pf = PythonDataFunction(
         function=transform_func,
         output_keys=["result"],
@@ -1934,7 +1934,7 @@ def test_load_function_node_identity_path_has_schema_instance_components(tmp_pat
     _write_csv(csv_path, [{"name": "alice", "y": 2}, {"name": "bob", "y": 4}])
 
     db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
-    source = CSVSource(file_path=csv_path, tag_columns=["name"], source_id="people")
+    source = CSVSource(file_path=csv_path, key_columns=["name"], source_id="people")
     pf = PythonDataFunction(
         function=transform_func,
         output_keys="result",
@@ -2045,7 +2045,7 @@ def test_load_function_node_with_old_function_pod_key_is_not_reconstructed(tmp_p
     csv_path = str(tmp_path / "data.csv")
     _write_csv(csv_path, [{"name": "alice", "y": 2}, {"name": "bob", "y": 4}])
     db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
-    source = CSVSource(file_path=csv_path, tag_columns=["name"], source_id="people")
+    source = CSVSource(file_path=csv_path, key_columns=["name"], source_id="people")
     pf = PythonDataFunction(
         function=transform_func, output_keys="result", function_name="transform_func"
     )
@@ -2086,7 +2086,7 @@ def test_load_operator_node_with_old_operator_key_is_not_reconstructed(tmp_path)
     csv_path = str(tmp_path / "data.csv")
     _write_csv(csv_path, [{"name": "alice", "y": 2}, {"name": "bob", "y": 4}])
     db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
-    source = CSVSource(file_path=csv_path, tag_columns=["name"], source_id="people")
+    source = CSVSource(file_path=csv_path, key_columns=["name"], source_id="people")
     pf = PythonDataFunction(
         function=transform_func, output_keys="result", function_name="transform_func"
     )
@@ -2162,7 +2162,7 @@ class TestSaveLoadRunRoundtrip:
         _write_csv(csv_path, [{"x": "1", "y": "2"}, {"x": "3", "y": "4"}])
 
         db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
-        source = CSVSource(file_path=csv_path, tag_columns=["x"], source_id="src")
+        source = CSVSource(file_path=csv_path, key_columns=["x"], source_id="src")
         pf = PythonDataFunction(
             function=transform_func,
             output_keys=["result"],
@@ -2206,7 +2206,7 @@ class TestSaveLoadRunRoundtrip:
         _write_csv(csv_path, [{"x": "1", "y": "10"}, {"x": "3", "y": "20"}])
 
         original_db = DeltaTableDatabase(base_path=str(tmp_path / "original_db"))
-        source = CSVSource(file_path=csv_path, tag_columns=["x"], source_id="src2")
+        source = CSVSource(file_path=csv_path, key_columns=["x"], source_id="src2")
         pf = PythonDataFunction(
             function=transform_func,
             output_keys=["result"],
@@ -2260,7 +2260,7 @@ class TestSaveLoadRunRoundtrip:
         _write_csv(csv_path, [{"x": "1", "y": "5"}, {"x": "3", "y": "15"}])
 
         db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
-        source = CSVSource(file_path=csv_path, tag_columns=["x"], source_id="src3")
+        source = CSVSource(file_path=csv_path, key_columns=["x"], source_id="src3")
         pf = PythonDataFunction(
             function=transform_func,
             output_keys=["result"],

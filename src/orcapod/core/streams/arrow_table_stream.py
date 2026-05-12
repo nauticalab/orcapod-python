@@ -6,9 +6,9 @@ from itertools import repeat
 from typing import TYPE_CHECKING, Any, cast
 
 from orcapod import contexts
-from orcapod.core.datagrams import Data, Tag
+from orcapod.core.datagrams import Data, Key
 from orcapod.core.streams.base import StreamBase
-from orcapod.protocols.core_protocols import PodProtocol, StreamProtocol, TagProtocol
+from orcapod.protocols.core_protocols import PodProtocol, StreamProtocol, KeyProtocol
 from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
@@ -28,19 +28,19 @@ class ArrowTableStream(StreamBase):
     """
     An immutable stream based on a PyArrow Table.
     This stream is designed to be used with data that is already in a tabular format,
-    such as data loaded from a file or database. The columns to be treated as tags are
+    such as data loaded from a file or database. The columns to be treated as keys are
     specified at initialization, and the rest of the columns are treated as data.
     The stream is immutable, meaning that once it is created, it cannot be modified.
     This is useful for ensuring that the data in the stream remains consistent and unchanging.
 
-    The types of the tag and data columns are inferred from the PyArrow Table schema.
+    The types of the key and data columns are inferred from the PyArrow Table schema.
     """
 
     def __init__(
         self,
         table: "pa.Table",
-        tag_columns: Collection[str] = (),
-        system_tag_columns: Collection[str] = (),
+        key_columns: Collection[str] = (),
+        system_key_columns: Collection[str] = (),
         source_info: dict[str, str | None] | None = None,
         producer: PodProtocol | None = None,
         upstreams: tuple[StreamProtocol, ...] = (),
@@ -76,37 +76,37 @@ class ArrowTableStream(StreamBase):
 
         prefix_info = {constants.SOURCE_PREFIX: source_info}
 
-        # determine tag columns first and then exclude any source info
-        self._tag_columns = tuple(c for c in tag_columns if c in table.column_names)
-        self._system_tag_columns = tuple(
-            c for c in table.column_names if c.startswith(constants.SYSTEM_TAG_PREFIX)
+        # determine key columns first and then exclude any source info
+        self._key_columns = tuple(c for c in key_columns if c in table.column_names)
+        self._system_key_columns = tuple(
+            c for c in table.column_names if c.startswith(constants.SYSTEM_KEY_PREFIX)
         )
-        if len(system_tag_columns) > 0:
-            # rename system_tag_columns
+        if len(system_key_columns) > 0:
+            # rename system_key_columns
             column_name_map = {
-                c: f"{constants.SYSTEM_TAG_PREFIX}{c}" for c in system_tag_columns
+                c: f"{constants.SYSTEM_KEY_PREFIX}{c}" for c in system_key_columns
             }
             table = table.rename_columns(
                 [column_name_map.get(c, c) for c in table.column_names]
             )
 
-            self._system_tag_columns += tuple(
-                f"{constants.SYSTEM_TAG_PREFIX}{c}" for c in system_tag_columns
+            self._system_key_columns += tuple(
+                f"{constants.SYSTEM_KEY_PREFIX}{c}" for c in system_key_columns
             )
 
-        self._all_tag_columns = self._tag_columns + self._system_tag_columns
-        if delta := set(tag_columns) - set(self._tag_columns):
+        self._all_key_columns = self._key_columns + self._system_key_columns
+        if delta := set(key_columns) - set(self._key_columns):
             raise ValueError(
-                f"Specified tag columns {delta} are not present in the table."
+                f"Specified key columns {delta} are not present in the table."
             )
         table, prefix_tables = arrow_utils.prepare_prefixed_columns(
             table,
             prefix_info,
-            exclude_columns=self._all_tag_columns,
+            exclude_columns=self._all_key_columns,
         )
-        # now table should only contain tag columns and data columns
+        # now table should only contain key columns and data columns
         self._data_columns = tuple(
-            c for c in table.column_names if c not in self._all_tag_columns
+            c for c in table.column_names if c not in self._all_key_columns
         )
         self._table = table
         self._source_info_table = prefix_tables[constants.SOURCE_PREFIX]
@@ -119,23 +119,23 @@ class ArrowTableStream(StreamBase):
 
         # Respect Arrow nullable flags as-is (after optional inference above):
         # nullable=True → T | None, nullable=False → T.
-        tag_schema = pa.schema(
-            f for f in self._table.schema if f.name in self._tag_columns
+        key_schema = pa.schema(
+            f for f in self._table.schema if f.name in self._key_columns
         )
-        system_tag_schema = pa.schema(
-            f for f in self._table.schema if f.name in self._system_tag_columns
+        system_key_schema = pa.schema(
+            f for f in self._table.schema if f.name in self._system_key_columns
         )
-        all_tag_schema = arrow_utils.join_arrow_schemas(tag_schema, system_tag_schema)
+        all_key_schema = arrow_utils.join_arrow_schemas(key_schema, system_key_schema)
         data_schema = pa.schema(
             f for f in self._table.schema if f.name in self._data_columns
         )
 
-        self._tag_schema = tag_schema
-        self._system_tag_schema = system_tag_schema
-        self._all_tag_schema = all_tag_schema
+        self._key_schema = key_schema
+        self._system_key_schema = system_key_schema
+        self._all_key_schema = all_key_schema
         self._data_schema = data_schema
 
-        self._cached_elements: list[tuple[TagProtocol, Data]] | None = None
+        self._cached_elements: list[tuple[KeyProtocol, Data]] | None = None
         self._update_modified_time()  # set modified time to now
 
     def identity_structure(self) -> Any:
@@ -144,15 +144,15 @@ class ArrowTableStream(StreamBase):
         return (
             self.__class__.__name__,
             self.as_table(all_info=True),
-            self._tag_columns,
+            self._key_columns,
         )
 
     def pipeline_identity_structure(self) -> Any:
         if self._producer is None or not isinstance(
             self._producer, PipelineElementProtocol
         ):
-            tag_schema, data_schema = self.output_schema()
-            return (tag_schema, data_schema)
+            key_schema, data_schema = self.output_schema()
+            return (key_schema, data_schema)
         return super().pipeline_identity_structure()
 
     @property
@@ -170,15 +170,15 @@ class ArrowTableStream(StreamBase):
         all_info: bool = False,
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """
-        Returns the keys of the tag and data columns in the stream.
+        Returns the keys of the key and data columns in the stream.
         This is useful for accessing the columns in the stream.
         """
-        tag_columns = self._tag_columns
+        key_columns = self._key_columns
         columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
         # TODO: add standard parsing of columns
-        if columns_config.system_tags:
-            tag_columns += self._system_tag_columns
-        return tag_columns, self._data_columns
+        if columns_config.system_keys:
+            key_columns += self._system_key_columns
+        return key_columns, self._data_columns
 
     def output_schema(
         self,
@@ -187,19 +187,19 @@ class ArrowTableStream(StreamBase):
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
         """
-        Returns the types of the tag and data columns in the stream.
+        Returns the types of the key and data columns in the stream.
         This is useful for accessing the types of the columns in the stream.
         """
         # normalize column config
         columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
         # TODO: consider using MappingProxyType to avoid copying the dicts
         converter = self.data_context.type_converter
-        if columns_config.system_tags:
-            tag_schema = self._all_tag_schema
+        if columns_config.system_keys:
+            key_schema = self._all_key_schema
         else:
-            tag_schema = self._tag_schema
+            key_schema = self._key_schema
         return (
-            converter.arrow_schema_to_python_schema(tag_schema),
+            converter.arrow_schema_to_python_schema(key_schema),
             converter.arrow_schema_to_python_schema(self._data_schema),
         )
 
@@ -228,9 +228,9 @@ class ArrowTableStream(StreamBase):
                 pa.field(hash_column_name, pa.large_string(), nullable=False),
                 pa.array(content_hashes, type=pa.large_string()),
             )
-        if not columns_config.system_tags:
+        if not columns_config.system_keys:
             # Check in original implementation
-            output_table = output_table.drop_columns(list(self._system_tag_columns))
+            output_table = output_table.drop_columns(list(self._system_key_columns))
         table_stack = (output_table,)
         if columns_config.context:
             table_stack += (self._data_context_table,)
@@ -239,15 +239,15 @@ class ArrowTableStream(StreamBase):
 
         table = arrow_utils.hstack_tables(*table_stack)
 
-        if columns_config.sort_by_tags:
-            # TODO: cleanup the sorting tag selection logic
+        if columns_config.sort_by_keys:
+            # TODO: cleanup the sorting key selection logic
             try:
-                target_tags = (
-                    self._all_tag_columns
-                    if columns_config.system_tags
-                    else self._tag_columns
+                target_keys = (
+                    self._all_key_columns
+                    if columns_config.system_keys
+                    else self._key_columns
                 )
-                return table.sort_by([(column, "ascending") for column in target_tags])
+                return table.sort_by([(column, "ascending") for column in target_keys])
             except pa.ArrowTypeError:
                 # If sorting fails, fall back to unsorted table
                 return table
@@ -261,35 +261,35 @@ class ArrowTableStream(StreamBase):
         """
         self._cached_elements = None
 
-    def iter_data(self) -> Iterator[tuple[TagProtocol, Data]]:
+    def iter_data(self) -> Iterator[tuple[KeyProtocol, Data]]:
         """
         Iterates over the data in the stream.
-        Each data is represented as a tuple of (TagProtocol, DataProtocol).
+        Each data is represented as a tuple of (KeyProtocol, DataProtocol).
         """
         # TODO: make it work with table batch stream
         if self._cached_elements is None:
             cached_elements = []
-            tag_present = len(self._all_tag_columns) > 0
-            if tag_present:
-                tags = self._table.select(self._all_tag_columns)
-                tag_batches = tags.to_batches()
+            key_present = len(self._all_key_columns) > 0
+            if key_present:
+                keys = self._table.select(self._all_key_columns)
+                key_batches = keys.to_batches()
             else:
-                tag_batches = repeat(Tag({}))
+                key_batches = repeat(Key({}))
 
             # TODO: come back and clean up this logic
 
             data = self._table.select(self._data_columns)
 
-            for tag_batch, data_batch in zip(tag_batches, data.to_batches()):
+            for key_batch, data_batch in zip(key_batches, data.to_batches()):
                 for i in range(len(data_batch)):
-                    if tag_present:
-                        tag = Tag(
-                            tag_batch.slice(i, 1),  # type: ignore
+                    if key_present:
+                        key = Key(
+                            key_batch.slice(i, 1),  # type: ignore
                             data_context=self.data_context,
                         )
 
                     else:
-                        tag = cast(Tag, tag_batch)
+                        key = cast(Key, key_batch)
 
                     data = Data(
                         data_batch.slice(i, 1),
@@ -297,9 +297,9 @@ class ArrowTableStream(StreamBase):
                         data_context=self.data_context,
                     )
 
-                    yield tag, data
+                    yield key, data
 
-                    cached_elements.append((tag, data))
+                    cached_elements.append((key, data))
             self._cached_elements = cached_elements
         else:
             yield from self._cached_elements
@@ -307,5 +307,5 @@ class ArrowTableStream(StreamBase):
     def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}(table={self._table.column_names}, "
-            f"tag_columns={self._tag_columns})"
+            f"key_columns={self._key_columns})"
         )

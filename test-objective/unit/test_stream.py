@@ -8,7 +8,7 @@ and format conversions.
 import pyarrow as pa
 import pytest
 
-from orcapod.core.datagrams import Data, Tag
+from orcapod.core.datagrams import Data, Key
 from orcapod.core.streams import ArrowTableStream
 from orcapod.types import ColumnConfig, Schema
 
@@ -19,7 +19,7 @@ from orcapod.types import ColumnConfig, Schema
 
 
 def _simple_table(n_rows: int = 3) -> pa.Table:
-    """A table with one tag-eligible column and one data column."""
+    """A table with one key-eligible column and one data column."""
     schema = pa.schema([
         pa.field("id", pa.int64(), nullable=False),
         pa.field("value", pa.large_string(), nullable=False),
@@ -34,7 +34,7 @@ def _simple_table(n_rows: int = 3) -> pa.Table:
 
 
 def _multi_data_table(n_rows: int = 3) -> pa.Table:
-    """A table with one tag column and two data columns."""
+    """A table with one key column and two data columns."""
     schema = pa.schema([
         pa.field("id", pa.int64(), nullable=False),
         pa.field("x", pa.int64(), nullable=False),
@@ -51,12 +51,12 @@ def _multi_data_table(n_rows: int = 3) -> pa.Table:
 
 
 def _make_stream(
-    tag_columns: list[str] | None = None,
+    key_columns: list[str] | None = None,
     n_rows: int = 3,
     **kwargs,
 ) -> ArrowTableStream:
-    tag_columns = tag_columns if tag_columns is not None else ["id"]
-    return ArrowTableStream(_simple_table(n_rows), tag_columns=tag_columns, **kwargs)
+    key_columns = key_columns if key_columns is not None else ["id"]
+    return ArrowTableStream(_simple_table(n_rows), key_columns=key_columns, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -68,12 +68,12 @@ class TestConstruction:
     """ArrowTableStream construction from a pa.Table."""
 
     def test_basic_construction(self):
-        """Stream can be created from a pa.Table with tag_columns."""
+        """Stream can be created from a pa.Table with key_columns."""
         stream = _make_stream()
         assert stream is not None
 
-    def test_construction_with_system_tag_columns(self):
-        """Stream accepts system_tag_columns parameter."""
+    def test_construction_with_system_key_columns(self):
+        """Stream accepts system_key_columns parameter."""
         table = pa.table(
             {
                 "id": pa.array([1, 2], type=pa.int64()),
@@ -82,7 +82,7 @@ class TestConstruction:
             }
         )
         stream = ArrowTableStream(
-            table, tag_columns=["id"], system_tag_columns=["sys"]
+            table, key_columns=["id"], system_key_columns=["sys"]
         )
         assert stream is not None
 
@@ -90,7 +90,7 @@ class TestConstruction:
         """Stream accepts source_info dict parameter."""
         stream = ArrowTableStream(
             _simple_table(),
-            tag_columns=["id"],
+            key_columns=["id"],
             source_info={"value": "test_source::row_0"},
         )
         assert stream is not None
@@ -100,7 +100,7 @@ class TestConstruction:
         upstream = _make_stream()
         # producer=None is the default; just verify upstreams tuple is stored
         stream = ArrowTableStream(
-            _simple_table(), tag_columns=["id"], upstreams=(upstream,)
+            _simple_table(), key_columns=["id"], upstreams=(upstream,)
         )
         assert stream.upstreams == (upstream,)
         assert stream.producer is None
@@ -109,18 +109,18 @@ class TestConstruction:
         """Stream requires at least one data column; ValueError if none."""
         table = pa.table({"id": pa.array([1, 2, 3], type=pa.int64())})
         with pytest.raises(ValueError):
-            ArrowTableStream(table, tag_columns=["id"])
+            ArrowTableStream(table, key_columns=["id"])
 
-    def test_no_tag_columns_is_valid(self):
-        """All columns may be data columns (no tags)."""
+    def test_no_key_columns_is_valid(self):
+        """All columns may be data columns (no keys)."""
         table = pa.table({"value": pa.array(["a", "b"], type=pa.large_string())})
-        stream = ArrowTableStream(table, tag_columns=[])
-        tag_keys, data_keys = stream.keys()
-        assert tag_keys == ()
+        stream = ArrowTableStream(table, key_columns=[])
+        key_keys, data_keys = stream.keys()
+        assert key_keys == ()
         assert "value" in data_keys
 
-    def test_multiple_tag_columns(self):
-        """Stream supports multiple tag columns."""
+    def test_multiple_key_columns(self):
+        """Stream supports multiple key columns."""
         table = pa.table(
             {
                 "t1": pa.array([1, 2], type=pa.int64()),
@@ -128,15 +128,15 @@ class TestConstruction:
                 "val": pa.array([10.0, 20.0], type=pa.float64()),
             }
         )
-        stream = ArrowTableStream(table, tag_columns=["t1", "t2"])
-        tag_keys, data_keys = stream.keys()
-        assert set(tag_keys) == {"t1", "t2"}
+        stream = ArrowTableStream(table, key_columns=["t1", "t2"])
+        key_keys, data_keys = stream.keys()
+        assert set(key_keys) == {"t1", "t2"}
         assert data_keys == ("val",)
 
     def test_multiple_data_columns(self):
         """Stream supports multiple data columns."""
         stream = ArrowTableStream(
-            _multi_data_table(), tag_columns=["id"]
+            _multi_data_table(), key_columns=["id"]
         )
         _, data_keys = stream.keys()
         assert set(data_keys) == {"x", "y"}
@@ -148,27 +148,27 @@ class TestConstruction:
 
 
 class TestKeys:
-    """keys() returns (tag_keys, data_keys) tuples."""
+    """keys() returns (key_keys, data_keys) tuples."""
 
     def test_keys_returns_tuple_of_tuples(self):
         stream = _make_stream()
         result = stream.keys()
         assert isinstance(result, tuple)
         assert len(result) == 2
-        tag_keys, data_keys = result
-        assert isinstance(tag_keys, tuple)
+        key_keys, data_keys = result
+        assert isinstance(key_keys, tuple)
         assert isinstance(data_keys, tuple)
 
     def test_keys_correct_split(self):
-        stream = _make_stream(tag_columns=["id"])
-        tag_keys, data_keys = stream.keys()
-        assert "id" in tag_keys
+        stream = _make_stream(key_columns=["id"])
+        key_keys, data_keys = stream.keys()
+        assert "id" in key_keys
         assert "value" in data_keys
         assert "id" not in data_keys
-        assert "value" not in tag_keys
+        assert "value" not in key_keys
 
-    def test_keys_with_column_config_system_tags(self):
-        """When system_tags=True, system tag columns appear in tag_keys."""
+    def test_keys_with_column_config_system_keys(self):
+        """When system_keys=True, system key columns appear in key_keys."""
         table = pa.table(
             {
                 "id": pa.array([1], type=pa.int64()),
@@ -177,15 +177,15 @@ class TestKeys:
             }
         )
         stream = ArrowTableStream(
-            table, tag_columns=["id"], system_tag_columns=["sys_col"]
+            table, key_columns=["id"], system_key_columns=["sys_col"]
         )
-        tag_keys_default, _ = stream.keys()
-        tag_keys_all, _ = stream.keys(columns=ColumnConfig(system_tags=True))
-        # Default: system tags excluded from keys
-        assert len(tag_keys_all) > len(tag_keys_default)
+        key_keys_default, _ = stream.keys()
+        key_keys_all, _ = stream.keys(columns=ColumnConfig(system_keys=True))
+        # Default: system keys excluded from keys
+        assert len(key_keys_all) > len(key_keys_default)
 
     def test_keys_with_all_info(self):
-        """all_info=True includes system tags in tag_keys."""
+        """all_info=True includes system keys in key_keys."""
         table = pa.table(
             {
                 "id": pa.array([1], type=pa.int64()),
@@ -194,19 +194,19 @@ class TestKeys:
             }
         )
         stream = ArrowTableStream(
-            table, tag_columns=["id"], system_tag_columns=["sys_col"]
+            table, key_columns=["id"], system_key_columns=["sys_col"]
         )
-        tag_keys_all, _ = stream.keys(all_info=True)
-        assert len(tag_keys_all) > 1  # id + system tag(s)
+        key_keys_all, _ = stream.keys(all_info=True)
+        assert len(key_keys_all) > 1  # id + system key(s)
 
-    def test_keys_no_tag_columns(self):
-        """With no tag columns, tag_keys is empty."""
+    def test_keys_no_key_columns(self):
+        """With no key columns, key_keys is empty."""
         table = pa.table(
             {"a": pa.array([1], type=pa.int64()), "b": pa.array([2], type=pa.int64())}
         )
-        stream = ArrowTableStream(table, tag_columns=[])
-        tag_keys, data_keys = stream.keys()
-        assert tag_keys == ()
+        stream = ArrowTableStream(table, key_columns=[])
+        key_keys, data_keys = stream.keys()
+        assert key_keys == ()
         assert set(data_keys) == {"a", "b"}
 
 
@@ -216,56 +216,56 @@ class TestKeys:
 
 
 class TestOutputSchema:
-    """output_schema() returns (tag_schema, data_schema) as Schema objects."""
+    """output_schema() returns (key_schema, data_schema) as Schema objects."""
 
     def test_returns_tuple_of_schemas(self):
         stream = _make_stream()
-        tag_schema, data_schema = stream.output_schema()
-        assert isinstance(tag_schema, Schema)
+        key_schema, data_schema = stream.output_schema()
+        assert isinstance(key_schema, Schema)
         assert isinstance(data_schema, Schema)
 
     def test_schema_field_names_match_keys(self):
-        stream = _make_stream(tag_columns=["id"])
-        tag_schema, data_schema = stream.output_schema()
-        tag_keys, data_keys = stream.keys()
-        assert set(tag_schema.keys()) == set(tag_keys)
+        stream = _make_stream(key_columns=["id"])
+        key_schema, data_schema = stream.output_schema()
+        key_keys, data_keys = stream.keys()
+        assert set(key_schema.keys()) == set(key_keys)
         assert set(data_schema.keys()) == set(data_keys)
 
     def test_schema_types_match_table_column_types(self):
         """output_schema types must be consistent with the actual data in as_table."""
-        stream = _make_stream(tag_columns=["id"])
-        tag_schema, data_schema = stream.output_schema()
-        # tag schema type for "id" should be int
-        assert tag_schema["id"] is int
+        stream = _make_stream(key_columns=["id"])
+        key_schema, data_schema = stream.output_schema()
+        # key schema type for "id" should be int
+        assert key_schema["id"] is int
         # data schema type for "value" should be str
         assert data_schema["value"] is str
 
     def test_schema_with_multiple_types(self):
         """Schema correctly reflects different column types."""
         schema = pa.schema([
-            pa.field("tag", pa.int64(), nullable=False),
+            pa.field("key", pa.int64(), nullable=False),
             pa.field("col_int", pa.int64(), nullable=False),
             pa.field("col_str", pa.large_string(), nullable=False),
             pa.field("col_float", pa.float64(), nullable=False),
         ])
         table = pa.table(
             {
-                "tag": pa.array([1], type=pa.int64()),
+                "key": pa.array([1], type=pa.int64()),
                 "col_int": pa.array([42], type=pa.int64()),
                 "col_str": pa.array(["hello"], type=pa.large_string()),
                 "col_float": pa.array([3.14], type=pa.float64()),
             },
             schema=schema,
         )
-        stream = ArrowTableStream(table, tag_columns=["tag"])
-        tag_schema, data_schema = stream.output_schema()
-        assert tag_schema["tag"] is int
+        stream = ArrowTableStream(table, key_columns=["key"])
+        key_schema, data_schema = stream.output_schema()
+        assert key_schema["key"] is int
         assert data_schema["col_int"] is int
         assert data_schema["col_str"] is str
         assert data_schema["col_float"] is float
 
-    def test_schema_with_system_tags_config(self):
-        """output_schema with system_tags=True includes system tag fields."""
+    def test_schema_with_system_keys_config(self):
+        """output_schema with system_keys=True includes system key fields."""
         table = pa.table(
             {
                 "id": pa.array([1], type=pa.int64()),
@@ -274,13 +274,13 @@ class TestOutputSchema:
             }
         )
         stream = ArrowTableStream(
-            table, tag_columns=["id"], system_tag_columns=["sys"]
+            table, key_columns=["id"], system_key_columns=["sys"]
         )
-        tag_schema_default, _ = stream.output_schema()
-        tag_schema_with_sys, _ = stream.output_schema(
-            columns=ColumnConfig(system_tags=True)
+        key_schema_default, _ = stream.output_schema()
+        key_schema_with_sys, _ = stream.output_schema(
+            columns=ColumnConfig(system_keys=True)
         )
-        assert len(tag_schema_with_sys) > len(tag_schema_default)
+        assert len(key_schema_with_sys) > len(key_schema_default)
 
 
 # ---------------------------------------------------------------------------
@@ -289,14 +289,14 @@ class TestOutputSchema:
 
 
 class TestIterDatas:
-    """iter_data() yields (Tag, Data) pairs."""
+    """iter_data() yields (Key, Data) pairs."""
 
-    def test_yields_tag_data_pairs(self):
+    def test_yields_key_data_pairs(self):
         stream = _make_stream(n_rows=2)
         pairs = list(stream.iter_data())
         assert len(pairs) == 2
-        for tag, data in pairs:
-            assert isinstance(tag, Tag)
+        for key, data in pairs:
+            assert isinstance(key, Key)
             assert isinstance(data, Data)
 
     def test_count_matches_row_count(self):
@@ -317,14 +317,14 @@ class TestIterDatas:
         stream = _make_stream(n_rows=1)
         pairs = list(stream.iter_data())
         assert len(pairs) == 1
-        tag, data = pairs[0]
-        assert isinstance(tag, Tag)
+        key, data = pairs[0]
+        assert isinstance(key, Key)
         assert isinstance(data, Data)
 
-    def test_no_tag_columns_still_yields_data(self):
-        """iter_data works when there are no tag columns."""
+    def test_no_key_columns_still_yields_data(self):
+        """iter_data works when there are no key columns."""
         table = pa.table({"value": pa.array(["a", "b"], type=pa.large_string())})
-        stream = ArrowTableStream(table, tag_columns=[])
+        stream = ArrowTableStream(table, key_columns=[])
         pairs = list(stream.iter_data())
         assert len(pairs) == 2
 
@@ -348,24 +348,24 @@ class TestAsTable:
         pairs = list(stream.iter_data())
         assert table.num_rows == len(pairs)
 
-    def test_as_table_contains_tag_and_data_columns(self):
-        stream = _make_stream(tag_columns=["id"])
+    def test_as_table_contains_key_and_data_columns(self):
+        stream = _make_stream(key_columns=["id"])
         table = stream.as_table()
         assert "id" in table.column_names
         assert "value" in table.column_names
 
     def test_as_table_column_count_matches_keys(self):
-        """Default as_table columns match keys() tag + data columns."""
-        stream = _make_stream(tag_columns=["id"])
+        """Default as_table columns match keys() key + data columns."""
+        stream = _make_stream(key_columns=["id"])
         table = stream.as_table()
-        tag_keys, data_keys = stream.keys()
-        expected_cols = set(tag_keys) | set(data_keys)
+        key_keys, data_keys = stream.keys()
+        expected_cols = set(key_keys) | set(data_keys)
         assert set(table.column_names) == expected_cols
 
     def test_as_table_data_values_consistent(self):
         """The data in as_table matches the original input data."""
         table_in = _simple_table(3)
-        stream = ArrowTableStream(table_in, tag_columns=["id"])
+        stream = ArrowTableStream(table_in, key_columns=["id"])
         table_out = stream.as_table()
         assert table_out.column("id").to_pylist() == [0, 1, 2]
         assert table_out.column("value").to_pylist() == ["v0", "v1", "v2"]
@@ -379,8 +379,8 @@ class TestAsTable:
 class TestColumnConfigFiltering:
     """ColumnConfig controls which columns appear in keys/schema/table."""
 
-    def test_default_excludes_system_tags(self):
-        """Default ColumnConfig excludes system tag columns."""
+    def test_default_excludes_system_keys(self):
+        """Default ColumnConfig excludes system key columns."""
         table = pa.table(
             {
                 "id": pa.array([1], type=pa.int64()),
@@ -389,14 +389,14 @@ class TestColumnConfigFiltering:
             }
         )
         stream = ArrowTableStream(
-            table, tag_columns=["id"], system_tag_columns=["stag"]
+            table, key_columns=["id"], system_key_columns=["stag"]
         )
-        tag_keys, _ = stream.keys()
-        # System tag columns are prefixed with _tag_ internally
-        assert all(not k.startswith("_tag_") for k in tag_keys)
+        key_keys, _ = stream.keys()
+        # System key columns are prefixed with _key_ internally
+        assert all(not k.startswith("_key_") for k in key_keys)
 
     def test_all_info_includes_everything(self):
-        """all_info=True should include source, context, system_tags columns."""
+        """all_info=True should include source, context, system_keys columns."""
         stream = _make_stream()
         table_default = stream.as_table()
         table_all = stream.as_table(all_info=True)
@@ -418,8 +418,8 @@ class TestColumnConfigFiltering:
         table_with_ctx = stream.as_table(columns=ColumnConfig(context=True))
         assert table_with_ctx.num_columns >= table_no_ctx.num_columns
 
-    def test_system_tags_in_as_table(self):
-        """system_tags=True includes system tag columns in the output table."""
+    def test_system_keys_in_as_table(self):
+        """system_keys=True includes system key columns in the output table."""
         table = pa.table(
             {
                 "id": pa.array([1], type=pa.int64()),
@@ -428,10 +428,10 @@ class TestColumnConfigFiltering:
             }
         )
         stream = ArrowTableStream(
-            table, tag_columns=["id"], system_tag_columns=["stag"]
+            table, key_columns=["id"], system_key_columns=["stag"]
         )
         table_default = stream.as_table()
-        table_with_sys = stream.as_table(columns=ColumnConfig(system_tags=True))
+        table_with_sys = stream.as_table(columns=ColumnConfig(system_keys=True))
         assert table_with_sys.num_columns > table_default.num_columns
 
     def test_column_config_as_dict(self):
@@ -442,14 +442,14 @@ class TestColumnConfigFiltering:
 
     def test_keys_schema_table_consistency_with_config(self):
         """keys(), output_schema(), and as_table() agree under the same ColumnConfig."""
-        stream = _make_stream(tag_columns=["id"])
-        tag_keys, data_keys = stream.keys()
-        tag_schema, data_schema = stream.output_schema()
+        stream = _make_stream(key_columns=["id"])
+        key_keys, data_keys = stream.keys()
+        key_schema, data_schema = stream.output_schema()
         table = stream.as_table()
 
-        assert set(tag_schema.keys()) == set(tag_keys)
+        assert set(key_schema.keys()) == set(key_keys)
         assert set(data_schema.keys()) == set(data_keys)
-        expected_cols = set(tag_keys) | set(data_keys)
+        expected_cols = set(key_keys) | set(data_keys)
         assert set(table.column_names) == expected_cols
 
 
@@ -486,7 +486,7 @@ class TestFormatConversions:
 
     def test_as_polars_df_preserves_columns(self):
         """Polars DataFrame has the same columns as as_table."""
-        stream = _make_stream(tag_columns=["id"])
+        stream = _make_stream(key_columns=["id"])
         table = stream.as_table()
         df = stream.as_polars_df()
         assert set(df.columns) == set(table.column_names)

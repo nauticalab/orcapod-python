@@ -28,14 +28,14 @@ from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import (
     Batch,
     DropDataColumns,
-    DropTagColumns,
+    DropKeyColumns,
     Join,
     MapData,
-    MapTags,
+    MapKeys,
     MergeJoin,
     PolarsFilter,
     SelectDataColumns,
-    SelectTagColumns,
+    SelectKeyColumns,
     SemiJoin,
 )
 from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
@@ -49,7 +49,7 @@ from orcapod.types import NodeConfig, PipelineConfig
 
 
 def make_stream(n: int = 3) -> ArrowTableStream:
-    """Stream with tag=id, data=x (ints). Uses nullable=False schema."""
+    """Stream with key=id, data=x (ints). Uses nullable=False schema."""
     schema = pa.schema(
         [pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]
     )
@@ -57,11 +57,11 @@ def make_stream(n: int = 3) -> ArrowTableStream:
         {"id": pa.array(list(range(n)), type=pa.int64()), "x": pa.array(list(range(n)), type=pa.int64())},
         schema=schema,
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 def make_two_col_stream(n: int = 3) -> ArrowTableStream:
-    """Stream with tag=id, data={x, y}. Uses nullable=False schema."""
+    """Stream with key=id, data={x, y}. Uses nullable=False schema."""
     schema = pa.schema(
         [
             pa.field("id", pa.int64(), nullable=False),
@@ -77,11 +77,11 @@ def make_two_col_stream(n: int = 3) -> ArrowTableStream:
         },
         schema=schema,
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 def make_name_stream() -> ArrowTableStream:
-    """Stream with tag=id, data=name (str). Uses nullable=False schema."""
+    """Stream with key=id, data=name (str). Uses nullable=False schema."""
     schema = pa.schema(
         [
             pa.field("id", pa.int64(), nullable=False),
@@ -95,18 +95,18 @@ def make_name_stream() -> ArrowTableStream:
         },
         schema=schema,
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 async def feed_stream_to_channel(stream: ArrowTableStream, ch: Channel) -> None:
-    """Push all (tag, data) pairs from a stream into a channel, then close."""
-    for tag, data in stream.iter_data():
-        await ch.writer.send((tag, data))
+    """Push all (key, data) pairs from a stream into a channel, then close."""
+    for key, data in stream.iter_data():
+        await ch.writer.send((key, data))
     await ch.writer.close()
 
 
 async def collect_output(ch: Channel) -> list[tuple]:
-    """Collect all (tag, data) pairs from a channel's reader."""
+    """Collect all (key, data) pairs from a channel's reader."""
     return await ch.reader.collect()
 
 
@@ -138,9 +138,9 @@ class TestMaterializeToStream:
         rows = list(stream.iter_data())
         rebuilt = StaticOutputOperatorPod._materialize_to_stream(rows)
 
-        orig_tag, orig_pkt = stream.output_schema()
-        rebuilt_tag, rebuilt_pkt = rebuilt.output_schema()
-        assert dict(orig_tag) == dict(rebuilt_tag)
+        orig_key, orig_pkt = stream.output_schema()
+        rebuilt_key, rebuilt_pkt = rebuilt.output_schema()
+        assert dict(orig_key) == dict(rebuilt_key)
         assert dict(orig_pkt) == dict(rebuilt_pkt)
 
     def test_empty_rows_raises(self):
@@ -214,9 +214,9 @@ class TestDirectAsyncCall:
 
 class TestUnaryOperatorAsyncExecute:
     @pytest.mark.asyncio
-    async def test_select_tag_columns(self):
+    async def test_select_key_columns(self):
         stream = make_two_col_stream(3)
-        op = SelectTagColumns(["id"])
+        op = SelectKeyColumns(["id"])
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -226,8 +226,8 @@ class TestUnaryOperatorAsyncExecute:
 
         results = await output_ch.reader.collect()
         assert len(results) == 3
-        for tag, data in results:
-            assert "id" in tag.keys()
+        for key, data in results:
+            assert "id" in key.keys()
 
     @pytest.mark.asyncio
     async def test_select_data_columns(self):
@@ -266,8 +266,8 @@ class TestUnaryOperatorAsyncExecute:
             assert "y" not in pkt_dict
 
     @pytest.mark.asyncio
-    async def test_drop_tag_columns(self):
-        # Need multi-tag stream
+    async def test_drop_key_columns(self):
+        # Need multi-key stream
         table = pa.table(
             {
                 "a": pa.array([1, 2], type=pa.int64()),
@@ -275,8 +275,8 @@ class TestUnaryOperatorAsyncExecute:
                 "x": pa.array([100, 200], type=pa.int64()),
             }
         )
-        stream = ArrowTableStream(table, tag_columns=["a", "b"])
-        op = DropTagColumns(["b"])
+        stream = ArrowTableStream(table, key_columns=["a", "b"])
+        op = DropKeyColumns(["b"])
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -286,15 +286,15 @@ class TestUnaryOperatorAsyncExecute:
 
         results = await output_ch.reader.collect()
         assert len(results) == 2
-        for tag, _ in results:
-            tag_keys = tag.keys()
-            assert "a" in tag_keys
-            assert "b" not in tag_keys
+        for key, _ in results:
+            key_keys = key.keys()
+            assert "a" in key_keys
+            assert "b" not in key_keys
 
     @pytest.mark.asyncio
-    async def test_map_tags(self):
+    async def test_map_keys(self):
         stream = make_stream(3)
-        op = MapTags({"id": "row_id"}, drop_unmapped=True)
+        op = MapKeys({"id": "row_id"}, drop_unmapped=True)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -304,9 +304,9 @@ class TestUnaryOperatorAsyncExecute:
 
         results = await output_ch.reader.collect()
         assert len(results) == 3
-        for tag, _ in results:
-            assert "row_id" in tag.keys()
-            assert "id" not in tag.keys()
+        for key, _ in results:
+            assert "row_id" in key.keys()
+            assert "id" not in key.keys()
 
     @pytest.mark.asyncio
     async def test_map_data(self):
@@ -339,8 +339,8 @@ class TestUnaryOperatorAsyncExecute:
 
         results = await output_ch.reader.collect()
         assert len(results) == 1
-        tag, data = results[0]
-        assert tag.as_dict()["id"] == 2
+        key, data = results[0]
+        assert key.as_dict()["id"] == 2
         assert data.as_dict()["x"] == 2
 
     @pytest.mark.asyncio
@@ -373,7 +373,7 @@ class TestBinaryOperatorAsyncExecute:
                 "z": pa.array([100, 300], type=pa.int64()),
             }
         )
-        right = ArrowTableStream(right_table, tag_columns=["id"])
+        right = ArrowTableStream(right_table, key_columns=["id"])
 
         op = SemiJoin()
 
@@ -387,7 +387,7 @@ class TestBinaryOperatorAsyncExecute:
         await op.async_execute([left_ch.reader, right_ch.reader], output_ch.writer)
 
         results = await output_ch.reader.collect()
-        ids = sorted(tag.as_dict()["id"] for tag, _ in results)
+        ids = sorted(key.as_dict()["id"] for key, _ in results)
         assert ids == [1, 3]
 
     @pytest.mark.asyncio
@@ -404,8 +404,8 @@ class TestBinaryOperatorAsyncExecute:
                 "val": pa.array([100, 200], type=pa.int64()),
             }
         )
-        left = ArrowTableStream(left_table, tag_columns=["id"])
-        right = ArrowTableStream(right_table, tag_columns=["id"])
+        left = ArrowTableStream(left_table, key_columns=["id"])
+        right = ArrowTableStream(right_table, key_columns=["id"])
 
         op = MergeJoin()
 
@@ -442,8 +442,8 @@ class TestJoinAsyncExecute:
                 "y": pa.array([100, 200, 300], type=pa.int64()),
             }
         )
-        left = ArrowTableStream(left_table, tag_columns=["id"])
-        right = ArrowTableStream(right_table, tag_columns=["id"])
+        left = ArrowTableStream(left_table, key_columns=["id"])
+        right = ArrowTableStream(right_table, key_columns=["id"])
 
         op = Join()
 
@@ -459,8 +459,8 @@ class TestJoinAsyncExecute:
         results = await output_ch.reader.collect()
         assert len(results) == 3
 
-        # Verify all tag values present
-        ids = sorted(tag.as_dict()["id"] for tag, _ in results)
+        # Verify all key values present
+        ids = sorted(key.as_dict()["id"] for key, _ in results)
         assert ids == [0, 1, 2]
 
         # Verify both data columns present
@@ -518,8 +518,8 @@ class TestFunctionPodAsyncExecute:
         assert values == [0, 11, 22]
 
     @pytest.mark.asyncio
-    async def test_tags_pass_through(self):
-        """FunctionPod should preserve the input tag for each output."""
+    async def test_keys_pass_through(self):
+        """FunctionPod should preserve the input key for each output."""
 
         def noop(x: int) -> int:
             return x
@@ -535,7 +535,7 @@ class TestFunctionPodAsyncExecute:
         await pod.async_execute([input_ch.reader], output_ch.writer)
 
         results = await output_ch.reader.collect()
-        ids = sorted(tag.as_dict()["id"] for tag, _ in results)
+        ids = sorted(key.as_dict()["id"] for key, _ in results)
         assert ids == [0, 1, 2]
 
     @pytest.mark.asyncio
@@ -662,8 +662,8 @@ class TestEndToEndPipeline:
 
         # Wire
         async def source():
-            for tag, data in stream.iter_data():
-                await ch1.writer.send((tag, data))
+            for key, data in stream.iter_data():
+                await ch1.writer.send((key, data))
             await ch1.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -675,7 +675,7 @@ class TestEndToEndPipeline:
         assert len(results) == 4
 
         result_map = {
-            tag.as_dict()["id"]: pkt.as_dict()["result"] for tag, pkt in results
+            key.as_dict()["id"]: pkt.as_dict()["result"] for key, pkt in results
         }
         assert result_map[1] == 3
         assert result_map[3] == 9
@@ -697,8 +697,8 @@ class TestEndToEndPipeline:
                 "y": pa.array([1, 2, 3], type=pa.int64()),
             }
         )
-        left_stream = ArrowTableStream(left_table, tag_columns=["id"])
-        right_stream = ArrowTableStream(right_table, tag_columns=["id"])
+        left_stream = ArrowTableStream(left_table, key_columns=["id"])
+        right_stream = ArrowTableStream(right_table, key_columns=["id"])
 
         def add(x: int, y: int) -> int:
             return x + y
@@ -712,8 +712,8 @@ class TestEndToEndPipeline:
         ch_out = Channel(buffer_size=16)
 
         async def push(stream, ch):
-            for tag, data in stream.iter_data():
-                await ch.writer.send((tag, data))
+            for key, data in stream.iter_data():
+                await ch.writer.send((key, data))
             await ch.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -730,7 +730,7 @@ class TestEndToEndPipeline:
         assert len(results) == 3
 
         result_map = {
-            tag.as_dict()["id"]: pkt.as_dict()["result"] for tag, pkt in results
+            key.as_dict()["id"]: pkt.as_dict()["result"] for key, pkt in results
         }
         assert result_map[0] == 11  # 10 + 1
         assert result_map[1] == 22  # 20 + 2
@@ -809,7 +809,7 @@ class TestSyncBehaviorUnchanged:
         op = PolarsFilter(predicates=(pl.col("id").is_in([1, 3]),))
         output = op.process(stream)
         results = list(output.iter_data())
-        ids = sorted(cast(int, tag.as_dict()["id"]) for tag, _ in results)
+        ids = sorted(cast(int, key.as_dict()["id"]) for key, _ in results)
         assert ids == [1, 3]
 
     def test_join_sync_process_still_works(self):
@@ -825,8 +825,8 @@ class TestSyncBehaviorUnchanged:
                 "y": pa.array([100, 200], type=pa.int64()),
             }
         )
-        left = ArrowTableStream(left_table, tag_columns=["id"])
-        right = ArrowTableStream(right_table, tag_columns=["id"])
+        left = ArrowTableStream(left_table, key_columns=["id"])
+        right = ArrowTableStream(right_table, key_columns=["id"])
 
         join = Join()
         output = join.process(left, right)

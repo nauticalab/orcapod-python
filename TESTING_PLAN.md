@@ -29,7 +29,7 @@ test-objective/
 │   ├── __init__.py
 │   ├── test_types.py                  # Schema, ColumnConfig, ContentHash
 │   ├── test_datagram.py               # Datagram core behavior
-│   ├── test_tag.py                    # Tag (system tags, ColumnConfig filtering)
+│   ├── test_key.py                    # Key (system keys, ColumnConfig filtering)
 │   ├── test_data.py                 # Data (source info, provenance)
 │   ├── test_stream.py                 # ArrowTableStream construction & iteration
 │   ├── test_sources.py                # All source types + error conditions
@@ -42,7 +42,7 @@ test-objective/
 │   ├── test_databases.py              # InMemory, DeltaLake, NoOp databases
 │   ├── test_schema_utils.py           # Schema extraction, union, intersection
 │   ├── test_arrow_utils.py            # Arrow table/schema utilities
-│   ├── test_arrow_data_utils.py       # System tags, source info, column helpers
+│   ├── test_arrow_data_utils.py       # System keys, source info, column helpers
 │   ├── test_semantic_types.py         # UniversalTypeConverter, SemanticTypeRegistry
 │   ├── test_contexts.py               # DataContext resolution, validation
 │   ├── test_tracker.py                # BasicTrackerManager, GraphTracker
@@ -52,7 +52,7 @@ test-objective/
 │   ├── test_pipeline_flows.py         # End-to-end pipeline scenarios
 │   ├── test_caching_flows.py          # DB-backed caching (FunctionNode, OperatorNode)
 │   ├── test_hash_invariants.py        # Hash stability & Merkle chain properties
-│   ├── test_provenance.py             # System tag lineage through pipelines
+│   ├── test_provenance.py             # System key lineage through pipelines
 │   └── test_column_config_filtering.py # ColumnConfig behavior across all components
 └── property/
     ├── __init__.py
@@ -156,19 +156,19 @@ test-objective/
 - `test_datagram_content_hash_changes_with_data` — different data → different hash
 - `test_datagram_equality_by_content` — equal content → equal datagrams
 
-### 3. `test_tag.py` — Tag
+### 3. `test_key.py` — Key
 
-- `test_tag_construction_with_system_tags` — system tags stored separately from data
-- `test_tag_system_tags_excluded_from_default_keys` — keys() doesn't show system tags
-- `test_tag_system_tags_included_with_column_config` — keys(columns={"system_tags": True}) shows them
-- `test_tag_as_dict_excludes_system_tags_by_default` — as_dict() only has data
-- `test_tag_as_dict_all_info_includes_system_tags` — as_dict(all_info=True) has everything
-- `test_tag_as_table_excludes_system_tags_by_default`
-- `test_tag_as_table_all_info_includes_system_tags`
-- `test_tag_schema_excludes_system_tags_by_default`
-- `test_tag_copy_preserves_system_tags` — copy() includes system tags
-- `test_tag_as_datagram_conversion` — as_datagram() returns Datagram (not Tag)
-- `test_tag_system_tags_method_returns_copy` — system_tags() returns dict copy, not reference
+- `test_key_construction_with_system_keys` — system keys stored separately from data
+- `test_key_system_keys_excluded_from_default_keys` — keys() doesn't show system keys
+- `test_key_system_keys_included_with_column_config` — keys(columns={"system_keys": True}) shows them
+- `test_key_as_dict_excludes_system_keys_by_default` — as_dict() only has data
+- `test_key_as_dict_all_info_includes_system_keys` — as_dict(all_info=True) has everything
+- `test_key_as_table_excludes_system_keys_by_default`
+- `test_key_as_table_all_info_includes_system_keys`
+- `test_key_schema_excludes_system_keys_by_default`
+- `test_key_copy_preserves_system_keys` — copy() includes system keys
+- `test_key_as_datagram_conversion` — as_datagram() returns Datagram (not Key)
+- `test_key_system_keys_method_returns_copy` — system_keys() returns dict copy, not reference
 
 ### 4. `test_data.py` — Data
 
@@ -186,23 +186,23 @@ test-objective/
 ### 5. `test_stream.py` — ArrowTableStream
 
 **Construction:**
-- `test_stream_from_table_with_tag_columns` — tag/data column separation
+- `test_stream_from_table_with_key_columns` — key/data column separation
 - `test_stream_requires_at_least_one_data_column` — ValueError if no data columns
-- `test_stream_with_system_tag_columns` — system tag columns tracked
+- `test_stream_with_system_key_columns` — system key columns tracked
 - `test_stream_with_source_info` — source info attached to data columns
 - `test_stream_with_producer` — producer property set
 - `test_stream_with_upstreams` — upstreams tuple set
 
 **Schema & Keys:**
-- `test_stream_keys_returns_tag_and_data_keys` — tuple of (tag_keys, data_keys)
-- `test_stream_output_schema_returns_two_schemas` — (tag_schema, data_schema)
+- `test_stream_keys_returns_key_and_data_keys` — tuple of (key_keys, data_keys)
+- `test_stream_output_schema_returns_two_schemas` — (key_schema, data_schema)
 - `test_stream_schema_matches_actual_data` — output_schema() types match as_table() types
 - `test_stream_keys_with_column_config` — ColumnConfig filtering works
 
 **Iteration:**
-- `test_stream_iter_data_yields_tag_data_pairs` — each yield is (Tag, Data)
+- `test_stream_iter_data_yields_key_data_pairs` — each yield is (Key, Data)
 - `test_stream_iter_data_count_matches_rows` — number of yields = number of rows
-- `test_stream_iter_data_tag_keys_correct` — tag column names match
+- `test_stream_iter_data_key_keys_correct` — key column names match
 - `test_stream_iter_data_data_keys_correct` — data column names match
 - `test_stream_as_table_matches_iter_data` — table materialization consistent with iteration
 
@@ -219,22 +219,22 @@ test-objective/
 **ArrowTableSource:**
 - `test_arrow_source_from_valid_table` — normal construction succeeds
 - `test_arrow_source_empty_table_raises` — ValueError("Table is empty")
-- `test_arrow_source_missing_tag_column_raises` — ValueError if tag_columns not in table
-- `test_arrow_source_adds_system_tag_column` — system tag column added automatically
+- `test_arrow_source_missing_key_column_raises` — ValueError if key_columns not in table
+- `test_arrow_source_adds_system_key_column` — system key column added automatically
 - `test_arrow_source_adds_source_info_columns` — _source_ columns added
 - `test_arrow_source_source_id_set` — source_id property populated
 - `test_arrow_source_producer_is_none` — root sources have no producer
 - `test_arrow_source_upstreams_empty` — root sources have no upstreams
 - `test_arrow_source_resolve_field_by_record_id` — resolves field value
 - `test_arrow_source_resolve_field_missing_raises` — FieldNotResolvableError
-- `test_arrow_source_pipeline_identity_structure` — returns (tag_schema, data_schema)
+- `test_arrow_source_pipeline_identity_structure` — returns (key_schema, data_schema)
 - `test_arrow_source_iter_data_yields_correct_pairs`
 - `test_arrow_source_as_table_has_all_columns`
 
 **DictSource:**
 - `test_dict_source_from_dict_of_lists` — constructs correctly
 - `test_dict_source_delegates_to_arrow_table_source` — same behavior as ArrowTableSource
-- `test_dict_source_with_tag_columns`
+- `test_dict_source_with_key_columns`
 
 **ListSource:**
 - `test_list_source_from_list_of_dicts` — constructs correctly
@@ -242,7 +242,7 @@ test-objective/
 
 **CSVSource:**
 - `test_csv_source_from_file` — reads CSV correctly
-- `test_csv_source_with_tag_columns`
+- `test_csv_source_with_key_columns`
 
 **DataFrameSource:**
 - `test_dataframe_source_from_polars` — constructs from Polars DataFrame
@@ -304,7 +304,7 @@ test-objective/
 - `test_function_pod_validate_inputs_multiple_raises` — rejects multiple streams
 - `test_function_pod_output_schema_prediction` — output_schema() matches actual output
 - `test_function_pod_callable_alias` — __call__ same as process()
-- `test_function_pod_never_modifies_tags` — tags pass through unchanged
+- `test_function_pod_never_modifies_keys` — keys pass through unchanged
 - `test_function_pod_transforms_data` — data are transformed by function
 
 **FunctionPodStream:**
@@ -322,55 +322,55 @@ test-objective/
 ### 10. `test_operators.py` — All Operators
 
 **Join (N-ary, commutative):**
-- `test_join_two_streams_on_common_tags` — inner join on shared tag columns
+- `test_join_two_streams_on_common_keys` — inner join on shared key columns
 - `test_join_non_overlapping_data_columns_required` — InputValidationError on collision
 - `test_join_commutative` — join(A, B) == join(B, A) (same rows regardless of order)
 - `test_join_three_or_more_streams` — N-ary join works
-- `test_join_empty_result_when_no_matches` — disjoint tags → empty stream
-- `test_join_system_tag_name_extending` — system tag columns get ::pipeline_hash:position suffix
-- `test_join_system_tag_values_sorted_for_commutativity` — canonical ordering of tag values
+- `test_join_empty_result_when_no_matches` — disjoint keys → empty stream
+- `test_join_system_key_name_extending` — system key columns get ::pipeline_hash:position suffix
+- `test_join_system_key_values_sorted_for_commutativity` — canonical ordering of key values
 - `test_join_output_schema_prediction` — output_schema() matches actual output
 
 **MergeJoin (binary):**
 - `test_merge_join_colliding_columns_become_sorted_lists` — same-name data cols → list[T]
 - `test_merge_join_requires_identical_types` — different types raise error
 - `test_merge_join_non_colliding_columns_pass_through` — unmatched columns kept as-is
-- `test_merge_join_system_tag_name_extending`
+- `test_merge_join_system_key_name_extending`
 - `test_merge_join_output_schema_prediction` — predicts list[T] types correctly
 
 **SemiJoin (binary, non-commutative):**
-- `test_semijoin_filters_left_by_right_tags` — keeps left rows matching right tags
+- `test_semijoin_filters_left_by_right_keys` — keeps left rows matching right keys
 - `test_semijoin_non_commutative` — semijoin(A, B) != semijoin(B, A) in general
 - `test_semijoin_preserves_left_data_columns` — right data columns dropped
-- `test_semijoin_system_tag_name_extending`
+- `test_semijoin_system_key_name_extending`
 
 **Batch:**
-- `test_batch_groups_rows` — groups rows by tag, aggregates data
+- `test_batch_groups_rows` — groups rows by key, aggregates data
 - `test_batch_types_become_lists` — data column types become list[T]
-- `test_batch_system_tag_type_evolving` — system tag type becomes list[str]
+- `test_batch_system_key_type_evolving` — system key type becomes list[str]
 - `test_batch_with_batch_size` — batch_size limits group size
 - `test_batch_drop_partial_batch` — drop_partial_batch=True drops incomplete groups
 - `test_batch_output_schema_prediction` — predicts list[T] types
 
-**Column Selection (Select/Drop Tag/Data):**
-- `test_select_tag_columns` — keeps only specified tag columns
-- `test_select_tag_columns_strict_missing_raises` — strict=True raises on missing column
+**Column Selection (Select/Drop Key/Data):**
+- `test_select_key_columns` — keeps only specified key columns
+- `test_select_key_columns_strict_missing_raises` — strict=True raises on missing column
 - `test_select_data_columns` — keeps only specified data columns
-- `test_drop_tag_columns` — removes specified tag columns
+- `test_drop_key_columns` — removes specified key columns
 - `test_drop_data_columns` — removes specified data columns
-- `test_column_selection_system_tag_name_preserving` — system tags unchanged
+- `test_column_selection_system_key_name_preserving` — system keys unchanged
 
-**MapTags/MapData:**
-- `test_map_tags_renames_tag_columns` — renames specified tag columns
-- `test_map_tags_drop_unmapped` — drop_unmapped=True removes unrenamed columns
+**MapKeys/MapData:**
+- `test_map_keys_renames_key_columns` — renames specified key columns
+- `test_map_keys_drop_unmapped` — drop_unmapped=True removes unrenamed columns
 - `test_map_data_renames_data_columns`
-- `test_map_preserves_system_tags` — system tag columns unchanged (name-preserving)
+- `test_map_preserves_system_keys` — system key columns unchanged (name-preserving)
 
 **PolarsFilter:**
 - `test_polars_filter_with_predicate` — filters rows matching predicate
 - `test_polars_filter_with_constraints` — filters by column=value constraints
 - `test_polars_filter_preserves_schema` — output schema same as input
-- `test_polars_filter_system_tag_name_preserving`
+- `test_polars_filter_system_key_name_preserving`
 
 **Operator Base Classes:**
 - `test_unary_operator_rejects_multiple_inputs` — validate_inputs raises for >1 stream
@@ -381,7 +381,7 @@ test-objective/
 
 **FunctionNode:**
 - `test_function_node_iter_data` — iterates and transforms all data
-- `test_function_node_process_data` — transforms single (tag, data) pair
+- `test_function_node_process_data` — transforms single (key, data) pair
 - `test_function_node_producer_is_function_pod`
 - `test_function_node_upstreams`
 - `test_function_node_clear_cache`
@@ -486,13 +486,13 @@ test-objective/
 - `test_check_arrow_schema_compatibility` — compatible schemas pass
 - `test_split_by_column_groups` — splits table into multiple tables
 
-### 16. `test_arrow_data_utils.py` — System Tags & Source Info
+### 16. `test_arrow_data_utils.py` — System Keys & Source Info
 
-- `test_add_system_tag_columns` — adds _tag:: prefixed columns
-- `test_add_system_tag_columns_empty_table_raises` — ValueError
-- `test_add_system_tag_columns_length_mismatch_raises` — ValueError
-- `test_append_to_system_tags` — extends existing system tag values
-- `test_sort_system_tag_values` — canonical sorting for commutativity
+- `test_add_system_key_columns` — adds _key:: prefixed columns
+- `test_add_system_key_columns_empty_table_raises` — ValueError
+- `test_add_system_key_columns_length_mismatch_raises` — ValueError
+- `test_append_to_system_keys` — extends existing system key values
+- `test_sort_system_key_values` — canonical sorting for commutativity
 - `test_add_source_info` — adds _source_ prefixed columns
 - `test_drop_columns_with_prefix` — removes columns matching prefix
 - `test_drop_system_columns` — removes __ and __ prefixed columns
@@ -542,7 +542,7 @@ test-objective/
 - `test_source_to_stream_to_single_operator` — Source → Filter → Stream
 - `test_source_to_function_pod` — Source → FunctionPod → Stream with transformed data
 - `test_multi_source_join` — Two sources → Join → Stream with combined data
-- `test_chained_operators` — Source → Filter → Select → MapTags → Stream
+- `test_chained_operators` — Source → Filter → Select → MapKeys → Stream
 - `test_function_pod_then_operator` — Source → FunctionPod → Filter → Stream
 - `test_join_then_batch` — Two sources → Join → Batch → Stream
 - `test_semijoin_filters_correctly` — Source A semi-joined with Source B
@@ -569,20 +569,20 @@ test-objective/
 - `test_commutative_join_pipeline_hash_order_independent` — join(A,B) pipeline_hash == join(B,A)
 - `test_non_commutative_semijoin_pipeline_hash_order_dependent` — semijoin(A,B) != semijoin(B,A)
 
-### `test_provenance.py` — System Tag Lineage Tracking
+### `test_provenance.py` — System Key Lineage Tracking
 
-- `test_source_creates_system_tag_column` — source adds _tag::source:hash column
-- `test_unary_operator_preserves_system_tags` — filter/select/map: name+value unchanged
-- `test_join_extends_system_tag_names` — multi-input: column names get ::hash:pos suffix
-- `test_join_sorts_system_tag_values` — commutative ops sort tag values
-- `test_batch_evolves_system_tag_type` — batch: str → list[str]
+- `test_source_creates_system_key_column` — source adds _key::source:hash column
+- `test_unary_operator_preserves_system_keys` — filter/select/map: name+value unchanged
+- `test_join_extends_system_key_names` — multi-input: column names get ::hash:pos suffix
+- `test_join_sorts_system_key_values` — commutative ops sort key values
+- `test_batch_evolves_system_key_type` — batch: str → list[str]
 - `test_full_pipeline_provenance_chain` — source → join → filter → batch: all rules applied
 
 ### `test_column_config_filtering.py` — ColumnConfig Across All Components
 
 - `test_datagram_column_config_meta` — meta=True includes __ columns
 - `test_datagram_column_config_data_only` — all False = data columns only
-- `test_tag_column_config_system_tags` — system_tags=True includes _tag:: columns
+- `test_key_column_config_system_keys` — system_keys=True includes _key:: columns
 - `test_data_column_config_source` — source=True includes _source_ columns
 - `test_stream_column_config_all_info` — all_info=True on keys/output_schema/as_table
 - `test_stream_column_config_consistency` — keys(), output_schema(), as_table() all respect same config
@@ -619,7 +619,7 @@ test-objective/
 
 ### Recommended additions (not implemented in this PR, but suggested):
 3. **Mutation testing** with `mutmut` — run `uv run mutmut run --paths-to-mutate=src/orcapod/ --tests-dir=test-objective/` to verify tests catch code mutations. A surviving mutant indicates a test gap
-4. **Metamorphic testing** — "if I add a row to source A that matches source B's tags, the join output should have one more row" — tests relationships between inputs/outputs without knowing exact expected values
+4. **Metamorphic testing** — "if I add a row to source A that matches source B's keys, the join output should have one more row" — tests relationships between inputs/outputs without knowing exact expected values
 5. **Protocol conformance automation** — use `runtime_checkable` protocols and `isinstance` checks to verify every concrete class satisfies its protocol at import time
 6. **Specification oracle** — for each documented behavior in `orcapod-design.md`, create a test that constructs the exact scenario described and verifies the documented outcome
 7. **Fuzz testing** — feed malformed inputs (wrong types, extreme sizes, Unicode edge cases) to constructors and verify graceful error handling
@@ -630,7 +630,7 @@ test-objective/
 
 1. **`conftest.py`** — shared fixtures (reusable sources, streams, data functions, databases)
 2. **`unit/test_types.py`** — foundational types (Schema, ContentHash, ColumnConfig)
-3. **`unit/test_datagram.py`**, **`test_tag.py`**, **`test_data.py`** — data containers
+3. **`unit/test_datagram.py`**, **`test_key.py`**, **`test_data.py`** — data containers
 4. **`unit/test_stream.py`** — stream construction and iteration
 5. **`unit/test_sources.py`** + **`test_source_registry.py`** — all source types
 6. **`unit/test_hashing.py`** — semantic hasher and handlers

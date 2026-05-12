@@ -5,8 +5,8 @@ class InputValidationError(Exception):
     """
 
 
-class DuplicateTagError(ValueError):
-    """Raised when duplicate tag values are found and skip_duplicates=False"""
+class DuplicateKeyError(ValueError):
+    """Raised when duplicate key values are found and skip_duplicates=False"""
 
     pass
 

@@ -166,14 +166,14 @@ def _build_operator_registry() -> dict[str, type]:
     from orcapod.core.operators import (
         Batch,
         DropDataColumns,
-        DropTagColumns,
+        DropKeyColumns,
         Join,
         MapData,
-        MapTags,
+        MapKeys,
         MergeJoin,
         PolarsFilter,
         SelectDataColumns,
-        SelectTagColumns,
+        SelectKeyColumns,
         SemiJoin,
     )
 
@@ -182,11 +182,11 @@ def _build_operator_registry() -> dict[str, type]:
         "MergeJoin": MergeJoin,
         "SemiJoin": SemiJoin,
         "Batch": Batch,
-        "SelectTagColumns": SelectTagColumns,
-        "DropTagColumns": DropTagColumns,
+        "SelectKeyColumns": SelectKeyColumns,
+        "DropKeyColumns": DropKeyColumns,
         "SelectDataColumns": SelectDataColumns,
         "DropDataColumns": DropDataColumns,
-        "MapTags": MapTags,
+        "MapKeys": MapKeys,
         "MapData": MapData,
         "PolarsFilter": PolarsFilter,
     }
@@ -480,13 +480,13 @@ def _source_proxy_from_config(
         content_hash = node_descriptor.get("content_hash")
         pipeline_hash_val = node_descriptor.get("pipeline_hash")
         output_schema = node_descriptor.get("output_schema", {})
-        tag_schema_dict = output_schema.get("tag", {})
+        key_schema_dict = output_schema.get("key", {})
         data_schema_dict = output_schema.get("data", {})
     else:
         # Inner sources (e.g. inside CachedSource) embed identity via _identity_config()
         content_hash = config.get("content_hash")
         pipeline_hash_val = config.get("pipeline_hash")
-        tag_schema_dict = config.get("tag_schema", {})
+        key_schema_dict = config.get("key_schema", {})
         data_schema_dict = config.get("data_schema", {})
 
     if not content_hash or not pipeline_hash_val:
@@ -503,14 +503,14 @@ def _source_proxy_from_config(
     if source_type and source_type in SOURCE_REGISTRY:
         expected_class_name = SOURCE_REGISTRY[source_type].__name__
 
-    tag_schema = Schema(deserialize_schema(tag_schema_dict))
+    key_schema = Schema(deserialize_schema(key_schema_dict))
     data_schema = Schema(deserialize_schema(data_schema_dict))
 
     return SourceProxy(
         source_id=config.get("source_id", "unknown"),
         content_hash_str=content_hash,
         pipeline_hash_str=pipeline_hash_val,
-        tag_schema=tag_schema,
+        key_schema=key_schema,
         data_schema=data_schema,
         expected_class_name=expected_class_name,
         source_config=config,

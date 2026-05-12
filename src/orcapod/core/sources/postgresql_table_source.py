@@ -1,7 +1,7 @@
 """PostgreSQLTableSource — a read-only RootSource backed by a PostgreSQL table.
 
 Wraps a PostgreSQL table as an OrcaPod Source. Primary-key columns are used
-as tag columns by default.
+as key columns by default.
 
 Example::
 
@@ -29,13 +29,13 @@ class PostgreSQLTableSource(DBTableSource):
     1. Stores the DSN for serialisation.
     2. Opens a ``PostgreSQLConnector`` for *dsn*.
     3. Delegates to ``DBTableSource.__init__``, which validates the table,
-       resolves tag columns (defaults to PK columns), fetches all rows as
+       resolves key columns (defaults to PK columns), fetches all rows as
        Arrow batches, and builds the stream.
     4. Closes the connector — all data is eagerly loaded into memory, so the
        connection is released immediately.
 
-    PostgreSQL PK columns are always ``NOT NULL``, so NULL tag values can
-    only arise when *tag_columns* is overridden to point at a nullable
+    PostgreSQL PK columns are always ``NOT NULL``, so NULL key values can
+    only arise when *key_columns* is overridden to point at a nullable
     column. Such NULLs are passed through as-is (Arrow supports nulls).
 
     Args:
@@ -43,10 +43,10 @@ class PostgreSQLTableSource(DBTableSource):
             URI form: ``"postgresql://user:pass@host:5432/dbname"``
             Keyword form: ``"host=localhost dbname=mydb user=alice"``
         table_name: Name of the table to expose as a source.
-        tag_columns: Columns to use as tag columns. If ``None`` (default),
+        key_columns: Columns to use as key columns. If ``None`` (default),
             the table's primary-key columns are used. Raises ``ValueError``
             if the table has no primary key and no explicit columns are given.
-        system_tag_columns: Additional system-level tag columns.
+        system_key_columns: Additional system-level key columns.
         record_id_column: Column for stable per-row record IDs in provenance.
         source_id: Canonical source name. Defaults to *table_name*.
         label: Human-readable label for this source node.
@@ -55,7 +55,7 @@ class PostgreSQLTableSource(DBTableSource):
 
     Raises:
         ValueError: If the table is not found, is empty, or has no PK and
-            no *tag_columns* are given.
+            no *key_columns* are given.
         psycopg.OperationalError: If the DSN is invalid or connection fails.
     """
 
@@ -63,8 +63,8 @@ class PostgreSQLTableSource(DBTableSource):
         self,
         dsn: str,
         table_name: str,
-        tag_columns: Collection[str] | None = None,
-        system_tag_columns: Collection[str] = (),
+        key_columns: Collection[str] | None = None,
+        system_key_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
         label: str | None = None,
@@ -77,8 +77,8 @@ class PostgreSQLTableSource(DBTableSource):
             super().__init__(
                 connector,
                 table_name,
-                tag_columns=tag_columns,
-                system_tag_columns=system_tag_columns,
+                key_columns=key_columns,
+                system_key_columns=system_key_columns,
                 record_id_column=record_id_column,
                 source_id=source_id,
                 label=label,
@@ -113,8 +113,8 @@ class PostgreSQLTableSource(DBTableSource):
         return cls(
             dsn=config["dsn"],
             table_name=config["table_name"],
-            tag_columns=config.get("tag_columns"),
-            system_tag_columns=config.get("system_tag_columns", ()),
+            key_columns=config.get("key_columns"),
+            system_key_columns=config.get("system_key_columns", ()),
             record_id_column=config.get("record_id_column"),
             source_id=config.get("source_id"),
             label=config.get("label"),

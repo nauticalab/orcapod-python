@@ -8,7 +8,7 @@
 
 The **datagram** is the universal immutable data container in OrcaPod. A datagram holds named columns with explicit type information and supports lazy conversion between Python dict and Apache Arrow representations. Datagrams come in two specialized forms:
 
-- **Tag** — metadata columns attached to a data for routing, filtering, and annotation. Tags carry additional **system tags** — framework-managed hidden provenance columns that are excluded from content identity by default.
+- **Key** — metadata columns attached to a data for routing, filtering, and annotation. Keys carry additional **system keys** — framework-managed hidden provenance columns that are excluded from content identity by default.
 
 - **Data** — data columns carrying the computational payload. Datas carry additional **source info** — per-column provenance tokens tracing each value back to its originating source and record.
 
@@ -16,13 +16,13 @@ Datagrams are always constructed from either a Python dict or an Arrow table/rec
 
 ### Stream
 
-A **stream** is a sequence of (Tag, Data) pairs over a shared schema. Streams define two column groups — tag columns and data columns — and provide lazy iteration, table materialization, and schema introspection. Streams are the fundamental data-flow abstraction: every source emits one, every operator consumes and produces them, and every function pod iterates over them.
+A **stream** is a sequence of (Key, Data) pairs over a shared schema. Streams define two column groups — key columns and data columns — and provide lazy iteration, table materialization, and schema introspection. Streams are the fundamental data-flow abstraction: every source emits one, every operator consumes and produces them, and every function pod iterates over them.
 
-The concrete implementation is `ArrowTableStream`, backed by an immutable PyArrow Table with explicit tag/data column assignment.
+The concrete implementation is `ArrowTableStream`, backed by an immutable PyArrow Table with explicit key/data column assignment.
 
 ### Source
 
-A **source** acts as a stream from external data with no upstream dependencies, forming the base case of the pipeline graph. Sources establish provenance: each row gets a source-info token and system tag columns encoding the source's identity.
+A **source** acts as a stream from external data with no upstream dependencies, forming the base case of the pipeline graph. Sources establish provenance: each row gets a source-info token and system key columns encoding the source's identity.
 
 - **Root source** — loads data from the external world (file, database, in-memory table). All root sources delegate to `ArrowTableSource`, which wraps the data in an `ArrowTableStream` with provenance annotations. Concrete subclasses include `CSVSource`, `DeltaTableSource`, `DataFrameSource`, `DictSource`, and `ListSource`.
 
@@ -32,13 +32,13 @@ Every source has a `source_id` — a canonical registry name used to register th
 
 ### Function Pod
 
-A **function pod** wraps a **data function** — a stateless computation that consumes a single data and produces an output data. Function pods never inspect tags or stream structure; they operate purely on data content. When given multiple input streams, a function pod joins them via a configurable multi-stream handler (defaulting to `Join`) before iterating.
+A **function pod** wraps a **data function** — a stateless computation that consumes a single data and produces an output data. Function pods never inspect keys or stream structure; they operate purely on data content. When given multiple input streams, a function pod joins them via a configurable multi-stream handler (defaulting to `Join`) before iterating.
 
 Data functions support pluggable executors (see **Data Function Executor System**). When an executor is set, `call()` routes through `executor.execute()` and `async_call()` routes through `executor.async_execute()`. When no executor is set, the function's native `direct_call()` / `direct_async_call()` is invoked directly. For `PythonDataFunction`, `direct_async_call` runs the synchronous function in a thread pool via `asyncio.run_in_executor`.
 
 Two execution models exist:
 
-- **FunctionPod + FunctionPodStream** — lazy, in-memory evaluation. The function pod processes each (tag, data) pair from the input stream on demand, caching results by index. When the attached executor declares `supports_concurrent_execution = True`, `iter_data()` materializes all remaining inputs and dispatches them concurrently via `asyncio.gather` over `async_call`, yielding results in order.
+- **FunctionPod + FunctionPodStream** — lazy, in-memory evaluation. The function pod processes each (key, data) pair from the input stream on demand, caching results by index. When the attached executor declares `supports_concurrent_execution = True`, `iter_data()` materializes all remaining inputs and dispatches them concurrently via `asyncio.gather` over `async_call`, yielding results in order.
 
 - **FunctionNode** — database-backed evaluation with incremental computation. Execution proceeds in two phases:
   1. **Phase 1**: yield cached results from the pipeline database for inputs whose hashes are already stored.
@@ -48,13 +48,13 @@ Two execution models exist:
 
 ### Operator
 
-An **operator** is a structural pod that transforms streams without synthesizing new data values. Every data value in an operator's output must be traceable to a concrete value already present in the input data — operators perform joins, merges, splits, selections, column renames, batching, and tag operations within this constraint.
+An **operator** is a structural pod that transforms streams without synthesizing new data values. Every data value in an operator's output must be traceable to a concrete value already present in the input data — operators perform joins, merges, splits, selections, column renames, batching, and key operations within this constraint.
 
 Operators are subclasses of `StaticOutputPod` organized by input arity:
 
 | Base Class | Arity | Examples |
 |---|---|---|
-| `UnaryOperator` | Exactly 1 input | Batch, SelectTagColumns, DropDataColumns, MapTags, MapData, PolarsFilter |
+| `UnaryOperator` | Exactly 1 input | Batch, SelectKeyColumns, DropDataColumns, MapKeys, MapData, PolarsFilter |
 | `BinaryOperator` | Exactly 2 inputs | MergeJoin, SemiJoin |
 | `NonZeroInputOperator` | 1 or more inputs | Join |
 
@@ -69,7 +69,7 @@ Every operator inherits a default barrier-mode `async_execute` from its base cla
 ## Operator Catalog
 
 ### Join
-Variable-arity inner join on shared tag columns. Non-overlapping data columns are required — colliding data columns raise `InputValidationError`. Tag schema is the union of all input tag schemas; data schema is the union. Inputs are canonically ordered by `pipeline_hash` for deterministic system tag column naming. Commutative (declared via `frozenset` argument symmetry).
+Variable-arity inner join on shared key columns. Non-overlapping data columns are required — colliding data columns raise `InputValidationError`. Key schema is the union of all input key schemas; data schema is the union. Inputs are canonically ordered by `pipeline_hash` for deterministic system key column naming. Commutative (declared via `frozenset` argument symmetry).
 
 ### MergeJoin
 Binary inner join that handles colliding data columns by merging their values into sorted `list[T]`. Colliding columns must have identical types. Non-colliding columns are kept as scalars. Corresponding source-info columns are reordered to match the sort order of their data column. Commutative — commutativity comes from sorting merged values, not from ordering input streams.
@@ -80,14 +80,14 @@ Binary semi-join: returns entries from the left stream that match on overlapping
 ### Batch
 Groups rows into batches of a configurable size. All column types become `list[T]`. Optionally drops incomplete final batches.
 
-### SelectTagColumns / SelectDataColumns
-Keep only specified tag or data columns. Optional `strict` mode raises on missing columns.
+### SelectKeyColumns / SelectDataColumns
+Keep only specified key or data columns. Optional `strict` mode raises on missing columns.
 
-### DropTagColumns / DropDataColumns
-Remove specified tag or data columns. `DropDataColumns` also removes associated source-info columns.
+### DropKeyColumns / DropDataColumns
+Remove specified key or data columns. `DropDataColumns` also removes associated source-info columns.
 
-### MapTags / MapData
-Rename tag or data columns via a name mapping. `MapData` automatically renames associated source-info columns. Optional `drop_unmapped` mode removes columns not in the mapping.
+### MapKeys / MapData
+Rename key or data columns via a name mapping. `MapData` automatically renames associated source-info columns. Optional `drop_unmapped` mode removes columns not in the mapping.
 
 ### PolarsFilter
 Applies Polars filtering predicates to rows. Output schema is unchanged from input.
@@ -96,7 +96,7 @@ Applies Polars filtering predicates to rows. Output schema is unchanged from inp
 
 ## Schema as a First-Class Citizen
 
-Every stream exposes `output_schema()` returning `(tag_schema, data_schema)` as `Schema` objects — immutable mappings from field names to Python types with support for optional fields. Schema is embedded explicitly at every level rather than resolved against a central registry, making streams fully self-describing.
+Every stream exposes `output_schema()` returning `(key_schema, data_schema)` as `Schema` objects — immutable mappings from field names to Python types with support for optional fields. Schema is embedded explicitly at every level rather than resolved against a central registry, making streams fully self-describing.
 
 The `ColumnConfig` dataclass controls what metadata columns are included in schema and data output:
 
@@ -105,25 +105,25 @@ The `ColumnConfig` dataclass controls what metadata columns are included in sche
 | `meta` | System metadata columns (`__` prefix) |
 | `context` | Data context column |
 | `source` | Source-info provenance columns (`_source_` prefix) |
-| `system_tags` | System tag columns (`_tag_` prefix) |
+| `system_keys` | System key columns (`_key_` prefix) |
 | `content_hash` | Per-row content hash column |
-| `sort_by_tags` | Whether to sort output by tag columns |
+| `sort_by_keys` | Whether to sort output by key columns |
 
-Operators predict their output schema — including system tag column names — without performing the actual computation.
+Operators predict their output schema — including system key column names — without performing the actual computation.
 
 ---
 
-## Tags
+## Keys
 
-Tags are key-value pairs attached to every data providing human-friendly metadata for navigation, filtering, and annotation. They are:
+Keys are key-value pairs attached to every data providing human-friendly metadata for navigation, filtering, and annotation. They are:
 
 - **Non-authoritative** — never used for cache lookup or pod identity computation
-- **Auto-propagated** — tags flow forward through the pipeline automatically
-- **The basis for joins** — operator pods join streams by matching tag keys, never by inspecting data content
+- **Auto-propagated** — keys flow forward through the pipeline automatically
+- **The basis for joins** — operator pods join streams by matching key keys, never by inspecting data content
 
-**Tag merging in joins:**
-- **Shared tag keys** — act as the join predicate; values must match for data to be joined
-- **Non-shared tag keys** — propagate freely into the joined output's tags
+**Key merging in joins:**
+- **Shared key keys** — act as the join predicate; values must match for data to be joined
+- **Non-shared key keys** — propagate freely into the joined output's keys
 
 ---
 
@@ -134,7 +134,7 @@ This is a strict and critical separation:
 | | Operator | Function Pod |
 |---|---|---|
 | Inspects data content | Never | Yes |
-| Inspects / uses tags | Yes | No |
+| Inspects / uses keys | Yes | No |
 | Can rename columns | Yes | No |
 | Stream arity | Configurable (unary/binary/N-ary) | Single stream in, single stream out |
 | Cached by content hash | No | Yes |
@@ -154,7 +154,7 @@ Data-inclusive identity capturing the precise semantic content of an object:
 
 | Component | What Gets Hashed |
 |---|---|
-| RootSource | Class name + tag columns + table content hash |
+| RootSource | Class name + key columns + table content hash |
 | DataFunction | URI (canonical name + output schema hash + version + type ID) |
 | FunctionPodStream | Function pod + argument symmetry of inputs |
 | Operator | Operator class + identity structure |
@@ -170,12 +170,12 @@ Schema-and-topology-only identity used for database path scoping. Excludes data 
 
 | Component | What Gets Hashed |
 |---|---|
-| RootSource | `(tag_schema, data_schema)` — base case |
+| RootSource | `(key_schema, data_schema)` — base case |
 | DataFunction | Raw data function object (via content hash) |
 | FunctionPodStream | Function pod + input stream pipeline hashes |
 | Operator | Operator class + argument symmetry (pipeline hashes of inputs) |
 | ArrowTableStream | Producer + upstreams pipeline hashes (or schema if no producer) |
-| DerivedSource | Inherited from RootSource: `(tag_schema, data_schema)` |
+| DerivedSource | Inherited from RootSource: `(key_schema, data_schema)` |
 
 Pipeline hash uses a **resolver pattern** — a callback that routes `PipelineElementProtocol` objects through `pipeline_hash()` and other `ContentIdentifiable` objects through `content_hash()` — ensuring the correct identity chain is used for nested objects within a single hash computation.
 
@@ -224,70 +224,70 @@ Source info is **immutable through the pipeline** — set once when a source cre
 
 ---
 
-## System Tags
+## System Keys
 
-System tags are **framework-managed, hidden provenance columns** automatically attached to every data. Unlike user tags, they are authoritative and guaranteed to maintain perfect traceability from any result row back to its original source rows.
+System keys are **framework-managed, hidden provenance columns** automatically attached to every data. Unlike user keys, they are authoritative and guaranteed to maintain perfect traceability from any result row back to its original source rows.
 
 ### Flat Column Design
 
-System tags store `source_id` and `record_id` as **separate flat columns** rather than a combined string value. This is a deliberate design choice driven by the caching strategy (see **Caching Strategy** section below).
+System keys store `source_id` and `record_id` as **separate flat columns** rather than a combined string value. This is a deliberate design choice driven by the caching strategy (see **Caching Strategy** section below).
 
-In function pod cache tables, which are scoped to a structural pipeline hash and thus shared across different source combinations, filtering by source identity is a first-class operation. Storing `source_id` and `record_id` as separate columns makes this a straightforward equality predicate (`WHERE _tag_source_id::schema1 = 'X'`) with clean standard indexing, rather than a prefix match or string parse against a combined value.
+In function pod cache tables, which are scoped to a structural pipeline hash and thus shared across different source combinations, filtering by source identity is a first-class operation. Storing `source_id` and `record_id` as separate columns makes this a straightforward equality predicate (`WHERE _key_source_id::schema1 = 'X'`) with clean standard indexing, rather than a prefix match or string parse against a combined value.
 
-This is safe because within any given cache table, the system tag schema is fixed — every row has the same set of system tag fields, determined by the pipeline structure. The column count grows with pipeline depth (more join stages produce more system tag column pairs), but this growth is per-table-schema, not within a table. Different pipeline structures produce different tables with different column layouts, which is the expected and correct behavior.
+This is safe because within any given cache table, the system key schema is fixed — every row has the same set of system key fields, determined by the pipeline structure. The column count grows with pipeline depth (more join stages produce more system key column pairs), but this growth is per-table-schema, not within a table. Different pipeline structures produce different tables with different column layouts, which is the expected and correct behavior.
 
-### Source System Tags
+### Source System Keys
 
-Each source automatically adds a pair of system tag columns using the `_tag_` prefix convention:
+Each source automatically adds a pair of system key columns using the `_key_` prefix convention:
 
 ```
-_tag_source_id::{schema_hash}    — the source's canonical source_id
-_tag_record_id::{schema_hash}    — the row identifier within that source
+_key_source_id::{schema_hash}    — the source's canonical source_id
+_key_record_id::{schema_hash}    — the row identifier within that source
 ```
 
-Where `schema_hash` is derived from the source's `(tag_schema, data_schema)`. The `::` delimiter separates segments of the system tag column name, maintaining consistency with the extension pattern used downstream.
+Where `schema_hash` is derived from the source's `(key_schema, data_schema)`. The `::` delimiter separates segments of the system key column name, maintaining consistency with the extension pattern used downstream.
 
 Example at the root level:
 
 ```
-_tag_source_id::schema1   (e.g., value: "customers_2024")
-_tag_record_id::schema1   (e.g., value: "row_42" or "user_id=abc123")
+_key_source_id::schema1   (e.g., value: "customers_2024")
+_key_record_id::schema1   (e.g., value: "row_42" or "user_id=abc123")
 ```
 
 ### Three Evolution Rules
 
 **1. Name-Preserving (~90% of operations)**
-Single-stream operations (filter, select, rename, batch, map). System tag column names and values pass through unchanged.
+Single-stream operations (filter, select, rename, batch, map). System key column names and values pass through unchanged.
 
 **2. Name-Extending (multi-input operations)**
-Joins and merges. Each incoming system tag column name is extended by appending `::node_pipeline_hash:canonical_position`. The `::` delimiter separates each extension segment, and `:` separates the pipeline hash from the canonical position within a segment. Canonical position assignment respects commutativity — for commutative operations, inputs are sorted by `pipeline_hash` to ensure identical column names regardless of wiring order.
+Joins and merges. Each incoming system key column name is extended by appending `::node_pipeline_hash:canonical_position`. The `::` delimiter separates each extension segment, and `:` separates the pipeline hash from the canonical position within a segment. Canonical position assignment respects commutativity — for commutative operations, inputs are sorted by `pipeline_hash` to ensure identical column names regardless of wiring order.
 
-For example, joining two streams that each carry `_tag_source_id::schema1` / `_tag_record_id::schema1`, through a join with pipeline hash `abc123`:
+For example, joining two streams that each carry `_key_source_id::schema1` / `_key_record_id::schema1`, through a join with pipeline hash `abc123`:
 
 ```
-_tag_source_id::schema1::abc123:0    _tag_record_id::schema1::abc123:0    (first stream by canonical position)
-_tag_source_id::schema1::abc123:1    _tag_record_id::schema1::abc123:1    (second stream by canonical position)
+_key_source_id::schema1::abc123:0    _key_record_id::schema1::abc123:0    (first stream by canonical position)
+_key_source_id::schema1::abc123:1    _key_record_id::schema1::abc123:1    (second stream by canonical position)
 ```
 
 A subsequent join (pipeline hash `def456`) over those results would further extend:
 
 ```
-_tag_source_id::schema1::abc123:0::def456:0
-_tag_record_id::schema1::abc123:0::def456:0
+_key_source_id::schema1::abc123:0::def456:0
+_key_record_id::schema1::abc123:0::def456:0
 ```
 
-The full column name is a chain of `::` delimited segments tracing the provenance path: `_tag_{field}::{source_schema_hash}::{join1_hash}:{position}::{join2_hash}:{position}::...`
+The full column name is a chain of `::` delimited segments tracing the provenance path: `_key_{field}::{source_schema_hash}::{join1_hash}:{position}::{join2_hash}:{position}::...`
 
 **3. Type-Evolving (aggregation operations)**
 Batch and similar grouping operations. Column names are unchanged but types evolve: `str → list[str]` as values collect all contributing source row IDs. Both `source_id` and `record_id` columns evolve independently.
 
-### System Tag Value Sorting
+### System Key Value Sorting
 
-For commutative operators (Join, MergeJoin), system tag values from same-`pipeline_hash` streams are sorted per row after the join. This ensures `Op(A, B)` and `Op(B, A)` produce identical system tag columns and values.
+For commutative operators (Join, MergeJoin), system key values from same-`pipeline_hash` streams are sorted per row after the join. This ensures `Op(A, B)` and `Op(B, A)` produce identical system key columns and values.
 
 ### Schema Prediction
 
-Operators predict output system tag column names at schema time — without performing the actual computation — by computing `pipeline_hash` values and canonical positions. This is exposed via `output_schema(columns={"system_tags": True})`.
+Operators predict output system key column names at schema time — without performing the actual computation — by computing `pipeline_hash` values and canonical positions. This is exposed via `output_schema(columns={"system_keys": True})`.
 
 ---
 
@@ -299,7 +299,7 @@ OrcaPod uses a differentiated caching strategy across its three pod types — so
 
 **Cache table identity:** Canonical source identity (content hash).
 
-Each source gets its own dedicated cache table. Sources are provenance roots — there is no upstream system tag mechanism to disambiguate rows from different sources within a shared table. A cached source table represents a cumulative record of all data ever observed from that specific source.
+Each source gets its own dedicated cache table. Sources are provenance roots — there is no upstream system key mechanism to disambiguate rows from different sources within a shared table. A cached source table represents a cumulative record of all data ever observed from that specific source.
 
 **Behavior:**
 - Cache is **always on** by default.
@@ -314,23 +314,23 @@ Each source gets its own dedicated cache table. Sources are provenance roots —
 Function pod caching is split into two tiers:
 
 1. **Data-level cache (global):** Maps input data hash → output data. Shared globally across all pipelines, enabling identical function calls to reuse results regardless of context.
-2. **Tag-level cache (per structural pipeline):** Maps tag → input data hash. Scoped to the structural pipeline hash.
+2. **Key-level cache (per structural pipeline):** Maps key → input data hash. Scoped to the structural pipeline hash.
 
-**Tag-level cache table identity:** Structural pipeline hash (`pipeline_hash()`).
+**Key-level cache table identity:** Structural pipeline hash (`pipeline_hash()`).
 
-A single cache table is used for all runs of structurally identical pipelines (same tag and data schemas at source, followed by the same sequence of operator and function pods), regardless of which specific source combinations were involved. This is safe because function pods operate on individual data independently — each cached mapping is self-contained and valid regardless of what other rows exist in the table.
+A single cache table is used for all runs of structurally identical pipelines (same key and data schemas at source, followed by the same sequence of operator and function pods), regardless of which specific source combinations were involved. This is safe because function pods operate on individual data independently — each cached mapping is self-contained and valid regardless of what other rows exist in the table.
 
 **Why structural hash, not content hash:**
-- System tags already carry full provenance, including source identity as separate queryable columns. Rows from different source combinations are distinguishable within a shared table via equality predicates on `source_id` columns (e.g., `WHERE _tag_source_id::schema1 = 'X'`).
+- System keys already carry full provenance, including source identity as separate queryable columns. Rows from different source combinations are distinguishable within a shared table via equality predicates on `source_id` columns (e.g., `WHERE _key_source_id::schema1 = 'X'`).
 - A shared table provides a natural **cross-source view** — comparing how the same analytical pipeline behaves across different source populations without needing cross-table joins.
-- Content-hash scoping would duplicate disambiguation that system tags already provide, violating the principle against redundant mechanisms.
+- Content-hash scoping would duplicate disambiguation that system keys already provide, violating the principle against redundant mechanisms.
 
 **Behavior:**
 - Cache is **always on** by default.
 - On a pipeline run, incoming data are scoped to the current source combination (determined by upstream source pods).
-- The function pod checks the tag-level cache for existing mappings among the incoming tag-data.
+- The function pod checks the key-level cache for existing mappings among the incoming key-data.
 - **Cache hits** (from this or any prior run over the same structural pipeline) are yielded directly. Cross-source sharing falls out naturally because data-level computation is source-independent.
-- **Cache misses** trigger computation; results are stored in both the data-level and tag-level caches.
+- **Cache misses** trigger computation; results are stored in both the data-level and key-level caches.
 
 **Semantic guarantee:** The cache is a **correct reusable lookup**. Every entry is independently valid. The table as a whole is a historical record of all computations processed through this function within this structural pipeline context.
 
@@ -343,7 +343,7 @@ A single cache table is used for all runs of structurally identical pipelines (s
 Each unique combination of pipeline structure and source identities gets its own cache table. This reflects the fact that operator results are holistic — they depend on the entire input stream, not individual data.
 
 **Why content hash, not structural hash:**
-Operators compute over the stream (joins, aggregations, window functions). Their outputs are meaningful only as a complete set given a specific input. Unlike function pods, operator results cannot be safely mixed across source combinations within a shared table because the distributive property does not hold for most operators. For example, with a join: `(X ⋈ Y) ∪ (X' ⋈ Y') ≠ (X ∪ X') ⋈ (Y ∪ Y')`. The shared table would miss cross-terms `X ⋈ Y'` and `X' ⋈ Y`. Cache invalidation is also cleaner per-table (drop/mark stale) rather than selectively purging rows by system tag.
+Operators compute over the stream (joins, aggregations, window functions). Their outputs are meaningful only as a complete set given a specific input. Unlike function pods, operator results cannot be safely mixed across source combinations within a shared table because the distributive property does not hold for most operators. For example, with a join: `(X ⋈ Y) ∪ (X' ⋈ Y') ≠ (X ∪ X') ⋈ (Y ∪ Y')`. The shared table would miss cross-terms `X ⋈ Y'` and `X' ⋈ Y`. Cache invalidation is also cleaner per-table (drop/mark stale) rather than selectively purging rows by system key.
 
 **Critical correctness caveat:**
 Even scoped to content hash, operator caches are **not guaranteed to be complete** with respect to the full picture of all data ever yielded by the sources. Because sources may use canonical identity for their content hash, the same source identity may yield different data sets over time. The cache accumulates result rows across runs:
@@ -352,7 +352,7 @@ Even scoped to content hash, operator caches are **not guaranteed to be complete
 - Run 2: Sources yield `X'` and `Y'`. The operator computes `X' ⋈ Y'` and appends new rows to cache.
 - The cache now contains `(X ⋈ Y) ∪ (X' ⋈ Y')`, which is **not** equivalent to `(X ∪ X') ⋈ (Y ∪ Y')`.
 
-The operator cache is strictly an **append-only historical record**, not a cumulative materialization. Identical output rows across runs naturally deduplicate (keyed by `hash(tag + data + system_tag)`). Run-level grouping and tracking is managed separately outside the cache mechanism.
+The operator cache is strictly an **append-only historical record**, not a cumulative materialization. Identical output rows across runs naturally deduplicate (keyed by `hash(key + data + system_key)`). Run-level grouping and tracking is managed separately outside the cache mechanism.
 
 **Behavior:**
 - Cache is **off by default**. Operator computation is always triggered fresh in a typical run.
@@ -377,7 +377,7 @@ The operator cache is strictly an **append-only historical record**, not a cumul
 | Default state | Always on | Always on | Off |
 | Semantic role | Cumulative record | Reusable lookup | Historical record |
 | Correctness | Always correct | Always correct | Per-run snapshots only |
-| Cross-source sharing | N/A (one source per table) | Yes, via system tag columns | No (separate tables) |
+| Cross-source sharing | N/A (one source per table) | Yes, via system key columns | No (separate tables) |
 | Computation on cache hit | Dedup and merge | Skip (use cached result) | Recompute by default |
 
 The overall gradient: sources are always cached and always correct, function pods are always cached and always reusable, operators are optionally logged and never silently substituted. Each level directly follows from whether the computation is cumulative, independent, or holistic.
@@ -402,7 +402,7 @@ Function pods and operators use `pipeline_hash()` to scope their database tables
 
 ### Multi-Source Table Sharing
 
-Sources with identical schemas produce identical `pipeline_hash` values. When processed through the same pipeline structure, they share database tables automatically. Different source instances (e.g., `customers_2023`, `customers_2024`) coexist in the same table, differentiated by system tag values and record hashes. This enables natural cross-source analytics without separate table management.
+Sources with identical schemas produce identical `pipeline_hash` values. When processed through the same pipeline structure, they share database tables automatically. Different source instances (e.g., `customers_2023`, `customers_2024`) coexist in the same table, differentiated by system key values and record hashes. This enables natural cross-source analytics without separate table management.
 
 ---
 
@@ -424,7 +424,7 @@ Derived sources serve two purposes:
 
 Data provenance focuses on **data-generating entities only** — sources and function pods. Since operators never synthesize new data values, they leave no computational footprint on the data itself.
 
-The provenance graph is a **bipartite graph of sources and function pods**, with edges encoded as source info pointers per output field. Operator pod topology is captured implicitly in system tag column names and the pipeline Merkle chain but operators do not appear as nodes in the provenance graph.
+The provenance graph is a **bipartite graph of sources and function pods**, with edges encoded as source info pointers per output field. Operator pod topology is captured implicitly in system key column names and the pipeline Merkle chain but operators do not appear as nodes in the provenance graph.
 
 This means:
 - **Operators can be refactored** without invalidating data provenance
@@ -461,14 +461,14 @@ Every pipeline node — source, operator, or function pod — implements the `As
 
 ```python
 async def async_execute(
-    inputs: Sequence[ReadableChannel[tuple[Tag, Data]]],
-    output: WritableChannel[tuple[Tag, Data]],
+    inputs: Sequence[ReadableChannel[tuple[Key, Data]]],
+    output: WritableChannel[tuple[Key, Data]],
 ) -> None
 ```
 
-Nodes consume `(Tag, Data)` pairs from input channels and produce them to an output channel. This enables push-based, streaming execution where data flows through the pipeline as soon as it's available, with backpressure propagated via bounded channel buffers.
+Nodes consume `(Key, Data)` pairs from input channels and produce them to an output channel. This enables push-based, streaming execution where data flows through the pipeline as soon as it's available, with backpressure propagated via bounded channel buffers.
 
-**FunctionPod async strategy:** Streaming mode — each input `(tag, data)` is processed independently with semaphore-controlled concurrency. Uses `asyncio.TaskGroup` for structured concurrency.
+**FunctionPod async strategy:** Streaming mode — each input `(key, data)` is processed independently with semaphore-controlled concurrency. Uses `asyncio.TaskGroup` for structured concurrency.
 
 #### Operator Async Strategies
 
@@ -476,7 +476,7 @@ Each operator overrides `async_execute` with the most efficient streaming patter
 
 | Strategy | Description | Operators |
 |---|---|---|
-| **Per-row streaming** | Transform each `(Tag, Data)` independently as it arrives; zero buffering beyond the current row | SelectTagColumns, SelectDataColumns, DropTagColumns, DropDataColumns, MapTags, MapData |
+| **Per-row streaming** | Transform each `(Key, Data)` independently as it arrives; zero buffering beyond the current row | SelectKeyColumns, SelectDataColumns, DropKeyColumns, DropDataColumns, MapKeys, MapData |
 | **Accumulate-and-emit** | Buffer rows up to `batch_size`, emit full batches immediately, flush partial at end | Batch (`batch_size > 0`) |
 | **Build-probe** | Collect one side fully (build), then stream the other through a hash lookup (probe) | SemiJoin |
 | **Symmetric hash join** | Read both sides concurrently, buffer + index both, emit matches as they're found | Join (2 inputs) |
@@ -484,7 +484,7 @@ Each operator overrides `async_execute` with the most efficient streaming patter
 
 #### Per-Row Streaming (Unary Column/Map Operators)
 
-For operators that transform each row independently (column selection, column dropping, column renaming), the async path iterates `async for tag, data in inputs[0]` and applies the transformation per row. Column metadata (which columns to drop, the rename map, etc.) is computed lazily on the first row and cached for subsequent rows. This avoids materializing the entire input into an Arrow table, enabling true pipeline-level streaming where upstream producers and downstream consumers run concurrently.
+For operators that transform each row independently (column selection, column dropping, column renaming), the async path iterates `async for key, data in inputs[0]` and applies the transformation per row. Column metadata (which columns to drop, the rename map, etc.) is computed lazily on the first row and cached for subsequent rows. This avoids materializing the entire input into an Arrow table, enabling true pipeline-level streaming where upstream producers and downstream consumers run concurrently.
 
 #### Accumulate-and-Emit (Batch)
 
@@ -502,7 +502,7 @@ The 2-input Join uses a symmetric hash join — the same algorithm used by Apach
 2. Probe the opposite side's index for matching keys.
 3. Emit all matches immediately.
 
-When the first rows from both sides have arrived, the shared key columns are determined (intersection of tag column names). Any rows that arrived before shared keys were known are re-indexed and cross-matched in a one-time reconciliation step.
+When the first rows from both sides have arrived, the shared key columns are determined (intersection of key column names). Any rows that arrived before shared keys were known are re-indexed and cross-matched in a one-time reconciliation step.
 
 **Comparison with industry stream processors:**
 
@@ -651,7 +651,7 @@ Pipelines can be composed across boundaries:
 
 The strict operator / function pod boundary is central to OrcaPod's provenance guarantees: operators never synthesize values (provenance transparent), function pods always synthesize values (provenance tracked). This two-category model keeps provenance tracking simple and robust.
 
-However, certain common patterns require combining both behaviors in a single logical operation. The most common is **enrichment** — running a function on a data and appending the computed columns to the original data rather than replacing it. The naïve decomposition into `FunctionPod + Join` works but incurs unnecessary overhead: an intermediate stream is materialized only to be immediately joined back, and the join must re-match tags that trivially correspond because they came from the same input row.
+However, certain common patterns require combining both behaviors in a single logical operation. The most common is **enrichment** — running a function on a data and appending the computed columns to the original data rather than replacing it. The naïve decomposition into `FunctionPod + Join` works but incurs unnecessary overhead: an intermediate stream is materialized only to be immediately joined back, and the join must re-match keys that trivially correspond because they came from the same input row.
 
 ### Fused Pods as Optimization, Not Extension
 
@@ -678,10 +678,10 @@ enriched = AddResult(grade_pf).process(stream)
 
 Equivalent decomposition: `FunctionPod(pf).process(stream)` → `Join()(stream, computed)`.
 
-Efficiency gains: no intermediate stream materialization, no redundant tag matching, no broadcast/rejoin wiring. The async path streams row-by-row like FunctionPod.
+Efficiency gains: no intermediate stream materialization, no redundant key matching, no broadcast/rejoin wiring. The async path streams row-by-row like FunctionPod.
 
 Implementation constraints:
-- `output_schema()` returns `(input_tag_schema, input_data_schema | function_output_schema)`.
+- `output_schema()` returns `(input_key_schema, input_data_schema | function_output_schema)`.
 - Raises `InputValidationError` if function output keys collide with existing data column names.
 - `pipeline_hash` commits to the wrapped DataFunction's identity plus the upstream's pipeline hash (as if the decomposition were performed).
 - Source-info on computed columns references the DataFunction. Source-info on preserved columns passes through unchanged.

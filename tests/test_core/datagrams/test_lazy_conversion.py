@@ -1,12 +1,12 @@
 """
-Tests verifying that Datagram/Tag/Data keep their original representation
+Tests verifying that Datagram/Key/Data keep their original representation
 (Arrow table or Python dict) for as long as possible, converting only when
 an operation semantically requires it.
 
 Design note
 -----------
 These tests intentionally inspect private attributes (_data_dict, _data_table,
-_system_tags_table, _source_info_table, _content_hash_cache, etc.) because the
+_system_keys_table, _source_info_table, _content_hash_cache, etc.) because the
 lazy-conversion contract is an explicit implementation guarantee — it is the
 entire point of the unified Datagram class.  Checking public behaviour alone
 would not distinguish "converted correctly" from "never converted at all".
@@ -15,7 +15,7 @@ would not distinguish "converted correctly" from "never converted at all".
 import pyarrow as pa
 import pytest
 
-from orcapod.core.datagrams import Datagram, Data, Tag
+from orcapod.core.datagrams import Datagram, Data, Key
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig
 
@@ -23,7 +23,7 @@ from orcapod.types import ColumnConfig
 # Helpers
 # ---------------------------------------------------------------------------
 
-SYS = constants.SYSTEM_TAG_PREFIX  # '_tag::'
+SYS = constants.SYSTEM_KEY_PREFIX  # '_key::'
 SRC = constants.SOURCE_PREFIX  # '_source_'
 META = constants.META_PREFIX  # '__'
 
@@ -291,71 +291,71 @@ class TestDatagramCopy:
 
 
 # ---------------------------------------------------------------------------
-# Tag — lazy system-tags table
+# Key — lazy system-keys table
 # ---------------------------------------------------------------------------
 
 
-class TestTagLazySystemTagsTable:
-    """_system_tags_table is built only when system_tags are explicitly requested."""
+class TestKeyLazySystemKeysTable:
+    """_system_keys_table is built only when system_keys are explicitly requested."""
 
-    def test_dict_backed_starts_with_no_system_tags_table(self):
-        t = Tag({"a": 1, f"{SYS}run": "run1"})
-        assert t._system_tags_table is None
+    def test_dict_backed_starts_with_no_system_keys_table(self):
+        t = Key({"a": 1, f"{SYS}run": "run1"})
+        assert t._system_keys_table is None
 
-    def test_arrow_backed_system_tag_columns_extracted_from_data_table(self):
+    def test_arrow_backed_system_key_columns_extracted_from_data_table(self):
         sys_col = f"{SYS}run"
         tbl = arrow_table(a=1)
         tbl = tbl.append_column(sys_col, pa.array(["run1"], type=pa.large_string()))
-        t = Tag(tbl)
-        # System tag column removed from primary data table
+        t = Key(tbl)
+        # System key column removed from primary data table
         assert t._data_table is not None
         assert sys_col not in t._data_table.column_names
-        # Captured in the system_tags dict
-        assert t._system_tags[sys_col] == "run1"
+        # Captured in the system_keys dict
+        assert t._system_keys[sys_col] == "run1"
         # Table not yet built
-        assert t._system_tags_table is None
+        assert t._system_keys_table is None
 
-    def test_system_tags_table_not_built_without_system_tags_flag(self):
-        t = Tag({"a": 1, f"{SYS}run": "run1"})
+    def test_system_keys_table_not_built_without_system_keys_flag(self):
+        t = Key({"a": 1, f"{SYS}run": "run1"})
         _ = t.as_table()
-        assert t._system_tags_table is None
+        assert t._system_keys_table is None
         _ = t.as_dict()
-        assert t._system_tags_table is None
+        assert t._system_keys_table is None
         _ = t.keys()
-        assert t._system_tags_table is None
+        assert t._system_keys_table is None
 
-    def test_system_tags_table_built_when_requested_via_as_table(self):
-        t = Tag({"a": 1, f"{SYS}run": "run1"})
-        _ = t.as_table(columns=ColumnConfig(system_tags=True))
-        assert t._system_tags_table is not None
+    def test_system_keys_table_built_when_requested_via_as_table(self):
+        t = Key({"a": 1, f"{SYS}run": "run1"})
+        _ = t.as_table(columns=ColumnConfig(system_keys=True))
+        assert t._system_keys_table is not None
 
-    def test_system_tags_table_built_when_requested_via_arrow_schema(self):
-        t = Tag({"a": 1, f"{SYS}run": "run1"})
-        _ = t.arrow_schema(columns=ColumnConfig(system_tags=True))
-        assert t._system_tags_table is not None
+    def test_system_keys_table_built_when_requested_via_arrow_schema(self):
+        t = Key({"a": 1, f"{SYS}run": "run1"})
+        _ = t.arrow_schema(columns=ColumnConfig(system_keys=True))
+        assert t._system_keys_table is not None
 
-    def test_arrow_backed_dict_not_loaded_by_system_tags_operations(self):
+    def test_arrow_backed_dict_not_loaded_by_system_keys_operations(self):
         sys_col = f"{SYS}run"
         tbl = arrow_table(a=1)
         tbl = tbl.append_column(sys_col, pa.array(["run1"], type=pa.large_string()))
-        t = Tag(tbl)
+        t = Key(tbl)
         assert t._data_dict is None
-        _ = t.keys(columns=ColumnConfig(system_tags=True))
-        _ = t.schema(columns=ColumnConfig(system_tags=True))
-        _ = t.arrow_schema(columns=ColumnConfig(system_tags=True))
+        _ = t.keys(columns=ColumnConfig(system_keys=True))
+        _ = t.schema(columns=ColumnConfig(system_keys=True))
+        _ = t.arrow_schema(columns=ColumnConfig(system_keys=True))
         assert t._data_dict is None
 
-    def test_copy_with_cache_propagates_system_tags_table(self):
-        t = Tag({"a": 1, f"{SYS}run": "run1"})
-        _ = t.as_table(columns=ColumnConfig(system_tags=True))
+    def test_copy_with_cache_propagates_system_keys_table(self):
+        t = Key({"a": 1, f"{SYS}run": "run1"})
+        _ = t.as_table(columns=ColumnConfig(system_keys=True))
         t2 = t.copy(include_cache=True)
-        assert t2._system_tags_table is not None
+        assert t2._system_keys_table is not None
 
-    def test_copy_without_cache_drops_system_tags_table(self):
-        t = Tag({"a": 1, f"{SYS}run": "run1"})
-        _ = t.as_table(columns=ColumnConfig(system_tags=True))
+    def test_copy_without_cache_drops_system_keys_table(self):
+        t = Key({"a": 1, f"{SYS}run": "run1"})
+        _ = t.as_table(columns=ColumnConfig(system_keys=True))
         t2 = t.copy(include_cache=False)
-        assert t2._system_tags_table is None
+        assert t2._system_keys_table is None
 
 
 # ---------------------------------------------------------------------------
@@ -435,7 +435,7 @@ class TestDataLazySourceInfoTable:
 
 
 # ---------------------------------------------------------------------------
-# RecordBatch — both Tag and Data accept pa.RecordBatch (from table.to_batches())
+# RecordBatch — both Key and Data accept pa.RecordBatch (from table.to_batches())
 # ---------------------------------------------------------------------------
 
 
@@ -450,15 +450,15 @@ class TestRecordBatchInput:
         assert d._data_dict is None
         assert d["a"] == 1
 
-    def test_tag_from_record_batch(self):
+    def test_key_from_record_batch(self):
         sys_col = f"{SYS}run"
         tbl = arrow_table(a=1)
         tbl = tbl.append_column(sys_col, pa.array(["r1"], type=pa.large_string()))
         batch = tbl.to_batches()[0]
-        t = Tag(batch.slice(0, 1))
+        t = Key(batch.slice(0, 1))
         assert t._data_table is not None
         assert sys_col not in t._data_table.column_names
-        assert t._system_tags[sys_col] == "r1"
+        assert t._system_keys[sys_col] == "r1"
         assert t._data_dict is None
 
     def test_data_from_record_batch(self):

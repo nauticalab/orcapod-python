@@ -22,7 +22,7 @@ from orcapod.types import CacheMode
 
 @pytest.fixture
 def simple_source() -> ArrowTableStream:
-    """Single-tag stream: id (tag), x (data), 3 rows."""
+    """Single-key stream: id (key), x (data), 3 rows."""
     return ArrowTableStream(
         pa.table(
             {
@@ -30,7 +30,7 @@ def simple_source() -> ArrowTableStream:
                 "x": pa.array([10, 20, 30], type=pa.int64()),
             }
         ),
-        tag_columns=["id"],
+        key_columns=["id"],
     )
 
 

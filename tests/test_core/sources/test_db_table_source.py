@@ -5,7 +5,7 @@ Test sections:
  1. Import / export sanity
  2. MockDBConnector satisfies DBConnectorProtocol
  3. DBTableSource protocol conformance (SourceProtocol, StreamProtocol, PipelineElementProtocol)
- 4. Construction — default tag columns (PK), explicit tag columns, source_id
+ 4. Construction — default key columns (PK), explicit key columns, source_id
  5. Construction error cases — missing table, no PK columns, empty table
  6. Stream behaviour — iter_data count, output_schema, as_table, producer/upstreams
  7. Deterministic hashing (pipeline_hash, content_hash)
@@ -202,18 +202,18 @@ class TestProtocolConformance:
 
 
 # ===========================================================================
-# 4. Construction — tag columns and source_id
+# 4. Construction — key columns and source_id
 # ===========================================================================
 
 
 class TestConstruction:
-    def test_pk_columns_used_as_default_tag_columns(self, source):
-        tag_schema, _ = source.output_schema()
-        assert "session_id" in tag_schema
+    def test_pk_columns_used_as_default_key_columns(self, source):
+        key_schema, _ = source.output_schema()
+        assert "session_id" in key_schema
 
-    def test_pk_tag_column_not_in_data_schema(self, source):
-        tag_schema, data_schema = source.output_schema()
-        assert "session_id" in tag_schema
+    def test_pk_key_column_not_in_data_schema(self, source):
+        key_schema, data_schema = source.output_schema()
+        assert "session_id" in key_schema
         assert "session_id" not in data_schema
 
     def test_non_pk_columns_in_data_schema(self, source):
@@ -221,19 +221,19 @@ class TestConstruction:
         assert "trial" in data_schema
         assert "response" in data_schema
 
-    def test_explicit_tag_columns_override_pk(self, connector):
-        src = DBTableSource(connector, "measurements", tag_columns=["trial"])
-        tag_schema, data_schema = src.output_schema()
-        assert "trial" in tag_schema
-        assert "session_id" not in tag_schema
+    def test_explicit_key_columns_override_pk(self, connector):
+        src = DBTableSource(connector, "measurements", key_columns=["trial"])
+        key_schema, data_schema = src.output_schema()
+        assert "trial" in key_schema
+        assert "session_id" not in key_schema
 
-    def test_multiple_explicit_tag_columns(self, connector):
+    def test_multiple_explicit_key_columns(self, connector):
         src = DBTableSource(
-            connector, "measurements", tag_columns=["session_id", "trial"]
+            connector, "measurements", key_columns=["session_id", "trial"]
         )
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
-        assert "trial" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "session_id" in key_schema
+        assert "trial" in key_schema
 
     def test_default_source_id_is_table_name(self, source):
         assert source.source_id == "measurements"
@@ -248,9 +248,9 @@ class TestConstruction:
             pk_columns={"t": ["session_id", "trial"]},
         )
         src = DBTableSource(connector, "t")
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
-        assert "trial" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "session_id" in key_schema
+        assert "trial" in key_schema
 
 
 # ===========================================================================
@@ -272,7 +272,7 @@ class TestConstructionErrors:
         with pytest.raises(ValueError, match="not found in database"):
             DBTableSource(connector, "completely_missing")
 
-    def test_no_pk_and_no_explicit_tags_raises_value_error(self, measurements_table):
+    def test_no_pk_and_no_explicit_keys_raises_value_error(self, measurements_table):
         connector = MockDBConnector(
             tables={"t": measurements_table},
             pk_columns={},  # table exists but has no PK
@@ -326,20 +326,20 @@ class TestStreamBehaviour:
         data = list(source.iter_data())
         assert len(data) == measurements_table.num_rows
 
-    def test_iter_data_each_has_tag_and_data(self, source):
-        # Tag and Data are named types (not plain dict) but support
+    def test_iter_data_each_has_key_and_data(self, source):
+        # Key and Data are named types (not plain dict) but support
         # dict-like access and containment checks.
-        for tags, data in source.iter_data():
-            assert "session_id" in tags
+        for keys, data in source.iter_data():
+            assert "session_id" in keys
             assert "trial" in data or "response" in data
 
     def test_output_schema_returns_two_schemas(self, source):
         result = source.output_schema()
         assert len(result) == 2
 
-    def test_output_schema_tag_schema_is_dict_like(self, source):
-        tag_schema, _ = source.output_schema()
-        assert "session_id" in tag_schema
+    def test_output_schema_key_schema_is_dict_like(self, source):
+        key_schema, _ = source.output_schema()
+        assert "session_id" in key_schema
 
     def test_output_schema_data_schema_has_payload_columns(self, source):
         _, data_schema = source.output_schema()
@@ -354,10 +354,10 @@ class TestStreamBehaviour:
         t = source.as_table()
         assert t.num_rows == measurements_table.num_rows
 
-    def test_source_with_explicit_tags_yields_correct_keys(self, connector):
-        src = DBTableSource(connector, "measurements", tag_columns=["session_id"])
-        for tags, _ in src.iter_data():
-            assert "session_id" in tags
+    def test_source_with_explicit_keys_yields_correct_keys(self, connector):
+        src = DBTableSource(connector, "measurements", key_columns=["session_id"])
+        for keys, _ in src.iter_data():
+            assert "session_id" in keys
 
 
 # ===========================================================================
@@ -377,16 +377,16 @@ class TestDeterministicHashing:
         assert src1.content_hash() == src2.content_hash()
 
     def test_pipeline_hash_is_schema_only_not_source_id(self, connector):
-        # pipeline_identity_structure() is (tag_schema, data_schema) by design —
+        # pipeline_identity_structure() is (key_schema, data_schema) by design —
         # source_id is intentionally excluded so sources with identical schemas
         # share the same pipeline hash and therefore the same pipeline DB table.
         src1 = DBTableSource(connector, "measurements", source_id="a")
         src2 = DBTableSource(connector, "measurements", source_id="b")
         assert src1.pipeline_hash() == src2.pipeline_hash()
 
-    def test_different_tag_columns_yields_different_pipeline_hash(self, connector):
-        src1 = DBTableSource(connector, "measurements", tag_columns=["session_id"])
-        src2 = DBTableSource(connector, "measurements", tag_columns=["trial"])
+    def test_different_key_columns_yields_different_pipeline_hash(self, connector):
+        src1 = DBTableSource(connector, "measurements", key_columns=["session_id"])
+        src2 = DBTableSource(connector, "measurements", key_columns=["trial"])
         assert src1.pipeline_hash() != src2.pipeline_hash()
 
 
@@ -404,10 +404,10 @@ class TestConfig:
         config = source.to_config()
         assert config["table_name"] == "measurements"
 
-    def test_to_config_has_tag_columns(self, source):
+    def test_to_config_has_key_columns(self, source):
         config = source.to_config()
-        assert "tag_columns" in config
-        assert "session_id" in config["tag_columns"]
+        assert "key_columns" in config
+        assert "session_id" in config["key_columns"]
 
     def test_to_config_has_connector(self, source):
         config = source.to_config()
@@ -420,7 +420,7 @@ class TestConfig:
 
     def test_to_config_has_identity_fields(self, source):
         config = source.to_config()
-        # identity_config() adds content_hash, pipeline_hash, tag_schema, data_schema
+        # identity_config() adds content_hash, pipeline_hash, key_schema, data_schema
         assert "content_hash" in config
         assert "pipeline_hash" in config
 
@@ -434,12 +434,12 @@ class TestConfig:
         config = src.to_config()
         assert config["source_id"] == "custom_id"
 
-    def test_to_config_system_tag_columns_preserved(self, connector):
+    def test_to_config_system_key_columns_preserved(self, connector):
         src = DBTableSource(
-            connector, "measurements", system_tag_columns=["session_id"]
+            connector, "measurements", system_key_columns=["session_id"]
         )
         config = src.to_config()
-        assert "system_tag_columns" in config
+        assert "system_key_columns" in config
 
 
 class TestQueryOverride:

@@ -44,12 +44,12 @@ structurally similar but type-distinct containers produce different hashes:
   dict       → {...}                                        # native JSON object; keys sorted
   tuple      → {"__type__": "tuple",     "items": [...]}
   set        → {"__type__": "set",       "items": [...]}   # items sorted by str()
-  frozenset  → {"__type__": "set",       "items": [...]}   # same tag as set
+  frozenset  → {"__type__": "set",       "items": [...]}   # same key as set
   namedtuple → {"__type__": "namedtuple","name": "T",
                 "fields": {...}}                            # sorted by field name
 
 This means a ``list`` and a ``tuple`` with the same elements will hash
-differently (the tuple carries a type tag), while a plain ``list`` and a
+differently (the tuple carries a type key), while a plain ``list`` and a
 plain JSON array embedded anywhere in a structure are indistinguishable --
 which is exactly the desired semantics for interoperability.
 
@@ -225,7 +225,7 @@ class BaseSemanticHasher:
                       path, for circular-reference detection.
 
         Returns:
-            A JSON-serialisable dict (with ``__type__`` tag) for containers,
+            A JSON-serialisable dict (with ``__type__`` key) for containers,
             or the primitive value itself.
         """
         # Primitives are leaves -- pass through.

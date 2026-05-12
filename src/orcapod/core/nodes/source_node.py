@@ -34,7 +34,7 @@ class SourceNode(StreamBase):
     ):
         super().__init__(label=label, config=config)
         self.stream = stream
-        self._cached_results: list[tuple[cp.TagProtocol, cp.DataProtocol]] | None = (
+        self._cached_results: list[tuple[cp.KeyProtocol, cp.DataProtocol]] | None = (
             None
         )
 
@@ -212,9 +212,9 @@ class SourceNode(StreamBase):
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         if self.stream is None:
             stored = getattr(self, "_stored_schema", {})
-            tag_keys = tuple(stored.get("tag", {}).keys())
+            key_keys = tuple(stored.get("key", {}).keys())
             data_keys = tuple(stored.get("data", {}).keys())
-            return tag_keys, data_keys
+            return key_keys, data_keys
         return self.stream.keys(columns=columns, all_info=all_info)
 
     def output_schema(
@@ -225,9 +225,9 @@ class SourceNode(StreamBase):
     ) -> tuple[Schema, Schema]:
         if self.stream is None:
             stored = getattr(self, "_stored_schema", {})
-            tag = Schema(stored.get("tag", {}))
+            key = Schema(stored.get("key", {}))
             data = Schema(stored.get("data", {}))
-            return tag, data
+            return key, data
         return self.stream.output_schema(columns=columns, all_info=all_info)
 
     @property
@@ -258,7 +258,7 @@ class SourceNode(StreamBase):
             )
         return self.stream.as_table(columns=columns, all_info=all_info)
 
-    def iter_data(self) -> Iterator[tuple[cp.TagProtocol, cp.DataProtocol]]:
+    def iter_data(self) -> Iterator[tuple[cp.KeyProtocol, cp.DataProtocol]]:
         if self.stream is None:
             raise RuntimeError(
                 "SourceNode in read-only mode has no stream data available"
@@ -271,14 +271,14 @@ class SourceNode(StreamBase):
         self,
         *,
         observer: ExecutionObserverProtocol | None = None,
-    ) -> list[tuple[cp.TagProtocol, cp.DataProtocol]]:
+    ) -> list[tuple[cp.KeyProtocol, cp.DataProtocol]]:
         """Execute this source: materialize data and return.
 
         Args:
             observer: Optional execution observer for hooks.
 
         Returns:
-            List of (tag, data) tuples.
+            List of (key, data) tuples.
         """
         if self.stream is None:
             raise RuntimeError(
@@ -299,11 +299,11 @@ class SourceNode(StreamBase):
 
     async def async_execute(
         self,
-        output: WritableChannel[tuple[cp.TagProtocol, cp.DataProtocol]],
+        output: WritableChannel[tuple[cp.KeyProtocol, cp.DataProtocol]],
         *,
         observer: ExecutionObserverProtocol | None = None,
     ) -> None:
-        """Push all (tag, data) pairs from the wrapped stream to the output channel.
+        """Push all (key, data) pairs from the wrapped stream to the output channel.
 
         Args:
             output: Channel to write results to.
@@ -318,8 +318,8 @@ class SourceNode(StreamBase):
         try:
             if observer is not None:
                 observer.on_node_start(node_label, node_hash)
-            for tag, data in self.stream.iter_data():
-                await output.send((tag, data))
+            for key, data in self.stream.iter_data():
+                await output.send((key, data))
             if observer is not None:
                 observer.on_node_end(node_label, node_hash)
         finally:

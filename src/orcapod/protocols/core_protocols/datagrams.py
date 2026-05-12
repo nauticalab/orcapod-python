@@ -33,9 +33,9 @@ class DatagramProtocol(ContentIdentifiableProtocol, DataContextAwareProtocol, Pr
     - **Meta columns**: Internal system metadata with {constants.META_PREFIX} (typically '__') prefixes (e.g. __processed_at, etc.)
     - **Context column**: Data context information ({constants.CONTEXT_KEY})
 
-    Derivative of datagram (such as DataProtocol or TagProtocol) will also include some specific columns pertinent to the function of the specialized datagram:
+    Derivative of datagram (such as DataProtocol or KeyProtocol) will also include some specific columns pertinent to the function of the specialized datagram:
     - **Source info columns**: Data provenance with {constants.SOURCE_PREFIX} ('_source_') prefixes (_source_user_id, etc.) used in DataProtocol
-    - **System tags**: Internal tags for system use, typically prefixed with {constants.SYSTEM_TAG_PREFIX} ('_system_') (_system_created_at, etc.) used in TagProtocol
+    - **System keys**: Internal keys for system use, typically prefixed with {constants.SYSTEM_KEY_PREFIX} ('_system_') (_system_created_at, etc.) used in KeyProtocol
 
     All operations are by design immutable - methods return new datagram instances rather than modifying existing ones.
 
@@ -595,11 +595,11 @@ class DatagramProtocol(ContentIdentifiableProtocol, DataContextAwareProtocol, Pr
 
 
 @runtime_checkable
-class TagProtocol(DatagramProtocol, Protocol):
+class KeyProtocol(DatagramProtocol, Protocol):
     """
     Metadata associated with each data item in a stream.
 
-    Tags carry contextual information about data data as they flow through
+    Keys carry contextual information about data data as they flow through
     the computational graph. They are immutable and provide metadata that
     helps with:
     - Data lineage tracking
@@ -616,7 +616,7 @@ class TagProtocol(DatagramProtocol, Protocol):
     - Quality indicators or confidence scores
     """
 
-    def system_tags(self) -> dict[str, DataValue]:
+    def system_keys(self) -> dict[str, DataValue]:
         """
         Return metadata about the data's source/origin.
 
@@ -639,7 +639,7 @@ class DataProtocol(DatagramProtocol, Protocol):
     The actual data payload in a stream.
 
     Datas represent the core data being processed through the computational
-    graph. Unlike Tags (which are metadata), Datas contain the actual
+    graph. Unlike Keys (which are metadata), Datas contain the actual
     information that computations operate on.
 
     Datas extend DatagramProtocol with additional capabilities for:
@@ -647,8 +647,8 @@ class DataProtocol(DatagramProtocol, Protocol):
     - Content-based hashing for caching
     - Metadata inclusion for debugging
 
-    The distinction between TagProtocol and DataProtocol is crucial for understanding
-    data flow: Tags provide context, Datas provide content.
+    The distinction between KeyProtocol and DataProtocol is crucial for understanding
+    data flow: Keys provide context, Datas provide content.
     """
 
     def source_info(self) -> dict[str, str | None]:

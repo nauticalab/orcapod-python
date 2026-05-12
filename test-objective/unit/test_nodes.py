@@ -41,7 +41,7 @@ def _make_stream(n: int = 3) -> ArrowTableSource:
             "x": pa.array(list(range(n)), type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
+    return ArrowTableSource(table, key_columns=["id"], infer_nullable=True)
 
 
 def _make_joinable_streams() -> tuple[ArrowTableSource, ArrowTableSource]:
@@ -58,8 +58,8 @@ def _make_joinable_streams() -> tuple[ArrowTableSource, ArrowTableSource]:
         }
     )
     return (
-        ArrowTableSource(left, tag_columns=["id"], infer_nullable=True),
-        ArrowTableSource(right, tag_columns=["id"], infer_nullable=True),
+        ArrowTableSource(left, key_columns=["id"], infer_nullable=True),
+        ArrowTableSource(right, key_columns=["id"], infer_nullable=True),
     )
 
 
@@ -78,7 +78,7 @@ class TestFunctionNode:
         node = FunctionNode(function_pod=pod, input_stream=stream)
         data = list(node.iter_data())
         assert len(data) == 3
-        for tag, data in data:
+        for key, data in data:
             assert "result" in data.keys()
 
     def test_process_data(self):
@@ -86,9 +86,9 @@ class TestFunctionNode:
         pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         node = FunctionNode(function_pod=pod, input_stream=stream)
-        # Get first tag/data from input
-        tag, data = next(iter(stream.iter_data()))
-        out_tag, out_data = node.process_data(tag, data)
+        # Get first key/data from input
+        key, data = next(iter(stream.iter_data()))
+        out_key, out_data = node.process_data(key, data)
         assert out_data is not None
         assert "result" in out_data.keys()
 

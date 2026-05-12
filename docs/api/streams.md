@@ -1,6 +1,6 @@
 # Streams
 
-Streams are immutable sequences of (Tag, Data) pairs backed by PyArrow tables.
+Streams are immutable sequences of (Key, Data) pairs backed by PyArrow tables.
 
 ::: orcapod.core.streams.ArrowTableStream
 

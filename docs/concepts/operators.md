@@ -5,7 +5,7 @@ synthesizing data values. They join, filter, batch, rename, and select columns -
 that affect the *structure* of the data (which rows exist, which columns are present, how
 columns are named) but never compute new values from data content. This is the key
 distinction from [function pods](function-pods.md), which do the opposite: they transform
-data values but never touch tags or stream structure.
+data values but never touch keys or stream structure.
 
 ## The operator / function pod boundary
 
@@ -14,7 +14,7 @@ This separation is a core Orcapod design principle:
 |  | Operator | Function Pod |
 |---|---|---|
 | Inspects data content | Never | Yes |
-| Inspects / uses tags | Yes | No |
+| Inspects / uses keys | Yes | No |
 | Can rename columns | Yes | No |
 | Synthesizes new values | No | Yes |
 | Stream arity | Configurable (1, 2, or N inputs) | Single in, single out |
@@ -42,7 +42,7 @@ Takes one or more streams. Used for `Join`, which performs an N-ary inner join.
 
 ### Join
 
-N-ary inner join on shared tag columns. Requires that input streams have non-overlapping
+N-ary inner join on shared key columns. Requires that input streams have non-overlapping
 data columns (raises `InputValidationError` on collision). Join is **commutative** -- the
 order of input streams does not affect the result.
 
@@ -55,7 +55,7 @@ subjects = DictSource(
         {"subject_id": "mouse_01", "age": 12},
         {"subject_id": "mouse_02", "age": 8},
     ],
-    tag_columns=["subject_id"],
+    key_columns=["subject_id"],
 )
 
 measurements = DictSource(
@@ -63,7 +63,7 @@ measurements = DictSource(
         {"subject_id": "mouse_01", "weight": 25.3},
         {"subject_id": "mouse_02", "weight": 22.1},
     ],
-    tag_columns=["subject_id"],
+    key_columns=["subject_id"],
 )
 
 join = Join()
@@ -82,10 +82,10 @@ is **commutative** -- the order of the two input streams does not affect the res
 
 ### SemiJoin
 
-Binary join that filters the left stream to only include rows whose tags match the right
+Binary join that filters the left stream to only include rows whose keys match the right
 stream. The right stream's data columns are discarded. SemiJoin is **not commutative** --
 the order of inputs matters. The first stream is the one being filtered; the second stream
-provides the set of matching tags.
+provides the set of matching keys.
 
 ### Batch
 
@@ -101,14 +101,14 @@ source = DictSource(
         {"subject_id": "mouse_01", "age": 12},
         {"subject_id": "mouse_02", "age": 8},
     ],
-    tag_columns=["subject_id"],
+    key_columns=["subject_id"],
 )
 
 batch = Batch()
 batched = batch.process(source)
-for tag, data in batched.iter_data():
-    print("Tags:", tag.as_dict())
-    # Tags: {'subject_id': ['mouse_01', 'mouse_02']}
+for key, data in batched.iter_data():
+    print("Keys:", key.as_dict())
+    # Keys: {'subject_id': ['mouse_01', 'mouse_02']}
     print("Data:", data.as_dict())
     # Data: {'age': [12, 8]}
 ```
@@ -123,9 +123,9 @@ batch = Batch(batch_size=10, drop_partial_batch=False)
 
 Four operators for including or excluding columns:
 
-- **`SelectTagColumns(columns=["col1", "col2"])`** -- keep only the specified tag columns
+- **`SelectKeyColumns(columns=["col1", "col2"])`** -- keep only the specified key columns
 - **`SelectDataColumns(columns=["col1", "col2"])`** -- keep only the specified data columns
-- **`DropTagColumns(columns=["col1"])`** -- remove the specified tag columns
+- **`DropKeyColumns(columns=["col1"])`** -- remove the specified key columns
 - **`DropDataColumns(columns=["col1"])`** -- remove the specified data columns
 
 ```python
@@ -138,7 +138,7 @@ print(result.keys()[1])  # ('weight',)
 
 ### Column renaming
 
-- **`MapTags(mapping={"old_name": "new_name"})`** -- rename tag columns
+- **`MapKeys(mapping={"old_name": "new_name"})`** -- rename key columns
 - **`MapData(mapping={"old_name": "new_name"})`** -- rename data columns
 
 ### PolarsFilter
@@ -151,8 +151,8 @@ from orcapod.operators import PolarsFilter
 
 filt = PolarsFilter(predicates=[pl.col("age") > 10])
 filtered = filt.process(source)
-for tag, pkt in filtered.iter_data():
-    print(f"{tag.as_dict()} -> {pkt.as_dict()}")
+for key, pkt in filtered.iter_data():
+    print(f"{key.as_dict()} -> {pkt.as_dict()}")
 # {'subject_id': 'mouse_01'} -> {'age': 12, 'weight': 25.3}
 # {'subject_id': 'mouse_03'} -> {'age': 15, 'weight': 27.8}
 ```

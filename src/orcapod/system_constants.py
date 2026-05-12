@@ -9,9 +9,9 @@ DATA_CONTEXT_KEY = "context_key"
 INPUT_DATA_HASH_COL = "input_data_hash"
 DATA_RECORD_ID = "data_id"
 NODE_CONTENT_HASH_COL = "node_content_hash"
-SYSTEM_TAG_PREFIX_NAME = "tag"
-SYSTEM_TAG_SOURCE_ID_FIELD = "source_id"
-SYSTEM_TAG_RECORD_ID_FIELD = "record_id"
+SYSTEM_KEY_PREFIX_NAME = "key"
+SYSTEM_KEY_SOURCE_ID_FIELD = "source_id"
+SYSTEM_KEY_RECORD_ID_FIELD = "record_id"
 POD_VERSION = "pod_version"
 EXECUTION_ENGINE = "execution_engine"
 POD_TIMESTAMP = "pod_ts"
@@ -73,16 +73,16 @@ class SystemConstant:
         return f"{self._global_prefix}{DATAGRAM_PREFIX}{NODE_CONTENT_HASH_COL}"
 
     @property
-    def SYSTEM_TAG_PREFIX(self) -> str:
-        return f"{self._global_prefix}{DATAGRAM_PREFIX}{SYSTEM_TAG_PREFIX_NAME}_"
+    def SYSTEM_KEY_PREFIX(self) -> str:
+        return f"{self._global_prefix}{DATAGRAM_PREFIX}{SYSTEM_KEY_PREFIX_NAME}_"
 
     @property
-    def SYSTEM_TAG_SOURCE_ID_PREFIX(self) -> str:
-        return f"{self.SYSTEM_TAG_PREFIX}{SYSTEM_TAG_SOURCE_ID_FIELD}"
+    def SYSTEM_KEY_SOURCE_ID_PREFIX(self) -> str:
+        return f"{self.SYSTEM_KEY_PREFIX}{SYSTEM_KEY_SOURCE_ID_FIELD}"
 
     @property
-    def SYSTEM_TAG_RECORD_ID_PREFIX(self) -> str:
-        return f"{self.SYSTEM_TAG_PREFIX}{SYSTEM_TAG_RECORD_ID_FIELD}"
+    def SYSTEM_KEY_RECORD_ID_PREFIX(self) -> str:
+        return f"{self.SYSTEM_KEY_PREFIX}{SYSTEM_KEY_RECORD_ID_FIELD}"
 
     @property
     def POD_VERSION(self) -> str:

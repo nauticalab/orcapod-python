@@ -18,7 +18,7 @@ from orcapod.protocols.core_protocols import (
     DataProtocol,
     PodProtocol,
     StreamProtocol,
-    TagProtocol,
+    KeyProtocol,
     TrackerManagerProtocol,
 )
 from orcapod.types import ColumnConfig, ContentHash, Schema
@@ -101,7 +101,7 @@ class StaticOutputOperatorPod(TraceableBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        """Determine output (tag, data) schemas without triggering computation.
+        """Determine output (key, data) schemas without triggering computation.
 
         Args:
             *streams: Input streams to analyze.
@@ -109,7 +109,7 @@ class StaticOutputOperatorPod(TraceableBase):
             all_info: If True, include all info columns.
 
         Returns:
-            A ``(tag_schema, data_schema)`` tuple.
+            A ``(key_schema, data_schema)`` tuple.
 
         Raises:
             ValidationError: If input types are incompatible.
@@ -193,9 +193,9 @@ class StaticOutputOperatorPod(TraceableBase):
 
     @staticmethod
     def _materialize_to_stream(
-        rows: Sequence[tuple[TagProtocol, DataProtocol]],
+        rows: Sequence[tuple[KeyProtocol, DataProtocol]],
     ) -> StreamProtocol:
-        """Materialize a list of (Tag, Data) pairs into an ArrowTableStream.
+        """Materialize a list of (Key, Data) pairs into an ArrowTableStream.
 
         Used by the barrier-mode ``async_execute`` to convert collected
         channel items back into a stream suitable for ``static_process``.
@@ -206,34 +206,34 @@ class StaticOutputOperatorPod(TraceableBase):
         if not rows:
             raise ValueError("Cannot materialize an empty list of rows into a stream")
 
-        tag_tables = []
+        key_tables = []
         data_tables = []
 
-        for tag, data in rows:
-            tag_tables.append(tag.as_table(columns={"system_tags": True}))
+        for key, data in rows:
+            key_tables.append(key.as_table(columns={"system_keys": True}))
             data_tables.append(data.as_table(columns={"source": True}))
 
-        combined_tags = pa.concat_tables(tag_tables)
+        combined_keys = pa.concat_tables(key_tables)
         combined_data = pa.concat_tables(data_tables)
 
-        user_tag_keys = tuple(rows[0][0].keys())
+        user_key_keys = tuple(rows[0][0].keys())
 
         # Preserve actual source_info provenance from the first row
         # (all rows share the same data columns and source tokens).
         source_info = rows[0][1].source_info()
 
-        full_table = arrow_utils.hstack_tables(combined_tags, combined_data)
+        full_table = arrow_utils.hstack_tables(combined_keys, combined_data)
 
         return ArrowTableStream(
             full_table,
-            tag_columns=user_tag_keys,
+            key_columns=user_key_keys,
             source_info=source_info,
         )
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[KeyProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[KeyProtocol, DataProtocol]],
         *,
         input_pipeline_hashes: Sequence[ContentHash] | None = None,
     ) -> None:
@@ -247,15 +247,15 @@ class StaticOutputOperatorPod(TraceableBase):
             output: Writable channel for downstream consumption.
             input_pipeline_hashes: Pipeline hash for each input stream,
                 positionally matching ``inputs``.  Multi-input operators
-                (e.g. Join) use these to compute canonical system-tag
+                (e.g. Join) use these to compute canonical system-key
                 column names.  Ignored by single-input operators.
         """
         try:
             all_rows = await asyncio.gather(*(ch.collect() for ch in inputs))
             streams = [self._materialize_to_stream(rows) for rows in all_rows]
             result = self.static_process(*streams)
-            for tag, data in result.iter_data():
-                await output.send((tag, data))
+            for key, data in result.iter_data():
+                await output.send((key, data))
         finally:
             await output.close()
 
@@ -310,13 +310,13 @@ class DynamicPodStream(StreamBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        """Return the (tag_keys, data_keys) column names for this stream."""
-        tag_schema, data_schema = self._pod.output_schema(
+        """Return the (key_keys, data_keys) column names for this stream."""
+        key_schema, data_schema = self._pod.output_schema(
             *self.upstreams,
             columns=columns,
             all_info=all_info,
         )
-        return tuple(tag_schema.keys()), tuple(data_schema.keys())
+        return tuple(key_schema.keys()), tuple(data_schema.keys())
 
     def output_schema(
         self,
@@ -324,7 +324,7 @@ class DynamicPodStream(StreamBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        """Return the (tag_schema, data_schema) for this stream."""
+        """Return the (key_schema, data_schema) for this stream."""
         return self._pod.output_schema(
             *self.upstreams,
             columns=columns,
@@ -381,7 +381,7 @@ class DynamicPodStream(StreamBase):
 
     def iter_data(
         self,
-    ) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+    ) -> Iterator[tuple[KeyProtocol, DataProtocol]]:
         self.run()
         assert self._cached_stream is not None, (
             "StreamProtocol has not been updated or is empty."

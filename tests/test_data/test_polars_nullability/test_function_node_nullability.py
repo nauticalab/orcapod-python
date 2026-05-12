@@ -36,7 +36,7 @@ class TestFunctionNodeGetAllRecordsNullability:
         database = InMemoryArrowDatabase()
         source = op.sources.DictSource(
             [{"id": 1, "x": 10}, {"id": 2, "x": 20}],
-            tag_columns=["id"],
+            key_columns=["id"],
         )
 
         @op.function_pod(output_keys=["result"])
@@ -64,21 +64,21 @@ class TestFunctionNodeGetAllRecordsNullability:
             "Arrow→Polars→Arrow round-trip in get_all_records() dropped nullability."
         )
 
-    def test_input_tag_column_non_nullable_after_get_all_records(self):
-        """Input tag columns that are non-nullable must remain so after Polars join."""
+    def test_input_key_column_non_nullable_after_get_all_records(self):
+        """Input key columns that are non-nullable must remain so after Polars join."""
         database = InMemoryArrowDatabase()
 
         # DictSource with integer id — infer_schema_nullable sets nullable=False (no nulls)
         source = op.sources.DictSource(
             [{"id": 1, "x": 5}, {"id": 2, "x": 15}],
-            tag_columns=["id"],
+            key_columns=["id"],
         )
 
         @op.function_pod(output_keys=["result"])
         def triple(x: int) -> int:
             return x * 3
 
-        pipeline = op.Pipeline("test_fn_tag_nullable", database)
+        pipeline = op.Pipeline("test_fn_key_nullable", database)
         with pipeline:
             triple.pod(source)
 
@@ -93,7 +93,7 @@ class TestFunctionNodeGetAllRecordsNullability:
         # "id" was non-nullable in the source; after the Polars join it must stay so
         id_field = table.schema.field("id")
         assert id_field.nullable is False, (
-            f"Expected 'id' tag column to be non-nullable after get_all_records(), "
+            f"Expected 'id' key column to be non-nullable after get_all_records(), "
             f"but got nullable={id_field.nullable}."
         )
 
@@ -113,7 +113,7 @@ class TestFunctionNodeIterDatasNullability:
         database = InMemoryArrowDatabase()
         source = op.sources.DictSource(
             [{"id": 1, "x": 7}],
-            tag_columns=["id"],
+            key_columns=["id"],
         )
 
         @op.function_pod(output_keys=["result"])
@@ -135,7 +135,7 @@ class TestFunctionNodeIterDatasNullability:
         data_seen = list(loaded.values())
         assert len(data_seen) == 1, "Expected one data from the database"
 
-        _tag, data = data_seen[0]
+        _key, data = data_seen[0]
         data_schema = data.arrow_schema()
 
         result_field = data_schema.field("result")
@@ -152,19 +152,19 @@ class TestFunctionNodeIterDatasNullability:
 
 
 class TestJoinOperatorNullability:
-    """Join.op_forward must preserve non-nullable tag column flags through the
+    """Join.op_forward must preserve non-nullable key column flags through the
     Polars inner join it uses internally."""
 
-    def test_join_preserves_non_nullable_shared_tag_column(self):
-        """Shared tag column remains non-nullable after stream join."""
+    def test_join_preserves_non_nullable_shared_key_column(self):
+        """Shared key column remains non-nullable after stream join."""
         # DictSource applies infer_schema_nullable → integer 'id' has nullable=False
         source1 = op.sources.DictSource(
             [{"id": 1, "x": 10}, {"id": 2, "x": 20}],
-            tag_columns=["id"],
+            key_columns=["id"],
         )
         source2 = op.sources.DictSource(
             [{"id": 1, "y": 100}, {"id": 2, "y": 200}],
-            tag_columns=["id"],
+            key_columns=["id"],
         )
 
         joined_stream = source1.join(source2)
@@ -172,7 +172,7 @@ class TestJoinOperatorNullability:
 
         id_field = table.schema.field("id")
         assert id_field.nullable is False, (
-            f"Expected 'id' tag column to be non-nullable after Join, "
+            f"Expected 'id' key column to be non-nullable after Join, "
             f"but got nullable={id_field.nullable}. "
             "Arrow→Polars→Arrow round-trip in Join.op_forward dropped nullability."
         )
@@ -181,11 +181,11 @@ class TestJoinOperatorNullability:
         """Data columns that are non-nullable remain so after stream join."""
         source1 = op.sources.DictSource(
             [{"id": 1, "x": 10}, {"id": 2, "x": 20}],
-            tag_columns=["id"],
+            key_columns=["id"],
         )
         source2 = op.sources.DictSource(
             [{"id": 1, "y": 100}, {"id": 2, "y": 200}],
-            tag_columns=["id"],
+            key_columns=["id"],
         )
 
         joined_stream = source1.join(source2)
@@ -218,12 +218,12 @@ class TestJoinOperatorNullability:
         ])
         source1 = op.sources.DictSource(
             [{"id": 1, "x": 10}, {"id": 2, "x": 20}],
-            tag_columns=["id"],
+            key_columns=["id"],
             data_schema=schema1,
         )
         source2 = op.sources.DictSource(
             [{"id": 1, "y": 100}, {"id": 2, "y": 200}],
-            tag_columns=["id"],
+            key_columns=["id"],
         )
 
         joined_stream = source1.join(source2)
@@ -239,44 +239,44 @@ class TestJoinOperatorNullability:
 
 
 # ---------------------------------------------------------------------------
-# Join tag-column nullability with mixed nullable/non-nullable tag keys
+# Join key-column nullability with mixed nullable/non-nullable key keys
 # ---------------------------------------------------------------------------
 
 
-class TestJoinTagColumnNullability:
-    """Join must preserve the exact nullable flag of every tag column —
+class TestJoinKeyColumnNullability:
+    """Join must preserve the exact nullable flag of every key column —
     both non-nullable mandatory keys and nullable optional keys — through
     the Polars inner join used internally."""
 
-    def test_shared_tag_columns_mixed_nullability_preserved(self):
-        """When two sources share multiple tag columns with mixed nullable flags,
+    def test_shared_key_columns_mixed_nullability_preserved(self):
+        """When two sources share multiple key columns with mixed nullable flags,
         each flag is preserved correctly after the join.
 
         Schema intent:
         - "id"    int64  nullable=False  (mandatory join key)
         - "group" utf8   nullable=True   (Optional grouping key, no actual nulls)
         """
-        tag_schema = pa.schema([
+        key_schema = pa.schema([
             pa.field("id",    pa.int64(), nullable=False),
             pa.field("group", pa.utf8(),  nullable=True),
         ])
         schema1 = pa.schema([
-            *tag_schema,
+            *key_schema,
             pa.field("x", pa.int64(), nullable=False),
         ])
         schema2 = pa.schema([
-            *tag_schema,
+            *key_schema,
             pa.field("y", pa.int64(), nullable=False),
         ])
 
         source1 = op.sources.DictSource(
             [{"id": 1, "group": "a", "x": 10}, {"id": 2, "group": "b", "x": 20}],
-            tag_columns=["id", "group"],
+            key_columns=["id", "group"],
             data_schema=schema1,
         )
         source2 = op.sources.DictSource(
             [{"id": 1, "group": "a", "y": 100}, {"id": 2, "group": "b", "y": 200}],
-            tag_columns=["id", "group"],
+            key_columns=["id", "group"],
             data_schema=schema2,
         )
 
@@ -286,40 +286,40 @@ class TestJoinTagColumnNullability:
         group_field = table.schema.field("group")
 
         assert id_field.nullable is False, (
-            f"'id' (non-nullable tag) must remain nullable=False after Join, "
+            f"'id' (non-nullable key) must remain nullable=False after Join, "
             f"got nullable={id_field.nullable}."
         )
         assert group_field.nullable is True, (
-            f"'group' (Optional tag, nullable=True) must remain nullable=True after Join "
+            f"'group' (Optional key, nullable=True) must remain nullable=True after Join "
             f"even though data contains no actual nulls, got nullable={group_field.nullable}."
         )
 
-    def test_non_shared_tag_columns_mixed_nullability_preserved(self):
-        """Tag columns that are unique to each side of a join (non-shared) also
+    def test_non_shared_key_columns_mixed_nullability_preserved(self):
+        """Key columns that are unique to each side of a join (non-shared) also
         preserve their nullable flags in the combined result.
 
-        source1 has tag "id" (non-nullable int).
-        source2 has tag "category" (nullable string, Optional, no actual nulls).
-        Neither tag is shared, so the join is a full cartesian product.
-        Both tag columns appear in the result and must keep their original nullable flags.
+        source1 has key "id" (non-nullable int).
+        source2 has key "category" (nullable string, Optional, no actual nulls).
+        Neither key is shared, so the join is a full cartesian product.
+        Both key columns appear in the result and must keep their original nullable flags.
         """
         schema1 = pa.schema([
             pa.field("id", pa.int64(), nullable=False),
             pa.field("x",  pa.int64(), nullable=False),
         ])
         schema2 = pa.schema([
-            pa.field("category", pa.utf8(), nullable=True),   # Optional tag
+            pa.field("category", pa.utf8(), nullable=True),   # Optional key
             pa.field("y",        pa.int64(), nullable=False),
         ])
 
         source1 = op.sources.DictSource(
             [{"id": 1, "x": 10}],
-            tag_columns=["id"],
+            key_columns=["id"],
             data_schema=schema1,
         )
         source2 = op.sources.DictSource(
             [{"category": "alpha", "y": 100}],
-            tag_columns=["category"],
+            key_columns=["category"],
             data_schema=schema2,
         )
 
@@ -329,43 +329,43 @@ class TestJoinTagColumnNullability:
         category_field = table.schema.field("category")
 
         assert id_field.nullable is False, (
-            f"'id' (non-nullable tag from source1) must remain nullable=False after "
+            f"'id' (non-nullable key from source1) must remain nullable=False after "
             f"cartesian join, got nullable={id_field.nullable}."
         )
         assert category_field.nullable is True, (
-            f"'category' (Optional tag, nullable=True from source2) must remain "
+            f"'category' (Optional key, nullable=True from source2) must remain "
             f"nullable=True after cartesian join even with no actual nulls, "
             f"got nullable={category_field.nullable}."
         )
 
-    def test_three_way_join_tag_nullability_preserved(self):
+    def test_three_way_join_key_nullability_preserved(self):
         """A three-way join (two Polars join iterations) correctly restores nullable
-        flags on all tag columns across both iterations.
+        flags on all key columns across both iterations.
 
-        shared tag "id"    int64  nullable=False
-        shared tag "group" utf8   nullable=True  (Optional, no actual nulls)
+        shared key "id"    int64  nullable=False
+        shared key "group" utf8   nullable=True  (Optional, no actual nulls)
         """
-        tag_schema = pa.schema([
+        key_schema = pa.schema([
             pa.field("id",    pa.int64(), nullable=False),
             pa.field("group", pa.utf8(),  nullable=True),
         ])
-        schema1 = pa.schema([*tag_schema, pa.field("a", pa.int64(), nullable=False)])
-        schema2 = pa.schema([*tag_schema, pa.field("b", pa.int64(), nullable=True)])   # b is Optional
-        schema3 = pa.schema([*tag_schema, pa.field("c", pa.int64(), nullable=False)])
+        schema1 = pa.schema([*key_schema, pa.field("a", pa.int64(), nullable=False)])
+        schema2 = pa.schema([*key_schema, pa.field("b", pa.int64(), nullable=True)])   # b is Optional
+        schema3 = pa.schema([*key_schema, pa.field("c", pa.int64(), nullable=False)])
 
         source1 = op.sources.DictSource(
             [{"id": 1, "group": "x", "a": 1}],
-            tag_columns=["id", "group"],
+            key_columns=["id", "group"],
             data_schema=schema1,
         )
         source2 = op.sources.DictSource(
             [{"id": 1, "group": "x", "b": 2}],
-            tag_columns=["id", "group"],
+            key_columns=["id", "group"],
             data_schema=schema2,
         )
         source3 = op.sources.DictSource(
             [{"id": 1, "group": "x", "c": 3}],
-            tag_columns=["id", "group"],
+            key_columns=["id", "group"],
             data_schema=schema3,
         )
 
@@ -376,11 +376,11 @@ class TestJoinTagColumnNullability:
         b_field     = table.schema.field("b")
 
         assert id_field.nullable is False, (
-            f"'id' (non-nullable tag) must remain nullable=False after 3-way join, "
+            f"'id' (non-nullable key) must remain nullable=False after 3-way join, "
             f"got nullable={id_field.nullable}."
         )
         assert group_field.nullable is True, (
-            f"'group' (Optional tag) must remain nullable=True after 3-way join, "
+            f"'group' (Optional key) must remain nullable=True after 3-way join, "
             f"got nullable={group_field.nullable}."
         )
         assert b_field.nullable is True, (

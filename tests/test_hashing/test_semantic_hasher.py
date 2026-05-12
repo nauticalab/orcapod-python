@@ -825,11 +825,11 @@ class TestContentIdentifiableMixin:
 
 
 class _DummyHandler:
-    def __init__(self, tag: str) -> None:
-        self.tag = tag
+    def __init__(self, key: str) -> None:
+        self.key = key
 
     def handle(self, obj: Any, hasher: Any) -> Any:
-        return f"{self.tag}:{obj}"
+        return f"{self.key}:{obj}"
 
 
 class Base:
@@ -1440,7 +1440,7 @@ class TestUniformHasherPropagation:
 
         result = outer.content_hash()
 
-        # Entry point is outer (hasher_b), so the top-level result tag is hasher_b
+        # Entry point is outer (hasher_b), so the top-level result key is hasher_b
         assert result.method == "hasher_b"
 
         # Verify: result equals computing everything with hasher_b uniformly

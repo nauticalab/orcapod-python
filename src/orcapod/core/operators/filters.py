@@ -51,14 +51,14 @@ class PolarsFilter(UnaryOperator):
 
         # TODO: improve efficiency here...
         table = stream.as_table(
-            columns={"source": True, "system_tags": True, "sort_by_tags": False}
+            columns={"source": True, "system_keys": True, "sort_by_keys": False}
         )
         df = pl.DataFrame(table)
         filtered_table = df.filter(*self.predicates, **self.constraints).to_arrow()
 
         return ArrowTableStream(
             filtered_table,
-            tag_columns=stream.keys()[0],
+            key_columns=stream.keys()[0],
         )
 
     def validate_unary_input(self, stream: StreamProtocol) -> None:
@@ -75,7 +75,7 @@ class PolarsFilter(UnaryOperator):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-        include_system_tags: bool = False,
+        include_system_keys: bool = False,
     ) -> tuple[Schema, Schema]:
         # data types are not modified
         return stream.output_schema(columns=columns, all_info=all_info)
@@ -163,7 +163,7 @@ class SelectDataColumns(UnaryOperator):
         super().__init__(**kwargs)
 
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
-        tag_columns, data_columns = stream.keys()
+        key_columns, data_columns = stream.keys()
         data_columns_to_drop = [c for c in data_columns if c not in self.columns]
         new_data_columns = [
             c for c in data_columns if c not in data_columns_to_drop
@@ -174,7 +174,7 @@ class SelectDataColumns(UnaryOperator):
             return stream
 
         table = stream.as_table(
-            columns={"source": True, "system_tags": True, "sort_by_tags": False}
+            columns={"source": True, "system_keys": True, "sort_by_keys": False}
         )
         # make sure to drop associated source fields
         associated_source_fields = [
@@ -186,7 +186,7 @@ class SelectDataColumns(UnaryOperator):
 
         return ArrowTableStream(
             modified_table,
-            tag_columns=tag_columns,
+            key_columns=key_columns,
         )
 
     def validate_unary_input(self, stream: StreamProtocol) -> None:
@@ -209,20 +209,20 @@ class SelectDataColumns(UnaryOperator):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-        include_system_tags: bool = False,
+        include_system_keys: bool = False,
     ) -> tuple[Schema, Schema]:
-        tag_schema, data_schema = stream.output_schema(
+        key_schema, data_schema = stream.output_schema(
             columns=columns, all_info=all_info
         )
         _, data_columns = stream.keys()
         data_to_drop = [pc for pc in data_columns if pc not in self.columns]
 
-        # this ensures all system tag columns are preserved
+        # this ensures all system key columns are preserved
         new_data_schema = {
             k: v for k, v in data_schema.items() if k not in data_to_drop
         }
 
-        return tag_schema, new_data_schema
+        return key_schema, new_data_schema
 
     def identity_structure(self) -> Any:
         return (

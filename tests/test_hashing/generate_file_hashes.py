@@ -108,7 +108,7 @@ def create_sample_files():
         "metadata": {
             "description": "Sample data for hash testing",
             "version": "1.0",
-            "tags": ["test", "hash", "sample"],
+            "keys": ["test", "hash", "sample"],
         },
     }
 

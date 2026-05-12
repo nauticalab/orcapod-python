@@ -14,7 +14,7 @@ from orcapod.core.operators import (
     Batch,
     DropDataColumns,
     Join,
-    MapTags,
+    MapKeys,
     MergeJoin,
     PolarsFilter,
     SelectDataColumns,
@@ -46,10 +46,10 @@ def _square_doubled(doubled: int) -> int:
     return doubled * doubled
 
 
-def _make_source(tag_data: dict, data_data: dict, tag_columns: list[str]):
-    all_data = {**tag_data, **data_data}
+def _make_source(key_data: dict, data_data: dict, key_columns: list[str]):
+    all_data = {**key_data, **data_data}
     table = pa.table(all_data)
-    return ArrowTableSource(table, tag_columns=tag_columns, infer_nullable=True)
+    return ArrowTableSource(table, key_columns=key_columns, infer_nullable=True)
 
 
 # ===================================================================
@@ -119,7 +119,7 @@ class TestMultiSourceJoin:
 
 
 class TestChainedOperators:
-    """Source → Filter → Select → MapTags → Stream."""
+    """Source → Filter → Select → MapKeys → Stream."""
 
     def test_chain_of_three_operators(self):
         source = _make_source(
@@ -138,8 +138,8 @@ class TestChainedOperators:
         select = SelectDataColumns(columns=["value"])
         selected = select.process(filtered)
 
-        # Step 3: Rename tag
-        mapper = MapTags(name_map={"id": "item_id"})
+        # Step 3: Rename key
+        mapper = MapKeys(name_map={"id": "item_id"})
         result = mapper.process(selected)
 
         table = result.as_table()
@@ -162,7 +162,7 @@ class TestFunctionPodThenOperator:
         transformed = pod.process(source)
 
         # Filter to only results >= 6 (i.e., x >= 3 → result >= 6)
-        # We can filter on tag id >= 3
+        # We can filter on key id >= 3
         filt = PolarsFilter(constraints={"id": 3})
         result = filt.process(transformed)
         table = result.as_table()
@@ -189,7 +189,7 @@ class TestJoinThenBatch:
         batch = Batch()
         result = batch.process(joined)
         table = result.as_table()
-        # After join and batch, rows should be grouped by tag
+        # After join and batch, rows should be grouped by key
         assert table.num_rows >= 1
 
 

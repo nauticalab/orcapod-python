@@ -20,7 +20,7 @@ Example::
 
 Log schema (fixed columns):
     Fixed columns are prefixed with ``_log_`` to follow system column conventions
-    and avoid collision with user-defined tag column names.
+    and avoid collision with user-defined key column names.
 
     - ``_log_id`` (large_utf8): UUID unique to this log entry.
     - ``_log_run_id`` (large_utf8): UUID of the pipeline run (from ``on_run_start``).
@@ -31,8 +31,8 @@ Log schema (fixed columns):
     - ``_log_success`` (bool): ``True`` if the data function returned normally.
     - ``_log_timestamp`` (large_utf8): ISO-8601 UTC timestamp when ``record()`` was called.
 
-    In addition, each tag key from the data's tag becomes a separate
-    ``large_utf8`` column (queryable, not JSON-encoded).  Tag columns use
+    In addition, each key key from the data's key becomes a separate
+    ``large_utf8`` column (queryable, not JSON-encoded).  Key columns use
     bare names (no prefix), so they are always distinguishable from fixed
     columns.
 
@@ -52,7 +52,7 @@ from typing import TYPE_CHECKING, Any
 from uuid_utils import uuid7
 
 from orcapod.pipeline.logging_capture import install_capture_streams
-from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
+from orcapod.protocols.core_protocols import DataProtocol, KeyProtocol
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -69,9 +69,9 @@ class DataLogger:
     """Context-bound logger created by `_ContextualizedLoggingObserver` per data.
 
     Holds all context needed to write a structured log row
-    (run_id, tag data) so the caller only needs to pass the `CapturedLogs` payload.
+    (run_id, key data) so the caller only needs to pass the `CapturedLogs` payload.
 
-    Tag data is stored as individual queryable columns (not JSON) alongside
+    Key data is stored as individual queryable columns (not JSON) alongside
     the fixed log columns.
 
     This class is not intended to be instantiated directly — use
@@ -83,12 +83,12 @@ class DataLogger:
         db: ArrowDatabaseProtocol,
         log_path: tuple[str, ...],
         run_id: str,
-        tag_data: dict[str, Any],
+        key_data: dict[str, Any],
     ) -> None:
         self._db = db
         self._log_path = log_path
         self._run_id = run_id
-        self._tag_data = tag_data
+        self._key_data = key_data
 
     def record(self, **kwargs: Any) -> None:
         """Write one log row to the database.
@@ -121,8 +121,8 @@ class DataLogger:
                     type=pa.large_utf8(),
                 )
 
-        # Dynamic tag columns — each tag key becomes its own column (unprefixed)
-        for key, value in self._tag_data.items():
+        # Dynamic key columns — each key key becomes its own column (unprefixed)
+        for key, value in self._key_data.items():
             columns[key] = pa.array([str(value)], type=pa.large_utf8())
 
         row = pa.table(columns)
@@ -190,7 +190,7 @@ class LoggingObserver:
         pass
 
     def on_node_start(
-        self, node_label: str, node_hash: str, tag_schema=None
+        self, node_label: str, node_hash: str, key_schema=None
     ) -> None:
         pass
 
@@ -199,13 +199,13 @@ class LoggingObserver:
     ) -> None:
         pass
 
-    def on_data_start(self, node_label: str, tag: TagProtocol, data: DataProtocol) -> None:
+    def on_data_start(self, node_label: str, key: KeyProtocol, data: DataProtocol) -> None:
         pass
 
     def on_data_end(
         self,
         node_label: str,
-        tag: TagProtocol,
+        key: KeyProtocol,
         input_data: DataProtocol,
         output_data: DataProtocol | None,
         cached: bool,
@@ -213,17 +213,17 @@ class LoggingObserver:
         pass
 
     def on_data_crash(
-        self, node_label: str, tag: TagProtocol, data: DataProtocol, error: Exception
+        self, node_label: str, key: KeyProtocol, data: DataProtocol, error: Exception
     ) -> None:
         pass
 
     def create_data_logger(
         self,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
     ) -> DataLogger:
-        """Return a `DataLogger` bound to *tag* context using the root DB."""
-        return DataLogger(db=self._db, log_path=DEFAULT_LOG_PATH, run_id=self._current_run_id, tag_data=dict(tag))
+        """Return a `DataLogger` bound to *key* context using the root DB."""
+        return DataLogger(db=self._db, log_path=DEFAULT_LOG_PATH, run_id=self._current_run_id, key_data=dict(key))
 
     # -- convenience --
 
@@ -327,19 +327,19 @@ class _ContextualizedLoggingObserver:
     def on_run_end(self, run_id: str) -> None:
         pass
 
-    def on_node_start(self, node_label: str, node_hash: str, tag_schema=None) -> None:
+    def on_node_start(self, node_label: str, node_hash: str, key_schema=None) -> None:
         pass
 
     def on_node_end(self, node_label: str, node_hash: str) -> None:
         pass
 
-    def on_data_start(self, node_label: str, tag: TagProtocol, data: DataProtocol) -> None:
+    def on_data_start(self, node_label: str, key: KeyProtocol, data: DataProtocol) -> None:
         pass
 
     def on_data_end(
         self,
         node_label: str,
-        tag: TagProtocol,
+        key: KeyProtocol,
         input_data: DataProtocol,
         output_data: DataProtocol | None,
         cached: bool,
@@ -347,13 +347,13 @@ class _ContextualizedLoggingObserver:
         pass
 
     def on_data_crash(
-        self, node_label: str, tag: TagProtocol, data: DataProtocol, error: Exception
+        self, node_label: str, key: KeyProtocol, data: DataProtocol, error: Exception
     ) -> None:
         pass
 
     def create_data_logger(
         self,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
     ) -> DataLogger:
         """Create a DataLogger using context from this wrapper.
@@ -361,11 +361,11 @@ class _ContextualizedLoggingObserver:
         Logs are written at ``DEFAULT_LOG_PATH`` within the scoped database.
         Node identity is encoded in the database path, not in column values.
         """
-        tag_data = dict(tag)
+        key_data = dict(key)
 
         return DataLogger(
             db=self._db,
             log_path=DEFAULT_LOG_PATH,
             run_id=self._run_id,
-            tag_data=tag_data,
+            key_data=key_data,
         )

@@ -8,7 +8,7 @@ from orcapod import contexts
 from orcapod.config import Config
 from orcapod.core.sources.base import RootSource
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
-from orcapod.protocols.core_protocols import DataProtocol, SourceProtocol, TagProtocol
+from orcapod.protocols.core_protocols import DataProtocol, SourceProtocol, KeyProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.lazy_module import LazyModule
@@ -42,7 +42,7 @@ class CachedSource(RootSource):
 
     Example::
 
-        source = ArrowTableSource(table, tag_columns=["id"])
+        source = ArrowTableSource(table, key_columns=["id"])
         cached = CachedSource(source, cache_database=db)
         # or equivalently:
         cached = source.cached(cache_database=db)
@@ -216,7 +216,7 @@ class CachedSource(RootSource):
         ``SourceProxy``).
         """
         live_table = self._source.as_table(
-            columns={"source": True, "system_tags": True}
+            columns={"source": True, "system_keys": True}
         )
 
         # Compute per-row record hashes for dedup: hash(full row)
@@ -262,13 +262,13 @@ class CachedSource(RootSource):
         if all_records is None:
             all_records = self._empty_table()
 
-        tag_keys = self._source.keys()[0]
-        return ArrowTableStream(all_records, tag_columns=tag_keys)
+        key_keys = self._source.keys()[0]
+        return ArrowTableStream(all_records, key_columns=key_keys)
 
     def _empty_table(self) -> pa.Table:
         """Build an empty Arrow table matching the source's output schema."""
-        tag_schema, data_schema = self._source.output_schema()
-        merged = dict(tag_schema)
+        key_schema, data_schema = self._source.output_schema()
+        merged = dict(key_schema)
         merged.update(data_schema)
         type_converter = self.data_context.type_converter
         arrow_schema = type_converter.python_schema_to_arrow_schema(merged)
@@ -299,7 +299,7 @@ class CachedSource(RootSource):
         """Discard in-memory cached stream (forces rebuild on next access)."""
         self._cached_stream = None
 
-    def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+    def iter_data(self) -> Iterator[tuple[KeyProtocol, DataProtocol]]:
         self._ensure_stream()
         assert self._cached_stream is not None
         return self._cached_stream.iter_data()

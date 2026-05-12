@@ -77,23 +77,23 @@ executor directly on the data function. The node never sees raw option dicts.
 ### Current state
 
 Caching exists only at the data-function level (`CachedDataFunction`), which wraps
-`call()` / `async_call()` with DB lookup/insert. This works but cannot leverage tag
+`call()` / `async_call()` with DB lookup/insert. This works but cannot leverage key
 information (which is invisible to data functions).
 
 ### Design decision
 
 Add a **`CachedFunctionPod`** that wraps a `FunctionPod` and intercepts at the
-`process_data(tag, data)` level. This complements `CachedDataFunction`:
+`process_data(key, data)` level. This complements `CachedDataFunction`:
 
 | Layer | `CachedDataFunction` | `CachedFunctionPod` |
 |-------|------------------------|---------------------|
-| Intercepts at | `call(data)` | `process_data(tag, data)` |
-| Has tag access | No | Yes |
-| Cache key includes | Data content hash | Tag + data content hash |
+| Intercepts at | `call(data)` | `process_data(key, data)` |
+| Has key access | No | Yes |
+| Cache key includes | Data content hash | Key + data content hash |
 | Delegates to | Wrapped `DataFunction.call()` | Inner `FunctionPod.process_data()` |
 
 Both are useful: `CachedDataFunction` deduplicates purely on data content;
-`CachedFunctionPod` can incorporate tag metadata into cache decisions.
+`CachedFunctionPod` can incorporate key metadata into cache decisions.
 
 ### Implementation sketch
 
@@ -113,17 +113,17 @@ class CachedFunctionPod(WrappedFunctionPod):
         self._record_path_prefix = record_path_prefix
 
     def process_data(
-        self, tag: TagProtocol, data: DataProtocol
-    ) -> tuple[TagProtocol, DataProtocol | None]:
-        # Cache key incorporates both tag and data content
-        cache_key = self._compute_cache_key(tag, data)
+        self, key: KeyProtocol, data: DataProtocol
+    ) -> tuple[KeyProtocol, DataProtocol | None]:
+        # Cache key incorporates both key and data content
+        cache_key = self._compute_cache_key(key, data)
         cached = self._lookup(cache_key)
         if cached is not None:
-            return tag, cached
-        tag, output = self._function_pod.process_data(tag, data)
+            return key, cached
+        key, output = self._function_pod.process_data(key, data)
         if output is not None:
-            self._store(cache_key, tag, output)
-        return tag, output
+            self._store(cache_key, key, output)
+        return key, output
 ```
 
 ### Changes
@@ -276,7 +276,7 @@ No code changes needed — this is a documentation/convention clarification.
 ### Phase 3: `CachedFunctionPod`
 
 1. Create `src/orcapod/core/cached_function_pod.py`.
-2. Implement `CachedFunctionPod(WrappedFunctionPod)` with tag-aware cache key computation.
+2. Implement `CachedFunctionPod(WrappedFunctionPod)` with key-aware cache key computation.
 3. Add `pod_cache_database` parameter to `function_pod` decorator.
 4. Add tests for pod-level vs data-level caching interaction.
 
@@ -296,5 +296,5 @@ No code changes needed — this is a documentation/convention clarification.
   rather than `execute(pf, data)`), the `Generic[E]` mechanism already supports this —
   just parameterize with the narrower protocol.
 - **`CachedFunctionPod` cache key design**: The exact composition of the cache key (which
-  tag columns to include, whether to include system tags) needs detailed design during
-  implementation. A reasonable default is tag content hash + data content hash.
+  key columns to include, whether to include system keys) needs detailed design during
+  implementation. A reasonable default is key content hash + data content hash.

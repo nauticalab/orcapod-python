@@ -1,6 +1,6 @@
 from typing import Any, Protocol, runtime_checkable
 
-from orcapod.protocols.core_protocols.datagrams import DataProtocol, TagProtocol
+from orcapod.protocols.core_protocols.datagrams import DataProtocol, KeyProtocol
 from orcapod.protocols.core_protocols.data_function import DataFunctionProtocol
 from orcapod.protocols.core_protocols.pod import PodProtocol
 from orcapod.protocols.hashing_protocols import PipelineElementProtocol
@@ -20,12 +20,12 @@ class FunctionPodProtocol(PodProtocol, PipelineElementProtocol, Protocol):
         ...
 
     def process_data(
-        self, tag: TagProtocol, data: DataProtocol
-    ) -> tuple[TagProtocol, DataProtocol | None]: ...
+        self, key: KeyProtocol, data: DataProtocol
+    ) -> tuple[KeyProtocol, DataProtocol | None]: ...
 
     async def async_process_data(
-        self, tag: TagProtocol, data: DataProtocol
-    ) -> tuple[TagProtocol, DataProtocol | None]: ...
+        self, key: KeyProtocol, data: DataProtocol
+    ) -> tuple[KeyProtocol, DataProtocol | None]: ...
 
     def to_config(self) -> dict[str, Any]:
         """Serialize this function pod to a JSON-compatible config dict."""

@@ -10,15 +10,15 @@ Operators perform structural transformations on streams without inspecting or sy
 
 ::: orcapod.core.operators.Batch
 
-::: orcapod.core.operators.SelectTagColumns
+::: orcapod.core.operators.SelectKeyColumns
 
 ::: orcapod.core.operators.SelectDataColumns
 
-::: orcapod.core.operators.DropTagColumns
+::: orcapod.core.operators.DropKeyColumns
 
 ::: orcapod.core.operators.DropDataColumns
 
-::: orcapod.core.operators.MapTags
+::: orcapod.core.operators.MapKeys
 
 ::: orcapod.core.operators.MapData
 

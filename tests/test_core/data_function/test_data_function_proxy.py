@@ -2,7 +2,7 @@
 
 import pytest
 
-from orcapod.core.datagrams.tag_data import Data, Tag
+from orcapod.core.datagrams.key_data import Data, Key
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.data_function_proxy import DataFunctionProxy
@@ -222,7 +222,7 @@ class TestFunctionPodWithProxy:
         source = DictSource(
             data=[{"age": 10}, {"age": 20}, {"age": 30}],
         )
-        _tag_schema, data_schema = pod.output_schema(source)
+        _key_schema, data_schema = pod.output_schema(source)
         assert "doubled_age" in data_schema
 
     def test_function_pod_process_data_raises(self):
@@ -230,7 +230,7 @@ class TestFunctionPodWithProxy:
         pf = _make_sample_function()
         proxy = _make_proxy_from_function(pf)
         pod = FunctionPod(data_function=proxy)
-        tag = Tag({})
+        key = Key({})
         data = Data({"age": 25})
         with pytest.raises(DataFunctionUnavailableError):
-            pod.process_data(tag, data)
+            pod.process_data(key, data)

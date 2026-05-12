@@ -25,7 +25,7 @@ from __future__ import annotations
 from typing import Any
 
 from orcapod.pipeline.observer import NoOpLogger
-from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
+from orcapod.protocols.core_protocols import DataProtocol, KeyProtocol
 from orcapod.types import SchemaLike
 
 _NOOP_LOGGER = NoOpLogger()
@@ -59,41 +59,41 @@ class CompositeObserver:
             o.on_run_end(run_id)
 
     def on_node_start(
-        self, node_label: str, node_hash: str, tag_schema: SchemaLike | None = None
+        self, node_label: str, node_hash: str, key_schema: SchemaLike | None = None
     ) -> None:
         for o in self._observers:
-            o.on_node_start(node_label, node_hash, tag_schema=tag_schema)
+            o.on_node_start(node_label, node_hash, key_schema=key_schema)
 
     def on_node_end(self, node_label: str, node_hash: str) -> None:
         for o in self._observers:
             o.on_node_end(node_label, node_hash)
 
     def on_data_start(
-        self, node_label: str, tag: TagProtocol, data: DataProtocol
+        self, node_label: str, key: KeyProtocol, data: DataProtocol
     ) -> None:
         for o in self._observers:
-            o.on_data_start(node_label, tag, data)
+            o.on_data_start(node_label, key, data)
 
     def on_data_end(
         self,
         node_label: str,
-        tag: TagProtocol,
+        key: KeyProtocol,
         input_data: DataProtocol,
         output_data: DataProtocol | None,
         cached: bool,
     ) -> None:
         for o in self._observers:
-            o.on_data_end(node_label, tag, input_data, output_data, cached)
+            o.on_data_end(node_label, key, input_data, output_data, cached)
 
     def on_data_crash(
-        self, node_label: str, tag: TagProtocol, data: DataProtocol, error: Exception
+        self, node_label: str, key: KeyProtocol, data: DataProtocol, error: Exception
     ) -> None:
         for o in self._observers:
-            o.on_data_crash(node_label, tag, data, error)
+            o.on_data_crash(node_label, key, data, error)
 
     def create_data_logger(
         self,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
     ) -> Any:
         """Return the first non-no-op logger from children.
@@ -103,7 +103,7 @@ class CompositeObserver:
         Falls back to a no-op logger if all children return no-ops.
         """
         for o in self._observers:
-            pkt_logger = o.create_data_logger(tag, data)
+            pkt_logger = o.create_data_logger(key, data)
             if not isinstance(pkt_logger, NoOpLogger):
                 return pkt_logger
         return _NOOP_LOGGER

@@ -37,19 +37,19 @@ from orcapod.types import CacheMode
 
 @pytest.fixture
 def simple_stream() -> ArrowTableStream:
-    """Stream with 1 tag (id) and 1 data column (x)."""
+    """Stream with 1 key (id) and 1 data column (x)."""
     table = pa.table(
         {
             "id": pa.array([1, 2, 3], type=pa.int64()),
             "x": pa.array([10, 20, 30], type=pa.int64()),
         }
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 @pytest.fixture
 def two_data_stream() -> ArrowTableStream:
-    """Stream with 1 tag (id) and 2 data columns (x, y)."""
+    """Stream with 1 key (id) and 2 data columns (x, y)."""
     table = pa.table(
         {
             "id": pa.array([1, 2, 3], type=pa.int64()),
@@ -57,7 +57,7 @@ def two_data_stream() -> ArrowTableStream:
             "y": pa.array([100, 200, 300], type=pa.int64()),
         }
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 @pytest.fixture
@@ -69,7 +69,7 @@ def left_stream() -> ArrowTableStream:
             "value_a": pa.array([10, 20, 30], type=pa.int64()),
         }
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 @pytest.fixture
@@ -81,7 +81,7 @@ def right_stream() -> ArrowTableStream:
             "value_b": pa.array([200, 300, 400], type=pa.int64()),
         }
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 @pytest.fixture
@@ -129,16 +129,16 @@ class TestOperatorNodeConstruction:
     def test_output_schema(self, simple_stream):
         op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
-        tag_schema, data_schema = node.output_schema()
-        assert "id" in tag_schema
+        key_schema, data_schema = node.output_schema()
+        assert "id" in key_schema
         assert "renamed_x" in data_schema
         assert "x" not in data_schema
 
     def test_keys(self, simple_stream):
         op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
-        tag_keys, data_keys = node.keys()
-        assert "id" in tag_keys
+        key_keys, data_keys = node.keys()
+        assert "id" in key_keys
         assert "renamed_x" in data_keys
 
     def test_stream_protocol_conformance(self, simple_stream):
@@ -174,11 +174,11 @@ class TestOperatorNodePipelinePath:
         assert path[-1].startswith("schema:")
         assert not any(seg.startswith("instance:") for seg in path)
 
-    def test_no_tag_schema_hash_in_path(self, simple_stream):
+    def test_no_key_schema_hash_in_path(self, simple_stream):
         op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
         path = node.node_identity_path
-        assert not any(segment.startswith("tag:") for segment in path)
+        assert not any(segment.startswith("key:") for segment in path)
 
 
 # ---------------------------------------------------------------------------
@@ -216,8 +216,8 @@ class TestOperatorNodeIdentity:
     def test_different_input_different_content_hash(self):
         table1 = pa.table({"id": [1, 2], "x": [10, 20]})
         table2 = pa.table({"id": [3, 4], "x": [30, 40]})
-        s1 = ArrowTableStream(table1, tag_columns=["id"])
-        s2 = ArrowTableStream(table2, tag_columns=["id"])
+        s1 = ArrowTableStream(table1, key_columns=["id"])
+        s2 = ArrowTableStream(table2, key_columns=["id"])
         op = MapData({"x": "y"})
         node1 = _make_node(op, (s1,))
         node2 = _make_node(op, (s2,))
@@ -237,8 +237,8 @@ class TestOperatorNodeIdentity:
                 "x": pa.array([30, 40], type=pa.int64()),
             }
         )
-        s1 = ArrowTableStream(table1, tag_columns=["id"])
-        s2 = ArrowTableStream(table2, tag_columns=["id"])
+        s1 = ArrowTableStream(table1, key_columns=["id"])
+        s2 = ArrowTableStream(table2, key_columns=["id"])
         op = MapData({"x": "y"})
         node1 = _make_node(op, (s1,))
         node2 = _make_node(op, (s2,))
@@ -328,7 +328,7 @@ class TestOperatorNodeRunAndStorage:
         node.run()                          # <-- add this line
         data = list(node.iter_data())
         assert len(data) == 3
-        for tag, data in data:
+        for key, data in data:
             assert "renamed_x" in data.keys()
 
     def test_as_table(self, simple_stream, db):
@@ -385,8 +385,8 @@ class TestOperatorNodeRunAndStorage:
         table = node.as_table()
         assert table.num_rows == 0
         # Schema is still correct
-        tag_keys, data_keys = node.keys()
-        assert set(tag_keys).issubset(set(table.column_names))
+        key_keys, data_keys = node.keys()
+        assert set(key_keys).issubset(set(table.column_names))
         assert set(data_keys).issubset(set(table.column_names))
 
 

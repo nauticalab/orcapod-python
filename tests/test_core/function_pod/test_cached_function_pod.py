@@ -30,7 +30,7 @@ def _make_stream(rows: list[dict] | None = None) -> ArrowTableStream:
         {k: pa.array([r[k] for r in rows], type=pa.int64()) for k in keys},
         schema=schema,
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 # ---------------------------------------------------------------------------
@@ -147,20 +147,20 @@ class TestCacheHit:
 
 
 # ---------------------------------------------------------------------------
-# Tag-aware caching
+# Key-aware caching
 # ---------------------------------------------------------------------------
 
 
 class TestCacheKeySemantics:
-    def test_same_data_different_tags_is_cache_hit(self, double_pod, cache_db):
-        """Same data data with different tags is a cache hit — the function
-        output depends only on the data, not the tag."""
+    def test_same_data_different_keys_is_cache_hit(self, double_pod, cache_db):
+        """Same data data with different keys is a cache hit — the function
+        output depends only on the data, not the key."""
         cached_pod = CachedFunctionPod(double_pod, result_database=cache_db)
 
         stream1 = _make_stream([{"id": 0, "x": 10}])
         list(cached_pod.process(stream1).iter_data())
 
-        # Same data data, different tag — should be cache hit
+        # Same data data, different key — should be cache hit
         stream2 = _make_stream([{"id": 1, "x": 10}])
         results = list(cached_pod.process(stream2).iter_data())
 

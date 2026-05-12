@@ -15,7 +15,7 @@ Pipeline::
                ├── Join ──► compute_letter_grade
     grades  ───┘
 
-Tags:   student_id
+Keys:   student_id
 Data: name, score  →  letter_grade
 """
 
@@ -89,8 +89,8 @@ def _build_pipeline() -> Pipeline:
     )
 
     with pipeline:
-        students = ArrowTableSource(STUDENTS, tag_columns=["student_id"], infer_nullable=True)
-        grades = ArrowTableSource(GRADES, tag_columns=["student_id"], infer_nullable=True)
+        students = ArrowTableSource(STUDENTS, key_columns=["student_id"], infer_nullable=True)
+        grades = ArrowTableSource(GRADES, key_columns=["student_id"], infer_nullable=True)
 
         joined = Join()(students, grades, label="join")
         compute_letter_grade.pod(joined, label="letter_grade")
@@ -185,29 +185,29 @@ class TestAsyncPipelineIntegration:
         assert sync_grades == async_grades == EXPECTED
 
 
-class TestSyncAsyncSystemTagEquivalence:
+class TestSyncAsyncSystemKeyEquivalence:
     """Verify that sync and async pipeline execution produce identical
-    system-tag column names and values in the persisted DB records."""
+    system-key column names and values in the persisted DB records."""
 
-    def _get_system_tag_columns(self, table: pa.Table) -> list[str]:
-        """Return sorted system-tag column names from a table."""
+    def _get_system_key_columns(self, table: pa.Table) -> list[str]:
+        """Return sorted system-key column names from a table."""
         from orcapod.system_constants import constants
 
         return sorted(
-            c for c in table.column_names if c.startswith(constants.SYSTEM_TAG_PREFIX)
+            c for c in table.column_names if c.startswith(constants.SYSTEM_KEY_PREFIX)
         )
 
-    def _system_tag_data(self, table: pa.Table) -> dict[str, list]:
-        """Extract system-tag columns as {col_name: sorted_values}."""
-        sys_cols = self._get_system_tag_columns(table)
+    def _system_key_data(self, table: pa.Table) -> dict[str, list]:
+        """Extract system-key columns as {col_name: sorted_values}."""
+        sys_cols = self._get_system_key_columns(table)
         return {c: sorted(table.column(c).to_pylist()) for c in sys_cols}
 
-    def test_join_pipeline_system_tags_identical(self):
-        """Join pipeline: sync and async produce the same system-tag columns."""
+    def test_join_pipeline_system_keys_identical(self):
+        """Join pipeline: sync and async produce the same system-key columns."""
         sync_pipeline = _build_pipeline()
         sync_pipeline.run()
         sync_records = sync_pipeline.letter_grade.get_all_records(
-            columns={"system_tags": True}
+            columns={"system_keys": True}
         )
         assert sync_records is not None
 
@@ -216,42 +216,42 @@ class TestSyncAsyncSystemTagEquivalence:
         AsyncPipelineOrchestrator().run(async_pipeline._node_graph)
         async_pipeline.flush()
         async_records = async_pipeline.letter_grade.get_all_records(
-            columns={"system_tags": True}
+            columns={"system_keys": True}
         )
         assert async_records is not None
 
-        # System-tag column names must match
-        sync_sys_cols = self._get_system_tag_columns(sync_records)
-        async_sys_cols = self._get_system_tag_columns(async_records)
-        assert sync_sys_cols, "Expected system-tag columns in output"
+        # System-key column names must match
+        sync_sys_cols = self._get_system_key_columns(sync_records)
+        async_sys_cols = self._get_system_key_columns(async_records)
+        assert sync_sys_cols, "Expected system-key columns in output"
         assert sync_sys_cols == async_sys_cols
 
-        # System-tag values must match
-        sync_sys_data = self._system_tag_data(sync_records)
-        async_sys_data = self._system_tag_data(async_records)
+        # System-key values must match
+        sync_sys_data = self._system_key_data(sync_records)
+        async_sys_data = self._system_key_data(async_records)
         assert sync_sys_data == async_sys_data
 
-    def test_join_pipeline_system_tag_column_names_contain_pipeline_hash(self):
-        """System-tag columns should follow the name-extending convention."""
+    def test_join_pipeline_system_key_column_names_contain_pipeline_hash(self):
+        """System-key columns should follow the name-extending convention."""
 
         pipeline = _build_pipeline()
         pipeline.compile()
         AsyncPipelineOrchestrator().run(pipeline._node_graph)
         pipeline.flush()
-        records = pipeline.letter_grade.get_all_records(columns={"system_tags": True})
+        records = pipeline.letter_grade.get_all_records(columns={"system_keys": True})
         assert records is not None
 
-        sys_cols = self._get_system_tag_columns(records)
+        sys_cols = self._get_system_key_columns(records)
         assert len(sys_cols) > 0
 
-        # Each system-tag column should end with :N (canonical position)
+        # Each system-key column should end with :N (canonical position)
         for col in sys_cols:
             assert col[-2:] in (":0", ":1"), (
-                f"System-tag column {col!r} missing canonical position suffix"
+                f"System-key column {col!r} missing canonical position suffix"
             )
 
-    def test_all_system_tag_columns_match_between_sync_and_async(self):
-        """Every system-tag column name and value in the terminal node's
+    def test_all_system_key_columns_match_between_sync_and_async(self):
+        """Every system-key column name and value in the terminal node's
         DB records should be identical between sync and async.
 
         Source-info columns contain run-specific UUIDs and are excluded
@@ -260,7 +260,7 @@ class TestSyncAsyncSystemTagEquivalence:
         sync_pipeline = _build_pipeline()
         sync_pipeline.run()
         sync_records = sync_pipeline.letter_grade.get_all_records(
-            columns={"system_tags": True}
+            columns={"system_keys": True}
         )
         assert sync_records is not None
 
@@ -269,20 +269,20 @@ class TestSyncAsyncSystemTagEquivalence:
         AsyncPipelineOrchestrator().run(async_pipeline._node_graph)
         async_pipeline.flush()
         async_records = async_pipeline.letter_grade.get_all_records(
-            columns={"system_tags": True}
+            columns={"system_keys": True}
         )
         assert async_records is not None
 
-        # System-tag column names must match
-        sync_sys_cols = self._get_system_tag_columns(sync_records)
-        async_sys_cols = self._get_system_tag_columns(async_records)
+        # System-key column names must match
+        sync_sys_cols = self._get_system_key_columns(sync_records)
+        async_sys_cols = self._get_system_key_columns(async_records)
         assert sync_sys_cols == async_sys_cols
 
-        # System-tag column values must match (sort by student_id)
+        # System-key column values must match (sort by student_id)
         sync_sorted = sync_records.sort_by("student_id")
         async_sorted = async_records.sort_by("student_id")
         for col in sync_sys_cols:
             assert (
                 sync_sorted.column(col).to_pylist()
                 == async_sorted.column(col).to_pylist()
-            ), f"System-tag column {col!r} differs between sync and async"
+            ), f"System-key column {col!r} differs between sync and async"

@@ -157,7 +157,7 @@ class TestFunctionPodDecoratorEndToEnd:
                     ]
                 ),
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
         )
         for i, (_, data) in enumerate(stats.pod.process(stream).iter_data()):
             assert data["total"] == i + i

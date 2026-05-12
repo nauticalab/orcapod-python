@@ -8,7 +8,7 @@
 
 ## Summary
 
-Implement `SQLiteTableSource`, a `RootSource` backed by a SQLite table. Primary-key columns serve as the default tag columns. For tables with no explicit primary key (ROWID-only tables), the implicit SQLite `rowid` is used automatically. Provides a working `from_config` round-trip — the gap that `DBTableSource` cannot fill today.
+Implement `SQLiteTableSource`, a `RootSource` backed by a SQLite table. Primary-key columns serve as the default key columns. For tables with no explicit primary key (ROWID-only tables), the implicit SQLite `rowid` is used automatically. Provides a working `from_config` round-trip — the gap that `DBTableSource` cannot fill today.
 
 ---
 
@@ -34,8 +34,8 @@ Three alternatives were evaluated:
 
 ```
 SQLiteTableSource(DBTableSource)
-  __init__(db_path, table_name, tag_columns=None,
-           system_tag_columns=(), record_id_column=None,
+  __init__(db_path, table_name, key_columns=None,
+           system_key_columns=(), record_id_column=None,
            source_id=None, label=None, data_context=None, config=None)
   to_config() → dict        # source_type="sqlite_table", db_path, table_name, …
   from_config(config) → cls # reconstructs via db_path; fully working
@@ -57,35 +57,35 @@ Note: `src/orcapod/sources/__init__.py` already does `from orcapod.core.sources 
 ## Data Flow
 
 ```
-SQLiteTableSource.__init__(db_path, table_name, tag_columns, ...)
+SQLiteTableSource.__init__(db_path, table_name, key_columns, ...)
 │
 ├─ 1. SQLiteConnector(db_path)
 │
 ├─ 2. Validate: table_name in connector.get_table_names()
 │      └─ missing → ValueError("Table 'x' not found in database.")
 │
-├─ 3. Resolve tags and query
-│      ├─ tag_columns provided (non-None)
-│      │    → resolved_tags = list(tag_columns)
-│      └─ tag_columns is None
+├─ 3. Resolve keys and query
+│      ├─ key_columns provided (non-None)
+│      │    → resolved_keys = list(key_columns)
+│      └─ key_columns is None
 │           ├─ pk_cols = connector.get_pk_columns(table_name)
-│           ├─ pk_cols non-empty → resolved_tags = pk_cols
-│           └─ pk_cols empty   → resolved_tags = ["rowid"]
+│           ├─ pk_cols non-empty → resolved_keys = pk_cols
+│           └─ pk_cols empty   → resolved_keys = ["rowid"]
 │
 ├─ 4. Determine query (handles both auto-detection AND from_config reconstruction)
 │      normal_cols = {ci.name for ci in connector.get_column_info(table_name)}
-│      ├─ "rowid" in resolved_tags AND "rowid" not in normal_cols
+│      ├─ "rowid" in resolved_keys AND "rowid" not in normal_cols
 │      │    → _query = 'SELECT rowid, * FROM "{table_name}"'
 │      └─ otherwise
 │           → _query = None  (DBTableSource uses default SELECT *)
 │
 └─ 5. super().__init__(connector, table_name,
-                       tag_columns=resolved_tags,   ← always non-None
+                       key_columns=resolved_keys,   ← always non-None
                        _query=_query, ...)
        │
-       │  NOTE: passing tag_columns as a non-None list bypasses
+       │  NOTE: passing key_columns as a non-None list bypasses
        │  DBTableSource's own PK-lookup-and-raise path, which only
-       │  fires when tag_columns is None. This is intentional.
+       │  fires when key_columns is None. This is intentional.
        │
        └─ DBTableSource: fetch batches (using _query) → SourceStreamBuilder → stream
           (rowid column arrives typed as int64 via SQLiteConnector patch)
@@ -93,7 +93,7 @@ SQLiteTableSource.__init__(db_path, table_name, tag_columns, ...)
 store self._db_path
 ```
 
-`from_config` calls `cls(db_path=config["db_path"], table_name=config["table_name"], tag_columns=config["tag_columns"], ...)` — the connector is recreated from `db_path`. Because `tag_columns` is passed explicitly (non-None), step 3 skips PK detection; step 4 then checks whether `"rowid"` is in the resolved tags but not in the table's normal columns and re-injects the rowid query if so. This means **ROWID-only tables also round-trip correctly** from config as long as the backing file exists.
+`from_config` calls `cls(db_path=config["db_path"], table_name=config["table_name"], key_columns=config["key_columns"], ...)` — the connector is recreated from `db_path`. Because `key_columns` is passed explicitly (non-None), step 3 skips PK detection; step 4 then checks whether `"rowid"` is in the resolved keys but not in the table's normal columns and re-injects the rowid query if so. This means **ROWID-only tables also round-trip correctly** from config as long as the backing file exists.
 
 **Known limitation:** `:memory:` sources cannot be reconstructed via `from_config`. The new in-memory database is empty and does not contain the original table, causing `ValueError: Table 'x' not found`. File-backed sources (including ROWID-only tables) round-trip correctly. The config round-trip test (test 9) must use a `tmp_path`-backed SQLite file.
 
@@ -104,14 +104,14 @@ store self._db_path
 | Condition | Behaviour |
 |---|---|
 | Table not found | `ValueError: Table 'x' not found in database.` — raised in step 2, before ROWID logic |
-| Table found, no PK, no explicit tags | ROWID fallback — no error; `"rowid"` used as tag column |
-| Table found, no PK, explicit `tag_columns=[...]` | Works normally — ROWID detection skipped when `tag_columns` is provided |
-| `tag_columns=[]` provided explicitly | Proceeds with empty tag schema — `SourceStreamBuilder` does not guard against empty tag lists; no `ValueError` is raised |
+| Table found, no PK, no explicit keys | ROWID fallback — no error; `"rowid"` used as key column |
+| Table found, no PK, explicit `key_columns=[...]` | Works normally — ROWID detection skipped when `key_columns` is provided |
+| `key_columns=[]` provided explicitly | Proceeds with empty key schema — `SourceStreamBuilder` does not guard against empty key lists; no `ValueError` is raised |
 | Table exists but is empty | `ValueError: Table 'x' is empty.` — raised by `DBTableSource` |
 | `db_path` points to non-existent file | `sqlite3.OperationalError` propagates from `SQLiteConnector.__init__` |
 | `"` in table name | `ValueError` from `SQLiteConnector._validate_table_name` |
 
-The ROWID fallback is silent (no warning log). The resolved `"rowid"` tag column appears in `to_config()` for auditability.
+The ROWID fallback is silent (no warning log). The resolved `"rowid"` key column appears in `to_config()` for auditability.
 
 ---
 
@@ -123,18 +123,18 @@ All use in-memory SQLite (`:memory:`), except the config round-trip test which r
 
 1. **Import / export sanity** — importable from `orcapod.core.sources` and `orcapod.sources`; in `__all__`
 2. **Protocol conformance** — is `SourceProtocol`, `StreamProtocol`, `PipelineElementProtocol`
-3. **PK as default tags** — single-column PK; composite PK; correct tag/data schema split
-4. **Explicit tag override** — `tag_columns=[...]` overrides PK detection entirely
-5. **ROWID fallback** — table with no explicit PK gets `"rowid"` tag; `rowid` column type is `int64`; all rows returned; rowid values are positive integers
+3. **PK as default keys** — single-column PK; composite PK; correct key/data schema split
+4. **Explicit key override** — `key_columns=[...]` overrides PK detection entirely
+5. **ROWID fallback** — table with no explicit PK gets `"rowid"` key; `rowid` column type is `int64`; all rows returned; rowid values are positive integers
 6. **Error cases** — missing table raises `ValueError`; empty table raises `ValueError`
 7. **Stream behaviour** — `iter_data` count, `as_table`, `output_schema`, `producer is None`, `upstreams == ()`
 8. **Deterministic hashing** — `pipeline_hash` and `content_hash` stable across two identical constructions (both in-memory)
-9. **Config round-trip (PK table)** — uses file-backed `tmp_path` SQLite db; `to_config()` has `source_type="sqlite_table"`, `db_path`, `table_name`, `tag_columns`; `from_config(to_config())` reconstructs successfully; content/pipeline hashes match before and after
-10. **Config round-trip (ROWID-only table)** — same as above but with a ROWID-only table; `tag_columns=["rowid"]` in config; `from_config(to_config())` reconstructs correctly and `rowid` remains the tag column
+9. **Config round-trip (PK table)** — uses file-backed `tmp_path` SQLite db; `to_config()` has `source_type="sqlite_table"`, `db_path`, `table_name`, `key_columns`; `from_config(to_config())` reconstructs successfully; content/pipeline hashes match before and after
+10. **Config round-trip (ROWID-only table)** — same as above but with a ROWID-only table; `key_columns=["rowid"]` in config; `from_config(to_config())` reconstructs correctly and `rowid` remains the key column
 
 ### Integration test — same file, marked `@pytest.mark.integration`
 
-Write rows into an in-memory SQLite table via `SQLiteConnector`, wrap with `SQLiteTableSource`, feed through a `FunctionPod`, collect output — verify tag columns flow through and pipeline completes.
+Write rows into an in-memory SQLite table via `SQLiteConnector`, wrap with `SQLiteTableSource`, feed through a `FunctionPod`, collect output — verify key columns flow through and pipeline completes.
 
 ### Regression tests
 

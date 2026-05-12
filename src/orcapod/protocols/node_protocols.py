@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from orcapod.protocols.core_protocols import (
         DataProtocol,
         StreamProtocol,
-        TagProtocol,
+        KeyProtocol,
     )
 
 
@@ -44,11 +44,11 @@ class SourceNodeProtocol(Protocol):
         self,
         *,
         observer: ExecutionObserverProtocol | None = None,
-    ) -> list[tuple[TagProtocol, DataProtocol]]: ...
+    ) -> list[tuple[KeyProtocol, DataProtocol]]: ...
 
     async def async_execute(
         self,
-        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+        output: WritableChannel[tuple[KeyProtocol, DataProtocol]],
         *,
         observer: ExecutionObserverProtocol | None = None,
     ) -> None: ...
@@ -79,12 +79,12 @@ class FunctionNodeProtocol(Protocol):
         *,
         observer: ExecutionObserverProtocol | None = None,
         error_policy: Literal["continue", "fail_fast"] = "continue",
-    ) -> list[tuple[TagProtocol, DataProtocol]]: ...
+    ) -> list[tuple[KeyProtocol, DataProtocol]]: ...
 
     async def async_execute(
         self,
-        input_channel: ReadableChannel[tuple[TagProtocol, DataProtocol]],
-        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+        input_channel: ReadableChannel[tuple[KeyProtocol, DataProtocol]],
+        output: WritableChannel[tuple[KeyProtocol, DataProtocol]],
         *,
         observer: ExecutionObserverProtocol | None = None,
     ) -> None: ...
@@ -105,12 +105,12 @@ class OperatorNodeProtocol(Protocol):
         self,
         *input_streams: StreamProtocol,
         observer: ExecutionObserverProtocol | None = None,
-    ) -> list[tuple[TagProtocol, DataProtocol]]: ...
+    ) -> list[tuple[KeyProtocol, DataProtocol]]: ...
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[KeyProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[KeyProtocol, DataProtocol]],
         *,
         observer: ExecutionObserverProtocol | None = None,
     ) -> None: ...

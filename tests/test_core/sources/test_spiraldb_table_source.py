@@ -7,8 +7,8 @@ SpiralDB requires network access and credentials, so all tests use
 Test sections:
  1. Import / export sanity
  2. Protocol conformance
- 3. PK as default tag columns (single and composite)
- 4. Explicit tag column override
+ 3. PK as default key columns (single and composite)
+ 4. Explicit key column override
  5. No key schema → ValueError (no ROWID fallback)
  6. Error cases (missing table, empty table)
  7. Stream behaviour
@@ -181,19 +181,19 @@ class TestProtocolConformance:
 
 
 # ===========================================================================
-# 3. PK as default tag columns
+# 3. PK as default key columns
 # ===========================================================================
 
 
-class TestPKAsDefaultTags:
-    def test_single_pk_is_tag_column(self):
+class TestPKAsDefaultKeys:
+    def test_single_pk_is_key_column(self):
         from orcapod.core.sources import SpiralDBTableSource
 
         connector = _make_mock_connector(pk_columns=["session_id"])
         with _patch_connector(connector):
             src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "session_id" in key_schema
 
     def test_pk_not_in_data_schema(self):
         from orcapod.core.sources import SpiralDBTableSource
@@ -213,15 +213,15 @@ class TestPKAsDefaultTags:
         _, data_schema = src.output_schema()
         assert "firing_rate" in data_schema
 
-    def test_composite_pk_all_columns_are_tags(self):
+    def test_composite_pk_all_columns_are_keys(self):
         from orcapod.core.sources import SpiralDBTableSource
 
         connector = _make_composite_pk_connector()
         with _patch_connector(connector):
             src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
-        assert "probe_id" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "session_id" in key_schema
+        assert "probe_id" in key_schema
 
     def test_composite_pk_data_column_in_data(self):
         from orcapod.core.sources import SpiralDBTableSource
@@ -250,17 +250,17 @@ class TestPKAsDefaultTags:
 
 
 # ===========================================================================
-# 4. Explicit tag column override
+# 4. Explicit key column override
 # ===========================================================================
 
 
-class TestExplicitTagOverride:
-    def test_explicit_tag_columns_override_pk(self):
+class TestExplicitKeyOverride:
+    def test_explicit_key_columns_override_pk(self):
         from orcapod.core.sources import SpiralDBTableSource
 
         connector = _make_mock_connector(pk_columns=["session_id"])
-        # Provide explicit tag_columns — PK should be ignored
-        # Use "firing_rate" as tag by overriding, and "session_id" as data
+        # Provide explicit key_columns — PK should be ignored
+        # Use "firing_rate" as key by overriding, and "session_id" as data
         batches = [
             pa.record_batch(
                 {
@@ -273,13 +273,13 @@ class TestExplicitTagOverride:
         connector.iter_batches.return_value = iter(batches)
         with _patch_connector(connector):
             src = SpiralDBTableSource(
-                _PROJECT_ID, _TABLE_NAME, tag_columns=["firing_rate"]
+                _PROJECT_ID, _TABLE_NAME, key_columns=["firing_rate"]
             )
-        tag_schema, _ = src.output_schema()
-        assert "firing_rate" in tag_schema
-        assert "session_id" not in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "firing_rate" in key_schema
+        assert "session_id" not in key_schema
 
-    def test_multiple_explicit_tag_columns(self):
+    def test_multiple_explicit_key_columns(self):
         from orcapod.core.sources import SpiralDBTableSource
 
         connector = _make_composite_pk_connector()
@@ -287,11 +287,11 @@ class TestExplicitTagOverride:
             src = SpiralDBTableSource(
                 _PROJECT_ID,
                 _TABLE_NAME,
-                tag_columns=["session_id", "probe_id"],
+                key_columns=["session_id", "probe_id"],
             )
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
-        assert "probe_id" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "session_id" in key_schema
+        assert "probe_id" in key_schema
 
 
 # ===========================================================================
@@ -300,7 +300,7 @@ class TestExplicitTagOverride:
 
 
 class TestNoPKRaisesError:
-    def test_no_pk_columns_and_no_explicit_tags_raises(self):
+    def test_no_pk_columns_and_no_explicit_keys_raises(self):
         """SpiralDB has no ROWID fallback — raise ValueError when no PK."""
         from orcapod.core.sources import SpiralDBTableSource
 
@@ -309,17 +309,17 @@ class TestNoPKRaisesError:
             with pytest.raises(ValueError, match="no primary key"):
                 SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
 
-    def test_no_pk_columns_but_explicit_tags_succeeds(self):
-        """Explicit tag_columns bypass the PK requirement."""
+    def test_no_pk_columns_but_explicit_keys_succeeds(self):
+        """Explicit key_columns bypass the PK requirement."""
         from orcapod.core.sources import SpiralDBTableSource
 
         connector = _make_mock_connector(pk_columns=[])
         with _patch_connector(connector):
             src = SpiralDBTableSource(
-                _PROJECT_ID, _TABLE_NAME, tag_columns=["session_id"]
+                _PROJECT_ID, _TABLE_NAME, key_columns=["session_id"]
             )
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "session_id" in key_schema
 
 
 # ===========================================================================
@@ -424,14 +424,14 @@ class TestStreamBehaviour:
         data = list(src.iter_data())
         assert len(data) == 3
 
-    def test_iter_data_tags_contain_pk(self):
+    def test_iter_data_keys_contain_pk(self):
         from orcapod.core.sources import SpiralDBTableSource
 
         connector = _make_mock_connector()
         with _patch_connector(connector):
             src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        for tags, _ in src.iter_data():
-            assert "session_id" in tags
+        for keys, _ in src.iter_data():
+            assert "session_id" in keys
 
     def test_output_schema_returns_two_schemas(self):
         from orcapod.core.sources import SpiralDBTableSource
@@ -468,13 +468,13 @@ class TestStreamBehaviour:
         firing_rates = sorted(pkt["firing_rate"] for _, pkt in src.iter_data())
         assert firing_rates == pytest.approx([0.1, 0.2, 0.3])
 
-    def test_tag_values_are_correct(self):
+    def test_key_values_are_correct(self):
         from orcapod.core.sources import SpiralDBTableSource
 
         connector = _make_mock_connector()
         with _patch_connector(connector):
             src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        session_ids = sorted(tags["session_id"] for tags, _ in src.iter_data())
+        session_ids = sorted(keys["session_id"] for keys, _ in src.iter_data())
         assert session_ids == ["s1", "s2", "s3"]
 
 
@@ -506,10 +506,10 @@ class TestDeterministicHashing:
             src2 = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
         assert src1.content_hash() == src2.content_hash()
 
-    def test_different_tag_columns_yields_different_pipeline_hash(self):
+    def test_different_key_columns_yields_different_pipeline_hash(self):
         from orcapod.core.sources import SpiralDBTableSource
 
-        # src1 uses PK (session_id) as tag; src2 uses firing_rate
+        # src1 uses PK (session_id) as key; src2 uses firing_rate
         batches = [
             pa.record_batch(
                 {
@@ -526,7 +526,7 @@ class TestDeterministicHashing:
         c2.iter_batches.return_value = iter(batches)
         with _patch_connector(c2):
             src2 = SpiralDBTableSource(
-                _PROJECT_ID, _TABLE_NAME, tag_columns=["firing_rate"]
+                _PROJECT_ID, _TABLE_NAME, key_columns=["firing_rate"]
             )
         assert src1.pipeline_hash() != src2.pipeline_hash()
 
@@ -534,9 +534,9 @@ class TestDeterministicHashing:
         """pipeline_hash is schema-only; different column schemas → different hash."""
         from orcapod.core.sources import SpiralDBTableSource
 
-        # src1: tag=session_id (large_string), data=firing_rate (float64)
+        # src1: key=session_id (large_string), data=firing_rate (float64)
         c1 = _make_mock_connector()
-        # src2: tag=session_id (large_string), data=neuron_count (int64)
+        # src2: key=session_id (large_string), data=neuron_count (int64)
         batches2 = [
             pa.record_batch(
                 {
@@ -599,13 +599,13 @@ class TestConfigSerialization:
             src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
         assert src.to_config()["table_name"] == _TABLE_NAME
 
-    def test_to_config_has_tag_columns(self):
+    def test_to_config_has_key_columns(self):
         from orcapod.core.sources import SpiralDBTableSource
 
         connector = _make_mock_connector(pk_columns=["session_id"])
         with _patch_connector(connector):
             src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        assert "session_id" in src.to_config()["tag_columns"]
+        assert "session_id" in src.to_config()["key_columns"]
 
     def test_to_config_has_overrides(self):
         from orcapod.core.sources import SpiralDBTableSource
@@ -762,5 +762,5 @@ class TestPipelineIntegration:
         )
         assert doubled_values == pytest.approx([0.2, 0.4, 0.6])
 
-        tag_values = sorted([tags["session_id"] for tags, _ in fn_outputs[0]])
-        assert tag_values == ["s1", "s2", "s3"]
+        key_values = sorted([keys["session_id"] for keys, _ in fn_outputs[0]])
+        assert key_values == ["s1", "s2", "s3"]

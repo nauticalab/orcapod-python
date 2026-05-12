@@ -8,16 +8,16 @@ Coverage added here:
   file-not-found, protocol conformance
 - DeltaTableSource: construction, source_id defaulting, resolve_field, bad path
   error, protocol conformance
-- DataFrameSource: string tag_columns, resolve_field raises, system-column
+- DataFrameSource: string key_columns, resolve_field raises, system-column
   stripping from Polars input, source_id parameter
 - DictSource: data_schema parameter, empty-data raises, source_id, content
   hash with explicit schema
-- ListSource: tag_function_hash_mode='signature' and 'content', empty list,
-  tag function inference without expected_tag_keys, TagProtocol.as_dict() protocol,
+- ListSource: key_function_hash_mode='signature' and 'content', empty list,
+  key function inference without expected_key_keys, KeyProtocol.as_dict() protocol,
   identity_structure stability
 - ArrowTableSource: table property, source_id controls provenance tokens,
   negative row index raises, duplicate record_id takes first match,
-  system_tag_columns forwarded, integer record_id_column values
+  system_key_columns forwarded, integer record_id_column values
 - SourceRegistry: replace() returns None when no prior entry, replace() with
   empty source_id raises, register() with None raises, __repr__
 """
@@ -91,13 +91,13 @@ def delta_path(tmp_path: Path) -> Path:
 
 class TestCSVSource:
     def test_construction_reads_rows(self, csv_path):
-        src = CSVSource(file_path=csv_path, tag_columns=["user_id"])
+        src = CSVSource(file_path=csv_path, key_columns=["user_id"])
         assert len(list(src.iter_data())) == 3
 
-    def test_tag_and_data_keys(self, csv_path):
-        src = CSVSource(file_path=csv_path, tag_columns=["user_id"])
-        tag_keys, data_keys = src.keys()
-        assert "user_id" in tag_keys
+    def test_key_and_data_keys(self, csv_path):
+        src = CSVSource(file_path=csv_path, key_columns=["user_id"])
+        key_keys, data_keys = src.keys()
+        assert "user_id" in key_keys
         assert "score" in data_keys
 
     def test_source_id_defaults_to_file_path(self, csv_path):
@@ -110,7 +110,7 @@ class TestCSVSource:
 
     def test_resolve_field_raises_not_implemented(self, csv_path):
         """CSVSource delegates to ArrowTableSource which no longer implements resolve_field."""
-        src = CSVSource(file_path=csv_path, tag_columns=["user_id"])
+        src = CSVSource(file_path=csv_path, key_columns=["user_id"])
         with pytest.raises(NotImplementedError):
             src.resolve_field("row_0", "score")
 
@@ -125,9 +125,9 @@ class TestCSVSource:
         assert isinstance(CSVSource(file_path=csv_path), RootSource)
 
     def test_output_schema_returns_two_schemas(self, csv_path):
-        src = CSVSource(file_path=csv_path, tag_columns=["user_id"])
-        tag_schema, data_schema = src.output_schema()
-        assert isinstance(tag_schema, Schema)
+        src = CSVSource(file_path=csv_path, key_columns=["user_id"])
+        key_schema, data_schema = src.output_schema()
+        assert isinstance(key_schema, Schema)
         assert isinstance(data_schema, Schema)
 
     def test_source_id_explicit(self, csv_path):
@@ -149,12 +149,12 @@ class TestCSVSource:
 
         src_a = CSVSource(
             file_path=str(csv_a),
-            tag_columns=["user_id"],
+            key_columns=["user_id"],
             source_id="shared_name",
         )
         src_b = CSVSource(
             file_path=str(csv_b),
-            tag_columns=["user_id"],
+            key_columns=["user_id"],
             source_id="shared_name",
         )
 
@@ -182,13 +182,13 @@ class TestCSVSource:
 
 class TestDeltaTableSource:
     def test_construction_reads_rows(self, delta_path):
-        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
+        src = DeltaTableSource(delta_table_path=delta_path, key_columns=["id"])
         assert len(list(src.iter_data())) == 3
 
-    def test_tag_and_data_keys(self, delta_path):
-        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
-        tag_keys, data_keys = src.keys()
-        assert "id" in tag_keys
+    def test_key_and_data_keys(self, delta_path):
+        src = DeltaTableSource(delta_table_path=delta_path, key_columns=["id"])
+        key_keys, data_keys = src.keys()
+        assert "id" in key_keys
         assert "value" in data_keys
 
     def test_source_id_defaults_to_directory_name(self, delta_path):
@@ -201,7 +201,7 @@ class TestDeltaTableSource:
 
     def test_resolve_field_raises_not_implemented(self, delta_path):
         """DeltaTableSource delegates to ArrowTableSource which no longer implements resolve_field."""
-        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
+        src = DeltaTableSource(delta_table_path=delta_path, key_columns=["id"])
         with pytest.raises(NotImplementedError):
             src.resolve_field("row_0", "id")
 
@@ -216,9 +216,9 @@ class TestDeltaTableSource:
         assert isinstance(DeltaTableSource(delta_table_path=delta_path), RootSource)
 
     def test_output_schema_returns_two_schemas(self, delta_path):
-        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
-        tag_schema, data_schema = src.output_schema()
-        assert isinstance(tag_schema, Schema)
+        src = DeltaTableSource(delta_table_path=delta_path, key_columns=["id"])
+        key_schema, data_schema = src.output_schema()
+        assert isinstance(key_schema, Schema)
         assert isinstance(data_schema, Schema)
 
     def test_source_id_explicit(self, delta_path):
@@ -257,7 +257,7 @@ class TestDeltaTableSourceNullability:
     ) -> None:
         """Columns declared NOT NULL in the Delta schema must map to T, not T | None."""
         source = DeltaTableSource(
-            delta_mixed_nullable_path, tag_columns=["id"]
+            delta_mixed_nullable_path, key_columns=["id"]
         )
         _, data_schema = source.output_schema()
         # score is nullable=False in the Delta schema → must be float, not float | None
@@ -268,7 +268,7 @@ class TestDeltaTableSourceNullability:
     ) -> None:
         """Columns declared nullable in the Delta schema must map to T | None."""
         source = DeltaTableSource(
-            delta_mixed_nullable_path, tag_columns=["id"]
+            delta_mixed_nullable_path, key_columns=["id"]
         )
         _, data_schema = source.output_schema()
         # label is nullable=True in the Delta schema → must be str | None
@@ -282,18 +282,18 @@ class TestDeltaTableSourceNullability:
 
 
 class TestDataFrameSourceAdditional:
-    def test_string_tag_columns_accepted(self):
-        """tag_columns as a plain string (not a list) should work."""
+    def test_string_key_columns_accepted(self):
+        """key_columns as a plain string (not a list) should work."""
         df = pl.DataFrame({"id": [1, 2, 3], "value": ["a", "b", "c"]})
-        src = DataFrameSource(data=df, tag_columns="id")
-        tag_keys, data_keys = src.keys()
-        assert "id" in tag_keys
+        src = DataFrameSource(data=df, key_columns="id")
+        key_keys, data_keys = src.keys()
+        assert "id" in key_keys
         assert "value" in data_keys
 
     def test_resolve_field_raises_not_implemented(self):
         """DataFrameSource does not override resolve_field; must raise."""
         df = pl.DataFrame({"id": [1, 2], "value": ["x", "y"]})
-        src = DataFrameSource(data=df, tag_columns="id")
+        src = DataFrameSource(data=df, key_columns="id")
         with pytest.raises(NotImplementedError):
             src.resolve_field("row_0", "value")
 
@@ -302,28 +302,28 @@ class TestDataFrameSourceAdditional:
         df = pl.DataFrame(
             {
                 "x": [1, 2],
-                "_tag_something": ["a", "b"],
+                "_key_something": ["a", "b"],
             }
         )
         src = DataFrameSource(data=df)
-        tag_keys, data_keys = src.keys()
-        assert "_tag_something" not in tag_keys
-        assert "_tag_something" not in data_keys
+        key_keys, data_keys = src.keys()
+        assert "_key_something" not in key_keys
+        assert "_key_something" not in data_keys
 
     def test_source_id_in_provenance_tokens(self):
         df = pl.DataFrame({"id": [1, 2, 3], "value": ["a", "b", "c"]})
-        src = DataFrameSource(data=df, tag_columns="id", source_id="df_source")
+        src = DataFrameSource(data=df, key_columns="id", source_id="df_source")
         table = src.as_table(all_info=True)
         source_cols = [c for c in table.column_names if c.startswith("_source_")]
         assert source_cols
         token = table.column(source_cols[0])[0].as_py()
         assert "df_source" in token
 
-    def test_multiple_tag_columns(self):
+    def test_multiple_key_columns(self):
         df = pl.DataFrame({"a": [1, 2], "b": [3, 4], "val": ["x", "y"]})
-        src = DataFrameSource(data=df, tag_columns=["a", "b"])
-        tag_keys, data_keys = src.keys()
-        assert set(tag_keys) == {"a", "b"}
+        src = DataFrameSource(data=df, key_columns=["a", "b"])
+        key_keys, data_keys = src.keys()
+        assert set(key_keys) == {"a", "b"}
         assert "val" in data_keys
 
     def test_content_hash_same_data(self):
@@ -350,21 +350,21 @@ class TestDictSourceAdditional:
         data = [{"id": 1, "value": "hello"}, {"id": 2, "value": "world"}]
         src = DictSource(
             data=data,
-            tag_columns=["id"],
+            key_columns=["id"],
             data_schema={"id": int, "value": str},
         )
-        tag_schema, data_schema = src.output_schema()
-        assert "id" in tag_schema
+        key_schema, data_schema = src.output_schema()
+        assert "id" in key_schema
         assert "value" in data_schema
 
     def test_empty_data_raises(self):
         """An empty DictSource cannot build a valid ArrowTableStream."""
         with pytest.raises(Exception):
-            DictSource(data=[], tag_columns=["id"])
+            DictSource(data=[], key_columns=["id"])
 
     def test_source_id_in_provenance_tokens(self):
         data = [{"id": 1, "val": "a"}, {"id": 2, "val": "b"}]
-        src = DictSource(data=data, tag_columns=["id"], source_id="dict_src_name")
+        src = DictSource(data=data, key_columns=["id"], source_id="dict_src_name")
         table = src.as_table(all_info=True)
         source_cols = [c for c in table.column_names if c.startswith("_source_")]
         assert source_cols
@@ -373,12 +373,12 @@ class TestDictSourceAdditional:
 
     def test_source_id_explicit(self):
         data = [{"id": 1, "val": "x"}]
-        src = DictSource(data=data, tag_columns=["id"], source_id="my_dict")
+        src = DictSource(data=data, key_columns=["id"], source_id="my_dict")
         assert src.source_id == "my_dict"
 
     def test_resolve_field_error_mentions_class_name(self):
         data = [{"id": 1, "val": "a"}]
-        src = DictSource(data=data, tag_columns=["id"], source_id="named_dict")
+        src = DictSource(data=data, key_columns=["id"], source_id="named_dict")
         with pytest.raises(NotImplementedError, match="DictSource"):
             src.resolve_field("row_0", "val")
 
@@ -388,98 +388,98 @@ class TestDictSourceAdditional:
 # ---------------------------------------------------------------------------
 
 
-def _tag_fn_for_signature(element, idx):
-    """Top-level tag function so inspect.getsource works."""
+def _key_fn_for_signature(element, idx):
+    """Top-level key function so inspect.getsource works."""
     return {"label": f"item_{idx}"}
 
 
-def _tag_fn_for_content(element, idx):
-    """Top-level tag function for content hash mode."""
+def _key_fn_for_content(element, idx):
+    """Top-level key function for content hash mode."""
     return {"bucket": idx % 2}
 
 
 class TestListSourceAdditional:
-    def test_tag_function_hash_mode_signature(self):
-        """Two ListSources with the same tag function and 'signature' mode share hash."""
+    def test_key_function_hash_mode_signature(self):
+        """Two ListSources with the same key function and 'signature' mode share hash."""
         src1 = ListSource(
             name="val",
             data=[1, 2, 3],
-            tag_function=_tag_fn_for_signature,
-            expected_tag_keys=["label"],
-            tag_function_hash_mode="signature",
+            key_function=_key_fn_for_signature,
+            expected_key_keys=["label"],
+            key_function_hash_mode="signature",
         )
         src2 = ListSource(
             name="val",
             data=[1, 2, 3],
-            tag_function=_tag_fn_for_signature,
-            expected_tag_keys=["label"],
-            tag_function_hash_mode="signature",
+            key_function=_key_fn_for_signature,
+            expected_key_keys=["label"],
+            key_function_hash_mode="signature",
         )
         assert src1.content_hash() == src2.content_hash()
 
-    def test_tag_function_hash_mode_content(self):
+    def test_key_function_hash_mode_content(self):
         """'content' mode hashes the function source code."""
         src = ListSource(
             name="val",
             data=[1, 2, 3],
-            tag_function=_tag_fn_for_content,
-            expected_tag_keys=["bucket"],
-            tag_function_hash_mode="content",
+            key_function=_key_fn_for_content,
+            expected_key_keys=["bucket"],
+            key_function_hash_mode="content",
         )
         # Identity structure should include a non-empty hash
         identity = src.identity_structure()
         assert isinstance(identity[3], str)
         assert len(identity[3]) > 0
 
-    def test_tag_function_hash_mode_name(self):
+    def test_key_function_hash_mode_name(self):
         """'name' mode uses the qualified name of the function."""
         src = ListSource(
             name="val",
             data=[1, 2, 3],
-            tag_function=_tag_fn_for_signature,
-            expected_tag_keys=["label"],
-            tag_function_hash_mode="name",
+            key_function=_key_fn_for_signature,
+            expected_key_keys=["label"],
+            key_function_hash_mode="name",
         )
-        assert _tag_fn_for_signature.__qualname__ in src._tag_function_hash
+        assert _key_fn_for_signature.__qualname__ in src._key_function_hash
 
     def test_empty_list_raises(self):
         """An empty ListSource cannot build a valid stream."""
         with pytest.raises(Exception):
             ListSource(name="item", data=[])
 
-    def test_tag_keys_inferred_from_first_row(self):
-        """When expected_tag_keys is None with a custom tag function, keys are
+    def test_key_keys_inferred_from_first_row(self):
+        """When expected_key_keys is None with a custom key function, keys are
         inferred from the first row."""
 
-        def tag_fn(el, idx):
+        def key_fn(el, idx):
             return {"group": el % 3}
 
-        src = ListSource(name="val", data=[0, 1, 2], tag_function=tag_fn)
-        tag_keys, data_keys = src.keys()
-        assert "group" in tag_keys
+        src = ListSource(name="val", data=[0, 1, 2], key_function=key_fn)
+        key_keys, data_keys = src.keys()
+        assert "group" in key_keys
         assert "val" in data_keys
 
-    def test_tag_as_dict_protocol(self):
-        """If the tag function returns an object with .as_dict(), it is unwrapped."""
+    def test_key_as_dict_protocol(self):
+        """If the key function returns an object with .as_dict(), it is unwrapped."""
 
-        class FakeTag:
+        class FakeKey:
             def __init__(self, d):
                 self._d = d
 
             def as_dict(self):
                 return self._d
 
-        def tag_fn(el, idx):
-            return FakeTag({"slot": idx})
+        def key_fn(el, idx):
+            return FakeKey({"slot": idx})
 
         src = ListSource(
             name="item",
             data=["x", "y", "z"],
-            tag_function=tag_fn,
-            expected_tag_keys=["slot"],
+            key_function=key_fn,
+            expected_key_keys=["slot"],
         )
         pairs = list(src.iter_data())
-        slots = {tag["slot"] for tag, _ in pairs}
+        slots = {key["slot"] for key, _ in pairs}
         assert slots == {0, 1, 2}
 
     def test_identity_structure_contains_name_and_elements(self):
@@ -518,7 +518,7 @@ class TestArrowTableSourceAdditional:
         src = ArrowTableSource(table=table, infer_nullable=True)
         enriched = src.table
         assert isinstance(enriched, pa.Table)
-        # The enriched table includes source-info and system-tag columns
+        # The enriched table includes source-info and system-key columns
         assert any(c.startswith("_source_") for c in enriched.column_names)
 
     def test_source_id_controls_provenance_tokens(self):
@@ -526,7 +526,7 @@ class TestArrowTableSourceAdditional:
         table = _simple_table()
         src = ArrowTableSource(
             table=table,
-            tag_columns=["user_id"],
+            key_columns=["user_id"],
             source_id="my_source",
             infer_nullable=True,
         )
@@ -543,25 +543,25 @@ class TestArrowTableSourceAdditional:
         with pytest.raises(NotImplementedError):
             src.resolve_field("row_0", "x")
 
-    def test_system_tag_columns_forwarded_to_stream(self):
-        """system_tag_columns passed at construction are preserved."""
+    def test_system_key_columns_forwarded_to_stream(self):
+        """system_key_columns passed at construction are preserved."""
         table = pa.table({"x": pa.array([1, 2], type=pa.int64())})
-        src = ArrowTableSource(table=table, system_tag_columns=["sys_col"], infer_nullable=True)
-        assert "sys_col" in src._system_tag_columns
+        src = ArrowTableSource(table=table, system_key_columns=["sys_col"], infer_nullable=True)
+        assert "sys_col" in src._system_key_columns
 
-    def test_as_table_all_info_includes_system_tag_columns(self):
-        """as_table(all_info=True) exposes paired _tag_source_id and _tag_record_id columns."""
+    def test_as_table_all_info_includes_system_key_columns(self):
+        """as_table(all_info=True) exposes paired _key_source_id and _key_record_id columns."""
         from orcapod.system_constants import constants
 
         table = pa.table({"x": pa.array([1, 2], type=pa.int64())})
         src = ArrowTableSource(table=table, infer_nullable=True)
         enriched = src.as_table(all_info=True)
         assert any(
-            c.startswith(constants.SYSTEM_TAG_SOURCE_ID_PREFIX)
+            c.startswith(constants.SYSTEM_KEY_SOURCE_ID_PREFIX)
             for c in enriched.column_names
         )
         assert any(
-            c.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX)
+            c.startswith(constants.SYSTEM_KEY_RECORD_ID_PREFIX)
             for c in enriched.column_names
         )
 
@@ -572,39 +572,39 @@ class TestArrowTableSourceAdditional:
         with pytest.raises(NotImplementedError):
             src.resolve_field("", "x")
 
-    def test_tag_columns_not_present_in_table_raises(self):
-        """tag_columns that don't exist in the table raise ValueError."""
+    def test_key_columns_not_present_in_table_raises(self):
+        """key_columns that don't exist in the table raise ValueError."""
         table = pa.table(
             {
                 "id": pa.array([1], type=pa.int64()),
                 "val": pa.array([42], type=pa.int64()),
             }
         )
-        with pytest.raises(ValueError, match="tag_columns not found in table"):
-            ArrowTableSource(table=table, tag_columns=["nonexistent", "id"], infer_nullable=True)
+        with pytest.raises(ValueError, match="key_columns not found in table"):
+            ArrowTableSource(table=table, key_columns=["nonexistent", "id"], infer_nullable=True)
 
-    def test_tag_columns_all_missing_raises(self):
-        """All tag_columns missing from the table raises ValueError."""
+    def test_key_columns_all_missing_raises(self):
+        """All key_columns missing from the table raises ValueError."""
         table = pa.table(
             {
                 "id": pa.array([1], type=pa.int64()),
                 "val": pa.array([42], type=pa.int64()),
             }
         )
-        with pytest.raises(ValueError, match="tag_columns not found in table"):
-            ArrowTableSource(table=table, tag_columns=["foo", "bar"], infer_nullable=True)
+        with pytest.raises(ValueError, match="key_columns not found in table"):
+            ArrowTableSource(table=table, key_columns=["foo", "bar"], infer_nullable=True)
 
-    def test_tag_columns_all_valid_succeeds(self):
-        """tag_columns that all exist in the table work correctly."""
+    def test_key_columns_all_valid_succeeds(self):
+        """key_columns that all exist in the table work correctly."""
         table = pa.table(
             {
                 "id": pa.array([1], type=pa.int64()),
                 "val": pa.array([42], type=pa.int64()),
             }
         )
-        src = ArrowTableSource(table=table, tag_columns=["id"], infer_nullable=True)
-        tag_keys, data_keys = src.keys()
-        assert "id" in tag_keys
+        src = ArrowTableSource(table=table, key_columns=["id"], infer_nullable=True)
+        key_keys, data_keys = src.keys()
+        assert "id" in key_keys
         assert "val" in data_keys
 
 

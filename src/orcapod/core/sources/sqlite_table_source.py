@@ -1,7 +1,7 @@
 """SQLiteTableSource — a read-only RootSource backed by a SQLite table.
 
 Wraps a SQLite table as an OrcaPod Source. Primary-key columns are used
-as tag columns by default. For tables with no explicit primary key
+as key columns by default. For tables with no explicit primary key
 (ROWID-only tables), the implicit ``rowid`` integer column is used
 automatically.
 
@@ -11,7 +11,7 @@ Example::
     source = SQLiteTableSource("/path/to/my.db", "measurements")
 
     # In-memory (for tests / throwaway pipelines; cannot round-trip)
-    source = SQLiteTableSource(":memory:", "events", tag_columns=["session_id"])
+    source = SQLiteTableSource(":memory:", "events", key_columns=["session_id"])
 
 Note:
     ``:memory:`` sources cannot be reconstructed via ``from_config`` because
@@ -38,13 +38,13 @@ class SQLiteTableSource(DBTableSource):
     At construction time the source:
     1. Opens a ``SQLiteConnector`` for *db_path*.
     2. Validates the table exists.
-    3. Resolves tag columns:
-       - If *tag_columns* is provided, uses them as-is.
+    3. Resolves key columns:
+       - If *key_columns* is provided, uses them as-is.
        - Otherwise uses the table's primary-key columns.
        - If the table has no explicit PK (ROWID-only), falls back to the
          implicit ``rowid`` integer column.
     4. Determines the fetch query: injects ``SELECT rowid, *`` when
-       ``"rowid"`` is a resolved tag column and not a normal table column
+       ``"rowid"`` is a resolved key column and not a normal table column
        (handles both auto-detection and ``from_config`` reconstruction).
     5. Delegates to ``DBTableSource.__init__`` for fetching and stream building.
     6. Closes the connector — all data is eagerly loaded into memory, so the
@@ -54,10 +54,10 @@ class SQLiteTableSource(DBTableSource):
         db_path: Path to the SQLite database file, or ``":memory:"`` for an
             in-process in-memory database.
         table_name: Name of the table to expose as a source.
-        tag_columns: Columns to use as tag columns. If ``None`` (default),
+        key_columns: Columns to use as key columns. If ``None`` (default),
             the table's primary-key columns are used; ROWID-only tables fall
             back to ``["rowid"]``.
-        system_tag_columns: Additional system-level tag columns.
+        system_key_columns: Additional system-level key columns.
         record_id_column: Column for stable per-row record IDs in provenance.
         source_id: Canonical source name. Defaults to *table_name*.
         label: Human-readable label for this source node.
@@ -73,8 +73,8 @@ class SQLiteTableSource(DBTableSource):
         self,
         db_path: str | os.PathLike,
         table_name: str,
-        tag_columns: Collection[str] | None = None,
-        system_tag_columns: Collection[str] = (),
+        key_columns: Collection[str] | None = None,
+        system_key_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
         label: str | None = None,
@@ -85,19 +85,19 @@ class SQLiteTableSource(DBTableSource):
         connector = SQLiteConnector(db_path)
 
         try:
-            # Step 3: Resolve tag columns.
-            if tag_columns is None:
+            # Step 3: Resolve key columns.
+            if key_columns is None:
                 pk_cols = connector.get_pk_columns(table_name)
-                resolved_tags: list[str] = pk_cols if pk_cols else ["rowid"]
+                resolved_keys: list[str] = pk_cols if pk_cols else ["rowid"]
             else:
-                resolved_tags = list(tag_columns)
+                resolved_keys = list(key_columns)
 
             # Step 4: Determine the fetch query.
-            # If "rowid" is in resolved_tags but not a real column, we need
+            # If "rowid" is in resolved_keys but not a real column, we need
             # SELECT rowid, * to include it.  This also handles from_config
-            # reconstruction where tag_columns=["rowid"] is passed explicitly.
+            # reconstruction where key_columns=["rowid"] is passed explicitly.
             normal_cols = {ci.name for ci in connector.get_column_info(table_name)}
-            if "rowid" in resolved_tags and "rowid" not in normal_cols:
+            if "rowid" in resolved_keys and "rowid" not in normal_cols:
                 _query: str | None = f'SELECT rowid, * FROM "{table_name}"'
             else:
                 _query = None
@@ -105,8 +105,8 @@ class SQLiteTableSource(DBTableSource):
             super().__init__(
                 connector,
                 table_name,
-                tag_columns=resolved_tags,
-                system_tag_columns=system_tag_columns,
+                key_columns=resolved_keys,
+                system_key_columns=system_key_columns,
                 record_id_column=record_id_column,
                 source_id=source_id,
                 label=label,
@@ -144,8 +144,8 @@ class SQLiteTableSource(DBTableSource):
         return cls(
             db_path=config["db_path"],
             table_name=config["table_name"],
-            tag_columns=config.get("tag_columns"),
-            system_tag_columns=config.get("system_tag_columns", ()),
+            key_columns=config.get("key_columns"),
+            system_key_columns=config.get("system_key_columns", ()),
             record_id_column=config.get("record_id_column"),
             source_id=config.get("source_id"),
             label=config.get("label"),

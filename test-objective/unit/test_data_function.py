@@ -8,7 +8,7 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from orcapod.core.datagrams.tag_data import Data
+from orcapod.core.datagrams.key_data import Data
 from orcapod.core.data_function import CachedDataFunction, PythonDataFunction
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.types import Schema

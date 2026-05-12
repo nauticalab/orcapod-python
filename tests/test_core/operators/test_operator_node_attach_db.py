@@ -19,7 +19,7 @@ def _make_stream(name="x", n=3):
                 name: pa.array(list(range(n)), type=pa.int64()),
             }
         ),
-        tag_columns=["id"],
+        key_columns=["id"],
     )
 
 

@@ -114,9 +114,9 @@ def generate_hash_examples():
             if isinstance(value, (bytes, bytearray)):
                 serialized_value = f"bytes:{value.hex()}"
             elif isinstance(value, (set, frozenset)):
-                type_tag = "frozenset" if isinstance(value, frozenset) else "set"
+                type_key = "frozenset" if isinstance(value, frozenset) else "set"
                 serialized_value = {
-                    "__type__": type_tag,
+                    "__type__": type_key,
                     "items": sorted(value, key=str),
                 }
             elif isinstance(value, tuple):

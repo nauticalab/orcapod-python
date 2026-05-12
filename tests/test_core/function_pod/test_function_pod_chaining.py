@@ -5,7 +5,7 @@ Covers:
 - Two-pod linear chain: output stream of pod1 feeds into pod2
 - Three-pod linear chain with value verification at each stage
 - Chaining via the decorator (@function_pod) interface
-- TagProtocol preservation across chained pods
+- KeyProtocol preservation across chained pods
 - Row count preservation across chained pods
 - as_table() results after chaining
 - Chain where an intermediate pod is inactive (data filtered out)
@@ -81,12 +81,12 @@ class TestTwoPodChain:
         ):
             assert data["result"] == i * 2 + 1
 
-    def test_chain_tag_preserved(self, double_pod, add_one_pod):
+    def test_chain_key_preserved(self, double_pod, add_one_pod):
         n = 3
-        for i, (tag, _) in enumerate(
+        for i, (key, _) in enumerate(
             add_one_pod.process(double_pod.process(make_int_stream(n=n))).iter_data()
         ):
-            assert tag["id"] == i
+            assert key["id"] == i
 
     def test_chain_as_table_has_correct_columns(self, double_pod, add_one_pod):
         table = add_one_pod.process(double_pod.process(make_int_stream(n=3))).as_table()
@@ -149,13 +149,13 @@ class TestThreePodChain:
             expected = (i * 2 + 1) ** 2
             assert data["result"] == expected
 
-    def test_three_pod_chain_tags_preserved(self, double_pod, add_one_pod, square_pod):
+    def test_three_pod_chain_keys_preserved(self, double_pod, add_one_pod, square_pod):
         n = 4
         stream = square_pod.process(
             add_one_pod.process(double_pod.process(make_int_stream(n=n)))
         )
-        for i, (tag, _) in enumerate(stream.iter_data()):
-            assert tag["id"] == i
+        for i, (key, _) in enumerate(stream.iter_data()):
+            assert key["id"] == i
 
     def test_three_pod_chain_as_table_correct(
         self, double_pod, add_one_pod, square_pod
@@ -167,7 +167,7 @@ class TestThreePodChain:
         results = table.column("result").to_pylist()
         assert results == [(i * 2 + 1) ** 2 for i in range(n)]
 
-    def test_three_pod_chain_table_has_tag_column(
+    def test_three_pod_chain_table_has_key_column(
         self, double_pod, add_one_pod, square_pod
     ):
         table = square_pod.process(

@@ -10,20 +10,20 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.datagrams.datagram import Datagram
-from orcapod.core.datagrams.tag_data import Data, Tag
+from orcapod.core.datagrams.key_data import Data, Key
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
 from orcapod.core.operators import (
     Batch,
     DropDataColumns,
-    DropTagColumns,
+    DropKeyColumns,
     Join,
     MapData,
-    MapTags,
+    MapKeys,
     MergeJoin,
     PolarsFilter,
     SelectDataColumns,
-    SelectTagColumns,
+    SelectKeyColumns,
     SemiJoin,
 )
 from orcapod.core.data_function import PythonDataFunction
@@ -79,7 +79,7 @@ def return_none(x: int) -> int | None:
 
 
 def make_simple_table(n: int = 3) -> pa.Table:
-    """Table with tag=id (int), data=value (int)."""
+    """Table with key=id (int), data=value (int)."""
     return pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
@@ -89,7 +89,7 @@ def make_simple_table(n: int = 3) -> pa.Table:
 
 
 def make_two_data_col_table(n: int = 3) -> pa.Table:
-    """Table with tag=id, data={x, y}."""
+    """Table with key=id, data={x, y}."""
     return pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
@@ -100,7 +100,7 @@ def make_two_data_col_table(n: int = 3) -> pa.Table:
 
 
 def make_string_table(n: int = 3) -> pa.Table:
-    """Table with tag=id, data=name (str)."""
+    """Table with key=id, data=name (str)."""
     names = ["alice", "bob", "charlie"][:n]
     return pa.table(
         {
@@ -111,7 +111,7 @@ def make_string_table(n: int = 3) -> pa.Table:
 
 
 def make_joinable_tables() -> tuple[pa.Table, pa.Table]:
-    """Two tables with shared tag=id, non-overlapping data columns."""
+    """Two tables with shared key=id, non-overlapping data columns."""
     left = pa.table(
         {
             "id": pa.array([1, 2, 3], type=pa.int64()),
@@ -128,7 +128,7 @@ def make_joinable_tables() -> tuple[pa.Table, pa.Table]:
 
 
 def make_overlapping_data_tables() -> tuple[pa.Table, pa.Table]:
-    """Two tables with shared tag=id AND overlapping data column 'value'."""
+    """Two tables with shared key=id AND overlapping data column 'value'."""
     left = pa.table(
         {
             "id": pa.array([1, 2, 3], type=pa.int64()),
@@ -171,29 +171,29 @@ def string_table() -> pa.Table:
 
 @pytest.fixture
 def simple_stream() -> ArrowTableStream:
-    """Stream with tag=id, data=value."""
-    return ArrowTableStream(make_simple_table(), tag_columns=["id"])
+    """Stream with key=id, data=value."""
+    return ArrowTableStream(make_simple_table(), key_columns=["id"])
 
 
 @pytest.fixture
 def two_col_stream() -> ArrowTableStream:
-    """Stream with tag=id, data={x, y}."""
-    return ArrowTableStream(make_two_data_col_table(), tag_columns=["id"])
+    """Stream with key=id, data={x, y}."""
+    return ArrowTableStream(make_two_data_col_table(), key_columns=["id"])
 
 
 @pytest.fixture
 def string_stream() -> ArrowTableStream:
-    """Stream with tag=id, data=name."""
-    return ArrowTableStream(make_string_table(), tag_columns=["id"])
+    """Stream with key=id, data=name."""
+    return ArrowTableStream(make_string_table(), key_columns=["id"])
 
 
 @pytest.fixture
 def joinable_streams() -> tuple[ArrowTableStream, ArrowTableStream]:
-    """Two streams with shared tag=id, non-overlapping data columns."""
+    """Two streams with shared key=id, non-overlapping data columns."""
     left, right = make_joinable_tables()
     return (
-        ArrowTableStream(left, tag_columns=["id"]),
-        ArrowTableStream(right, tag_columns=["id"]),
+        ArrowTableStream(left, key_columns=["id"]),
+        ArrowTableStream(right, key_columns=["id"]),
     )
 
 
@@ -204,14 +204,14 @@ def joinable_streams() -> tuple[ArrowTableStream, ArrowTableStream]:
 
 @pytest.fixture
 def simple_source() -> ArrowTableSource:
-    return ArrowTableSource(make_simple_table(), tag_columns=["id"])
+    return ArrowTableSource(make_simple_table(), key_columns=["id"])
 
 
 @pytest.fixture
 def dict_source() -> DictSource:
     return DictSource(
         {"id": [1, 2, 3], "value": [10, 20, 30]},
-        tag_columns=["id"],
+        key_columns=["id"],
         infer_nullable=True,
     )
 

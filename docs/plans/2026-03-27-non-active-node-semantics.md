@@ -72,7 +72,7 @@ from orcapod.types import CacheMode
 
 @pytest.fixture
 def simple_source() -> ArrowTableStream:
-    """Single-tag stream: id (tag), x (data), 3 rows."""
+    """Single-key stream: id (key), x (data), 3 rows."""
     return ArrowTableStream(
         pa.table(
             {
@@ -80,7 +80,7 @@ def simple_source() -> ArrowTableStream:
                 "x": pa.array([10, 20, 30], type=pa.int64()),
             }
         ),
-        tag_columns=["id"],
+        key_columns=["id"],
     )
 
 
@@ -189,10 +189,10 @@ def _make_empty_table(self) -> "pa.Table":
     Requires ``self._operator is not None`` (pre-existing limitation shared
     with ``_replay_from_cache``).
     """
-    tag_schema, data_schema = self.output_schema()
+    key_schema, data_schema = self.output_schema()
     type_converter = self.data_context.type_converter
     empty_fields: dict = {}
-    for name, py_type in {**tag_schema, **data_schema}.items():
+    for name, py_type in {**key_schema, **data_schema}.items():
         arrow_type = type_converter.python_type_to_arrow_type(py_type)
         empty_fields[name] = pa.array([], type=arrow_type)
     return pa.table(empty_fields)
@@ -213,8 +213,8 @@ def _replay_from_cache(self) -> None:
     if records is None:
         records = self._make_empty_table()
 
-    tag_keys = self.keys()[0]
-    self._cached_output_stream = ArrowTableStream(records, tag_columns=tag_keys)
+    key_keys = self.keys()[0]
+    self._cached_output_stream = ArrowTableStream(records, key_columns=key_keys)
     self._update_modified_time()
 ```
 
@@ -271,8 +271,8 @@ def _load_cached_stream_from_db(self) -> "ArrowTableStream | None":
         records_table = self._make_empty_table()
     else:
         records_table = records
-    tag_keys = self.keys()[0]
-    return ArrowTableStream(records_table, tag_columns=tag_keys)
+    key_keys = self.keys()[0]
+    return ArrowTableStream(records_table, key_columns=key_keys)
 ```
 
 - [ ] **Step 3.2: Run the existing test suite — no regressions**
@@ -306,8 +306,8 @@ This is the core fix. Both methods stop calling `self.run()` and instead do a 3-
 Replace lines 555–558 (current `iter_data()`):
 
 ```python
-def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
-    """Return an iterator over (tag, data) pairs.
+def iter_data(self) -> Iterator[tuple[KeyProtocol, DataProtocol]]:
+    """Return an iterator over (key, data) pairs.
 
     Read-only: never triggers computation. Returns empty before ``run()``
     or ``execute()`` populates the cache. Call ``node.is_stale`` before
@@ -368,7 +368,7 @@ def test_iter_data(self, simple_stream, db):
     node.run()                          # <-- add this line
     data = list(node.iter_data())
     assert len(data) == 3
-    for tag, data in data:
+    for key, data in data:
         assert "renamed_x" in data.keys()
 
 def test_as_table(self, simple_stream, db):
@@ -586,9 +586,9 @@ Replace the body of the `flow()` docstring:
 ```python
 def flow(
     self,
-) -> Collection[tuple[TagProtocol, DataProtocol]]:
+) -> Collection[tuple[KeyProtocol, DataProtocol]]:
     """
-    Returns the entire collection of (TagProtocol, DataProtocol) as a list.
+    Returns the entire collection of (KeyProtocol, DataProtocol) as a list.
     This is a read-only operation — results reflect whatever has been computed
     by a prior ``run()`` or ``execute()`` call. If no computation has been
     performed, returns an empty list.
@@ -634,7 +634,7 @@ from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 
 src = ArrowTableStream(
     pa.table({"id": [1, 2], "x": [10, 20]}),
-    tag_columns=["id"],
+    key_columns=["id"],
 )
 op_a = MapData({"x": "y"})
 op_b = MapData({"y": "z"})

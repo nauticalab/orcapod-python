@@ -57,14 +57,14 @@ _CONCURRENT_MAX = _SLEEP_S * 2.5                 # at most 2.5× single-step
 
 
 def _make_source(n: int = _N_DATA) -> ArrowTableSource:
-    """Simple source with ``id`` tag and ``x`` data column."""
+    """Simple source with ``id`` key and ``x`` data column."""
     table = pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
             "x": pa.array(list(range(n)), type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
+    return ArrowTableSource(table, key_columns=["id"], infer_nullable=True)
 
 
 def _build_pipeline(

@@ -21,7 +21,7 @@ import pytest
 
 from orcapod.core.function_pod import FunctionPod, function_pod
 from orcapod.core.nodes import FunctionNode, OperatorNode, SourceNode
-from orcapod.core.operators import Join, SelectTagColumns
+from orcapod.core.operators import Join, SelectKeyColumns
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
 from orcapod.core.streams import ArrowTableStream
@@ -55,7 +55,7 @@ def _make_pipeline(
 
 
 def _make_stream(n: int = 3) -> ArrowTableStream:
-    """Simple stream with tag=id, data=x. Uses nullable=False schema."""
+    """Simple stream with key=id, data=x. Uses nullable=False schema."""
     schema = pa.schema(
         [pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]
     )
@@ -63,11 +63,11 @@ def _make_stream(n: int = 3) -> ArrowTableStream:
         {"id": pa.array(list(range(n)), type=pa.int64()), "x": pa.array(list(range(n)), type=pa.int64())},
         schema=schema,
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 def _make_two_col_stream(n: int = 3) -> ArrowTableStream:
-    """Stream with tag=id, data={a, b} for binary operator tests. Uses nullable=False schema."""
+    """Stream with key=id, data={a, b} for binary operator tests. Uses nullable=False schema."""
     schema = pa.schema(
         [
             pa.field("id", pa.int64(), nullable=False),
@@ -83,11 +83,11 @@ def _make_two_col_stream(n: int = 3) -> ArrowTableStream:
         },
         schema=schema,
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 def _make_y_stream(n: int = 3) -> ArrowTableStream:
-    """Stream with tag=id, data=y (non-overlapping with _make_stream). Uses nullable=False schema."""
+    """Stream with key=id, data=y (non-overlapping with _make_stream). Uses nullable=False schema."""
     schema = pa.schema(
         [pa.field("id", pa.int64(), nullable=False), pa.field("y", pa.int64(), nullable=False)]
     )
@@ -95,7 +95,7 @@ def _make_y_stream(n: int = 3) -> ArrowTableStream:
         {"id": pa.array(list(range(n)), type=pa.int64()), "y": pa.array([i * 10 for i in range(n)], type=pa.int64())},
         schema=schema,
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +221,7 @@ class TestNodeContextDelegation:
 
     def test_operator_node_context_matches_operator(self):
         stream = _make_two_col_stream()
-        op = SelectTagColumns("id")
+        op = SelectKeyColumns("id")
         node = OperatorNode(operator=op, input_streams=[stream])
         assert node.data_context_key == op.data_context_key
         assert node.data_context.context_key == op.data_context_key
@@ -379,7 +379,7 @@ class TestPipelineRecording:
 
     def test_record_operator_pod_creates_operator_node(self):
         stream = _make_stream()
-        op = SelectTagColumns(columns=["id"])
+        op = SelectKeyColumns(columns=["id"])
         mgr = BasicTrackerManager()
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
@@ -472,7 +472,7 @@ class TestPipelineCompile:
     def test_compile_single_operator(self):
         """Source stream -> Operator: compile creates SourceNode and wires upstream."""
         stream = _make_stream()
-        op = SelectTagColumns(columns=["id"])
+        op = SelectKeyColumns(columns=["id"])
         mgr = BasicTrackerManager()
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
@@ -549,7 +549,7 @@ class TestPipelineCompile:
         """Source -> FunctionPod -> Operator: compile wires SourceNode -> FunctionNode -> OperatorNode."""
         pf = PythonDataFunction(_double, output_keys="result")
         pod = FunctionPod(data_function=pf)
-        op = SelectTagColumns(columns=["id"])
+        op = SelectKeyColumns(columns=["id"])
         stream = _make_stream()
         mgr = BasicTrackerManager()
         pod.tracker_manager = mgr
@@ -574,7 +574,7 @@ class TestPipelineCompile:
     def test_compile_operator_then_function(self):
         """Source -> Operator -> FunctionPod: compile wires SourceNode -> OperatorNode -> FunctionNode."""
         stream = _make_stream()
-        op = SelectTagColumns(columns=["id"])
+        op = SelectKeyColumns(columns=["id"])
         pf = PythonDataFunction(_double, output_keys="result")
         pod = FunctionPod(data_function=pf)
         mgr = BasicTrackerManager()
@@ -750,7 +750,7 @@ class TestOperatorTrackerIntegration:
     def test_operator_process_records_to_tracker(self):
         """StaticOutputPod.process() automatically records to an active Pipeline."""
         stream = _make_stream()
-        op = SelectTagColumns(columns=["id"])
+        op = SelectKeyColumns(columns=["id"])
         mgr = BasicTrackerManager()
         op.tracker_manager = mgr
 
@@ -768,8 +768,8 @@ class TestOperatorTrackerIntegration:
     def test_operator_chain(self):
         """Source -> operator1 -> operator2."""
         stream = _make_two_col_stream()
-        op1 = SelectTagColumns(columns=["id"])
-        op2 = SelectTagColumns(columns=["id"])
+        op1 = SelectKeyColumns(columns=["id"])
+        op2 = SelectKeyColumns(columns=["id"])
         mgr = BasicTrackerManager()
         op1.tracker_manager = mgr
         op2.tracker_manager = mgr
@@ -858,7 +858,7 @@ class TestBMIPipelineEndToEnd:
                     "height_cm": pa.array([170, 185, 160], type=pa.int64()),
                 }
             ),
-            tag_columns=["person_id"],
+            key_columns=["person_id"],
             source_id="heights",
             infer_nullable=True,
         )
@@ -869,7 +869,7 @@ class TestBMIPipelineEndToEnd:
                     "weight_kg": pa.array([70, 90, 55], type=pa.int64()),
                 }
             ),
-            tag_columns=["person_id"],
+            key_columns=["person_id"],
             source_id="weights",
             infer_nullable=True,
         )
@@ -893,8 +893,8 @@ class TestBMIPipelineEndToEnd:
             joined = Join()(converted, weights)
             bmi_stream = _compute_bmi.pod(joined)
 
-        for tag, data in bmi_stream.iter_data():
-            pid = tag["person_id"]
+        for key, data in bmi_stream.iter_data():
+            pid = key["person_id"]
             assert data["bmi"] == expected_bmi[pid], (
                 f"person_id={pid}: got {data['bmi']}, expected {expected_bmi[pid]}"
             )

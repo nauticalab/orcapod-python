@@ -18,14 +18,14 @@ source = DictSource(
         {"experiment": "exp_002", "temperature": 22.3, "pressure": 0.98},
         {"experiment": "exp_003", "temperature": 19.8, "pressure": 1.05},
     ],
-    tag_columns=["experiment"],
+    key_columns=["experiment"],
     source_id="lab_results",
 )
 ```
 
 There are two important concepts here:
 
-- **Tag columns** (`tag_columns`) are the keys that identify each row -- like primary keys
+- **Key columns** (`key_columns`) are the keys that identify each row -- like primary keys
   in a database or independent variables in an experiment. Here, `experiment` uniquely
   identifies each measurement.
 - **Data columns** are everything else -- the actual data payload. In this example,
@@ -45,11 +45,11 @@ conversion step.
 
 ### Schema
 
-Use `output_schema()` to see the tag and data column types:
+Use `output_schema()` to see the key and data column types:
 
 ```python
-tag_schema, data_schema = source.output_schema()
-print(tag_schema)
+key_schema, data_schema = source.output_schema()
+print(key_schema)
 # Schema({'experiment': <class 'str'>})
 print(data_schema)
 # Schema({'temperature': <class 'float'>, 'pressure': <class 'float'>})
@@ -60,8 +60,8 @@ print(data_schema)
 Use `keys()` to get just the column names:
 
 ```python
-tag_keys, data_keys = source.keys()
-print(tag_keys)
+key_keys, data_keys = source.keys()
+print(key_keys)
 # ('experiment',)
 print(data_keys)
 # ('temperature', 'pressure')
@@ -69,14 +69,14 @@ print(data_keys)
 
 ### Iterating over rows
 
-Use `iter_data()` to walk through each (Tag, Data) pair:
+Use `iter_data()` to walk through each (Key, Data) pair:
 
 ```python
-for tag, data in source.iter_data():
-    print(f"Tag: {tag.as_dict()}, Data: {data.as_dict()}")
-# Tag: {'experiment': 'exp_001'}, Data: {'temperature': 20.5, 'pressure': 1.01}
-# Tag: {'experiment': 'exp_002'}, Data: {'temperature': 22.3, 'pressure': 0.98}
-# Tag: {'experiment': 'exp_003'}, Data: {'temperature': 19.8, 'pressure': 1.05}
+for key, data in source.iter_data():
+    print(f"Key: {key.as_dict()}, Data: {data.as_dict()}")
+# Key: {'experiment': 'exp_001'}, Data: {'temperature': 20.5, 'pressure': 1.01}
+# Key: {'experiment': 'exp_002'}, Data: {'temperature': 22.3, 'pressure': 0.98}
+# Key: {'experiment': 'exp_003'}, Data: {'temperature': 19.8, 'pressure': 1.05}
 ```
 
 ### Getting the full table
@@ -128,7 +128,7 @@ result = analyze_conditions.pod(source)
     All standard pods support `__call__` as a shorthand for `.process()`, so
     `pod(stream)` is equivalent to `pod.process(stream)`.
 
-The `result` is a new stream. Tags are preserved from the input; the data columns
+The `result` is a new stream. Keys are preserved from the input; the data columns
 are replaced with the function's outputs.
 
 ## Inspecting the result
@@ -136,24 +136,24 @@ are replaced with the function's outputs.
 The result stream supports the same inspection methods as the source:
 
 ```python
-tag_schema, data_schema = result.output_schema()
-print(tag_schema)
+key_schema, data_schema = result.output_schema()
+print(key_schema)
 # Schema({'experiment': <class 'str'>})
 print(data_schema)
 # Schema({'temp_fahrenheit': <class 'float'>, 'is_high_pressure': <class 'bool'>})
 ```
 
-The tag schema is unchanged -- function pods never modify tags. The data schema
+The key schema is unchanged -- function pods never modify keys. The data schema
 now reflects the function's output types.
 
 Iterate over the results:
 
 ```python
-for tag, data in result.iter_data():
-    print(f"Tag: {tag.as_dict()}, Data: {data.as_dict()}")
-# Tag: {'experiment': 'exp_001'}, Data: {'temp_fahrenheit': 68.9, 'is_high_pressure': True}
-# Tag: {'experiment': 'exp_002'}, Data: {'temp_fahrenheit': 72.14, 'is_high_pressure': False}
-# Tag: {'experiment': 'exp_003'}, Data: {'temp_fahrenheit': 67.64, 'is_high_pressure': True}
+for key, data in result.iter_data():
+    print(f"Key: {key.as_dict()}, Data: {data.as_dict()}")
+# Key: {'experiment': 'exp_001'}, Data: {'temp_fahrenheit': 68.9, 'is_high_pressure': True}
+# Key: {'experiment': 'exp_002'}, Data: {'temp_fahrenheit': 72.14, 'is_high_pressure': False}
+# Key: {'experiment': 'exp_003'}, Data: {'temp_fahrenheit': 67.64, 'is_high_pressure': True}
 ```
 
 Or view it as a table:
@@ -181,7 +181,7 @@ source = DictSource(
         {"experiment": "exp_002", "temperature": 22.3, "pressure": 0.98},
         {"experiment": "exp_003", "temperature": 19.8, "pressure": 1.05},
     ],
-    tag_columns=["experiment"],
+    key_columns=["experiment"],
     source_id="lab_results",
 )
 
@@ -207,10 +207,10 @@ Now that you have the basics, explore these topics:
 
 - [Sources](concepts/sources.md) -- learn about the different source types and how
   provenance tracking works.
-- [Streams](concepts/streams.md) -- understand the immutable (Tag, Data) stream model.
+- [Streams](concepts/streams.md) -- understand the immutable (Key, Data) stream model.
 - [Function Pods](concepts/function-pods.md) -- advanced function pod usage, including
   caching with databases.
 - [Operators](concepts/operators.md) -- structural transforms like Join, Batch, and Filter
-  that work on tags and stream structure without inspecting data content.
+  that work on keys and stream structure without inspecting data content.
 - [Identity & Hashing](concepts/identity.md) -- how Orcapod tracks content identity and
   pipeline structure for reproducibility.

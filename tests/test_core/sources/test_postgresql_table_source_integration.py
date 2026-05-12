@@ -66,7 +66,7 @@ def schema_dsn(pg_schema: str) -> str:
 class TestSinglePKTable:
     """Source backed by a table with a single-column PK."""
 
-    def test_pk_column_is_tag(self, schema_dsn: str) -> None:
+    def test_pk_column_is_key(self, schema_dsn: str) -> None:
         from orcapod.core.sources import PostgreSQLTableSource
 
         with psycopg.connect(schema_dsn) as conn:
@@ -82,8 +82,8 @@ class TestSinglePKTable:
             conn.commit()
 
         src = PostgreSQLTableSource(schema_dsn, "measurements")
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "session_id" in key_schema
 
     def test_non_pk_columns_in_data_schema(self, schema_dsn: str) -> None:
         from orcapod.core.sources import PostgreSQLTableSource
@@ -123,7 +123,7 @@ class TestSinglePKTable:
         src = PostgreSQLTableSource(schema_dsn, "measurements")
         assert len(list(src.iter_data())) == 3
 
-    def test_tag_values_are_correct(self, schema_dsn: str) -> None:
+    def test_key_values_are_correct(self, schema_dsn: str) -> None:
         from orcapod.core.sources import PostgreSQLTableSource
 
         with psycopg.connect(schema_dsn) as conn:
@@ -139,15 +139,15 @@ class TestSinglePKTable:
             conn.commit()
 
         src = PostgreSQLTableSource(schema_dsn, "measurements")
-        tag_values = sorted([tags["session_id"] for tags, _ in src.iter_data()])
-        assert tag_values == ["s1", "s2", "s3"]
+        key_values = sorted([keys["session_id"] for keys, _ in src.iter_data()])
+        assert key_values == ["s1", "s2", "s3"]
 
 
 @pytest.mark.postgres
 class TestCompositePKTable:
     """Source backed by a table with a composite PK."""
 
-    def test_both_pk_columns_are_tags(self, schema_dsn: str) -> None:
+    def test_both_pk_columns_are_keys(self, schema_dsn: str) -> None:
         from orcapod.core.sources import PostgreSQLTableSource
 
         with psycopg.connect(schema_dsn) as conn:
@@ -164,16 +164,16 @@ class TestCompositePKTable:
             conn.commit()
 
         src = PostgreSQLTableSource(schema_dsn, "events")
-        tag_schema, _ = src.output_schema()
-        assert "user_id" in tag_schema
-        assert "event_id" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "user_id" in key_schema
+        assert "event_id" in key_schema
 
 
 @pytest.mark.postgres
-class TestExplicitTagOverride:
-    """tag_columns override overrides the PK."""
+class TestExplicitKeyOverride:
+    """key_columns override overrides the PK."""
 
-    def test_explicit_tag_columns_override_pk(self, schema_dsn: str) -> None:
+    def test_explicit_key_columns_override_pk(self, schema_dsn: str) -> None:
         from orcapod.core.sources import PostgreSQLTableSource
 
         with psycopg.connect(schema_dsn) as conn:
@@ -189,11 +189,11 @@ class TestExplicitTagOverride:
             conn.commit()
 
         src = PostgreSQLTableSource(
-            schema_dsn, "measurements", tag_columns=["trial"]
+            schema_dsn, "measurements", key_columns=["trial"]
         )
-        tag_schema, _ = src.output_schema()
-        assert "trial" in tag_schema
-        assert "session_id" not in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "trial" in key_schema
+        assert "session_id" not in key_schema
 
 
 @pytest.mark.postgres
@@ -246,5 +246,5 @@ class TestPipelineIntegration:
         doubled_values = sorted([pkt.as_dict()["doubled"] for _, pkt in fn_outputs[0]])
         assert doubled_values == pytest.approx([0.2, 0.4, 0.6])
 
-        tag_values = sorted([tags["session_id"] for tags, _ in fn_outputs[0]])
-        assert tag_values == ["s1", "s2", "s3"]
+        key_values = sorted([keys["session_id"] for keys, _ in fn_outputs[0]])
+        assert key_values == ["s1", "s2", "s3"]

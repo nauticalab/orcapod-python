@@ -8,13 +8,13 @@ import pytest
 from orcapod.core.operators import (
     Batch,
     DropDataColumns,
-    DropTagColumns,
+    DropKeyColumns,
     Join,
     MapData,
-    MapTags,
+    MapKeys,
     PolarsFilter,
     SelectDataColumns,
-    SelectTagColumns,
+    SelectKeyColumns,
     SemiJoin,
 )
 from orcapod.core.streams import ArrowTableStream
@@ -28,7 +28,7 @@ from orcapod.protocols.core_protocols import PodProtocol, StreamProtocol
 
 @pytest.fixture
 def simple_stream() -> ArrowTableStream:
-    """Stream with 1 tag (animal) and 2 data columns (weight, legs)."""
+    """Stream with 1 key (animal) and 2 data columns (weight, legs)."""
     table = pa.table(
         {
             "animal": ["cat", "dog", "bird"],
@@ -36,12 +36,12 @@ def simple_stream() -> ArrowTableStream:
             "legs": [4, 4, 2],
         }
     )
-    return ArrowTableStream(table, tag_columns=["animal"])
+    return ArrowTableStream(table, key_columns=["animal"])
 
 
 @pytest.fixture
-def two_tag_stream() -> ArrowTableStream:
-    """Stream with 2 tags (region, animal) and 1 data column (count)."""
+def two_key_stream() -> ArrowTableStream:
+    """Stream with 2 keys (region, animal) and 1 data column (count)."""
     table = pa.table(
         {
             "region": ["east", "east", "west"],
@@ -49,7 +49,7 @@ def two_tag_stream() -> ArrowTableStream:
             "count": [10, 5, 8],
         }
     )
-    return ArrowTableStream(table, tag_columns=["region", "animal"])
+    return ArrowTableStream(table, key_columns=["region", "animal"])
 
 
 @pytest.fixture
@@ -61,7 +61,7 @@ def left_stream() -> ArrowTableStream:
             "value_a": [10, 20, 30],
         }
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 @pytest.fixture
@@ -73,7 +73,7 @@ def right_stream() -> ArrowTableStream:
             "value_b": [200, 300, 400],
         }
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 @pytest.fixture
@@ -85,7 +85,7 @@ def disjoint_stream() -> ArrowTableStream:
             "speed": [30.0, 45.0, 80.0],
         }
     )
-    return ArrowTableStream(table, tag_columns=["animal"])
+    return ArrowTableStream(table, key_columns=["animal"])
 
 
 # ===================================================================
@@ -100,16 +100,16 @@ class TestPodProtocolConformance:
         op = PolarsFilter()
         assert isinstance(op, PodProtocol)
 
-    def test_select_tag_columns_is_pod(self):
-        op = SelectTagColumns(columns=["x"])
+    def test_select_key_columns_is_pod(self):
+        op = SelectKeyColumns(columns=["x"])
         assert isinstance(op, PodProtocol)
 
     def test_select_data_columns_is_pod(self):
         op = SelectDataColumns(columns=["x"])
         assert isinstance(op, PodProtocol)
 
-    def test_drop_tag_columns_is_pod(self):
-        op = DropTagColumns(columns=["x"])
+    def test_drop_key_columns_is_pod(self):
+        op = DropKeyColumns(columns=["x"])
         assert isinstance(op, PodProtocol)
 
     def test_drop_data_columns_is_pod(self):
@@ -120,8 +120,8 @@ class TestPodProtocolConformance:
         op = MapData(name_map={"a": "b"})
         assert isinstance(op, PodProtocol)
 
-    def test_map_tags_is_pod(self):
-        op = MapTags(name_map={"a": "b"})
+    def test_map_keys_is_pod(self):
+        op = MapKeys(name_map={"a": "b"})
         assert isinstance(op, PodProtocol)
 
     def test_batch_is_pod(self):
@@ -151,9 +151,9 @@ class TestOutputStreamLineage:
         assert isinstance(out, StreamProtocol)
         assert out.producer is op
 
-    def test_select_tag_columns_producer(self, two_tag_stream):
-        op = SelectTagColumns(columns=["region"])
-        out = op.process(two_tag_stream)
+    def test_select_key_columns_producer(self, two_key_stream):
+        op = SelectKeyColumns(columns=["region"])
+        out = op.process(two_key_stream)
         assert isinstance(out, StreamProtocol)
         assert out.producer is op
 
@@ -163,9 +163,9 @@ class TestOutputStreamLineage:
         assert isinstance(out, StreamProtocol)
         assert out.producer is op
 
-    def test_drop_tag_columns_producer(self, two_tag_stream):
-        op = DropTagColumns(columns=["region"])
-        out = op.process(two_tag_stream)
+    def test_drop_key_columns_producer(self, two_key_stream):
+        op = DropKeyColumns(columns=["region"])
+        out = op.process(two_key_stream)
         assert isinstance(out, StreamProtocol)
         assert out.producer is op
 
@@ -181,9 +181,9 @@ class TestOutputStreamLineage:
         assert isinstance(out, StreamProtocol)
         assert out.producer is op
 
-    def test_map_tags_producer(self, two_tag_stream):
-        op = MapTags(name_map={"region": "area"})
-        out = op.process(two_tag_stream)
+    def test_map_keys_producer(self, two_key_stream):
+        op = MapKeys(name_map={"region": "area"})
+        out = op.process(two_key_stream)
         assert isinstance(out, StreamProtocol)
         assert out.producer is op
 
@@ -244,8 +244,8 @@ class TestInputValidation:
         with pytest.raises(Exception):
             op.process(simple_stream)
 
-    def test_select_tag_strict_rejects_missing(self, simple_stream):
-        op = SelectTagColumns(columns=["nonexistent"], strict=True)
+    def test_select_key_strict_rejects_missing(self, simple_stream):
+        op = SelectKeyColumns(columns=["nonexistent"], strict=True)
         with pytest.raises(Exception):
             op.process(simple_stream)
 
@@ -254,8 +254,8 @@ class TestInputValidation:
         with pytest.raises(Exception):
             op.process(simple_stream)
 
-    def test_drop_tag_strict_rejects_missing(self, simple_stream):
-        op = DropTagColumns(columns=["nonexistent"], strict=True)
+    def test_drop_key_strict_rejects_missing(self, simple_stream):
+        op = DropKeyColumns(columns=["nonexistent"], strict=True)
         with pytest.raises(Exception):
             op.process(simple_stream)
 
@@ -281,27 +281,27 @@ class TestPolarsFilterBehavior:
 
     def test_filter_preserves_schema(self, simple_stream):
         op = PolarsFilter(constraints={"legs": 4})
-        tag_schema, data_schema = op.output_schema(simple_stream)
-        orig_tag, orig_pkt = simple_stream.output_schema()
-        assert set(tag_schema.keys()) == set(orig_tag.keys())
+        key_schema, data_schema = op.output_schema(simple_stream)
+        orig_key, orig_pkt = simple_stream.output_schema()
+        assert set(key_schema.keys()) == set(orig_key.keys())
         assert set(data_schema.keys()) == set(orig_pkt.keys())
 
 
-class TestSelectTagColumnsBehavior:
-    def test_keeps_only_selected_tags(self, two_tag_stream):
-        op = SelectTagColumns(columns=["region"])
-        out = op.process(two_tag_stream)
-        tag_keys, pkt_keys = out.keys()
-        assert "region" in tag_keys
-        assert "animal" not in tag_keys
+class TestSelectKeyColumnsBehavior:
+    def test_keeps_only_selected_keys(self, two_key_stream):
+        op = SelectKeyColumns(columns=["region"])
+        out = op.process(two_key_stream)
+        key_keys, pkt_keys = out.keys()
+        assert "region" in key_keys
+        assert "animal" not in key_keys
         # data columns unchanged
         assert "count" in pkt_keys
 
-    def test_output_schema_matches_result(self, two_tag_stream):
-        op = SelectTagColumns(columns=["region"])
-        tag_schema, pkt_schema = op.output_schema(two_tag_stream)
-        assert "region" in tag_schema
-        assert "animal" not in tag_schema
+    def test_output_schema_matches_result(self, two_key_stream):
+        op = SelectKeyColumns(columns=["region"])
+        key_schema, pkt_schema = op.output_schema(two_key_stream)
+        assert "region" in key_schema
+        assert "animal" not in key_schema
         assert "count" in pkt_schema
 
 
@@ -309,47 +309,47 @@ class TestSelectDataColumnsBehavior:
     def test_keeps_only_selected_data(self, simple_stream):
         op = SelectDataColumns(columns=["weight"])
         out = op.process(simple_stream)
-        tag_keys, pkt_keys = out.keys()
+        key_keys, pkt_keys = out.keys()
         assert pkt_keys == ("weight",)
         assert "legs" not in pkt_keys
-        # tag columns unchanged
-        assert "animal" in tag_keys
+        # key columns unchanged
+        assert "animal" in key_keys
 
     def test_output_schema_matches_result(self, simple_stream):
         op = SelectDataColumns(columns=["weight"])
-        tag_schema, pkt_schema = op.output_schema(simple_stream)
+        key_schema, pkt_schema = op.output_schema(simple_stream)
         assert "weight" in pkt_schema
         assert "legs" not in pkt_schema
 
 
-class TestDropTagColumnsBehavior:
-    def test_drops_specified_tags(self, two_tag_stream):
-        op = DropTagColumns(columns=["region"])
-        out = op.process(two_tag_stream)
-        tag_keys, pkt_keys = out.keys()
-        assert "region" not in tag_keys
-        assert "animal" in tag_keys
+class TestDropKeyColumnsBehavior:
+    def test_drops_specified_keys(self, two_key_stream):
+        op = DropKeyColumns(columns=["region"])
+        out = op.process(two_key_stream)
+        key_keys, pkt_keys = out.keys()
+        assert "region" not in key_keys
+        assert "animal" in key_keys
         assert "count" in pkt_keys
 
-    def test_output_schema_matches_result(self, two_tag_stream):
-        op = DropTagColumns(columns=["region"])
-        tag_schema, pkt_schema = op.output_schema(two_tag_stream)
-        assert "region" not in tag_schema
-        assert "animal" in tag_schema
+    def test_output_schema_matches_result(self, two_key_stream):
+        op = DropKeyColumns(columns=["region"])
+        key_schema, pkt_schema = op.output_schema(two_key_stream)
+        assert "region" not in key_schema
+        assert "animal" in key_schema
 
 
 class TestDropDataColumnsBehavior:
     def test_drops_specified_data(self, simple_stream):
         op = DropDataColumns(columns=["legs"])
         out = op.process(simple_stream)
-        tag_keys, pkt_keys = out.keys()
+        key_keys, pkt_keys = out.keys()
         assert "legs" not in pkt_keys
         assert "weight" in pkt_keys
-        assert "animal" in tag_keys
+        assert "animal" in key_keys
 
     def test_output_schema_matches_result(self, simple_stream):
         op = DropDataColumns(columns=["legs"])
-        tag_schema, pkt_schema = op.output_schema(simple_stream)
+        key_schema, pkt_schema = op.output_schema(simple_stream)
         assert "legs" not in pkt_schema
         assert "weight" in pkt_schema
 
@@ -358,7 +358,7 @@ class TestMapDataBehavior:
     def test_renames_data_column(self, simple_stream):
         op = MapData(name_map={"weight": "mass"})
         out = op.process(simple_stream)
-        tag_keys, pkt_keys = out.keys()
+        key_keys, pkt_keys = out.keys()
         assert "mass" in pkt_keys
         assert "weight" not in pkt_keys
         # data preserved
@@ -367,7 +367,7 @@ class TestMapDataBehavior:
 
     def test_output_schema_reflects_rename(self, simple_stream):
         op = MapData(name_map={"weight": "mass"})
-        tag_schema, pkt_schema = op.output_schema(simple_stream)
+        key_schema, pkt_schema = op.output_schema(simple_stream)
         assert "mass" in pkt_schema
         assert "weight" not in pkt_schema
 
@@ -377,27 +377,27 @@ class TestMapDataBehavior:
             op.process(simple_stream)
 
 
-class TestMapTagsBehavior:
-    def test_renames_tag_column(self, two_tag_stream):
-        op = MapTags(name_map={"region": "area"})
-        out = op.process(two_tag_stream)
-        tag_keys, pkt_keys = out.keys()
-        assert "area" in tag_keys
-        assert "region" not in tag_keys
+class TestMapKeysBehavior:
+    def test_renames_key_column(self, two_key_stream):
+        op = MapKeys(name_map={"region": "area"})
+        out = op.process(two_key_stream)
+        key_keys, pkt_keys = out.keys()
+        assert "area" in key_keys
+        assert "region" not in key_keys
         # data preserved
         result = out.as_table()
         assert set(result.column("area").to_pylist()) == {"east", "west"}
 
-    def test_output_schema_reflects_rename(self, two_tag_stream):
-        op = MapTags(name_map={"region": "area"})
-        tag_schema, pkt_schema = op.output_schema(two_tag_stream)
-        assert "area" in tag_schema
-        assert "region" not in tag_schema
+    def test_output_schema_reflects_rename(self, two_key_stream):
+        op = MapKeys(name_map={"region": "area"})
+        key_schema, pkt_schema = op.output_schema(two_key_stream)
+        assert "area" in key_schema
+        assert "region" not in key_schema
 
-    def test_collision_with_existing_tag_raises(self, two_tag_stream):
-        op = MapTags(name_map={"region": "animal"})
+    def test_collision_with_existing_key_raises(self, two_key_stream):
+        op = MapKeys(name_map={"region": "animal"})
         with pytest.raises(Exception):
-            op.process(two_tag_stream)
+            op.process(two_key_stream)
 
 
 class TestBatchBehavior:
@@ -435,11 +435,11 @@ class TestBatchBehavior:
 
 
 class TestJoinBehavior:
-    def test_join_combines_streams_on_shared_tags(self, simple_stream, disjoint_stream):
+    def test_join_combines_streams_on_shared_keys(self, simple_stream, disjoint_stream):
         op = Join()
         out = op.process(simple_stream, disjoint_stream)
         result = out.as_table()
-        # Both have 3 rows with same "animal" tags → inner join → 3 rows
+        # Both have 3 rows with same "animal" keys → inner join → 3 rows
         assert len(result) == 3
         # All columns present
         col_names = set(result.column_names)
@@ -454,8 +454,8 @@ class TestJoinBehavior:
 
     def test_join_output_schema(self, simple_stream, disjoint_stream):
         op = Join()
-        tag_schema, pkt_schema = op.output_schema(simple_stream, disjoint_stream)
-        assert "animal" in tag_schema
+        key_schema, pkt_schema = op.output_schema(simple_stream, disjoint_stream)
+        assert "animal" in key_schema
         assert "weight" in pkt_schema
         assert "speed" in pkt_schema
 
@@ -471,7 +471,7 @@ class TestJoinMetaColumnCollision:
     with stream-index-based suffixes (e.g. ``__computed_1``, ``__computed_2``)."""
 
     def _make_stream(self, id_vals, pkt_col, pkt_vals, meta_val):
-        """Helper: stream with shared tag 'id', one data column, and ``__computed``."""
+        """Helper: stream with shared key 'id', one data column, and ``__computed``."""
         table = pa.table(
             {
                 "id": pa.array(id_vals, type=pa.int64()),
@@ -479,7 +479,7 @@ class TestJoinMetaColumnCollision:
                 "__computed": pa.array([meta_val] * len(id_vals), type=pa.bool_()),
             }
         )
-        return ArrowTableStream(table, tag_columns=["id"])
+        return ArrowTableStream(table, key_columns=["id"])
 
     def test_three_way_join_with_shared_meta_column_succeeds(self):
         """Three streams each carrying ``__computed`` should join without DuplicateError."""
@@ -509,11 +509,11 @@ class TestJoinMetaColumnCollision:
         assert "__computed_2" in col_names
 
 
-class TestJoinOutputSchemaSystemTags:
-    """Verify that Join.output_schema correctly predicts system tag columns."""
+class TestJoinOutputSchemaSystemKeys:
+    """Verify that Join.output_schema correctly predicts system key columns."""
 
-    def test_output_schema_excludes_system_tags_by_default(self):
-        """Without system_tags=True, no system tag columns in tag schema."""
+    def test_output_schema_excludes_system_keys_by_default(self):
+        """Without system_keys=True, no system key columns in key schema."""
         from orcapod.core.sources.arrow_table_source import ArrowTableSource
         from orcapod.system_constants import constants
 
@@ -524,7 +524,7 @@ class TestJoinOutputSchemaSystemTags:
                     "alpha": pa.array([10, 20], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -534,18 +534,18 @@ class TestJoinOutputSchemaSystemTags:
                     "beta": pa.array([100, 200], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
 
         op = Join()
-        tag_schema, _ = op.output_schema(src_a, src_b)
+        key_schema, _ = op.output_schema(src_a, src_b)
 
-        for key in tag_schema:
-            assert not key.startswith(constants.SYSTEM_TAG_PREFIX)
+        for key in key_schema:
+            assert not key.startswith(constants.SYSTEM_KEY_PREFIX)
 
-    def test_output_schema_includes_system_tags_when_requested(self):
-        """With system_tags=True, tag schema should include system tag columns."""
+    def test_output_schema_includes_system_keys_when_requested(self):
+        """With system_keys=True, key schema should include system key columns."""
         from orcapod.core.sources.arrow_table_source import ArrowTableSource
         from orcapod.system_constants import constants
 
@@ -556,7 +556,7 @@ class TestJoinOutputSchemaSystemTags:
                     "alpha": pa.array([10, 20], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -566,20 +566,20 @@ class TestJoinOutputSchemaSystemTags:
                     "beta": pa.array([100, 200], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
 
         op = Join()
-        tag_schema, _ = op.output_schema(src_a, src_b, columns={"system_tags": True})
+        key_schema, _ = op.output_schema(src_a, src_b, columns={"system_keys": True})
 
-        sys_tag_keys = [
-            k for k in tag_schema if k.startswith(constants.SYSTEM_TAG_PREFIX)
+        sys_key_keys = [
+            k for k in key_schema if k.startswith(constants.SYSTEM_KEY_PREFIX)
         ]
-        assert len(sys_tag_keys) == 4  # 2 sources × 2 fields (source_id + record_id)
+        assert len(sys_key_keys) == 4  # 2 sources × 2 fields (source_id + record_id)
 
-    def test_output_schema_system_tags_match_actual_output(self):
-        """Predicted system tag column names must match the actual result."""
+    def test_output_schema_system_keys_match_actual_output(self):
+        """Predicted system key column names must match the actual result."""
         from orcapod.core.sources.arrow_table_source import ArrowTableSource
         from orcapod.system_constants import constants
 
@@ -590,7 +590,7 @@ class TestJoinOutputSchemaSystemTags:
                     "alpha": pa.array([10, 20], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -600,31 +600,31 @@ class TestJoinOutputSchemaSystemTags:
                     "beta": pa.array([100, 200], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
 
         op = Join()
 
         # Predicted
-        tag_schema, _ = op.output_schema(src_a, src_b, columns={"system_tags": True})
+        key_schema, _ = op.output_schema(src_a, src_b, columns={"system_keys": True})
         predicted = sorted(
-            k for k in tag_schema if k.startswith(constants.SYSTEM_TAG_PREFIX)
+            k for k in key_schema if k.startswith(constants.SYSTEM_KEY_PREFIX)
         )
 
         # Actual
         result = op.static_process(src_a, src_b)
-        result_table = result.as_table(columns={"system_tags": True})
+        result_table = result.as_table(columns={"system_keys": True})
         actual = sorted(
             c
             for c in result_table.column_names
-            if c.startswith(constants.SYSTEM_TAG_PREFIX)
+            if c.startswith(constants.SYSTEM_KEY_PREFIX)
         )
 
         assert predicted == actual
 
-    def test_output_schema_system_tags_three_way_join(self):
-        """Three-way join should predict 3 system tag columns."""
+    def test_output_schema_system_keys_three_way_join(self):
+        """Three-way join should predict 3 system key columns."""
         from orcapod.core.sources.arrow_table_source import ArrowTableSource
         from orcapod.system_constants import constants
 
@@ -635,7 +635,7 @@ class TestJoinOutputSchemaSystemTags:
                     "alpha": pa.array([10, 20], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -645,7 +645,7 @@ class TestJoinOutputSchemaSystemTags:
                     "beta": pa.array([100, 200], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         src_c = ArrowTableSource(
@@ -655,43 +655,43 @@ class TestJoinOutputSchemaSystemTags:
                     "gamma": pa.array([1000, 2000], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
 
         op = Join()
 
         # Predicted
-        tag_schema, _ = op.output_schema(
-            src_a, src_b, src_c, columns={"system_tags": True}
+        key_schema, _ = op.output_schema(
+            src_a, src_b, src_c, columns={"system_keys": True}
         )
         predicted = sorted(
-            k for k in tag_schema if k.startswith(constants.SYSTEM_TAG_PREFIX)
+            k for k in key_schema if k.startswith(constants.SYSTEM_KEY_PREFIX)
         )
 
         # Actual
         result = op.static_process(src_a, src_b, src_c)
         actual = sorted(
             c
-            for c in result.as_table(columns={"system_tags": True}).column_names
-            if c.startswith(constants.SYSTEM_TAG_PREFIX)
+            for c in result.as_table(columns={"system_keys": True}).column_names
+            if c.startswith(constants.SYSTEM_KEY_PREFIX)
         )
 
         assert len(predicted) == 6  # 3 sources × 2 fields
         assert predicted == actual
 
     def test_output_schema_single_stream_passthrough(self, simple_stream):
-        """Single stream should pass through output_schema including system_tags."""
+        """Single stream should pass through output_schema including system_keys."""
         op = Join()
         result_default = op.output_schema(simple_stream)
-        result_sys = op.output_schema(simple_stream, columns={"system_tags": True})
+        result_sys = op.output_schema(simple_stream, columns={"system_keys": True})
         # Single stream delegates to stream's output_schema
         assert result_default == simple_stream.output_schema()
-        assert result_sys == simple_stream.output_schema(columns={"system_tags": True})
+        assert result_sys == simple_stream.output_schema(columns={"system_keys": True})
 
     def test_predicted_schema_matches_result_stream_schema(self):
         """Operator's predicted output_schema must equal the result stream's
-        output_schema — both tag and data schemas, without system tags."""
+        output_schema — both key and data schemas, without system keys."""
         from orcapod.core.sources.arrow_table_source import ArrowTableSource
 
         src_a = ArrowTableSource(
@@ -701,7 +701,7 @@ class TestJoinOutputSchemaSystemTags:
                     "alpha": pa.array([10, 20], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -711,22 +711,22 @@ class TestJoinOutputSchemaSystemTags:
                     "beta": pa.array([100, 200], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
 
         op = Join()
 
-        predicted_tag, predicted_pkt = op.output_schema(src_a, src_b)
+        predicted_key, predicted_pkt = op.output_schema(src_a, src_b)
         result = op.static_process(src_a, src_b)
-        actual_tag, actual_pkt = result.output_schema()
+        actual_key, actual_pkt = result.output_schema()
 
-        assert dict(predicted_tag) == dict(actual_tag)
+        assert dict(predicted_key) == dict(actual_key)
         assert dict(predicted_pkt) == dict(actual_pkt)
 
-    def test_predicted_schema_matches_result_stream_schema_with_system_tags(self):
-        """Operator's predicted output_schema(system_tags=True) must equal
-        the result stream's output_schema(system_tags=True)."""
+    def test_predicted_schema_matches_result_stream_schema_with_system_keys(self):
+        """Operator's predicted output_schema(system_keys=True) must equal
+        the result stream's output_schema(system_keys=True)."""
         from orcapod.core.sources.arrow_table_source import ArrowTableSource
 
         src_a = ArrowTableSource(
@@ -736,7 +736,7 @@ class TestJoinOutputSchemaSystemTags:
                     "alpha": pa.array([10, 20], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -746,19 +746,19 @@ class TestJoinOutputSchemaSystemTags:
                     "beta": pa.array([100, 200], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
 
         op = Join()
 
-        predicted_tag, predicted_pkt = op.output_schema(
-            src_a, src_b, columns={"system_tags": True}
+        predicted_key, predicted_pkt = op.output_schema(
+            src_a, src_b, columns={"system_keys": True}
         )
         result = op.static_process(src_a, src_b)
-        actual_tag, actual_pkt = result.output_schema(columns={"system_tags": True})
+        actual_key, actual_pkt = result.output_schema(columns={"system_keys": True})
 
-        assert dict(predicted_tag) == dict(actual_tag)
+        assert dict(predicted_key) == dict(actual_key)
         assert dict(predicted_pkt) == dict(actual_pkt)
 
 
@@ -773,9 +773,9 @@ class TestSemiJoinBehavior:
 
     def test_semijoin_preserves_left_schema(self, left_stream, right_stream):
         op = SemiJoin()
-        tag_schema, pkt_schema = op.output_schema(left_stream, right_stream)
-        left_tag, left_pkt = left_stream.output_schema()
-        assert set(tag_schema.keys()) == set(left_tag.keys())
+        key_schema, pkt_schema = op.output_schema(left_stream, right_stream)
+        left_key, left_pkt = left_stream.output_schema()
+        assert set(key_schema.keys()) == set(left_key.keys())
         assert set(pkt_schema.keys()) == set(left_pkt.keys())
 
     def test_semijoin_is_not_commutative(self, left_stream, right_stream):
@@ -797,9 +797,9 @@ class TestIdentityStructure:
         b = PolarsFilter(constraints={"x": 2})
         assert a.content_hash() != b.content_hash()
 
-    def test_select_tag_columns_different_params_different_hash(self):
-        a = SelectTagColumns(columns=["x"])
-        b = SelectTagColumns(columns=["y"])
+    def test_select_key_columns_different_params_different_hash(self):
+        a = SelectKeyColumns(columns=["x"])
+        b = SelectKeyColumns(columns=["y"])
         assert a.content_hash() != b.content_hash()
 
     def test_select_data_columns_different_params_different_hash(self):
@@ -807,9 +807,9 @@ class TestIdentityStructure:
         b = SelectDataColumns(columns=["y"])
         assert a.content_hash() != b.content_hash()
 
-    def test_drop_tag_columns_different_params_different_hash(self):
-        a = DropTagColumns(columns=["x"])
-        b = DropTagColumns(columns=["y"])
+    def test_drop_key_columns_different_params_different_hash(self):
+        a = DropKeyColumns(columns=["x"])
+        b = DropKeyColumns(columns=["y"])
         assert a.content_hash() != b.content_hash()
 
     def test_drop_data_columns_different_params_different_hash(self):
@@ -822,9 +822,9 @@ class TestIdentityStructure:
         b = MapData(name_map={"a": "c"})
         assert a.content_hash() != b.content_hash()
 
-    def test_map_tags_different_params_different_hash(self):
-        a = MapTags(name_map={"a": "b"})
-        b = MapTags(name_map={"a": "c"})
+    def test_map_keys_different_params_different_hash(self):
+        a = MapKeys(name_map={"a": "b"})
+        b = MapKeys(name_map={"a": "c"})
         assert a.content_hash() != b.content_hash()
 
     def test_batch_different_params_different_hash(self):
@@ -854,11 +854,11 @@ class TestArgumentSymmetryType:
         assert isinstance(sym, tuple)
         assert sym == (simple_stream,)
 
-    def test_select_tag_columns_argument_symmetry(self, two_tag_stream):
-        op = SelectTagColumns(columns=["region"])
-        sym = op.argument_symmetry([two_tag_stream])
+    def test_select_key_columns_argument_symmetry(self, two_key_stream):
+        op = SelectKeyColumns(columns=["region"])
+        sym = op.argument_symmetry([two_key_stream])
         assert isinstance(sym, tuple)
-        assert sym == (two_tag_stream,)
+        assert sym == (two_key_stream,)
 
     def test_select_data_columns_argument_symmetry(self, simple_stream):
         op = SelectDataColumns(columns=["weight"])
@@ -866,11 +866,11 @@ class TestArgumentSymmetryType:
         assert isinstance(sym, tuple)
         assert sym == (simple_stream,)
 
-    def test_drop_tag_columns_argument_symmetry(self, two_tag_stream):
-        op = DropTagColumns(columns=["region"])
-        sym = op.argument_symmetry([two_tag_stream])
+    def test_drop_key_columns_argument_symmetry(self, two_key_stream):
+        op = DropKeyColumns(columns=["region"])
+        sym = op.argument_symmetry([two_key_stream])
         assert isinstance(sym, tuple)
-        assert sym == (two_tag_stream,)
+        assert sym == (two_key_stream,)
 
     def test_drop_data_columns_argument_symmetry(self, simple_stream):
         op = DropDataColumns(columns=["legs"])
@@ -884,11 +884,11 @@ class TestArgumentSymmetryType:
         assert isinstance(sym, tuple)
         assert sym == (simple_stream,)
 
-    def test_map_tags_argument_symmetry(self, two_tag_stream):
-        op = MapTags(name_map={"region": "area"})
-        sym = op.argument_symmetry([two_tag_stream])
+    def test_map_keys_argument_symmetry(self, two_key_stream):
+        op = MapKeys(name_map={"region": "area"})
+        sym = op.argument_symmetry([two_key_stream])
         assert isinstance(sym, tuple)
-        assert sym == (two_tag_stream,)
+        assert sym == (two_key_stream,)
 
     def test_batch_argument_symmetry(self, simple_stream):
         op = Batch(batch_size=2)
@@ -974,16 +974,16 @@ class TestArgumentSymmetryIdentity:
     def test_polars_filter_identity(self, simple_stream):
         self._check_unary_identity(PolarsFilter(), simple_stream)
 
-    def test_select_tag_columns_identity(self, two_tag_stream):
-        self._check_unary_identity(SelectTagColumns(columns=["region"]), two_tag_stream)
+    def test_select_key_columns_identity(self, two_key_stream):
+        self._check_unary_identity(SelectKeyColumns(columns=["region"]), two_key_stream)
 
     def test_select_data_columns_identity(self, simple_stream):
         self._check_unary_identity(
             SelectDataColumns(columns=["weight"]), simple_stream
         )
 
-    def test_drop_tag_columns_identity(self, two_tag_stream):
-        self._check_unary_identity(DropTagColumns(columns=["region"]), two_tag_stream)
+    def test_drop_key_columns_identity(self, two_key_stream):
+        self._check_unary_identity(DropKeyColumns(columns=["region"]), two_key_stream)
 
     def test_drop_data_columns_identity(self, simple_stream):
         self._check_unary_identity(DropDataColumns(columns=["legs"]), simple_stream)
@@ -993,8 +993,8 @@ class TestArgumentSymmetryIdentity:
             MapData(name_map={"weight": "mass"}), simple_stream
         )
 
-    def test_map_tags_identity(self, two_tag_stream):
-        self._check_unary_identity(MapTags(name_map={"region": "area"}), two_tag_stream)
+    def test_map_keys_identity(self, two_key_stream):
+        self._check_unary_identity(MapKeys(name_map={"region": "area"}), two_key_stream)
 
     def test_batch_identity(self, simple_stream):
         self._check_unary_identity(Batch(batch_size=2), simple_stream)
@@ -1073,20 +1073,20 @@ class TestArgumentSymmetryIdentity:
 
 
 # ---------------------------------------------------------------------------
-# System Tag Name-Extension Tests
+# System Key Name-Extension Tests
 # ---------------------------------------------------------------------------
 
 
-class TestJoinSystemTagNameExtension:
-    """Verify that Join uses pipeline_hash (structure-only) for system tag
+class TestJoinSystemKeyNameExtension:
+    """Verify that Join uses pipeline_hash (structure-only) for system key
     name-extension, not content_hash (data-inclusive).
 
-    Uses ArrowTableSource to ensure system tag columns are present (raw
-    ArrowTableStream has no system tags)."""
+    Uses ArrowTableSource to ensure system key columns are present (raw
+    ArrowTableStream has no system keys)."""
 
-    def test_same_schema_different_data_produces_same_system_tag_names(self):
+    def test_same_schema_different_data_produces_same_system_key_names(self):
         """Two sources with same schema but different data should produce
-        the same system tag column names after Join, because system tag
+        the same system key column names after Join, because system key
         name-extension uses pipeline_hash (structure-only)."""
         from orcapod.core.sources.arrow_table_source import ArrowTableSource
         from orcapod.system_constants import constants
@@ -1098,7 +1098,7 @@ class TestJoinSystemTagNameExtension:
                     "value_a": pa.array([10, 20], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         src_left2 = ArrowTableSource(
@@ -1108,7 +1108,7 @@ class TestJoinSystemTagNameExtension:
                     "value_a": pa.array([100, 200], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         src_right = ArrowTableSource(
@@ -1118,7 +1118,7 @@ class TestJoinSystemTagNameExtension:
                     "value_b": pa.array([30, 40], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
 
@@ -1126,27 +1126,27 @@ class TestJoinSystemTagNameExtension:
         result1 = op.static_process(src_left1, src_right)
         result2 = op.static_process(src_left2, src_right)
 
-        result1_table = result1.as_table(columns={"system_tags": True})
-        result2_table = result2.as_table(columns={"system_tags": True})
+        result1_table = result1.as_table(columns={"system_keys": True})
+        result2_table = result2.as_table(columns={"system_keys": True})
 
         sys_cols_1 = sorted(
             c
             for c in result1_table.column_names
-            if c.startswith(constants.SYSTEM_TAG_PREFIX)
+            if c.startswith(constants.SYSTEM_KEY_PREFIX)
         )
         sys_cols_2 = sorted(
             c
             for c in result2_table.column_names
-            if c.startswith(constants.SYSTEM_TAG_PREFIX)
+            if c.startswith(constants.SYSTEM_KEY_PREFIX)
         )
 
         # Column names should be identical (structure-only hashing)
-        assert len(sys_cols_1) > 0, "Expected system tag columns to be present"
+        assert len(sys_cols_1) > 0, "Expected system key columns to be present"
         assert sys_cols_1 == sys_cols_2
 
-    def test_different_schema_produces_different_system_tag_names(self):
+    def test_different_schema_produces_different_system_key_names(self):
         """Two sources with different data schemas should produce different
-        system tag column names after Join."""
+        system key column names after Join."""
         from orcapod.core.sources.arrow_table_source import ArrowTableSource
         from orcapod.system_constants import constants
 
@@ -1157,7 +1157,7 @@ class TestJoinSystemTagNameExtension:
                     "value_a": pa.array([10, 20], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         src_right_int = ArrowTableSource(
@@ -1167,7 +1167,7 @@ class TestJoinSystemTagNameExtension:
                     "value_b": pa.array([30, 40], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         src_right_str = ArrowTableSource(
@@ -1177,7 +1177,7 @@ class TestJoinSystemTagNameExtension:
                     "value_c": pa.array(["a", "b"]),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
 
@@ -1185,32 +1185,32 @@ class TestJoinSystemTagNameExtension:
         result1 = op.static_process(src_left, src_right_int)
         result2 = op.static_process(src_left, src_right_str)
 
-        result1_table = result1.as_table(columns={"system_tags": True})
-        result2_table = result2.as_table(columns={"system_tags": True})
+        result1_table = result1.as_table(columns={"system_keys": True})
+        result2_table = result2.as_table(columns={"system_keys": True})
 
         sys_cols_1 = sorted(
             c
             for c in result1_table.column_names
-            if c.startswith(constants.SYSTEM_TAG_PREFIX)
+            if c.startswith(constants.SYSTEM_KEY_PREFIX)
         )
         sys_cols_2 = sorted(
             c
             for c in result2_table.column_names
-            if c.startswith(constants.SYSTEM_TAG_PREFIX)
+            if c.startswith(constants.SYSTEM_KEY_PREFIX)
         )
 
         # Column names should differ (different pipeline structures)
-        assert len(sys_cols_1) > 0, "Expected system tag columns to be present"
+        assert len(sys_cols_1) > 0, "Expected system key columns to be present"
         assert sys_cols_1 != sys_cols_2
 
 
-class TestSourceSystemTagSchemaHash:
-    """Verify that source system tag column name uses a hash consistent
+class TestSourceSystemKeySchemaHash:
+    """Verify that source system key column name uses a hash consistent
     with the source's pipeline_hash."""
 
     def test_source_schema_hash_matches_pipeline_hash(self):
         """ArrowTableSource._schema_hash should match the truncated
-        pipeline_hash, since both hash (tag_schema, data_schema)."""
+        pipeline_hash, since both hash (key_schema, data_schema)."""
         from orcapod.core.sources.arrow_table_source import ArrowTableSource
 
         table = pa.table(
@@ -1219,20 +1219,20 @@ class TestSourceSystemTagSchemaHash:
                 "x": pa.array([10, 20, 30], type=pa.int64()),
             }
         )
-        source = ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
+        source = ArrowTableSource(table, key_columns=["id"], infer_nullable=True)
         schema_hash = source._schema_hash
         pipeline_hash_hex = source.pipeline_hash().to_hex(char_count=len(schema_hash))
         assert schema_hash == pipeline_hash_hex
 
 
-class TestJoinSystemTagCanonicalOrdering:
+class TestJoinSystemKeyCanonicalOrdering:
     """Verify that Join canonically orders streams by pipeline_hash,
-    and that the resulting system tag columns reflect this ordering
+    and that the resulting system key columns reflect this ordering
     with canonical position indices (0, 1, 2, ...)."""
 
     @pytest.fixture
     def three_sources(self):
-        """Three ArrowTableSources with distinct data schemas sharing tag 'id'."""
+        """Three ArrowTableSources with distinct data schemas sharing key 'id'."""
         from orcapod.core.sources.arrow_table_source import ArrowTableSource
 
         src_a = ArrowTableSource(
@@ -1242,7 +1242,7 @@ class TestJoinSystemTagCanonicalOrdering:
                     "alpha": pa.array([10, 20], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -1252,7 +1252,7 @@ class TestJoinSystemTagCanonicalOrdering:
                     "beta": pa.array([100, 200], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         src_c = ArrowTableSource(
@@ -1262,30 +1262,30 @@ class TestJoinSystemTagCanonicalOrdering:
                     "gamma": pa.array([1000, 2000], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         return src_a, src_b, src_c
 
     @staticmethod
-    def _get_system_tag_columns(table, constants):
-        """Extract system tag column names in their natural table order."""
+    def _get_system_key_columns(table, constants):
+        """Extract system key column names in their natural table order."""
         return [
-            c for c in table.column_names if c.startswith(constants.SYSTEM_TAG_PREFIX)
+            c for c in table.column_names if c.startswith(constants.SYSTEM_KEY_PREFIX)
         ]
 
     @staticmethod
-    def _parse_system_tag_column(col, constants):
-        """Parse a system tag column name into (field_type, schema_hash, stream_hash, index).
+    def _parse_system_key_column(col, constants):
+        """Parse a system key column name into (field_type, schema_hash, stream_hash, index).
 
         Column format after join::
 
-            _tag_{field_type}::{schema_hash}::{stream_hash}:{canonical_index}
+            _key_{field_type}::{schema_hash}::{stream_hash}:{canonical_index}
 
         Blocks are separated by ``::`` (block separator).
         Fields within a block are separated by ``:`` (field separator).
         """
-        after_prefix = col[len(constants.SYSTEM_TAG_PREFIX) :]
+        after_prefix = col[len(constants.SYSTEM_KEY_PREFIX) :]
         blocks = after_prefix.split(constants.BLOCK_SEPARATOR)
         field_type = blocks[0]
         schema_hash = blocks[1]
@@ -1294,18 +1294,18 @@ class TestJoinSystemTagCanonicalOrdering:
         index = join_block_fields[1]
         return field_type, schema_hash, stream_hash, index
 
-    def test_three_way_join_produces_six_system_tag_columns(self, three_sources):
+    def test_three_way_join_produces_six_system_key_columns(self, three_sources):
         from orcapod.system_constants import constants
 
         src_a, src_b, src_c = three_sources
         op = Join()
         result = op.static_process(src_a, src_b, src_c)
-        result_table = result.as_table(columns={"system_tags": True})
-        sys_cols = self._get_system_tag_columns(result_table, constants)
+        result_table = result.as_table(columns={"system_keys": True})
+        sys_cols = self._get_system_key_columns(result_table, constants)
         assert len(sys_cols) == 6  # 3 sources × 2 fields (source_id + record_id)
 
-    def test_system_tag_position_maps_to_correct_source(self, three_sources):
-        """Each system tag column should carry the canonical position index
+    def test_system_key_position_maps_to_correct_source(self, three_sources):
+        """Each system key column should carry the canonical position index
         matching the source's rank when sorted by pipeline_hash.
 
         Independently sorts sources by pipeline_hash to determine expected
@@ -1317,7 +1317,7 @@ class TestJoinSystemTagCanonicalOrdering:
         from orcapod.system_constants import constants
 
         src_a, src_b, src_c = three_sources
-        n_char = Config().system_tag_hash_n_char
+        n_char = Config().system_key_hash_n_char
 
         # Independently determine expected position → source mapping
         sources = [src_a, src_b, src_c]
@@ -1325,18 +1325,18 @@ class TestJoinSystemTagCanonicalOrdering:
 
         op = Join()
         result = op.static_process(src_a, src_b, src_c)
-        result_table = result.as_table(columns={"system_tags": True})
-        sys_cols = self._get_system_tag_columns(result_table, constants)
+        result_table = result.as_table(columns={"system_keys": True})
+        sys_cols = self._get_system_key_columns(result_table, constants)
 
         # Filter to source_id columns for position checking
         sid_cols = [
-            c for c in sys_cols if c.startswith(constants.SYSTEM_TAG_SOURCE_ID_PREFIX)
+            c for c in sys_cols if c.startswith(constants.SYSTEM_KEY_SOURCE_ID_PREFIX)
         ]
         assert len(sid_cols) == 3
 
         for expected_idx, expected_source in enumerate(sorted_sources):
             field_type, schema_hash, stream_hash, index_str = (
-                self._parse_system_tag_column(sid_cols[expected_idx], constants)
+                self._parse_system_key_column(sid_cols[expected_idx], constants)
             )
             # The schema_hash identifies the originating source
             assert schema_hash == expected_source._schema_hash, (
@@ -1355,9 +1355,9 @@ class TestJoinSystemTagCanonicalOrdering:
                 f"got {index_str!r}"
             )
 
-    def test_swapped_input_order_produces_identical_system_tags(self, three_sources):
+    def test_swapped_input_order_produces_identical_system_keys(self, three_sources):
         """Join is commutative — any permutation of inputs should produce
-        the same system tag column names in the same order."""
+        the same system key column names in the same order."""
         from orcapod.system_constants import constants
 
         src_a, src_b, src_c = three_sources
@@ -1367,29 +1367,29 @@ class TestJoinSystemTagCanonicalOrdering:
         result_cab = op.static_process(src_c, src_a, src_b)
         result_bca = op.static_process(src_b, src_c, src_a)
 
-        sys_abc = self._get_system_tag_columns(
-            result_abc.as_table(columns={"system_tags": True}), constants
+        sys_abc = self._get_system_key_columns(
+            result_abc.as_table(columns={"system_keys": True}), constants
         )
-        sys_cab = self._get_system_tag_columns(
-            result_cab.as_table(columns={"system_tags": True}), constants
+        sys_cab = self._get_system_key_columns(
+            result_cab.as_table(columns={"system_keys": True}), constants
         )
-        sys_bca = self._get_system_tag_columns(
-            result_bca.as_table(columns={"system_tags": True}), constants
+        sys_bca = self._get_system_key_columns(
+            result_bca.as_table(columns={"system_keys": True}), constants
         )
 
         assert sys_abc == sys_cab
         assert sys_abc == sys_bca
 
-    def test_system_tag_values_are_per_row_source_provenance(self, three_sources):
-        """System tag column values should reflect the source provenance.
+    def test_system_key_values_are_per_row_source_provenance(self, three_sources):
+        """System key column values should reflect the source provenance.
         source_id columns contain the source_id, record_id columns contain the record_id."""
         from orcapod.system_constants import constants
 
         src_a, src_b, src_c = three_sources
         op = Join()
         result = op.static_process(src_a, src_b, src_c)
-        result_table = result.as_table(columns={"system_tags": True})
-        sys_cols = self._get_system_tag_columns(result_table, constants)
+        result_table = result.as_table(columns={"system_keys": True})
+        sys_cols = self._get_system_key_columns(result_table, constants)
 
         for col in sys_cols:
             values = result_table.column(col).to_pylist()
@@ -1401,9 +1401,9 @@ class TestJoinSystemTagCanonicalOrdering:
     def test_intermediate_operators_produce_different_stream_hash(self):
         """When sources pass through intermediate operators before Join,
         the schema_hash (from origin source) and stream_hash (from the
-        operator output) should differ in the system tag column name.
+        operator output) should differ in the system key column name.
 
-        Column format: _tag_{field_type}::{schema_hash}::{stream_hash}:{index}
+        Column format: _key_{field_type}::{schema_hash}::{stream_hash}:{index}
 
         With an intermediate MapData, stream_hash comes from the
         DynamicPodStream which has a different pipeline_hash than the
@@ -1412,7 +1412,7 @@ class TestJoinSystemTagCanonicalOrdering:
         from orcapod.core.sources.arrow_table_source import ArrowTableSource
         from orcapod.system_constants import constants
 
-        n_char = Config().system_tag_hash_n_char
+        n_char = Config().system_key_hash_n_char
 
         src_a = ArrowTableSource(
             pa.table(
@@ -1421,7 +1421,7 @@ class TestJoinSystemTagCanonicalOrdering:
                     "alpha": pa.array([10, 20], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         src_b = ArrowTableSource(
@@ -1431,7 +1431,7 @@ class TestJoinSystemTagCanonicalOrdering:
                     "beta": pa.array([100, 200], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         src_c = ArrowTableSource(
@@ -1441,7 +1441,7 @@ class TestJoinSystemTagCanonicalOrdering:
                     "gamma": pa.array([1000, 2000], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
 
@@ -1462,14 +1462,14 @@ class TestJoinSystemTagCanonicalOrdering:
         # Join the intermediate streams
         op = Join()
         result = op.static_process(stream_a, stream_b, stream_c)
-        result_table = result.as_table(columns={"system_tags": True})
-        sys_cols = self._get_system_tag_columns(result_table, constants)
+        result_table = result.as_table(columns={"system_keys": True})
+        sys_cols = self._get_system_key_columns(result_table, constants)
 
         assert len(sys_cols) == 6  # 3 sources × 2 fields
 
         # Filter to source_id columns for position checking
         sid_cols = [
-            c for c in sys_cols if c.startswith(constants.SYSTEM_TAG_SOURCE_ID_PREFIX)
+            c for c in sys_cols if c.startswith(constants.SYSTEM_KEY_SOURCE_ID_PREFIX)
         ]
         assert len(sid_cols) == 3
 
@@ -1484,7 +1484,7 @@ class TestJoinSystemTagCanonicalOrdering:
         for expected_idx, expected_stream in enumerate(sorted_streams):
             expected_source = stream_to_source[expected_stream]
             field_type, schema_hash, stream_hash, index_str = (
-                self._parse_system_tag_column(sid_cols[expected_idx], constants)
+                self._parse_system_key_column(sid_cols[expected_idx], constants)
             )
 
             # schema_hash should match the original source's schema_hash
@@ -1512,22 +1512,22 @@ class TestJoinSystemTagCanonicalOrdering:
             assert index_str == str(expected_idx)
 
 
-class TestSortSystemTagValues:
-    """Tests for the sort_system_tag_values utility that ensures commutativity
-    by sorting paired (source_id, record_id) system tag values per row."""
+class TestSortSystemKeyValues:
+    """Tests for the sort_system_key_values utility that ensures commutativity
+    by sorting paired (source_id, record_id) system key values per row."""
 
     @staticmethod
     def _make_paired_cols(constants, provenance_path, position):
         """Build paired source_id/record_id column names for a given provenance path and position."""
-        sid = f"{constants.SYSTEM_TAG_SOURCE_ID_PREFIX}{constants.BLOCK_SEPARATOR}{provenance_path}{constants.FIELD_SEPARATOR}{position}"
-        rid = f"{constants.SYSTEM_TAG_RECORD_ID_PREFIX}{constants.BLOCK_SEPARATOR}{provenance_path}{constants.FIELD_SEPARATOR}{position}"
+        sid = f"{constants.SYSTEM_KEY_SOURCE_ID_PREFIX}{constants.BLOCK_SEPARATOR}{provenance_path}{constants.FIELD_SEPARATOR}{position}"
+        rid = f"{constants.SYSTEM_KEY_RECORD_ID_PREFIX}{constants.BLOCK_SEPARATOR}{provenance_path}{constants.FIELD_SEPARATOR}{position}"
         return sid, rid
 
     def test_sorts_paired_values_across_same_provenance_path(self):
         """Paired (source_id, record_id) columns sharing a provenance path
         should have their values sorted per row by (source_id, record_id) tuples."""
         from orcapod.system_constants import constants
-        from orcapod.utils.arrow_utils import sort_system_tag_values
+        from orcapod.utils.arrow_utils import sort_system_key_values
 
         sid_0, rid_0 = self._make_paired_cols(constants, "abc::ph123", "0")
         sid_1, rid_1 = self._make_paired_cols(constants, "abc::ph123", "1")
@@ -1542,7 +1542,7 @@ class TestSortSystemTagValues:
             }
         )
 
-        result = sort_system_tag_values(table)
+        result = sort_system_key_values(table)
 
         # After sorting by (source_id, record_id), position :0 should have the smaller tuple
         # Row 0: ("zzz_source", "row_0") vs ("aaa_source", "row_1") → sorted: aaa first
@@ -1560,7 +1560,7 @@ class TestSortSystemTagValues:
     def test_does_not_sort_different_provenance_paths(self):
         """Columns with different provenance paths should NOT have their values sorted."""
         from orcapod.system_constants import constants
-        from orcapod.utils.arrow_utils import sort_system_tag_values
+        from orcapod.utils.arrow_utils import sort_system_key_values
 
         # Two different provenance paths (different pipeline hashes)
         sid_a, rid_a = self._make_paired_cols(constants, "abc::ph_AAA", "0")
@@ -1576,7 +1576,7 @@ class TestSortSystemTagValues:
             }
         )
 
-        result = sort_system_tag_values(table)
+        result = sort_system_key_values(table)
 
         # Values should be untouched since provenance paths differ
         assert result.column(sid_a).to_pylist() == ["zzz"]
@@ -1585,7 +1585,7 @@ class TestSortSystemTagValues:
     def test_no_op_for_single_position_groups(self):
         """Groups with only one position should be left untouched."""
         from orcapod.system_constants import constants
-        from orcapod.utils.arrow_utils import sort_system_tag_values
+        from orcapod.utils.arrow_utils import sort_system_key_values
 
         sid, rid = self._make_paired_cols(constants, "abc::ph123", "0")
 
@@ -1597,14 +1597,14 @@ class TestSortSystemTagValues:
             }
         )
 
-        result = sort_system_tag_values(table)
+        result = sort_system_key_values(table)
         assert result.column(sid).to_pylist() == ["hello", "world"]
         assert result.column(rid).to_pylist() == ["row_0", "row_1"]
 
-    def test_preserves_non_system_tag_columns(self):
-        """Non-system-tag columns should be completely unaffected."""
+    def test_preserves_non_system_key_columns(self):
+        """Non-system-key columns should be completely unaffected."""
         from orcapod.system_constants import constants
-        from orcapod.utils.arrow_utils import sort_system_tag_values
+        from orcapod.utils.arrow_utils import sort_system_key_values
 
         sid_0, rid_0 = self._make_paired_cols(constants, "abc::ph123", "0")
         sid_1, rid_1 = self._make_paired_cols(constants, "abc::ph123", "1")
@@ -1620,14 +1620,14 @@ class TestSortSystemTagValues:
             }
         )
 
-        result = sort_system_tag_values(table)
+        result = sort_system_key_values(table)
         assert result.column("id").to_pylist() == [1, 2]
         assert result.column("data").to_pylist() == ["foo", "bar"]
 
     def test_three_way_group_sorts_correctly(self):
         """Three positions sharing the same provenance path should all be sorted together."""
         from orcapod.system_constants import constants
-        from orcapod.utils.arrow_utils import sort_system_tag_values
+        from orcapod.utils.arrow_utils import sort_system_key_values
 
         sid_0, rid_0 = self._make_paired_cols(constants, "abc::ph123", "0")
         sid_1, rid_1 = self._make_paired_cols(constants, "abc::ph123", "1")
@@ -1644,7 +1644,7 @@ class TestSortSystemTagValues:
             }
         )
 
-        result = sort_system_tag_values(table)
+        result = sort_system_key_values(table)
 
         # Row 0: tuples are (cherry,r0), (apple,r1), (banana,r2) → sorted: (apple,r1), (banana,r2), (cherry,r0)
         assert result.column(sid_0).to_pylist()[0] == "apple"

@@ -101,7 +101,7 @@ def build_pipeline(use_async_fn: bool) -> Pipeline:
 
     fn = async_slow_double if use_async_fn else sync_slow_double
     with pipeline:
-        source = ArrowTableSource(SOURCE_TABLE, tag_columns=["id"])
+        source = ArrowTableSource(SOURCE_TABLE, key_columns=["id"])
         pf_a = PythonDataFunction(fn, output_keys="result", function_name="branch_a")
         pf_b = PythonDataFunction(fn, output_keys="result", function_name="branch_b")
         FunctionPod(

@@ -11,7 +11,7 @@ from orcapod.protocols.core_protocols import (
     DataProtocol,
     PodProtocol,
     StreamProtocol,
-    TagProtocol,
+    KeyProtocol,
 )
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.lazy_module import LazyModule
@@ -98,25 +98,25 @@ class StreamBase(TraceableBase):
     ) -> StreamBase:
         """
         Performs a semi-join with another stream, returning a new stream that contains
-        only the data from this stream that have matching tags in the other stream.
+        only the data from this stream that have matching keys in the other stream.
         """
         from orcapod.core.operators import SemiJoin
 
         return SemiJoin()(self, other_stream, label=label)
 
-    def map_tags(
+    def map_keys(
         self,
         name_map: Mapping[str, str],
         drop_unmapped: bool = True,
         label: str | None = None,
     ) -> StreamBase:
         """
-        Maps the tags in this stream according to the provided name_map.
-        If drop_unmapped is True, any tags that are not in the name_map will be dropped.
+        Maps the keys in this stream according to the provided name_map.
+        If drop_unmapped is True, any keys that are not in the name_map will be dropped.
         """
-        from orcapod.core.operators import MapTags
+        from orcapod.core.operators import MapKeys
 
-        return MapTags(name_map, drop_unmapped)(self, label=label)
+        return MapKeys(name_map, drop_unmapped)(self, label=label)
 
     def map_data(
         self,
@@ -165,19 +165,19 @@ class StreamBase(TraceableBase):
             self, label=label
         )
 
-    def select_tag_columns(
+    def select_key_columns(
         self,
-        tag_columns: str | Collection[str],
+        key_columns: str | Collection[str],
         strict: bool = True,
         label: str | None = None,
     ) -> StreamBase:
         """
-        Select the specified tag columns from the stream. A ValueError is raised
-        if one or more specified tag columns do not exist in the stream unless strict = False.
+        Select the specified key columns from the stream. A ValueError is raised
+        if one or more specified key columns do not exist in the stream unless strict = False.
         """
-        from orcapod.core.operators import SelectTagColumns
+        from orcapod.core.operators import SelectKeyColumns
 
-        return SelectTagColumns(tag_columns, strict=strict)(self, label=label)
+        return SelectKeyColumns(key_columns, strict=strict)(self, label=label)
 
     def select_data_columns(
         self,
@@ -193,15 +193,15 @@ class StreamBase(TraceableBase):
 
         return SelectDataColumns(data_columns, strict=strict)(self, label=label)
 
-    def drop_tag_columns(
+    def drop_key_columns(
         self,
-        tag_columns: str | Collection[str],
+        key_columns: str | Collection[str],
         strict: bool = True,
         label: str | None = None,
     ) -> StreamBase:
-        from orcapod.core.operators import DropTagColumns
+        from orcapod.core.operators import DropKeyColumns
 
-        return DropTagColumns(tag_columns, strict=strict)(self, label=label)
+        return DropKeyColumns(key_columns, strict=strict)(self, label=label)
 
     def drop_data_columns(
         self,
@@ -231,18 +231,18 @@ class StreamBase(TraceableBase):
 
     def __iter__(
         self,
-    ) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+    ) -> Iterator[tuple[KeyProtocol, DataProtocol]]:
         return self.iter_data()
 
     @abstractmethod
     def iter_data(
         self,
-    ) -> Iterator[tuple[TagProtocol, DataProtocol]]: ...
+    ) -> Iterator[tuple[KeyProtocol, DataProtocol]]: ...
 
     async def async_iter_data(
         self,
-    ) -> AsyncIterator[tuple[TagProtocol, DataProtocol]]:
-        """Async iterator over (tag, data) pairs.
+    ) -> AsyncIterator[tuple[KeyProtocol, DataProtocol]]:
+        """Async iterator over (key, data) pairs.
 
         Subclasses should override this to provide true async iteration.
         """
@@ -309,24 +309,24 @@ class StreamBase(TraceableBase):
         self,
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
-        index_by_tags: bool = False,
+        index_by_keys: bool = False,
         all_info: bool = False,
     ) -> "pd.DataFrame":
         df = self.as_polars_df(
             columns=columns,
             all_info=all_info,
         )
-        tag_keys, _ = self.keys()
+        key_keys, _ = self.keys()
         pdf = df.to_pandas()
-        if index_by_tags:
-            pdf = pdf.set_index(list(tag_keys))
+        if index_by_keys:
+            pdf = pdf.set_index(list(key_keys))
         return pdf
 
     def flow(
         self,
-    ) -> list[tuple[TagProtocol, DataProtocol]]:
+    ) -> list[tuple[KeyProtocol, DataProtocol]]:
         """Materialize the stream into a concrete collection of
-        ``(TagProtocol, DataProtocol)`` pairs.
+        ``(KeyProtocol, DataProtocol)`` pairs.
 
         This is implemented by iterating over :meth:`iter_data`. Depending on
         the concrete stream implementation, iterating may trigger computation or
@@ -341,9 +341,9 @@ class StreamBase(TraceableBase):
             c for c in df.columns if c not in self.keys()[0]
         ]
         df = df[new_column_order]
-        tag_map = {t: f"*{t}" for t in self.keys()[0]}
+        key_map = {t: f"*{t}" for t in self.keys()[0]}
         # TODO: construct repr html better
-        df = df.rename(tag_map)
+        df = df.rename(key_map)
         return f"{self.__class__.__name__}[{self.label}]\n" + df._repr_html_()
 
     def view(
@@ -356,9 +356,9 @@ class StreamBase(TraceableBase):
             columns=columns,
             all_info=all_info,
         )
-        tag_map = {t: f"*{t}" for t in self.keys()[0]}
+        key_map = {t: f"*{t}" for t in self.keys()[0]}
         # TODO: construct repr html better
-        df = df.rename(tag_map)
+        df = df.rename(key_map)
         return StreamView(self, df)
 
 

@@ -138,19 +138,19 @@ def pod():
 class TestSourcePodCaching:
     def test_delta_source_id_defaults_to_dir_name(self, clinic_a):
         patients_path, labs_path = clinic_a
-        ps = DeltaTableSource(patients_path, tag_columns=["patient_id"])
-        ls = DeltaTableSource(labs_path, tag_columns=["patient_id"])
+        ps = DeltaTableSource(patients_path, key_columns=["patient_id"])
+        ls = DeltaTableSource(labs_path, key_columns=["patient_id"])
         assert ps.source_id == patients_path.name
         assert ls.source_id == labs_path.name
 
     def test_different_sources_get_different_cache_paths(self, clinic_a, source_db):
         patients_path, labs_path = clinic_a
         patients = CachedSource(
-            DeltaTableSource(patients_path, tag_columns=["patient_id"]),
+            DeltaTableSource(patients_path, key_columns=["patient_id"]),
             cache_database=source_db,
         )
         labs = CachedSource(
-            DeltaTableSource(labs_path, tag_columns=["patient_id"]),
+            DeltaTableSource(labs_path, key_columns=["patient_id"]),
             cache_database=source_db,
         )
         assert patients.cache_path != labs.cache_path
@@ -158,7 +158,7 @@ class TestSourcePodCaching:
     def test_cache_populates_on_flow(self, clinic_a, source_db):
         patients_path, _ = clinic_a
         ps = CachedSource(
-            DeltaTableSource(patients_path, tag_columns=["patient_id"]),
+            DeltaTableSource(patients_path, key_columns=["patient_id"]),
             cache_database=source_db,
         )
         ps.flow()
@@ -169,12 +169,12 @@ class TestSourcePodCaching:
     def test_dedup_on_rerun(self, clinic_a, source_db):
         patients_path, _ = clinic_a
         ps1 = CachedSource(
-            DeltaTableSource(patients_path, tag_columns=["patient_id"]),
+            DeltaTableSource(patients_path, key_columns=["patient_id"]),
             cache_database=source_db,
         )
         ps1.flow()
         ps2 = CachedSource(
-            DeltaTableSource(patients_path, tag_columns=["patient_id"]),
+            DeltaTableSource(patients_path, key_columns=["patient_id"]),
             cache_database=source_db,
         )
         ps2.flow()
@@ -185,7 +185,7 @@ class TestSourcePodCaching:
     ):
         """Same dir name + same schema = same content_hash regardless of data."""
         patients_path, _ = clinic_a
-        src1 = DeltaTableSource(patients_path, tag_columns=["patient_id"])
+        src1 = DeltaTableSource(patients_path, key_columns=["patient_id"])
         ps1 = CachedSource(src1, cache_database=source_db)
 
         # Overwrite with different data, same schema
@@ -203,7 +203,7 @@ class TestSourcePodCaching:
             ),
             mode="overwrite",
         )
-        src2 = DeltaTableSource(patients_path, tag_columns=["patient_id"])
+        src2 = DeltaTableSource(patients_path, key_columns=["patient_id"])
         ps2 = CachedSource(src2, cache_database=source_db)
 
         assert src1.source_id == src2.source_id
@@ -214,7 +214,7 @@ class TestSourcePodCaching:
         """New rows from updated data accumulate in the same cache table."""
         patients_path, _ = clinic_a
         ps1 = CachedSource(
-            DeltaTableSource(patients_path, tag_columns=["patient_id"]),
+            DeltaTableSource(patients_path, key_columns=["patient_id"]),
             cache_database=source_db,
         )
         ps1.flow()
@@ -236,7 +236,7 @@ class TestSourcePodCaching:
             mode="overwrite",
         )
         ps2 = CachedSource(
-            DeltaTableSource(patients_path, tag_columns=["patient_id"]),
+            DeltaTableSource(patients_path, key_columns=["patient_id"]),
             cache_database=source_db,
         )
         ps2.flow()
@@ -256,8 +256,8 @@ class TestSourcePodCaching:
                 "v": pa.array([2], type=pa.int64()),
             }
         )
-        s1 = ArrowTableSource(t1, tag_columns=["k"], infer_nullable=True)
-        s2 = ArrowTableSource(t2, tag_columns=["k"], infer_nullable=True)
+        s1 = ArrowTableSource(t1, key_columns=["k"], infer_nullable=True)
+        s2 = ArrowTableSource(t2, key_columns=["k"], infer_nullable=True)
         assert s1.source_id != s2.source_id
         assert s1.content_hash() != s2.content_hash()
 
@@ -268,8 +268,8 @@ class TestSourcePodCaching:
                 "v": pa.array([1], type=pa.int64()),
             }
         )
-        s1 = ArrowTableSource(t, tag_columns=["k"], infer_nullable=True)
-        s2 = ArrowTableSource(t, tag_columns=["k"], infer_nullable=True)
+        s1 = ArrowTableSource(t, key_columns=["k"], infer_nullable=True)
+        s2 = ArrowTableSource(t, key_columns=["k"], infer_nullable=True)
         assert s1.source_id == s2.source_id
         assert s1.content_hash() == s2.content_hash()
 
@@ -285,11 +285,11 @@ class TestFunctionPodCaching:
     ):
         patients_path, labs_path = clinic_a
         patients = CachedSource(
-            DeltaTableSource(patients_path, tag_columns=["patient_id"]),
+            DeltaTableSource(patients_path, key_columns=["patient_id"]),
             cache_database=source_db,
         )
         labs = CachedSource(
-            DeltaTableSource(labs_path, tag_columns=["patient_id"]),
+            DeltaTableSource(labs_path, key_columns=["patient_id"]),
             cache_database=source_db,
         )
         joined = Join()(patients, labs)
@@ -317,11 +317,11 @@ class TestFunctionPodCaching:
 
         # Pipeline A
         pa_src = CachedSource(
-            DeltaTableSource(patients_a, tag_columns=["patient_id"]),
+            DeltaTableSource(patients_a, key_columns=["patient_id"]),
             cache_database=source_db,
         )
         la_src = CachedSource(
-            DeltaTableSource(labs_a, tag_columns=["patient_id"]),
+            DeltaTableSource(labs_a, key_columns=["patient_id"]),
             cache_database=source_db,
         )
         fn_a = FunctionNode(
@@ -333,11 +333,11 @@ class TestFunctionPodCaching:
 
         # Pipeline B
         pb_src = CachedSource(
-            DeltaTableSource(patients_b, tag_columns=["patient_id"]),
+            DeltaTableSource(patients_b, key_columns=["patient_id"]),
             cache_database=source_db,
         )
         lb_src = CachedSource(
-            DeltaTableSource(labs_b, tag_columns=["patient_id"]),
+            DeltaTableSource(labs_b, key_columns=["patient_id"]),
             cache_database=source_db,
         )
         fn_b = FunctionNode(
@@ -366,11 +366,11 @@ class TestFunctionPodCaching:
             function_pod=pod,
             input_stream=Join()(
                 CachedSource(
-                    DeltaTableSource(patients_a, tag_columns=["patient_id"]),
+                    DeltaTableSource(patients_a, key_columns=["patient_id"]),
                     cache_database=source_db,
                 ),
                 CachedSource(
-                    DeltaTableSource(labs_a, tag_columns=["patient_id"]),
+                    DeltaTableSource(labs_a, key_columns=["patient_id"]),
                     cache_database=source_db,
                 ),
             ),
@@ -385,11 +385,11 @@ class TestFunctionPodCaching:
             function_pod=pod,
             input_stream=Join()(
                 CachedSource(
-                    DeltaTableSource(patients_b, tag_columns=["patient_id"]),
+                    DeltaTableSource(patients_b, key_columns=["patient_id"]),
                     cache_database=source_db,
                 ),
                 CachedSource(
-                    DeltaTableSource(labs_b, tag_columns=["patient_id"]),
+                    DeltaTableSource(labs_b, key_columns=["patient_id"]),
                     cache_database=source_db,
                 ),
             ),
@@ -410,11 +410,11 @@ class TestOperatorPodCaching:
     def _make_joined_streams(self, clinic_a, source_db):
         patients_path, labs_path = clinic_a
         patients = CachedSource(
-            DeltaTableSource(patients_path, tag_columns=["patient_id"]),
+            DeltaTableSource(patients_path, key_columns=["patient_id"]),
             cache_database=source_db,
         )
         labs = CachedSource(
-            DeltaTableSource(labs_path, tag_columns=["patient_id"]),
+            DeltaTableSource(labs_path, key_columns=["patient_id"]),
             cache_database=source_db,
         )
         return patients, labs
@@ -479,8 +479,8 @@ class TestOperatorPodCaching:
         table = node.as_table()
         assert table.num_rows == 0
         # Schema is preserved
-        tag_keys, data_keys = node.keys()
-        assert set(tag_keys).issubset(set(table.column_names))
+        key_keys, data_keys = node.keys()
+        assert set(key_keys).issubset(set(table.column_names))
         assert set(data_keys).issubset(set(table.column_names))
 
     def test_content_hash_scoping_isolates_source_combinations(
@@ -492,19 +492,19 @@ class TestOperatorPodCaching:
         patients_b, labs_b = clinic_b
 
         pa_src = CachedSource(
-            DeltaTableSource(patients_a, tag_columns=["patient_id"]),
+            DeltaTableSource(patients_a, key_columns=["patient_id"]),
             cache_database=source_db,
         )
         la_src = CachedSource(
-            DeltaTableSource(labs_a, tag_columns=["patient_id"]),
+            DeltaTableSource(labs_a, key_columns=["patient_id"]),
             cache_database=source_db,
         )
         pb_src = CachedSource(
-            DeltaTableSource(patients_b, tag_columns=["patient_id"]),
+            DeltaTableSource(patients_b, key_columns=["patient_id"]),
             cache_database=source_db,
         )
         lb_src = CachedSource(
-            DeltaTableSource(labs_b, tag_columns=["patient_id"]),
+            DeltaTableSource(labs_b, key_columns=["patient_id"]),
             cache_database=source_db,
         )
 
@@ -543,11 +543,11 @@ class TestEndToEndPipeline:
 
         # Step 1: CachedSource
         patients = CachedSource(
-            DeltaTableSource(patients_a, tag_columns=["patient_id"]),
+            DeltaTableSource(patients_a, key_columns=["patient_id"]),
             cache_database=source_db,
         )
         labs = CachedSource(
-            DeltaTableSource(labs_a, tag_columns=["patient_id"]),
+            DeltaTableSource(labs_a, key_columns=["patient_id"]),
             cache_database=source_db,
         )
 
@@ -589,11 +589,11 @@ class TestEndToEndPipeline:
             function_pod=pod,
             input_stream=Join()(
                 CachedSource(
-                    DeltaTableSource(patients_b, tag_columns=["patient_id"]),
+                    DeltaTableSource(patients_b, key_columns=["patient_id"]),
                     cache_database=source_db,
                 ),
                 CachedSource(
-                    DeltaTableSource(labs_b, tag_columns=["patient_id"]),
+                    DeltaTableSource(labs_b, key_columns=["patient_id"]),
                     cache_database=source_db,
                 ),
             ),

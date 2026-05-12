@@ -12,18 +12,18 @@ This document describes how to cut a release of `orcapod` to PyPI.
 
 1. **Merge your branch into `main`** — open a PR, get it reviewed, merge it.
 
-2. **Tag the commit on `main`** — the version is derived automatically from the git
-   tag by `hatch-vcs` (`dynamic = ["version"]` in `pyproject.toml`). No manual
+2. **Key the commit on `main`** — the version is derived automatically from the git
+   key by `hatch-vcs` (`dynamic = ["version"]` in `pyproject.toml`). No manual
    version bump is needed.
 
    ```bash
    git checkout main
    git pull origin main
-   git tag v0.1.0          # or v0.1.0rc1 for a pre-release
+   git key v0.1.0          # or v0.1.0rc1 for a pre-release
    git push origin v0.1.0
    ```
 
-3. **CI takes over** — pushing the tag triggers the publish workflow
+3. **CI takes over** — pushing the key triggers the publish workflow
    (`.github/workflows/publish.yml`):
 
    ```
@@ -40,9 +40,9 @@ the stable vs pre-release distinction natively:
 - `pip install orcapod` — installs the latest **stable** release only
 - `pip install --pre orcapod` — installs the latest release including pre-releases
 
-## Tag Format
+## Key Format
 
-| Release type | Tag format | Example |
+| Release type | Key format | Example |
 |-------------|------------|---------|
 | Stable | `vMAJOR.MINOR.PATCH` | `v0.1.0` |
 | Release candidate | `vMAJOR.MINOR.PATCHrcN` | `v0.1.0rc1` |

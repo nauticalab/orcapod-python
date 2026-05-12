@@ -1,9 +1,9 @@
 """Compositional builder for enriching raw Arrow tables into source streams.
 
 Extracts the enrichment pipeline that was previously embedded in
-``ArrowTableSource.__init__``: dropping system columns, validating tags,
+``ArrowTableSource.__init__``: dropping system columns, validating keys,
 computing schema/table hashes, adding source-info provenance, adding system
-tag columns, and wrapping the result in an ``ArrowTableStream``.
+key columns, and wrapping the result in an ``ArrowTableStream``.
 """
 
 from __future__ import annotations
@@ -47,8 +47,8 @@ class SourceStreamResult:
     schema_hash: str
     table_hash: ContentHash
     source_id: str
-    tag_columns: tuple[str, ...]
-    system_tag_columns: tuple[str, ...]
+    key_columns: tuple[str, ...]
+    system_key_columns: tuple[str, ...]
 
 
 class SourceStreamBuilder:
@@ -66,10 +66,10 @@ class SourceStreamBuilder:
     def build(
         self,
         table: pa.Table,
-        tag_columns: Collection[str],
+        key_columns: Collection[str],
         source_id: str | None = None,
         record_id_column: str | None = None,
-        system_tag_columns: Collection[str] = (),
+        system_key_columns: Collection[str] = (),
     ) -> SourceStreamResult:
         """Run the full enrichment pipeline.
 
@@ -82,28 +82,28 @@ class SourceStreamBuilder:
 
         Args:
             table: Arrow table with nullable flags already set correctly.
-            tag_columns: Column names forming the tag for each row.
+            key_columns: Column names forming the key for each row.
             source_id: Canonical source name. Defaults to table hash.
             record_id_column: Column for stable record IDs in provenance.
-            system_tag_columns: Additional system-level tag columns.
+            system_key_columns: Additional system-level key columns.
 
         Returns:
             SourceStreamResult with enriched stream and metadata.
 
         Raises:
-            ValueError: If tag_columns or record_id_column are not in table.
+            ValueError: If key_columns or record_id_column are not in table.
         """
-        tag_columns_tuple = tuple(tag_columns)
-        system_tag_columns_tuple = tuple(system_tag_columns)
+        key_columns_tuple = tuple(key_columns)
+        system_key_columns_tuple = tuple(system_key_columns)
 
         # 1. Drop system columns from raw input.
         table = arrow_utils.drop_system_columns(table)
 
-        # 2. Validate tag_columns.
-        missing_tags = set(tag_columns_tuple) - set(table.column_names)
-        if missing_tags:
+        # 2. Validate key_columns.
+        missing_keys = set(key_columns_tuple) - set(table.column_names)
+        if missing_keys:
             raise ValueError(
-                f"tag_columns not found in table: {missing_tags}. "
+                f"key_columns not found in table: {missing_keys}. "
                 f"Available columns: {list(table.column_names)}"
             )
 
@@ -114,20 +114,20 @@ class SourceStreamBuilder:
                 f"{table.column_names}"
             )
 
-        # 4. Compute schema hash from tag/data python schemas.
+        # 4. Compute schema hash from key/data python schemas.
         # Nullable flags in the incoming table are trusted as-is — callers must
         # set them correctly before calling build().
         non_sys = arrow_utils.drop_system_columns(table)
-        tag_schema = non_sys.select(list(tag_columns_tuple)).schema
-        data_schema = non_sys.drop(list(tag_columns_tuple)).schema
-        tag_python = self._data_context.type_converter.arrow_schema_to_python_schema(
-            tag_schema
+        key_schema = non_sys.select(list(key_columns_tuple)).schema
+        data_schema = non_sys.drop(list(key_columns_tuple)).schema
+        key_python = self._data_context.type_converter.arrow_schema_to_python_schema(
+            key_schema
         )
         data_python = self._data_context.type_converter.arrow_schema_to_python_schema(
             data_schema
         )
         schema_hash = self._data_context.semantic_hasher.hash_object(
-            (tag_python, data_python)
+            (key_python, data_python)
         ).to_hex(char_count=self._config.schema_hash_n_char)
 
         # 5. Compute table hash for data identity.
@@ -147,15 +147,15 @@ class SourceStreamBuilder:
 
         # 8. Add source-info provenance columns.
         table = arrow_utils.add_source_info(
-            table, source_info, exclude_columns=tag_columns_tuple
+            table, source_info, exclude_columns=key_columns_tuple
         )
 
-        # 9. Add system tag columns.
+        # 9. Add system key columns.
         record_id_values = [
             _make_record_id(record_id_column, i, row)
             for i, row in enumerate(rows_as_dicts)
         ]
-        table = arrow_utils.add_system_tag_columns(
+        table = arrow_utils.add_system_key_columns(
             table,
             schema_hash,
             source_id,
@@ -166,8 +166,8 @@ class SourceStreamBuilder:
         # the caller set them before calling build().
         stream = ArrowTableStream(
             table=table,
-            tag_columns=tag_columns_tuple,
-            system_tag_columns=system_tag_columns_tuple,
+            key_columns=key_columns_tuple,
+            system_key_columns=system_key_columns_tuple,
         )
 
         return SourceStreamResult(
@@ -175,6 +175,6 @@ class SourceStreamBuilder:
             schema_hash=schema_hash,
             table_hash=table_hash,
             source_id=source_id,
-            tag_columns=tag_columns_tuple,
-            system_tag_columns=system_tag_columns_tuple,
+            key_columns=key_columns_tuple,
+            system_key_columns=system_key_columns_tuple,
         )

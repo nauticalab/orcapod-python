@@ -109,19 +109,19 @@ class TestProtocolConformance:
 
 
 # ===========================================================================
-# 3. PK as default tag columns
+# 3. PK as default key columns
 # ===========================================================================
 
 
-class TestPKAsDefaultTags:
-    def test_single_pk_is_tag_column(self):
+class TestPKAsDefaultKeys:
+    def test_single_pk_is_key_column(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         with patch(_PATCH) as mock_cls:
             mock_cls.return_value = _make_mock_connector()
             src = PostgreSQLTableSource(DSN, "measurements")
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "session_id" in key_schema
 
     def test_pk_not_in_data_schema(self):
         from orcapod.core.sources import PostgreSQLTableSource
@@ -142,7 +142,7 @@ class TestPKAsDefaultTags:
         assert "trial" in data_schema
         assert "response" in data_schema
 
-    def test_composite_pk_all_columns_are_tags(self):
+    def test_composite_pk_all_columns_are_keys(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         schema = pa.schema([
@@ -165,9 +165,9 @@ class TestPKAsDefaultTags:
                 batches=[batch],
             )
             src = PostgreSQLTableSource(DSN, "events")
-        tag_schema, _ = src.output_schema()
-        assert "user_id" in tag_schema
-        assert "event_id" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "user_id" in key_schema
+        assert "event_id" in key_schema
 
     def test_default_source_id_is_table_name(self):
         from orcapod.core.sources import PostgreSQLTableSource
@@ -187,32 +187,32 @@ class TestPKAsDefaultTags:
 
 
 # ===========================================================================
-# 4. Explicit tag_columns override
+# 4. Explicit key_columns override
 # ===========================================================================
 
 
-class TestExplicitTagOverride:
-    def test_explicit_tag_columns_override_pk(self):
+class TestExplicitKeyOverride:
+    def test_explicit_key_columns_override_pk(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         with patch(_PATCH) as mock_cls:
             mock_cls.return_value = _make_mock_connector()
-            src = PostgreSQLTableSource(DSN, "measurements", tag_columns=["trial"])
-        tag_schema, _ = src.output_schema()
-        assert "trial" in tag_schema
-        assert "session_id" not in tag_schema
+            src = PostgreSQLTableSource(DSN, "measurements", key_columns=["trial"])
+        key_schema, _ = src.output_schema()
+        assert "trial" in key_schema
+        assert "session_id" not in key_schema
 
-    def test_multiple_explicit_tag_columns(self):
+    def test_multiple_explicit_key_columns(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         with patch(_PATCH) as mock_cls:
             mock_cls.return_value = _make_mock_connector()
             src = PostgreSQLTableSource(
-                DSN, "measurements", tag_columns=["session_id", "trial"]
+                DSN, "measurements", key_columns=["session_id", "trial"]
             )
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
-        assert "trial" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "session_id" in key_schema
+        assert "trial" in key_schema
 
 
 # ===========================================================================
@@ -221,7 +221,7 @@ class TestExplicitTagOverride:
 
 
 class TestNoPKError:
-    def test_no_pk_and_no_tag_columns_raises(self):
+    def test_no_pk_and_no_key_columns_raises(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         with patch(_PATCH) as mock_cls:
@@ -283,14 +283,14 @@ class TestStreamBehaviour:
             src = PostgreSQLTableSource(DSN, "measurements")
         assert len(list(src.iter_data())) == 3
 
-    def test_iter_data_tags_contain_pk(self):
+    def test_iter_data_keys_contain_pk(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         with patch(_PATCH) as mock_cls:
             mock_cls.return_value = _make_mock_connector()
             src = PostgreSQLTableSource(DSN, "measurements")
-        for tags, _ in src.iter_data():
-            assert "session_id" in tags
+        for keys, _ in src.iter_data():
+            assert "session_id" in keys
 
     def test_output_schema_returns_two_schemas(self):
         from orcapod.core.sources import PostgreSQLTableSource
@@ -386,7 +386,7 @@ class TestDeterministicHashing:
             src2 = PostgreSQLTableSource(DSN, "measurements")
         assert src1.content_hash() == src2.content_hash()
 
-    def test_different_tag_columns_yields_different_pipeline_hash(self):
+    def test_different_key_columns_yields_different_pipeline_hash(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         with patch(_PATCH) as mock_cls:
@@ -394,7 +394,7 @@ class TestDeterministicHashing:
             src1 = PostgreSQLTableSource(DSN, "measurements")
         with patch(_PATCH) as mock_cls:
             mock_cls.return_value = _make_mock_connector()
-            src2 = PostgreSQLTableSource(DSN, "measurements", tag_columns=["trial"])
+            src2 = PostgreSQLTableSource(DSN, "measurements", key_columns=["trial"])
         assert src1.pipeline_hash() != src2.pipeline_hash()
 
 
@@ -420,8 +420,8 @@ class TestToConfig:
     def test_has_table_name(self):
         assert self._make_src().to_config()["table_name"] == "measurements"
 
-    def test_has_tag_columns(self):
-        assert "session_id" in self._make_src().to_config()["tag_columns"]
+    def test_has_key_columns(self):
+        assert "session_id" in self._make_src().to_config()["key_columns"]
 
     def test_has_source_id(self):
         assert self._make_src().to_config()["source_id"] == "measurements"
@@ -474,18 +474,18 @@ class TestFromConfig:
         assert src2.content_hash() == src.content_hash()
         assert src2.pipeline_hash() == src.pipeline_hash()
 
-    def test_from_config_with_explicit_tag_columns(self):
+    def test_from_config_with_explicit_key_columns(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         with patch(_PATCH) as mock_cls:
             mock_cls.return_value = _make_mock_connector()
-            src = PostgreSQLTableSource(DSN, "measurements", tag_columns=["trial"])
+            src = PostgreSQLTableSource(DSN, "measurements", key_columns=["trial"])
         config = src.to_config()
         with patch(_PATCH) as mock_cls:
             mock_cls.return_value = _make_mock_connector()
             src2 = PostgreSQLTableSource.from_config(config)
-        tag_schema, _ = src2.output_schema()
-        assert "trial" in tag_schema
+        key_schema, _ = src2.output_schema()
+        assert "trial" in key_schema
 
     def test_from_config_missing_dsn_raises(self):
         from orcapod.core.sources import PostgreSQLTableSource

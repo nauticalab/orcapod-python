@@ -10,7 +10,7 @@ from orcapod.protocols.core_protocols import (
     ArgumentGroup,
     DataProtocol,
     StreamProtocol,
-    TagProtocol,
+    KeyProtocol,
 )
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, ContentHash, Schema
@@ -63,13 +63,13 @@ class Join(NonZeroInputOperator):
             # if single stream, simply return the output schema of the single input stream
             return streams[0].output_schema(columns=columns, all_info=all_info)
 
-        # Always get input schemas WITHOUT system tags for the base computation.
-        # System tags are computed separately because the join renames them.
+        # Always get input schemas WITHOUT system keys for the base computation.
+        # System keys are computed separately because the join renames them.
         stream = streams[0]
-        tag_schema, data_schema = stream.output_schema()
+        key_schema, data_schema = stream.output_schema()
         for other_stream in streams[1:]:
-            other_tag_schema, other_data_schema = other_stream.output_schema()
-            tag_schema = schema_utils.union_schemas(tag_schema, other_tag_schema)
+            other_key_schema, other_data_schema = other_stream.output_schema()
+            key_schema = schema_utils.union_schemas(key_schema, other_key_schema)
             intersection_data_schema = schema_utils.intersection_schemas(
                 data_schema, other_data_schema
             )
@@ -81,70 +81,70 @@ class Join(NonZeroInputOperator):
                     f"Datas should not have overlapping keys, but {data_schema.keys()} found in {stream} and {other_stream}."
                 )
 
-        # Add system tag columns if requested
-        if columns_config.system_tags:
-            system_tag_schema = self._predict_system_tag_schema(*streams)
-            tag_schema = schema_utils.union_schemas(tag_schema, system_tag_schema)
+        # Add system key columns if requested
+        if columns_config.system_keys:
+            system_key_schema = self._predict_system_key_schema(*streams)
+            key_schema = schema_utils.union_schemas(key_schema, system_key_schema)
 
-        return tag_schema, data_schema
+        return key_schema, data_schema
 
-    def _predict_system_tag_schema(self, *streams: StreamProtocol) -> Schema:
-        """Predict the system tag columns that the join would produce.
+    def _predict_system_key_schema(self, *streams: StreamProtocol) -> Schema:
+        """Predict the system key columns that the join would produce.
 
-        Each input stream's existing system tag columns get renamed by
+        Each input stream's existing system key columns get renamed by
         appending ::{pipeline_hash}:{canonical_position}. This method
         computes those output column names without performing the join.
         """
-        n_char = self.orcapod_config.system_tag_hash_n_char
+        n_char = self.orcapod_config.system_key_hash_n_char
         ordered_streams = self.order_input_streams(*streams)
 
-        system_tag_fields: dict[str, type] = {}
+        system_key_fields: dict[str, type] = {}
         for idx, stream in enumerate(ordered_streams):
-            stream_tag_schema, _ = stream.output_schema(columns={"system_tags": True})
-            for col_name in stream_tag_schema:
-                if col_name.startswith(constants.SYSTEM_TAG_PREFIX):
+            stream_key_schema, _ = stream.output_schema(columns={"system_keys": True})
+            for col_name in stream_key_schema:
+                if col_name.startswith(constants.SYSTEM_KEY_PREFIX):
                     new_name = (
                         f"{col_name}{constants.BLOCK_SEPARATOR}"
                         f"{stream.pipeline_hash().to_hex(n_char)}:{idx}"
                     )
-                    system_tag_fields[new_name] = str
-        return Schema(system_tag_fields)
+                    system_key_fields[new_name] = str
+        return Schema(system_key_fields)
 
     def static_process(self, *streams: StreamProtocol) -> StreamProtocol:
         """
-        Joins two streams together based on their tags.
-        The resulting stream will contain all the tags from both streams.
+        Joins two streams together based on their keys.
+        The resulting stream will contain all the keys from both streams.
         """
         if len(streams) == 1:
             return streams[0]
 
         # Canonically order streams by pipeline_hash for deterministic
-        # system tag column names regardless of input order (Join is commutative)
+        # system key column names regardless of input order (Join is commutative)
         ordered_streams = self.order_input_streams(*streams)
 
         COMMON_JOIN_KEY = "_common"
 
-        n_char = self.orcapod_config.system_tag_hash_n_char
+        n_char = self.orcapod_config.system_key_hash_n_char
 
         stream = ordered_streams[0]
 
-        tag_keys, _ = [set(k) for k in stream.keys()]
+        key_keys, _ = [set(k) for k in stream.keys()]
         table = stream.as_table(
-            columns={"source": True, "system_tags": True, "meta": True}
+            columns={"source": True, "system_keys": True, "meta": True}
         )
         # trick to get cartesian product
         table = table.add_column(0, COMMON_JOIN_KEY, pa.array([0] * len(table)))
-        table = arrow_utils.append_to_system_tags(
+        table = arrow_utils.append_to_system_keys(
             table,
             f"{stream.pipeline_hash().to_hex(n_char)}:0",
         )
 
         for idx, next_stream in enumerate(ordered_streams[1:], start=1):
-            next_tag_keys, _ = next_stream.keys()
+            next_key_keys, _ = next_stream.keys()
             next_table = next_stream.as_table(
-                columns={"source": True, "system_tags": True, "meta": True}
+                columns={"source": True, "system_keys": True, "meta": True}
             )
-            next_table = arrow_utils.append_to_system_tags(
+            next_table = arrow_utils.append_to_system_keys(
                 next_table,
                 f"{next_stream.pipeline_hash().to_hex(n_char)}:{idx}",
             )
@@ -158,9 +158,9 @@ class Join(NonZeroInputOperator):
             # the accumulated table, using stream-index-based suffixes instead of
             # Polars' default ``_right`` suffix which causes cascading collisions
             # on 3+ stream joins.  The only legitimately shared column names are
-            # the tag join keys; everything else (meta columns, their derived
+            # the key join keys; everything else (meta columns, their derived
             # source-info columns, etc.) must be unique.
-            join_key_set = tag_keys.intersection(next_tag_keys) | {COMMON_JOIN_KEY}
+            join_key_set = key_keys.intersection(next_key_keys) | {COMMON_JOIN_KEY}
             existing_names = set(table.column_names)
             rename_map = {}
             for col in next_table.column_names:
@@ -186,46 +186,46 @@ class Join(NonZeroInputOperator):
                     [rename_map.get(name, name) for name in next_table.column_names]
                 )
 
-            common_tag_keys = tag_keys.intersection(next_tag_keys)
-            common_tag_keys.add(COMMON_JOIN_KEY)
+            common_key_keys = key_keys.intersection(next_key_keys)
+            common_key_keys.add(COMMON_JOIN_KEY)
 
             # Capture the left-side schema before the Polars join, which sets all
             # fields to nullable=True regardless of the original schema.
             table_ref_schema = table.schema
             table = (
                 pl.DataFrame(table)
-                .join(pl.DataFrame(next_table), on=list(common_tag_keys), how="inner")
+                .join(pl.DataFrame(next_table), on=list(common_key_keys), how="inner")
                 .to_arrow()
             )
             table = arrow_utils.restore_schema_nullability(table, table_ref_schema, next_ref_schema)
 
-            tag_keys.update(next_tag_keys)
+            key_keys.update(next_key_keys)
 
-        # reorder columns to bring tag columns to the front
+        # reorder columns to bring key columns to the front
         # TODO: come up with a better algorithm
         table = table.drop(COMMON_JOIN_KEY)
 
-        # Sort system tag values for same-pipeline-hash streams to ensure commutativity
-        table = arrow_utils.sort_system_tag_values(table)
+        # Sort system key values for same-pipeline-hash streams to ensure commutativity
+        table = arrow_utils.sort_system_key_values(table)
 
-        reordered_columns = [col for col in table.column_names if col in tag_keys]
-        reordered_columns += [col for col in table.column_names if col not in tag_keys]
+        reordered_columns = [col for col in table.column_names if col in key_keys]
+        reordered_columns += [col for col in table.column_names if col not in key_keys]
 
         result_table = table.select(reordered_columns)
         return ArrowTableStream(
             result_table,
-            tag_columns=tuple(tag_keys),
+            key_columns=tuple(key_keys),
         )
 
     # ------------------------------------------------------------------
     # Async execution
     # ------------------------------------------------------------------
 
-    def _compute_system_tag_suffixes(
+    def _compute_system_key_suffixes(
         self,
         input_pipeline_hashes: Sequence[ContentHash],
     ) -> list[str]:
-        """Compute per-input system-tag suffixes from pipeline hashes.
+        """Compute per-input system-key suffixes from pipeline hashes.
 
         Each suffix is ``{truncated_hash}:{canonical_position}`` where
         canonical position is determined by sorting the hashes (matching
@@ -238,7 +238,7 @@ class Join(NonZeroInputOperator):
         Returns:
             List of suffix strings, one per input position.
         """
-        n_char = self.orcapod_config.system_tag_hash_n_char
+        n_char = self.orcapod_config.system_key_hash_n_char
         hex_strings = [h.to_hex() for h in input_pipeline_hashes]
 
         # Canonical order: sorted by full hex (same as order_input_streams).
@@ -258,8 +258,8 @@ class Join(NonZeroInputOperator):
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[KeyProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[KeyProtocol, DataProtocol]],
         *,
         input_pipeline_hashes: Sequence[ContentHash] | None = None,
     ) -> None:
@@ -274,20 +274,20 @@ class Join(NonZeroInputOperator):
         Three or more inputs: staggered pairwise binary joins in
         canonical order — ``join(join(x, y), z)`` — matching
         ``static_process``'s iterative accumulation.  Each binary join
-        uses the per-pair intersection of tag keys, so partially
-        overlapping tag schemas are handled correctly.
+        uses the per-pair intersection of key keys, so partially
+        overlapping key schemas are handled correctly.
 
         Args:
             inputs: Readable channels, one per upstream.
             output: Writable channel for downstream.
             input_pipeline_hashes: Pipeline hash for each input,
                 positionally matching ``inputs``.  Required for
-                correct system-tag renaming with 2+ inputs.
+                correct system-key renaming with 2+ inputs.
         """
         try:
             if len(inputs) == 1:
-                async for tag, data in inputs[0]:
-                    await output.send((tag, data))
+                async for key, data in inputs[0]:
+                    await output.send((key, data))
                 return
 
             n = len(inputs)
@@ -297,7 +297,7 @@ class Join(NonZeroInputOperator):
                     f"must match inputs length ({n})"
                 )
             suffixes = (
-                self._compute_system_tag_suffixes(input_pipeline_hashes)
+                self._compute_system_key_suffixes(input_pipeline_hashes)
                 if input_pipeline_hashes is not None
                 else [str(i) for i in range(n)]
             )
@@ -307,8 +307,8 @@ class Join(NonZeroInputOperator):
 
     async def _streaming_join(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[KeyProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[KeyProtocol, DataProtocol]],
         suffixes: list[str],
     ) -> None:
         """Dispatch between binary join (N=2) and staggered chain (N>=3).
@@ -316,7 +316,7 @@ class Join(NonZeroInputOperator):
         Args:
             inputs: Readable channels, one per upstream.
             output: Output channel for matched rows.
-            suffixes: Per-input system-tag suffixes (positional).
+            suffixes: Per-input system-key suffixes (positional).
         """
         n = len(inputs)
         block_sep = constants.BLOCK_SEPARATOR
@@ -324,11 +324,11 @@ class Join(NonZeroInputOperator):
         if n == 2:
 
             def merge_fn(
-                lt: TagProtocol,
+                lt: KeyProtocol,
                 lp: DataProtocol,
-                rt: TagProtocol,
+                rt: KeyProtocol,
                 rp: DataProtocol,
-            ) -> tuple[TagProtocol, DataProtocol]:
+            ) -> tuple[KeyProtocol, DataProtocol]:
                 return self._merge_pair_rename(lt, lp, rt, rp, suffixes, block_sep)
 
             await self._binary_streaming_join(inputs[0], inputs[1], output, merge_fn)
@@ -339,17 +339,17 @@ class Join(NonZeroInputOperator):
 
     async def _staggered_join(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[KeyProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[KeyProtocol, DataProtocol]],
         suffixes: list[str],
     ) -> None:
         """Staggered pairwise binary joins: ``join(join(x, y), z)``.
 
         Matches ``static_process``'s iterative pairwise join semantics.
-        Each input's system tags are pre-renamed, then binary joins are
+        Each input's system keys are pre-renamed, then binary joins are
         chained in canonical order.  Per-pair join keys are computed
         naturally by each binary join (intersection of its two inputs'
-        tag keys), so partially overlapping tag schemas produce the
+        key keys), so partially overlapping key schemas produce the
         same results as the sync path.
 
         Intermediate results flow through channels, so downstream joins
@@ -359,13 +359,13 @@ class Join(NonZeroInputOperator):
         Args:
             inputs: Readable channels, one per upstream.
             output: Output channel for matched rows.
-            suffixes: Per-input system-tag suffixes (positional).
+            suffixes: Per-input system-key suffixes (positional).
         """
         from orcapod.channels import Channel
 
         n = len(inputs)
         block_sep = constants.BLOCK_SEPARATOR
-        sys_prefix = constants.SYSTEM_TAG_PREFIX
+        sys_prefix = constants.SYSTEM_KEY_PREFIX
 
         # Canonical order: sorted by canonical position encoded in suffixes.
         # Suffixes are "hash:position" when pipeline hashes are provided,
@@ -377,17 +377,17 @@ class Join(NonZeroInputOperator):
         canon_order = sorted(range(n), key=_canon_pos)
 
         async with asyncio.TaskGroup() as tg:
-            # Pre-rename system tags for each input so binary joins
+            # Pre-rename system keys for each input so binary joins
             # can pass them through without modification
             renamed_readers: list[
-                ReadableChannel[tuple[TagProtocol, DataProtocol]]
+                ReadableChannel[tuple[KeyProtocol, DataProtocol]]
             ] = []
             for orig_idx in canon_order:
-                ch: Channel[tuple[TagProtocol, DataProtocol]] = Channel(
+                ch: Channel[tuple[KeyProtocol, DataProtocol]] = Channel(
                     buffer_size=64
                 )
                 tg.create_task(
-                    self._rename_sys_tags(
+                    self._rename_sys_keys(
                         inputs[orig_idx],
                         ch.writer,
                         suffixes[orig_idx],
@@ -405,7 +405,7 @@ class Join(NonZeroInputOperator):
                     target_writer = output
                 else:
                     intermediate: Channel[
-                        tuple[TagProtocol, DataProtocol]
+                        tuple[KeyProtocol, DataProtocol]
                     ] = Channel(buffer_size=64)
                     target_writer = intermediate.writer
 
@@ -423,12 +423,12 @@ class Join(NonZeroInputOperator):
 
     async def _binary_streaming_join(
         self,
-        left: ReadableChannel[tuple[TagProtocol, DataProtocol]],
-        right: ReadableChannel[tuple[TagProtocol, DataProtocol]],
-        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+        left: ReadableChannel[tuple[KeyProtocol, DataProtocol]],
+        right: ReadableChannel[tuple[KeyProtocol, DataProtocol]],
+        output: WritableChannel[tuple[KeyProtocol, DataProtocol]],
         merge_fn: Callable[
-            [TagProtocol, DataProtocol, TagProtocol, DataProtocol],
-            tuple[TagProtocol, DataProtocol],
+            [KeyProtocol, DataProtocol, KeyProtocol, DataProtocol],
+            tuple[KeyProtocol, DataProtocol],
         ],
     ) -> None:
         """Binary symmetric hash join.
@@ -443,14 +443,14 @@ class Join(NonZeroInputOperator):
             left: Left input channel.
             right: Right input channel.
             output: Output channel for matched rows.
-            merge_fn: Callable(left_tag, left_pkt, right_tag, right_pkt)
-                that produces the merged (Tag, Data) pair.
+            merge_fn: Callable(left_key, left_pkt, right_key, right_pkt)
+                that produces the merged (Key, Data) pair.
         """
         _SENTINEL = object()
         queue: asyncio.Queue = asyncio.Queue(maxsize=64)
 
         async def _drain(
-            ch: ReadableChannel[tuple[TagProtocol, DataProtocol]],
+            ch: ReadableChannel[tuple[KeyProtocol, DataProtocol]],
             side: int,
         ) -> None:
             async for item in ch:
@@ -462,7 +462,7 @@ class Join(NonZeroInputOperator):
                 tg.create_task(_drain(left, 0))
                 tg.create_task(_drain(right, 1))
 
-                buffers: list[list[tuple[TagProtocol, DataProtocol]]] = [
+                buffers: list[list[tuple[KeyProtocol, DataProtocol]]] = [
                     [],
                     [],
                 ]
@@ -479,15 +479,15 @@ class Join(NonZeroInputOperator):
                         closed_count += 1
                         continue
 
-                    tag, pkt = item
+                    key, pkt = item
                     other = 1 - side
 
-                    # Determine shared tag keys once we have rows from both sides
+                    # Determine shared key keys once we have rows from both sides
                     if shared_keys is None:
                         if not buffers[other]:
-                            buffers[side].append((tag, pkt))
+                            buffers[side].append((key, pkt))
                             continue
-                        this_keys = set(tag.keys())
+                        this_keys = set(key.keys())
                         other_keys = set(buffers[other][0][0].keys())
                         shared_keys = tuple(sorted(this_keys & other_keys))
                         needs_reindex = True
@@ -506,89 +506,89 @@ class Join(NonZeroInputOperator):
                                 indexes[buf_side].setdefault(k, []).append(j)
 
                     # Index the new row
-                    td = tag.as_dict()
-                    key = (
+                    td = key.as_dict()
+                    join_key = (
                         tuple(td[sk] for sk in shared_keys)
                         if shared_keys
                         else (0,)
                     )
                     row_idx = len(buffers[side])
-                    buffers[side].append((tag, pkt))
-                    indexes[side].setdefault(key, []).append(row_idx)
+                    buffers[side].append((key, pkt))
+                    indexes[side].setdefault(join_key, []).append(row_idx)
 
                     # Probe the opposite side for matches
-                    for mi in indexes[other].get(key, []):
+                    for mi in indexes[other].get(join_key, []):
                         ot, op = buffers[other][mi]
                         if side == 0:
-                            await output.send(merge_fn(tag, pkt, ot, op))
+                            await output.send(merge_fn(key, pkt, ot, op))
                         else:
-                            await output.send(merge_fn(ot, op, tag, pkt))
+                            await output.send(merge_fn(ot, op, key, pkt))
         finally:
             await output.close()
 
     @staticmethod
-    async def _rename_sys_tags(
-        ch_in: ReadableChannel[tuple[TagProtocol, DataProtocol]],
-        ch_out: WritableChannel[tuple[TagProtocol, DataProtocol]],
+    async def _rename_sys_keys(
+        ch_in: ReadableChannel[tuple[KeyProtocol, DataProtocol]],
+        ch_out: WritableChannel[tuple[KeyProtocol, DataProtocol]],
         suffix: str,
         block_sep: str,
         sys_prefix: str,
     ) -> None:
-        """Read rows and rename system-tag keys by appending the per-input suffix.
+        """Read rows and rename system-key keys by appending the per-input suffix.
 
         Used as a pre-processing step in ``_staggered_join`` so that
-        downstream binary joins can pass system tags through without
+        downstream binary joins can pass system keys through without
         modification.
         """
-        from orcapod.core.datagrams import Tag
+        from orcapod.core.datagrams import Key
 
         try:
-            async for tag, pkt in ch_in:
-                sys_tags = tag.system_tags()
-                if sys_tags:
+            async for key, pkt in ch_in:
+                sys_keys = key.system_keys()
+                if sys_keys:
                     renamed: dict = {}
-                    for k, v in sys_tags.items():
+                    for k, v in sys_keys.items():
                         new_key = (
                             f"{k}{block_sep}{suffix}"
                             if k.startswith(sys_prefix)
                             else k
                         )
                         renamed[new_key] = v
-                    tag = Tag(tag.as_dict(), system_tags=renamed)
-                await ch_out.send((tag, pkt))
+                    key = Key(key.as_dict(), system_keys=renamed)
+                await ch_out.send((key, pkt))
         finally:
             await ch_out.close()
 
     @staticmethod
     def _merge_pair_rename(
-        left_tag: TagProtocol,
+        left_key: KeyProtocol,
         left_pkt: DataProtocol,
-        right_tag: TagProtocol,
+        right_key: KeyProtocol,
         right_pkt: DataProtocol,
         suffixes: list[str],
         block_sep: str,
-    ) -> tuple[TagProtocol, DataProtocol]:
-        """Merge a matched pair, renaming system tags with per-side suffixes.
+    ) -> tuple[KeyProtocol, DataProtocol]:
+        """Merge a matched pair, renaming system keys with per-side suffixes.
 
-        Used for direct 2-input joins where system tags are renamed
+        Used for direct 2-input joins where system keys are renamed
         during the merge (not pre-renamed).
         """
-        from orcapod.core.datagrams import Data, Tag
+        from orcapod.core.datagrams import Data, Key
 
-        sys_prefix = constants.SYSTEM_TAG_PREFIX
+        sys_prefix = constants.SYSTEM_KEY_PREFIX
 
-        # Merge tag dicts — shared keys come from left
-        merged_tag_d: dict = {}
-        for k, v in left_tag.as_dict().items():
-            merged_tag_d[k] = v
-        for k, v in right_tag.as_dict().items():
-            if k not in merged_tag_d:
-                merged_tag_d[k] = v
+        # Merge key dicts — shared keys come from left
+        merged_key_d: dict = {}
+        for k, v in left_key.as_dict().items():
+            merged_key_d[k] = v
+        for k, v in right_key.as_dict().items():
+            if k not in merged_key_d:
+                merged_key_d[k] = v
 
-        # Rename and merge system tags
+        # Rename and merge system keys
         merged_sys: dict = {}
-        for i, tag in enumerate((left_tag, right_tag)):
-            for k, v in tag.system_tags().items():
+        for i, key in enumerate((left_key, right_key)):
+            for k, v in key.system_keys().items():
                 new_key = (
                     f"{k}{block_sep}{suffixes[i]}"
                     if k.startswith(sys_prefix)
@@ -596,8 +596,8 @@ class Join(NonZeroInputOperator):
                 )
                 merged_sys[new_key] = v
 
-        merged_sys = Join._sort_merged_system_tags(merged_sys)
-        merged_tag = Tag(merged_tag_d, system_tags=merged_sys)
+        merged_sys = Join._sort_merged_system_keys(merged_sys)
+        merged_key = Key(merged_key_d, system_keys=merged_sys)
 
         # Merge data dicts (non-overlapping by Join's validation)
         merged_pkt_d: dict = {}
@@ -608,38 +608,38 @@ class Join(NonZeroInputOperator):
         merged_si.update(right_pkt.source_info())
 
         merged_pkt = Data(merged_pkt_d, source_info=merged_si)
-        return merged_tag, merged_pkt
+        return merged_key, merged_pkt
 
     @staticmethod
     def _merge_pair_passthrough(
-        left_tag: TagProtocol,
+        left_key: KeyProtocol,
         left_pkt: DataProtocol,
-        right_tag: TagProtocol,
+        right_key: KeyProtocol,
         right_pkt: DataProtocol,
-    ) -> tuple[TagProtocol, DataProtocol]:
-        """Merge a matched pair, passing system tags through without renaming.
+    ) -> tuple[KeyProtocol, DataProtocol]:
+        """Merge a matched pair, passing system keys through without renaming.
 
-        Used in the staggered chain where system tags have already been
-        pre-renamed by ``_rename_sys_tags``.
+        Used in the staggered chain where system keys have already been
+        pre-renamed by ``_rename_sys_keys``.
         """
-        from orcapod.core.datagrams import Data, Tag
+        from orcapod.core.datagrams import Data, Key
 
-        # Merge tag dicts — shared keys come from left
-        merged_tag_d: dict = {}
-        for k, v in left_tag.as_dict().items():
-            merged_tag_d[k] = v
-        for k, v in right_tag.as_dict().items():
-            if k not in merged_tag_d:
-                merged_tag_d[k] = v
+        # Merge key dicts — shared keys come from left
+        merged_key_d: dict = {}
+        for k, v in left_key.as_dict().items():
+            merged_key_d[k] = v
+        for k, v in right_key.as_dict().items():
+            if k not in merged_key_d:
+                merged_key_d[k] = v
 
-        # Combine system tags (already renamed)
+        # Combine system keys (already renamed)
         merged_sys: dict = {}
-        merged_sys.update(left_tag.system_tags())
-        merged_sys.update(right_tag.system_tags())
+        merged_sys.update(left_key.system_keys())
+        merged_sys.update(right_key.system_keys())
 
         # Sort within same-provenance-path groups for commutativity
-        merged_sys = Join._sort_merged_system_tags(merged_sys)
-        merged_tag = Tag(merged_tag_d, system_tags=merged_sys)
+        merged_sys = Join._sort_merged_system_keys(merged_sys)
+        merged_key = Key(merged_key_d, system_keys=merged_sys)
 
         # Merge data dicts (non-overlapping by Join's validation)
         merged_pkt_d: dict = {}
@@ -650,20 +650,20 @@ class Join(NonZeroInputOperator):
         merged_si.update(right_pkt.source_info())
 
         merged_pkt = Data(merged_pkt_d, source_info=merged_si)
-        return merged_tag, merged_pkt
+        return merged_key, merged_pkt
 
     @staticmethod
-    def _sort_merged_system_tags(merged_sys: dict) -> dict:
-        """Sort system tag values within same-provenance-path groups.
+    def _sort_merged_system_keys(merged_sys: dict) -> dict:
+        """Sort system key values within same-provenance-path groups.
 
-        When two joined inputs share a pipeline_hash, their system tag
+        When two joined inputs share a pipeline_hash, their system key
         columns share a provenance path but occupy different canonical
         positions.  Sorting the paired (source_id, record_id) values
         across positions ensures commutativity — mirroring what
-        ``sort_system_tag_values`` does on Arrow tables in
+        ``sort_system_key_values`` does on Arrow tables in
         ``static_process``.
         """
-        sys_prefix = constants.SYSTEM_TAG_PREFIX
+        sys_prefix = constants.SYSTEM_KEY_PREFIX
         block_sep = constants.BLOCK_SEPARATOR
         field_sep = constants.FIELD_SEPARATOR
 
@@ -683,8 +683,8 @@ class Join(NonZeroInputOperator):
                 field_type
             ] = key
 
-        sid_field = constants.SYSTEM_TAG_SOURCE_ID_PREFIX[len(sys_prefix) :]
-        rid_field = constants.SYSTEM_TAG_RECORD_ID_PREFIX[len(sys_prefix) :]
+        sid_field = constants.SYSTEM_KEY_SOURCE_ID_PREFIX[len(sys_prefix) :]
+        rid_field = constants.SYSTEM_KEY_RECORD_ID_PREFIX[len(sys_prefix) :]
 
         for _prov_path, positions in groups.items():
             if len(positions) <= 1:

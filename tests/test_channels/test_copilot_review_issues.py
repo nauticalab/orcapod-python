@@ -43,12 +43,12 @@ def make_stream(n: int = 5) -> ArrowTableStream:
         {"id": pa.array(list(range(n)), type=pa.int64()), "x": pa.array(list(range(n)), type=pa.int64())},
         schema=schema,
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 async def feed_stream_to_channel(stream: ArrowTableStream, ch: Channel) -> None:
-    for tag, data in stream.iter_data():
-        await ch.writer.send((tag, data))
+    for key, data in stream.iter_data():
+        await ch.writer.send((key, data))
     await ch.writer.close()
 
 

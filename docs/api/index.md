@@ -22,5 +22,5 @@ Everything else lives in subpackages:
 | [`orcapod.operators`](operators.md) | Structural stream transformations (join, filter, select, batch, etc.) |
 | [`orcapod.databases`](databases.md) | Persistent storage backends for computation results |
 | [`orcapod.nodes`](nodes.md) | DB-backed pipeline elements that persist their results |
-| [`orcapod.streams`](streams.md) | Immutable (Tag, Data) sequences backed by PyArrow tables |
+| [`orcapod.streams`](streams.md) | Immutable (Key, Data) sequences backed by PyArrow tables |
 | [`orcapod.types`](types.md) | Core type definitions: `Schema`, `ColumnConfig`, `ContentHash` |

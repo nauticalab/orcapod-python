@@ -73,14 +73,14 @@ def deserialize_value(serialized_value):
 
     # --- tagged dicts (set, frozenset, tuple, OrderedDict) ---
     if isinstance(serialized_value, dict) and "__type__" in serialized_value:
-        type_tag = serialized_value["__type__"]
-        if type_tag == "set":
+        type_key = serialized_value["__type__"]
+        if type_key == "set":
             return set(serialized_value["items"])
-        if type_tag == "frozenset":
+        if type_key == "frozenset":
             return frozenset(serialized_value["items"])
-        if type_tag == "tuple":
+        if type_key == "tuple":
             return tuple(serialized_value["items"])
-        if type_tag == "OrderedDict":
+        if type_key == "OrderedDict":
             from collections import OrderedDict
 
             return OrderedDict(serialized_value["items"])

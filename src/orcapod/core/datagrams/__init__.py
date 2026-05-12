@@ -1,8 +1,8 @@
 from .datagram import Datagram
-from .tag_data import Data, Tag
+from .key_data import Data, Key
 
 __all__ = [
     "Datagram",
-    "Tag",
+    "Key",
     "Data",
 ]

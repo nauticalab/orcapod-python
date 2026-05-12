@@ -34,7 +34,7 @@ source = DictSource(
         {"name": "Bob", "age": 25},
         {"name": "Charlie", "age": 35},
     ],
-    tag_columns=["name"],
+    key_columns=["name"],
     source_id="people",
 )
 
@@ -45,8 +45,8 @@ def compute_birth_year(age: int) -> int:
 
 # 3. Apply the function pod and inspect the output
 result = compute_birth_year.pod(source)
-for tag, data in result.iter_data():
-    print(f"{tag.as_dict()} -> {data.as_dict()}")
+for key, data in result.iter_data():
+    print(f"{key.as_dict()} -> {data.as_dict()}")
 # {'name': 'Alice'} -> {'birth_year': 1996}
 # {'name': 'Bob'} -> {'birth_year': 2001}
 # {'name': 'Charlie'} -> {'birth_year': 1991}

@@ -18,13 +18,13 @@ class TestPreparePrefixedColumnsPreservesNullable:
         """Fields with nullable=False in source table must remain nullable=False in data_table."""
         schema = pa.schema(
             [
-                pa.field("tag", pa.large_string(), nullable=False),
+                pa.field("key", pa.large_string(), nullable=False),
                 pa.field("val", pa.int64(), nullable=False),
             ]
         )
         table = pa.table(
             {
-                "tag": pa.array(["a"], type=pa.large_string()),
+                "key": pa.array(["a"], type=pa.large_string()),
                 "val": pa.array([1], type=pa.int64()),
             },
             schema=schema,
@@ -41,7 +41,7 @@ class TestPreparePrefixedColumnsPreservesNullable:
         """Fields with nullable=True in source table must remain nullable=True in data_table."""
         table = pa.table(
             {
-                "tag": pa.array(["a"], type=pa.large_string()),
+                "key": pa.array(["a"], type=pa.large_string()),
                 "val": pa.array([1], type=pa.int64()),
             }
         )
@@ -57,14 +57,14 @@ class TestPreparePrefixedColumnsPreservesNullable:
         """Mix of nullable and non-nullable fields must be preserved correctly."""
         schema = pa.schema(
             [
-                pa.field("tag", pa.large_string(), nullable=True),
+                pa.field("key", pa.large_string(), nullable=True),
                 pa.field("val_nullable", pa.int64(), nullable=True),
                 pa.field("val_non_nullable", pa.float64(), nullable=False),
             ]
         )
         table = pa.table(
             {
-                "tag": pa.array(["a"], type=pa.large_string()),
+                "key": pa.array(["a"], type=pa.large_string()),
                 "val_nullable": pa.array([1], type=pa.int64()),
                 "val_non_nullable": pa.array([1.5], type=pa.float64()),
             },

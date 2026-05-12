@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement `PostgreSQLTableSource`, a read-only OrcaPod `Source` backed by a PostgreSQL table, using PK columns as default tag columns.
+**Goal:** Implement `PostgreSQLTableSource`, a read-only OrcaPod `Source` backed by a PostgreSQL table, using PK columns as default key columns.
 
 **Architecture:** Thin subclass of `DBTableSource` (which handles all source logic). `PostgreSQLTableSource.__init__` stores the DSN, creates a `PostgreSQLConnector`, delegates entirely to `DBTableSource.__init__` (which eagerly loads all data into memory), then closes the connector. No ROWID fallback needed — PostgreSQL PKs are always `NOT NULL`.
 
@@ -81,7 +81,7 @@ Create `src/orcapod/core/sources/postgresql_table_source.py`:
 """PostgreSQLTableSource — a read-only RootSource backed by a PostgreSQL table.
 
 Wraps a PostgreSQL table as an OrcaPod Source. Primary-key columns are used
-as tag columns by default.
+as key columns by default.
 
 Example::
 
@@ -109,13 +109,13 @@ class PostgreSQLTableSource(DBTableSource):
     1. Stores the DSN for serialisation.
     2. Opens a ``PostgreSQLConnector`` for *dsn*.
     3. Delegates to ``DBTableSource.__init__``, which validates the table,
-       resolves tag columns (defaults to PK columns), fetches all rows as
+       resolves key columns (defaults to PK columns), fetches all rows as
        Arrow batches, and builds the stream.
     4. Closes the connector — all data is eagerly loaded into memory, so the
        connection is released immediately.
 
-    PostgreSQL PK columns are always ``NOT NULL``, so NULL tag values can
-    only arise when *tag_columns* is overridden to point at a nullable
+    PostgreSQL PK columns are always ``NOT NULL``, so NULL key values can
+    only arise when *key_columns* is overridden to point at a nullable
     column. Such NULLs are passed through as-is (Arrow supports nulls).
 
     Args:
@@ -123,10 +123,10 @@ class PostgreSQLTableSource(DBTableSource):
             URI form: ``"postgresql://user:pass@host:5432/dbname"``
             Keyword form: ``"host=localhost dbname=mydb user=alice"``
         table_name: Name of the table to expose as a source.
-        tag_columns: Columns to use as tag columns. If ``None`` (default),
+        key_columns: Columns to use as key columns. If ``None`` (default),
             the table's primary-key columns are used. Raises ``ValueError``
             if the table has no primary key and no explicit columns are given.
-        system_tag_columns: Additional system-level tag columns.
+        system_key_columns: Additional system-level key columns.
         record_id_column: Column for stable per-row record IDs in provenance.
         source_id: Canonical source name. Defaults to *table_name*.
         label: Human-readable label for this source node.
@@ -135,7 +135,7 @@ class PostgreSQLTableSource(DBTableSource):
 
     Raises:
         ValueError: If the table is not found, is empty, or has no PK and
-            no *tag_columns* are given.
+            no *key_columns* are given.
         psycopg.OperationalError: If the DSN is invalid or connection fails.
     """
 
@@ -143,8 +143,8 @@ class PostgreSQLTableSource(DBTableSource):
         self,
         dsn: str,
         table_name: str,
-        tag_columns: Collection[str] | None = None,
-        system_tag_columns: Collection[str] = (),
+        key_columns: Collection[str] | None = None,
+        system_key_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
         label: str | None = None,
@@ -194,7 +194,7 @@ git commit -m "feat(sources): stub PostgreSQLTableSource with import/export wiri
 
 ---
 
-## Task 2: Core `__init__` — construction, PK tags, error cases
+## Task 2: Core `__init__` — construction, PK keys, error cases
 
 Implement the actual `__init__` and verify the main behaviours.
 
@@ -297,19 +297,19 @@ class TestProtocolConformance:
 
 
 # ===========================================================================
-# 3. PK as default tag columns
+# 3. PK as default key columns
 # ===========================================================================
 
 
-class TestPKAsDefaultTags:
-    def test_single_pk_is_tag_column(self):
+class TestPKAsDefaultKeys:
+    def test_single_pk_is_key_column(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         with patch(_PATCH) as mock_cls:
             mock_cls.return_value = _make_mock_connector()
             src = PostgreSQLTableSource(DSN, "measurements")
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "session_id" in key_schema
 
     def test_pk_not_in_data_schema(self):
         from orcapod.core.sources import PostgreSQLTableSource
@@ -330,7 +330,7 @@ class TestPKAsDefaultTags:
         assert "trial" in data_schema
         assert "response" in data_schema
 
-    def test_composite_pk_all_columns_are_tags(self):
+    def test_composite_pk_all_columns_are_keys(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         schema = pa.schema([
@@ -353,9 +353,9 @@ class TestPKAsDefaultTags:
                 batches=[batch],
             )
             src = PostgreSQLTableSource(DSN, "events")
-        tag_schema, _ = src.output_schema()
-        assert "user_id" in tag_schema
-        assert "event_id" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "user_id" in key_schema
+        assert "event_id" in key_schema
 
     def test_default_source_id_is_table_name(self):
         from orcapod.core.sources import PostgreSQLTableSource
@@ -375,32 +375,32 @@ class TestPKAsDefaultTags:
 
 
 # ===========================================================================
-# 4. Explicit tag_columns override
+# 4. Explicit key_columns override
 # ===========================================================================
 
 
-class TestExplicitTagOverride:
-    def test_explicit_tag_columns_override_pk(self):
+class TestExplicitKeyOverride:
+    def test_explicit_key_columns_override_pk(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         with patch(_PATCH) as mock_cls:
             mock_cls.return_value = _make_mock_connector()
-            src = PostgreSQLTableSource(DSN, "measurements", tag_columns=["trial"])
-        tag_schema, _ = src.output_schema()
-        assert "trial" in tag_schema
-        assert "session_id" not in tag_schema
+            src = PostgreSQLTableSource(DSN, "measurements", key_columns=["trial"])
+        key_schema, _ = src.output_schema()
+        assert "trial" in key_schema
+        assert "session_id" not in key_schema
 
-    def test_multiple_explicit_tag_columns(self):
+    def test_multiple_explicit_key_columns(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         with patch(_PATCH) as mock_cls:
             mock_cls.return_value = _make_mock_connector()
             src = PostgreSQLTableSource(
-                DSN, "measurements", tag_columns=["session_id", "trial"]
+                DSN, "measurements", key_columns=["session_id", "trial"]
             )
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
-        assert "trial" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "session_id" in key_schema
+        assert "trial" in key_schema
 
 
 # ===========================================================================
@@ -409,7 +409,7 @@ class TestExplicitTagOverride:
 
 
 class TestNoPKError:
-    def test_no_pk_and_no_tag_columns_raises(self):
+    def test_no_pk_and_no_key_columns_raises(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         with patch(_PATCH) as mock_cls:
@@ -471,14 +471,14 @@ class TestStreamBehaviour:
             src = PostgreSQLTableSource(DSN, "measurements")
         assert len(list(src.iter_data())) == 3
 
-    def test_iter_data_tags_contain_pk(self):
+    def test_iter_data_keys_contain_pk(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         with patch(_PATCH) as mock_cls:
             mock_cls.return_value = _make_mock_connector()
             src = PostgreSQLTableSource(DSN, "measurements")
-        for tags, _ in src.iter_data():
-            assert "session_id" in tags
+        for keys, _ in src.iter_data():
+            assert "session_id" in keys
 
     def test_output_schema_returns_two_schemas(self):
         from orcapod.core.sources import PostgreSQLTableSource
@@ -533,7 +533,7 @@ class TestDeterministicHashing:
             src2 = PostgreSQLTableSource(DSN, "measurements")
         assert src1.content_hash() == src2.content_hash()
 
-    def test_different_tag_columns_yields_different_pipeline_hash(self):
+    def test_different_key_columns_yields_different_pipeline_hash(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         with patch(_PATCH) as mock_cls:
@@ -541,7 +541,7 @@ class TestDeterministicHashing:
             src1 = PostgreSQLTableSource(DSN, "measurements")
         with patch(_PATCH) as mock_cls:
             mock_cls.return_value = _make_mock_connector()
-            src2 = PostgreSQLTableSource(DSN, "measurements", tag_columns=["trial"])
+            src2 = PostgreSQLTableSource(DSN, "measurements", key_columns=["trial"])
         assert src1.pipeline_hash() != src2.pipeline_hash()
 ```
 
@@ -562,8 +562,8 @@ Replace the `__init__` stub in `src/orcapod/core/sources/postgresql_table_source
         self,
         dsn: str,
         table_name: str,
-        tag_columns: Collection[str] | None = None,
-        system_tag_columns: Collection[str] = (),
+        key_columns: Collection[str] | None = None,
+        system_key_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
         label: str | None = None,
@@ -576,8 +576,8 @@ Replace the `__init__` stub in `src/orcapod/core/sources/postgresql_table_source
             super().__init__(
                 connector,
                 table_name,
-                tag_columns=tag_columns,
-                system_tag_columns=system_tag_columns,
+                key_columns=key_columns,
+                system_key_columns=system_key_columns,
                 record_id_column=record_id_column,
                 source_id=source_id,
                 label=label,
@@ -627,7 +627,7 @@ Expected: PASS.
 ```bash
 git add src/orcapod/core/sources/postgresql_table_source.py \
         tests/test_core/sources/test_postgresql_table_source.py
-git commit -m "feat(sources): implement PostgreSQLTableSource.__init__ with PK tag resolution (PLT-1072)"
+git commit -m "feat(sources): implement PostgreSQLTableSource.__init__ with PK key resolution (PLT-1072)"
 ```
 
 ---
@@ -667,8 +667,8 @@ class TestToConfig:
     def test_has_table_name(self):
         assert self._make_src().to_config()["table_name"] == "measurements"
 
-    def test_has_tag_columns(self):
-        assert "session_id" in self._make_src().to_config()["tag_columns"]
+    def test_has_key_columns(self):
+        assert "session_id" in self._make_src().to_config()["key_columns"]
 
     def test_has_source_id(self):
         assert self._make_src().to_config()["source_id"] == "measurements"
@@ -721,18 +721,18 @@ class TestFromConfig:
         assert src2.content_hash() == src.content_hash()
         assert src2.pipeline_hash() == src.pipeline_hash()
 
-    def test_from_config_with_explicit_tag_columns(self):
+    def test_from_config_with_explicit_key_columns(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         with patch(_PATCH) as mock_cls:
             mock_cls.return_value = _make_mock_connector()
-            src = PostgreSQLTableSource(DSN, "measurements", tag_columns=["trial"])
+            src = PostgreSQLTableSource(DSN, "measurements", key_columns=["trial"])
         config = src.to_config()
         with patch(_PATCH) as mock_cls:
             mock_cls.return_value = _make_mock_connector()
             src2 = PostgreSQLTableSource.from_config(config)
-        tag_schema, _ = src2.output_schema()
-        assert "trial" in tag_schema
+        key_schema, _ = src2.output_schema()
+        assert "trial" in key_schema
 
     def test_from_config_missing_dsn_raises(self):
         from orcapod.core.sources import PostgreSQLTableSource
@@ -774,8 +774,8 @@ Replace the stubs in `src/orcapod/core/sources/postgresql_table_source.py`:
         return cls(
             dsn=config["dsn"],
             table_name=config["table_name"],
-            tag_columns=config.get("tag_columns"),
-            system_tag_columns=config.get("system_tag_columns", ()),
+            key_columns=config.get("key_columns"),
+            system_key_columns=config.get("system_key_columns", ()),
             record_id_column=config.get("record_id_column"),
             source_id=config.get("source_id"),
             label=config.get("label"),
@@ -993,7 +993,7 @@ def schema_dsn(pg_schema: str) -> str:
 class TestSinglePKTable:
     """Source backed by a table with a single-column PK."""
 
-    def test_pk_column_is_tag(self, schema_dsn: str) -> None:
+    def test_pk_column_is_key(self, schema_dsn: str) -> None:
         from orcapod.core.sources import PostgreSQLTableSource
 
         with psycopg.connect(schema_dsn) as conn:
@@ -1009,8 +1009,8 @@ class TestSinglePKTable:
             conn.commit()
 
         src = PostgreSQLTableSource(schema_dsn, "measurements")
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "session_id" in key_schema
 
     def test_non_pk_columns_in_data_schema(self, schema_dsn: str) -> None:
         from orcapod.core.sources import PostgreSQLTableSource
@@ -1050,7 +1050,7 @@ class TestSinglePKTable:
         src = PostgreSQLTableSource(schema_dsn, "measurements")
         assert len(list(src.iter_data())) == 3
 
-    def test_tag_values_are_correct(self, schema_dsn: str) -> None:
+    def test_key_values_are_correct(self, schema_dsn: str) -> None:
         from orcapod.core.sources import PostgreSQLTableSource
 
         with psycopg.connect(schema_dsn) as conn:
@@ -1066,15 +1066,15 @@ class TestSinglePKTable:
             conn.commit()
 
         src = PostgreSQLTableSource(schema_dsn, "measurements")
-        tag_values = sorted([tags["session_id"] for tags, _ in src.iter_data()])
-        assert tag_values == ["s1", "s2", "s3"]
+        key_values = sorted([keys["session_id"] for keys, _ in src.iter_data()])
+        assert key_values == ["s1", "s2", "s3"]
 
 
 @pytest.mark.postgres
 class TestCompositePKTable:
     """Source backed by a table with a composite PK."""
 
-    def test_both_pk_columns_are_tags(self, schema_dsn: str) -> None:
+    def test_both_pk_columns_are_keys(self, schema_dsn: str) -> None:
         from orcapod.core.sources import PostgreSQLTableSource
 
         with psycopg.connect(schema_dsn) as conn:
@@ -1091,16 +1091,16 @@ class TestCompositePKTable:
             conn.commit()
 
         src = PostgreSQLTableSource(schema_dsn, "events")
-        tag_schema, _ = src.output_schema()
-        assert "user_id" in tag_schema
-        assert "event_id" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "user_id" in key_schema
+        assert "event_id" in key_schema
 
 
 @pytest.mark.postgres
-class TestExplicitTagOverride:
-    """tag_columns override overrides the PK."""
+class TestExplicitKeyOverride:
+    """key_columns override overrides the PK."""
 
-    def test_explicit_tag_columns_override_pk(self, schema_dsn: str) -> None:
+    def test_explicit_key_columns_override_pk(self, schema_dsn: str) -> None:
         from orcapod.core.sources import PostgreSQLTableSource
 
         with psycopg.connect(schema_dsn) as conn:
@@ -1116,11 +1116,11 @@ class TestExplicitTagOverride:
             conn.commit()
 
         src = PostgreSQLTableSource(
-            schema_dsn, "measurements", tag_columns=["trial"]
+            schema_dsn, "measurements", key_columns=["trial"]
         )
-        tag_schema, _ = src.output_schema()
-        assert "trial" in tag_schema
-        assert "session_id" not in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "trial" in key_schema
+        assert "session_id" not in key_schema
 
 
 @pytest.mark.postgres
@@ -1173,8 +1173,8 @@ class TestPipelineIntegration:
         doubled_values = sorted([pkt.as_dict()["doubled"] for _, pkt in fn_outputs[0]])
         assert doubled_values == pytest.approx([0.2, 0.4, 0.6])
 
-        tag_values = sorted([tags["session_id"] for tags, _ in fn_outputs[0]])
-        assert tag_values == ["s1", "s2", "s3"]
+        key_values = sorted([keys["session_id"] for keys, _ in fn_outputs[0]])
+        assert key_values == ["s1", "s2", "s3"]
 ```
 
 - [ ] **Step 5.2: Verify the integration test file is syntactically correct (dry run)**
@@ -1235,7 +1235,7 @@ gh pr create \
 ## Summary
 
 - Implements `PostgreSQLTableSource` as a thin subclass of `DBTableSource`
-- PK columns used as default tag columns; explicit `tag_columns` override supported
+- PK columns used as default key columns; explicit `key_columns` override supported
 - Connector opened and closed eagerly at construction time (all data loaded into memory)
 - `to_config` / `from_config` round-trip serialisation
 - Registered in `_build_source_registry()` under `"postgresql_table"`

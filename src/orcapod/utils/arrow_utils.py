@@ -932,18 +932,18 @@ def get_system_columns(table: "pa.Table") -> "pa.Table":
         [
             col
             for col in table.column_names
-            if col.startswith(constants.SYSTEM_TAG_PREFIX)
+            if col.startswith(constants.SYSTEM_KEY_PREFIX)
         ]
     )
 
 
-def add_system_tag_columns(
+def add_system_key_columns(
     table: "pa.Table",
     schema_hash: str,
     source_ids: str | Collection[str],
     record_ids: Collection[str],
 ) -> "pa.Table":
-    """Add paired source_id and record_id system tag columns to an Arrow table."""
+    """Add paired source_id and record_id system key columns to an Arrow table."""
     if not table.column_names:
         raise ValueError("Table is empty")
 
@@ -961,13 +961,13 @@ def add_system_tag_columns(
     if len(record_ids) != table.num_rows:
         raise ValueError("Length of record_ids must match number of rows in the table.")
 
-    source_id_col_name = f"{constants.SYSTEM_TAG_SOURCE_ID_PREFIX}{constants.BLOCK_SEPARATOR}{schema_hash}"
-    record_id_col_name = f"{constants.SYSTEM_TAG_RECORD_ID_PREFIX}{constants.BLOCK_SEPARATOR}{schema_hash}"
+    source_id_col_name = f"{constants.SYSTEM_KEY_SOURCE_ID_PREFIX}{constants.BLOCK_SEPARATOR}{schema_hash}"
+    record_id_col_name = f"{constants.SYSTEM_KEY_RECORD_ID_PREFIX}{constants.BLOCK_SEPARATOR}{schema_hash}"
 
     source_id_array = pa.array(source_ids, type=pa.large_string())
     record_id_array = pa.array(record_ids, type=pa.large_string())
 
-    # System tag columns are always computed, never null — declare nullable=False
+    # System key columns are always computed, never null — declare nullable=False
     # explicitly so the schema intent is not lost in Polars round-trips.
     table = table.append_column(
         pa.field(source_id_col_name, pa.large_string(), nullable=False), source_id_array
@@ -978,30 +978,30 @@ def add_system_tag_columns(
     return table
 
 
-def append_to_system_tags(table: "pa.Table", value: str) -> "pa.Table":
-    """Append a value to the system tags column in an Arrow table."""
+def append_to_system_keys(table: "pa.Table", value: str) -> "pa.Table":
+    """Append a value to the system keys column in an Arrow table."""
     if not table.column_names:
         raise ValueError("Table is empty")
 
     column_name_map = {
         c: f"{c}{constants.BLOCK_SEPARATOR}{value}"
-        if c.startswith(constants.SYSTEM_TAG_PREFIX)
+        if c.startswith(constants.SYSTEM_KEY_PREFIX)
         else c
         for c in table.column_names
     }
     return table.rename_columns(column_name_map)
 
 
-def _parse_system_tag_column(
+def _parse_system_key_column(
     col_name: str,
 ) -> tuple[str, str, str] | None:
-    """Parse a system tag column name into (field_type, provenance_path, position).
+    """Parse a system key column name into (field_type, provenance_path, position).
 
     For example:
-        _tag_source_id::abc123::def456:0
+        _key_source_id::abc123::def456:0
         → field_type="source_id", provenance_path="abc123::def456", position="0"
 
-        _tag_record_id::abc123::def456:0
+        _key_record_id::abc123::def456:0
         → field_type="record_id", provenance_path="abc123::def456", position="0"
 
     Returns None if the column doesn't end with a :position suffix.
@@ -1012,7 +1012,7 @@ def _parse_system_tag_column(
         return None
 
     # Determine field type by checking known prefixes
-    prefix = constants.SYSTEM_TAG_PREFIX
+    prefix = constants.SYSTEM_KEY_PREFIX
     if not base.startswith(prefix):
         return None
 
@@ -1029,34 +1029,34 @@ def _parse_system_tag_column(
     return field_type, provenance_path, position
 
 
-def sort_system_tag_values(table: "pa.Table") -> "pa.Table":
-    """Sort paired system tag values for columns that share the same provenance path.
+def sort_system_key_values(table: "pa.Table") -> "pa.Table":
+    """Sort paired system key values for columns that share the same provenance path.
 
-    System tag columns come in (source_id, record_id) pairs. Columns that differ
+    System key columns come in (source_id, record_id) pairs. Columns that differ
     only by their canonical position (the final :N) represent streams with the same
     pipeline_hash that were joined. For commutativity, paired (source_id, record_id)
     tuples must be sorted together per row so that the result is independent of
     input order.
 
     Algorithm:
-    1. Parse each system tag column into (field_type, provenance_path, position)
+    1. Parse each system key column into (field_type, provenance_path, position)
     2. Group by provenance_path — source_id and record_id at the same path+position
        are paired
     3. For each group with >1 position, sort per-row by (source_id, record_id) tuples
     4. Assign sorted values back to both columns at each position
     """
-    sys_tag_cols = [
-        c for c in table.column_names if c.startswith(constants.SYSTEM_TAG_PREFIX)
+    sys_key_cols = [
+        c for c in table.column_names if c.startswith(constants.SYSTEM_KEY_PREFIX)
     ]
 
-    if not sys_tag_cols:
+    if not sys_key_cols:
         return table
 
-    # Parse all system tag columns and group by provenance_path
+    # Parse all system key columns and group by provenance_path
     # groups[provenance_path][position] = {field_type: col_name}
     groups: dict[str, dict[str, dict[str, str]]] = {}
-    for col in sys_tag_cols:
-        parsed = _parse_system_tag_column(col)
+    for col in sys_key_cols:
+        parsed = _parse_system_key_column(col)
         if parsed is None:
             continue
         field_type, provenance_path, position = parsed
@@ -1064,11 +1064,11 @@ def sort_system_tag_values(table: "pa.Table") -> "pa.Table":
             col
         )
 
-    source_id_field = constants.SYSTEM_TAG_SOURCE_ID_PREFIX[
-        len(constants.SYSTEM_TAG_PREFIX) :
+    source_id_field = constants.SYSTEM_KEY_SOURCE_ID_PREFIX[
+        len(constants.SYSTEM_KEY_PREFIX) :
     ]
-    record_id_field = constants.SYSTEM_TAG_RECORD_ID_PREFIX[
-        len(constants.SYSTEM_TAG_PREFIX) :
+    record_id_field = constants.SYSTEM_KEY_RECORD_ID_PREFIX[
+        len(constants.SYSTEM_KEY_PREFIX) :
     ]
 
     # For each provenance_path group with >1 position, sort paired tuples per row

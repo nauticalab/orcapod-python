@@ -19,7 +19,7 @@ Example::
 
 Status schema (fixed columns):
     Fixed columns are prefixed with ``_status_`` to follow system column
-    conventions and avoid collision with user-defined tag column names.
+    conventions and avoid collision with user-defined key column names.
 
     - ``_status_id`` (large_utf8): UUID7 unique to this status event.
     - ``_status_run_id`` (large_utf8): UUID of the pipeline run (from ``on_run_start``).
@@ -31,8 +31,8 @@ Status schema (fixed columns):
     - ``_status_timestamp`` (large_utf8): ISO-8601 UTC timestamp.
     - ``_status_error_summary`` (large_utf8): Brief error on ``FAILED``; ``None`` otherwise.
 
-    In addition, each tag key from the data's tag becomes a separate
-    ``large_utf8`` column (queryable, not JSON-encoded).  Tag columns use
+    In addition, each key key from the data's key becomes a separate
+    ``large_utf8`` column (queryable, not JSON-encoded).  Key columns use
     bare names (no prefix), so they are always distinguishable from fixed
     columns.
 
@@ -44,7 +44,7 @@ Status storage:
     path, not in column values.
 
 Append-only:
-    Each state transition is a new row.  Current state for a (node, tag)
+    Each state transition is a new row.  Current state for a (node, key)
     combination within a run is the row with the latest ``_status_timestamp``.
     If a ``RUNNING`` event has no subsequent terminal event for the same
     ``run_id``, the process crashed.
@@ -59,7 +59,7 @@ from typing import TYPE_CHECKING, Any
 from uuid_utils import uuid7
 
 from orcapod.pipeline.observer import NoOpLogger
-from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
+from orcapod.protocols.core_protocols import DataProtocol, KeyProtocol
 from orcapod.types import SchemaLike
 
 if TYPE_CHECKING:
@@ -103,9 +103,9 @@ class StatusObserver:
         self._db = status_database
         self._current_run_id: str = ""
         self._current_pipeline_uri: str = ""
-        # Maps node_label → tag_schema for in-flight nodes.
+        # Maps node_label → key_schema for in-flight nodes.
         # Populated by on_node_start; cleared by on_node_end.
-        self._tag_schema_per_node: dict[str, SchemaLike] = {}
+        self._key_schema_per_node: dict[str, SchemaLike] = {}
 
     # -- contextualize --
 
@@ -129,49 +129,49 @@ class StatusObserver:
     ) -> None:
         self._current_run_id = run_id
         self._current_pipeline_uri = pipeline_uri
-        self._tag_schema_per_node.clear()
+        self._key_schema_per_node.clear()
 
     def on_run_end(self, run_id: str) -> None:
-        self._tag_schema_per_node.clear()
+        self._key_schema_per_node.clear()
 
     def on_node_start(
         self,
         node_label: str,
         node_hash: str,
-        tag_schema: SchemaLike | None = None,
+        key_schema: SchemaLike | None = None,
     ) -> None:
-        self._tag_schema_per_node[node_label] = tag_schema or {}
+        self._key_schema_per_node[node_label] = key_schema or {}
 
     def on_node_end(
         self,
         node_label: str,
         node_hash: str,
     ) -> None:
-        self._tag_schema_per_node.pop(node_label, None)
+        self._key_schema_per_node.pop(node_label, None)
 
     def on_data_start(
-        self, node_label: str, tag: TagProtocol, data: DataProtocol
+        self, node_label: str, key: KeyProtocol, data: DataProtocol
     ) -> None:
-        self._write_event(node_label, tag, state="RUNNING")
+        self._write_event(node_label, key, state="RUNNING")
 
     def on_data_end(
         self,
         node_label: str,
-        tag: TagProtocol,
+        key: KeyProtocol,
         input_data: DataProtocol,
         output_data: DataProtocol | None,
         cached: bool,
     ) -> None:
-        self._write_event(node_label, tag, state="CACHED" if cached else "SUCCESS")
+        self._write_event(node_label, key, state="CACHED" if cached else "SUCCESS")
 
     def on_data_crash(
-        self, node_label: str, tag: TagProtocol, data: DataProtocol, error: Exception
+        self, node_label: str, key: KeyProtocol, data: DataProtocol, error: Exception
     ) -> None:
-        self._write_event(node_label, tag, state="FAILED", error=error)
+        self._write_event(node_label, key, state="FAILED", error=error)
 
     def create_data_logger(
         self,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
     ) -> NoOpLogger:
         """Return a no-op logger.
@@ -261,14 +261,14 @@ class StatusObserver:
     def _write_event(
         self,
         node_label: str,
-        tag: TagProtocol,
+        key: KeyProtocol,
         state: str,
         error: Exception | None = None,
     ) -> None:
         """Build and write a single status event row."""
         import pyarrow as pa
 
-        tag_schema = self._tag_schema_per_node.get(node_label, {})
+        key_schema = self._key_schema_per_node.get(node_label, {})
 
         status_id = str(uuid7())
         timestamp = datetime.now(timezone.utc).isoformat()
@@ -285,10 +285,10 @@ class StatusObserver:
             ),
         }
 
-        # Tag columns — use statically-known schema from on_node_start
-        for key in tag_schema:
-            value = tag.get(key, None)
-            columns[key] = pa.array(
+        # Key columns — use statically-known schema from on_node_start
+        for col_name in key_schema:
+            value = key.get(col_name, None)
+            columns[col_name] = pa.array(
                 [str(value) if value is not None else None],
                 type=pa.large_utf8(),
             )
@@ -322,7 +322,7 @@ class _ContextualizedStatusObserver:
         self._db = db
         self._current_run_id: str = ""
         self._current_pipeline_uri: str = ""
-        self._tag_schema: SchemaLike = {}
+        self._key_schema: SchemaLike = {}
 
     def contextualize(self, *identity_path: str) -> "_ContextualizedStatusObserver":
         """Re-contextualize with a new identity path (scopes the DB)."""
@@ -343,44 +343,44 @@ class _ContextualizedStatusObserver:
         self,
         node_label: str,
         node_hash: str,
-        tag_schema: SchemaLike | None = None,
+        key_schema: SchemaLike | None = None,
     ) -> None:
-        self._tag_schema = tag_schema or {}
+        self._key_schema = key_schema or {}
 
     def on_node_end(
         self,
         node_label: str,
         node_hash: str,
     ) -> None:
-        self._tag_schema = {}
+        self._key_schema = {}
 
     def on_data_start(
-        self, node_label: str, tag: TagProtocol, data: DataProtocol
+        self, node_label: str, key: KeyProtocol, data: DataProtocol
     ) -> None:
-        self._write_event(node_label, tag, state="RUNNING")
+        self._write_event(node_label, key, state="RUNNING")
 
     def on_data_end(
         self,
         node_label: str,
-        tag: TagProtocol,
+        key: KeyProtocol,
         input_data: DataProtocol,
         output_data: DataProtocol | None,
         cached: bool,
     ) -> None:
-        self._write_event(node_label, tag, state="CACHED" if cached else "SUCCESS")
+        self._write_event(node_label, key, state="CACHED" if cached else "SUCCESS")
 
     def on_data_crash(
         self,
         node_label: str,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
         error: Exception,
     ) -> None:
-        self._write_event(node_label, tag, state="FAILED", error=error)
+        self._write_event(node_label, key, state="FAILED", error=error)
 
     def create_data_logger(
         self,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
     ) -> NoOpLogger:
         return _NOOP_LOGGER
@@ -390,7 +390,7 @@ class _ContextualizedStatusObserver:
     def _write_event(
         self,
         node_label: str,
-        tag: TagProtocol,
+        key: KeyProtocol,
         state: str,
         error: Exception | None = None,
     ) -> None:
@@ -412,9 +412,9 @@ class _ContextualizedStatusObserver:
             ),
         }
 
-        for key in self._tag_schema:
-            value = tag.get(key, None)
-            columns[key] = pa.array(
+        for col_name in self._key_schema:
+            value = key.get(col_name, None)
+            columns[col_name] = pa.array(
                 [str(value) if value is not None else None],
                 type=pa.large_utf8(),
             )

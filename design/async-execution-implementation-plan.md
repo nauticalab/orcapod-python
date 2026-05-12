@@ -67,9 +67,9 @@ sync execution — this just makes every node async-capable.
 
 **New file:** `src/orcapod/core/execution/materialization.py`
 
-- `materialize_to_stream(rows: list[tuple[TagProtocol, DataProtocol]]) -> ArrowTableStream`
-  — converts a list of (tag, data) pairs back into an ArrowTableStream
-- `stream_to_rows(stream: StreamProtocol) -> list[tuple[TagProtocol, DataProtocol]]`
+- `materialize_to_stream(rows: list[tuple[KeyProtocol, DataProtocol]]) -> ArrowTableStream`
+  — converts a list of (key, data) pairs back into an ArrowTableStream
+- `stream_to_rows(stream: StreamProtocol) -> list[tuple[KeyProtocol, DataProtocol]]`
   — the inverse (thin wrapper around `iter_data`)
 
 **Tests:** `tests/test_core/test_execution/test_materialization.py`
@@ -166,8 +166,8 @@ Each step is independent — can be done in any order or in parallel.
 
 **Modify:** `src/orcapod/core/operators/column_selection.py`
 
-- Override `async_execute` on `SelectTagColumns`, `SelectDataColumns`,
-  `DropTagColumns`, `DropDataColumns`
+- Override `async_execute` on `SelectKeyColumns`, `SelectDataColumns`,
+  `DropKeyColumns`, `DropDataColumns`
 - Each: iterate input, project/drop columns per row, emit
 
 **Tests:** `tests/test_core/test_execution/test_streaming_operators.py`
@@ -178,7 +178,7 @@ Each step is independent — can be done in any order or in parallel.
 
 **Modify:** `src/orcapod/core/operators/mappers.py`
 
-- Override `async_execute` on `MapTags`, `MapData`
+- Override `async_execute` on `MapKeys`, `MapData`
 - Each: iterate input, rename columns per row, emit
 
 **Tests:** added to `test_streaming_operators.py`
@@ -199,7 +199,7 @@ Each step is independent — can be done in any order or in parallel.
 - Override `async_execute` with symmetric hash join
 - Concurrent consumption of all inputs via TaskGroup
 - Per-row index probing and immediate emission
-- System tag extension logic (reuse existing `_extend_system_tag_columns` logic)
+- System key extension logic (reuse existing `_extend_system_key_columns` logic)
 
 **Tests:** `tests/test_core/test_execution/test_incremental_join.py`
 - Same result set as sync join (order may differ, compare as sets)
@@ -312,7 +312,7 @@ Phase 5 depends on everything above.
 
 | Risk | Mitigation |
 |---|---|
-| Row ordering differs between sync/async | Document clearly; `sort_by_tags` provides determinism |
+| Row ordering differs between sync/async | Document clearly; `sort_by_keys` provides determinism |
 | Incremental Join correctness | Extensive property-based tests comparing to sync |
 | Deadlocks from channel misuse | Strict rule: every node MUST close output channel |
 | Per-row Datagram operations are slow | Benchmark; fall back to barrier if perf regresses |

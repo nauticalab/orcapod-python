@@ -1,9 +1,9 @@
 """Specification-derived tests for all operators.
 
 Tests based on the design specification's operator semantics:
-- Operators inspect tags, never data content
+- Operators inspect keys, never data content
 - Operators can rename columns but never synthesize new values
-- System tag evolution rules: name-preserving, name-extending, type-evolving
+- System key evolution rules: name-preserving, name-extending, type-evolving
 """
 
 from __future__ import annotations
@@ -14,14 +14,14 @@ import pytest
 from orcapod.core.operators import (
     Batch,
     DropDataColumns,
-    DropTagColumns,
+    DropKeyColumns,
     Join,
     MapData,
-    MapTags,
+    MapKeys,
     MergeJoin,
     PolarsFilter,
     SelectDataColumns,
-    SelectTagColumns,
+    SelectKeyColumns,
     SemiJoin,
 )
 from orcapod.core.sources import ArrowTableSource
@@ -37,15 +37,15 @@ from orcapod.types import ColumnConfig
 
 
 def _make_stream(
-    tag_data: dict, data_data: dict, tag_columns: list[str]
+    key_data: dict, data_data: dict, key_columns: list[str]
 ) -> ArrowTableStream:
-    all_data = {**tag_data, **data_data}
+    all_data = {**key_data, **data_data}
     table = pa.table(all_data)
-    return ArrowTableStream(table, tag_columns=tag_columns)
+    return ArrowTableStream(table, key_columns=key_columns)
 
 
 def _stream_a() -> ArrowTableStream:
-    """Stream with tag=id, data=age."""
+    """Stream with key=id, data=age."""
     return _make_stream(
         {"id": pa.array([1, 2, 3], type=pa.int64())},
         {"age": pa.array([25, 30, 35], type=pa.int64())},
@@ -54,7 +54,7 @@ def _stream_a() -> ArrowTableStream:
 
 
 def _stream_b() -> ArrowTableStream:
-    """Stream with tag=id, data=score (overlaps with A on id=2,3)."""
+    """Stream with key=id, data=score (overlaps with A on id=2,3)."""
     return _make_stream(
         {"id": pa.array([2, 3, 4], type=pa.int64())},
         {"score": pa.array([85, 90, 95], type=pa.int64())},
@@ -63,7 +63,7 @@ def _stream_b() -> ArrowTableStream:
 
 
 def _stream_b_overlapping_data() -> ArrowTableStream:
-    """Stream with tag=id, data=age (same data col name as A)."""
+    """Stream with key=id, data=age (same data col name as A)."""
     return _make_stream(
         {"id": pa.array([2, 3, 4], type=pa.int64())},
         {"age": pa.array([40, 45, 50], type=pa.int64())},
@@ -71,8 +71,8 @@ def _stream_b_overlapping_data() -> ArrowTableStream:
     )
 
 
-def _stream_with_two_tags() -> ArrowTableStream:
-    """Stream with tag={id, group}, data=value."""
+def _stream_with_two_keys() -> ArrowTableStream:
+    """Stream with key={id, group}, data=value."""
     return _make_stream(
         {
             "id": pa.array([1, 2, 3], type=pa.int64()),
@@ -89,10 +89,10 @@ def _stream_with_two_tags() -> ArrowTableStream:
 
 
 class TestJoin:
-    """Per design: N-ary inner join on shared tag columns. Requires
-    non-overlapping data columns. Commutative. System tags: name-extending."""
+    """Per design: N-ary inner join on shared key columns. Requires
+    non-overlapping data columns. Commutative. System keys: name-extending."""
 
-    def test_two_streams_on_common_tags(self):
+    def test_two_streams_on_common_keys(self):
         join = Join()
         result = join.process(_stream_a(), _stream_b())
         table = result.as_table()
@@ -124,7 +124,7 @@ class TestJoin:
         assert ab_ids == ba_ids
 
     def test_empty_result_when_no_matches(self):
-        """Disjoint tags → empty stream."""
+        """Disjoint keys → empty stream."""
         s1 = _make_stream(
             {"id": pa.array([1], type=pa.int64())},
             {"a": pa.array([10], type=pa.int64())},
@@ -164,35 +164,35 @@ class TestJoin:
         assert "b" in table.column_names
         assert "c" in table.column_names
 
-    def test_system_tag_name_extending(self):
-        """Per design, multi-input ops extend system tag column names with
-        ::pipeline_hash:position. Sources (not raw streams) create system tags."""
+    def test_system_key_name_extending(self):
+        """Per design, multi-input ops extend system key column names with
+        ::pipeline_hash:position. Sources (not raw streams) create system keys."""
         sa = ArrowTableSource(
             pa.table({"id": pa.array([2, 3], type=pa.int64()), "a": pa.array([10, 20], type=pa.int64())}),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         sb = ArrowTableSource(
             pa.table({"id": pa.array([2, 3], type=pa.int64()), "b": pa.array([30, 40], type=pa.int64())}),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         join = Join()
         result = join.process(sa, sb)
         table = result.as_table(all_info=True)
-        tag_cols = [
-            c for c in table.column_names if c.startswith(constants.SYSTEM_TAG_PREFIX)
+        key_cols = [
+            c for c in table.column_names if c.startswith(constants.SYSTEM_KEY_PREFIX)
         ]
-        # After join, system tag columns should have extended names (at least 2 per input)
-        assert len(tag_cols) >= 2
+        # After join, system key columns should have extended names (at least 2 per input)
+        assert len(key_cols) >= 2
 
     def test_output_schema_prediction(self):
         join = Join()
         sa, sb = _stream_a(), _stream_b()
-        predicted_tag, predicted_data = join.output_schema(sa, sb)
+        predicted_key, predicted_data = join.output_schema(sa, sb)
         result = join.process(sa, sb)
-        actual_tag, actual_data = result.output_schema()
-        assert set(predicted_tag.keys()) == set(actual_tag.keys())
+        actual_key, actual_data = result.output_schema()
+        assert set(predicted_key.keys()) == set(actual_key.keys())
         assert set(predicted_data.keys()) == set(actual_data.keys())
 
 
@@ -239,7 +239,7 @@ class TestMergeJoin:
         merge = MergeJoin()
         sa = _stream_a()
         sb = _stream_b_overlapping_data()
-        predicted_tag, predicted_data = merge.output_schema(sa, sb)
+        predicted_key, predicted_data = merge.output_schema(sa, sb)
         # The 'age' column should be predicted as list type
         assert "age" in predicted_data
 
@@ -251,9 +251,9 @@ class TestMergeJoin:
 
 class TestSemiJoin:
     """Per design: binary non-commutative join. Keeps left rows matching
-    right tags. Right data columns are dropped."""
+    right keys. Right data columns are dropped."""
 
-    def test_filters_left_by_right_tags(self):
+    def test_filters_left_by_right_keys(self):
         semi = SemiJoin()
         result = semi.process(_stream_a(), _stream_b())
         table = result.as_table()
@@ -286,8 +286,8 @@ class TestSemiJoin:
 
 
 class TestBatch:
-    """Per design: groups rows by tag, aggregates data. Data column
-    types become list[T]. System tag type evolves from str to list[str]."""
+    """Per design: groups rows by key, aggregates data. Data column
+    types become list[T]. System key type evolves from str to list[str]."""
 
     def test_groups_rows(self):
         stream = _make_stream(
@@ -325,10 +325,10 @@ class TestBatch:
             ["group"],
         )
         batch = Batch()
-        predicted_tag, predicted_data = batch.output_schema(stream)
+        predicted_key, predicted_data = batch.output_schema(stream)
         result = batch.process(stream)
-        actual_tag, actual_data = result.output_schema()
-        assert set(predicted_tag.keys()) == set(actual_tag.keys())
+        actual_key, actual_data = result.output_schema()
+        assert set(predicted_key.keys()) == set(actual_key.keys())
         assert set(predicted_data.keys()) == set(actual_data.keys())
 
     def test_batch_with_batch_size(self):
@@ -361,20 +361,20 @@ class TestBatch:
 # ===================================================================
 
 
-class TestSelectTagColumns:
-    """Per design: keeps only specified tag columns."""
+class TestSelectKeyColumns:
+    """Per design: keeps only specified key columns."""
 
-    def test_select_tag_columns(self):
-        stream = _stream_with_two_tags()
-        select = SelectTagColumns(columns=["id"])
+    def test_select_key_columns(self):
+        stream = _stream_with_two_keys()
+        select = SelectKeyColumns(columns=["id"])
         result = select.process(stream)
-        tag_keys, _ = result.keys()
-        assert "id" in tag_keys
-        assert "group" not in tag_keys
+        key_keys, _ = result.keys()
+        assert "id" in key_keys
+        assert "group" not in key_keys
 
     def test_strict_missing_raises(self):
-        stream = _stream_with_two_tags()
-        select = SelectTagColumns(columns=["nonexistent"], strict=True)
+        stream = _stream_with_two_keys()
+        select = SelectKeyColumns(columns=["nonexistent"], strict=True)
         with pytest.raises(Exception):
             select.process(stream)
 
@@ -395,16 +395,16 @@ class TestSelectDataColumns:
         assert "b" not in data_keys
 
 
-class TestDropTagColumns:
-    """Per design: removes specified tag columns."""
+class TestDropKeyColumns:
+    """Per design: removes specified key columns."""
 
-    def test_drop_tag_columns(self):
-        stream = _stream_with_two_tags()
-        drop = DropTagColumns(columns=["group"])
+    def test_drop_key_columns(self):
+        stream = _stream_with_two_keys()
+        drop = DropKeyColumns(columns=["group"])
         result = drop.process(stream)
-        tag_keys, _ = result.keys()
-        assert "group" not in tag_keys
-        assert "id" in tag_keys
+        key_keys, _ = result.keys()
+        assert "group" not in key_keys
+        assert "id" in key_keys
 
 
 class TestDropDataColumns:
@@ -424,28 +424,28 @@ class TestDropDataColumns:
 
 
 # ===================================================================
-# MapTags / MapData
+# MapKeys / MapData
 # ===================================================================
 
 
-class TestMapTags:
-    """Per design: renames tag columns. System tags: name-preserving."""
+class TestMapKeys:
+    """Per design: renames key columns. System keys: name-preserving."""
 
-    def test_renames_tag_columns(self):
-        stream = _stream_with_two_tags()
-        mapper = MapTags(name_map={"id": "identifier"})
+    def test_renames_key_columns(self):
+        stream = _stream_with_two_keys()
+        mapper = MapKeys(name_map={"id": "identifier"})
         result = mapper.process(stream)
-        tag_keys, _ = result.keys()
-        assert "identifier" in tag_keys
-        assert "id" not in tag_keys
+        key_keys, _ = result.keys()
+        assert "identifier" in key_keys
+        assert "id" not in key_keys
 
     def test_drop_unmapped(self):
-        stream = _stream_with_two_tags()
-        mapper = MapTags(name_map={"id": "identifier"}, drop_unmapped=True)
+        stream = _stream_with_two_keys()
+        mapper = MapKeys(name_map={"id": "identifier"}, drop_unmapped=True)
         result = mapper.process(stream)
-        tag_keys, _ = result.keys()
-        assert "identifier" in tag_keys
-        assert "group" not in tag_keys
+        key_keys, _ = result.keys()
+        assert "identifier" in key_keys
+        assert "group" not in key_keys
 
 
 class TestMapData:
@@ -471,7 +471,7 @@ class TestMapData:
 
 class TestPolarsFilter:
     """Per design: filters rows by predicate or constraints. Schema preserved.
-    System tags: name-preserving."""
+    System keys: name-preserving."""
 
     def test_filter_with_constraints(self):
         stream = _stream_a()
@@ -484,10 +484,10 @@ class TestPolarsFilter:
     def test_filter_preserves_schema(self):
         stream = _stream_a()
         filt = PolarsFilter(constraints={"id": 2})
-        predicted_tag, predicted_data = filt.output_schema(stream)
+        predicted_key, predicted_data = filt.output_schema(stream)
         result = filt.process(stream)
-        actual_tag, actual_data = result.output_schema()
-        assert set(predicted_tag.keys()) == set(actual_tag.keys())
+        actual_key, actual_data = result.output_schema()
+        assert set(predicted_key.keys()) == set(actual_key.keys())
         assert set(predicted_data.keys()) == set(actual_data.keys())
 
 

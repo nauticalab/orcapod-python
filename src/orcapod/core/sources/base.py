@@ -31,7 +31,7 @@ class RootSource(StreamBase):
       ``self._stream`` by default; concrete subclasses may override them.
 
     As a PipelineElementProtocol:
-    - ``pipeline_identity_structure()`` returns ``(tag_schema, data_schema)``
+    - ``pipeline_identity_structure()`` returns ``(key_schema, data_schema)``
       — schema-only, no data content — forming the base case of the pipeline
       identity Merkle chain.
 
@@ -121,23 +121,23 @@ class RootSource(StreamBase):
         """
         from orcapod.pipeline.serialization import serialize_schema
 
-        tag_schema, data_schema = self.output_schema()
+        key_schema, data_schema = self.output_schema()
         type_converter = self.data_context.type_converter
         return {
             "content_hash": self.content_hash().to_string(),
             "pipeline_hash": self.pipeline_hash().to_string(),
-            "tag_schema": serialize_schema(tag_schema, type_converter),
+            "key_schema": serialize_schema(key_schema, type_converter),
             "data_schema": serialize_schema(data_schema, type_converter),
         }
 
     def pipeline_identity_structure(self) -> Any:
-        """Return (tag_schema, data_schema) as the pipeline identity for this
+        """Return (key_schema, data_schema) as the pipeline identity for this
         source.  Schema-only: no data content is included, so sources with
         identical schemas share the same pipeline hash and therefore the same
         pipeline database table.
         """
-        tag_schema, data_schema = self.output_schema()
-        return (tag_schema, data_schema)
+        key_schema, data_schema = self.output_schema()
+        return (key_schema, data_schema)
 
     # -------------------------------------------------------------------------
     # StreamProtocol protocol

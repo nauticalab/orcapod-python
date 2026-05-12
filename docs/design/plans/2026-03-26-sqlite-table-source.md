@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement `SQLiteTableSource`, a `RootSource` backed by a SQLite table that uses primary-key columns (or `rowid` for ROWID-only tables) as default tag columns, with a working `from_config` round-trip.
+**Goal:** Implement `SQLiteTableSource`, a `RootSource` backed by a SQLite table that uses primary-key columns (or `rowid` for ROWID-only tables) as default key columns, with a working `from_config` round-trip.
 
 **Architecture:** `SQLiteTableSource` subclasses `DBTableSource`. Two small patches are made to existing files first (`SQLiteConnector.iter_batches` for `rowid` typing; `DBTableSource.__init__` for a `_query` hook), then the new class and its tests are added, followed by wiring into exports and the source registry.
 
@@ -178,8 +178,8 @@ In `src/orcapod/core/sources/db_table_source.py`, update the `__init__` signatur
         self,
         connector: DBConnectorProtocol,
         table_name: str,
-        tag_columns: Collection[str] | None = None,
-        system_tag_columns: Collection[str] = (),
+        key_columns: Collection[str] | None = None,
+        system_key_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
         label: str | None = None,
@@ -195,8 +195,8 @@ to:
         self,
         connector: DBConnectorProtocol,
         table_name: str,
-        tag_columns: Collection[str] | None = None,
-        system_tag_columns: Collection[str] = (),
+        key_columns: Collection[str] | None = None,
+        system_key_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
         label: str | None = None,
@@ -249,7 +249,7 @@ git commit -m "feat(sources): add keyword-only _query parameter to DBTableSource
 
 ---
 
-## Task 3: Implement `SQLiteTableSource` — core class + unit tests (PK, explicit tags, errors, stream, hashing)
+## Task 3: Implement `SQLiteTableSource` — core class + unit tests (PK, explicit keys, errors, stream, hashing)
 
 **Files:**
 - Create: `src/orcapod/core/sources/sqlite_table_source.py`
@@ -265,8 +265,8 @@ Create `tests/test_core/sources/test_sqlite_table_source.py`:
 Test sections:
  1. Import / export sanity
  2. Protocol conformance
- 3. PK as default tag columns (single and composite)
- 4. Explicit tag column override
+ 3. PK as default key columns (single and composite)
+ 4. Explicit key column override
  5. ROWID fallback (no explicit PK)
  6. Error cases (missing table, empty table)
  7. Stream behaviour
@@ -426,7 +426,7 @@ Create `src/orcapod/core/sources/sqlite_table_source.py`:
 """SQLiteTableSource — a read-only RootSource backed by a SQLite table.
 
 Wraps a SQLite table as an OrcaPod Source. Primary-key columns are used
-as tag columns by default. For tables with no explicit primary key
+as key columns by default. For tables with no explicit primary key
 (ROWID-only tables), the implicit ``rowid`` integer column is used
 automatically.
 
@@ -436,7 +436,7 @@ Example::
     source = SQLiteTableSource("/path/to/my.db", "measurements")
 
     # In-memory (for tests / throwaway pipelines; cannot round-trip)
-    source = SQLiteTableSource(":memory:", "events", tag_columns=["session_id"])
+    source = SQLiteTableSource(":memory:", "events", key_columns=["session_id"])
 
 Note:
     ``:memory:`` sources cannot be reconstructed via ``from_config`` because
@@ -464,13 +464,13 @@ class SQLiteTableSource(DBTableSource):
     At construction time the source:
     1. Opens a ``SQLiteConnector`` for *db_path*.
     2. Validates the table exists.
-    3. Resolves tag columns:
-       - If *tag_columns* is provided, uses them as-is.
+    3. Resolves key columns:
+       - If *key_columns* is provided, uses them as-is.
        - Otherwise uses the table's primary-key columns.
        - If the table has no explicit PK (ROWID-only), falls back to the
          implicit ``rowid`` integer column.
     4. Determines the fetch query: injects ``SELECT rowid, *`` when
-       ``"rowid"`` is a resolved tag column and not a normal table column
+       ``"rowid"`` is a resolved key column and not a normal table column
        (handles both auto-detection and ``from_config`` reconstruction).
     5. Delegates to ``DBTableSource.__init__`` for fetching and stream building.
 
@@ -478,10 +478,10 @@ class SQLiteTableSource(DBTableSource):
         db_path: Path to the SQLite database file, or ``":memory:"`` for an
             in-process in-memory database.
         table_name: Name of the table to expose as a source.
-        tag_columns: Columns to use as tag columns. If ``None`` (default),
+        key_columns: Columns to use as key columns. If ``None`` (default),
             the table's primary-key columns are used; ROWID-only tables fall
             back to ``["rowid"]``.
-        system_tag_columns: Additional system-level tag columns.
+        system_key_columns: Additional system-level key columns.
         record_id_column: Column for stable per-row record IDs in provenance.
         source_id: Canonical source name. Defaults to *table_name*.
         label: Human-readable label for this source node.
@@ -497,8 +497,8 @@ class SQLiteTableSource(DBTableSource):
         self,
         db_path: str | os.PathLike,
         table_name: str,
-        tag_columns: Collection[str] | None = None,
-        system_tag_columns: Collection[str] = (),
+        key_columns: Collection[str] | None = None,
+        system_key_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
         label: str | None = None,
@@ -508,19 +508,19 @@ class SQLiteTableSource(DBTableSource):
         self._db_path = db_path
         connector = SQLiteConnector(db_path)
 
-        # Step 3: Resolve tag columns.
-        if tag_columns is None:
+        # Step 3: Resolve key columns.
+        if key_columns is None:
             pk_cols = connector.get_pk_columns(table_name)
-            resolved_tags: list[str] = pk_cols if pk_cols else ["rowid"]
+            resolved_keys: list[str] = pk_cols if pk_cols else ["rowid"]
         else:
-            resolved_tags = list(tag_columns)
+            resolved_keys = list(key_columns)
 
         # Step 4: Determine the fetch query.
-        # If "rowid" is in resolved_tags but not a real column, we need
+        # If "rowid" is in resolved_keys but not a real column, we need
         # SELECT rowid, * to include it.  This also handles from_config
-        # reconstruction where tag_columns=["rowid"] is passed explicitly.
+        # reconstruction where key_columns=["rowid"] is passed explicitly.
         normal_cols = {ci.name for ci in connector.get_column_info(table_name)}
-        if "rowid" in resolved_tags and "rowid" not in normal_cols:
+        if "rowid" in resolved_keys and "rowid" not in normal_cols:
             _query: str | None = f'SELECT rowid, * FROM "{table_name}"'
         else:
             _query = None
@@ -528,8 +528,8 @@ class SQLiteTableSource(DBTableSource):
         super().__init__(
             connector,
             table_name,
-            tag_columns=resolved_tags,
-            system_tag_columns=system_tag_columns,
+            key_columns=resolved_keys,
+            system_key_columns=system_key_columns,
             record_id_column=record_id_column,
             source_id=source_id,
             label=label,
@@ -565,8 +565,8 @@ class SQLiteTableSource(DBTableSource):
         return cls(
             db_path=config["db_path"],
             table_name=config["table_name"],
-            tag_columns=config.get("tag_columns"),
-            system_tag_columns=config.get("system_tag_columns", ()),
+            key_columns=config.get("key_columns"),
+            system_key_columns=config.get("system_key_columns", ()),
             record_id_column=config.get("record_id_column"),
             source_id=config.get("source_id"),
         )
@@ -588,22 +588,22 @@ uv run pytest tests/test_core/sources/test_sqlite_table_source.py::TestProtocolC
 
 Expected: PASS. Revert the temporary import change (back to `from orcapod.core.sources import SQLiteTableSource`) before committing — Task 4 will wire the `__init__.py` export and make the standard import work.
 
-- [ ] **Step 3.5: Add PK, explicit tag, error-case, stream, and hashing test groups to the test file**
+- [ ] **Step 3.5: Add PK, explicit key, error-case, stream, and hashing test groups to the test file**
 
 Append to `tests/test_core/sources/test_sqlite_table_source.py`:
 
 ```python
 # ===========================================================================
-# 3. PK as default tag columns
+# 3. PK as default key columns
 # ===========================================================================
 
 
-class TestPKAsDefaultTags:
-    def test_single_pk_is_tag_column(self, pk_connector):
+class TestPKAsDefaultKeys:
+    def test_single_pk_is_key_column(self, pk_connector):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(pk_connector._db_path, "measurements")
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "session_id" in key_schema
 
     def test_pk_not_in_data_schema(self, pk_connector):
         from orcapod.core.sources import SQLiteTableSource
@@ -618,12 +618,12 @@ class TestPKAsDefaultTags:
         assert "trial" in data_schema
         assert "response" in data_schema
 
-    def test_composite_pk_all_columns_are_tags(self, composite_pk_connector):
+    def test_composite_pk_all_columns_are_keys(self, composite_pk_connector):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(composite_pk_connector._db_path, "events")
-        tag_schema, _ = src.output_schema()
-        assert "user_id" in tag_schema
-        assert "event_id" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "user_id" in key_schema
+        assert "event_id" in key_schema
 
     def test_default_source_id_is_table_name(self, pk_connector):
         from orcapod.core.sources import SQLiteTableSource
@@ -637,30 +637,30 @@ class TestPKAsDefaultTags:
 
 
 # ===========================================================================
-# 4. Explicit tag column override
+# 4. Explicit key column override
 # ===========================================================================
 
 
-class TestExplicitTagOverride:
-    def test_explicit_tag_columns_override_pk(self, pk_connector):
+class TestExplicitKeyOverride:
+    def test_explicit_key_columns_override_pk(self, pk_connector):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(
-            pk_connector._db_path, "measurements", tag_columns=["trial"]
+            pk_connector._db_path, "measurements", key_columns=["trial"]
         )
-        tag_schema, _ = src.output_schema()
-        assert "trial" in tag_schema
-        assert "session_id" not in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "trial" in key_schema
+        assert "session_id" not in key_schema
 
-    def test_multiple_explicit_tag_columns(self, pk_connector):
+    def test_multiple_explicit_key_columns(self, pk_connector):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(
             pk_connector._db_path,
             "measurements",
-            tag_columns=["session_id", "trial"],
+            key_columns=["session_id", "trial"],
         )
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
-        assert "trial" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "session_id" in key_schema
+        assert "trial" in key_schema
 
 
 # ===========================================================================
@@ -669,11 +669,11 @@ class TestExplicitTagOverride:
 
 
 class TestRowidFallback:
-    def test_rowid_only_table_uses_rowid_as_tag(self, rowid_connector):
+    def test_rowid_only_table_uses_rowid_as_key(self, rowid_connector):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(rowid_connector._db_path, "logs")
-        tag_schema, _ = src.output_schema()
-        assert "rowid" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "rowid" in key_schema
 
     def test_rowid_is_not_in_data_schema(self, rowid_connector):
         from orcapod.core.sources import SQLiteTableSource
@@ -684,15 +684,15 @@ class TestRowidFallback:
     def test_rowid_values_are_positive_integers(self, rowid_connector):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(rowid_connector._db_path, "logs")
-        for tags, _ in src.iter_data():
-            assert isinstance(tags["rowid"], int)
-            assert tags["rowid"] > 0
+        for keys, _ in src.iter_data():
+            assert isinstance(keys["rowid"], int)
+            assert keys["rowid"] > 0
 
     def test_rowid_type_is_int64(self, rowid_connector):
         """Verify rowid is actually typed as int64, not large_string."""
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(rowid_connector._db_path, "logs")
-        # The raw stream table (before tag/data split) holds all columns.
+        # The raw stream table (before key/data split) holds all columns.
         # We can verify the Arrow type via the internal stream table.
         raw = src._stream._table  # ArrowTableStream stores the enriched table
         assert "rowid" in raw.schema.names
@@ -744,11 +744,11 @@ class TestStreamBehaviour:
         data = list(src.iter_data())
         assert len(data) == 3
 
-    def test_iter_data_tags_contain_pk(self, pk_connector):
+    def test_iter_data_keys_contain_pk(self, pk_connector):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(pk_connector._db_path, "measurements")
-        for tags, _ in src.iter_data():
-            assert "session_id" in tags
+        for keys, _ in src.iter_data():
+            assert "session_id" in keys
 
     def test_output_schema_returns_two_schemas(self, pk_connector):
         from orcapod.core.sources import SQLiteTableSource
@@ -786,11 +786,11 @@ class TestDeterministicHashing:
         src2 = SQLiteTableSource(pk_connector._db_path, "measurements")
         assert src1.content_hash() == src2.content_hash()
 
-    def test_different_tag_columns_yields_different_pipeline_hash(self, pk_connector):
+    def test_different_key_columns_yields_different_pipeline_hash(self, pk_connector):
         from orcapod.core.sources import SQLiteTableSource
         src1 = SQLiteTableSource(pk_connector._db_path, "measurements")
         src2 = SQLiteTableSource(
-            pk_connector._db_path, "measurements", tag_columns=["trial"]
+            pk_connector._db_path, "measurements", key_columns=["trial"]
         )
         assert src1.pipeline_hash() != src2.pipeline_hash()
 ```
@@ -969,10 +969,10 @@ class TestConfigRoundTripPKTable:
         src = SQLiteTableSource(file_db_path, "measurements")
         assert src.to_config()["table_name"] == "measurements"
 
-    def test_to_config_has_tag_columns(self, file_db_path):
+    def test_to_config_has_key_columns(self, file_db_path):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(file_db_path, "measurements")
-        assert "session_id" in src.to_config()["tag_columns"]
+        assert "session_id" in src.to_config()["key_columns"]
 
     def test_to_config_has_identity_fields(self, file_db_path):
         from orcapod.core.sources import SQLiteTableSource
@@ -1019,18 +1019,18 @@ class TestConfigRoundTripRowidTable:
         conn.close()
         return db_path
 
-    def test_to_config_has_rowid_as_tag_column(self, rowid_file_db_path):
+    def test_to_config_has_rowid_as_key_column(self, rowid_file_db_path):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(rowid_file_db_path, "logs")
-        assert src.to_config()["tag_columns"] == ["rowid"]
+        assert src.to_config()["key_columns"] == ["rowid"]
 
     def test_from_config_reconstructs_rowid_table(self, rowid_file_db_path):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(rowid_file_db_path, "logs")
         config = src.to_config()
         src2 = SQLiteTableSource.from_config(config)
-        tag_schema, _ = src2.output_schema()
-        assert "rowid" in tag_schema
+        key_schema, _ = src2.output_schema()
+        assert "rowid" in key_schema
 
     def test_from_config_rowid_hashes_match(self, rowid_file_db_path):
         from orcapod.core.sources import SQLiteTableSource
@@ -1060,7 +1060,7 @@ git commit -m "test(sources): add config round-trip tests for SQLiteTableSource"
 
 ## Task 6: Integration test — `SQLiteTableSource` in a pipeline
 
-**Background:** `Pipeline` wires sources into a node graph. A `FunctionPod` consumes data from the source. We verify end-to-end that tag columns flow through and the pipeline produces the expected results.
+**Background:** `Pipeline` wires sources into a node graph. A `FunctionPod` consumes data from the source. We verify end-to-end that key columns flow through and the pipeline produces the expected results.
 
 **Files:**
 - Modify: `tests/test_core/sources/test_sqlite_table_source.py`
@@ -1108,15 +1108,15 @@ class TestPipelineIntegration:
         assert len(fn_outputs) == 1
         assert len(fn_outputs[0]) == 3
 
-        # Verify tag column (session_id) flows through and results are correct
+        # Verify key column (session_id) flows through and results are correct
         doubled_values = sorted(
             [pkt.as_dict()["doubled"] for _, pkt in fn_outputs[0]]
         )
         assert doubled_values == pytest.approx([0.2, 0.4, 0.6])
 
-        # Verify tag values are present
-        tag_values = sorted([tags["session_id"] for tags, _ in fn_outputs[0]])
-        assert tag_values == ["s1", "s2", "s3"]
+        # Verify key values are present
+        key_values = sorted([keys["session_id"] for keys, _ in fn_outputs[0]])
+        assert key_values == ["s1", "s2", "s3"]
 ```
 
 - [ ] **Step 6.2: Run the integration test**
@@ -1165,8 +1165,8 @@ gh-app-token-generator nauticalab | gh auth login --with-token
 - [ ] **Step 7.3: Create the feature branch and push**
 
 ```bash
-git checkout -b eywalker/plt-1077-implement-source-based-on-sqlite-tables-with-pk-as-default-tag
-git push -u origin eywalker/plt-1077-implement-source-based-on-sqlite-tables-with-pk-as-default-tag
+git checkout -b eywalker/plt-1077-implement-source-based-on-sqlite-tables-with-pk-as-default-key
+git push -u origin eywalker/plt-1077-implement-source-based-on-sqlite-tables-with-pk-as-default-key
 ```
 
 - [ ] **Step 7.4: Open the PR against `dev`**
@@ -1179,7 +1179,7 @@ gh pr create \
 ## Summary
 
 - Implements `SQLiteTableSource` — a `RootSource` backed by a SQLite table
-- Primary-key columns are used as tag columns by default
+- Primary-key columns are used as key columns by default
 - ROWID-only tables (no explicit PK) automatically fall back to the implicit `rowid` integer column
 - `from_config` round-trip works for file-backed databases (unlike `DBTableSource`)
 - Registered as `\"sqlite_table\"` in the source registry

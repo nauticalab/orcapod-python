@@ -46,7 +46,7 @@ def make_stream(n: int = 5) -> ArrowTableStream:
         {"id": pa.array(list(range(n)), type=pa.int64()), "x": pa.array(list(range(n)), type=pa.int64())},
         schema=schema,
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 def make_two_col_stream(n: int = 3) -> ArrowTableStream:
@@ -65,13 +65,13 @@ def make_two_col_stream(n: int = 3) -> ArrowTableStream:
         },
         schema=schema,
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 async def feed_stream_to_channel(stream: ArrowTableStream, ch: Channel) -> None:
-    """Push all (tag, data) pairs from a stream into a channel, then close."""
-    for tag, data in stream.iter_data():
-        await ch.writer.send((tag, data))
+    """Push all (key, data) pairs from a stream into a channel, then close."""
+    for key, data in stream.iter_data():
+        await ch.writer.send((key, data))
     await ch.writer.close()
 
 
@@ -216,8 +216,8 @@ class TestFunctionNodeAsyncExecute:
         assert results == []
 
     @pytest.mark.asyncio
-    async def test_tags_preserved(self):
-        """Tags should pass through unchanged."""
+    async def test_keys_preserved(self):
+        """Keys should pass through unchanged."""
         _, pod = make_double_pod()
         node = FunctionNode(pod, make_stream(3))
 
@@ -228,7 +228,7 @@ class TestFunctionNodeAsyncExecute:
         await node.async_execute(input_ch.reader, output_ch.writer)
 
         results = await output_ch.reader.collect()
-        ids = sorted(tag.as_dict()["id"] for tag, _ in results)
+        ids = sorted(key.as_dict()["id"] for key, _ in results)
         assert ids == [0, 1, 2]
 
 
@@ -276,8 +276,8 @@ class TestFunctionNodeAsyncExecute:
         output_ch = Channel(buffer_size=16)
 
         # Send the same data that were already cached
-        for tag, data in input_stream.iter_data():
-            await input_ch.writer.send((tag, data))
+        for key, data in input_stream.iter_data():
+            await input_ch.writer.send((key, data))
         await input_ch.writer.close()
 
         await node2.async_execute(input_ch.reader, output_ch.writer)
@@ -476,7 +476,7 @@ class TestOperatorNodeAsyncExecute:
                 "z": pa.array([100, 300], type=pa.int64()),
             }
         )
-        right = ArrowTableStream(right_table, tag_columns=["id"])
+        right = ArrowTableStream(right_table, key_columns=["id"])
 
         op = SemiJoin()
         node = OperatorNode(op, [left, right])
@@ -487,12 +487,12 @@ class TestOperatorNodeAsyncExecute:
 
         await feed_stream_to_channel(make_stream(5), left_ch)
         await feed_stream_to_channel(
-            ArrowTableStream(right_table, tag_columns=["id"]), right_ch
+            ArrowTableStream(right_table, key_columns=["id"]), right_ch
         )
         await node.async_execute([left_ch.reader, right_ch.reader], output_ch.writer)
 
         results = await output_ch.reader.collect()
-        ids = sorted(tag.as_dict()["id"] for tag, _ in results)
+        ids = sorted(key.as_dict()["id"] for key, _ in results)
         assert ids == [1, 3]
 
     @pytest.mark.asyncio
@@ -509,8 +509,8 @@ class TestOperatorNodeAsyncExecute:
                 "y": pa.array([100, 200, 300], type=pa.int64()),
             }
         )
-        left = ArrowTableStream(left_table, tag_columns=["id"])
-        right = ArrowTableStream(right_table, tag_columns=["id"])
+        left = ArrowTableStream(left_table, key_columns=["id"])
+        right = ArrowTableStream(right_table, key_columns=["id"])
         op = Join()
         node = OperatorNode(op, [left, right])
 
@@ -519,16 +519,16 @@ class TestOperatorNodeAsyncExecute:
         output_ch = Channel(buffer_size=16)
 
         await feed_stream_to_channel(
-            ArrowTableStream(left_table, tag_columns=["id"]), left_ch
+            ArrowTableStream(left_table, key_columns=["id"]), left_ch
         )
         await feed_stream_to_channel(
-            ArrowTableStream(right_table, tag_columns=["id"]), right_ch
+            ArrowTableStream(right_table, key_columns=["id"]), right_ch
         )
         await node.async_execute([left_ch.reader, right_ch.reader], output_ch.writer)
 
         results = await output_ch.reader.collect()
         assert len(results) == 3
-        ids = sorted(tag.as_dict()["id"] for tag, _ in results)
+        ids = sorted(key.as_dict()["id"] for key, _ in results)
         assert ids == [0, 1, 2]
 
     @pytest.mark.asyncio
@@ -678,9 +678,9 @@ class TestExecuteDataRouting:
         # Monkey-patch to verify routing through internal path
         original = node._process_data_internal
 
-        def patched(tag, data, *, logger=None):
+        def patched(key, data, *, logger=None):
             call_log.append("_process_data_internal")
-            return original(tag, data, logger=logger)
+            return original(key, data, logger=logger)
 
         node._process_data_internal = patched
 
@@ -700,9 +700,9 @@ class TestExecuteDataRouting:
 
         original = node._async_process_data_internal
 
-        async def patched(tag, data, **kwargs):
+        async def patched(key, data, **kwargs):
             call_log.append("_async_process_data_internal")
-            return await original(tag, data, **kwargs)
+            return await original(key, data, **kwargs)
 
         node._async_process_data_internal = patched
 
@@ -738,8 +738,8 @@ class TestEndToEnd:
         ch2 = Channel(buffer_size=16)
 
         async def source():
-            for tag, data in make_stream(4).iter_data():
-                await ch1.writer.send((tag, data))
+            for key, data in make_stream(4).iter_data():
+                await ch1.writer.send((key, data))
             await ch1.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -762,8 +762,8 @@ class TestEndToEnd:
         ch2 = Channel(buffer_size=16)
 
         async def source():
-            for tag, data in make_two_col_stream(3).iter_data():
-                await ch1.writer.send((tag, data))
+            for key, data in make_two_col_stream(3).iter_data():
+                await ch1.writer.send((key, data))
             await ch1.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -812,8 +812,8 @@ class TestAsyncPipelineThenSyncRetrieval:
         output_ch = Channel(buffer_size=16)
 
         async def source_producer():
-            for tag, data in make_stream(5).iter_data():
-                await input_ch.writer.send((tag, data))
+            for key, data in make_stream(5).iter_data():
+                await input_ch.writer.send((key, data))
             await input_ch.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -857,8 +857,8 @@ class TestAsyncPipelineThenSyncRetrieval:
         output_ch = Channel(buffer_size=16)
 
         async def source_producer():
-            for tag, data in make_two_col_stream(4).iter_data():
-                await input_ch.writer.send((tag, data))
+            for key, data in make_two_col_stream(4).iter_data():
+                await input_ch.writer.send((key, data))
             await input_ch.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -918,7 +918,7 @@ class TestAsyncPipelineThenSyncRetrieval:
                 "result": pa.array([0, 2, 4], type=pa.int64()),
             }
         )
-        stage1_stream = ArrowTableStream(stage1_table, tag_columns=["id"])
+        stage1_stream = ArrowTableStream(stage1_table, key_columns=["id"])
         op = SelectDataColumns(["result"])
         op_db = InMemoryArrowDatabase()
         op_node = OperatorNode(
@@ -931,8 +931,8 @@ class TestAsyncPipelineThenSyncRetrieval:
         ch_out = Channel(buffer_size=16)
 
         async def source_producer():
-            for tag, data in make_stream(3).iter_data():
-                await ch_source.writer.send((tag, data))
+            for key, data in make_stream(3).iter_data():
+                await ch_source.writer.send((key, data))
             await ch_source.writer.close()
 
         async with asyncio.TaskGroup() as tg:

@@ -18,16 +18,16 @@ else:
 class DictSource(RootSource):
     """A source backed by a collection of Python dictionaries.
 
-    Each dict becomes one (tag, data) pair in the stream. The dicts are
+    Each dict becomes one (key, data) pair in the stream. The dicts are
     converted to an Arrow table via the data-context type converter, then
-    enriched by ``SourceStreamBuilder`` (source-info, schema-hash, system tags).
+    enriched by ``SourceStreamBuilder`` (source-info, schema-hash, system keys).
     """
 
     def __init__(
         self,
         data: Collection[Mapping[str, DataValue]],
-        tag_columns: Collection[str] = (),
-        system_tag_columns: Collection[str] = (),
+        key_columns: Collection[str] = (),
+        system_key_columns: Collection[str] = (),
         data_schema: SchemaLike | pa.Schema | None = None,
         source_id: str | None = None,
         **kwargs: Any,
@@ -55,13 +55,13 @@ class DictSource(RootSource):
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(
             arrow_table,
-            tag_columns=tag_columns,
+            key_columns=key_columns,
             source_id=self._source_id,
-            system_tag_columns=system_tag_columns,
+            system_key_columns=system_key_columns,
         )
 
         self._stream = result.stream
-        self._tag_columns = result.tag_columns
+        self._key_columns = result.key_columns
         if self._source_id is None:
             self._source_id = result.source_id
 
@@ -69,7 +69,7 @@ class DictSource(RootSource):
         """Serialize metadata-only config (data is not serializable)."""
         return {
             "source_type": "dict",
-            "tag_columns": list(self._tag_columns),
+            "key_columns": list(self._key_columns),
             "source_id": self.source_id,
             **self._identity_config(),
         }

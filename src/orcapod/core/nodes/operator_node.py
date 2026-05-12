@@ -17,7 +17,7 @@ from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
     DataProtocol,
     StreamProtocol,
-    TagProtocol,
+    KeyProtocol,
     TrackerManagerProtocol,
 )
 from orcapod.protocols.core_protocols.operator_pod import OperatorPodProtocol
@@ -349,13 +349,13 @@ class OperatorNode(StreamBase):
         all_info: bool = False,
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         if self._operator is None:
-            tag_keys = tuple(self._stored_schema.get("tag", {}).keys())
+            key_keys = tuple(self._stored_schema.get("key", {}).keys())
             data_keys = tuple(self._stored_schema.get("data", {}).keys())
-            return tag_keys, data_keys
-        tag_schema, data_schema = self.output_schema(
+            return key_keys, data_keys
+        key_schema, data_schema = self.output_schema(
             columns=columns, all_info=all_info
         )
-        return tuple(tag_schema.keys()), tuple(data_schema.keys())
+        return tuple(key_schema.keys()), tuple(data_schema.keys())
 
     def output_schema(
         self,
@@ -365,9 +365,9 @@ class OperatorNode(StreamBase):
     ) -> tuple[Schema, Schema]:
         """Return output schema, using stored value in read-only mode."""
         if self._operator is None:
-            tag = Schema(self._stored_schema.get("tag", {}))
+            key = Schema(self._stored_schema.get("key", {}))
             data = Schema(self._stored_schema.get("data", {}))
-            return tag, data
+            return key, data
         return self._operator.output_schema(
             *self._input_streams,
             columns=columns,
@@ -448,7 +448,7 @@ class OperatorNode(StreamBase):
     def _store_output_stream(self, stream: StreamProtocol) -> None:
         """Materialize stream and store in the pipeline database with per-row dedup."""
         output_table = stream.as_table(
-            columns={"source": True, "system_tags": True},
+            columns={"source": True, "system_keys": True},
         )
 
         # Always append the node content hash column first so that it is included
@@ -466,7 +466,7 @@ class OperatorNode(StreamBase):
             pa.repeat(self.content_hash().to_string(), n_rows).cast(pa.large_string()),
         )
 
-        # Per-row record hashes for dedup: hash(tag + data + system_tags + node_content_hash).
+        # Per-row record hashes for dedup: hash(key + data + system_keys + node_content_hash).
         arrow_hasher = self.data_context.arrow_hasher
         record_hashes = []
         for batch in output_table.to_batches():
@@ -502,10 +502,10 @@ class OperatorNode(StreamBase):
         Requires ``self._operator is not None`` (pre-existing limitation shared
         with ``_replay_from_cache``).
         """
-        tag_schema, data_schema = self.output_schema()
+        key_schema, data_schema = self.output_schema()
         type_converter = self.data_context.type_converter
         empty_fields: dict = {}
-        for name, py_type in {**tag_schema, **data_schema}.items():
+        for name, py_type in {**key_schema, **data_schema}.items():
             arrow_type = type_converter.python_type_to_arrow_type(py_type)
             empty_fields[name] = pa.array([], type=arrow_type)
         return pa.table(empty_fields)
@@ -549,8 +549,8 @@ class OperatorNode(StreamBase):
             ]
             if cols_to_drop:
                 records_table = records_table.drop(cols_to_drop)
-        tag_keys = self.keys()[0]
-        return ArrowTableStream(records_table, tag_columns=tag_keys)
+        key_keys = self.keys()[0]
+        return ArrowTableStream(records_table, key_columns=key_keys)
 
     def get_cached_output(self) -> StreamProtocol | None:
         """Return cached output stream in REPLAY mode, else None.
@@ -570,7 +570,7 @@ class OperatorNode(StreamBase):
         self,
         *input_streams: StreamProtocol,
         observer: ExecutionObserverProtocol | None = None,
-    ) -> list[tuple[TagProtocol, DataProtocol]]:
+    ) -> list[tuple[KeyProtocol, DataProtocol]]:
         """Execute input streams: compute, persist, and cache.
 
         Args:
@@ -578,7 +578,7 @@ class OperatorNode(StreamBase):
             observer: Optional execution observer for hooks.
 
         Returns:
-            Materialized list of (tag, data) pairs.
+            Materialized list of (key, data) pairs.
         """
         from orcapod.pipeline.observer import NoOpObserver
 
@@ -657,8 +657,8 @@ class OperatorNode(StreamBase):
             if cols_to_drop:
                 records = records.drop(cols_to_drop)
 
-        tag_keys = self.keys()[0]
-        self._cached_output_stream = ArrowTableStream(records, tag_columns=tag_keys)
+        key_keys = self.keys()[0]
+        self._cached_output_stream = ArrowTableStream(records, key_columns=key_keys)
         self._update_modified_time()
 
     def run(self) -> None:
@@ -689,8 +689,8 @@ class OperatorNode(StreamBase):
             )
             self._update_modified_time()
 
-    def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
-        """Return an iterator over (tag, data) pairs.
+    def iter_data(self) -> Iterator[tuple[KeyProtocol, DataProtocol]]:
+        """Return an iterator over (key, data) pairs.
 
         Read-only: never triggers computation. Returns empty before ``run()``
         or ``execute()`` populates the cache. Call ``node.is_stale`` before
@@ -726,8 +726,8 @@ class OperatorNode(StreamBase):
         if self._operator is None:
             return pa.table({})
         empty_records = self._make_empty_table()
-        tag_keys = self.keys()[0]
-        empty_stream = ArrowTableStream(empty_records, tag_columns=tag_keys)
+        key_keys = self.keys()[0]
+        empty_stream = ArrowTableStream(empty_records, key_columns=key_keys)
         return empty_stream.as_table(columns=columns, all_info=all_info)
 
     # ------------------------------------------------------------------
@@ -770,11 +770,11 @@ class OperatorNode(StreamBase):
             drop_columns.extend(
                 c for c in results.column_names if c.startswith(constants.SOURCE_PREFIX)
             )
-        if not column_config.system_tags and not column_config.all_info:
+        if not column_config.system_keys and not column_config.all_info:
             drop_columns.extend(
                 c
                 for c in results.column_names
-                if c.startswith(constants.SYSTEM_TAG_PREFIX)
+                if c.startswith(constants.SYSTEM_KEY_PREFIX)
             )
         if drop_columns:
             results = results.drop(
@@ -814,8 +814,8 @@ class OperatorNode(StreamBase):
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[KeyProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[KeyProtocol, DataProtocol]],
         *,
         observer: ExecutionObserverProtocol | None = None,
     ) -> None:
@@ -831,7 +831,7 @@ class OperatorNode(StreamBase):
 
         Args:
             inputs: Sequence of readable channels from upstream nodes.
-            output: Writable channel for output (tag, data) pairs.
+            output: Writable channel for output (key, data) pairs.
             observer: Optional execution observer for hooks.
         """
         from orcapod.pipeline.observer import NoOpObserver
@@ -857,15 +857,15 @@ class OperatorNode(StreamBase):
             if self._cache_mode == CacheMode.REPLAY:
                 self._replay_from_cache()
                 assert self._cached_output_stream is not None
-                for tag, data in self._cached_output_stream.iter_data():
-                    await output.send((tag, data))
+                for key, data in self._cached_output_stream.iter_data():
+                    await output.send((key, data))
                 ctx_obs.on_node_end(node_label, node_hash)
                 return  # finally block closes output
 
             # OFF or LOG: delegate to operator, forward results downstream
-            intermediate: Channel[tuple[TagProtocol, DataProtocol]] = Channel()
+            intermediate: Channel[tuple[KeyProtocol, DataProtocol]] = Channel()
             should_collect = self._cache_mode == CacheMode.LOG
-            collected: list[tuple[TagProtocol, DataProtocol]] = []
+            collected: list[tuple[KeyProtocol, DataProtocol]] = []
 
             async def forward() -> None:
                 async for item in intermediate.reader:

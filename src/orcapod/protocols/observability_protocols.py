@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
+from orcapod.protocols.core_protocols import DataProtocol, KeyProtocol
 from orcapod.types import SchemaLike
 
 
@@ -23,7 +23,7 @@ from orcapod.types import SchemaLike
 class DataExecutionLoggerProtocol(Protocol):
     """Receives captured execution output and persists it.
 
-    A logger is *bound* to a specific data execution context (node, tag,
+    A logger is *bound* to a specific data execution context (node, key,
     data) when created by the Observer.  It knows the destination (e.g. a
     Delta Lake table) but does not know how the logs were collected — that is
     the executor's responsibility.
@@ -116,14 +116,14 @@ class ExecutionObserverProtocol(Protocol):
         self,
         node_label: str,
         node_hash: str,
-        tag_schema: SchemaLike | None = None,
+        key_schema: SchemaLike | None = None,
     ) -> None:
         """Called before a node begins processing its data.
 
         Args:
             node_label: Human-readable label of the node.
             node_hash: Content hash of the node.
-            tag_schema: The tag schema (including system tags) for this
+            key_schema: The key schema (including system keys) for this
                 node's input stream.
         """
         ...
@@ -144,7 +144,7 @@ class ExecutionObserverProtocol(Protocol):
     def on_data_start(
         self,
         node_label: str,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
     ) -> None:
         """Called before a data is processed by a function node."""
@@ -153,7 +153,7 @@ class ExecutionObserverProtocol(Protocol):
     def on_data_end(
         self,
         node_label: str,
-        tag: TagProtocol,
+        key: KeyProtocol,
         input_data: DataProtocol,
         output_data: DataProtocol | None,
         cached: bool,
@@ -169,7 +169,7 @@ class ExecutionObserverProtocol(Protocol):
     def on_data_crash(
         self,
         node_label: str,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
         error: Exception,
     ) -> None:
@@ -183,7 +183,7 @@ class ExecutionObserverProtocol(Protocol):
 
     def create_data_logger(
         self,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
     ) -> DataExecutionLoggerProtocol:
         """Create a context-bound logger for a single data execution.
@@ -193,7 +193,7 @@ class ExecutionObserverProtocol(Protocol):
         without the executor needing to know anything about the pipeline.
 
         Args:
-            tag: The tag for the data being processed.
+            key: The key for the data being processed.
             data: The input data being processed.
         """
         ...

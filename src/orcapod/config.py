@@ -7,7 +7,7 @@ from typing import Self
 class Config:
     """Immutable configuration object."""
 
-    system_tag_hash_n_char: int = 12
+    system_key_hash_n_char: int = 12
     schema_hash_n_char: int = 12
     path_hash_n_char: int = 20
 

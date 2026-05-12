@@ -1,7 +1,7 @@
 """
 Tests for FunctionNode's stream interface covering:
 - iter_data: correctness, repeatability, __iter__
-- as_table: correctness, ColumnConfig (content_hash, sort_by_tags)
+- as_table: correctness, ColumnConfig (content_hash, sort_by_keys)
 - output_schema and keys
 - source / upstreams properties
 - Inactive data function behaviour
@@ -90,7 +90,7 @@ class TestFunctionNodeStreamBasic:
     def test_as_table_has_correct_row_count(self, node):
         assert len(node.as_table()) == 3
 
-    def test_as_table_contains_tag_columns(self, node):
+    def test_as_table_contains_key_columns(self, node):
         assert "id" in node.as_table().column_names
 
     def test_as_table_contains_data_columns(self, node):
@@ -105,14 +105,14 @@ class TestFunctionNodeStreamBasic:
         assert len(upstreams) == 1
 
     def test_output_schema_has_result_in_data_schema(self, node):
-        tag_schema, data_schema = node.output_schema()
-        assert isinstance(tag_schema, Mapping)
+        key_schema, data_schema = node.output_schema()
+        assert isinstance(key_schema, Mapping)
         assert isinstance(data_schema, Mapping)
         assert "result" in data_schema
 
 
 # ---------------------------------------------------------------------------
-# 2. ColumnConfig — content_hash and sort_by_tags
+# 2. ColumnConfig — content_hash and sort_by_keys
 # ---------------------------------------------------------------------------
 
 
@@ -124,7 +124,7 @@ class TestFunctionNodeColumnConfig:
         assert "_content_hash" in table.column_names
         assert len(table.column("_content_hash")) == 3
 
-    def test_as_table_sort_by_tags(self, double_pf):
+    def test_as_table_sort_by_keys(self, double_pf):
         db = InMemoryArrowDatabase()
         reversed_table = pa.table(
             {
@@ -135,14 +135,14 @@ class TestFunctionNodeColumnConfig:
                 [pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]
             ),
         )
-        input_stream = ArrowTableStream(reversed_table, tag_columns=["id"])
+        input_stream = ArrowTableStream(reversed_table, key_columns=["id"])
         node = FunctionNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=input_stream,
             pipeline_database=db,
         )
         node.run()
-        result = node.as_table(columns={"sort_by_tags": True})
+        result = node.as_table(columns={"sort_by_keys": True})
         ids: list[int] = result.column("id").to_pylist()  # type: ignore[assignment]
         assert ids == sorted(ids)
 

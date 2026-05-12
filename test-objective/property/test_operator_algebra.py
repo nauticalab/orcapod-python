@@ -38,9 +38,9 @@ def _sorted_rows(table: pa.Table, sort_col: str = "id") -> list[dict]:
     return sorted(rows, key=lambda r: r.get(sort_col, 0))
 
 
-def _make_stream(tag_data: dict, data_data: dict, tag_cols: list[str]) -> ArrowTableStream:
-    all_data = {**tag_data, **data_data}
-    return ArrowTableStream(pa.table(all_data), tag_columns=tag_cols)
+def _make_stream(key_data: dict, data_data: dict, key_cols: list[str]) -> ArrowTableStream:
+    all_data = {**key_data, **data_data}
+    return ArrowTableStream(pa.table(all_data), key_columns=key_cols)
 
 
 # ===================================================================

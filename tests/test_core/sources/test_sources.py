@@ -37,7 +37,7 @@ def _make_arrow_source(record_id_column=None, source_id=None):
     )
     return ArrowTableSource(
         table=table,
-        tag_columns=["user_id"],
+        key_columns=["user_id"],
         record_id_column=record_id_column,
         source_id=source_id,
         infer_nullable=True,
@@ -83,7 +83,7 @@ class TestDefaultResolveField:
     def test_dict_source_raises_not_implemented(self):
         src = DictSource(
             data=[{"id": 1, "val": "a"}, {"id": 2, "val": "b"}],
-            tag_columns=["id"],
+            key_columns=["id"],
         )
         with pytest.raises(NotImplementedError):
             src.resolve_field("row_0", "val")
@@ -96,7 +96,7 @@ class TestDefaultResolveField:
     def test_error_message_contains_class_name_and_field(self):
         src = DictSource(
             data=[{"id": 1, "val": "a"}],
-            tag_columns=["id"],
+            key_columns=["id"],
             source_id="test_source",
         )
         with pytest.raises(NotImplementedError, match="DictSource"):

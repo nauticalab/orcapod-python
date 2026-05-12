@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
+from orcapod.protocols.core_protocols import DataProtocol, KeyProtocol
 from orcapod.types import SchemaLike
 from orcapod.protocols.observability_protocols import (  # noqa: F401  (re-exported for convenience)
     ExecutionObserverProtocol,
@@ -64,7 +64,7 @@ class NoOpObserver:
         pass
 
     def on_node_start(
-        self, node_label: str, node_hash: str, tag_schema: SchemaLike | None = None
+        self, node_label: str, node_hash: str, key_schema: SchemaLike | None = None
     ) -> None:
         pass
 
@@ -76,7 +76,7 @@ class NoOpObserver:
     def on_data_start(
         self,
         node_label: str,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
     ) -> None:
         pass
@@ -84,7 +84,7 @@ class NoOpObserver:
     def on_data_end(
         self,
         node_label: str,
-        tag: TagProtocol,
+        key: KeyProtocol,
         input_data: DataProtocol,
         output_data: DataProtocol | None,
         cached: bool,
@@ -94,7 +94,7 @@ class NoOpObserver:
     def on_data_crash(
         self,
         node_label: str,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
         error: Exception,
     ) -> None:
@@ -102,7 +102,7 @@ class NoOpObserver:
 
     def create_data_logger(
         self,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
     ) -> NoOpLogger:
         return _NOOP_LOGGER

@@ -13,7 +13,7 @@ across Phases 1–5 of the redesign:
     Different function → different pipeline_hash
 
   Phase 3 — RootSource base case
-    RootSource.pipeline_hash() is (tag_schema, data_schema) only
+    RootSource.pipeline_hash() is (key_schema, data_schema) only
     Same-schema sources share pipeline_hash regardless of data
 
   Phase 4 — ArrowTableStream pipeline_hash
@@ -184,17 +184,17 @@ class TestRootSourcePipelineHash:
         )
         assert src_x.pipeline_hash() != src_y.pipeline_hash()
 
-    def test_different_tag_column_different_pipeline_hash(self):
-        """Tag vs data assignment changes the schema, hence the pipeline_hash."""
+    def test_different_key_column_different_pipeline_hash(self):
+        """Key vs data assignment changes the schema, hence the pipeline_hash."""
         table = pa.table(
             {
                 "id": pa.array([1, 2], type=pa.int64()),
                 "val": pa.array([10, 20], type=pa.int64()),
             }
         )
-        src_with_tag = ArrowTableSource(table=table, tag_columns=["id"], infer_nullable=True)
-        src_no_tag = ArrowTableSource(table=table, infer_nullable=True)
-        assert src_with_tag.pipeline_hash() != src_no_tag.pipeline_hash()
+        src_with_key = ArrowTableSource(table=table, key_columns=["id"], infer_nullable=True)
+        src_no_key = ArrowTableSource(table=table, infer_nullable=True)
+        assert src_with_key.pipeline_hash() != src_no_key.pipeline_hash()
 
     def test_dict_source_same_schema_shares_pipeline_hash_with_arrow_source(self):
         """DictSource and ArrowTableSource with identical schemas share pipeline_hash."""
@@ -205,7 +205,7 @@ class TestRootSourcePipelineHash:
             data=[{"x": 10}, {"x": 20}, {"x": 30}],
             data_schema={"x": int},
         )
-        # Both have data schema {x: int64}, no tag columns → same pipeline_hash
+        # Both have data schema {x: int64}, no key columns → same pipeline_hash
         assert arrow_src.pipeline_hash() == dict_src.pipeline_hash()
 
     def test_pipeline_hash_stable_across_instances(self):
@@ -252,7 +252,7 @@ class TestTableStreamPipelineHash:
                     ]
                 ),
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
         )
         assert s1.pipeline_hash() == s2.pipeline_hash()
         assert s1.content_hash() != s2.content_hash()
@@ -328,7 +328,7 @@ class TestFunctionNodePipelineHashFix:
                         ]
                     ),
                 ),
-                tag_columns=["id"],
+                key_columns=["id"],
             ),
             pipeline_database=db,
         )
@@ -358,7 +358,7 @@ class TestFunctionNodePipelineHashFix:
                         ]
                     ),
                 ),
-                tag_columns=["id"],
+                key_columns=["id"],
             ),
             pipeline_database=db,
         )

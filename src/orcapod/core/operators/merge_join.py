@@ -29,10 +29,10 @@ class MergeJoin(BinaryOperator):
 
     For non-colliding columns, values are kept as scalars (same as regular Join).
 
-    Tag columns use inner join on shared tags, with union of tag schemas.
+    Key columns use inner join on shared keys, with union of key schemas.
 
     MergeJoin is commutative: MergeJoin(A, B) produces the same result as
-    MergeJoin(B, A), achieved by sorting merged values and system tag values.
+    MergeJoin(B, A), achieved by sorting merged values and system key values.
     """
 
     @property
@@ -82,13 +82,13 @@ class MergeJoin(BinaryOperator):
     ) -> tuple[Schema, Schema]:
         columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
 
-        # Always get input schemas WITHOUT system tags for the base computation.
-        # System tags are computed separately because the join renames them.
-        left_tag_schema, left_data_schema = left_stream.output_schema()
-        right_tag_schema, right_data_schema = right_stream.output_schema()
+        # Always get input schemas WITHOUT system keys for the base computation.
+        # System keys are computed separately because the join renames them.
+        left_key_schema, left_data_schema = left_stream.output_schema()
+        right_key_schema, right_data_schema = right_stream.output_schema()
 
-        # Tag schema: union of both tag schemas
-        tag_schema = schema_utils.union_schemas(left_tag_schema, right_tag_schema)
+        # Key schema: union of both key schemas
+        key_schema = schema_utils.union_schemas(left_key_schema, right_key_schema)
 
         # Data schema: colliding columns become list[T], non-colliding stay scalar
         colliding_schema = schema_utils.intersection_schemas(
@@ -107,14 +107,14 @@ class MergeJoin(BinaryOperator):
             else:
                 merged_data_schema[key] = right_data_schema[key]
 
-        # Add system tag columns if requested
-        if columns_config.system_tags:
-            system_tag_schema = self._predict_system_tag_schema(
+        # Add system key columns if requested
+        if columns_config.system_keys:
+            system_key_schema = self._predict_system_key_schema(
                 left_stream, right_stream
             )
-            tag_schema = schema_utils.union_schemas(tag_schema, system_tag_schema)
+            key_schema = schema_utils.union_schemas(key_schema, system_key_schema)
 
-        return tag_schema, Schema(merged_data_schema)
+        return key_schema, Schema(merged_data_schema)
 
     def _canonical_order(
         self, left_stream: StreamProtocol, right_stream: StreamProtocol
@@ -128,45 +128,45 @@ class MergeJoin(BinaryOperator):
         # Python's sorted is stable, so equal pipeline_hashes preserve input order
         return sorted(streams_with_idx, key=lambda s: s[0].pipeline_hash().to_hex())
 
-    def _predict_system_tag_schema(
+    def _predict_system_key_schema(
         self, left_stream: StreamProtocol, right_stream: StreamProtocol
     ) -> Schema:
-        """Predict the system tag columns that the join would produce.
+        """Predict the system key columns that the join would produce.
 
-        Each input stream's existing system tag columns get renamed by
+        Each input stream's existing system key columns get renamed by
         appending ::{pipeline_hash}:{canonical_position}. This method
         computes those output column names without performing the join.
         """
-        n_char = self.orcapod_config.system_tag_hash_n_char
+        n_char = self.orcapod_config.system_key_hash_n_char
         canonical = self._canonical_order(left_stream, right_stream)
 
-        system_tag_fields: dict[str, type] = {}
+        system_key_fields: dict[str, type] = {}
         for stream, orig_idx in canonical:
             canon_pos = canonical.index((stream, orig_idx))
-            stream_tag_schema, _ = stream.output_schema(columns={"system_tags": True})
-            for col_name in stream_tag_schema:
-                if col_name.startswith(constants.SYSTEM_TAG_PREFIX):
+            stream_key_schema, _ = stream.output_schema(columns={"system_keys": True})
+            for col_name in stream_key_schema:
+                if col_name.startswith(constants.SYSTEM_KEY_PREFIX):
                     new_name = (
                         f"{col_name}{constants.BLOCK_SEPARATOR}"
                         f"{stream.pipeline_hash().to_hex(n_char)}:{canon_pos}"
                     )
-                    system_tag_fields[new_name] = str
-        return Schema(system_tag_fields)
+                    system_key_fields[new_name] = str
+        return Schema(system_key_fields)
 
     def binary_static_process(
         self, left_stream: StreamProtocol, right_stream: StreamProtocol
     ) -> StreamProtocol:
-        n_char = self.orcapod_config.system_tag_hash_n_char
+        n_char = self.orcapod_config.system_key_hash_n_char
 
-        # Determine canonical ordering for system tag positions
+        # Determine canonical ordering for system key positions
         canonical = self._canonical_order(left_stream, right_stream)
 
-        # Get tables with source + system_tags, append system tag blocks
+        # Get tables with source + system_keys, append system key blocks
         tables = {}
         for stream, orig_idx in canonical:
             canon_pos = canonical.index((stream, orig_idx))
-            table = stream.as_table(columns={"source": True, "system_tags": True})
-            table = arrow_utils.append_to_system_tags(
+            table = stream.as_table(columns={"source": True, "system_keys": True})
+            table = arrow_utils.append_to_system_keys(
                 table, f"{stream.pipeline_hash().to_hex(n_char)}:{canon_pos}"
             )
             tables[orig_idx] = table
@@ -174,10 +174,10 @@ class MergeJoin(BinaryOperator):
         left_table = tables[0]
         right_table = tables[1]
 
-        # Determine shared tag keys for inner join
-        left_tag_keys, left_data_keys = left_stream.keys()
-        right_tag_keys, right_data_keys = right_stream.keys()
-        shared_tag_keys = set(left_tag_keys) & set(right_tag_keys)
+        # Determine shared key keys for inner join
+        left_key_keys, left_data_keys = left_stream.keys()
+        right_key_keys, right_data_keys = right_stream.keys()
+        shared_key_keys = set(left_key_keys) & set(right_key_keys)
 
         # Find colliding data columns
         colliding_keys = set(left_data_keys) & set(right_data_keys)
@@ -185,10 +185,10 @@ class MergeJoin(BinaryOperator):
         # Capture nullable flags from input schemas BEFORE Polars conversion.
         # Polars' join discards nullable info (defaults all to True); we derive
         # the output schema from the inputs instead of from data null counts.
-        # Only capture tag and data columns — system tag and source columns
+        # Only capture key and data columns — system key and source columns
         # are internally created with Arrow's all-nullable default; those fall
         # through to null-count inference below.
-        captured_cols = set(left_tag_keys) | set(left_data_keys) | set(right_tag_keys) | set(right_data_keys)
+        captured_cols = set(left_key_keys) | set(left_data_keys) | set(right_key_keys) | set(right_data_keys)
         left_nullable = {f.name: f.nullable for f in left_table.schema if f.name in captured_cols}
         right_nullable = {f.name: f.nullable for f in right_table.schema if f.name in captured_cols}
         # Build expected output nullable map
@@ -204,8 +204,8 @@ class MergeJoin(BinaryOperator):
             if source_col in output_nullable:
                 output_nullable[source_col] = False
 
-        # Perform inner join via Polars on shared tag keys
-        # Use a common key trick to ensure cartesian product if no shared tags
+        # Perform inner join via Polars on shared key keys
+        # Use a common key trick to ensure cartesian product if no shared keys
         COMMON_JOIN_KEY = "_common"
         # COMMON_JOIN_KEY is a temporary column that gets dropped after the join
         output_nullable.pop(COMMON_JOIN_KEY, None)
@@ -216,7 +216,7 @@ class MergeJoin(BinaryOperator):
             0, COMMON_JOIN_KEY, pa.array([0] * len(right_table))
         )
 
-        join_keys = list(shared_tag_keys | {COMMON_JOIN_KEY})
+        join_keys = list(shared_key_keys | {COMMON_JOIN_KEY})
 
         # Track which columns Polars will auto-suffix with _right
         # (right-table columns that collide with left, excluding join keys)
@@ -299,14 +299,14 @@ class MergeJoin(BinaryOperator):
                 # Both versions exist, drop the right one
                 joined = joined.drop(suffixed_name)
 
-        # Sort system tag values for same-pipeline-hash streams to ensure commutativity
-        joined = arrow_utils.sort_system_tag_values(joined)
+        # Sort system key values for same-pipeline-hash streams to ensure commutativity
+        joined = arrow_utils.sort_system_key_values(joined)
 
-        # Reorder: tag columns first, then data columns
-        all_tag_keys = set(left_tag_keys) | set(right_tag_keys)
-        tag_cols = [c for c in joined.column_names if c in all_tag_keys]
-        other_cols = [c for c in joined.column_names if c not in all_tag_keys]
-        joined = joined.select(tag_cols + other_cols)
+        # Reorder: key columns first, then data columns
+        all_key_keys = set(left_key_keys) | set(right_key_keys)
+        key_cols = [c for c in joined.column_names if c in all_key_keys]
+        other_cols = [c for c in joined.column_names if c not in all_key_keys]
+        joined = joined.select(key_cols + other_cols)
 
         # Reconstruct schema from captured input nullable flags.
         # Fall back to null-count inference for any unexpected columns.
@@ -324,7 +324,7 @@ class MergeJoin(BinaryOperator):
         )
         return ArrowTableStream(
             joined,
-            tag_columns=tuple(all_tag_keys),
+            key_columns=tuple(all_key_keys),
         )
 
     def identity_structure(self) -> Any:

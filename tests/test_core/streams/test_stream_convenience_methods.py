@@ -18,20 +18,20 @@ from orcapod.core.streams import ArrowTableStream
 # ---------------------------------------------------------------------------
 
 
-def _make_stream(tag_col: str, data_cols: dict, tag_data: list) -> ArrowTableStream:
+def _make_stream(key_col: str, data_cols: dict, key_data: list) -> ArrowTableStream:
     """Build an ArrowTableStream from column specs."""
-    columns = {tag_col: pa.array(tag_data, type=pa.large_string())}
+    columns = {key_col: pa.array(key_data, type=pa.large_string())}
     for name, values in data_cols.items():
         columns[name] = pa.array(values, type=pa.int64())
-    return ArrowTableStream(pa.table(columns), tag_columns=[tag_col])
+    return ArrowTableStream(pa.table(columns), key_columns=[key_col])
 
 
-def _make_source(tag_col: str, data_cols: dict, tag_data: list) -> ArrowTableSource:
+def _make_source(key_col: str, data_cols: dict, key_data: list) -> ArrowTableSource:
     """Build an ArrowTableSource from column specs."""
-    columns = {tag_col: pa.array(tag_data, type=pa.large_string())}
+    columns = {key_col: pa.array(key_data, type=pa.large_string())}
     for name, values in data_cols.items():
         columns[name] = pa.array(values, type=pa.int64())
-    return ArrowTableSource(pa.table(columns), tag_columns=[tag_col], infer_nullable=True)
+    return ArrowTableSource(pa.table(columns), key_columns=[key_col], infer_nullable=True)
 
 
 # ---------------------------------------------------------------------------
@@ -99,22 +99,22 @@ class TestSemiJoinConvenience:
 
 
 # ---------------------------------------------------------------------------
-# Tests: map_tags
+# Tests: map_keys
 # ---------------------------------------------------------------------------
 
 
-class TestMapTagsConvenience:
-    def test_map_tags_renames(self):
+class TestMapKeysConvenience:
+    def test_map_keys_renames(self):
         s = _make_stream("k", {"a": [1, 2]}, ["x", "y"])
-        result = s.map_tags({"k": "key"})
-        tag_keys, _ = result.keys()
-        assert "key" in tag_keys
-        assert "k" not in tag_keys
+        result = s.map_keys({"k": "key"})
+        key_keys, _ = result.keys()
+        assert "key" in key_keys
+        assert "k" not in key_keys
 
-    def test_map_tags_with_label(self):
+    def test_map_keys_with_label(self):
         s = _make_stream("k", {"a": [1]}, ["x"])
-        result = s.map_tags({"k": "key"}, label="rename_tag")
-        assert result.label == "rename_tag"
+        result = s.map_keys({"k": "key"}, label="rename_key")
+        assert result.label == "rename_key"
         assert result.has_assigned_label
 
 
@@ -146,12 +146,12 @@ class TestMapDataConvenience:
 
 
 # ---------------------------------------------------------------------------
-# Tests: select_tag_columns / select_data_columns
+# Tests: select_key_columns / select_data_columns
 # ---------------------------------------------------------------------------
 
 
 class TestSelectColumnsConvenience:
-    def test_select_tag_columns(self):
+    def test_select_key_columns(self):
         table = pa.table(
             {
                 "k1": pa.array(["a"], type=pa.large_string()),
@@ -159,10 +159,10 @@ class TestSelectColumnsConvenience:
                 "v": pa.array([1], type=pa.int64()),
             }
         )
-        s = ArrowTableStream(table, tag_columns=["k1", "k2"])
-        result = s.select_tag_columns(["k1"])
-        tag_keys, _ = result.keys()
-        assert tag_keys == ("k1",)
+        s = ArrowTableStream(table, key_columns=["k1", "k2"])
+        result = s.select_key_columns(["k1"])
+        key_keys, _ = result.keys()
+        assert key_keys == ("k1",)
 
     def test_select_data_columns(self):
         table = pa.table(
@@ -172,12 +172,12 @@ class TestSelectColumnsConvenience:
                 "v2": pa.array([2], type=pa.int64()),
             }
         )
-        s = ArrowTableStream(table, tag_columns=["k"])
+        s = ArrowTableStream(table, key_columns=["k"])
         result = s.select_data_columns(["v1"])
         _, data_keys = result.keys()
         assert data_keys == ("v1",)
 
-    def test_select_tag_columns_with_label(self):
+    def test_select_key_columns_with_label(self):
         table = pa.table(
             {
                 "k1": pa.array(["a"], type=pa.large_string()),
@@ -185,19 +185,19 @@ class TestSelectColumnsConvenience:
                 "v": pa.array([1], type=pa.int64()),
             }
         )
-        s = ArrowTableStream(table, tag_columns=["k1", "k2"])
-        result = s.select_tag_columns(["k1"], label="sel_tag")
-        assert result.label == "sel_tag"
+        s = ArrowTableStream(table, key_columns=["k1", "k2"])
+        result = s.select_key_columns(["k1"], label="sel_key")
+        assert result.label == "sel_key"
         assert result.has_assigned_label
 
 
 # ---------------------------------------------------------------------------
-# Tests: drop_tag_columns / drop_data_columns
+# Tests: drop_key_columns / drop_data_columns
 # ---------------------------------------------------------------------------
 
 
 class TestDropColumnsConvenience:
-    def test_drop_tag_columns(self):
+    def test_drop_key_columns(self):
         table = pa.table(
             {
                 "k1": pa.array(["a"], type=pa.large_string()),
@@ -205,11 +205,11 @@ class TestDropColumnsConvenience:
                 "v": pa.array([1], type=pa.int64()),
             }
         )
-        s = ArrowTableStream(table, tag_columns=["k1", "k2"])
-        result = s.drop_tag_columns(["k2"])
-        tag_keys, _ = result.keys()
-        assert "k1" in tag_keys
-        assert "k2" not in tag_keys
+        s = ArrowTableStream(table, key_columns=["k1", "k2"])
+        result = s.drop_key_columns(["k2"])
+        key_keys, _ = result.keys()
+        assert "k1" in key_keys
+        assert "k2" not in key_keys
 
     def test_drop_data_columns(self):
         table = pa.table(
@@ -219,7 +219,7 @@ class TestDropColumnsConvenience:
                 "v2": pa.array([2], type=pa.int64()),
             }
         )
-        s = ArrowTableStream(table, tag_columns=["k"])
+        s = ArrowTableStream(table, key_columns=["k"])
         result = s.drop_data_columns(["v2"])
         _, data_keys = result.keys()
         assert "v1" in data_keys

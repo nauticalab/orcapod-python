@@ -12,7 +12,7 @@ from orcapod.protocols.core_protocols import (
     FunctionPodProtocol,
     DataProtocol,
     StreamProtocol,
-    TagProtocol,
+    KeyProtocol,
 )
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.protocols.observability_protocols import DataExecutionLoggerProtocol
@@ -26,11 +26,11 @@ module_logger = logging.getLogger(__name__)
 class CachedFunctionPod(WrappedFunctionPod):
     """Pod-level caching wrapper that intercepts ``process_data()``.
 
-    Caches at the ``process_data(tag, data)`` level using only the
+    Caches at the ``process_data(key, data)`` level using only the
     **input data content hash** as the cache key — the output of a
-    data function depends solely on the data, not the tag.
+    data function depends solely on the data, not the key.
 
-    Tag-level provenance tracking (tag + system tags + data hash) is
+    Key-level provenance tracking (key + system keys + data hash) is
     handled separately by ``FunctionNode.add_pipeline_record``.
 
     Uses a shared ``ResultCache`` for lookup/store/conflict-resolution
@@ -66,34 +66,34 @@ class CachedFunctionPod(WrappedFunctionPod):
 
     def process_data(
         self,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
         *,
         logger: DataExecutionLoggerProtocol | None = None,
-    ) -> tuple[TagProtocol, DataProtocol | None]:
+    ) -> tuple[KeyProtocol, DataProtocol | None]:
         """Process a data with pod-level caching.
 
         The cache key is the input data content hash only — the function
-        output depends solely on the data, not the tag.  The output
+        output depends solely on the data, not the key.  The output
         data carries a ``RESULT_COMPUTED_FLAG`` meta value: ``True`` if
         freshly computed, ``False`` if retrieved from cache.
 
         Args:
-            tag: The tag associated with the data.
+            key: The key associated with the data.
             data: The input data to process.
             logger: Optional data execution logger.
 
         Returns:
-            A ``(tag, output_data)`` tuple; output_data is ``None``
+            A ``(key, output_data)`` tuple; output_data is ``None``
             if the inner function filters the data out.
         """
         cached = self._cache.lookup(data)
         if cached is not None:
             module_logger.info("Pod-level cache hit")
             cached = cached.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: False})
-            return tag, cached
+            return key, cached
 
-        tag, output = self._function_pod.process_data(tag, data, logger=logger)
+        key, output = self._function_pod.process_data(key, data, logger=logger)
         if output is not None:
             pf = self._function_pod.data_function
             var_dg = Datagram(
@@ -108,15 +108,15 @@ class CachedFunctionPod(WrappedFunctionPod):
             )
             self._cache.store(data, output, var_dg, exec_dg)
             output = output.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: True})
-        return tag, output
+        return key, output
 
     async def async_process_data(
         self,
-        tag: TagProtocol,
+        key: KeyProtocol,
         data: DataProtocol,
         *,
         logger: DataExecutionLoggerProtocol | None = None,
-    ) -> tuple[TagProtocol, DataProtocol | None]:
+    ) -> tuple[KeyProtocol, DataProtocol | None]:
         """Async counterpart of ``process_data``.
 
         DB lookup and store are synchronous (DB protocol is sync), but the
@@ -127,10 +127,10 @@ class CachedFunctionPod(WrappedFunctionPod):
         if cached is not None:
             module_logger.info("Pod-level cache hit")
             cached = cached.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: False})
-            return tag, cached
+            return key, cached
 
-        tag, output = await self._function_pod.async_process_data(
-            tag, data, logger=logger
+        key, output = await self._function_pod.async_process_data(
+            key, data, logger=logger
         )
         if output is not None:
             pf = self._function_pod.data_function
@@ -146,7 +146,7 @@ class CachedFunctionPod(WrappedFunctionPod):
             )
             self._cache.store(data, output, var_dg, exec_dg)
             output = output.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: True})
-        return tag, output
+        return key, output
 
     def get_all_cached_outputs(
         self, include_system_columns: bool = False

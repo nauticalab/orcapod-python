@@ -1,13 +1,13 @@
 """DBTableSource — a read-only RootSource backed by any DBConnectorProtocol.
 
-Uses the table's primary-key columns as tag columns by default.
+Uses the table's primary-key columns as key columns by default.
 Type mapping (DB-native → Arrow) is fully delegated to the connector.
 
 Example::
 
     connector = SQLiteConnector(":memory:")   # PLT-1076
-    source = DBTableSource(connector, "measurements")          # PKs → tags
-    source = DBTableSource(connector, "events", tag_columns=["session_id"])
+    source = DBTableSource(connector, "measurements")          # PKs → keys
+    source = DBTableSource(connector, "events", key_columns=["session_id"])
 """
 from __future__ import annotations
 
@@ -34,17 +34,17 @@ class DBTableSource(RootSource):
 
     At construction time the source:
     1. Validates the table exists in the connector.
-    2. Resolves tag columns (defaults to the table's primary-key columns).
+    2. Resolves key columns (defaults to the table's primary-key columns).
     3. Fetches all rows as Arrow batches and assembles a PyArrow table.
-    4. Enriches via ``SourceStreamBuilder`` (source-info, schema-hash, system tags).
+    4. Enriches via ``SourceStreamBuilder`` (source-info, schema-hash, system keys).
 
     Args:
         connector: A ``DBConnectorProtocol`` providing DB access.
         table_name: Name of the table to expose as a source.
-        tag_columns: Columns to use as tag columns.  If ``None`` (default),
+        key_columns: Columns to use as key columns.  If ``None`` (default),
             the table's primary-key columns are used.  Raises ``ValueError``
             if the table has no primary key and no explicit columns are given.
-        system_tag_columns: Additional system-level tag columns (passed through
+        system_key_columns: Additional system-level key columns (passed through
             to ``SourceStreamBuilder``; mirrors ``DeltaTableSource`` API).
         record_id_column: Column for stable per-row record IDs in provenance
             strings.  If ``None``, row indices are used.
@@ -63,8 +63,8 @@ class DBTableSource(RootSource):
         self,
         connector: DBConnectorProtocol,
         table_name: str,
-        tag_columns: Collection[str] | None = None,
-        system_tag_columns: Collection[str] = (),
+        key_columns: Collection[str] | None = None,
+        system_key_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
         label: str | None = None,
@@ -91,16 +91,16 @@ class DBTableSource(RootSource):
         if table_name not in connector.get_table_names():
             raise ValueError(f"Table {table_name!r} not found in database.")
 
-        # Step 2: Resolve tag columns — default to PK columns
-        if tag_columns is None:
-            resolved_tag_columns: list[str] = connector.get_pk_columns(table_name)
-            if not resolved_tag_columns:
+        # Step 2: Resolve key columns — default to PK columns
+        if key_columns is None:
+            resolved_key_columns: list[str] = connector.get_pk_columns(table_name)
+            if not resolved_key_columns:
                 raise ValueError(
                     f"Table {table_name!r} has no primary key columns. "
-                    "Provide explicit tag_columns."
+                    "Provide explicit key_columns."
                 )
         else:
-            resolved_tag_columns = list(tag_columns)
+            resolved_key_columns = list(key_columns)
 
         # Step 3: Fetch the full table as Arrow.
         # _query allows subclasses (e.g. SQLiteTableSource) to inject a custom
@@ -133,15 +133,15 @@ class DBTableSource(RootSource):
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(
             table,
-            tag_columns=resolved_tag_columns,
+            key_columns=resolved_key_columns,
             source_id=self._source_id,
             record_id_column=record_id_column,
-            system_tag_columns=system_tag_columns,
+            system_key_columns=system_key_columns,
         )
 
         self._stream = result.stream
-        self._tag_columns = result.tag_columns
-        self._system_tag_columns = result.system_tag_columns
+        self._key_columns = result.key_columns
+        self._system_key_columns = result.system_key_columns
         if self._source_id is None:
             self._source_id = result.source_id
 
@@ -151,8 +151,8 @@ class DBTableSource(RootSource):
             "source_type": "db_table",
             "connector": self._connector.to_config(),
             "table_name": self._table_name,
-            "tag_columns": list(self._tag_columns),
-            "system_tag_columns": list(self._system_tag_columns),
+            "key_columns": list(self._key_columns),
+            "system_key_columns": list(self._system_key_columns),
             "record_id_column": self._record_id_column,
             "source_id": self.source_id,
             **self._identity_config(),

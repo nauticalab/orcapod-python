@@ -3,14 +3,14 @@
 from orcapod.core.operators import (
     Batch,
     DropDataColumns,
-    DropTagColumns,
+    DropKeyColumns,
     Join,
     MapData,
-    MapTags,
+    MapKeys,
     MergeJoin,
     PolarsFilter,
     SelectDataColumns,
-    SelectTagColumns,
+    SelectKeyColumns,
     SemiJoin,
 )
 
@@ -78,28 +78,28 @@ class TestBatchConfig:
         assert restored.drop_partial_batch is True
 
 
-class TestSelectTagColumnsConfig:
+class TestSelectKeyColumnsConfig:
     def test_to_config(self):
-        op = SelectTagColumns(columns=["a", "b"], strict=False)
+        op = SelectKeyColumns(columns=["a", "b"], strict=False)
         config = op.to_config()
-        assert config["class_name"] == "SelectTagColumns"
+        assert config["class_name"] == "SelectKeyColumns"
         assert config["config"]["columns"] == ["a", "b"]
         assert config["config"]["strict"] is False
 
     def test_round_trip(self):
-        op = SelectTagColumns(columns=["a", "b"])
+        op = SelectKeyColumns(columns=["a", "b"])
         config = op.to_config()
-        restored = SelectTagColumns.from_config(config)
-        assert isinstance(restored, SelectTagColumns)
+        restored = SelectKeyColumns.from_config(config)
+        assert isinstance(restored, SelectKeyColumns)
 
 
-class TestDropTagColumnsConfig:
+class TestDropKeyColumnsConfig:
     def test_round_trip(self):
-        op = DropTagColumns(columns=["x"])
+        op = DropKeyColumns(columns=["x"])
         config = op.to_config()
-        restored = DropTagColumns.from_config(config)
-        assert isinstance(restored, DropTagColumns)
-        assert config["class_name"] == "DropTagColumns"
+        restored = DropKeyColumns.from_config(config)
+        assert isinstance(restored, DropKeyColumns)
+        assert config["class_name"] == "DropKeyColumns"
 
 
 class TestSelectDataColumnsConfig:
@@ -118,18 +118,18 @@ class TestDropDataColumnsConfig:
         assert isinstance(restored, DropDataColumns)
 
 
-class TestMapTagsConfig:
+class TestMapKeysConfig:
     def test_to_config(self):
-        op = MapTags(name_map={"old": "new"}, drop_unmapped=True)
+        op = MapKeys(name_map={"old": "new"}, drop_unmapped=True)
         config = op.to_config()
         assert config["config"]["name_map"] == {"old": "new"}
         assert config["config"]["drop_unmapped"] is True
 
     def test_round_trip(self):
-        op = MapTags(name_map={"old": "new"})
+        op = MapKeys(name_map={"old": "new"})
         config = op.to_config()
-        restored = MapTags.from_config(config)
-        assert isinstance(restored, MapTags)
+        restored = MapKeys.from_config(config)
+        assert isinstance(restored, MapKeys)
 
 
 class TestMapDataConfig:

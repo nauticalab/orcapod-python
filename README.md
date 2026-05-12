@@ -3,7 +3,7 @@ Orcapod's Python library for developing reproducbile scientific pipelines.
 
 ## Releasing
 
-To cut a release, tag a commit on `main` — `hatch-vcs` derives the version
+To cut a release, key a commit on `main` — `hatch-vcs` derives the version
 automatically and CI publishes to PyPI. See [RELEASING.md](RELEASING.md) for the
 full workflow.
 
@@ -112,24 +112,24 @@ While the following is subject to change based on future development, it represe
       │  ctx_observer = obs.contextualize(node_hash, node_label)
       │  ctx_observer.on_node_start(node_label, node_hash)
       │
-      │  for each non-cached (tag, data):
+      │  for each non-cached (key, data):
       │
-      │  ctx_observer.on_data_start(node_label, tag, data)
+      │  ctx_observer.on_data_start(node_label, key, data)
       │
-      ├─► pkt_logger = ctx_observer.create_data_logger(tag, data, pipeline_path=...)
+      ├─► pkt_logger = ctx_observer.create_data_logger(key, data, pipeline_path=...)
       │       │
       │       └─► _ContextualizedLoggingObserver creates a DataLogger bound to
-      │           (run_id, node_label, node_hash, tag_data, log_path)
+      │           (run_id, node_label, node_hash, key_data, log_path)
       │
-      ├─► FunctionNode._process_data_internal(tag, data, logger=pkt_logger)
+      ├─► FunctionNode._process_data_internal(key, data, logger=pkt_logger)
       │       │
-      │       ├─► CachedFunctionPod.process_data(tag, data, logger=pkt_logger)
+      │       ├─► CachedFunctionPod.process_data(key, data, logger=pkt_logger)
       │       │       │
       │       │       │  checks pod-level cache (ResultCache.lookup)
-      │       │       │  cache hit? → return (tag, cached_data)
+      │       │       │  cache hit? → return (key, cached_data)
       │       │       │  cache miss ↓
       │       │       │
-      │       │       ├─► _FunctionPodBase.process_data(tag, data, logger=pkt_logger)
+      │       │       ├─► _FunctionPodBase.process_data(key, data, logger=pkt_logger)
       │       │       │       │
       │       │       │       ├─► PythonDataFunction.call(data, logger=pkt_logger)
       │       │       │       │       │
@@ -168,27 +168,27 @@ While the following is subject to change based on future development, it represe
       │       │       │       │       │
       │       │       │       │       └─► returns Data | None (or raises)
       │       │       │       │
-      │       │       │       └─► returns (tag, Data | None)
+      │       │       │       └─► returns (key, Data | None)
       │       │       │
       │       │       │  stores result in pod-level cache (on success)
       │       │       │
-      │       │       └─► returns (tag, Data | None)
+      │       │       └─► returns (key, Data | None)
       │       │
       │       │  writes pipeline provenance record (on success)
       │       │  caches result internally
       │       │
-      │       └─► returns (tag, Data | None)
+      │       └─► returns (key, Data | None)
       │
-      │  ← back in FunctionNode.execute() with (tag_out, result)
+      │  ← back in FunctionNode.execute() with (key_out, result)
       │
       │  (logger.record already called inside the executor — nothing to do here)
       │
       ├─► try/except around _process_data_internal:
       │   on success:
-      │       ctx_observer.on_data_end(node_label, tag, data, result, cached=False)
-      │       emit (tag_out, result) downstream
+      │       ctx_observer.on_data_end(node_label, key, data, result, cached=False)
+      │       emit (key_out, result) downstream
       │   on exception:
-      │       ctx_observer.on_data_crash(node_label, tag, data, exc)
+      │       ctx_observer.on_data_crash(node_label, key, data, exc)
       │       if error_policy == "fail_fast": raise
       │       otherwise: skip this data, continue
       │
@@ -204,7 +204,7 @@ While the following is subject to change based on future development, it represe
           Execution output columns (from **kwargs, prefixed with "`__`"):
             __stdout, __stderr, __python_logs, __traceback, __success
             (or any other fields the executor passes — protocol is generic)
-          Tag columns (unprefixed, from tag_data baked in at creation):
+          Key columns (unprefixed, from key_data baked in at creation):
             e.g. "idx" → "0", "key" → "a"
 
 Writes the row to the database at the mirrored log path.
@@ -222,4 +222,4 @@ Writes the row to the database at the mirrored log path.
   identify the node).
   - No auto-executor in the class — DataFunctionBase.__init__ does not assign a default executor. Pipeline.compile() assigns LocalExecutor to function nodes that have none. Users
    can override per-node (pipeline.node.executor = ...) or globally via pipeline.run(execution_engine=...).
-  - Log columns use __ prefix — fixed columns (__log_id, __stdout, __success, etc.) are prefixed to avoid collision with user-defined tag column names.
+  - Log columns use __ prefix — fixed columns (__log_id, __stdout, __success, etc.) are prefixed to avoid collision with user-defined key column names.

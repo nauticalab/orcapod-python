@@ -28,7 +28,7 @@ def function_node_with_db():
             "value": pa.array([1, 2], type=pa.int64()),
         }
     )
-    src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
+    src = ArrowTableSource(table, key_columns=["key"], infer_nullable=True)
     pf = PythonDataFunction(double_value, output_keys="result")
     pod = FunctionPod(pf)
     pipeline_db = InMemoryArrowDatabase()
@@ -50,7 +50,7 @@ def function_node_no_db():
             "value": pa.array([1, 2], type=pa.int64()),
         }
     )
-    src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
+    src = ArrowTableSource(table, key_columns=["key"], infer_nullable=True)
     pf = PythonDataFunction(double_value, output_keys="result")
     pod = FunctionPod(pf)
     return FunctionNode(pod, src)
@@ -60,16 +60,16 @@ class TestFunctionNodeExecuteData:
     def test_returns_correct_result(self, function_node_no_db):
         node = function_node_no_db
         data = list(node._input_stream.iter_data())
-        tag, data = data[0]
-        tag_out, result = node.execute_data(tag, data)
+        key, data = data[0]
+        key_out, result = node.execute_data(key, data)
         assert result is not None
         assert result.as_dict()["result"] == 2
 
     def test_writes_pipeline_record(self, function_node_with_db):
         node, pipeline_db, _ = function_node_with_db
         data = list(node._input_stream.iter_data())
-        tag, data = data[0]
-        node.execute_data(tag, data)
+        key, data = data[0]
+        node.execute_data(key, data)
         records = pipeline_db.get_all_records(node.node_identity_path)
         assert records is not None
         assert records.num_rows == 1
@@ -77,8 +77,8 @@ class TestFunctionNodeExecuteData:
     def test_writes_to_result_db(self, function_node_with_db):
         node, _, _ = function_node_with_db
         data = list(node._input_stream.iter_data())
-        tag, data = data[0]
-        node.execute_data(tag, data)
+        key, data = data[0]
+        node.execute_data(key, data)
         cached = node._cached_function_pod.get_all_cached_outputs()
         assert cached is not None
         assert cached.num_rows == 1
@@ -86,8 +86,8 @@ class TestFunctionNodeExecuteData:
     def test_caches_internally(self, function_node_with_db):
         node, _, _ = function_node_with_db
         data = list(node._input_stream.iter_data())
-        tag, data = data[0]
-        node.execute_data(tag, data)
+        key, data = data[0]
+        node.execute_data(key, data)
         assert len(node._cached_output_datas) == 1
 
 
@@ -130,7 +130,7 @@ def operator_with_db():
             "value": pa.array([10, 20], type=pa.int64()),
         }
     )
-    src = ArrowTableSource(table, tag_columns=["key"])
+    src = ArrowTableSource(table, key_columns=["key"])
     op = SelectDataColumns(columns=["value"])
     db = InMemoryArrowDatabase()
     node = OperatorNode(
@@ -150,7 +150,7 @@ def operator_no_db():
             "value": pa.array([10, 20], type=pa.int64()),
         }
     )
-    src = ArrowTableSource(table, tag_columns=["key"])
+    src = ArrowTableSource(table, key_columns=["key"])
     op = SelectDataColumns(columns=["value"])
     node = OperatorNode(op, input_streams=[src])
     return node, src

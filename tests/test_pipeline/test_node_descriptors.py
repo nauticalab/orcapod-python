@@ -12,11 +12,11 @@ class TestSourceNodeFromDescriptor:
     def _make_source_and_descriptor(self):
         source = DictSource(
             data=[{"a": 1, "b": 2}, {"a": 3, "b": 4}],
-            tag_columns=["a"],
+            key_columns=["a"],
             source_id="test",
         )
         node = SourceNode(stream=source, label="my_source")
-        tag_schema, data_schema = node.output_schema()
+        key_schema, data_schema = node.output_schema()
         descriptor = {
             "node_type": "source",
             "label": "my_source",
@@ -24,7 +24,7 @@ class TestSourceNodeFromDescriptor:
             "pipeline_hash": node.pipeline_hash().to_string(),
             "data_context_key": node.data_context_key,
             "output_schema": {
-                "tag": {k: str(v) for k, v in tag_schema.items()},
+                "key": {k: str(v) for k, v in key_schema.items()},
                 "data": {k: str(v) for k, v in data_schema.items()},
             },
             "stream_type": "dict",
@@ -60,8 +60,8 @@ class TestSourceNodeFromDescriptor:
             stream=None,
             databases={},
         )
-        tag_schema, data_schema = loaded.output_schema()
-        assert set(tag_schema.keys()) == set(descriptor["output_schema"]["tag"].keys())
+        key_schema, data_schema = loaded.output_schema()
+        assert set(key_schema.keys()) == set(descriptor["output_schema"]["key"].keys())
         assert set(data_schema.keys()) == set(
             descriptor["output_schema"]["data"].keys()
         )
@@ -74,8 +74,8 @@ class TestSourceNodeFromDescriptor:
             stream=source,
             databases={},
         )
-        tag_schema, data_schema = loaded.output_schema()
-        assert "a" in tag_schema
+        key_schema, data_schema = loaded.output_schema()
+        assert "a" in key_schema
         assert "b" in data_schema
         # iter_data should work
         data = list(loaded.iter_data())
@@ -128,7 +128,7 @@ class TestFunctionNodeFromDescriptor:
     def _make_function_node_descriptor(self):
         source = DictSource(
             data=[{"a": 1, "b": 2}],
-            tag_columns=["a"],
+            key_columns=["a"],
             source_id="test",
         )
         pf = PythonDataFunction(function=_sample_func, output_keys=["result"])
@@ -140,7 +140,7 @@ class TestFunctionNodeFromDescriptor:
             input_stream=source,
             pipeline_database=scoped_db,
         )
-        tag_schema, data_schema = node.output_schema()
+        key_schema, data_schema = node.output_schema()
         descriptor = {
             "node_type": "function",
             "label": None,
@@ -149,7 +149,7 @@ class TestFunctionNodeFromDescriptor:
             "data_context_key": node.data_context_key,
             "table_scope": node._table_scope,
             "output_schema": {
-                "tag": {k: str(v) for k, v in tag_schema.items()},
+                "key": {k: str(v) for k, v in key_schema.items()},
                 "data": {k: str(v) for k, v in data_schema.items()},
             },
             "function_pod": pod.to_config(),
@@ -162,7 +162,7 @@ class TestFunctionNodeFromDescriptor:
         original, descriptor, db = self._make_function_node_descriptor()
         source = DictSource(
             data=[{"a": 1, "b": 2}],
-            tag_columns=["a"],
+            key_columns=["a"],
             source_id="test",
         )
         pf = PythonDataFunction(function=_sample_func, output_keys=["result"])
@@ -201,7 +201,7 @@ class TestOperatorNodeFromDescriptor:
             "data_context_key": "std:v0.1:default",
             "table_scope": "pipeline_hash",
             "output_schema": {
-                "tag": {"a": "int64"},
+                "key": {"a": "int64"},
                 "data": {"b": "int64", "c": "int64"},
             },
             "operator": {
@@ -224,8 +224,8 @@ class TestOperatorNodeFromDescriptor:
     def test_from_descriptor_full_mode(self):
         db = InMemoryArrowDatabase()
         scoped_db = db.at("test")
-        source1 = DictSource(data=[{"a": 1, "b": 2}], tag_columns=["a"], source_id="s1")
-        source2 = DictSource(data=[{"a": 1, "c": 3}], tag_columns=["a"], source_id="s2")
+        source1 = DictSource(data=[{"a": 1, "b": 2}], key_columns=["a"], source_id="s1")
+        source2 = DictSource(data=[{"a": 1, "c": 3}], key_columns=["a"], source_id="s2")
         op = Join()
         node = OperatorNode(
             operator=op,
@@ -240,7 +240,7 @@ class TestOperatorNodeFromDescriptor:
             "data_context_key": node.data_context_key,
             "table_scope": node._table_scope,
             "output_schema": {
-                "tag": {"a": "int64"},
+                "key": {"a": "int64"},
                 "data": {"b": "int64", "c": "int64"},
             },
             "operator": op.to_config(),

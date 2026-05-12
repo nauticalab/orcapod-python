@@ -12,57 +12,57 @@ from orcapod.core.sources.data_frame_source import DataFrameSource
 
 class TestDictSourceBuilder:
     def test_no_arrow_source_attr(self):
-        src = DictSource(data=[{"id": 1, "x": 10}], tag_columns=["id"])
+        src = DictSource(data=[{"id": 1, "x": 10}], key_columns=["id"])
         assert not hasattr(src, "_arrow_source")
 
     def test_has_stream_attr(self):
-        src = DictSource(data=[{"id": 1, "x": 10}], tag_columns=["id"])
+        src = DictSource(data=[{"id": 1, "x": 10}], key_columns=["id"])
         assert hasattr(src, "_stream")
 
     def test_iter_data(self):
         src = DictSource(
             data=[{"id": 1, "x": 10}, {"id": 2, "x": 20}],
-            tag_columns=["id"],
+            key_columns=["id"],
         )
         assert len(list(src.iter_data())) == 2
 
     def test_output_schema(self):
-        src = DictSource(data=[{"id": 1, "x": 10}], tag_columns=["id"])
-        tag_schema, data_schema = src.output_schema()
-        assert "id" in tag_schema
+        src = DictSource(data=[{"id": 1, "x": 10}], key_columns=["id"])
+        key_schema, data_schema = src.output_schema()
+        assert "id" in key_schema
         assert "x" in data_schema
 
     def test_to_config(self):
-        src = DictSource(data=[{"id": 1, "x": 10}], tag_columns=["id"])
+        src = DictSource(data=[{"id": 1, "x": 10}], key_columns=["id"])
         config = src.to_config()
         assert config["source_type"] == "dict"
-        assert config["tag_columns"] == ["id"]
+        assert config["key_columns"] == ["id"]
 
     def test_identity_uses_class_name(self):
-        src = DictSource(data=[{"id": 1, "x": 10}], tag_columns=["id"])
+        src = DictSource(data=[{"id": 1, "x": 10}], key_columns=["id"])
         identity = src.identity_structure()
         assert identity[0] == "DictSource"
 
     def test_source_id_defaults(self):
-        src = DictSource(data=[{"id": 1, "x": 10}], tag_columns=["id"])
+        src = DictSource(data=[{"id": 1, "x": 10}], key_columns=["id"])
         assert src.source_id is not None
 
 
 class TestDataFrameSourceBuilder:
     def test_no_arrow_source_attr(self):
-        src = DataFrameSource(data={"id": [1, 2], "x": [10, 20]}, tag_columns=["id"])
+        src = DataFrameSource(data={"id": [1, 2], "x": [10, 20]}, key_columns=["id"])
         assert not hasattr(src, "_arrow_source")
 
     def test_has_stream_attr(self):
-        src = DataFrameSource(data={"id": [1, 2], "x": [10, 20]}, tag_columns=["id"])
+        src = DataFrameSource(data={"id": [1, 2], "x": [10, 20]}, key_columns=["id"])
         assert hasattr(src, "_stream")
 
     def test_iter_data(self):
-        src = DataFrameSource(data={"id": [1, 2], "x": [10, 20]}, tag_columns=["id"])
+        src = DataFrameSource(data={"id": [1, 2], "x": [10, 20]}, key_columns=["id"])
         assert len(list(src.iter_data())) == 2
 
     def test_identity_uses_class_name(self):
-        src = DataFrameSource(data={"id": [1], "x": [10]}, tag_columns=["id"])
+        src = DataFrameSource(data={"id": [1], "x": [10]}, key_columns=["id"])
         identity = src.identity_structure()
         assert identity[0] == "DataFrameSource"
 
@@ -75,26 +75,26 @@ class TestCSVSourceBuilder:
     def test_no_arrow_source_attr(self, tmp_path):
         csv_file = tmp_path / "test.csv"
         csv_file.write_text("id,x\n1,10\n2,20\n")
-        src = CSVSource(file_path=str(csv_file), tag_columns=["id"])
+        src = CSVSource(file_path=str(csv_file), key_columns=["id"])
         assert not hasattr(src, "_arrow_source")
 
     def test_has_stream_attr(self, tmp_path):
         csv_file = tmp_path / "test.csv"
         csv_file.write_text("id,x\n1,10\n2,20\n")
-        src = CSVSource(file_path=str(csv_file), tag_columns=["id"])
+        src = CSVSource(file_path=str(csv_file), key_columns=["id"])
         assert hasattr(src, "_stream")
 
     def test_iter_data(self, tmp_path):
         csv_file = tmp_path / "test.csv"
         csv_file.write_text("id,x\n1,10\n2,20\n")
-        src = CSVSource(file_path=str(csv_file), tag_columns=["id"])
+        src = CSVSource(file_path=str(csv_file), key_columns=["id"])
         assert len(list(src.iter_data())) == 2
 
     def test_round_trip_config(self, tmp_path):
         csv_file = tmp_path / "test.csv"
         csv_file.write_text("id,x\n1,10\n2,20\n")
         src = CSVSource(
-            file_path=str(csv_file), tag_columns=["id"], record_id_column="id"
+            file_path=str(csv_file), key_columns=["id"], record_id_column="id"
         )
         config = src.to_config()
         assert config["source_type"] == "csv"
@@ -105,7 +105,7 @@ class TestCSVSourceBuilder:
     def test_identity_uses_class_name(self, tmp_path):
         csv_file = tmp_path / "test.csv"
         csv_file.write_text("id,x\n1,10\n")
-        src = CSVSource(file_path=str(csv_file), tag_columns=["id"])
+        src = CSVSource(file_path=str(csv_file), key_columns=["id"])
         assert src.identity_structure()[0] == "CSVSource"
 
 
@@ -120,22 +120,22 @@ class TestDeltaTableSourceBuilder:
         return path
 
     def test_no_arrow_source_attr(self, delta_path):
-        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
+        src = DeltaTableSource(delta_table_path=delta_path, key_columns=["id"])
         assert not hasattr(src, "_arrow_source")
 
     def test_has_stream_attr(self, delta_path):
-        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
+        src = DeltaTableSource(delta_table_path=delta_path, key_columns=["id"])
         assert hasattr(src, "_stream")
 
     def test_round_trip_config(self, delta_path):
-        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
+        src = DeltaTableSource(delta_table_path=delta_path, key_columns=["id"])
         config = src.to_config()
         assert config["source_type"] == "delta_table"
         src2 = DeltaTableSource.from_config(config)
         assert src2.source_id == src.source_id
 
     def test_identity_uses_class_name(self, delta_path):
-        src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
+        src = DeltaTableSource(delta_table_path=delta_path, key_columns=["id"])
         assert src.identity_structure()[0] == "DeltaTableSource"
 
 
@@ -161,14 +161,14 @@ class TestListSourceBuilder:
         assert identity[0] == "ListSource"
         assert identity[1] == "val"
         assert identity[2] == (1, 2, 3)
-        assert len(identity) == 4  # includes tag_function_hash
+        assert len(identity) == 4  # includes key_function_hash
 
-    def test_with_tag_function(self):
+    def test_with_key_function(self):
         src = ListSource(
             name="val",
             data=[10, 20],
-            tag_function=lambda e, i: {"idx": i, "label": f"item_{i}"},
-            expected_tag_keys=["idx", "label"],
+            key_function=lambda e, i: {"idx": i, "label": f"item_{i}"},
+            expected_key_keys=["idx", "label"],
         )
         results = list(src.iter_data())
         assert len(results) == 2
@@ -180,20 +180,20 @@ class TestListSourceBuilder:
 
 class TestSourceLabelDefaults:
     def test_dict_source_label_defaults_to_class_name(self):
-        src = DictSource(data=[{"id": 1, "x": 10}], tag_columns=["id"])
+        src = DictSource(data=[{"id": 1, "x": 10}], key_columns=["id"])
         assert src.label == "DictSource"
 
     def test_dict_source_explicit_label_preserved(self):
         src = DictSource(
             data=[{"id": 1, "x": 10}],
-            tag_columns=["id"],
+            key_columns=["id"],
             label="my_source",
         )
         assert src.label == "my_source"
 
     def test_arrow_table_source_label_defaults_to_class_name(self):
         table = pa.table({"id": pa.array([1, 2]), "x": pa.array([10, 20])})
-        src = ArrowTableSource(table=table, tag_columns=["id"], infer_nullable=True)
+        src = ArrowTableSource(table=table, key_columns=["id"], infer_nullable=True)
         assert src.label == "ArrowTableSource"
 
     def test_list_source_label_defaults_to_class_name(self):
@@ -203,5 +203,5 @@ class TestSourceLabelDefaults:
     def test_csv_source_label_defaults_to_class_name(self, tmp_path):
         csv_file = tmp_path / "test.csv"
         csv_file.write_text("id,x\n1,10\n")
-        src = CSVSource(file_path=str(csv_file), tag_columns=["id"])
+        src = CSVSource(file_path=str(csv_file), key_columns=["id"])
         assert src.label == "CSVSource"

@@ -5,7 +5,7 @@ from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import BinaryOperator
 from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
-from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, TagProtocol
+from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, KeyProtocol
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils import schema_utils
 from orcapod.utils.lazy_module import LazyModule
@@ -37,15 +37,15 @@ class SemiJoin(BinaryOperator):
         Performs a semi-join between left and right streams.
         Returns entries from left stream that have matching entries in right stream.
         """
-        left_tag_schema, left_data_schema = left_stream.output_schema()
-        right_tag_schema, right_data_schema = right_stream.output_schema()
+        left_key_schema, left_data_schema = left_stream.output_schema()
+        right_key_schema, right_data_schema = right_stream.output_schema()
 
-        # Find overlapping columns across all columns (tags + data)
+        # Find overlapping columns across all columns (keys + data)
         left_all_schema = schema_utils.union_schemas(
-            left_tag_schema, left_data_schema
+            left_key_schema, left_data_schema
         )
         right_all_schema = schema_utils.union_schemas(
-            right_tag_schema, right_data_schema
+            right_key_schema, right_data_schema
         )
 
         common_keys = tuple(
@@ -56,8 +56,8 @@ class SemiJoin(BinaryOperator):
         if not common_keys:
             return left_stream
 
-        # include source info and system tags for left stream
-        left_table = left_stream.as_table(columns={"source": True, "system_tags": True})
+        # include source info and system keys for left stream
+        left_table = left_stream.as_table(columns={"source": True, "system_keys": True})
 
         # Get the right table for matching
         right_table = right_stream.as_table()
@@ -73,7 +73,7 @@ class SemiJoin(BinaryOperator):
 
         return ArrowTableStream(
             semi_joined_table,
-            tag_columns=tuple(left_tag_schema.keys()),
+            key_columns=tuple(left_key_schema.keys()),
         )
 
     def binary_output_schema(
@@ -102,15 +102,15 @@ class SemiJoin(BinaryOperator):
         to determine the correct empty-right behavior without data.
         """
         try:
-            left_tag_schema, left_data_schema = left_stream.output_schema()
-            right_tag_schema, right_data_schema = right_stream.output_schema()
+            left_key_schema, left_data_schema = left_stream.output_schema()
+            right_key_schema, right_data_schema = right_stream.output_schema()
 
             # Check that overlapping columns have compatible types across all columns
             left_all_schema = schema_utils.union_schemas(
-                left_tag_schema, left_data_schema
+                left_key_schema, left_data_schema
             )
             right_all_schema = schema_utils.union_schemas(
-                right_tag_schema, right_data_schema
+                right_key_schema, right_data_schema
             )
 
             # intersection_schemas will raise an error if types are incompatible
@@ -137,8 +137,8 @@ class SemiJoin(BinaryOperator):
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[KeyProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[KeyProtocol, DataProtocol]],
         **kwargs: Any,
     ) -> None:
         """Build-probe: collect right input, then stream left through a hash lookup.
@@ -167,30 +167,30 @@ class SemiJoin(BinaryOperator):
                     await left_ch.collect()
                     return
                 # No common keys — pass all left rows through unchanged
-                async for tag, data in left_ch:
-                    await output.send((tag, data))
+                async for key, data in left_ch:
+                    await output.send((key, data))
                 return
 
             # Determine right-side keys from first row
-            right_tag_keys = set(right_rows[0][0].keys())
+            right_key_keys = set(right_rows[0][0].keys())
             right_pkt_keys = set(right_rows[0][1].keys())
-            right_all_keys = right_tag_keys | right_pkt_keys
+            right_all_keys = right_key_keys | right_pkt_keys
 
             # Phase 2: Probe — stream left rows
             common_keys: tuple[str, ...] | None = None
             right_lookup: set[tuple] | None = None
 
-            async for tag, data in left_ch:
+            async for key, data in left_ch:
                 if common_keys is None:
                     # First left row — determine common keys and build index
-                    left_tag_keys = set(tag.keys())
+                    left_key_keys = set(key.keys())
                     left_pkt_keys = set(data.keys())
-                    left_all_keys = left_tag_keys | left_pkt_keys
+                    left_all_keys = left_key_keys | left_pkt_keys
                     common_keys = tuple(sorted(left_all_keys & right_all_keys))
 
                     if not common_keys:
                         # No common keys — pass all left rows through
-                        await output.send((tag, data))
+                        await output.send((key, data))
                         async for t, p in left_ch:
                             await output.send((t, p))
                         return
@@ -203,10 +203,10 @@ class SemiJoin(BinaryOperator):
                         right_lookup.add(tuple(rd[k] for k in common_keys))
 
                 # Probe
-                ld = tag.as_dict()
+                ld = key.as_dict()
                 ld.update(data.as_dict())
                 if tuple(ld[k] for k in common_keys) in right_lookup:  # type: ignore[arg-type]
-                    await output.send((tag, data))
+                    await output.send((key, data))
         finally:
             await output.close()
 

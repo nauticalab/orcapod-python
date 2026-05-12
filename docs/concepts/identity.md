@@ -42,8 +42,8 @@ benefits from results already cached for previous data with the same schema.
 Consider two sources with the same schema but different data:
 
 ```
-source_a = DictSource(data=[{"x": 1, "y": 2}], tag_columns=["x"])
-source_b = DictSource(data=[{"x": 10, "y": 20}], tag_columns=["x"])
+source_a = DictSource(data=[{"x": 1, "y": 2}], key_columns=["x"])
+source_b = DictSource(data=[{"x": 10, "y": 20}], key_columns=["x"])
 ```
 
 - `source_a.content_hash() != source_b.content_hash()` -- different source identity
@@ -59,7 +59,7 @@ identity plus the pipeline hashes of all its upstream elements.
 
 ### Base case: sources
 
-A `RootSource`'s pipeline identity is simply its `(tag_schema, data_schema)`. Sources with
+A `RootSource`'s pipeline identity is simply its `(key_schema, data_schema)`. Sources with
 the same column names and types have the same pipeline hash, regardless of their data.
 
 ### Recursive case: downstream elements

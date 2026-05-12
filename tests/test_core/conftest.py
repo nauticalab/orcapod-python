@@ -28,7 +28,7 @@ def to_upper(name: str) -> str:
 
 
 def make_int_stream(n: int = 3) -> ArrowTableStream:
-    """ArrowTableStream with tag=id (int), data=x (int).
+    """ArrowTableStream with key=id (int), data=x (int).
 
     Uses explicit nullable=False schema to simulate data that has been
     processed through SourceStreamBuilder (which normalizes nullable flags).
@@ -46,11 +46,11 @@ def make_int_stream(n: int = 3) -> ArrowTableStream:
         },
         schema=schema,
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 def make_two_col_stream(n: int = 3) -> ArrowTableStream:
-    """ArrowTableStream with tag=id, data={x, y} for add_pf.
+    """ArrowTableStream with key=id, data={x, y} for add_pf.
 
     Uses explicit nullable=False schema to simulate data that has been
     processed through SourceStreamBuilder (which normalizes nullable flags).
@@ -70,7 +70,7 @@ def make_two_col_stream(n: int = 3) -> ArrowTableStream:
         },
         schema=schema,
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 # ---------------------------------------------------------------------------

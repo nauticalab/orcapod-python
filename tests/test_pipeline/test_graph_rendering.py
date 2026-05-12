@@ -32,14 +32,14 @@ from orcapod.pipeline.graph import (
 # ---------------------------------------------------------------------------
 
 
-def _make_source(tag_col: str, data_col: str, data: dict) -> ArrowTableSource:
+def _make_source(key_col: str, data_col: str, data: dict) -> ArrowTableSource:
     table = pa.table(
         {
-            tag_col: pa.array(data[tag_col], type=pa.large_string()),
+            key_col: pa.array(data[key_col], type=pa.large_string()),
             data_col: pa.array(data[data_col], type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
+    return ArrowTableSource(table, key_columns=[key_col], infer_nullable=True)
 
 
 def _make_two_sources() -> tuple[ArrowTableSource, ArrowTableSource]:

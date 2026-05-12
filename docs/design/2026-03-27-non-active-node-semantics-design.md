@@ -67,7 +67,7 @@ All of these will become passive after the fix — empty before `run()`, correct
 
 **`_make_empty_table() -> "pa.Table"`**
 
-Builds a zero-row PyArrow table whose columns match the node's full output schema (tags + data). Uses `self.output_schema()` and `self.data_context.type_converter`. This is a pure, side-effect-free method.
+Builds a zero-row PyArrow table whose columns match the node's full output schema (keys + data). Uses `self.output_schema()` and `self.data_context.type_converter`. This is a pure, side-effect-free method.
 
 - The return type annotation must use a string literal (`"pa.Table"`) because `pa` is imported via `LazyModule` at runtime; the real type is only available under `TYPE_CHECKING`.
 - `output_schema()` is safe on live and read-only deserialized nodes (uses `_stored_schema` when `_operator is None`).
@@ -85,7 +85,7 @@ Guards (return `None` immediately if any apply):
 If all guards pass, call `self.pipeline_path` directly (no try/except). This is safe: by the time we reach this point, `_pipeline_database is not None`, and `pipeline_path` only raises `RuntimeError` when `_pipeline_database is None`. For live nodes `_pipeline_node_hash` is always set in `__init__`; for read-only deserialized nodes `_operator is None` causes `pipeline_path` to return `_stored_pipeline_path`.
 
 Then call `self._pipeline_database.get_all_records(self.pipeline_path)`:
-- If records are non-None (zero or more rows): wrap in `ArrowTableStream(records, tag_columns=self.keys()[0])` and return it.
+- If records are non-None (zero or more rows): wrap in `ArrowTableStream(records, key_columns=self.keys()[0])` and return it.
   Note: the DB stores records with a `_record_hash` column added by `_store_output_stream`. `get_all_records` does not strip this column. `_load_cached_stream_from_db` inherits this behavior — it returns an `ArrowTableStream` that includes `_record_hash`. This matches the existing behavior of `_replay_from_cache`, which also does not strip `_record_hash`.
 - If records are `None` (no prior LOG run has written to this path): build an empty table via `_make_empty_table()`, wrap in `ArrowTableStream`, and return it.
 
@@ -126,7 +126,7 @@ In `src/orcapod/core/streams/base.py`, update the `flow()` docstring:
 
 **Before:** "This will trigger any upstream computation of the stream."
 
-**After:** "Returns the entire collection of (TagProtocol, DataProtocol) as a list. This is a read-only operation — results reflect whatever has been computed by a prior `run()` or `execute()` call. If no computation has been performed, returns an empty list."
+**After:** "Returns the entire collection of (KeyProtocol, DataProtocol) as a list. This is a read-only operation — results reflect whatever has been computed by a prior `run()` or `execute()` call. If no computation has been performed, returns an empty list."
 
 No other changes to `base.py`.
 
@@ -167,7 +167,7 @@ node.run()
        └─ populates self._cached_output_stream
 
 # Read path (this fix): never triggers upstream computation
-for tag, data in operator_node:     # __iter__ → iter_data()
+for key, data in operator_node:     # __iter__ → iter_data()
 node.flow()                           # flow() → iter_data()
 node.iter_data()
 node.as_table()

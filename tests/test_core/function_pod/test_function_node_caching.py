@@ -2,10 +2,10 @@
 
 Covers:
 - compute_pipeline_entry_id behavior
-- Pipeline entry_id based Phase 2 skip (tag + system_tags + data_hash)
+- Pipeline entry_id based Phase 2 skip (key + system_keys + data_hash)
 - CachedFunctionPod result cache hit with novel pipeline entry_id
-- Same data data, different tags → 1 result record, N pipeline records
-- System tag awareness in pipeline entry_id computation
+- Same data data, different keys → 1 result record, N pipeline records
+- System key awareness in pipeline entry_id computation
 - Phase 1 yields existing records, Phase 2 processes only novel entry_ids
 """
 
@@ -15,7 +15,7 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.cached_function_pod import CachedFunctionPod
-from orcapod.core.datagrams import Data, Tag
+from orcapod.core.datagrams import Data, Key
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
 from orcapod.core.data_function import PythonDataFunction
@@ -40,29 +40,29 @@ def _make_pod():
 
 
 def _make_stream(
-    rows: list[dict], tag_columns: list[str] | None = None
+    rows: list[dict], key_columns: list[str] | None = None
 ) -> ArrowTableStream:
-    if tag_columns is None:
-        tag_columns = ["id"]
+    if key_columns is None:
+        key_columns = ["id"]
     keys = list(rows[0].keys())
     schema = pa.schema([pa.field(k, pa.int64(), nullable=False) for k in keys])
     table = pa.table(
         {k: pa.array([r[k] for r in rows], type=pa.int64()) for k in keys},
         schema=schema,
     )
-    return ArrowTableStream(table, tag_columns=tag_columns)
+    return ArrowTableStream(table, key_columns=key_columns)
 
 
 def _make_source_stream(
-    rows: list[dict], tag_columns: list[str] | None = None, source_id: str = "src_a"
+    rows: list[dict], key_columns: list[str] | None = None, source_id: str = "src_a"
 ) -> ArrowTableStream:
-    """Create a stream from an ArrowTableSource so it has system tag columns."""
-    if tag_columns is None:
-        tag_columns = ["id"]
+    """Create a stream from an ArrowTableSource so it has system key columns."""
+    if key_columns is None:
+        key_columns = ["id"]
     table = pa.table(
         {k: pa.array([r[k] for r in rows], type=pa.int64()) for k in rows[0]}
     )
-    source = ArrowTableSource(table, tag_columns=tag_columns, source_id=source_id, infer_nullable=True)
+    source = ArrowTableSource(table, key_columns=key_columns, source_id=source_id, infer_nullable=True)
     return source
 
 
@@ -87,63 +87,63 @@ class TestComputePipelineEntryId:
     def test_returns_non_empty_string(self):
         stream = _make_stream([{"id": 0, "x": 10}])
         node, _ = _make_node(stream)
-        tag = Tag({"id": 0})
+        key = Key({"id": 0})
         data = Data({"x": 10})
-        entry_id = node.compute_pipeline_entry_id(tag, data)
+        entry_id = node.compute_pipeline_entry_id(key, data)
         assert isinstance(entry_id, str)
         assert len(entry_id) > 0
 
     def test_same_inputs_produce_same_id(self):
         stream = _make_stream([{"id": 0, "x": 10}])
         node, _ = _make_node(stream)
-        tag = Tag({"id": 0})
+        key = Key({"id": 0})
         data = Data({"x": 10})
-        id1 = node.compute_pipeline_entry_id(tag, data)
-        id2 = node.compute_pipeline_entry_id(tag, data)
+        id1 = node.compute_pipeline_entry_id(key, data)
+        id2 = node.compute_pipeline_entry_id(key, data)
         assert id1 == id2
 
-    def test_different_tags_produce_different_ids(self):
+    def test_different_keys_produce_different_ids(self):
         stream = _make_stream([{"id": 0, "x": 10}])
         node, _ = _make_node(stream)
         data = Data({"x": 10})
-        id_tag0 = node.compute_pipeline_entry_id(Tag({"id": 0}), data)
-        id_tag1 = node.compute_pipeline_entry_id(Tag({"id": 1}), data)
-        assert id_tag0 != id_tag1
+        id_key0 = node.compute_pipeline_entry_id(Key({"id": 0}), data)
+        id_key1 = node.compute_pipeline_entry_id(Key({"id": 1}), data)
+        assert id_key0 != id_key1
 
     def test_different_data_produce_different_ids(self):
         stream = _make_stream([{"id": 0, "x": 10}])
         node, _ = _make_node(stream)
-        tag = Tag({"id": 0})
-        id_x10 = node.compute_pipeline_entry_id(tag, Data({"x": 10}))
-        id_x99 = node.compute_pipeline_entry_id(tag, Data({"x": 99}))
+        key = Key({"id": 0})
+        id_x10 = node.compute_pipeline_entry_id(key, Data({"x": 10}))
+        id_x99 = node.compute_pipeline_entry_id(key, Data({"x": 99}))
         assert id_x10 != id_x99
 
 
 # ---------------------------------------------------------------------------
-# System tag awareness in entry_id
+# System key awareness in entry_id
 # ---------------------------------------------------------------------------
 
 
-class TestSystemTagAwareness:
-    def test_same_tag_values_different_system_tags_produce_different_ids(self):
-        """Two tags with identical user values but different system tags
+class TestSystemKeyAwareness:
+    def test_same_key_values_different_system_keys_produce_different_ids(self):
+        """Two keys with identical user values but different system keys
         must produce different pipeline entry_ids."""
         stream = _make_stream([{"id": 0, "x": 10}])
         node, _ = _make_node(stream)
         data = Data({"x": 10})
 
-        # Tags with same user value but different system tag columns
-        tag_a = Tag(
+        # Keys with same user value but different system key columns
+        key_a = Key(
             {"id": 0},
-            system_tags={f"{constants.SYSTEM_TAG_PREFIX}source:abc": "row0"},
+            system_keys={f"{constants.SYSTEM_KEY_PREFIX}source:abc": "row0"},
         )
-        tag_b = Tag(
+        key_b = Key(
             {"id": 0},
-            system_tags={f"{constants.SYSTEM_TAG_PREFIX}source:xyz": "row0"},
+            system_keys={f"{constants.SYSTEM_KEY_PREFIX}source:xyz": "row0"},
         )
 
-        id_a = node.compute_pipeline_entry_id(tag_a, data)
-        id_b = node.compute_pipeline_entry_id(tag_b, data)
+        id_a = node.compute_pipeline_entry_id(key_a, data)
+        id_b = node.compute_pipeline_entry_id(key_b, data)
         assert id_a != id_b
 
 
@@ -153,10 +153,10 @@ class TestSystemTagAwareness:
 
 
 class TestResultVsPipelineRecordCounts:
-    def test_same_data_different_tags_one_result_two_pipeline_records(self):
-        """Same data data with different tags should produce:
+    def test_same_data_different_keys_one_result_two_pipeline_records(self):
+        """Same data data with different keys should produce:
         - 1 result record (CachedFunctionPod caches by data hash only)
-        - 2 pipeline records (different tag → different entry_id)
+        - 2 pipeline records (different key → different entry_id)
         """
         rows = [{"id": 0, "x": 10}, {"id": 1, "x": 10}]
         stream = _make_stream(rows)
@@ -170,13 +170,13 @@ class TestResultVsPipelineRecordCounts:
         assert result_records is not None
         assert result_records.num_rows == 1
 
-        # Pipeline DB: 2 records (different tags → different entry_ids)
+        # Pipeline DB: 2 records (different keys → different entry_ids)
         pipeline_records = db.get_all_records(node.node_identity_path)
         assert pipeline_records is not None
         assert pipeline_records.num_rows == 2
 
-    def test_different_data_same_tag_two_result_two_pipeline_records(self):
-        """Different data data with same tag should produce:
+    def test_different_data_same_key_two_result_two_pipeline_records(self):
+        """Different data data with same key should produce:
         - 2 result records (different data hashes)
         - 2 pipeline records (different data hash → different entry_id)
         """
@@ -196,7 +196,7 @@ class TestResultVsPipelineRecordCounts:
         assert pipeline_records.num_rows == 2
 
     def test_identical_rows_one_result_one_pipeline_record(self):
-        """Identical (tag, data) → 1 result record, 1 pipeline record."""
+        """Identical (key, data) → 1 result record, 1 pipeline record."""
         # A single row — process once
         stream = _make_stream([{"id": 0, "x": 10}])
         node, db = _make_node(stream)
@@ -258,13 +258,13 @@ class TestPhase1Phase2PipelineEntryId:
         result_values = sorted(p.as_dict()["result"] for _, p in results)
         assert result_values == [20, 40, 60]
 
-    def test_same_data_new_tag_triggers_phase2(self):
+    def test_same_data_new_key_triggers_phase2(self):
         """With pipeline_hash scope (default), nodes with same schema share one DB table.
         node2 (id=1, x=10) has a different content_hash than node1 (id=0, x=10),
         so Phase 1 finds no records for node2 and Phase 2 executes the data."""
         db = InMemoryArrowDatabase()
 
-        # First run: tag=0, x=10
+        # First run: key=0, x=10
         stream1 = _make_stream([{"id": 0, "x": 10}])
         node1, _ = _make_node(stream1, db=db)
         node1.run()
@@ -272,7 +272,7 @@ class TestPhase1Phase2PipelineEntryId:
         pipeline_count_after_first = db.get_all_records(node1.node_identity_path).num_rows
         assert pipeline_count_after_first == 1
 
-        # Second run: tag=1, x=10 (same data, different tag)
+        # Second run: key=1, x=10 (same data, different key)
         stream2 = _make_stream([{"id": 1, "x": 10}])
         node2, _ = _make_node(stream2, db=db)
 
@@ -327,28 +327,28 @@ class TestPhase1Phase2PipelineEntryId:
 
 
 class TestResultCacheHitPipelineNovel:
-    def test_cached_result_reused_for_new_tag(self):
+    def test_cached_result_reused_for_new_key(self):
         """When CachedFunctionPod has a cache hit (same data hash) but
-        the pipeline entry_id is novel (different tag), the cached result
+        the pipeline entry_id is novel (different key), the cached result
         should be reused and a new pipeline record created."""
         db = InMemoryArrowDatabase()
 
-        # Process tag=0, x=10
+        # Process key=0, x=10
         stream1 = _make_stream([{"id": 0, "x": 10}])
         node1, _ = _make_node(stream1, db=db)
         node1.run()
 
-        # Process tag=1, x=10 — same data, different tag
+        # Process key=1, x=10 — same data, different key
         stream2 = _make_stream([{"id": 1, "x": 10}])
         node2, _ = _make_node(stream2, db=db)
         results = list(node2.iter_data())
 
-        # Both tags should produce the same result value
+        # Both keys should produce the same result value
         result_values = [p.as_dict()["result"] for _, p in results]
         assert all(v == 20 for v in result_values)
 
     def test_pipeline_records_reference_same_result_uuid(self):
-        """Two pipeline records for the same data (different tags)
+        """Two pipeline records for the same data (different keys)
         should reference the same output data UUID in the result DB."""
         db = InMemoryArrowDatabase()
 

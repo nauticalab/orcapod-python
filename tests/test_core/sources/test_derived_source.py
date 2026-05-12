@@ -112,9 +112,9 @@ class TestDerivedSourceBeforeRun:
     def test_empty_table_schema_matches_origin(self):
         node = _make_node(n=3)
         src = node.as_source()
-        tag_schema, data_schema = src.output_schema()
+        key_schema, data_schema = src.output_schema()
         _ = src.as_table()
-        assert "id" in tag_schema
+        assert "id" in key_schema
         assert "result" in data_schema
 
 
@@ -137,7 +137,7 @@ class TestDerivedSourceAfterRun:
         results = sorted(p["result"] for _, p in src.iter_data())
         assert results == [0, 2, 4, 6]
 
-    def test_iter_data_yields_correct_tags(self, src):
+    def test_iter_data_yields_correct_keys(self, src):
         ids = sorted(t["id"] for t, _ in src.iter_data())
         assert ids == [0, 1, 2, 3]
 
@@ -147,7 +147,7 @@ class TestDerivedSourceAfterRun:
     def test_as_table_correct_row_count(self, src):
         assert src.as_table().num_rows == 4
 
-    def test_as_table_has_tag_column(self, src):
+    def test_as_table_has_key_column(self, src):
         assert "id" in src.as_table().column_names
 
     def test_as_table_has_data_column(self, src):
@@ -183,13 +183,13 @@ class TestDerivedSourceRoundTrip:
 
         assert node_results == src_results
 
-    def test_derived_source_tag_schema_matches_node(self):
+    def test_derived_source_key_schema_matches_node(self):
         node = _make_node(n=3)
         node.run()
         src = node.as_source()
-        node_tag_schema, _ = node.output_schema()
-        src_tag_schema, _ = src.output_schema()
-        assert node_tag_schema == src_tag_schema
+        node_key_schema, _ = node.output_schema()
+        src_key_schema, _ = src.output_schema()
+        assert node_key_schema == src_key_schema
 
     def test_derived_source_data_schema_matches_node(self):
         node = _make_node(n=3)
@@ -223,7 +223,7 @@ class TestDerivedSourceRoundTrip:
             ),
         )
 
-        result_stream = ArrowTableStream(result_table, tag_columns=["id"])
+        result_stream = ArrowTableStream(result_table, key_columns=["id"])
 
         double_result = PythonDataFunction(double, output_keys="result")
         node2 = FunctionNode(
@@ -248,16 +248,16 @@ class TestDerivedSourceSchema:
         node = _make_node(n=3)
         node.run()
         src = node.as_source()
-        tag_schema, data_schema = src.output_schema()
-        assert isinstance(tag_schema, Mapping)
+        key_schema, data_schema = src.output_schema()
+        assert isinstance(key_schema, Mapping)
         assert isinstance(data_schema, Mapping)
 
-    def test_output_schema_tag_has_id(self):
+    def test_output_schema_key_has_id(self):
         node = _make_node(n=3)
         node.run()
         src = node.as_source()
-        tag_schema, _ = src.output_schema()
-        assert "id" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "id" in key_schema
 
     def test_output_schema_data_has_result(self):
         node = _make_node(n=3)
@@ -266,12 +266,12 @@ class TestDerivedSourceSchema:
         _, data_schema = src.output_schema()
         assert "result" in data_schema
 
-    def test_keys_tag_has_id(self):
+    def test_keys_key_has_id(self):
         node = _make_node(n=3)
         node.run()
         src = node.as_source()
-        tag_keys, _ = src.keys()
-        assert "id" in tag_keys
+        key_keys, _ = src.keys()
+        assert "id" in key_keys
 
     def test_keys_data_has_result(self):
         node = _make_node(n=3)
@@ -284,9 +284,9 @@ class TestDerivedSourceSchema:
         node = _make_node(n=3)
         node.run()
         src = node.as_source()
-        tag_keys, data_keys = src.keys()
-        tag_schema, data_schema = src.output_schema()
-        assert set(tag_keys) == set(tag_schema.keys())
+        key_keys, data_keys = src.keys()
+        key_schema, data_schema = src.output_schema()
+        assert set(key_keys) == set(key_schema.keys())
         assert set(data_keys) == set(data_schema.keys())
 
 
@@ -332,7 +332,7 @@ class TestDerivedSourceIdentity:
 
     def test_pipeline_hash_is_schema_only(self):
         """
-        DerivedSource inherits RootSource.pipeline_identity_structure() = (tag_schema, data_schema).
+        DerivedSource inherits RootSource.pipeline_identity_structure() = (key_schema, data_schema).
         Two DerivedSources with identical schemas share the same pipeline_hash even if
         the underlying FunctionNode processed different data.
         """

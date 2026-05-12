@@ -3,7 +3,7 @@
 Function pods are data-level transforms -- they take each data in a
 [stream](streams.md), apply a Python function to its values, and produce a new data with the
 function's outputs. Unlike [operators](operators.md), function pods never inspect or modify
-tags. They are the primary mechanism for adding computation to an Orcapod pipeline: data
+keys. They are the primary mechanism for adding computation to an Orcapod pipeline: data
 cleaning, feature extraction, model inference, or any transformation that produces new values
 from existing ones.
 
@@ -58,27 +58,27 @@ source = DictSource(
         {"subject_id": "mouse_01", "weight": 25.3, "height": 0.12},
         {"subject_id": "mouse_02", "weight": 22.1, "height": 0.10},
     ],
-    tag_columns=["subject_id"],
+    key_columns=["subject_id"],
 )
 
 # Apply the function pod to the source stream
 result = compute_bmi.pod(source)  # shorthand for compute_bmi.pod.process(source)
 
-# Inspect the output schema -- tags pass through, data are replaced
-tag_schema, data_schema = result.output_schema()
-print("Tag schema:", dict(tag_schema))
-# Tag schema: {'subject_id': <class 'str'>}
+# Inspect the output schema -- keys pass through, data are replaced
+key_schema, data_schema = result.output_schema()
+print("Key schema:", dict(key_schema))
+# Key schema: {'subject_id': <class 'str'>}
 print("Data schema:", dict(data_schema))
 # Data schema: {'bmi': <class 'float'>}
 
 # Iterate over results
-for tag, data in result.iter_data():
-    print(f"  {tag.as_dict()} -> {data.as_dict()}")
+for key, data in result.iter_data():
+    print(f"  {key.as_dict()} -> {data.as_dict()}")
 # {'subject_id': 'mouse_01'} -> {'bmi': 1756.9444444444446}
 # {'subject_id': 'mouse_02'} -> {'bmi': 2209.9999999999995}
 ```
 
-The function pod preserves tags and replaces data columns with the function's output. If the
+The function pod preserves keys and replaces data columns with the function's output. If the
 input stream has multiple data columns but the function only needs some of them, Orcapod
 extracts the matching columns by name.
 
@@ -107,7 +107,7 @@ source = DictSource(
         {"subject_id": "mouse_01", "weight": 25.3, "height": 0.12},
         {"subject_id": "mouse_02", "weight": 22.1, "height": 0.10},
     ],
-    tag_columns=["subject_id"],
+    key_columns=["subject_id"],
 )
 
 db = InMemoryArrowDatabase()
@@ -122,8 +122,8 @@ node = FunctionNode(
 node.run()
 
 # Iterate over cached results
-for tag, data in node.iter_data():
-    print(f"  {tag.as_dict()} -> {data.as_dict()}")
+for key, data in node.iter_data():
+    print(f"  {key.as_dict()} -> {data.as_dict()}")
 ```
 
 `FunctionNode` also provides:
@@ -141,7 +141,7 @@ If you pass multiple streams to a function pod, they are automatically joined (u
 result = compute_bmi.pod(weight_stream, height_stream)
 ```
 
-The join happens on shared tag columns, and the merged data columns are fed to the function.
+The join happens on shared key columns, and the merged data columns are fed to the function.
 
 ## DataFunction internals
 

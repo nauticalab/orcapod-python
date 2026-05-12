@@ -33,7 +33,7 @@ def _make_source(n: int = 3) -> ArrowTableSource:
         "id": pa.array([str(i) for i in range(n)], type=pa.large_string()),
         "x": pa.array([10 * (i + 1) for i in range(n)], type=pa.int64()),
     })
-    return ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
+    return ArrowTableSource(table, key_columns=["id"], infer_nullable=True)
 
 
 def _get_function_node(pipeline: Pipeline):
@@ -148,12 +148,12 @@ class TestFlatLogStorage:
 
 
 # ---------------------------------------------------------------------------
-# 4. Queryable tag columns (not JSON)
+# 4. Queryable key columns (not JSON)
 # ---------------------------------------------------------------------------
 
 
-class TestQueryableTagColumns:
-    def test_tag_columns_in_log_table(self):
+class TestQueryableKeyColumns:
+    def test_key_columns_in_log_table(self):
         db = InMemoryArrowDatabase()
         source = _make_source(2)
 
@@ -163,7 +163,7 @@ class TestQueryableTagColumns:
         pf = PythonDataFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="test_tags", pipeline_database=db)
+        pipeline = Pipeline(name="test_keys", pipeline_database=db)
         with pipeline:
             pod(source, label="ident")
 
@@ -174,9 +174,9 @@ class TestQueryableTagColumns:
         logs = obs.get_logs()
 
         assert logs is not None
-        # "id" tag column should be a separate column, not JSON
+        # "id" key column should be a separate column, not JSON
         assert "id" in logs.column_names
-        assert "tags" not in logs.column_names
+        assert "keys" not in logs.column_names
         id_values = sorted(logs.column("id").to_pylist())
         assert id_values == ["0", "1"]
 
@@ -259,7 +259,7 @@ class TestMixedSuccessFailure:
                 "id": pa.array(["0", "1", "2"], type=pa.large_string()),
                 "x": pa.array([10, -1, 30], type=pa.int64()),
             }),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
 

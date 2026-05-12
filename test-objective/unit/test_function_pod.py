@@ -2,7 +2,7 @@
 
 Tests based on FunctionPodProtocol and documented behaviors:
 - FunctionPod wraps a DataFunction for per-data transformation
-- Never inspects or modifies tags
+- Never inspects or modifies keys
 - Exactly one input stream
 - output_schema() prediction matches actual output
 """
@@ -12,7 +12,7 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from orcapod.core.datagrams.tag_data import Data, Tag
+from orcapod.core.datagrams.key_data import Data, Key
 from orcapod.core.function_pod import FunctionPod, FunctionPodStream, function_pod
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
@@ -41,7 +41,7 @@ def _make_stream(n: int = 3) -> ArrowTableSource:
             "x": pa.array(list(range(n)), type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
+    return ArrowTableSource(table, key_columns=["id"], infer_nullable=True)
 
 
 def _make_two_col_stream(n: int = 3) -> ArrowTableSource:
@@ -52,7 +52,7 @@ def _make_two_col_stream(n: int = 3) -> ArrowTableSource:
             "y": pa.array([i * 10 for i in range(n)], type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
+    return ArrowTableSource(table, key_columns=["id"], infer_nullable=True)
 
 
 # ---------------------------------------------------------------------------
@@ -93,23 +93,23 @@ class TestFunctionPodProcess:
         pod.validate_inputs(stream)  # Should not raise
 
 
-class TestFunctionPodTagInvariant:
-    """Per the strict boundary: function pods NEVER inspect or modify tags."""
+class TestFunctionPodKeyInvariant:
+    """Per the strict boundary: function pods NEVER inspect or modify keys."""
 
-    def test_tags_pass_through_unchanged(self):
+    def test_keys_pass_through_unchanged(self):
         pf = PythonDataFunction(_double, output_keys="result")
         pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         result = pod.process(stream)
 
-        input_tags = [tag for tag, _ in stream.iter_data()]
-        output_tags = [tag for tag, _ in result.iter_data()]
+        input_keys = [key for key, _ in stream.iter_data()]
+        output_keys = [key for key, _ in result.iter_data()]
 
-        for in_tag, out_tag in zip(input_tags, output_tags):
-            # Tag data columns should be identical
-            assert in_tag.keys() == out_tag.keys()
-            for key in in_tag.keys():
-                assert in_tag[key] == out_tag[key]
+        for in_key, out_key in zip(input_keys, output_keys):
+            # Key data columns should be identical
+            assert in_key.keys() == out_key.keys()
+            for key in in_key.keys():
+                assert in_key[key] == out_key[key]
 
     def test_data_are_transformed(self):
         pf = PythonDataFunction(_double, output_keys="result")
@@ -117,7 +117,7 @@ class TestFunctionPodTagInvariant:
         stream = _make_stream()
         result = pod.process(stream)
 
-        for tag, data in result.iter_data():
+        for key, data in result.iter_data():
             assert "result" in data.keys()
 
 
@@ -129,12 +129,12 @@ class TestFunctionPodOutputSchema:
         pod = FunctionPod(data_function=pf)
         stream = _make_stream()
 
-        predicted_tag_schema, predicted_data_schema = pod.output_schema(stream)
+        predicted_key_schema, predicted_data_schema = pod.output_schema(stream)
         result = pod.process(stream)
-        actual_tag_schema, actual_data_schema = result.output_schema()
+        actual_key_schema, actual_data_schema = result.output_schema()
 
-        # Tag schemas should match
-        assert set(predicted_tag_schema.keys()) == set(actual_tag_schema.keys())
+        # Key schemas should match
+        assert set(predicted_key_schema.keys()) == set(actual_key_schema.keys())
         # Data schemas should match
         assert set(predicted_data_schema.keys()) == set(actual_data_schema.keys())
 
@@ -166,9 +166,9 @@ class TestFunctionPodStream:
         pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         result = pod.process(stream)
-        tag_keys, data_keys = result.keys()
-        tag_schema, data_schema = result.output_schema()
-        assert set(tag_keys) == set(tag_schema.keys())
+        key_keys, data_keys = result.keys()
+        key_schema, data_schema = result.output_schema()
+        assert set(key_keys) == set(key_schema.keys())
         assert set(data_keys) == set(data_schema.keys())
 
     def test_as_table_materialization(self):

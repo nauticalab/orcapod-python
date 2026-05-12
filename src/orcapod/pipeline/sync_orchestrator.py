@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     import networkx as nx
 
     from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
-    from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
+    from orcapod.protocols.core_protocols import DataProtocol, KeyProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ class SyncPipelineOrchestrator:
 
         try:
             topo_order = list(nx.topological_sort(graph))
-            buffers: dict[Any, list[tuple[TagProtocol, DataProtocol]]] = {}
+            buffers: dict[Any, list[tuple[KeyProtocol, DataProtocol]]] = {}
             processed: set[Any] = set()
 
             for node in topo_order:
@@ -148,16 +148,16 @@ class SyncPipelineOrchestrator:
 
     @staticmethod
     def _materialize_as_stream(buf: list[tuple[Any, Any]], upstream_node: Any) -> Any:
-        """Wrap a (tag, data) buffer as an ArrowTableStream.
+        """Wrap a (key, data) buffer as an ArrowTableStream.
 
         Uses the same column selection pattern as
-        ``StaticOutputOperatorPod._materialize_to_stream``: system_tags
-        for tags, source info for data.
+        ``StaticOutputOperatorPod._materialize_to_stream``: system_keys
+        for keys, source info for data.
 
         Args:
-            buf: List of (tag, data) tuples.
+            buf: List of (key, data) tuples.
             upstream_node: The node that produced this buffer (used to
-                determine tag column names).
+                determine key column names).
 
         Returns:
             An ArrowTableStream.
@@ -170,45 +170,45 @@ class SyncPipelineOrchestrator:
 
         if not buf:
             # Build an empty stream with the correct schema from the upstream node
-            tag_schema, data_schema = upstream_node.output_schema(
-                columns={"system_tags": True, "source": True}
+            key_schema, data_schema = upstream_node.output_schema(
+                columns={"system_keys": True, "source": True}
             )
             type_converter = upstream_node.data_context.type_converter
             empty_fields = {}
-            for name, py_type in {**tag_schema, **data_schema}.items():
+            for name, py_type in {**key_schema, **data_schema}.items():
                 arrow_type = type_converter.python_type_to_arrow_type(py_type)
                 empty_fields[name] = pa.array([], type=arrow_type)
             empty_table = pa.table(empty_fields)
-            tag_keys = upstream_node.keys()[0]
+            key_keys = upstream_node.keys()[0]
             return ArrowTableStream(
                 empty_table,
-                tag_columns=tag_keys,
+                key_columns=key_keys,
                 producer=upstream_node.producer,
                 upstreams=upstream_node.upstreams,
             )
 
-        tag_tables = [tag.as_table(columns={"system_tags": True}) for tag, _ in buf]
+        key_tables = [key.as_table(columns={"system_keys": True}) for key, _ in buf]
         data_tables = [pkt.as_table(columns={"source": True}) for _, pkt in buf]
 
-        combined_tags = pa.concat_tables(tag_tables)
+        combined_keys = pa.concat_tables(key_tables)
         combined_data = pa.concat_tables(data_tables)
 
-        user_tag_keys = tuple(buf[0][0].keys())
+        user_key_keys = tuple(buf[0][0].keys())
         source_info = buf[0][1].source_info()
 
-        full_table = arrow_utils.hstack_tables(combined_tags, combined_data)
+        full_table = arrow_utils.hstack_tables(combined_keys, combined_data)
 
         # Pass the upstream node's producer and upstreams so the
         # materialized stream inherits the correct identity_structure
         # and pipeline_identity_structure (via StreamBase delegation).
-        # This ensures downstream operators produce correct system tag
+        # This ensures downstream operators produce correct system key
         # column names (which embed pipeline hashes of their inputs).
         producer = upstream_node.producer
         upstreams = upstream_node.upstreams
 
         return ArrowTableStream(
             full_table,
-            tag_columns=user_tag_keys,
+            key_columns=user_key_keys,
             source_info=source_info,
             producer=producer,
             upstreams=upstreams,

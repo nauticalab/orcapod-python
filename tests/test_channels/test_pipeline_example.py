@@ -71,7 +71,7 @@ def make_students() -> ArrowTableStream:
         },
         schema=schema,
     )
-    return ArrowTableStream(table, tag_columns=["student_id"])
+    return ArrowTableStream(table, key_columns=["student_id"])
 
 
 def make_grades() -> ArrowTableStream:
@@ -88,7 +88,7 @@ def make_grades() -> ArrowTableStream:
         },
         schema=schema,
     )
-    return ArrowTableStream(table, tag_columns=["student_id"])
+    return ArrowTableStream(table, key_columns=["student_id"])
 
 
 # The expected output: only students with score >= 70, with letter grades.
@@ -128,8 +128,8 @@ class TestSynchronousPipeline:
 
         # --- Execute (pull-based: iter_data triggers computation) ---
         results = {}
-        for tag, data in with_grades.iter_data():
-            sid = tag.as_dict()["student_id"]
+        for key, data in with_grades.iter_data():
+            sid = key.as_dict()["student_id"]
             results[sid] = data.as_dict()["letter_grade"]
 
         # --- Verify ---
@@ -179,8 +179,8 @@ class TestAsynchronousPipeline:
 
         # --- Source tasks push data into channels ---
         async def push_source(stream: ArrowTableStream, ch: Channel):
-            for tag, data in stream.iter_data():
-                await ch.writer.send((tag, data))
+            for key, data in stream.iter_data():
+                await ch.writer.send((key, data))
             await ch.writer.close()
 
         # --- Run all stages concurrently via TaskGroup ---
@@ -217,8 +217,8 @@ class TestAsynchronousPipeline:
         output_rows = await ch_output.reader.collect()
 
         results = {}
-        for tag, data in output_rows:
-            sid = tag.as_dict()["student_id"]
+        for key, data in output_rows:
+            sid = key.as_dict()["student_id"]
             results[sid] = data.as_dict()["letter_grade"]
 
         assert results == EXPECTED
@@ -240,8 +240,8 @@ class TestAsynchronousPipeline:
         ch_output = Channel(buffer_size=16)
 
         async def push_source(stream, ch):
-            for tag, data in stream.iter_data():
-                await ch.writer.send((tag, data))
+            for key, data in stream.iter_data():
+                await ch.writer.send((key, data))
             await ch.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -269,8 +269,8 @@ class TestAsynchronousPipeline:
 
         output_rows = await ch_output.reader.collect()
         results = {
-            tag.as_dict()["student_id"]: data.as_dict()["letter_grade"]
-            for tag, data in output_rows
+            key.as_dict()["student_id"]: data.as_dict()["letter_grade"]
+            for key, data in output_rows
         }
         assert results == EXPECTED
 
@@ -294,8 +294,8 @@ class TestSyncAsyncEquivalence:
         with_grades = grade_pod.process(passing)
 
         return {
-            tag.as_dict()["student_id"]: data.as_dict()["letter_grade"]
-            for tag, data in with_grades.iter_data()
+            key.as_dict()["student_id"]: data.as_dict()["letter_grade"]
+            for key, data in with_grades.iter_data()
         }
 
     async def _run_async(self) -> dict[str, str]:
@@ -312,8 +312,8 @@ class TestSyncAsyncEquivalence:
         ch_o = Channel(buffer_size=16)
 
         async def push(stream, ch):
-            for tag, data in stream.iter_data():
-                await ch.writer.send((tag, data))
+            for key, data in stream.iter_data():
+                await ch.writer.send((key, data))
             await ch.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -326,8 +326,8 @@ class TestSyncAsyncEquivalence:
             tg.create_task(grade_pod.async_execute([ch_f.reader], ch_o.writer))
 
         return {
-            tag.as_dict()["student_id"]: data.as_dict()["letter_grade"]
-            for tag, data in await ch_o.reader.collect()
+            key.as_dict()["student_id"]: data.as_dict()["letter_grade"]
+            for key, data in await ch_o.reader.collect()
         }
 
     @pytest.mark.asyncio

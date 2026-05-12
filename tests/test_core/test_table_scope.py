@@ -28,7 +28,7 @@ from orcapod.types import CacheMode
 
 
 def _make_pod() -> FunctionPod:
-    """Pod that doubles the 'y' data column (tag column is 'x')."""
+    """Pod that doubles the 'y' data column (key column is 'x')."""
 
     def double(y: int) -> int:
         return y * 2
@@ -38,8 +38,8 @@ def _make_pod() -> FunctionPod:
 
 
 def _make_source(data: list[dict], source_id: str = "src") -> DictSource:
-    """Source with tag column 'x' and data column 'y'."""
-    return DictSource(data=data, tag_columns=["x"], source_id=source_id)
+    """Source with key column 'x' and data column 'y'."""
+    return DictSource(data=data, key_columns=["x"], source_id=source_id)
 
 
 def _make_join_streams(
@@ -63,10 +63,10 @@ def _make_join_streams(
         }
     )
     src_a = ArrowTableSource(
-        table_a, tag_columns=["key"], source_id=f"src_a_{source_id_suffix}", infer_nullable=True
+        table_a, key_columns=["key"], source_id=f"src_a_{source_id_suffix}", infer_nullable=True
     )
     src_b = ArrowTableSource(
-        table_b, tag_columns=["key"], source_id=f"src_b_{source_id_suffix}", infer_nullable=True
+        table_b, key_columns=["key"], source_id=f"src_b_{source_id_suffix}", infer_nullable=True
     )
     return src_a, src_b
 
@@ -233,7 +233,7 @@ class TestFunctionNodeDescriptorTableScope:
         src = _make_source([{"x": 1, "y": 2}])
         db = InMemoryArrowDatabase()
         node = FunctionNode(function_pod=pod, input_stream=src, pipeline_database=db)
-        tag_schema, data_schema = node.output_schema()
+        key_schema, data_schema = node.output_schema()
         descriptor = {
             "node_type": "function",
             "label": None,
@@ -242,7 +242,7 @@ class TestFunctionNodeDescriptorTableScope:
             "data_context_key": node.data_context_key,
             # "table_scope" intentionally omitted
             "output_schema": {
-                "tag": {k: str(v) for k, v in tag_schema.items()},
+                "key": {k: str(v) for k, v in key_schema.items()},
                 "data": {k: str(v) for k, v in data_schema.items()},
             },
         }
@@ -259,7 +259,7 @@ class TestFunctionNodeDescriptorTableScope:
         src = _make_source([{"x": 1, "y": 2}])
         db = InMemoryArrowDatabase()
         node = FunctionNode(function_pod=pod, input_stream=src, pipeline_database=db)
-        tag_schema, data_schema = node.output_schema()
+        key_schema, data_schema = node.output_schema()
         descriptor = {
             "node_type": "function",
             "label": None,
@@ -268,7 +268,7 @@ class TestFunctionNodeDescriptorTableScope:
             "data_context_key": node.data_context_key,
             "table_scope": "pipeline_hash",
             "output_schema": {
-                "tag": {k: str(v) for k, v in tag_schema.items()},
+                "key": {k: str(v) for k, v in key_schema.items()},
                 "data": {k: str(v) for k, v in data_schema.items()},
             },
         }
@@ -287,7 +287,7 @@ class TestFunctionNodeDescriptorTableScope:
         node = FunctionNode(
             function_pod=pod, input_stream=src, pipeline_database=db, table_scope="content_hash"
         )
-        tag_schema, data_schema = node.output_schema()
+        key_schema, data_schema = node.output_schema()
         descriptor = {
             "node_type": "function",
             "label": None,
@@ -296,7 +296,7 @@ class TestFunctionNodeDescriptorTableScope:
             "data_context_key": node.data_context_key,
             "table_scope": "content_hash",
             "output_schema": {
-                "tag": {k: str(v) for k, v in tag_schema.items()},
+                "key": {k: str(v) for k, v in key_schema.items()},
                 "data": {k: str(v) for k, v in data_schema.items()},
             },
         }
@@ -492,7 +492,7 @@ class TestOperatorNodeDescriptorTableScope:
             "pipeline_hash": "fake_pipeline_hash",
             "data_context_key": "std:v0.1:default",
             # "table_scope" intentionally omitted
-            "output_schema": {"tag": {"key": "large_string"}, "data": {"val": "int64"}},
+            "output_schema": {"key": {"key": "large_string"}, "data": {"val": "int64"}},
             "operator": {
                 "class_name": "Join",
                 "module_path": "orcapod.core.operators.join",
@@ -519,7 +519,7 @@ class TestOperatorNodeDescriptorTableScope:
             "pipeline_hash": "fake_pipeline_hash",
             "data_context_key": "std:v0.1:default",
             "table_scope": "pipeline_hash",
-            "output_schema": {"tag": {"key": "large_string"}, "data": {"val": "int64"}},
+            "output_schema": {"key": {"key": "large_string"}, "data": {"val": "int64"}},
             "operator": {
                 "class_name": "Join",
                 "module_path": "orcapod.core.operators.join",
@@ -546,7 +546,7 @@ class TestOperatorNodeDescriptorTableScope:
             "pipeline_hash": "fake_pipeline_hash",
             "data_context_key": "std:v0.1:default",
             "table_scope": "content_hash",
-            "output_schema": {"tag": {"key": "large_string"}, "data": {"val": "int64"}},
+            "output_schema": {"key": {"key": "large_string"}, "data": {"val": "int64"}},
             "operator": {
                 "class_name": "Join",
                 "module_path": "orcapod.core.operators.join",

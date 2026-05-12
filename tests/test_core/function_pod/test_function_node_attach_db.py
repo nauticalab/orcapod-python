@@ -35,7 +35,7 @@ def _make_stream(n=3):
         },
         schema=schema,
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 class TestFunctionNodeWithoutDatabase:

@@ -281,14 +281,14 @@ class TestColumnConfig:
         cc = ColumnConfig.all()
         assert cc.meta is True
         assert cc.source is True
-        assert cc.system_tags is True
+        assert cc.system_keys is True
         assert cc.context is True
 
     def test_data_only_excludes_extras(self):
         cc = ColumnConfig.data_only()
         assert cc.meta is False
         assert cc.source is False
-        assert cc.system_tags is False
+        assert cc.system_keys is False
 
     def test_default_construction(self):
         cc = ColumnConfig()
@@ -316,4 +316,4 @@ class TestColumnConfigHandleConfig:
         result = ColumnConfig.handle_config(None, all_info=True)
         assert result.meta is True
         assert result.source is True
-        assert result.system_tags is True
+        assert result.system_keys is True

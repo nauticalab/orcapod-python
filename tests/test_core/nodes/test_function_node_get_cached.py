@@ -24,7 +24,7 @@ def function_node_with_db():
             "value": pa.array([1, 2], type=pa.int64()),
         }
     )
-    src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
+    src = ArrowTableSource(table, key_columns=["key"], infer_nullable=True)
     pf = PythonDataFunction(double_value, output_keys="result")
     pod = FunctionPod(pf)
     pipeline_db = InMemoryArrowDatabase()
@@ -46,7 +46,7 @@ class TestGetCachedResults:
                 "value": pa.array([1], type=pa.int64()),
             }
         )
-        src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
+        src = ArrowTableSource(table, key_columns=["key"], infer_nullable=True)
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
         node = FunctionNode(pod, src)
@@ -60,9 +60,9 @@ class TestGetCachedResults:
         data = list(node._input_stream.iter_data())
 
         entry_ids = []
-        for tag, data in data:
-            node.execute_data(tag, data)
-            entry_ids.append(node.compute_pipeline_entry_id(tag, data))
+        for key, data in data:
+            node.execute_data(key, data)
+            entry_ids.append(node.compute_pipeline_entry_id(key, data))
 
         cached = node.get_cached_results(entry_ids)
         assert len(cached) == 2
@@ -73,9 +73,9 @@ class TestGetCachedResults:
         data = list(node._input_stream.iter_data())
 
         entry_ids = []
-        for tag, data in data:
-            node.execute_data(tag, data)
-            entry_ids.append(node.compute_pipeline_entry_id(tag, data))
+        for key, data in data:
+            node.execute_data(key, data)
+            entry_ids.append(node.compute_pipeline_entry_id(key, data))
 
         cached = node.get_cached_results([entry_ids[0]])
         assert len(cached) == 1
@@ -88,9 +88,9 @@ class TestGetCachedResults:
         data = list(node._input_stream.iter_data())
 
         entry_ids = []
-        for tag, data in data:
-            node.execute_data(tag, data)
-            entry_ids.append(node.compute_pipeline_entry_id(tag, data))
+        for key, data in data:
+            node.execute_data(key, data)
+            entry_ids.append(node.compute_pipeline_entry_id(key, data))
 
         # Clear internal cache
         node._cached_output_datas.clear()

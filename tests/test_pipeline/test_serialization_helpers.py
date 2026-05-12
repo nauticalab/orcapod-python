@@ -139,7 +139,7 @@ class TestRegistries:
     def test_operator_registry_has_all_types(self):
         assert "Join" in OPERATOR_REGISTRY
         assert "Batch" in OPERATOR_REGISTRY
-        assert "SelectTagColumns" in OPERATOR_REGISTRY
+        assert "SelectKeyColumns" in OPERATOR_REGISTRY
 
     def test_data_function_registry(self):
         assert "python.function.v0" in DATA_FUNCTION_REGISTRY
@@ -386,7 +386,7 @@ class TestSchemaRoundTrip:
             "id": int,
             "name": str,
             "score": float,
-            "tags": list[str],
+            "keys": list[str],
             "active": bool,
         }
         result = self._round_trip(schema)
@@ -583,7 +583,7 @@ def test_cached_source_to_config_no_identity_fields():
     inner = DictSource([{"x": 1}], source_id="s")
     src = CachedSource(source=inner, cache_database=db, cache_path_prefix=("cache",))
     config = src.to_config()
-    for field in ("content_hash", "pipeline_hash", "tag_schema", "data_schema"):
+    for field in ("content_hash", "pipeline_hash", "key_schema", "data_schema"):
         assert field not in config, f"Identity field {field!r} must not be in source_config"
 
 
@@ -694,7 +694,7 @@ def test_source_proxy_from_node_descriptor_fields():
         "content_hash": "semantic_v0.1:abc123",
         "pipeline_hash": "semantic_v0.1:def456",
         "output_schema": {
-            "tag": {"x": "int64"},
+            "key": {"x": "int64"},
             "data": {"result": "int64"},
         },
     }
@@ -711,7 +711,7 @@ def test_source_proxy_from_config_backward_compat():
         "source_id": "my_src",
         "content_hash": "semantic_v0.1:abc123",
         "pipeline_hash": "semantic_v0.1:def456",
-        "tag_schema": {"x": "int64"},
+        "key_schema": {"x": "int64"},
         "data_schema": {"result": "int64"},
     }
     proxy = _source_proxy_from_config(source_config)
@@ -738,7 +738,7 @@ def test_function_node_has_node_uri():
         return x + 1
 
     table = pa.table({"id": pa.array(["a", "b"], type=pa.large_string()), "x": pa.array([1, 2], type=pa.int64())})
-    source = ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
+    source = ArrowTableSource(table, key_columns=["id"], infer_nullable=True)
     pf = PythonDataFunction(add_one, output_keys="result")
     pod = FunctionPod(data_function=pf)
 
@@ -765,7 +765,7 @@ def test_function_node_stored_node_uri_from_descriptor():
         "pipeline_hash": "semantic_v0.1:def",
         "table_scope": "pipeline_hash",
         "node_uri": ["add_one", "v0", "python.function.v0", "schema_repr"],
-        "output_schema": {"tag": {"x": "int64"}, "data": {"result": "int64"}},
+        "output_schema": {"key": {"x": "int64"}, "data": {"result": "int64"}},
         "data_context_key": "std:v0.1:default",
     }
     node = FunctionNode.from_descriptor(descriptor, function_pod=None, input_stream=None, databases={})
@@ -785,8 +785,8 @@ def test_operator_node_has_node_uri():
     table_b = pa.table(
         {"key": pa.array(["a"], type=pa.large_string()), "val_b": pa.array([1], type=pa.int64())}
     )
-    src_a = ArrowTableSource(table_a, tag_columns=["key"], infer_nullable=True)
-    src_b = ArrowTableSource(table_b, tag_columns=["key"], infer_nullable=True)
+    src_a = ArrowTableSource(table_a, key_columns=["key"], infer_nullable=True)
+    src_b = ArrowTableSource(table_b, key_columns=["key"], infer_nullable=True)
 
     pipeline = Pipeline(name="test", pipeline_database=db)
     with pipeline:

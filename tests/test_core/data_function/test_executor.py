@@ -377,7 +377,7 @@ def _make_add_stream(rows: list[dict] | None = None):
         {k: pa.array([r[k] for r in rows], type=pa.int64()) for k in keys},
         schema=schema,
     )
-    return ArrowTableStream(table, tag_columns=["id"])
+    return ArrowTableStream(table, key_columns=["id"])
 
 
 class TestFunctionPodExecutorAccess:
@@ -698,7 +698,7 @@ class TestConcurrentIteration:
         rows = [{"id": i, "x": i, "y": i * 10} for i in range(5)]
         stream = _make_add_stream(rows)
         output = pod.process(stream)
-        results = [tag_pkt[1].as_dict()["result"] for tag_pkt in output.iter_data()]
+        results = [key_pkt[1].as_dict()["result"] for key_pkt in output.iter_data()]
         assert results == [0, 11, 22, 33, 44]
 
     def test_second_iteration_uses_cache(self):

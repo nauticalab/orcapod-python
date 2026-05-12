@@ -38,7 +38,7 @@ def _make_source(n: int = 3) -> ArrowTableSource:
             "x": pa.array(list(range(n)), type=pa.int64()),
         }
     )
-    return ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
+    return ArrowTableSource(table, key_columns=["id"], infer_nullable=True)
 
 
 # ===================================================================
@@ -136,7 +136,7 @@ class TestOperatorNodeCaching:
                     "age": pa.array([25, 30, 35], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         source_b = ArrowTableSource(
@@ -146,7 +146,7 @@ class TestOperatorNodeCaching:
                     "score": pa.array([85, 90, 95], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         join = Join()
@@ -170,7 +170,7 @@ class TestOperatorNodeCaching:
                     "age": pa.array([25, 30, 35], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         source_b = ArrowTableSource(
@@ -180,7 +180,7 @@ class TestOperatorNodeCaching:
                     "score": pa.array([85, 90, 95], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         join = Join()
@@ -221,7 +221,7 @@ class TestCachedDataFunctionEndToEnd:
         cached_pf = CachedDataFunction(inner_pf, result_database=db)
         cached_pf.set_auto_flush(True)
 
-        from orcapod.core.datagrams.tag_data import Data
+        from orcapod.core.datagrams.key_data import Data
 
         # Process multiple data
         for x in [1, 2, 3]:

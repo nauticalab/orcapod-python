@@ -50,34 +50,34 @@ def get_system_columns(
     )
 
 
-def add_system_tag_column(
+def add_system_key_column(
     df: "pl.DataFrame",
-    system_tag_column_name: str,
-    system_tag_values: str | Collection[str],
+    system_key_column_name: str,
+    system_key_values: str | Collection[str],
 ) -> "pl.DataFrame":
-    """Add a system tags column to a Polars DataFrame."""
+    """Add a system keys column to a Polars DataFrame."""
     if df.is_empty():
         raise ValueError("DataFrame is empty")
-    if isinstance(system_tag_values, str):
-        system_tag_values = [system_tag_values] * df.height
+    if isinstance(system_key_values, str):
+        system_key_values = [system_key_values] * df.height
     else:
-        system_tag_values = list(system_tag_values)
-        if len(system_tag_values) != df.height:
+        system_key_values = list(system_key_values)
+        if len(system_key_values) != df.height:
             raise ValueError(
-                "Length of system_tag_values must match number of rows in the DataFrame."
+                "Length of system_key_values must match number of rows in the DataFrame."
             )
-    if not system_tag_column_name.startswith(constants.SYSTEM_TAG_PREFIX):
-        system_tag_column_name = (
-            f"{constants.SYSTEM_TAG_PREFIX}{system_tag_column_name}"
+    if not system_key_column_name.startswith(constants.SYSTEM_KEY_PREFIX):
+        system_key_column_name = (
+            f"{constants.SYSTEM_KEY_PREFIX}{system_key_column_name}"
         )
-    tags_column = pl.Series(
-        system_tag_column_name, system_tag_values, dtype=pl.String()
+    keys_column = pl.Series(
+        system_key_column_name, system_key_values, dtype=pl.String()
     )
-    return df.with_columns(tags_column)
+    return df.with_columns(keys_column)
 
 
-def append_to_system_tags(df: "pl.DataFrame", value: str) -> "pl.DataFrame":
-    """Append a value to the system tags column in an Arrow table."""
+def append_to_system_keys(df: "pl.DataFrame", value: str) -> "pl.DataFrame":
+    """Append a value to the system keys column in an Arrow table."""
     if df.is_empty():
         raise ValueError("Table is empty")
 
@@ -85,7 +85,7 @@ def append_to_system_tags(df: "pl.DataFrame", value: str) -> "pl.DataFrame":
     column_name_map = {
         c: f"{c}{constants.BLOCK_SEPARATOR}{value}"
         for c in df.columns
-        if c.startswith(constants.SYSTEM_TAG_PREFIX)
+        if c.startswith(constants.SYSTEM_KEY_PREFIX)
     }
     return df.rename(column_name_map)
 

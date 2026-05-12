@@ -217,7 +217,7 @@ class PipelineElementBase(DataContextMixin, ABC):
     which provides self.data_context used by pipeline_hash().
 
     The only class that needs to override pipeline_identity_structure() in a
-    non-trivial way is RootSource, which returns (tag_schema, data_schema)
+    non-trivial way is RootSource, which returns (key_schema, data_schema)
     as the base case of the recursion. All other pipeline elements return
     structures built from the pipeline_hash() values of their upstream
     components — ContentHash objects are terminal in the semantic hasher, so

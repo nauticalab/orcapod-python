@@ -4,7 +4,7 @@ Tests for FunctionNode covering:
 - output_schema and keys
 - execute_data and add_pipeline_record
 - iter_data, run(), stream interface
-- get_all_records: empty DB, correctness, ColumnConfig (meta/source/system_tags/all_info)
+- get_all_records: empty DB, correctness, ColumnConfig (meta/source/system_keys/all_info)
 - pipeline_identity_structure and pipeline_hash
 - pipeline_path_prefix
 - result path conventions
@@ -17,7 +17,7 @@ from collections.abc import Mapping
 import pyarrow as pa
 import pytest
 
-from orcapod.core.datagrams import Data, Tag
+from orcapod.core.datagrams import Data, Key
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
 from orcapod.core.data_function import PythonDataFunction
@@ -48,12 +48,12 @@ def _make_node(
     )
 
 
-def _make_node_with_system_tags(
+def _make_node_with_system_keys(
     pf: PythonDataFunction,
     n: int = 3,
     db: InMemoryArrowDatabase | None = None,
 ) -> FunctionNode:
-    """Build a node whose input stream has an explicit system-tag column ('run')."""
+    """Build a node whose input stream has an explicit system-key column ('run')."""
     if db is None:
         db = InMemoryArrowDatabase()
     schema = pa.schema(
@@ -71,7 +71,7 @@ def _make_node_with_system_tags(
         },
         schema=schema,
     )
-    stream = ArrowTableStream(table, tag_columns=["id"], system_tag_columns=["run"])
+    stream = ArrowTableStream(table, key_columns=["id"], system_key_columns=["run"])
     return FunctionNode(
         function_pod=FunctionPod(data_function=pf),
         input_stream=stream,
@@ -127,9 +127,9 @@ class TestFunctionNodeConstruction:
         for part in pf_uri:
             assert part in node.node_identity_path
 
-    def test_pipeline_path_has_no_tag_schema_hash(self, node):
+    def test_pipeline_path_has_no_key_schema_hash(self, node):
         path = node.node_identity_path
-        assert not any(segment.startswith("tag:") for segment in path)
+        assert not any(segment.startswith("key:") for segment in path)
 
     def test_node_is_stream_protocol(self, node):
         assert isinstance(node, StreamProtocol)
@@ -155,7 +155,7 @@ class TestFunctionNodeConstruction:
                     "z": pa.array([0, 1], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
         )
         with pytest.raises(ValueError):
             FunctionNode(
@@ -201,24 +201,24 @@ class TestFunctionNodeOutputSchema:
         )
 
     def test_output_schema_returns_two_mappings(self, node: FunctionNode):
-        tag_schema, data_schema = node.output_schema()
-        assert isinstance(tag_schema, Mapping)
+        key_schema, data_schema = node.output_schema()
+        assert isinstance(key_schema, Mapping)
         assert isinstance(data_schema, Mapping)
-        assert "id" in tag_schema
-        assert len(tag_schema) == 1
+        assert "id" in key_schema
+        assert len(key_schema) == 1
         assert "result" in data_schema
         assert len(data_schema) == 1
-        assert tag_schema["id"] is int
+        assert key_schema["id"] is int
         assert data_schema["result"] is int
 
     def test_data_schema_matches_function_output(self, node, double_pf):
         _, data_schema = node.output_schema()
         assert data_schema == double_pf.output_data_schema
 
-    def test_tag_schema_matches_input_stream(self, node):
-        tag_schema, _ = node.output_schema()
-        assert "id" in tag_schema
-        assert tag_schema["id"] is int
+    def test_key_schema_matches_input_stream(self, node):
+        key_schema, _ = node.output_schema()
+        assert "id" in key_schema
+        assert key_schema["id"] is int
 
 
 # ---------------------------------------------------------------------------
@@ -236,24 +236,24 @@ class TestFunctionNodeExecuteData:
             pipeline_database=db,
         )
 
-    def test_execute_data_returns_tag_and_data(self, node):
-        tag = Tag({"id": 0})
+    def test_execute_data_returns_key_and_data(self, node):
+        key = Key({"id": 0})
         data = Data({"x": 5})
-        out_tag, out_data = node.execute_data(tag, data)
-        assert out_tag is tag
+        out_key, out_data = node.execute_data(key, data)
+        assert out_key is key
         assert out_data is not None
 
     def test_execute_data_value_correct(self, node):
-        tag = Tag({"id": 0})
+        key = Key({"id": 0})
         data = Data({"x": 6})
-        _, out_data = node.execute_data(tag, data)
+        _, out_data = node.execute_data(key, data)
         assert out_data["result"] == 12  # 6 * 2
 
     def test_execute_data_adds_pipeline_record(self, node, double_pf):
         """execute_data writes pipeline records (compute + persist + cache)."""
-        tag = Tag({"id": 0})
+        key = Key({"id": 0})
         data = Data({"x": 3})
-        node.execute_data(tag, data)
+        node.execute_data(key, data)
         db = node._pipeline_database
         db.flush()
         all_records = db.get_all_records(node.node_identity_path)
@@ -261,9 +261,9 @@ class TestFunctionNodeExecuteData:
         assert all_records.num_rows >= 1
 
     def test_execute_data_internal_adds_pipeline_record(self, node, double_pf):
-        tag = Tag({"id": 0})
+        key = Key({"id": 0})
         data = Data({"x": 3})
-        node._process_data_internal(tag, data)
+        node._process_data_internal(key, data)
         db = node._pipeline_database
         db.flush()
         all_records = db.get_all_records(node.node_identity_path)
@@ -271,10 +271,10 @@ class TestFunctionNodeExecuteData:
         assert all_records.num_rows >= 1
 
     def test_execute_data_second_call_same_input_deduplicates(self, node):
-        tag = Tag({"id": 0})
+        key = Key({"id": 0})
         data = Data({"x": 3})
-        node._process_data_internal(tag, data)
-        node._process_data_internal(tag, data)
+        node._process_data_internal(key, data)
+        node._process_data_internal(key, data)
         db = node._pipeline_database
         db.flush()
         all_records = db.get_all_records(node.node_identity_path)
@@ -282,11 +282,11 @@ class TestFunctionNodeExecuteData:
         assert all_records.num_rows == 1
 
     def test_process_and_store_two_data_add_two_entries(self, node):
-        tag = Tag({"id": 0})
+        key = Key({"id": 0})
         data1 = Data({"x": 3})
         data2 = Data({"x": 4})
-        node._process_data_internal(tag, data1)
-        node._process_data_internal(tag, data2)
+        node._process_data_internal(key, data1)
+        node._process_data_internal(key, data2)
         db = node._pipeline_database
         all_records = db.get_all_records(node.node_identity_path)
         assert all_records is not None
@@ -360,7 +360,7 @@ class TestFunctionNodePipelineIdentity:
                     [pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]
                 ),
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
         )
         node_a = FunctionNode(
             function_pod=FunctionPod(data_function=double_pf),
@@ -437,7 +437,7 @@ class TestGetAllRecordsValues:
         assert result is not None
         assert result.num_rows == 4
 
-    def test_contains_tag_column(self, filled_node):
+    def test_contains_key_column(self, filled_node):
         result = filled_node.get_all_records()
         assert result is not None
         assert "id" in result.column_names
@@ -452,7 +452,7 @@ class TestGetAllRecordsValues:
         assert result is not None
         assert sorted(result.column("result").to_pylist()) == [0, 2, 4, 6]
 
-    def test_tag_values_are_correct(self, filled_node):
+    def test_key_values_are_correct(self, filled_node):
         result = filled_node.get_all_records()
         assert result is not None
         assert sorted(result.column("id").to_pylist()) == [0, 1, 2, 3]
@@ -543,40 +543,40 @@ class TestGetAllRecordsSourceColumns:
 
 
 # ---------------------------------------------------------------------------
-# 10. get_all_records — ColumnConfig: system_tags columns
+# 10. get_all_records — ColumnConfig: system_keys columns
 # ---------------------------------------------------------------------------
 
 
-class TestGetAllRecordsSystemTagColumns:
+class TestGetAllRecordsSystemKeyColumns:
     @pytest.fixture
-    def filled_node_with_sys_tags(self, double_pf) -> FunctionNode:
-        node = _make_node_with_system_tags(double_pf, n=3)
+    def filled_node_with_sys_keys(self, double_pf) -> FunctionNode:
+        node = _make_node_with_system_keys(double_pf, n=3)
         _fill_node(node)
         return node
 
-    def test_default_excludes_system_tag_columns(self, filled_node_with_sys_tags):
-        result = filled_node_with_sys_tags.get_all_records()
+    def test_default_excludes_system_key_columns(self, filled_node_with_sys_keys):
+        result = filled_node_with_sys_keys.get_all_records()
         assert result is not None
         sys_cols = [
-            c for c in result.column_names if c.startswith(constants.SYSTEM_TAG_PREFIX)
+            c for c in result.column_names if c.startswith(constants.SYSTEM_KEY_PREFIX)
         ]
-        assert sys_cols == [], f"Unexpected system tag columns: {sys_cols}"
+        assert sys_cols == [], f"Unexpected system key columns: {sys_cols}"
 
-    def test_system_tags_true_includes_system_tag_columns(
-        self, filled_node_with_sys_tags
+    def test_system_keys_true_includes_system_key_columns(
+        self, filled_node_with_sys_keys
     ):
-        result = filled_node_with_sys_tags.get_all_records(
-            columns={"system_tags": True}
+        result = filled_node_with_sys_keys.get_all_records(
+            columns={"system_keys": True}
         )
         assert result is not None
         sys_cols = [
-            c for c in result.column_names if c.startswith(constants.SYSTEM_TAG_PREFIX)
+            c for c in result.column_names if c.startswith(constants.SYSTEM_KEY_PREFIX)
         ]
         assert len(sys_cols) > 0
 
-    def test_system_tags_true_still_has_data_columns(self, filled_node_with_sys_tags):
-        result = filled_node_with_sys_tags.get_all_records(
-            columns={"system_tags": True}
+    def test_system_keys_true_still_has_data_columns(self, filled_node_with_sys_keys):
+        result = filled_node_with_sys_keys.get_all_records(
+            columns={"system_keys": True}
         )
         assert result is not None
         assert "id" in result.column_names
@@ -596,8 +596,8 @@ class TestGetAllRecordsAllInfo:
         return node
 
     @pytest.fixture
-    def filled_node_with_sys_tags(self, double_pf) -> FunctionNode:
-        node = _make_node_with_system_tags(double_pf, n=3)
+    def filled_node_with_sys_keys(self, double_pf) -> FunctionNode:
+        node = _make_node_with_system_keys(double_pf, n=3)
         _fill_node(node)
         return node
 
@@ -617,11 +617,11 @@ class TestGetAllRecordsAllInfo:
         ]
         assert len(source_cols) > 0
 
-    def test_all_info_includes_system_tag_columns(self, filled_node_with_sys_tags):
-        result = filled_node_with_sys_tags.get_all_records(all_info=True)
+    def test_all_info_includes_system_key_columns(self, filled_node_with_sys_keys):
+        result = filled_node_with_sys_keys.get_all_records(all_info=True)
         assert result is not None
         sys_cols = [
-            c for c in result.column_names if c.startswith(constants.SYSTEM_TAG_PREFIX)
+            c for c in result.column_names if c.startswith(constants.SYSTEM_KEY_PREFIX)
         ]
         assert len(sys_cols) > 0
 
@@ -681,9 +681,9 @@ class TestFunctionNodeResultPath:
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
         )
-        tag = Tag({"id": 0})
+        key = Key({"id": 0})
         data = Data({"x": 5})
-        node.execute_data(tag, data)
+        node.execute_data(key, data)
         db.flush()
 
         result_path = node._cached_function_pod.record_path

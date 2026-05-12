@@ -26,9 +26,9 @@ def _double(x: int) -> int:
     return x * 2
 
 
-def _make_source(data: dict, tag_columns: list[str]) -> ArrowTableSource:
+def _make_source(data: dict, key_columns: list[str]) -> ArrowTableSource:
     table = pa.table(data)
-    return ArrowTableSource(table, tag_columns=tag_columns, infer_nullable=True)
+    return ArrowTableSource(table, key_columns=key_columns, infer_nullable=True)
 
 
 # ===================================================================
@@ -42,19 +42,19 @@ class TestContentHashStability:
 
     def test_same_data_same_hash(self):
         s1 = ArrowTableStream(
-            pa.table({"id": [1, 2], "x": [10, 20]}), tag_columns=["id"]
+            pa.table({"id": [1, 2], "x": [10, 20]}), key_columns=["id"]
         )
         s2 = ArrowTableStream(
-            pa.table({"id": [1, 2], "x": [10, 20]}), tag_columns=["id"]
+            pa.table({"id": [1, 2], "x": [10, 20]}), key_columns=["id"]
         )
         assert s1.content_hash() == s2.content_hash()
 
     def test_different_data_different_hash(self):
         s1 = ArrowTableStream(
-            pa.table({"id": [1, 2], "x": [10, 20]}), tag_columns=["id"]
+            pa.table({"id": [1, 2], "x": [10, 20]}), key_columns=["id"]
         )
         s2 = ArrowTableStream(
-            pa.table({"id": [1, 2], "x": [10, 99]}), tag_columns=["id"]
+            pa.table({"id": [1, 2], "x": [10, 99]}), key_columns=["id"]
         )
         assert s1.content_hash() != s2.content_hash()
 
@@ -108,7 +108,7 @@ class TestMerkleChain:
             {"id": pa.array([1, 2], type=pa.int64()), "x": pa.array([10, 20], type=pa.int64())},
             ["id"],
         )
-        # Different schema: tag=category instead of tag=id
+        # Different schema: key=category instead of key=id
         source_b = _make_source(
             {"category": pa.array([1, 2], type=pa.int64()), "x": pa.array([10, 20], type=pa.int64())},
             ["category"],

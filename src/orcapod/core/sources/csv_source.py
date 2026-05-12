@@ -19,14 +19,14 @@ class CSVSource(RootSource):
 
     The file is read once at construction time using PyArrow's CSV reader,
     converted to an Arrow table, and enriched by ``SourceStreamBuilder``
-    (source-info, schema-hash, system tags).
+    (source-info, schema-hash, system keys).
     """
 
     def __init__(
         self,
         file_path: str,
-        tag_columns: Collection[str] = (),
-        system_tag_columns: Collection[str] = (),
+        key_columns: Collection[str] = (),
+        system_key_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
         schema: pa.Schema | None = None,
@@ -48,15 +48,15 @@ class CSVSource(RootSource):
         builder = SourceStreamBuilder(self.data_context, self.orcapod_config)
         result = builder.build(
             table,
-            tag_columns=tag_columns,
+            key_columns=key_columns,
             source_id=self._source_id,
             record_id_column=record_id_column,
-            system_tag_columns=system_tag_columns,
+            system_key_columns=system_key_columns,
         )
 
         self._stream = result.stream
-        self._tag_columns = result.tag_columns
-        self._system_tag_columns = result.system_tag_columns
+        self._key_columns = result.key_columns
+        self._system_key_columns = result.system_key_columns
         self._record_id_column = record_id_column
         if self._source_id is None:
             self._source_id = result.source_id
@@ -66,8 +66,8 @@ class CSVSource(RootSource):
         return {
             "source_type": "csv",
             "file_path": self._file_path,
-            "tag_columns": list(self._tag_columns),
-            "system_tag_columns": list(self._system_tag_columns),
+            "key_columns": list(self._key_columns),
+            "system_key_columns": list(self._system_key_columns),
             "record_id_column": self._record_id_column,
             "source_id": self.source_id,
             **self._identity_config(),
@@ -78,8 +78,8 @@ class CSVSource(RootSource):
         """Reconstruct a CSVSource from a config dict."""
         return cls(
             file_path=config["file_path"],
-            tag_columns=config.get("tag_columns", ()),
-            system_tag_columns=config.get("system_tag_columns", ()),
+            key_columns=config.get("key_columns", ()),
+            system_key_columns=config.get("system_key_columns", ()),
             record_id_column=config.get("record_id_column"),
             source_id=config.get("source_id"),
         )

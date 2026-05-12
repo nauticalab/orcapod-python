@@ -1,7 +1,7 @@
 from orcapod.types import ColumnConfig
 from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 
-from .datagrams import DatagramProtocol, DataProtocol, TagProtocol
+from .datagrams import DatagramProtocol, DataProtocol, KeyProtocol
 from .executor import DataFunctionExecutorProtocol, PythonFunctionExecutorProtocol
 from .function_pod import FunctionPodProtocol
 from .operator_pod import OperatorPodProtocol
@@ -14,7 +14,7 @@ from .trackers import TrackerProtocol, TrackerManagerProtocol
 __all__ = [
     "ColumnConfig",
     "DatagramProtocol",
-    "TagProtocol",
+    "KeyProtocol",
     "DataProtocol",
     "SourceProtocol",
     "StreamProtocol",

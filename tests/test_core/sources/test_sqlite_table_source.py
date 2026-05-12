@@ -3,8 +3,8 @@
 Test sections:
  1. Import / export sanity
  2. Protocol conformance
- 3. PK as default tag columns (single and composite)
- 4. Explicit tag column override
+ 3. PK as default key columns (single and composite)
+ 4. Explicit key column override
  5. ROWID fallback (no explicit PK)
  6. Error cases (missing table, empty table)
  7. Stream behaviour
@@ -167,16 +167,16 @@ class TestProtocolConformance:
 
 
 # ===========================================================================
-# 3. PK as default tag columns
+# 3. PK as default key columns
 # ===========================================================================
 
 
-class TestPKAsDefaultTags:
-    def test_single_pk_is_tag_column(self, pk_db):
+class TestPKAsDefaultKeys:
+    def test_single_pk_is_key_column(self, pk_db):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(pk_db, "measurements")
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "session_id" in key_schema
 
     def test_pk_not_in_data_schema(self, pk_db):
         from orcapod.core.sources import SQLiteTableSource
@@ -191,12 +191,12 @@ class TestPKAsDefaultTags:
         assert "trial" in data_schema
         assert "response" in data_schema
 
-    def test_composite_pk_all_columns_are_tags(self, composite_pk_db):
+    def test_composite_pk_all_columns_are_keys(self, composite_pk_db):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(composite_pk_db, "events")
-        tag_schema, _ = src.output_schema()
-        assert "user_id" in tag_schema
-        assert "event_id" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "user_id" in key_schema
+        assert "event_id" in key_schema
 
     def test_default_source_id_is_table_name(self, pk_db):
         from orcapod.core.sources import SQLiteTableSource
@@ -210,30 +210,30 @@ class TestPKAsDefaultTags:
 
 
 # ===========================================================================
-# 4. Explicit tag column override
+# 4. Explicit key column override
 # ===========================================================================
 
 
-class TestExplicitTagOverride:
-    def test_explicit_tag_columns_override_pk(self, pk_db):
+class TestExplicitKeyOverride:
+    def test_explicit_key_columns_override_pk(self, pk_db):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(
-            pk_db, "measurements", tag_columns=["trial"]
+            pk_db, "measurements", key_columns=["trial"]
         )
-        tag_schema, _ = src.output_schema()
-        assert "trial" in tag_schema
-        assert "session_id" not in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "trial" in key_schema
+        assert "session_id" not in key_schema
 
-    def test_multiple_explicit_tag_columns(self, pk_db):
+    def test_multiple_explicit_key_columns(self, pk_db):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(
             pk_db,
             "measurements",
-            tag_columns=["session_id", "trial"],
+            key_columns=["session_id", "trial"],
         )
-        tag_schema, _ = src.output_schema()
-        assert "session_id" in tag_schema
-        assert "trial" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "session_id" in key_schema
+        assert "trial" in key_schema
 
 
 # ===========================================================================
@@ -242,11 +242,11 @@ class TestExplicitTagOverride:
 
 
 class TestRowidFallback:
-    def test_rowid_only_table_uses_rowid_as_tag(self, rowid_db):
+    def test_rowid_only_table_uses_rowid_as_key(self, rowid_db):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(rowid_db, "logs")
-        tag_schema, _ = src.output_schema()
-        assert "rowid" in tag_schema
+        key_schema, _ = src.output_schema()
+        assert "rowid" in key_schema
 
     def test_rowid_is_not_in_data_schema(self, rowid_db):
         from orcapod.core.sources import SQLiteTableSource
@@ -257,15 +257,15 @@ class TestRowidFallback:
     def test_rowid_values_are_positive_integers(self, rowid_db):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(rowid_db, "logs")
-        for tags, _ in src.iter_data():
-            assert isinstance(tags["rowid"], int)
-            assert tags["rowid"] > 0
+        for keys, _ in src.iter_data():
+            assert isinstance(keys["rowid"], int)
+            assert keys["rowid"] > 0
 
     def test_rowid_type_is_int64(self, rowid_db):
         """Verify rowid is actually typed as int64, not large_string."""
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(rowid_db, "logs")
-        # The raw stream table (before tag/data split) holds all columns.
+        # The raw stream table (before key/data split) holds all columns.
         # We can verify the Arrow type via the internal stream table.
         raw = src._stream._table  # ArrowTableStream stores the enriched table
         assert "rowid" in raw.schema.names
@@ -317,11 +317,11 @@ class TestStreamBehaviour:
         data = list(src.iter_data())
         assert len(data) == 3
 
-    def test_iter_data_tags_contain_pk(self, pk_db):
+    def test_iter_data_keys_contain_pk(self, pk_db):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(pk_db, "measurements")
-        for tags, _ in src.iter_data():
-            assert "session_id" in tags
+        for keys, _ in src.iter_data():
+            assert "session_id" in keys
 
     def test_output_schema_returns_two_schemas(self, pk_db):
         from orcapod.core.sources import SQLiteTableSource
@@ -359,11 +359,11 @@ class TestDeterministicHashing:
         src2 = SQLiteTableSource(pk_db, "measurements")
         assert src1.content_hash() == src2.content_hash()
 
-    def test_different_tag_columns_yields_different_pipeline_hash(self, pk_db):
+    def test_different_key_columns_yields_different_pipeline_hash(self, pk_db):
         from orcapod.core.sources import SQLiteTableSource
         src1 = SQLiteTableSource(pk_db, "measurements")
         src2 = SQLiteTableSource(
-            pk_db, "measurements", tag_columns=["trial"]
+            pk_db, "measurements", key_columns=["trial"]
         )
         assert src1.pipeline_hash() != src2.pipeline_hash()
 
@@ -422,10 +422,10 @@ class TestConfigRoundTripPKTable:
         src = SQLiteTableSource(file_db_path, "measurements")
         assert src.to_config()["table_name"] == "measurements"
 
-    def test_to_config_has_tag_columns(self, file_db_path):
+    def test_to_config_has_key_columns(self, file_db_path):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(file_db_path, "measurements")
-        assert "session_id" in src.to_config()["tag_columns"]
+        assert "session_id" in src.to_config()["key_columns"]
 
     def test_to_config_has_identity_fields(self, file_db_path):
         from orcapod.core.sources import SQLiteTableSource
@@ -472,18 +472,18 @@ class TestConfigRoundTripRowidTable:
         conn.close()
         return db_path
 
-    def test_to_config_has_rowid_as_tag_column(self, rowid_file_db_path):
+    def test_to_config_has_rowid_as_key_column(self, rowid_file_db_path):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(rowid_file_db_path, "logs")
-        assert src.to_config()["tag_columns"] == ["rowid"]
+        assert src.to_config()["key_columns"] == ["rowid"]
 
     def test_from_config_reconstructs_rowid_table(self, rowid_file_db_path):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(rowid_file_db_path, "logs")
         config = src.to_config()
         src2 = SQLiteTableSource.from_config(config)
-        tag_schema, _ = src2.output_schema()
-        assert "rowid" in tag_schema
+        key_schema, _ = src2.output_schema()
+        assert "rowid" in key_schema
 
     def test_from_config_rowid_hashes_match(self, rowid_file_db_path):
         from orcapod.core.sources import SQLiteTableSource
@@ -532,12 +532,12 @@ class TestPipelineIntegration:
         assert len(fn_outputs) == 1
         assert len(fn_outputs[0]) == 3
 
-        # Verify tag column (session_id) flows through and results are correct
+        # Verify key column (session_id) flows through and results are correct
         doubled_values = sorted(
             [pkt.as_dict()["doubled"] for _, pkt in fn_outputs[0]]
         )
         assert doubled_values == pytest.approx([0.2, 0.4, 0.6])
 
-        # Verify tag values are present
-        tag_values = sorted([tags["session_id"] for tags, _ in fn_outputs[0]])
-        assert tag_values == ["s1", "s2", "s3"]
+        # Verify key values are present
+        key_values = sorted([keys["session_id"] for keys, _ in fn_outputs[0]])
+        assert key_values == ["s1", "s2", "s3"]

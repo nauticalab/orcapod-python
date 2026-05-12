@@ -654,7 +654,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         # -- Build node descriptors --
         nodes: dict[str, dict[str, Any]] = {}
         for content_hash_str, node in self._persistent_node_map.items():
-            tag_schema, data_schema = node.output_schema()
+            key_schema, data_schema = node.output_schema()
             type_converter = node.data_context.type_converter
 
             descriptor: dict[str, Any] = {
@@ -663,7 +663,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 "content_hash": node.content_hash().to_string(),
                 "pipeline_hash": node.pipeline_hash().to_string(),
                 "output_schema": {
-                    "tag": serialize_schema(tag_schema, type_converter),
+                    "key": serialize_schema(key_schema, type_converter),
                     "data": serialize_schema(data_schema, type_converter),
                 },
             }
@@ -751,7 +751,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             # Remove identity fields — they live in the node descriptor
             source_config = {
                 k: v for k, v in config.items()
-                if k not in ("content_hash", "pipeline_hash", "tag_schema", "data_schema")
+                if k not in ("content_hash", "pipeline_hash", "key_schema", "data_schema")
             }
             reconstructable = stream_type in self._RECONSTRUCTABLE_SOURCE_TYPES
         else:

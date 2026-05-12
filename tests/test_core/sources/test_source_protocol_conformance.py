@@ -43,7 +43,7 @@ def arrow_src():
             "value": pa.array(["a", "b", "c"], type=pa.large_string()),
         }
     )
-    return ArrowTableSource(table=table, tag_columns=["id"], infer_nullable=True)
+    return ArrowTableSource(table=table, key_columns=["id"], infer_nullable=True)
 
 
 @pytest.fixture
@@ -56,7 +56,7 @@ def arrow_src_with_record_id():
     )
     return ArrowTableSource(
         table=table,
-        tag_columns=["id"],
+        key_columns=["id"],
         record_id_column="id",
         source_id="arrow_with_rid",
         infer_nullable=True,
@@ -71,7 +71,7 @@ def dict_src():
             {"id": 2, "value": "b"},
             {"id": 3, "value": "c"},
         ],
-        tag_columns=["id"],
+        key_columns=["id"],
     )
 
 
@@ -83,7 +83,7 @@ def list_src():
 @pytest.fixture
 def df_src():
     df = pl.DataFrame({"id": [1, 2, 3], "value": ["a", "b", "c"]})
-    return DataFrameSource(data=df, tag_columns="id")
+    return DataFrameSource(data=df, key_columns="id")
 
 
 ALL_SOURCE_FIXTURES = ["arrow_src", "dict_src", "list_src", "df_src"]
@@ -141,33 +141,33 @@ class TestSourceOutputSchema:
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_schemas_are_schema_instances(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
-        tag_schema, data_schema = src.output_schema()
-        assert isinstance(tag_schema, Schema)
+        key_schema, data_schema = src.output_schema()
+        assert isinstance(key_schema, Schema)
         assert isinstance(data_schema, Schema)
 
-    def test_arrow_src_tag_schema_has_id(self, arrow_src):
-        tag_schema, _ = arrow_src.output_schema()
-        assert "id" in tag_schema
+    def test_arrow_src_key_schema_has_id(self, arrow_src):
+        key_schema, _ = arrow_src.output_schema()
+        assert "id" in key_schema
 
     def test_arrow_src_data_schema_has_value(self, arrow_src):
         _, data_schema = arrow_src.output_schema()
         assert "value" in data_schema
 
-    def test_dict_src_tag_schema_has_id(self, dict_src):
-        tag_schema, _ = dict_src.output_schema()
-        assert "id" in tag_schema
+    def test_dict_src_key_schema_has_id(self, dict_src):
+        key_schema, _ = dict_src.output_schema()
+        assert "id" in key_schema
 
     def test_list_src_data_schema_has_item(self, list_src):
         _, data_schema = list_src.output_schema()
         assert "item" in data_schema
 
-    def test_list_src_tag_schema_has_element_index(self, list_src):
-        tag_schema, _ = list_src.output_schema()
-        assert "element_index" in tag_schema
+    def test_list_src_key_schema_has_element_index(self, list_src):
+        key_schema, _ = list_src.output_schema()
+        assert "element_index" in key_schema
 
-    def test_df_src_tag_schema_has_id(self, df_src):
-        tag_schema, _ = df_src.output_schema()
-        assert "id" in tag_schema
+    def test_df_src_key_schema_has_id(self, df_src):
+        key_schema, _ = df_src.output_schema()
+        assert "id" in key_schema
 
 
 # ---------------------------------------------------------------------------
@@ -192,29 +192,29 @@ class TestStreamKeys:
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_returns_two_tuples(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
-        tag_keys, data_keys = src.keys()
-        assert isinstance(tag_keys, tuple)
+        key_keys, data_keys = src.keys()
+        assert isinstance(key_keys, tuple)
         assert isinstance(data_keys, tuple)
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_no_overlap_between_tag_and_data_keys(self, src_fixture, request):
+    def test_no_overlap_between_key_and_data_keys(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
-        tag_keys, data_keys = src.keys()
-        assert set(tag_keys).isdisjoint(set(data_keys))
+        key_keys, data_keys = src.keys()
+        assert set(key_keys).isdisjoint(set(data_keys))
 
     def test_arrow_src_keys(self, arrow_src):
-        tag_keys, data_keys = arrow_src.keys()
-        assert "id" in tag_keys
+        key_keys, data_keys = arrow_src.keys()
+        assert "id" in key_keys
         assert "value" in data_keys
 
     def test_list_src_keys(self, list_src):
-        tag_keys, data_keys = list_src.keys()
-        assert "element_index" in tag_keys
+        key_keys, data_keys = list_src.keys()
+        assert "element_index" in key_keys
         assert "item" in data_keys
 
     def test_dict_src_keys(self, dict_src):
-        tag_keys, data_keys = dict_src.keys()
-        assert "id" in tag_keys
+        key_keys, data_keys = dict_src.keys()
+        assert "id" in key_keys
         assert "value" in data_keys
 
 
@@ -224,27 +224,27 @@ class TestStreamOutputSchema:
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_returns_two_schemas(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
-        tag_schema, data_schema = src.output_schema()
-        assert isinstance(tag_schema, Schema)
+        key_schema, data_schema = src.output_schema()
+        assert isinstance(key_schema, Schema)
         assert isinstance(data_schema, Schema)
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_consistent_with_keys(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
-        tag_keys, data_keys = src.keys()
-        tag_schema, data_schema = src.output_schema()
-        assert set(tag_keys) == set(tag_schema.keys())
+        key_keys, data_keys = src.keys()
+        key_schema, data_schema = src.output_schema()
+        assert set(key_keys) == set(key_schema.keys())
         assert set(data_keys) == set(data_schema.keys())
 
 
 class TestStreamIterDatas:
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_yields_tag_data_pairs(self, src_fixture, request):
+    def test_yields_key_data_pairs(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
         pairs = list(src.iter_data())
         assert len(pairs) > 0
-        for tag, data in pairs:
-            assert tag is not None
+        for key, data in pairs:
+            assert key is not None
             assert data is not None
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
@@ -257,9 +257,9 @@ class TestStreamIterDatas:
         values = {pkt["value"] for pkt in data}
         assert values == {"a", "b", "c"}
 
-    def test_arrow_src_tag_values(self, arrow_src):
-        tags = [tag for tag, _ in arrow_src.iter_data()]
-        ids = {tag["id"] for tag in tags}
+    def test_arrow_src_key_values(self, arrow_src):
+        keys = [key for key, _ in arrow_src.iter_data()]
+        ids = {key["id"] for key in keys}
         assert ids == {1, 2, 3}
 
     def test_list_src_data_values(self, list_src):
@@ -267,7 +267,7 @@ class TestStreamIterDatas:
         items = {pkt["item"] for pkt in data}
         assert items == {"x", "y", "z"}
 
-    def test_dict_src_tag_and_data_values(self, dict_src):
+    def test_dict_src_key_and_data_values(self, dict_src):
         pairs = list(dict_src.iter_data())
         assert len(pairs) == 3
         values = {pkt["value"] for _, pkt in pairs}
@@ -302,7 +302,7 @@ class TestStreamAsTable:
     def test_default_no_system_columns(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
         table = src.as_table()
-        assert not any(c.startswith("_tag_") for c in table.column_names)
+        assert not any(c.startswith("_key_") for c in table.column_names)
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_all_info_adds_source_columns(self, src_fixture, request):
@@ -409,56 +409,56 @@ class TestPipelineHash:
 
 
 class TestEdgeCases:
-    def test_arrow_source_no_tag_columns(self):
-        """A source with no tag columns is valid; all columns are data columns."""
+    def test_arrow_source_no_key_columns(self):
+        """A source with no key columns is valid; all columns are data columns."""
         table = pa.table({"a": pa.array([1, 2], type=pa.int64())})
         src = ArrowTableSource(table=table, infer_nullable=True)
-        tag_keys, data_keys = src.keys()
+        key_keys, data_keys = src.keys()
         assert "a" in data_keys
-        assert tag_keys == ()
+        assert key_keys == ()
 
-    def test_dict_source_multiple_tag_columns(self):
+    def test_dict_source_multiple_key_columns(self):
         data = [
             {"a": 1, "b": 2, "val": "x"},
             {"a": 3, "b": 4, "val": "y"},
         ]
-        src = DictSource(data=data, tag_columns=["a", "b"])
-        tag_keys, data_keys = src.keys()
-        assert set(tag_keys) == {"a", "b"}
+        src = DictSource(data=data, key_columns=["a", "b"])
+        key_keys, data_keys = src.keys()
+        assert set(key_keys) == {"a", "b"}
         assert "val" in data_keys
 
-    def test_list_source_custom_tag_function(self):
-        def tag_fn(element, idx):
+    def test_list_source_custom_key_function(self):
+        def key_fn(element, idx):
             return {"label": f"item_{idx}"}
 
         src = ListSource(
             name="val",
             data=[10, 20, 30],
-            tag_function=tag_fn,
-            expected_tag_keys=["label"],
+            key_function=key_fn,
+            expected_key_keys=["label"],
         )
-        tag_keys, data_keys = src.keys()
-        assert "label" in tag_keys
+        key_keys, data_keys = src.keys()
+        assert "label" in key_keys
         assert "val" in data_keys
         pairs = list(src.iter_data())
-        labels = {tag["label"] for tag, _ in pairs}
+        labels = {key["label"] for key, _ in pairs}
         assert labels == {"item_0", "item_1", "item_2"}
 
-    def test_df_source_missing_tag_column_raises(self):
+    def test_df_source_missing_key_column_raises(self):
         df = pl.DataFrame({"x": [1, 2, 3]})
         with pytest.raises(ValueError, match="not found"):
-            DataFrameSource(data=df, tag_columns="nonexistent")
+            DataFrameSource(data=df, key_columns="nonexistent")
 
     def test_arrow_source_strips_system_columns_from_input(self):
         """System columns in the input table are silently dropped."""
         table = pa.table(
             {
                 "x": pa.array([1, 2], type=pa.int64()),
-                "_tag_something": pa.array(["a", "b"], type=pa.large_string()),
+                "_key_something": pa.array(["a", "b"], type=pa.large_string()),
             }
         )
         src = ArrowTableSource(table=table, infer_nullable=True)
         # system columns should not appear in data keys
-        tag_keys, data_keys = src.keys()
-        assert "_tag_something" not in tag_keys
-        assert "_tag_something" not in data_keys
+        key_keys, data_keys = src.keys()
+        assert "_key_something" not in key_keys
+        assert "_key_something" not in data_keys

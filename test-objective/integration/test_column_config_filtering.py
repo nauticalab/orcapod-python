@@ -1,7 +1,7 @@
 """Specification-derived integration tests for ColumnConfig filtering across components.
 
 Tests that ColumnConfig consistently controls column visibility across
-Datagram, Tag, Data, Stream, and Source components.
+Datagram, Key, Data, Stream, and Source components.
 """
 
 from __future__ import annotations
@@ -10,14 +10,14 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.datagrams.datagram import Datagram
-from orcapod.core.datagrams.tag_data import Data, Tag
+from orcapod.core.datagrams.key_data import Data, Key
 from orcapod.core.sources import ArrowTableSource
 from orcapod.core.streams import ArrowTableStream
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig
 
-# Use the actual system tag prefix from constants
-_SYS_TAG_KEY = f"{constants.SYSTEM_TAG_PREFIX}source:abc"
+# Use the actual system key prefix from constants
+_SYS_TAG_KEY = f"{constants.SYSTEM_KEY_PREFIX}source:abc"
 
 
 # ===================================================================
@@ -62,35 +62,35 @@ class TestDatagramColumnConfig:
 
 
 # ===================================================================
-# Tag ColumnConfig
+# Key ColumnConfig
 # ===================================================================
 
 
-class TestTagColumnConfig:
-    """Per design, system_tags=True includes _tag_ columns in Tag."""
+class TestKeyColumnConfig:
+    """Per design, system_keys=True includes _key_ columns in Key."""
 
-    def test_system_tags_excluded_by_default(self):
-        t = Tag(
+    def test_system_keys_excluded_by_default(self):
+        t = Key(
             {"id": 1},
-            system_tags={_SYS_TAG_KEY: "rec1"},
+            system_keys={_SYS_TAG_KEY: "rec1"},
         )
         keys = t.keys()
         assert _SYS_TAG_KEY not in keys
 
-    def test_system_tags_included_with_config(self):
-        t = Tag(
+    def test_system_keys_included_with_config(self):
+        t = Key(
             {"id": 1},
-            system_tags={_SYS_TAG_KEY: "rec1"},
+            system_keys={_SYS_TAG_KEY: "rec1"},
         )
         keys_default = t.keys()
-        keys_with_tags = t.keys(columns=ColumnConfig(system_tags=True))
-        assert len(keys_with_tags) > len(keys_default)
-        assert _SYS_TAG_KEY in keys_with_tags
+        keys_with_keys = t.keys(columns=ColumnConfig(system_keys=True))
+        assert len(keys_with_keys) > len(keys_default)
+        assert _SYS_TAG_KEY in keys_with_keys
 
-    def test_all_info_includes_system_tags(self):
-        t = Tag(
+    def test_all_info_includes_system_keys(self):
+        t = Key(
             {"id": 1},
-            system_tags={_SYS_TAG_KEY: "rec1"},
+            system_keys={_SYS_TAG_KEY: "rec1"},
         )
         keys = t.keys(all_info=True)
         assert _SYS_TAG_KEY in keys
@@ -149,19 +149,19 @@ class TestStreamColumnConfigConsistency:
                     "value": pa.array([10, 20], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
-        tag_keys, data_keys = source.keys()
-        tag_schema, data_schema = source.output_schema()
+        key_keys, data_keys = source.keys()
+        key_schema, data_schema = source.output_schema()
         table = source.as_table()
 
         # keys and schema should have same field names
-        assert set(tag_keys) == set(tag_schema.keys())
+        assert set(key_keys) == set(key_schema.keys())
         assert set(data_keys) == set(data_schema.keys())
 
         # Table should have all key columns
-        all_keys = set(tag_keys) | set(data_keys)
+        all_keys = set(key_keys) | set(data_keys)
         assert all_keys.issubset(set(table.column_names))
 
     def test_keys_schema_table_consistency_all_info(self):
@@ -172,17 +172,17 @@ class TestStreamColumnConfigConsistency:
                     "value": pa.array([10, 20], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
-        tag_keys, data_keys = source.keys(all_info=True)
-        tag_schema, data_schema = source.output_schema(all_info=True)
+        key_keys, data_keys = source.keys(all_info=True)
+        key_schema, data_schema = source.output_schema(all_info=True)
         table = source.as_table(all_info=True)
 
-        assert set(tag_keys) == set(tag_schema.keys())
+        assert set(key_keys) == set(key_schema.keys())
         assert set(data_keys) == set(data_schema.keys())
 
-        all_keys = set(tag_keys) | set(data_keys)
+        all_keys = set(key_keys) | set(data_keys)
         assert all_keys.issubset(set(table.column_names))
 
     def test_all_info_has_more_columns_than_default(self):
@@ -193,7 +193,7 @@ class TestStreamColumnConfigConsistency:
                     "value": pa.array([10, 20], type=pa.int64()),
                 }
             ),
-            tag_columns=["id"],
+            key_columns=["id"],
             infer_nullable=True,
         )
         default_table = source.as_table()

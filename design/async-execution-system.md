@@ -41,11 +41,11 @@ Every pipeline node — source, operator, or function pod — implements a singl
 class AsyncExecutableProtocol(Protocol):
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[KeyProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[KeyProtocol, DataProtocol]],
     ) -> None:
         """
-        Consume (tag, data) pairs from input channels, produce to output channel.
+        Consume (key, data) pairs from input channels, produce to output channel.
         MUST close output channel when done (signals completion to downstream).
         """
         ...
@@ -128,31 +128,31 @@ in **when** the node reads, **how much** it buffers, and **when** it emits.
 
 ### 1. Streaming (Row-by-Row)
 
-**Applies to:** Filter, MapTags, MapData, Select/Drop columns, FunctionPod
+**Applies to:** Filter, MapKeys, MapData, Select/Drop columns, FunctionPod
 
 Zero buffering. Each input row is independently transformed and emitted immediately.
 
 ```python
 # Example: PolarsFilter
 async def async_execute(self, inputs, output):
-    async for tag, data in inputs[0]:
-        if self._evaluate_predicate(tag, data):
-            await output.send((tag, data))
+    async for key, data in inputs[0]:
+        if self._evaluate_predicate(key, data):
+            await output.send((key, data))
     await output.close()
 
 # Example: FunctionPod with concurrency control
 async def async_execute(self, inputs, output):
     sem = asyncio.Semaphore(self.node_config.max_concurrency or _INF)
 
-    async def process_one(tag, data):
+    async def process_one(key, data):
         async with sem:
             result = await self.data_function.async_call(data)
             if result is not None:
-                await output.send((tag, result))
+                await output.send((key, result))
 
     async with asyncio.TaskGroup() as tg:
-        async for tag, data in inputs[0]:
-            tg.create_task(process_one(tag, data))
+        async for key, data in inputs[0]:
+            tg.create_task(process_one(key, data))
 
     await output.close()
 ```
@@ -169,14 +169,14 @@ async def async_execute(self, inputs, output):
     indexes: list[dict[JoinKey, list[Row]]] = [{} for _ in inputs]
 
     async def consume(i: int, channel):
-        async for tag, data in channel:
-            key = self._extract_join_key(tag)
-            indexes[i].setdefault(key, []).append((tag, data))
+        async for key, data in channel:
+            key = self._extract_join_key(key)
+            indexes[i].setdefault(key, []).append((key, data))
 
             # Probe all OTHER indexes for matches
             other_lists = [indexes[j].get(key, []) for j in range(len(inputs)) if j != i]
             for combo in itertools.product(*other_lists):
-                joined = self._merge_rows((tag, data), *combo)
+                joined = self._merge_rows((key, data), *combo)
                 await output.send(joined)
 
     async with asyncio.TaskGroup() as tg:
@@ -194,15 +194,15 @@ async def async_execute(self, inputs, output):
 
     # Phase 1: Build right-side index
     right_keys = set()
-    async for tag, data in right:
-        key = self._extract_join_key(tag)
+    async for key, data in right:
+        key = self._extract_join_key(key)
         right_keys.add(key)
 
     # Phase 2: Stream left, emit matches
-    async for tag, data in left:
-        key = self._extract_join_key(tag)
+    async for key, data in left:
+        key = self._extract_join_key(key)
         if key in right_keys:
-            await output.send((tag, data))
+            await output.send((key, data))
 
     await output.close()
 ```
@@ -224,8 +224,8 @@ async def async_execute(self, inputs, output):
     result_stream = self.static_process(*streams)
 
     # Phase 3: Emit results asynchronously
-    for tag, data in result_stream.iter_data():
-        await output.send((tag, data))
+    for key, data in result_stream.iter_data():
+        await output.send((key, data))
 
     await output.close()
 ```
@@ -249,8 +249,8 @@ class UnaryOperator(StaticOutputPod):
         rows = await inputs[0].collect()
         stream = self._materialize_to_stream(rows)
         result = self.static_process(stream)
-        for tag, data in result.iter_data():
-            await output.send((tag, data))
+        for key, data in result.iter_data():
+            await output.send((key, data))
         await output.close()
 
 
@@ -262,8 +262,8 @@ class BinaryOperator(StaticOutputPod):
         left_stream = self._materialize_to_stream(left_rows)
         right_stream = self._materialize_to_stream(right_rows)
         result = self.static_process(left_stream, right_stream)
-        for tag, data in result.iter_data():
-            await output.send((tag, data))
+        for key, data in result.iter_data():
+            await output.send((key, data))
         await output.close()
 
 
@@ -272,8 +272,8 @@ class NonZeroInputOperator(StaticOutputPod):
         all_rows = await asyncio.gather(*(ch.collect() for ch in inputs))
         streams = [self._materialize_to_stream(rows) for rows in all_rows]
         result = self.static_process(*streams)
-        for tag, data in result.iter_data():
-            await output.send((tag, data))
+        for key, data in result.iter_data():
+            await output.send((key, data))
         await output.close()
 ```
 
@@ -290,15 +290,15 @@ class FunctionPod:
     async def async_execute(self, inputs, output):
         sem = asyncio.Semaphore(self.node_config.max_concurrency or _INF)
 
-        async def process_one(tag, data):
+        async def process_one(key, data):
             async with sem:
                 result_data = await self.data_function.async_call(data)
                 if result_data is not None:
-                    await output.send((tag, result_data))
+                    await output.send((key, result_data))
 
         async with asyncio.TaskGroup() as tg:
-            async for tag, data in inputs[0]:
-                tg.create_task(process_one(tag, data))
+            async for key, data in inputs[0]:
+                tg.create_task(process_one(key, data))
 
         await output.close()
 ```
@@ -311,22 +311,22 @@ class FunctionNode:
     async def async_execute(self, inputs, output):
         sem = asyncio.Semaphore(self.node_config.max_concurrency or _INF)
 
-        async def process_one(tag, data):
+        async def process_one(key, data):
             cache_key = self._compute_cache_key(data)
             cached = await self._db_lookup(cache_key)
             if cached is not None:
-                await output.send((tag, cached))
+                await output.send((key, cached))
                 return
 
             async with sem:
                 result = await self.data_function.async_call(data)
                 await self._db_store(cache_key, result)
                 if result is not None:
-                    await output.send((tag, result))
+                    await output.send((key, result))
 
         async with asyncio.TaskGroup() as tg:
-            async for tag, data in inputs[0]:
-                tg.create_task(process_one(tag, data))
+            async for key, data in inputs[0]:
+                tg.create_task(process_one(key, data))
 
         await output.close()
 ```
@@ -429,8 +429,8 @@ Sources have no input channels — they just push their data onto the output cha
 class SourceNode:
     async def async_execute(self, inputs, output):
         # inputs is empty for sources
-        for tag, data in self.stream.iter_data():
-            await output.send((tag, data))
+        for key, data in self.stream.iter_data():
+            await output.send((key, data))
         await output.close()
 ```
 
@@ -447,9 +447,9 @@ while allowing each consumer to read at its own pace.
 | Operator | Default Strategy | Async Override? |
 |---|---|---|
 | PolarsFilter | Barrier (inherited) | **Streaming** — evaluate predicate per row |
-| MapTags / MapData | Barrier (inherited) | **Streaming** — rename per row |
-| SelectTagColumns / SelectDataColumns | Barrier (inherited) | **Streaming** — project per row |
-| DropTagColumns / DropDataColumns | Barrier (inherited) | **Streaming** — project per row |
+| MapKeys / MapData | Barrier (inherited) | **Streaming** — rename per row |
+| SelectKeyColumns / SelectDataColumns | Barrier (inherited) | **Streaming** — project per row |
+| DropKeyColumns / DropDataColumns | Barrier (inherited) | **Streaming** — project per row |
 | FunctionPod | N/A (new) | **Streaming** — transform data per row |
 | FunctionNode | N/A (new) | **Streaming** — cache check + transform per row |
 | Join | Barrier (inherited) | **Incremental** — symmetric hash join |
@@ -503,7 +503,7 @@ Streaming and incremental strategies may change row ordering compared to synchro
   from upstream. The result set is identical but row order may differ.
 - **Barrier**: row order matches synchronous mode exactly.
 
-The `sort_by_tags` option in `ColumnConfig` provides deterministic ordering when needed,
+The `sort_by_keys` option in `ColumnConfig` provides deterministic ordering when needed,
 independent of execution strategy.
 
 ---

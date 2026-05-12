@@ -32,7 +32,7 @@ def _make_source(n: int = 3) -> ArrowTableSource:
             ]
         ),
     )
-    return ArrowTableSource(table, tag_columns=["id"])
+    return ArrowTableSource(table, key_columns=["id"])
 
 
 def _make_node(n: int = 3, db: InMemoryArrowDatabase | None = None) -> FunctionNode:
@@ -154,7 +154,7 @@ class TestIterDatasReadOnly:
         from orcapod.pipeline.observer import NoOpObserver
 
         class CapturingObserver(NoOpObserver):
-            def on_data_crash(self, node_label, tag, data, exc):
+            def on_data_crash(self, node_label, key, data, exc):
                 errors.append(exc)
 
         results = node.execute(node._input_stream, observer=CapturingObserver(), error_policy="continue")
