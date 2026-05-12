@@ -1,7 +1,7 @@
 """Specification-derived tests for FunctionPod and FunctionPodStream.
 
 Tests based on FunctionPodProtocol and documented behaviors:
-- FunctionPod wraps a PacketFunction for per-packet transformation
+- FunctionPod wraps a DataFunction for per-data transformation
 - Never inspects or modifies tags
 - Exactly one input stream
 - output_schema() prediction matches actual output
@@ -12,9 +12,9 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from orcapod.core.datagrams.tag_packet import Packet, Tag
+from orcapod.core.datagrams.tag_data import Data, Tag
 from orcapod.core.function_pod import FunctionPod, FunctionPodStream, function_pod
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
@@ -65,30 +65,30 @@ class TestFunctionPodProcess:
     returns a FunctionPodStream."""
 
     def test_process_returns_function_pod_stream(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         result = pod.process(stream)
         assert isinstance(result, FunctionPodStream)
 
     def test_callable_alias(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         result = pod(stream)
         assert isinstance(result, FunctionPodStream)
 
     def test_validate_inputs_rejects_multiple_streams(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         s1 = _make_stream()
         s2 = _make_stream()
         with pytest.raises(Exception):
             pod.validate_inputs(s1, s2)
 
     def test_validate_inputs_accepts_single_stream(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         pod.validate_inputs(stream)  # Should not raise
 
@@ -97,13 +97,13 @@ class TestFunctionPodTagInvariant:
     """Per the strict boundary: function pods NEVER inspect or modify tags."""
 
     def test_tags_pass_through_unchanged(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         result = pod.process(stream)
 
-        input_tags = [tag for tag, _ in stream.iter_packets()]
-        output_tags = [tag for tag, _ in result.iter_packets()]
+        input_tags = [tag for tag, _ in stream.iter_data()]
+        output_tags = [tag for tag, _ in result.iter_data()]
 
         for in_tag, out_tag in zip(input_tags, output_tags):
             # Tag data columns should be identical
@@ -111,32 +111,32 @@ class TestFunctionPodTagInvariant:
             for key in in_tag.keys():
                 assert in_tag[key] == out_tag[key]
 
-    def test_packets_are_transformed(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+    def test_data_are_transformed(self):
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         result = pod.process(stream)
 
-        for tag, packet in result.iter_packets():
-            assert "result" in packet.keys()
+        for tag, data in result.iter_data():
+            assert "result" in data.keys()
 
 
 class TestFunctionPodOutputSchema:
     """Per PodProtocol, output_schema() must match the actual output."""
 
     def test_output_schema_matches_actual(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
 
-        predicted_tag_schema, predicted_packet_schema = pod.output_schema(stream)
+        predicted_tag_schema, predicted_data_schema = pod.output_schema(stream)
         result = pod.process(stream)
-        actual_tag_schema, actual_packet_schema = result.output_schema()
+        actual_tag_schema, actual_data_schema = result.output_schema()
 
         # Tag schemas should match
         assert set(predicted_tag_schema.keys()) == set(actual_tag_schema.keys())
-        # Packet schemas should match
-        assert set(predicted_packet_schema.keys()) == set(actual_packet_schema.keys())
+        # Data schemas should match
+        assert set(predicted_data_schema.keys()) == set(actual_data_schema.keys())
 
 
 # ---------------------------------------------------------------------------
@@ -148,57 +148,57 @@ class TestFunctionPodStream:
     """Per design, FunctionPodStream is lazy — computation happens on iteration."""
 
     def test_producer_is_function_pod(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         result = pod.process(stream)
         assert result.producer is pod
 
     def test_upstreams_contains_input_stream(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         result = pod.process(stream)
         assert stream in result.upstreams
 
     def test_keys_matches_output_schema(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         result = pod.process(stream)
-        tag_keys, packet_keys = result.keys()
-        tag_schema, packet_schema = result.output_schema()
+        tag_keys, data_keys = result.keys()
+        tag_schema, data_schema = result.output_schema()
         assert set(tag_keys) == set(tag_schema.keys())
-        assert set(packet_keys) == set(packet_schema.keys())
+        assert set(data_keys) == set(data_schema.keys())
 
     def test_as_table_materialization(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream(3)
         result = pod.process(stream)
         table = result.as_table()
         assert isinstance(table, pa.Table)
         assert table.num_rows == 3
 
-    def test_iter_packets_yields_correct_count(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+    def test_iter_data_yields_correct_count(self):
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream(5)
         result = pod.process(stream)
-        packets = list(result.iter_packets())
-        assert len(packets) == 5
+        data = list(result.iter_data())
+        assert len(data) == 5
 
     def test_clear_cache_forces_recompute(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         result = pod.process(stream)
         # Materialize
-        list(result.iter_packets())
+        list(result.iter_data())
         # Clear and re-iterate
         result.clear_cache()
-        packets = list(result.iter_packets())
-        assert len(packets) == 3
+        data = list(result.iter_data())
+        assert len(data) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -225,5 +225,5 @@ class TestFunctionPodDecorator:
         # The pod can process streams
         stream = _make_stream()
         result = my_double.pod.process(stream)
-        packets = list(result.iter_packets())
-        assert len(packets) == 3
+        data = list(result.iter_data())
+        assert len(data) == 3

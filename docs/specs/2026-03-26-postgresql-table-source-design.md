@@ -98,7 +98,7 @@ PostgreSQLTableSource.__init__(dsn, table_name)
   → [finally] try: connector.close() except Exception: pass
 ```
 
-After construction the source holds all data in-memory as an `ArrowTableStream`. The PostgreSQL connection is fully released; subsequent `iter_packets()` / `as_table()` calls read from memory.
+After construction the source holds all data in-memory as an `ArrowTableStream`. The PostgreSQL connection is fully released; subsequent `iter_data()` / `as_table()` calls read from memory.
 
 ---
 
@@ -118,7 +118,7 @@ After construction the source holds all data in-memory as an `ArrowTableStream`.
     "content_hash": ...,
     "pipeline_hash": ...,
     "tag_schema": {...},
-    "packet_schema": {...},
+    "data_schema": {...},
 }
 ```
 
@@ -191,7 +191,7 @@ Uses `unittest.mock.patch("psycopg.connect")` throughout, with mock cursors retu
 4. Explicit `tag_columns` override
 5. No-PK table raises `ValueError`
 6. Missing / empty table raises `ValueError`
-7. Stream behaviour (`iter_packets`, `output_schema`, `as_table`, `producer`, `upstreams`)
+7. Stream behaviour (`iter_data`, `output_schema`, `as_table`, `producer`, `upstreams`)
 8. Deterministic hashing (`pipeline_hash`, `content_hash`)
 9. `to_config` shape — has `source_type`, `dsn`, `table_name`, `tag_columns`, `source_id`, `content_hash`, `pipeline_hash`; does **not** have `connector` key or `label` key
 10. `from_config` round-trip (reconstructs with matching hashes)
@@ -203,10 +203,10 @@ Uses `unittest.mock.patch("psycopg.connect")` throughout, with mock cursors retu
 **Marker:** `@pytest.mark.postgres`
 **Fixture:** per-test schema isolation (reuse pattern from `test_postgresql_connector_integration.py`)
 
-- Single-PK table: source yields correct packets, tag column in tag schema
+- Single-PK table: source yields correct data, tag column in tag schema
 - Composite-PK table: both PK columns in tag schema
 - Explicit `tag_columns` override: overrides PKs correctly
-- Pipeline integration: `PostgreSQLTableSource` drives a full pipeline end-to-end, tag values and packet values are correct
+- Pipeline integration: `PostgreSQLTableSource` drives a full pipeline end-to-end, tag values and data values are correct
 
 ---
 

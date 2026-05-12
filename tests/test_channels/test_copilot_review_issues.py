@@ -21,10 +21,10 @@ import pyarrow as pa
 import pytest
 
 from orcapod.channels import Channel
-from orcapod.core.datagrams import Packet
+from orcapod.core.datagrams import Data
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.types import NodeConfig, PipelineConfig, resolve_concurrency
@@ -47,8 +47,8 @@ def make_stream(n: int = 5) -> ArrowTableStream:
 
 
 async def feed_stream_to_channel(stream: ArrowTableStream, ch: Channel) -> None:
-    for tag, packet in stream.iter_packets():
-        await ch.writer.send((tag, packet))
+    for tag, data in stream.iter_data():
+        await ch.writer.send((tag, data))
     await ch.writer.close()
 
 
@@ -81,7 +81,7 @@ class TestDeterministicConcurrencyTracking:
                 current -= 1
             return x * 2
 
-        pf = PythonPacketFunction(tracked_double, output_keys="result")
+        pf = PythonDataFunction(tracked_double, output_keys="result")
         pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=5))
         db = InMemoryArrowDatabase()
         stream = make_stream(5)
@@ -124,7 +124,7 @@ class TestThreadPoolExecutorReuse:
         async def simple_add(x: int, y: int) -> int:
             return x + y
 
-        pf = PythonPacketFunction(simple_add, output_keys="result")
+        pf = PythonDataFunction(simple_add, output_keys="result")
 
         creation_count = 0
         original_init = None
@@ -144,7 +144,7 @@ class TestThreadPoolExecutorReuse:
             nonlocal creation_count
             with patch.object(ThreadPoolExecutor, "__init__", counting_init):
                 for _ in range(3):
-                    _result = pf.direct_call(Packet({"x": 1, "y": 2}))
+                    _result = pf.direct_call(Data({"x": 1, "y": 2}))
 
         asyncio.run(run_in_loop())
         # Current code creates a new executor per call, so creation_count == 3.
@@ -164,7 +164,7 @@ class TestCoroutineConstructedInExecutorThread:
     """Copilot comment: coroutine is created in the caller thread but passed
     to another thread — risks unawaited coroutine warnings if submission fails.
 
-    The current code does ``coro = self._function(**packet.as_dict())`` in the
+    The current code does ``coro = self._function(**data.as_dict())`` in the
     caller thread, then passes the already-created coroutine to a
     ThreadPoolExecutor. If submission fails, the coroutine is never awaited,
     triggering a RuntimeWarning.
@@ -191,7 +191,7 @@ class TestCoroutineConstructedInExecutorThread:
             execution_threads.append(threading.current_thread().name)
             return x * 2
 
-        pf = PythonPacketFunction(tracking_func, output_keys="result")
+        pf = PythonDataFunction(tracking_func, output_keys="result")
 
         # Intercept _call_async_function_sync to verify it does NOT call
         # self._function before submitting to the executor.
@@ -200,7 +200,7 @@ class TestCoroutineConstructedInExecutorThread:
         coroutine_created_in_caller = False
         original_method = pf._call_async_function_sync
 
-        def instrumented_call(packet):
+        def instrumented_call(data):
             nonlocal coroutine_created_in_caller
             # Read the source to check if coro is created before submit
             import inspect as _inspect
@@ -209,13 +209,13 @@ class TestCoroutineConstructedInExecutorThread:
             # The buggy pattern assigns coro before the try block
             if "coro = self._function(" in source:
                 coroutine_created_in_caller = True
-            return original_method(packet)
+            return original_method(data)
 
         pf._call_async_function_sync = instrumented_call
 
         # Run inside an event loop to trigger the ThreadPoolExecutor path
         async def run_in_loop():
-            _result = pf.direct_call(Packet({"x": 5}))
+            _result = pf.direct_call(Data({"x": 5}))
 
         asyncio.run(run_in_loop())
 
@@ -273,7 +273,7 @@ class TestSemaphoreZeroDeadlock:
         async def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result")
+        pf = PythonDataFunction(double, output_keys="result")
         pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=0))
         stream = make_stream(1)
         node = FunctionNode(pod, stream)

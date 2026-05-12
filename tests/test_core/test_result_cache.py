@@ -2,7 +2,7 @@
 
 Covers:
 - Lookup: cache miss, cache hit, conflict resolution (most recent wins)
-- Store: variation/execution columns, input packet hash, timestamp
+- Store: variation/execution columns, input data hash, timestamp
 - additional_constraints for narrowing match
 - auto_flush behavior
 - get_all_records
@@ -15,8 +15,8 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
-from orcapod.core.datagrams import Datagram, Packet
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.datagrams import Datagram, Data
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.result_cache import ResultCache
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.system_constants import constants
@@ -31,8 +31,8 @@ def double(x: int) -> int:
     return x * 2
 
 
-def _make_pf() -> PythonPacketFunction:
-    return PythonPacketFunction(double, output_keys="result")
+def _make_pf() -> PythonDataFunction:
+    return PythonDataFunction(double, output_keys="result")
 
 
 def _make_cache(
@@ -45,10 +45,10 @@ def _make_cache(
 
 
 def _compute_and_store(
-    cache: ResultCache, pf: PythonPacketFunction, input_packet: Packet
+    cache: ResultCache, pf: PythonDataFunction, input_data: Data
 ):
     """Helper: compute output and store in cache."""
-    output = pf.direct_call(input_packet)
+    output = pf.direct_call(input_data)
     assert output is not None
     variation_datagram = Datagram(
         pf.get_function_variation_data(),
@@ -61,7 +61,7 @@ def _compute_and_store(
         data_context=pf.data_context,
     )
     cache.store(
-        input_packet,
+        input_data,
         output,
         variation_datagram=variation_datagram,
         execution_datagram=execution_datagram,
@@ -77,21 +77,21 @@ def _compute_and_store(
 class TestLookupMiss:
     def test_empty_db_returns_none(self):
         cache, _ = _make_cache()
-        packet = Packet({"x": 10})
-        assert cache.lookup(packet) is None
+        data = Data({"x": 10})
+        assert cache.lookup(data) is None
 
-    def test_different_packet_returns_none(self):
+    def test_different_data_returns_none(self):
         cache, _ = _make_cache()
         pf = _make_pf()
-        _compute_and_store(cache, pf, Packet({"x": 10}))
-        assert cache.lookup(Packet({"x": 99})) is None
+        _compute_and_store(cache, pf, Data({"x": 10}))
+        assert cache.lookup(Data({"x": 99})) is None
 
 
 class TestLookupHit:
     def test_returns_cached_result(self):
         cache, _ = _make_cache()
         pf = _make_pf()
-        input_pkt = Packet({"x": 10})
+        input_pkt = Data({"x": 10})
         _compute_and_store(cache, pf, input_pkt)
 
         cached = cache.lookup(input_pkt)
@@ -101,19 +101,19 @@ class TestLookupHit:
     def test_sets_computed_flag_false(self):
         cache, _ = _make_cache()
         pf = _make_pf()
-        input_pkt = Packet({"x": 10})
+        input_pkt = Data({"x": 10})
         _compute_and_store(cache, pf, input_pkt)
 
         cached = cache.lookup(input_pkt)
         assert cached is not None
         assert cached.get_meta_value(ResultCache.RESULT_COMPUTED_FLAG) is False
 
-    def test_same_packet_different_record_path_is_miss(self):
+    def test_same_data_different_record_path_is_miss(self):
         db = InMemoryArrowDatabase()
         cache_a = ResultCache(result_database=db, record_path=("path_a",))
         cache_b = ResultCache(result_database=db, record_path=("path_b",))
         pf = _make_pf()
-        input_pkt = Packet({"x": 10})
+        input_pkt = Data({"x": 10})
 
         output = pf.direct_call(input_pkt)
         variation_datagram = Datagram(
@@ -138,7 +138,7 @@ class TestConflictResolution:
 
         cache, _ = _make_cache()
         pf = _make_pf()
-        input_pkt = Packet({"x": 10})
+        input_pkt = Data({"x": 10})
 
         # Store first result
         _compute_and_store(cache, pf, input_pkt)
@@ -178,7 +178,7 @@ class TestAdditionalConstraints:
     def test_narrower_match_filters_results(self):
         cache, _ = _make_cache()
         pf = _make_pf()
-        input_pkt = Packet({"x": 10})
+        input_pkt = Data({"x": 10})
         _compute_and_store(cache, pf, input_pkt)
 
         # Lookup with a constraint that doesn't match any stored column value
@@ -193,7 +193,7 @@ class TestAdditionalConstraints:
     def test_matching_constraint_returns_result(self):
         cache, _ = _make_cache()
         pf = _make_pf()
-        input_pkt = Packet({"x": 10})
+        input_pkt = Data({"x": 10})
         _compute_and_store(cache, pf, input_pkt)
 
         # Lookup with a constraint that matches
@@ -213,20 +213,20 @@ class TestAdditionalConstraints:
 
 
 class TestStore:
-    def test_stores_input_packet_hash_column(self):
+    def test_stores_input_data_hash_column(self):
         cache, db = _make_cache()
         pf = _make_pf()
-        input_pkt = Packet({"x": 10})
+        input_pkt = Data({"x": 10})
         _compute_and_store(cache, pf, input_pkt)
 
         records = db.get_all_records(cache.record_path)
         assert records is not None
-        assert constants.INPUT_PACKET_HASH_COL in records.column_names
+        assert constants.INPUT_DATA_HASH_COL in records.column_names
 
     def test_stores_variation_columns(self):
         cache, db = _make_cache()
         pf = _make_pf()
-        _compute_and_store(cache, pf, Packet({"x": 10}))
+        _compute_and_store(cache, pf, Data({"x": 10}))
 
         records = db.get_all_records(cache.record_path)
         assert records is not None
@@ -240,7 +240,7 @@ class TestStore:
     def test_stores_execution_columns(self):
         cache, db = _make_cache()
         pf = _make_pf()
-        _compute_and_store(cache, pf, Packet({"x": 10}))
+        _compute_and_store(cache, pf, Data({"x": 10}))
 
         records = db.get_all_records(cache.record_path)
         assert records is not None
@@ -254,7 +254,7 @@ class TestStore:
     def test_stores_timestamp(self):
         cache, db = _make_cache()
         pf = _make_pf()
-        _compute_and_store(cache, pf, Packet({"x": 10}))
+        _compute_and_store(cache, pf, Data({"x": 10}))
 
         records = db.get_all_records(cache.record_path)
         assert records is not None
@@ -263,7 +263,7 @@ class TestStore:
     def test_stores_output_data(self):
         cache, db = _make_cache()
         pf = _make_pf()
-        _compute_and_store(cache, pf, Packet({"x": 10}))
+        _compute_and_store(cache, pf, Data({"x": 10}))
 
         records = db.get_all_records(cache.record_path)
         assert records is not None
@@ -305,8 +305,8 @@ class TestGetAllRecords:
     def test_returns_stored_records(self):
         cache, _ = _make_cache()
         pf = _make_pf()
-        _compute_and_store(cache, pf, Packet({"x": 10}))
-        _compute_and_store(cache, pf, Packet({"x": 20}))
+        _compute_and_store(cache, pf, Data({"x": 10}))
+        _compute_and_store(cache, pf, Data({"x": 20}))
 
         records = cache.get_all_records()
         assert records is not None
@@ -315,20 +315,20 @@ class TestGetAllRecords:
     def test_include_system_columns_adds_record_id(self):
         cache, _ = _make_cache()
         pf = _make_pf()
-        _compute_and_store(cache, pf, Packet({"x": 10}))
+        _compute_and_store(cache, pf, Data({"x": 10}))
 
         records = cache.get_all_records(include_system_columns=True)
         assert records is not None
-        assert constants.PACKET_RECORD_ID in records.column_names
+        assert constants.DATA_RECORD_ID in records.column_names
 
     def test_exclude_system_columns_by_default(self):
         cache, _ = _make_cache()
         pf = _make_pf()
-        _compute_and_store(cache, pf, Packet({"x": 10}))
+        _compute_and_store(cache, pf, Data({"x": 10}))
 
         records = cache.get_all_records(include_system_columns=False)
         assert records is not None
-        assert constants.PACKET_RECORD_ID not in records.column_names
+        assert constants.DATA_RECORD_ID not in records.column_names
 
 
 # ---------------------------------------------------------------------------
@@ -340,7 +340,7 @@ class TestStoreDictColumns:
     def test_executor_info_column_stored_as_map(self):
         cache, db = _make_cache()
         pf = _make_pf()
-        _compute_and_store(cache, pf, Packet({"x": 10}))
+        _compute_and_store(cache, pf, Data({"x": 10}))
 
         records = db.get_all_records(cache.record_path)
         assert records is not None
@@ -353,7 +353,7 @@ class TestStoreDictColumns:
     def test_extra_info_column_stored_as_map(self):
         cache, db = _make_cache()
         pf = _make_pf()
-        _compute_and_store(cache, pf, Packet({"x": 10}))
+        _compute_and_store(cache, pf, Data({"x": 10}))
 
         records = db.get_all_records(cache.record_path)
         assert records is not None

@@ -1,10 +1,10 @@
-"""Specification-derived tests for Packet."""
+"""Specification-derived tests for Data."""
 
 import pyarrow as pa
 import pytest
 
 from orcapod.core.datagrams.datagram import Datagram
-from orcapod.core.datagrams.tag_packet import Packet
+from orcapod.core.datagrams.tag_data import Data
 from orcapod.types import ColumnConfig
 
 
@@ -18,12 +18,12 @@ def _make_context():
 # Source info stored per data column
 # ---------------------------------------------------------------------------
 
-class TestPacketSourceInfo:
+class TestDataSourceInfo:
     """source_info is stored per data column."""
 
-    def test_packet_stores_source_info(self):
+    def test_data_stores_source_info(self):
         ctx = _make_context()
-        pkt = Packet(
+        pkt = Data(
             {"x": 1, "y": "hello"},
             data_context=ctx,
             source_info={"x": "src_x", "y": "src_y"},
@@ -32,7 +32,7 @@ class TestPacketSourceInfo:
 
     def test_source_info_not_in_keys_by_default(self):
         ctx = _make_context()
-        pkt = Packet(
+        pkt = Data(
             {"x": 1},
             data_context=ctx,
             source_info={"x": "src_x"},
@@ -43,7 +43,7 @@ class TestPacketSourceInfo:
 
     def test_source_info_not_in_as_dict_by_default(self):
         ctx = _make_context()
-        pkt = Packet(
+        pkt = Data(
             {"x": 1},
             data_context=ctx,
             source_info={"x": "src_x"},
@@ -53,7 +53,7 @@ class TestPacketSourceInfo:
 
     def test_source_info_not_in_as_table_by_default(self):
         ctx = _make_context()
-        pkt = Packet(
+        pkt = Data(
             {"x": 1},
             data_context=ctx,
             source_info={"x": "src_x"},
@@ -66,12 +66,12 @@ class TestPacketSourceInfo:
 # Source info included with ColumnConfig
 # ---------------------------------------------------------------------------
 
-class TestPacketSourceInfoWithConfig:
+class TestDataSourceInfoWithConfig:
     """With ColumnConfig source=True or all_info=True, source columns included."""
 
     def test_keys_with_source_true(self):
         ctx = _make_context()
-        pkt = Packet(
+        pkt = Data(
             {"x": 1},
             data_context=ctx,
             source_info={"x": "src_x"},
@@ -81,7 +81,7 @@ class TestPacketSourceInfoWithConfig:
 
     def test_as_dict_with_source_true(self):
         ctx = _make_context()
-        pkt = Packet(
+        pkt = Data(
             {"x": 1},
             data_context=ctx,
             source_info={"x": "src_x"},
@@ -91,7 +91,7 @@ class TestPacketSourceInfoWithConfig:
 
     def test_as_table_with_source_true(self):
         ctx = _make_context()
-        pkt = Packet(
+        pkt = Data(
             {"x": 1},
             data_context=ctx,
             source_info={"x": "src_x"},
@@ -101,7 +101,7 @@ class TestPacketSourceInfoWithConfig:
 
     def test_keys_with_all_info(self):
         ctx = _make_context()
-        pkt = Packet(
+        pkt = Data(
             {"x": 1},
             data_context=ctx,
             source_info={"x": "src_x"},
@@ -114,18 +114,18 @@ class TestPacketSourceInfoWithConfig:
 # with_source_info() returns new instance (immutable)
 # ---------------------------------------------------------------------------
 
-class TestPacketWithSourceInfo:
+class TestDataWithSourceInfo:
     """with_source_info() returns new instance (immutable)."""
 
     def test_with_source_info_returns_new_instance(self):
         ctx = _make_context()
-        pkt = Packet({"x": 1}, data_context=ctx, source_info={"x": "src_x"})
+        pkt = Data({"x": 1}, data_context=ctx, source_info={"x": "src_x"})
         new_pkt = pkt.with_source_info(x="new_src")
         assert new_pkt is not pkt
 
     def test_with_source_info_does_not_mutate_original(self):
         ctx = _make_context()
-        pkt = Packet({"x": 1}, data_context=ctx, source_info={"x": "src_x"})
+        pkt = Data({"x": 1}, data_context=ctx, source_info={"x": "src_x"})
         pkt.with_source_info(x="new_src")
         # Original should still have old source info
         d = pkt.as_dict(columns=ColumnConfig(source=True))
@@ -137,12 +137,12 @@ class TestPacketWithSourceInfo:
 # rename() also renames source_info keys
 # ---------------------------------------------------------------------------
 
-class TestPacketRename:
+class TestDataRename:
     """rename() also renames source_info keys."""
 
     def test_rename_updates_source_info_keys(self):
         ctx = _make_context()
-        pkt = Packet(
+        pkt = Data(
             {"x": 1, "y": 2},
             data_context=ctx,
             source_info={"x": "src_x", "y": "src_y"},
@@ -160,12 +160,12 @@ class TestPacketRename:
 # with_columns() adds source_info=None for new columns
 # ---------------------------------------------------------------------------
 
-class TestPacketWithColumns:
+class TestDataWithColumns:
     """with_columns() adds source_info=None for new columns."""
 
     def test_with_columns_new_column_has_none_source(self):
         ctx = _make_context()
-        pkt = Packet({"x": 1}, data_context=ctx, source_info={"x": "src_x"})
+        pkt = Data({"x": 1}, data_context=ctx, source_info={"x": "src_x"})
         extended = pkt.with_columns(z=99)
         assert "z" in extended
         # The new column should exist with source_info accessible
@@ -176,22 +176,22 @@ class TestPacketWithColumns:
 
 
 # ---------------------------------------------------------------------------
-# as_datagram() returns Datagram, not Packet
+# as_datagram() returns Datagram, not Data
 # ---------------------------------------------------------------------------
 
-class TestPacketAsDatagram:
-    """as_datagram() returns a Datagram (not Packet)."""
+class TestDataAsDatagram:
+    """as_datagram() returns a Datagram (not Data)."""
 
     def test_as_datagram_returns_datagram_type(self):
         ctx = _make_context()
-        pkt = Packet({"x": 1}, data_context=ctx, source_info={"x": "src_x"})
+        pkt = Data({"x": 1}, data_context=ctx, source_info={"x": "src_x"})
         dg = pkt.as_datagram()
         assert isinstance(dg, Datagram)
-        assert not isinstance(dg, Packet)
+        assert not isinstance(dg, Data)
 
     def test_as_datagram_preserves_data(self):
         ctx = _make_context()
-        pkt = Packet({"x": 1, "y": "hello"}, data_context=ctx, source_info={"x": "s1", "y": "s2"})
+        pkt = Data({"x": 1, "y": "hello"}, data_context=ctx, source_info={"x": "s1", "y": "s2"})
         dg = pkt.as_datagram()
         assert dg["x"] == 1
         assert dg["y"] == "hello"
@@ -201,12 +201,12 @@ class TestPacketAsDatagram:
 # copy() preserves source_info
 # ---------------------------------------------------------------------------
 
-class TestPacketCopy:
+class TestDataCopy:
     """copy() preserves source_info."""
 
     def test_copy_preserves_source_info(self):
         ctx = _make_context()
-        pkt = Packet({"x": 1}, data_context=ctx, source_info={"x": "src_x"})
+        pkt = Data({"x": 1}, data_context=ctx, source_info={"x": "src_x"})
         copied = pkt.copy()
         assert copied is not pkt
         # Both should have same source info
@@ -218,7 +218,7 @@ class TestPacketCopy:
 
     def test_copy_preserves_data(self):
         ctx = _make_context()
-        pkt = Packet({"x": 1, "y": "hello"}, data_context=ctx, source_info={"x": "s1", "y": "s2"})
+        pkt = Data({"x": 1, "y": "hello"}, data_context=ctx, source_info={"x": "s1", "y": "s2"})
         copied = pkt.copy()
         assert copied["x"] == 1
         assert copied["y"] == "hello"

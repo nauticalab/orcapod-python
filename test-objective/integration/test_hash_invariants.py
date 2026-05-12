@@ -12,7 +12,7 @@ import pytest
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import Join, SemiJoin
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.core.streams import ArrowTableStream
 
@@ -114,10 +114,10 @@ class TestMerkleChain:
             ["category"],
         )
 
-        pf_a = PythonPacketFunction(_double, output_keys="result")
-        pod_a = FunctionPod(packet_function=pf_a)
-        pf_b = PythonPacketFunction(_double, output_keys="result")
-        pod_b = FunctionPod(packet_function=pf_b)
+        pf_a = PythonDataFunction(_double, output_keys="result")
+        pod_a = FunctionPod(data_function=pf_a)
+        pf_b = PythonDataFunction(_double, output_keys="result")
+        pod_b = FunctionPod(data_function=pf_b)
 
         stream_a = pod_a.process(source_a)
         stream_b = pod_b.process(source_b)

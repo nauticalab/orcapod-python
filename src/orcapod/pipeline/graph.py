@@ -398,7 +398,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         self,
         orchestrator=None,
         config: PipelineConfig | None = None,
-        execution_engine: cp.PacketFunctionExecutorProtocol | None = None,
+        execution_engine: cp.DataFunctionExecutorProtocol | None = None,
         execution_engine_opts: "dict[str, Any] | None" = None,
         observer: ExecutionObserverProtocol | None = None,
     ) -> None:
@@ -417,7 +417,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 is used by default. Passing an explicit ``config`` always
                 takes priority — supply ``ExecutorType.SYNCHRONOUS`` to force
                 synchronous execution even when an engine is present.
-            execution_engine: Optional packet-function executor applied to
+            execution_engine: Optional data-function executor applied to
                 every function node before execution (e.g. a ``RayExecutor``).
                 Overrides ``config.execution_engine`` when both are provided.
             execution_engine_opts: Resource/options dict forwarded to the
@@ -500,7 +500,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
 
     def _apply_execution_engine(
         self,
-        execution_engine: cp.PacketFunctionExecutorProtocol,
+        execution_engine: cp.DataFunctionExecutorProtocol,
         execution_engine_opts: dict[str, Any] | None,
     ) -> None:
         """Apply *execution_engine* to every ``FunctionNode`` in the pipeline.
@@ -654,7 +654,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         # -- Build node descriptors --
         nodes: dict[str, dict[str, Any]] = {}
         for content_hash_str, node in self._persistent_node_map.items():
-            tag_schema, packet_schema = node.output_schema()
+            tag_schema, data_schema = node.output_schema()
             type_converter = node.data_context.type_converter
 
             descriptor: dict[str, Any] = {
@@ -664,7 +664,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 "pipeline_hash": node.pipeline_hash().to_string(),
                 "output_schema": {
                     "tag": serialize_schema(tag_schema, type_converter),
-                    "packet": serialize_schema(packet_schema, type_converter),
+                    "data": serialize_schema(data_schema, type_converter),
                 },
             }
 
@@ -751,7 +751,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             # Remove identity fields — they live in the node descriptor
             source_config = {
                 k: v for k, v in config.items()
-                if k not in ("content_hash", "pipeline_hash", "tag_schema", "packet_schema")
+                if k not in ("content_hash", "pipeline_hash", "tag_schema", "data_schema")
             }
             reconstructable = stream_type in self._RECONSTRUCTABLE_SOURCE_TYPES
         else:
@@ -1122,7 +1122,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
 
         When the upstream is usable and mode is not ``"read_only"``, attempts
         to reconstruct the function pod with ``fallback_to_proxy=True`` so
-        that a ``PacketFunctionProxy`` is used when the original function
+        that a ``DataFunctionProxy`` is used when the original function
         cannot be imported.
 
         When the upstream is UNAVAILABLE (but exists), still builds the proxy

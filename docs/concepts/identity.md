@@ -20,8 +20,8 @@ canonical identity (e.g., its path and metadata) rather than the raw data. The k
 that the content hash changes whenever a different source is used, even if the schema is the
 same.
 
-**Used for:** deduplication and memoization. When a `FunctionNode` processes a packet, it
-checks the packet's content hash against its database. If the hash already exists, the cached
+**Used for:** deduplication and memoization. When a `FunctionNode` processes a data, it
+checks the data's content hash against its database. If the hash already exists, the cached
 result is returned without recomputation.
 
 ### `pipeline_hash()` -- schema and topology only
@@ -50,7 +50,7 @@ source_b = DictSource(data=[{"x": 10, "y": 20}], tag_columns=["x"])
 - `source_a.pipeline_hash() == source_b.pipeline_hash()` -- same schema and structure
 
 If both sources feed into the same function via `FunctionNode`, the nodes share a database
-table (same pipeline hash), but each packet is stored and retrieved by its content hash.
+table (same pipeline hash), but each data is stored and retrieved by its content hash.
 
 ## The Merkle chain
 
@@ -59,7 +59,7 @@ identity plus the pipeline hashes of all its upstream elements.
 
 ### Base case: sources
 
-A `RootSource`'s pipeline identity is simply its `(tag_schema, packet_schema)`. Sources with
+A `RootSource`'s pipeline identity is simply its `(tag_schema, data_schema)`. Sources with
 the same column names and types have the same pipeline hash, regardless of their data.
 
 ### Recursive case: downstream elements
@@ -94,7 +94,7 @@ When a `FunctionNode` iterates over its input stream, it follows a two-phase pro
 
 1. **Phase 1 (cached):** Read all existing records from the shared pipeline database table
    and yield them immediately.
-2. **Phase 2 (compute):** For each input packet whose content hash is not already in the
+2. **Phase 2 (compute):** For each input data whose content hash is not already in the
    database, run the function, store the result, and yield it.
 
 This means that adding new data to a source only triggers computation for the new rows --

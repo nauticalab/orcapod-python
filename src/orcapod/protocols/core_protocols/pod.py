@@ -110,7 +110,7 @@ class PodProtocol(TraceableProtocol, Protocol):
             *streams: Input streams to analyze
 
         Returns:
-            tuple[TypeSpec, TypeSpec]: (tag_types, packet_types) for output
+            tuple[TypeSpec, TypeSpec]: (tag_types, data_types) for output
 
         Raises:
             ValidationError: If input types are incompatible

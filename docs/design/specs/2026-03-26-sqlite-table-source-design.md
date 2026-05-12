@@ -123,11 +123,11 @@ All use in-memory SQLite (`:memory:`), except the config round-trip test which r
 
 1. **Import / export sanity** — importable from `orcapod.core.sources` and `orcapod.sources`; in `__all__`
 2. **Protocol conformance** — is `SourceProtocol`, `StreamProtocol`, `PipelineElementProtocol`
-3. **PK as default tags** — single-column PK; composite PK; correct tag/packet schema split
+3. **PK as default tags** — single-column PK; composite PK; correct tag/data schema split
 4. **Explicit tag override** — `tag_columns=[...]` overrides PK detection entirely
 5. **ROWID fallback** — table with no explicit PK gets `"rowid"` tag; `rowid` column type is `int64`; all rows returned; rowid values are positive integers
 6. **Error cases** — missing table raises `ValueError`; empty table raises `ValueError`
-7. **Stream behaviour** — `iter_packets` count, `as_table`, `output_schema`, `producer is None`, `upstreams == ()`
+7. **Stream behaviour** — `iter_data` count, `as_table`, `output_schema`, `producer is None`, `upstreams == ()`
 8. **Deterministic hashing** — `pipeline_hash` and `content_hash` stable across two identical constructions (both in-memory)
 9. **Config round-trip (PK table)** — uses file-backed `tmp_path` SQLite db; `to_config()` has `source_type="sqlite_table"`, `db_path`, `table_name`, `tag_columns`; `from_config(to_config())` reconstructs successfully; content/pipeline hashes match before and after
 10. **Config round-trip (ROWID-only table)** — same as above but with a ROWID-only table; `tag_columns=["rowid"]` in config; `from_config(to_config())` reconstructs correctly and `rowid` remains the tag column

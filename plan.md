@@ -1,12 +1,12 @@
-# Plan: Unified `process_packet` / `async_process_packet` + Node `async_execute`
+# Plan: Unified `process_data` / `async_process_data` + Node `async_execute`
 
 ## Goal
 
-Establish `process_packet` and `async_process_packet` as **the** universal per-packet
+Establish `process_data` and `async_process_data` as **the** universal per-data
 interface across FunctionPod, FunctionPodStream, FunctionNode, and PersistentFunctionNode.
 All iteration paths — sequential, concurrent, and async — route through these methods.
 Add `async_execute` to all four Node classes. Add cache-aware `async_call` to
-`CachedPacketFunction`. Remove `_execute_concurrent` module-level helper.
+`CachedDataFunction`. Remove `_execute_concurrent` module-level helper.
 
 ---
 
@@ -16,25 +16,25 @@ Add `async_execute` to all four Node classes. Add cache-aware `async_call` to
 
 ```
 _FunctionPodBase (TraceableBase)
-  ├── process_packet(tag, packet)       → calls packet_function.call(packet)
+  ├── process_data(tag, data)       → calls data_function.call(data)
   ├── FunctionPod
   │     ├── process() → FunctionPodStream
-  │     └── async_execute()             → calls packet_function.async_call(packet) DIRECTLY
+  │     └── async_execute()             → calls data_function.async_call(data) DIRECTLY
   │
   FunctionPodStream (StreamBase)
-  │   ├── _iter_packets_sequential()    → calls _function_pod.process_packet(tag, packet) ✓
-  │   └── _iter_packets_concurrent()    → calls _execute_concurrent(packet_function, ...) DIRECTLY
+  │   ├── _iter_data_sequential()    → calls _function_pod.process_data(tag, data) ✓
+  │   └── _iter_data_concurrent()    → calls _execute_concurrent(data_function, ...) DIRECTLY
   │
   FunctionNode (StreamBase)
-  │   ├── _iter_packets_sequential()    → calls _packet_function.call(packet) DIRECTLY
-  │   ├── _iter_packets_concurrent()    → calls _execute_concurrent(_packet_function, ...) DIRECTLY
+  │   ├── _iter_data_sequential()    → calls _data_function.call(data) DIRECTLY
+  │   ├── _iter_data_concurrent()    → calls _execute_concurrent(_data_function, ...) DIRECTLY
   │   └── (no async_execute)
   │
   PersistentFunctionNode (FunctionNode)
-      ├── process_packet(tag, packet)   → calls _packet_function.call(packet, skip_cache_*=...)
+      ├── process_data(tag, data)   → calls _data_function.call(data, skip_cache_*=...)
       │                                   then add_pipeline_record(...)
-      ├── iter_packets()                → Phase 1: replay from DB
-      │                                   Phase 2: calls self.process_packet(tag, packet) ✓
+      ├── iter_data()                → Phase 1: replay from DB
+      │                                   Phase 2: calls self.process_data(tag, data) ✓
       └── (no async_execute)
 
 OperatorNode (StreamBase)
@@ -50,95 +50,95 @@ PersistentOperatorNode (OperatorNode)
 ### Module-level helpers
 
 ```python
-def _executor_supports_concurrent(packet_function) -> bool:
+def _executor_supports_concurrent(data_function) -> bool:
     """True if the pf's executor supports concurrent execution."""
 
-def _execute_concurrent(packet_function, packets) -> list[PacketProtocol | None]:
-    """Submit all packets concurrently via asyncio.gather(pf.async_call(...)).
+def _execute_concurrent(data_function, data) -> list[DataProtocol | None]:
+    """Submit all data concurrently via asyncio.gather(pf.async_call(...)).
     Falls back to sequential pf.call() if already inside a running event loop."""
 ```
 
 ### Problems
 
-1. **FunctionPod.async_execute** bypasses `process_packet` — calls `packet_function.async_call`
+1. **FunctionPod.async_execute** bypasses `process_data` — calls `data_function.async_call`
    directly (line 317).
-2. **FunctionPodStream._iter_packets_concurrent** bypasses `process_packet` — calls
-   `_execute_concurrent(packet_function, ...)` directly (line 472).
-3. **FunctionNode._iter_packets_sequential** bypasses any process_packet — calls
-   `_packet_function.call(packet)` directly (line 831).
-4. **FunctionNode._iter_packets_concurrent** same — calls `_execute_concurrent` directly
+2. **FunctionPodStream._iter_data_concurrent** bypasses `process_data` — calls
+   `_execute_concurrent(data_function, ...)` directly (line 472).
+3. **FunctionNode._iter_data_sequential** bypasses any process_data — calls
+   `_data_function.call(data)` directly (line 831).
+4. **FunctionNode._iter_data_concurrent** same — calls `_execute_concurrent` directly
    (line 852).
-5. **CachedPacketFunction.async_call** inherits from `PacketFunctionWrapper` — completely
+5. **CachedDataFunction.async_call** inherits from `DataFunctionWrapper` — completely
    **bypasses the cache** (no lookup, no recording).
-6. **No `async_process_packet`** exists anywhere.
+6. **No `async_process_data`** exists anywhere.
 7. **No `async_execute`** on any Node class.
-8. **`_execute_concurrent`** is a module-level function that takes a raw `packet_function`
-   and list of bare `packets` — no way to route through `process_packet`.
+8. **`_execute_concurrent`** is a module-level function that takes a raw `data_function`
+   and list of bare `data` — no way to route through `process_data`.
 
 ---
 
 ## Design principles
 
-### A. `process_packet` / `async_process_packet` is the single per-packet entry point
+### A. `process_data` / `async_process_data` is the single per-data entry point
 
 Every class in the function pod hierarchy defines these two methods. **All** iteration and
 execution paths go through them — sequential, concurrent, and async. No direct
-`packet_function.call()` or `packet_function.async_call()` calls outside of these methods.
+`data_function.call()` or `data_function.async_call()` calls outside of these methods.
 
 ```
-_FunctionPodBase.process_packet(tag, pkt)         → packet_function.call(pkt)
-_FunctionPodBase.async_process_packet(tag, pkt)    → await packet_function.async_call(pkt)
+_FunctionPodBase.process_data(tag, pkt)         → data_function.call(pkt)
+_FunctionPodBase.async_process_data(tag, pkt)    → await data_function.async_call(pkt)
 
-FunctionNode.process_packet(tag, pkt)              → self._function_pod.process_packet(tag, pkt)
-FunctionNode.async_process_packet(tag, pkt)        → await self._function_pod.async_process_packet(tag, pkt)
+FunctionNode.process_data(tag, pkt)              → self._function_pod.process_data(tag, pkt)
+FunctionNode.async_process_data(tag, pkt)        → await self._function_pod.async_process_data(tag, pkt)
 
-PersistentFunctionNode.process_packet(tag, pkt)    → cache check → self._function_pod.process_packet → pipeline record
-PersistentFunctionNode.async_process_packet(tag, pkt) → cache check → await self._function_pod.async_process_packet → pipeline record
+PersistentFunctionNode.process_data(tag, pkt)    → cache check → self._function_pod.process_data → pipeline record
+PersistentFunctionNode.async_process_data(tag, pkt) → cache check → await self._function_pod.async_process_data → pipeline record
 ```
 
-Wait — there's a subtlety with PersistentFunctionNode. Today its `process_packet` calls
-`self._packet_function.call(packet, skip_cache_lookup=..., skip_cache_insert=...)` directly,
-where `self._packet_function` is a `CachedPacketFunction` (which wraps the original pf).
-It does NOT delegate to the pod's `process_packet`. That's because PersistentFunctionNode
-needs to pass `skip_cache_*` kwargs that the base `process_packet` doesn't accept.
+Wait — there's a subtlety with PersistentFunctionNode. Today its `process_data` calls
+`self._data_function.call(data, skip_cache_lookup=..., skip_cache_insert=...)` directly,
+where `self._data_function` is a `CachedDataFunction` (which wraps the original pf).
+It does NOT delegate to the pod's `process_data`. That's because PersistentFunctionNode
+needs to pass `skip_cache_*` kwargs that the base `process_data` doesn't accept.
 
 The cleanest structure:
 
 ```
-PersistentFunctionNode.process_packet(tag, pkt)
-  → self._packet_function.call(pkt, skip_cache_*=...)    # CachedPacketFunction (sync)
+PersistentFunctionNode.process_data(tag, pkt)
+  → self._data_function.call(pkt, skip_cache_*=...)    # CachedDataFunction (sync)
   → self.add_pipeline_record(...)                         # pipeline DB (sync)
 
-PersistentFunctionNode.async_process_packet(tag, pkt)
-  → await self._packet_function.async_call(pkt, skip_cache_*=...)  # CachedPacketFunction (async)
+PersistentFunctionNode.async_process_data(tag, pkt)
+  → await self._data_function.async_call(pkt, skip_cache_*=...)  # CachedDataFunction (async)
   → self.add_pipeline_record(...)                                   # pipeline DB (sync)
 ```
 
-This is the same as today for the sync path. The `CachedPacketFunction` handles the result
+This is the same as today for the sync path. The `CachedDataFunction` handles the result
 cache internally. The `PersistentFunctionNode` handles pipeline records. Neither delegates
-to the pod's `process_packet` — the pod is bypassed because the `CachedPacketFunction`
-replaced the raw packet function in `__init__`.
+to the pod's `process_data` — the pod is bypassed because the `CachedDataFunction`
+replaced the raw data function in `__init__`.
 
-### B. Concurrent iteration routes through `async_process_packet`
+### B. Concurrent iteration routes through `async_process_data`
 
 The concurrent path is inherently async — it uses `asyncio.gather`. So it naturally routes
-through `async_process_packet`. The fallback path (when already inside an event loop) routes
-through `process_packet` (sync).
+through `async_process_data`. The fallback path (when already inside an event loop) routes
+through `process_data` (sync).
 
 For **FunctionPodStream**, the target is the pod:
 ```python
 # concurrent
-await self._function_pod.async_process_packet(tag, pkt)
+await self._function_pod.async_process_data(tag, pkt)
 # fallback
-self._function_pod.process_packet(tag, pkt)
+self._function_pod.process_data(tag, pkt)
 ```
 
 For **FunctionNode**, the target is `self` — so overrides (PersistentFunctionNode) kick in:
 ```python
 # concurrent
-await self.async_process_packet(tag, pkt)
+await self.async_process_data(tag, pkt)
 # fallback
-self.process_packet(tag, pkt)
+self.process_data(tag, pkt)
 ```
 
 This means PersistentFunctionNode's concurrent path **automatically** gets cache checks +
@@ -146,16 +146,16 @@ pipeline records via polymorphism. No special handling needed.
 
 ### C. `_execute_concurrent` is removed
 
-The module-level `_execute_concurrent(packet_function, packets)` helper is removed. Its
-logic (asyncio.gather with event-loop fallback) is inlined into `_iter_packets_concurrent`
-methods, but now routes through `process_packet` / `async_process_packet` instead of raw
-`packet_function.call` / `packet_function.async_call`.
+The module-level `_execute_concurrent(data_function, data)` helper is removed. Its
+logic (asyncio.gather with event-loop fallback) is inlined into `_iter_data_concurrent`
+methods, but now routes through `process_data` / `async_process_data` instead of raw
+`data_function.call` / `data_function.async_call`.
 
 The `_executor_supports_concurrent` helper stays — it's just a predicate check.
 
 ### D. Sync and async are cleanly separated execution modes
 
-- Sync: `iter_packets()` / `as_table()` / `run()`
+- Sync: `iter_data()` / `as_table()` / `run()`
 - Async: `async_execute(inputs, output)`
 
 They don't populate each other's caches. DB persistence (for Persistent variants) provides
@@ -163,7 +163,7 @@ durability that works across both modes.
 
 ### E. OperatorNode delegates to operator, PersistentOperatorNode intercepts for storage
 
-Operators are opaque stream transformers — no per-packet hook. `OperatorNode` passes through
+Operators are opaque stream transformers — no per-data hook. `OperatorNode` passes through
 directly. `PersistentOperatorNode` uses an intermediate channel + `TaskGroup` to forward
 results downstream immediately while collecting them for post-hoc DB storage.
 
@@ -176,57 +176,57 @@ Acceptable because DB is typically in-process and fast. Async DB protocol is def
 
 ## Implementation steps
 
-### Step 1: Add `async_process_packet` to `_FunctionPodBase`
+### Step 1: Add `async_process_data` to `_FunctionPodBase`
 
 **File:** `src/orcapod/core/function_pod.py`
 
-Add alongside existing `process_packet` (after line 180):
+Add alongside existing `process_data` (after line 180):
 
 ```python
-async def async_process_packet(
-    self, tag: TagProtocol, packet: PacketProtocol
-) -> tuple[TagProtocol, PacketProtocol | None]:
-    """Async counterpart of ``process_packet``."""
-    return tag, await self.packet_function.async_call(packet)
+async def async_process_data(
+    self, tag: TagProtocol, data: DataProtocol
+) -> tuple[TagProtocol, DataProtocol | None]:
+    """Async counterpart of ``process_data``."""
+    return tag, await self.data_function.async_call(data)
 ```
 
-### Step 2: Fix `FunctionPod.async_execute` to use `async_process_packet`
+### Step 2: Fix `FunctionPod.async_execute` to use `async_process_data`
 
 **File:** `src/orcapod/core/function_pod.py`
 
 Change the `process_one` inner function (lines 315-322):
 
 ```python
-async def process_one(tag: TagProtocol, packet: PacketProtocol) -> None:
+async def process_one(tag: TagProtocol, data: DataProtocol) -> None:
     try:
-        tag, result_packet = await self.async_process_packet(tag, packet)
-        if result_packet is not None:
-            await output.send((tag, result_packet))
+        tag, result_data = await self.async_process_data(tag, data)
+        if result_data is not None:
+            await output.send((tag, result_data))
     finally:
         if sem is not None:
             sem.release()
 ```
 
-### Step 3: Fix `FunctionPodStream._iter_packets_concurrent` to use `async_process_packet`
+### Step 3: Fix `FunctionPodStream._iter_data_concurrent` to use `async_process_data`
 
 **File:** `src/orcapod/core/function_pod.py`
 
-Replace the `_execute_concurrent` call (lines 454-482) with direct `async_process_packet`
+Replace the `_execute_concurrent` call (lines 454-482) with direct `async_process_data`
 routing:
 
 ```python
-def _iter_packets_concurrent(
+def _iter_data_concurrent(
     self,
-) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
+) -> Iterator[tuple[TagProtocol, DataProtocol]]:
     """Collect remaining inputs, execute concurrently, and yield results in order."""
     input_iter = self._cached_input_iterator
 
-    all_inputs: list[tuple[int, TagProtocol, PacketProtocol]] = []
-    to_compute: list[tuple[int, TagProtocol, PacketProtocol]] = []
-    for i, (tag, packet) in enumerate(input_iter):
-        all_inputs.append((i, tag, packet))
-        if i not in self._cached_output_packets:
-            to_compute.append((i, tag, packet))
+    all_inputs: list[tuple[int, TagProtocol, DataProtocol]] = []
+    to_compute: list[tuple[int, TagProtocol, DataProtocol]] = []
+    for i, (tag, data) in enumerate(input_iter):
+        all_inputs.append((i, tag, data))
+        if i not in self._cached_output_datas:
+            to_compute.append((i, tag, data))
     self._cached_input_iterator = None
 
     if to_compute:
@@ -238,16 +238,16 @@ def _iter_packets_concurrent(
         if loop is not None:
             # Already in event loop — fall back to sequential sync
             results = [
-                self._function_pod.process_packet(tag, pkt)
+                self._function_pod.process_data(tag, pkt)
                 for _, tag, pkt in to_compute
             ]
         else:
             # No event loop — run concurrently via asyncio.run
-            async def _gather() -> list[tuple[TagProtocol, PacketProtocol | None]]:
+            async def _gather() -> list[tuple[TagProtocol, DataProtocol | None]]:
                 return list(
                     await asyncio.gather(
                         *[
-                            self._function_pod.async_process_packet(tag, pkt)
+                            self._function_pod.async_process_data(tag, pkt)
                             for _, tag, pkt in to_compute
                         ]
                     )
@@ -255,70 +255,70 @@ def _iter_packets_concurrent(
 
             results = asyncio.run(_gather())
 
-        for (i, _, _), (tag, output_packet) in zip(to_compute, results):
-            self._cached_output_packets[i] = (tag, output_packet)
+        for (i, _, _), (tag, output_data) in zip(to_compute, results):
+            self._cached_output_datas[i] = (tag, output_data)
 
     for i, *_ in all_inputs:
-        tag, packet = self._cached_output_packets[i]
-        if packet is not None:
-            yield tag, packet
+        tag, data = self._cached_output_datas[i]
+        if data is not None:
+            yield tag, data
 ```
 
-**Note:** The method signature drops the `packet_function` parameter — it no longer needs
+**Note:** The method signature drops the `data_function` parameter — it no longer needs
 it since it routes through `self._function_pod`.
 
-The `iter_packets` method that calls this also needs updating — remove the `pf` argument:
+The `iter_data` method that calls this also needs updating — remove the `pf` argument:
 
 ```python
-def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
+def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
     if self.is_stale:
         self.clear_cache()
     if self._cached_input_iterator is not None:
-        if _executor_supports_concurrent(self._function_pod.packet_function):
-            yield from self._iter_packets_concurrent()
+        if _executor_supports_concurrent(self._function_pod.data_function):
+            yield from self._iter_data_concurrent()
         else:
-            yield from self._iter_packets_sequential()
+            yield from self._iter_data_sequential()
     else:
-        for i in range(len(self._cached_output_packets)):
-            tag, packet = self._cached_output_packets[i]
-            if packet is not None:
-                yield tag, packet
+        for i in range(len(self._cached_output_datas)):
+            tag, data = self._cached_output_datas[i]
+            if data is not None:
+                yield tag, data
 ```
 
-### Step 4: Fix `FunctionNode._iter_packets_sequential` to use `process_packet`
+### Step 4: Fix `FunctionNode._iter_data_sequential` to use `process_data`
 
 **File:** `src/orcapod/core/function_pod.py`
 
 Change line 831 from:
 ```python
-output_packet = self._packet_function.call(packet)
-self._cached_output_packets[i] = (tag, output_packet)
+output_data = self._data_function.call(data)
+self._cached_output_datas[i] = (tag, output_data)
 ```
 to:
 ```python
-tag, output_packet = self.process_packet(tag, packet)
-self._cached_output_packets[i] = (tag, output_packet)
+tag, output_data = self.process_data(tag, data)
+self._cached_output_datas[i] = (tag, output_data)
 ```
 
-### Step 5: Fix `FunctionNode._iter_packets_concurrent` to use `async_process_packet`
+### Step 5: Fix `FunctionNode._iter_data_concurrent` to use `async_process_data`
 
 **File:** `src/orcapod/core/function_pod.py`
 
 Same transformation as Step 3, but routing through `self` instead of `self._function_pod`:
 
 ```python
-def _iter_packets_concurrent(
+def _iter_data_concurrent(
     self,
-) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
+) -> Iterator[tuple[TagProtocol, DataProtocol]]:
     """Collect remaining inputs, execute concurrently, and yield results in order."""
     input_iter = self._cached_input_iterator
 
-    all_inputs: list[tuple[int, TagProtocol, PacketProtocol]] = []
-    to_compute: list[tuple[int, TagProtocol, PacketProtocol]] = []
-    for i, (tag, packet) in enumerate(input_iter):
-        all_inputs.append((i, tag, packet))
-        if i not in self._cached_output_packets:
-            to_compute.append((i, tag, packet))
+    all_inputs: list[tuple[int, TagProtocol, DataProtocol]] = []
+    to_compute: list[tuple[int, TagProtocol, DataProtocol]] = []
+    for i, (tag, data) in enumerate(input_iter):
+        all_inputs.append((i, tag, data))
+        if i not in self._cached_output_datas:
+            to_compute.append((i, tag, data))
     self._cached_input_iterator = None
 
     if to_compute:
@@ -330,16 +330,16 @@ def _iter_packets_concurrent(
         if loop is not None:
             # Already in event loop — fall back to sequential sync
             results = [
-                self.process_packet(tag, pkt)
+                self.process_data(tag, pkt)
                 for _, tag, pkt in to_compute
             ]
         else:
             # No event loop — run concurrently via asyncio.run
-            async def _gather() -> list[tuple[TagProtocol, PacketProtocol | None]]:
+            async def _gather() -> list[tuple[TagProtocol, DataProtocol | None]]:
                 return list(
                     await asyncio.gather(
                         *[
-                            self.async_process_packet(tag, pkt)
+                            self.async_process_data(tag, pkt)
                             for _, tag, pkt in to_compute
                         ]
                     )
@@ -347,142 +347,142 @@ def _iter_packets_concurrent(
 
             results = asyncio.run(_gather())
 
-        for (i, _, _), (tag, output_packet) in zip(to_compute, results):
-            self._cached_output_packets[i] = (tag, output_packet)
+        for (i, _, _), (tag, output_data) in zip(to_compute, results):
+            self._cached_output_datas[i] = (tag, output_data)
 
     for i, *_ in all_inputs:
-        tag, packet = self._cached_output_packets[i]
-        if packet is not None:
-            yield tag, packet
+        tag, data = self._cached_output_datas[i]
+        if data is not None:
+            yield tag, data
 ```
 
-**Critical difference from Step 3:** Uses `self.process_packet` / `self.async_process_packet`
+**Critical difference from Step 3:** Uses `self.process_data` / `self.async_process_data`
 instead of `self._function_pod.*`. This means when `PersistentFunctionNode` inherits this
-method, it automatically routes through its overridden `process_packet` /
-`async_process_packet` which include cache checks + pipeline record storage.
+method, it automatically routes through its overridden `process_data` /
+`async_process_data` which include cache checks + pipeline record storage.
 
 ### Step 6: Remove `_execute_concurrent`
 
 **File:** `src/orcapod/core/function_pod.py`
 
 Delete the `_execute_concurrent` function (lines 52-82). Its logic is now inlined into the
-`_iter_packets_concurrent` methods.
+`_iter_data_concurrent` methods.
 
-### Step 7: Add `process_packet` and `async_process_packet` to `FunctionNode`
+### Step 7: Add `process_data` and `async_process_data` to `FunctionNode`
 
 **File:** `src/orcapod/core/function_pod.py`
 
-FunctionNode currently has no `process_packet`. Add delegation to the function pod:
+FunctionNode currently has no `process_data`. Add delegation to the function pod:
 
 ```python
-def process_packet(
-    self, tag: TagProtocol, packet: PacketProtocol
-) -> tuple[TagProtocol, PacketProtocol | None]:
-    """Process a single packet by delegating to the function pod."""
-    return self._function_pod.process_packet(tag, packet)
+def process_data(
+    self, tag: TagProtocol, data: DataProtocol
+) -> tuple[TagProtocol, DataProtocol | None]:
+    """Process a single data by delegating to the function pod."""
+    return self._function_pod.process_data(tag, data)
 
-async def async_process_packet(
-    self, tag: TagProtocol, packet: PacketProtocol
-) -> tuple[TagProtocol, PacketProtocol | None]:
-    """Async counterpart of ``process_packet``."""
-    return await self._function_pod.async_process_packet(tag, packet)
+async def async_process_data(
+    self, tag: TagProtocol, data: DataProtocol
+) -> tuple[TagProtocol, DataProtocol | None]:
+    """Async counterpart of ``process_data``."""
+    return await self._function_pod.async_process_data(tag, data)
 ```
 
 ### Step 8: Add `FunctionNode.async_execute`
 
 **File:** `src/orcapod/core/function_pod.py`
 
-Sequential streaming through `async_process_packet`:
+Sequential streaming through `async_process_data`:
 
 ```python
 async def async_execute(
     self,
-    inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-    output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+    output: WritableChannel[tuple[TagProtocol, DataProtocol]],
 ) -> None:
-    """Streaming async execution — process each packet via async_process_packet."""
+    """Streaming async execution — process each data via async_process_data."""
     try:
-        async for tag, packet in inputs[0]:
-            tag, result_packet = await self.async_process_packet(tag, packet)
-            if result_packet is not None:
-                await output.send((tag, result_packet))
+        async for tag, data in inputs[0]:
+            tag, result_data = await self.async_process_data(tag, data)
+            if result_data is not None:
+                await output.send((tag, result_data))
     finally:
         await output.close()
 ```
 
-### Step 9: Add async cache-aware `async_call` to `CachedPacketFunction`
+### Step 9: Add async cache-aware `async_call` to `CachedDataFunction`
 
-**File:** `src/orcapod/core/packet_function.py`
+**File:** `src/orcapod/core/data_function.py`
 
 Override `async_call` to mirror the sync `call()` logic (lines 508-533):
 
 ```python
 async def async_call(
     self,
-    packet: PacketProtocol,
+    data: DataProtocol,
     *,
     skip_cache_lookup: bool = False,
     skip_cache_insert: bool = False,
-) -> PacketProtocol | None:
+) -> DataProtocol | None:
     """Async counterpart of ``call`` with cache check and recording."""
-    output_packet = None
+    output_data = None
     if not skip_cache_lookup:
         logger.info("Checking for cache...")
-        output_packet = self.get_cached_output_for_packet(packet)
-        if output_packet is not None:
-            logger.info(f"Cache hit for {packet}!")
-    if output_packet is None:
-        output_packet = await self._packet_function.async_call(packet)
-        if output_packet is not None:
+        output_data = self.get_cached_output_for_data(data)
+        if output_data is not None:
+            logger.info(f"Cache hit for {data}!")
+    if output_data is None:
+        output_data = await self._data_function.async_call(data)
+        if output_data is not None:
             if not skip_cache_insert:
-                self.record_packet(packet, output_packet)
-            output_packet = output_packet.with_meta_columns(
+                self.record_data(data, output_data)
+            output_data = output_data.with_meta_columns(
                 **{self.RESULT_COMPUTED_FLAG: True}
             )
-    return output_packet
+    return output_data
 ```
 
-### Step 10: Add `async_process_packet` to `PersistentFunctionNode`
+### Step 10: Add `async_process_data` to `PersistentFunctionNode`
 
 **File:** `src/orcapod/core/function_pod.py`
 
-PersistentFunctionNode already has `process_packet` (line 1027-1066) which calls
-`self._packet_function.call(packet, skip_cache_*=...)` (where `_packet_function` is a
-`CachedPacketFunction`) then `self.add_pipeline_record(...)`. Add the async counterpart:
+PersistentFunctionNode already has `process_data` (line 1027-1066) which calls
+`self._data_function.call(data, skip_cache_*=...)` (where `_data_function` is a
+`CachedDataFunction`) then `self.add_pipeline_record(...)`. Add the async counterpart:
 
 ```python
-async def async_process_packet(
+async def async_process_data(
     self,
     tag: TagProtocol,
-    packet: PacketProtocol,
+    data: DataProtocol,
     skip_cache_lookup: bool = False,
     skip_cache_insert: bool = False,
-) -> tuple[TagProtocol, PacketProtocol | None]:
-    """Async counterpart of ``process_packet``.
+) -> tuple[TagProtocol, DataProtocol | None]:
+    """Async counterpart of ``process_data``.
 
-    Uses the CachedPacketFunction's async_call for computation + result caching.
+    Uses the CachedDataFunction's async_call for computation + result caching.
     Pipeline record storage is synchronous (DB protocol is sync).
     """
-    output_packet = await self._packet_function.async_call(
-        packet,
+    output_data = await self._data_function.async_call(
+        data,
         skip_cache_lookup=skip_cache_lookup,
         skip_cache_insert=skip_cache_insert,
     )
 
-    if output_packet is not None:
+    if output_data is not None:
         result_computed = bool(
-            output_packet.get_meta_value(
-                self._packet_function.RESULT_COMPUTED_FLAG, False
+            output_data.get_meta_value(
+                self._data_function.RESULT_COMPUTED_FLAG, False
             )
         )
         self.add_pipeline_record(
             tag,
-            packet,
-            packet_record_id=output_packet.datagram_id,
+            data,
+            data_record_id=output_data.datagram_id,
             computed=result_computed,
         )
 
-    return tag, output_packet
+    return tag, output_data
 ```
 
 ### Step 11: Add `PersistentFunctionNode.async_execute` (two-phase)
@@ -494,8 +494,8 @@ Overrides `FunctionNode.async_execute`:
 ```python
 async def async_execute(
     self,
-    inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-    output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+    output: WritableChannel[tuple[TagProtocol, DataProtocol]],
 ) -> None:
     """Two-phase async execution: replay cached, then compute missing."""
     try:
@@ -504,23 +504,23 @@ async def async_execute(
         computed_hashes: set[str] = set()
         if existing is not None and existing.num_rows > 0:
             tag_keys = self._input_stream.keys()[0]
-            hash_col = constants.INPUT_PACKET_HASH_COL
+            hash_col = constants.INPUT_DATA_HASH_COL
             computed_hashes = set(
                 cast(list[str], existing.column(hash_col).to_pylist())
             )
             data_table = existing.drop([hash_col])
             existing_stream = ArrowTableStream(data_table, tag_columns=tag_keys)
-            for tag, packet in existing_stream.iter_packets():
-                await output.send((tag, packet))
+            for tag, data in existing_stream.iter_data():
+                await output.send((tag, data))
 
-        # Phase 2: process packets not already in the DB
-        async for tag, packet in inputs[0]:
-            input_hash = packet.content_hash().to_string()
+        # Phase 2: process data not already in the DB
+        async for tag, data in inputs[0]:
+            input_hash = data.content_hash().to_string()
             if input_hash in computed_hashes:
                 continue
-            tag, output_packet = await self.async_process_packet(tag, packet)
-            if output_packet is not None:
-                await output.send((tag, output_packet))
+            tag, output_data = await self.async_process_data(tag, data)
+            if output_data is not None:
+                await output.send((tag, output_data))
     finally:
         await output.close()
 ```
@@ -534,8 +534,8 @@ Direct pass-through:
 ```python
 async def async_execute(
     self,
-    inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-    output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+    output: WritableChannel[tuple[TagProtocol, DataProtocol]],
 ) -> None:
     """Delegate to operator's async_execute."""
     await self._operator.async_execute(inputs, output)
@@ -595,8 +595,8 @@ def _compute_and_store(self) -> None:
 ```python
 async def async_execute(
     self,
-    inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-    output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+    inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+    output: WritableChannel[tuple[TagProtocol, DataProtocol]],
 ) -> None:
     """Async execution with cache mode handling.
 
@@ -608,13 +608,13 @@ async def async_execute(
         if self._cache_mode == CacheMode.REPLAY:
             self._replay_from_cache()
             assert self._cached_output_stream is not None
-            for tag, packet in self._cached_output_stream.iter_packets():
-                await output.send((tag, packet))
+            for tag, data in self._cached_output_stream.iter_data():
+                await output.send((tag, data))
             return  # finally block closes output
 
         # OFF or LOG: delegate to operator, forward results downstream
-        intermediate = Channel[tuple[TagProtocol, PacketProtocol]]()
-        collected: list[tuple[TagProtocol, PacketProtocol]] = []
+        intermediate = Channel[tuple[TagProtocol, DataProtocol]]()
+        collected: list[tuple[TagProtocol, DataProtocol]] = []
 
         async def forward() -> None:
             async for item in intermediate.reader:
@@ -660,9 +660,9 @@ from orcapod.core.static_output_pod import StaticOutputPod
 Since we're removing that function, this test class needs to be rewritten to test the
 behavior through the actual classes:
 
-- Test that `FunctionPodStream._iter_packets_concurrent` falls back to sequential
-  `process_packet` when called inside a running event loop.
-- Test that `FunctionNode._iter_packets_concurrent` does the same.
+- Test that `FunctionPodStream._iter_data_concurrent` falls back to sequential
+  `process_data` when called inside a running event loop.
+- Test that `FunctionNode._iter_data_concurrent` does the same.
 
 The tested behavior (event-loop fallback) is preserved — it's just now method-internal
 rather than in a standalone helper.
@@ -678,34 +678,34 @@ TestProtocolConformance
   - test_operator_node_satisfies_async_executable_protocol
   - test_persistent_operator_node_satisfies_async_executable_protocol
 
-TestCachedPacketFunctionAsync
+TestCachedDataFunctionAsync
   - test_async_call_cache_miss_computes_and_records
   - test_async_call_cache_hit_returns_cached
   - test_async_call_skip_cache_lookup
   - test_async_call_skip_cache_insert
 
-TestProcessPacketRouting
-  - test_function_pod_stream_sequential_uses_process_packet
-  - test_function_pod_stream_concurrent_uses_async_process_packet
-  - test_function_node_sequential_uses_process_packet
-  - test_function_node_concurrent_uses_async_process_packet
-  - test_persistent_function_node_concurrent_uses_overridden_async_process_packet
-  - test_concurrent_fallback_in_event_loop_uses_sync_process_packet
+TestProcessDataRouting
+  - test_function_pod_stream_sequential_uses_process_data
+  - test_function_pod_stream_concurrent_uses_async_process_data
+  - test_function_node_sequential_uses_process_data
+  - test_function_node_concurrent_uses_async_process_data
+  - test_persistent_function_node_concurrent_uses_overridden_async_process_data
+  - test_concurrent_fallback_in_event_loop_uses_sync_process_data
 
 TestFunctionNodeAsyncExecute
   - test_basic_streaming_matches_sync
   - test_empty_input_closes_cleanly
-  - test_none_packets_filtered_out
+  - test_none_data_filtered_out
 
 TestPersistentFunctionNodeAsyncExecute
   - test_no_cache_processes_all_inputs
   - test_phase1_emits_cached_results
   - test_phase2_skips_cached_computes_new
-  - test_pipeline_records_created_for_new_packets
-  - test_result_cache_populated_for_new_packets
+  - test_pipeline_records_created_for_new_data
+  - test_result_cache_populated_for_new_data
 
 TestOperatorNodeAsyncExecute
-  - test_unary_op_delegation (SelectPacketColumns)
+  - test_unary_op_delegation (SelectDataColumns)
   - test_binary_op_delegation (SemiJoin)
   - test_nary_op_delegation (Join)
   - test_results_match_sync_run
@@ -736,41 +736,41 @@ uv run pytest tests/ -x
 
 **Sync sequential path:**
 ```
-FunctionPodStream._iter_packets_sequential
-  → self._function_pod.process_packet(tag, pkt)       # already correct
-    → packet_function.call(pkt)
+FunctionPodStream._iter_data_sequential
+  → self._function_pod.process_data(tag, pkt)       # already correct
+    → data_function.call(pkt)
 
-FunctionNode._iter_packets_sequential
-  → self.process_packet(tag, pkt)                      # CHANGED: was _packet_function.call(pkt)
-    → self._function_pod.process_packet(tag, pkt)
-      → packet_function.call(pkt)
+FunctionNode._iter_data_sequential
+  → self.process_data(tag, pkt)                      # CHANGED: was _data_function.call(pkt)
+    → self._function_pod.process_data(tag, pkt)
+      → data_function.call(pkt)
 
-PersistentFunctionNode._iter_packets_sequential (inherited from FunctionNode)
-  → self.process_packet(tag, pkt)                      # polymorphism kicks in
-    → CachedPacketFunction.call(pkt, skip_cache_*=...) # cache check + compute + record
+PersistentFunctionNode._iter_data_sequential (inherited from FunctionNode)
+  → self.process_data(tag, pkt)                      # polymorphism kicks in
+    → CachedDataFunction.call(pkt, skip_cache_*=...) # cache check + compute + record
     → self.add_pipeline_record(...)                     # pipeline DB
 ```
 
 **Sync concurrent path:**
 ```
-FunctionPodStream._iter_packets_concurrent
+FunctionPodStream._iter_data_concurrent
   → asyncio.run(gather(
-        self._function_pod.async_process_packet(tag, pkt) ...   # CHANGED: was _execute_concurrent
+        self._function_pod.async_process_data(tag, pkt) ...   # CHANGED: was _execute_concurrent
     ))
   OR (if event loop running):
-    self._function_pod.process_packet(tag, pkt) ...             # fallback
+    self._function_pod.process_data(tag, pkt) ...             # fallback
 
-FunctionNode._iter_packets_concurrent
+FunctionNode._iter_data_concurrent
   → asyncio.run(gather(
-        self.async_process_packet(tag, pkt) ...                 # CHANGED: was _execute_concurrent
+        self.async_process_data(tag, pkt) ...                 # CHANGED: was _execute_concurrent
     ))
   OR (if event loop running):
-    self.process_packet(tag, pkt) ...                           # fallback
+    self.process_data(tag, pkt) ...                           # fallback
 
-PersistentFunctionNode._iter_packets_concurrent (inherited from FunctionNode)
+PersistentFunctionNode._iter_data_concurrent (inherited from FunctionNode)
   → asyncio.run(gather(
-        self.async_process_packet(tag, pkt) ...                 # polymorphism kicks in
-          → await CachedPacketFunction.async_call(pkt)          # cache + compute
+        self.async_process_data(tag, pkt) ...                 # polymorphism kicks in
+          → await CachedDataFunction.async_call(pkt)          # cache + compute
           → self.add_pipeline_record(...)                       # pipeline DB
     ))
 ```
@@ -778,19 +778,19 @@ PersistentFunctionNode._iter_packets_concurrent (inherited from FunctionNode)
 **Async execution path:**
 ```
 FunctionPod.async_execute
-  → await self.async_process_packet(tag, pkt)          # CHANGED: was packet_function.async_call
-    → await packet_function.async_call(pkt)
+  → await self.async_process_data(tag, pkt)          # CHANGED: was data_function.async_call
+    → await data_function.async_call(pkt)
 
 FunctionNode.async_execute                              # NEW
-  → await self.async_process_packet(tag, pkt)
-    → await self._function_pod.async_process_packet(tag, pkt)
-      → await packet_function.async_call(pkt)
+  → await self.async_process_data(tag, pkt)
+    → await self._function_pod.async_process_data(tag, pkt)
+      → await data_function.async_call(pkt)
 
 PersistentFunctionNode.async_execute                    # NEW (two-phase)
   Phase 1: emit from DB
   Phase 2:
-    → await self.async_process_packet(tag, pkt)         # polymorphic override
-      → await CachedPacketFunction.async_call(pkt)      # cache + compute
+    → await self.async_process_data(tag, pkt)         # polymorphic override
+      → await CachedDataFunction.async_call(pkt)      # cache + compute
       → self.add_pipeline_record(...)                   # pipeline DB (sync)
 
 OperatorNode.async_execute                              # NEW
@@ -809,16 +809,16 @@ PersistentOperatorNode.async_execute                    # NEW
 
 | File | Changes |
 |------|---------|
-| `src/orcapod/core/packet_function.py` | Add `CachedPacketFunction.async_call` override with cache logic |
-| `src/orcapod/core/function_pod.py` | (1) Add `_FunctionPodBase.async_process_packet` |
-| | (2) Fix `FunctionPod.async_execute` to use `async_process_packet` |
-| | (3) Rewrite `FunctionPodStream._iter_packets_concurrent` — route through `_function_pod.async_process_packet` / `process_packet`, drop `packet_function` param |
-| | (4) Update `FunctionPodStream.iter_packets` — remove `pf` arg to `_iter_packets_concurrent` |
-| | (5) Fix `FunctionNode._iter_packets_sequential` to use `self.process_packet` |
-| | (6) Rewrite `FunctionNode._iter_packets_concurrent` — route through `self.async_process_packet` / `self.process_packet` |
-| | (7) Add `FunctionNode.process_packet` + `async_process_packet` (delegate to pod) |
+| `src/orcapod/core/data_function.py` | Add `CachedDataFunction.async_call` override with cache logic |
+| `src/orcapod/core/function_pod.py` | (1) Add `_FunctionPodBase.async_process_data` |
+| | (2) Fix `FunctionPod.async_execute` to use `async_process_data` |
+| | (3) Rewrite `FunctionPodStream._iter_data_concurrent` — route through `_function_pod.async_process_data` / `process_data`, drop `data_function` param |
+| | (4) Update `FunctionPodStream.iter_data` — remove `pf` arg to `_iter_data_concurrent` |
+| | (5) Fix `FunctionNode._iter_data_sequential` to use `self.process_data` |
+| | (6) Rewrite `FunctionNode._iter_data_concurrent` — route through `self.async_process_data` / `self.process_data` |
+| | (7) Add `FunctionNode.process_data` + `async_process_data` (delegate to pod) |
 | | (8) Add `FunctionNode.async_execute` |
-| | (9) Add `PersistentFunctionNode.async_process_packet` (cache + pipeline records) |
+| | (9) Add `PersistentFunctionNode.async_process_data` (cache + pipeline records) |
 | | (10) Add `PersistentFunctionNode.async_execute` (two-phase) |
 | | (11) Remove `_execute_concurrent` module-level helper |
 | `src/orcapod/core/operator_node.py` | (1) Add imports |

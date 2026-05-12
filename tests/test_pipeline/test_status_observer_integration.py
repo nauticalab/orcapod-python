@@ -12,7 +12,7 @@ import pytest
 
 from orcapod.core.executors import LocalPythonFunctionExecutor
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline.serialization import DatabaseRegistry
@@ -60,7 +60,7 @@ class TestSyncPipelineSuccessStatus:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_status", pipeline_database=db)
@@ -74,7 +74,7 @@ class TestSyncPipelineSuccessStatus:
         status = obs.get_status()
 
         assert status is not None
-        # 3 packets × 2 events each (RUNNING + SUCCESS) = 6 rows
+        # 3 data × 2 events each (RUNNING + SUCCESS) = 6 rows
         assert status.num_rows == 6
 
         states = status.column("_status_state").to_pylist()
@@ -83,11 +83,11 @@ class TestSyncPipelineSuccessStatus:
 
 
 # ---------------------------------------------------------------------------
-# 2. Failing packets → FAILED status with error summary
+# 2. Failing data → FAILED status with error summary
 # ---------------------------------------------------------------------------
 
 
-class TestFailingPacketsStatus:
+class TestFailingDatasStatus:
     def test_failure_status_with_error_summary(self):
         db = InMemoryArrowDatabase()
         source = _make_source(2)
@@ -95,7 +95,7 @@ class TestFailingPacketsStatus:
         def failing(x: int) -> int:
             raise ValueError("boom")
 
-        pf = PythonPacketFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_fail_status", pipeline_database=db)
@@ -109,7 +109,7 @@ class TestFailingPacketsStatus:
         status = obs.get_status()
 
         assert status is not None
-        # 2 packets × 2 events each (RUNNING + FAILED)
+        # 2 data × 2 events each (RUNNING + FAILED)
         assert status.num_rows == 4
 
         states = status.column("_status_state").to_pylist()
@@ -139,7 +139,7 @@ class TestFlatStatusStorage:
         def identity(x: int) -> int:
             return x
 
-        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_flat_status", pipeline_database=db)
@@ -169,7 +169,7 @@ class TestQueryableTagColumns:
         def identity(x: int) -> int:
             return x
 
-        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_tags_status", pipeline_database=db)
@@ -202,7 +202,7 @@ class TestAsyncOrchestratorStatus:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_async_status", pipeline_database=db)
@@ -236,7 +236,7 @@ class TestFailFastErrorPolicy:
         def failing(x: int) -> int:
             raise RuntimeError("crash")
 
-        pf = PythonPacketFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_failfast_status", pipeline_database=db)
@@ -260,7 +260,7 @@ class TestFailFastErrorPolicy:
 
 
 # ---------------------------------------------------------------------------
-# 7. Mixed success/failure — correct status per packet
+# 7. Mixed success/failure — correct status per data
 # ---------------------------------------------------------------------------
 
 
@@ -279,7 +279,7 @@ class TestMixedSuccessFailure:
         def safe_div(x: int) -> float:
             return 100 / x  # x=0 will raise ZeroDivisionError
 
-        pf = PythonPacketFunction(safe_div, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(safe_div, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_mixed_status", pipeline_database=db)
@@ -318,9 +318,9 @@ class TestMultipleFunctionNodesSeparateStatus:
         def triple(result: int) -> int:
             return result * 3
 
-        pf1 = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf1 = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod1 = FunctionPod(pf1)
-        pf2 = PythonPacketFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
+        pf2 = PythonDataFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
         pod2 = FunctionPod(pf2)
 
         pipeline = Pipeline(name="test_multi_status", pipeline_database=db)
@@ -335,7 +335,7 @@ class TestMultipleFunctionNodesSeparateStatus:
         # Combined status contains events for both nodes
         status = obs.get_status()
         assert status is not None
-        # Each node: 2 packets × 2 events = 4 rows per node → 8 total
+        # Each node: 2 data × 2 events = 4 rows per node → 8 total
         assert status.num_rows == 8
 
 
@@ -355,9 +355,9 @@ class TestGetStatusNodeSpecific:
         def triple(result: int) -> int:
             return result * 3
 
-        pf1 = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf1 = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod1 = FunctionPod(pf1)
-        pf2 = PythonPacketFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
+        pf2 = PythonDataFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
         pod2 = FunctionPod(pf2)
 
         pipeline = Pipeline(name="test_filter_status", pipeline_database=db)
@@ -371,7 +371,7 @@ class TestGetStatusNodeSpecific:
 
         all_status = obs.get_status()
         assert all_status is not None
-        # Each node: 2 packets × 2 events = 4 rows per node → 8 total
+        # Each node: 2 data × 2 events = 4 rows per node → 8 total
         assert all_status.num_rows == 8
 
 
@@ -388,7 +388,7 @@ class TestStatusSchema:
         def identity(x: int) -> int:
             return x
 
-        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_schema", pipeline_database=db)
@@ -430,7 +430,7 @@ class TestRunIdTracking:
         def identity(x: int) -> int:
             return x
 
-        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_runid", pipeline_database=db)

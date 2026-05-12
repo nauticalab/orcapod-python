@@ -78,7 +78,7 @@ class DerivedSource(RootSource):
             records = self._origin.get_all_records()
             if records is None:
                 # Build empty table with correct schema
-                tag_schema, packet_schema = self._origin.output_schema()
+                tag_schema, data_schema = self._origin.output_schema()
                 tag_keys = self._origin.keys()[0]
                 tc = self.data_context.type_converter
                 fields = [
@@ -87,7 +87,7 @@ class DerivedSource(RootSource):
                 ]
                 fields += [
                     pa.field(k, tc.python_type_to_arrow_type(v))
-                    for k, v in packet_schema.items()
+                    for k, v in data_schema.items()
                 ]
                 arrow_schema = pa.schema(fields)
                 self._cached_table = pa.table(
@@ -99,8 +99,8 @@ class DerivedSource(RootSource):
         tag_keys = self._origin.keys()[0]
         return ArrowTableStream(self._cached_table, tag_columns=tag_keys)
 
-    def iter_packets(self):
-        return self._get_stream().iter_packets()
+    def iter_data(self):
+        return self._get_stream().iter_data()
 
     def as_table(
         self,

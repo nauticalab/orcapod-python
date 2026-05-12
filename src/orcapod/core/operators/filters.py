@@ -150,7 +150,7 @@ class PolarsFilter(UnaryOperator):
         )
 
 
-class SelectPacketColumns(UnaryOperator):
+class SelectDataColumns(UnaryOperator):
     """
     Operator that selects specified columns from a stream.
     """
@@ -163,14 +163,14 @@ class SelectPacketColumns(UnaryOperator):
         super().__init__(**kwargs)
 
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
-        tag_columns, packet_columns = stream.keys()
-        packet_columns_to_drop = [c for c in packet_columns if c not in self.columns]
-        new_packet_columns = [
-            c for c in packet_columns if c not in packet_columns_to_drop
+        tag_columns, data_columns = stream.keys()
+        data_columns_to_drop = [c for c in data_columns if c not in self.columns]
+        new_data_columns = [
+            c for c in data_columns if c not in data_columns_to_drop
         ]
 
-        if len(new_packet_columns) == len(packet_columns):
-            logger.info("All packet columns are selected. Returning stream unaltered.")
+        if len(new_data_columns) == len(data_columns):
+            logger.info("All data columns are selected. Returning stream unaltered.")
             return stream
 
         table = stream.as_table(
@@ -178,11 +178,11 @@ class SelectPacketColumns(UnaryOperator):
         )
         # make sure to drop associated source fields
         associated_source_fields = [
-            f"{constants.SOURCE_PREFIX}{c}" for c in packet_columns_to_drop
+            f"{constants.SOURCE_PREFIX}{c}" for c in data_columns_to_drop
         ]
-        packet_columns_to_drop.extend(associated_source_fields)
+        data_columns_to_drop.extend(associated_source_fields)
 
-        modified_table = table.drop_columns(packet_columns_to_drop)
+        modified_table = table.drop_columns(data_columns_to_drop)
 
         return ArrowTableStream(
             modified_table,
@@ -195,12 +195,12 @@ class SelectPacketColumns(UnaryOperator):
         It takes two streams as input and raises an error if the inputs are not valid.
         """
         # TODO: remove redundant logic
-        _, packet_columns = stream.keys()
+        _, data_columns = stream.keys()
         columns_to_select = self.columns
-        missing_columns = set(columns_to_select) - set(packet_columns)
+        missing_columns = set(columns_to_select) - set(data_columns)
         if missing_columns and self.strict:
             raise InputValidationError(
-                f"Missing packet columns: {missing_columns}. Make sure all specified columns to select are present or use strict=False to ignore missing columns"
+                f"Missing data columns: {missing_columns}. Make sure all specified columns to select are present or use strict=False to ignore missing columns"
             )
 
     def unary_output_schema(
@@ -211,18 +211,18 @@ class SelectPacketColumns(UnaryOperator):
         all_info: bool = False,
         include_system_tags: bool = False,
     ) -> tuple[Schema, Schema]:
-        tag_schema, packet_schema = stream.output_schema(
+        tag_schema, data_schema = stream.output_schema(
             columns=columns, all_info=all_info
         )
-        _, packet_columns = stream.keys()
-        packets_to_drop = [pc for pc in packet_columns if pc not in self.columns]
+        _, data_columns = stream.keys()
+        data_to_drop = [pc for pc in data_columns if pc not in self.columns]
 
         # this ensures all system tag columns are preserved
-        new_packet_schema = {
-            k: v for k, v in packet_schema.items() if k not in packets_to_drop
+        new_data_schema = {
+            k: v for k, v in data_schema.items() if k not in data_to_drop
         }
 
-        return tag_schema, new_packet_schema
+        return tag_schema, new_data_schema
 
     def identity_structure(self) -> Any:
         return (

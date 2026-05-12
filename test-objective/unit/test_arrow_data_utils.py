@@ -134,7 +134,7 @@ class TestSortSystemTagValues:
 
 class TestAddSourceInfo:
     """Per design, source info columns are prefixed with _source_ and track
-    provenance tokens per packet column."""
+    provenance tokens per data column."""
 
     def test_adds_source_info_columns(self):
         table = pa.table({"id": [1, 2], "value": [10, 20]})

@@ -1,7 +1,7 @@
 """Tests for the refactored FunctionNode iteration semantics.
 
 After ENG-379:
-- iter_packets() is strictly read-only — never triggers computation
+- iter_data() is strictly read-only — never triggers computation
 - Computation only via run() / execute() / async_execute()
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ import pytest
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.core.executors import LocalPythonFunctionExecutor
@@ -39,74 +39,74 @@ def _make_node(n: int = 3, db: InMemoryArrowDatabase | None = None) -> FunctionN
     def double(x: int) -> int:
         return x * 2
 
-    pf = PythonPacketFunction(double, output_keys="result")
+    pf = PythonDataFunction(double, output_keys="result")
     pod = FunctionPod(pf)
     pipeline_db = db if db is not None else InMemoryArrowDatabase()
     return FunctionNode(pod, _make_source(n=n), pipeline_database=pipeline_db)
 
 
-class TestIterPacketsReadOnly:
+class TestIterDatasReadOnly:
     def test_fresh_node_no_db_yields_nothing(self):
-        """iter_packets() on a fresh node with no run() and empty DB yields nothing."""
+        """iter_data() on a fresh node with no run() and empty DB yields nothing."""
         node = _make_node()
-        assert list(node.iter_packets()) == []
+        assert list(node.iter_data()) == []
 
-    def test_iter_does_not_call_process_packet_internal(self):
-        """iter_packets() never calls _process_packet_internal under any non-compute path."""
+    def test_iter_does_not_call_process_data_internal(self):
+        """iter_data() never calls _process_data_internal under any non-compute path."""
         node = _make_node()
-        with patch.object(node, "_process_packet_internal") as mock_proc:
-            list(node.iter_packets())
+        with patch.object(node, "_process_data_internal") as mock_proc:
+            list(node.iter_data())
             mock_proc.assert_not_called()
 
     def test_iter_after_db_populated_hot_loads_without_compute(self):
-        """iter_packets() on a node with DB records hot-loads without _process_packet_internal."""
+        """iter_data() on a node with DB records hot-loads without _process_data_internal."""
         db = InMemoryArrowDatabase()
         node1 = _make_node(n=3, db=db)
         node1.run()  # populate DB
 
         node2 = _make_node(n=3, db=db)
-        with patch.object(node2, "_process_packet_internal") as mock_proc:
-            results = list(node2.iter_packets())
+        with patch.object(node2, "_process_data_internal") as mock_proc:
+            results = list(node2.iter_data())
             mock_proc.assert_not_called()
         assert len(results) == 3
 
     def test_after_run_iter_yields_from_cache_no_db_query(self):
-        """After run(), iter_packets() yields from _cached_output_packets without DB query."""
+        """After run(), iter_data() yields from _cached_output_datas without DB query."""
         node = _make_node()
         node.run()
-        initial_count = len(node._cached_output_packets)
+        initial_count = len(node._cached_output_datas)
         assert initial_count == 3
 
         with patch.object(node, "_load_cached_entries") as mock_load:
-            results = list(node.iter_packets())
+            results = list(node.iter_data())
             mock_load.assert_not_called()
         assert len(results) == 3
 
     def test_iter_twice_same_order_db_queried_once(self):
-        """Two successive iter_packets() calls return same order; DB queried at most once."""
+        """Two successive iter_data() calls return same order; DB queried at most once."""
         db = InMemoryArrowDatabase()
         node1 = _make_node(n=3, db=db)
         node1.run()
 
         node2 = _make_node(n=3, db=db)
         with patch.object(node2, "_load_cached_entries", wraps=node2._load_cached_entries) as mock_load:
-            first = [(t["id"], p["result"]) for t, p in node2.iter_packets()]
-            second = [(t["id"], p["result"]) for t, p in node2.iter_packets()]
+            first = [(t["id"], p["result"]) for t, p in node2.iter_data()]
+            second = [(t["id"], p["result"]) for t, p in node2.iter_data()]
             assert mock_load.call_count <= 1  # at most one DB query
         assert first == second
 
-    def test_cached_output_packets_keyed_by_entry_id_strings(self):
-        """After run(), _cached_output_packets keys are entry_id strings, not ints."""
+    def test_cached_output_datas_keyed_by_entry_id_strings(self):
+        """After run(), _cached_output_datas keys are entry_id strings, not ints."""
         node = _make_node()
         node.run()
-        assert len(node._cached_output_packets) == 3
-        for key in node._cached_output_packets:
+        assert len(node._cached_output_datas) == 3
+        for key in node._cached_output_datas:
             assert isinstance(key, str), f"Expected str key, got {type(key)}: {key!r}"
 
     def test_as_table_fresh_node_returns_empty_no_compute(self):
         """as_table() on a fresh node with no run() and empty DB returns empty table."""
         node = _make_node()
-        with patch.object(node, "_process_packet_internal") as mock_proc:
+        with patch.object(node, "_process_data_internal") as mock_proc:
             table = node.as_table()
             mock_proc.assert_not_called()
         assert isinstance(table, pa.Table)
@@ -134,7 +134,7 @@ class TestIterPacketsReadOnly:
             node.run()
 
     def test_execute_error_policy_continue_skips_failures(self):
-        """execute() fires on_packet_crash per failing packet and returns successes when error_policy='continue'.
+        """execute() fires on_data_crash per failing data and returns successes when error_policy='continue'.
 
         Uses LocalExecutor (non-concurrent) to test the sequential execute() path.
         """
@@ -145,7 +145,7 @@ class TestIterPacketsReadOnly:
                 raise ValueError("intentional failure")
             return x * 2
 
-        pf = PythonPacketFunction(sometimes_fail, output_keys="result")
+        pf = PythonDataFunction(sometimes_fail, output_keys="result")
         pf.executor = LocalPythonFunctionExecutor()  # supports_concurrent_execution is False
         pod = FunctionPod(pf)
         db = InMemoryArrowDatabase()
@@ -154,11 +154,11 @@ class TestIterPacketsReadOnly:
         from orcapod.pipeline.observer import NoOpObserver
 
         class CapturingObserver(NoOpObserver):
-            def on_packet_crash(self, node_label, tag, packet, exc):
+            def on_data_crash(self, node_label, tag, data, exc):
                 errors.append(exc)
 
         results = node.execute(node._input_stream, observer=CapturingObserver(), error_policy="continue")
         assert len(errors) == 1
         assert isinstance(errors[0], ValueError)
-        # Two non-failing packets should succeed
+        # Two non-failing data should succeed
         assert len(results) == 2

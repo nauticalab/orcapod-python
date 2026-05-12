@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, Self, TypeAlias
 if TYPE_CHECKING:
     import pyarrow as pa
 
-    from orcapod.protocols.core_protocols import PacketFunctionExecutorProtocol
+    from orcapod.protocols.core_protocols import DataFunctionExecutorProtocol
 else:
     from orcapod.utils.lazy_module import LazyModule
 
@@ -44,7 +44,7 @@ PathLike: TypeAlias = str | os.PathLike
 # TODO: accomodate other common data types such as datetime
 TagValue: TypeAlias = int | str | None | Collection["TagValue"]
 """A tag metadata value: an int, string, ``None``, or an arbitrarily nested
-collection thereof. Tags are used to label and organise packets and
+collection thereof. Tags are used to label and organise data and
 datagrams."""
 
 PathSet: TypeAlias = PathLike | Collection[PathLike | None]
@@ -60,12 +60,12 @@ ExtendedSupportedPythonData: TypeAlias = SupportedNativePythonData | PathSet
 """Native scalar types extended with filesystem paths."""
 
 DataValue: TypeAlias = ExtendedSupportedPythonData | Collection["DataValue"] | None
-"""The universe of values that can appear in a packet column -- scalars,
+"""The universe of values that can appear in a data column -- scalars,
 paths, arbitrarily nested collections, or ``None``."""
 
-PacketLike: TypeAlias = Mapping[str, DataValue]
+DataLike: TypeAlias = Mapping[str, DataValue]
 """A dict-like structure mapping field names to ``DataValue`` entries. Serves
-as a lightweight, protocol-free representation of a packet."""
+as a lightweight, protocol-free representation of a data."""
 
 SchemaLike: TypeAlias = Mapping[str, DataType]
 """A dict-like structure mapping field names to ``DataType`` entries.
@@ -150,7 +150,7 @@ class Schema(Mapping[str, DataType]):
 
     @property
     def required_fields(self) -> frozenset[str]:
-        """Field names that must be present in an incoming packet."""
+        """Field names that must be present in an incoming data."""
         return frozenset(self._data.keys()) - self._optional
 
     def is_required(self, field: str) -> bool:
@@ -291,7 +291,7 @@ class PipelineConfig:
         channel_buffer_size: Max items buffered per channel edge.
         default_max_concurrency: Pipeline-wide default for per-node
             concurrency.  ``None`` means unlimited.
-        execution_engine: Optional packet-function executor applied to all
+        execution_engine: Optional data-function executor applied to all
             function nodes (e.g. ``RayExecutor``).  ``None`` means in-process
             execution.
         execution_engine_opts: Resource/options dict forwarded to the engine
@@ -301,7 +301,7 @@ class PipelineConfig:
     executor: ExecutorType = ExecutorType.SYNCHRONOUS
     channel_buffer_size: int = 64
     default_max_concurrency: int | None = None
-    execution_engine: PacketFunctionExecutorProtocol | None = None
+    execution_engine: DataFunctionExecutorProtocol | None = None
     execution_engine_opts: dict[str, Any] | None = None
 
 
@@ -358,7 +358,7 @@ class CacheMode(Enum):
 @dataclass(frozen=True, slots=True)
 class ColumnConfig:
     """
-    Configuration for column inclusion in DatagramProtocol/PacketProtocol/TagProtocol operations.
+    Configuration for column inclusion in DatagramProtocol/DataProtocol/TagProtocol operations.
 
     Controls which column types to include when converting to tables, dicts,
     or querying keys/types.
@@ -370,7 +370,7 @@ class ColumnConfig:
               - Collection[str]: include specific meta columns by name
                 (prefix '__' is added automatically if not present)
         context: Include context column
-        source: Include source info columns (PacketProtocol only, ignored for others)
+        source: Include source info columns (DataProtocol only, ignored for others)
         system_tags: Include system tag columns (TagProtocol only, ignored for others)
         all_info: Include all available columns (overrides other settings)
 
@@ -393,9 +393,9 @@ class ColumnConfig:
 
     meta: bool | Collection[str] = False
     context: bool = False
-    source: bool = False  # Only relevant for PacketProtocol
+    source: bool = False  # Only relevant for DataProtocol
     system_tags: bool = False  # Only relevant for TagProtocol
-    content_hash: bool | str = False  # Only relevant for PacketProtocol
+    content_hash: bool | str = False  # Only relevant for DataProtocol
     sort_by_tags: bool = False  # Only relevant for TagProtocol
     all_info: bool = False
 

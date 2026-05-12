@@ -1,11 +1,11 @@
 """
-Tests for core/packet_function.py.
+Tests for core/data_function.py.
 
 Covers:
 - parse_function_outputs helper
-- PacketFunctionBase (version parsing, URI, schema hash, identity) via PythonPacketFunction
-- PythonPacketFunction construction, properties, call behaviour, error paths
-- PacketFunctionProtocol protocol conformance
+- DataFunctionBase (version parsing, URI, schema hash, identity) via PythonDataFunction
+- PythonDataFunction construction, properties, call behaviour, error paths
+- DataFunctionProtocol protocol conformance
 """
 
 from __future__ import annotations
@@ -15,9 +15,9 @@ import sys
 
 import pytest
 
-from orcapod.core.datagrams import Packet
-from orcapod.core.packet_function import PythonPacketFunction, parse_function_outputs
-from orcapod.protocols.core_protocols import PacketFunctionProtocol
+from orcapod.core.datagrams import Data
+from orcapod.core.data_function import PythonDataFunction, parse_function_outputs
+from orcapod.protocols.core_protocols import DataFunctionProtocol
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -46,32 +46,32 @@ async def async_multi(a: int, b: int) -> tuple[int, int]:
 
 
 @pytest.fixture
-def add_pf() -> PythonPacketFunction:
-    """PythonPacketFunction wrapping a simple two-arg addition."""
-    return PythonPacketFunction(add, output_keys="result")
+def add_pf() -> PythonDataFunction:
+    """PythonDataFunction wrapping a simple two-arg addition."""
+    return PythonDataFunction(add, output_keys="result")
 
 
 @pytest.fixture
-def multi_pf() -> PythonPacketFunction:
-    """PythonPacketFunction wrapping a two-output function."""
-    return PythonPacketFunction(multi, output_keys=["sum", "product"])
+def multi_pf() -> PythonDataFunction:
+    """PythonDataFunction wrapping a two-output function."""
+    return PythonDataFunction(multi, output_keys=["sum", "product"])
 
 
 @pytest.fixture
-def async_add_pf() -> PythonPacketFunction:
-    """PythonPacketFunction wrapping an async two-arg addition."""
-    return PythonPacketFunction(async_add, output_keys="result")
+def async_add_pf() -> PythonDataFunction:
+    """PythonDataFunction wrapping an async two-arg addition."""
+    return PythonDataFunction(async_add, output_keys="result")
 
 
 @pytest.fixture
-def async_multi_pf() -> PythonPacketFunction:
-    """PythonPacketFunction wrapping an async two-output function."""
-    return PythonPacketFunction(async_multi, output_keys=["sum", "product"])
+def async_multi_pf() -> PythonDataFunction:
+    """PythonDataFunction wrapping an async two-output function."""
+    return PythonDataFunction(async_multi, output_keys=["sum", "product"])
 
 
 @pytest.fixture
-def add_packet() -> Packet:
-    return Packet({"x": 1, "y": 2})
+def add_data() -> Data:
+    return Data({"x": 1, "y": 2})
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +104,7 @@ class TestParseFunctionOutputs:
 
 
 # ---------------------------------------------------------------------------
-# 2. PacketFunctionBase — version parsing
+# 2. DataFunctionBase — version parsing
 # ---------------------------------------------------------------------------
 
 
@@ -120,21 +120,21 @@ class TestVersionParsing:
         ],
     )
     def test_valid_version_parses(self, version, expected_major, expected_minor):
-        pf = PythonPacketFunction(add, output_keys="result", version=version)
+        pf = PythonDataFunction(add, output_keys="result", version=version)
         assert pf.major_version == expected_major
         assert pf.minor_version_string == expected_minor
 
     def test_invalid_version_raises(self):
         with pytest.raises(ValueError):
-            PythonPacketFunction(add, output_keys="result", version="no_dots")
+            PythonDataFunction(add, output_keys="result", version="no_dots")
 
 
 # ---------------------------------------------------------------------------
-# 3. PacketFunctionBase properties
+# 3. DataFunctionBase properties
 # ---------------------------------------------------------------------------
 
 
-class TestPacketFunctionBaseProperties:
+class TestDataFunctionBaseProperties:
     def test_major_version_type(self, add_pf):
         assert isinstance(add_pf.major_version, int)
 
@@ -150,17 +150,17 @@ class TestPacketFunctionBaseProperties:
         name, schema_hash, version_part, type_id = add_pf.uri
         assert name == add_pf.canonical_function_name
         assert version_part == f"v{add_pf.major_version}"
-        assert type_id == add_pf.packet_function_type_id
+        assert type_id == add_pf.data_function_type_id
         assert isinstance(schema_hash, str)
 
-    def test_output_packet_schema_hash_is_string(self, add_pf):
-        h = add_pf.output_packet_schema_hash
+    def test_output_data_schema_hash_is_string(self, add_pf):
+        h = add_pf.output_data_schema_hash
         assert isinstance(h, str)
         assert len(h) > 0
 
-    def test_output_packet_schema_hash_matches_uri(self, add_pf):
+    def test_output_data_schema_hash_matches_uri(self, add_pf):
         _, schema_hash, _, _ = add_pf.uri
-        assert schema_hash == add_pf.output_packet_schema_hash
+        assert schema_hash == add_pf.output_data_schema_hash
 
     def test_identity_structure_equals_uri(self, add_pf):
         assert add_pf.identity_structure() == add_pf.uri
@@ -169,25 +169,25 @@ class TestPacketFunctionBaseProperties:
         assert add_pf.label == add_pf.canonical_function_name
 
     def test_explicit_label_overrides_computed(self):
-        pf = PythonPacketFunction(add, output_keys="result", label="my_label")
+        pf = PythonDataFunction(add, output_keys="result", label="my_label")
         assert pf.label == "my_label"
 
 
 # ---------------------------------------------------------------------------
-# 4. PythonPacketFunction — construction
+# 4. PythonDataFunction — construction
 # ---------------------------------------------------------------------------
 
 
-class TestPythonPacketFunctionConstruction:
-    def test_packet_function_type_id(self, add_pf):
-        assert add_pf.packet_function_type_id == "python.function.v0"
+class TestPythonDataFunctionConstruction:
+    def test_data_function_type_id(self, add_pf):
+        assert add_pf.data_function_type_id == "python.function.v0"
 
     def test_canonical_name_from_dunder_name(self):
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         assert pf.canonical_function_name == "add"
 
     def test_explicit_function_name_overrides(self):
-        pf = PythonPacketFunction(add, output_keys="result", function_name="custom")
+        pf = PythonDataFunction(add, output_keys="result", function_name="custom")
         assert pf.canonical_function_name == "custom"
 
     def test_no_name_on_callable_raises(self):
@@ -200,32 +200,32 @@ class TestPythonPacketFunctionConstruction:
         # callable objects don't have __name__ by default
         assert not hasattr(obj, "__name__")
         with pytest.raises(ValueError):
-            PythonPacketFunction(obj, output_keys="result")
+            PythonDataFunction(obj, output_keys="result")
 
-    def test_input_packet_schema_has_correct_keys(self, add_pf):
-        schema = add_pf.input_packet_schema
+    def test_input_data_schema_has_correct_keys(self, add_pf):
+        schema = add_pf.input_data_schema
         assert "x" in schema
         assert "y" in schema
 
-    def test_input_packet_schema_has_correct_types(self, add_pf):
-        schema = add_pf.input_packet_schema
+    def test_input_data_schema_has_correct_types(self, add_pf):
+        schema = add_pf.input_data_schema
         assert schema["x"] is int
         assert schema["y"] is int
 
-    def test_output_packet_schema_has_correct_keys(self, add_pf):
-        schema = add_pf.output_packet_schema
+    def test_output_data_schema_has_correct_keys(self, add_pf):
+        schema = add_pf.output_data_schema
         assert "result" in schema
 
-    def test_output_packet_schema_has_correct_types(self, add_pf):
-        schema = add_pf.output_packet_schema
+    def test_output_data_schema_has_correct_types(self, add_pf):
+        schema = add_pf.output_data_schema
         assert schema["result"] is int
 
     def test_output_keys_string_normalised_to_list(self):
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         assert pf._output_keys == ["result"]
 
     def test_output_keys_collection_preserved(self):
-        pf = PythonPacketFunction(multi, output_keys=["sum", "product"])
+        pf = PythonDataFunction(multi, output_keys=["sum", "product"])
         assert list(pf._output_keys) == ["sum", "product"]
 
     def test_var_positional_args_raises(self):
@@ -233,30 +233,30 @@ class TestPythonPacketFunctionConstruction:
             return sum(args)
 
         with pytest.raises(ValueError, match=r"\*args"):
-            PythonPacketFunction(func_with_args, output_keys="result")
+            PythonDataFunction(func_with_args, output_keys="result")
 
     def test_var_keyword_args_raises(self):
         def func_with_kwargs(**kwargs: int) -> int:
             return sum(kwargs.values())
 
         with pytest.raises(ValueError, match=r"\*\*kwargs"):
-            PythonPacketFunction(func_with_kwargs, output_keys="result")
+            PythonDataFunction(func_with_kwargs, output_keys="result")
 
     def test_mixed_variadic_raises(self):
         def func_mixed(x: int, *args: int, **kwargs: int) -> int:
             return x
 
         with pytest.raises(ValueError):
-            PythonPacketFunction(func_mixed, output_keys="result")
+            PythonDataFunction(func_mixed, output_keys="result")
 
     def test_fixed_params_with_defaults_accepted(self):
         def func_with_default(x: int, y: int = 10) -> int:
             return x + y
 
         # Should not raise -- default values are fine, only variadic are rejected
-        pf = PythonPacketFunction(func_with_default, output_keys="result")
-        assert "x" in pf.input_packet_schema
-        assert "y" in pf.input_packet_schema
+        pf = PythonDataFunction(func_with_default, output_keys="result")
+        assert "x" in pf.input_data_schema
+        assert "y" in pf.input_data_schema
 
     def test_bare_dict_return_type_raises(self):
         """Bare ``dict`` (no type params) is not a valid output type."""
@@ -265,7 +265,7 @@ class TestPythonPacketFunctionConstruction:
             return {"result": x}
 
         with pytest.raises(ValueError, match="dict"):
-            PythonPacketFunction(func, output_keys="result")
+            PythonDataFunction(func, output_keys="result")
 
     def test_bare_list_return_type_raises(self):
         """Bare ``list`` (no type params) is not a valid output type."""
@@ -274,7 +274,7 @@ class TestPythonPacketFunctionConstruction:
             return [x]
 
         with pytest.raises(ValueError, match="list"):
-            PythonPacketFunction(func, output_keys="result")
+            PythonDataFunction(func, output_keys="result")
 
     def test_bare_set_return_type_raises(self):
         """Bare ``set`` (no type params) is not a valid output type."""
@@ -283,7 +283,7 @@ class TestPythonPacketFunctionConstruction:
             return {x}
 
         with pytest.raises(ValueError, match="set"):
-            PythonPacketFunction(func, output_keys="result")
+            PythonDataFunction(func, output_keys="result")
 
     def test_bare_tuple_return_type_raises(self):
         """Bare ``tuple`` (no type params) is not a valid output type."""
@@ -292,7 +292,7 @@ class TestPythonPacketFunctionConstruction:
             return (x,)
 
         with pytest.raises(ValueError, match="tuple"):
-            PythonPacketFunction(func, output_keys="result")
+            PythonDataFunction(func, output_keys="result")
 
     def test_bare_dict_input_type_raises(self):
         """Bare ``dict`` (no type params) is not a valid input type."""
@@ -301,7 +301,7 @@ class TestPythonPacketFunctionConstruction:
             return 1
 
         with pytest.raises(ValueError, match="dict"):
-            PythonPacketFunction(func, output_keys="result")
+            PythonDataFunction(func, output_keys="result")
 
     def test_bare_list_input_type_raises(self):
         """Bare ``list`` (no type params) is not a valid input type."""
@@ -310,7 +310,7 @@ class TestPythonPacketFunctionConstruction:
             return 1
 
         with pytest.raises(ValueError, match="list"):
-            PythonPacketFunction(func, output_keys="result")
+            PythonDataFunction(func, output_keys="result")
 
     def test_bare_set_input_type_raises(self):
         """Bare ``set`` (no type params) is not a valid input type."""
@@ -319,7 +319,7 @@ class TestPythonPacketFunctionConstruction:
             return 1
 
         with pytest.raises(ValueError, match="set"):
-            PythonPacketFunction(func, output_keys="result")
+            PythonDataFunction(func, output_keys="result")
 
     def test_bare_tuple_input_type_raises(self):
         """Bare ``tuple`` (no type params) is not a valid input type."""
@@ -328,7 +328,7 @@ class TestPythonPacketFunctionConstruction:
             return 1
 
         with pytest.raises(ValueError, match="tuple"):
-            PythonPacketFunction(func, output_keys="result")
+            PythonDataFunction(func, output_keys="result")
 
     def test_parameterized_dict_return_type_accepted(self):
         """``dict[str, int]`` (with type params) is a valid output type."""
@@ -336,8 +336,8 @@ class TestPythonPacketFunctionConstruction:
         def func(x: int) -> dict[str, int]:
             return {"result": x}
 
-        pf = PythonPacketFunction(func, output_keys="result")
-        assert "result" in pf.output_packet_schema
+        pf = PythonDataFunction(func, output_keys="result")
+        assert "result" in pf.output_data_schema
 
     def test_parameterized_list_return_type_accepted(self):
         """``list[int]`` (with type params) is a valid output type."""
@@ -345,8 +345,8 @@ class TestPythonPacketFunctionConstruction:
         def func(x: int) -> list[int]:
             return [x]
 
-        pf = PythonPacketFunction(func, output_keys="result")
-        assert "result" in pf.output_packet_schema
+        pf = PythonDataFunction(func, output_keys="result")
+        assert "result" in pf.output_data_schema
 
 
 # ---------------------------------------------------------------------------
@@ -395,12 +395,12 @@ class TestGetExecutionData:
         assert add_pf.get_execution_data()["python_version"] == expected
 
     def test_executor_type_is_string(self):
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         data = pf.get_execution_data()
         assert isinstance(data["executor_type"], str)
 
     def test_executor_info_is_dict_str_str(self):
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         data = pf.get_execution_data()
         assert isinstance(data["executor_info"], dict)
         for k, v in data["executor_info"].items():
@@ -408,14 +408,14 @@ class TestGetExecutionData:
             assert isinstance(v, str)
 
     def test_extra_info_is_empty_dict(self):
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         data = pf.get_execution_data()
         assert data["extra_info"] == {}
 
 
 class TestExecutionDataSchema:
     def test_execution_data_has_expected_keys(self):
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         data = pf.get_execution_data()
         assert set(data.keys()) == {
             "executor_type",
@@ -425,12 +425,12 @@ class TestExecutionDataSchema:
         }
 
     def test_executor_type_is_string(self):
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         data = pf.get_execution_data()
         assert isinstance(data["executor_type"], str)
 
     def test_executor_info_is_dict_str_str(self):
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         data = pf.get_execution_data()
         assert isinstance(data["executor_info"], dict)
         for k, v in data["executor_info"].items():
@@ -438,24 +438,24 @@ class TestExecutionDataSchema:
             assert isinstance(v, str)
 
     def test_python_version_matches_sys(self):
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         data = pf.get_execution_data()
         expected = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
         assert data["python_version"] == expected
 
     def test_extra_info_is_empty_dict(self):
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         data = pf.get_execution_data()
         assert data["extra_info"] == {}
 
     def test_execution_data_schema_matches_data_keys(self):
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         data = pf.get_execution_data()
         schema = pf.get_execution_data_schema()
         assert set(schema.keys()) == set(data.keys())
 
     def test_execution_data_schema_types(self):
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         schema = pf.get_execution_data_schema()
         assert schema["executor_type"] is str
         assert schema["executor_info"] == dict[str, str]
@@ -488,38 +488,38 @@ class TestActiveState:
 
 
 class TestCall:
-    def test_returns_packet_when_active(self, add_pf, add_packet):
-        result = add_pf.call(add_packet)
+    def test_returns_data_when_active(self, add_pf, add_data):
+        result = add_pf.call(add_data)
         assert result is not None
 
-    def test_output_has_correct_key(self, add_pf, add_packet):
-        result = add_pf.call(add_packet)
+    def test_output_has_correct_key(self, add_pf, add_data):
+        result = add_pf.call(add_data)
         assert "result" in result.keys()
 
-    def test_output_has_correct_value(self, add_pf, add_packet):
-        result = add_pf.call(add_packet)
+    def test_output_has_correct_value(self, add_pf, add_data):
+        result = add_pf.call(add_data)
         assert result["result"] == 3  # 1 + 2
 
-    def test_source_info_contains_result_key(self, add_pf, add_packet):
-        result = add_pf.call(add_packet)
+    def test_source_info_contains_result_key(self, add_pf, add_data):
+        result = add_pf.call(add_data)
         source = result.source_info()
         assert "result" in source
 
-    def test_source_info_ends_with_key_name(self, add_pf, add_packet):
-        result = add_pf.call(add_packet)
+    def test_source_info_ends_with_key_name(self, add_pf, add_data):
+        result = add_pf.call(add_data)
         source_str = result.source_info()["result"]
         assert source_str.endswith("::result")
 
-    def test_source_info_contains_uri_components(self, add_pf, add_packet):
-        result = add_pf.call(add_packet)
+    def test_source_info_contains_uri_components(self, add_pf, add_data):
+        result = add_pf.call(add_data)
         source_str = result.source_info()["result"]
         for component in add_pf.uri:
             assert component in source_str
 
-    def test_source_info_record_id_is_uuid(self, add_pf, add_packet):
+    def test_source_info_record_id_is_uuid(self, add_pf, add_data):
         import re
 
-        result = add_pf.call(add_packet)
+        result = add_pf.call(add_data)
         source_str = result.source_info()["result"]
         # The record_id segment is between the URI components and the key name
         # Format: uri_part1:uri_part2:..::record_id::key
@@ -528,30 +528,30 @@ class TestCall:
         )
         assert uuid_pattern.search(source_str), f"No UUID found in {source_str!r}"
 
-    def test_inactive_returns_none(self, add_pf, add_packet):
+    def test_inactive_returns_none(self, add_pf, add_data):
         add_pf.set_active(False)
-        result = add_pf.call(add_packet)
+        result = add_pf.call(add_data)
         assert result is None
 
     def test_multiple_output_keys(self, multi_pf):
-        packet = Packet({"a": 3, "b": 4})
-        result = multi_pf.call(packet)
+        data = Data({"a": 3, "b": 4})
+        result = multi_pf.call(data)
         assert result["sum"] == 7  # 3 + 4
         assert result["product"] == 12  # 3 * 4
 
     def test_multiple_output_keys_source_info(self, multi_pf):
-        packet = Packet({"a": 3, "b": 4})
-        result = multi_pf.call(packet)
+        data = Data({"a": 3, "b": 4})
+        result = multi_pf.call(data)
         source = result.source_info()
         assert "sum" in source
         assert "product" in source
         assert source["sum"].endswith("::sum")
         assert source["product"].endswith("::product")
 
-    def test_output_packet_schema_applied(self, add_pf, add_packet):
-        result = add_pf.call(add_packet)
+    def test_output_data_schema_applied(self, add_pf, add_data):
+        result = add_pf.call(add_data)
         assert result is not None
-        # schema from the packet function should carry through
+        # schema from the data function should carry through
         schema = result.schema()
         assert "result" in schema
 
@@ -567,30 +567,30 @@ class TestCallErrors:
         def returns_scalar(a, b):
             return a + b
 
-        pf = PythonPacketFunction(
+        pf = PythonDataFunction(
             returns_scalar,
             output_keys=["x", "y"],
             input_schema={"a": int, "b": int},
             output_schema={"x": int, "y": int},
         )
-        packet = Packet({"a": 1, "b": 2})
+        data = Data({"a": 1, "b": 2})
         with pytest.raises(ValueError):
-            pf.call(packet)
+            pf.call(data)
 
     def test_too_few_values_raises(self):
         # Returns only one value but two keys are expected
         def returns_one(a, b):
             return (a,)
 
-        pf = PythonPacketFunction(
+        pf = PythonDataFunction(
             returns_one,
             output_keys=["x", "y"],
             input_schema={"a": int, "b": int},
             output_schema={"x": int, "y": int},
         )
-        packet = Packet({"a": 1, "b": 2})
+        data = Data({"a": 1, "b": 2})
         with pytest.raises(ValueError):
-            pf.call(packet)
+            pf.call(data)
 
 
 # ---------------------------------------------------------------------------
@@ -599,26 +599,26 @@ class TestCallErrors:
 
 
 class TestAsyncCall:
-    def test_async_call_returns_correct_result(self, add_pf, add_packet):
-        result = asyncio.run(add_pf.async_call(add_packet))
+    def test_async_call_returns_correct_result(self, add_pf, add_data):
+        result = asyncio.run(add_pf.async_call(add_data))
         assert result is not None
         assert result.as_dict()["result"] == 3  # 1 + 2
 
 
 # ---------------------------------------------------------------------------
-# 11. PacketFunctionProtocol protocol conformance
+# 11. DataFunctionProtocol protocol conformance
 # ---------------------------------------------------------------------------
 
 
-class TestPacketFunctionProtocolConformance:
-    def test_python_packet_function_satisfies_protocol(self, add_pf):
-        assert isinstance(add_pf, PacketFunctionProtocol), (
-            "PythonPacketFunction does not satisfy the PacketFunctionProtocol protocol"
+class TestDataFunctionProtocolConformance:
+    def test_python_data_function_satisfies_protocol(self, add_pf):
+        assert isinstance(add_pf, DataFunctionProtocol), (
+            "PythonDataFunction does not satisfy the DataFunctionProtocol protocol"
         )
 
-    def test_async_python_packet_function_satisfies_protocol(self, async_add_pf):
-        assert isinstance(async_add_pf, PacketFunctionProtocol), (
-            "Async PythonPacketFunction does not satisfy the PacketFunctionProtocol protocol"
+    def test_async_python_data_function_satisfies_protocol(self, async_add_pf):
+        assert isinstance(async_add_pf, DataFunctionProtocol), (
+            "Async PythonDataFunction does not satisfy the DataFunctionProtocol protocol"
         )
 
 
@@ -634,17 +634,17 @@ class TestAsyncConstruction:
     def test_is_async_false_for_sync_function(self, add_pf):
         assert add_pf.is_async is False
 
-    def test_packet_function_type_id_same_for_async(self, async_add_pf):
-        assert async_add_pf.packet_function_type_id == "python.function.v0"
+    def test_data_function_type_id_same_for_async(self, async_add_pf):
+        assert async_add_pf.data_function_type_id == "python.function.v0"
 
     def test_input_schema_correct_for_async(self, async_add_pf):
-        schema = async_add_pf.input_packet_schema
+        schema = async_add_pf.input_data_schema
         assert "x" in schema and "y" in schema
         assert schema["x"] is int
         assert schema["y"] is int
 
     def test_output_schema_correct_for_async(self, async_add_pf):
-        schema = async_add_pf.output_packet_schema
+        schema = async_add_pf.output_data_schema
         assert "result" in schema
         assert schema["result"] is int
 
@@ -656,7 +656,7 @@ class TestAsyncConstruction:
             return sum(args)
 
         with pytest.raises(ValueError, match=r"\*args"):
-            PythonPacketFunction(bad, output_keys="result")
+            PythonDataFunction(bad, output_keys="result")
 
 
 # ---------------------------------------------------------------------------
@@ -665,29 +665,29 @@ class TestAsyncConstruction:
 
 
 class TestAsyncFunctionSyncCall:
-    def test_direct_call_returns_correct_result(self, async_add_pf, add_packet):
-        result = async_add_pf.direct_call(add_packet)
+    def test_direct_call_returns_correct_result(self, async_add_pf, add_data):
+        result = async_add_pf.direct_call(add_data)
         assert result is not None
         assert result["result"] == 3
 
-    def test_call_returns_correct_result(self, async_add_pf, add_packet):
-        result = async_add_pf.call(add_packet)
+    def test_call_returns_correct_result(self, async_add_pf, add_data):
+        result = async_add_pf.call(add_data)
         assert result is not None
         assert result["result"] == 3
 
-    def test_inactive_returns_none(self, async_add_pf, add_packet):
+    def test_inactive_returns_none(self, async_add_pf, add_data):
         async_add_pf.set_active(False)
-        result = async_add_pf.call(add_packet)
+        result = async_add_pf.call(add_data)
         assert result is None
 
     def test_multiple_outputs(self, async_multi_pf):
-        packet = Packet({"a": 3, "b": 4})
-        result = async_multi_pf.call(packet)
+        data = Data({"a": 3, "b": 4})
+        result = async_multi_pf.call(data)
         assert result["sum"] == 7
         assert result["product"] == 12
 
-    def test_source_info_present(self, async_add_pf, add_packet):
-        result = async_add_pf.call(add_packet)
+    def test_source_info_present(self, async_add_pf, add_data):
+        result = async_add_pf.call(add_data)
         source = result.source_info()
         assert "result" in source
         assert source["result"].endswith("::result")
@@ -699,23 +699,23 @@ class TestAsyncFunctionSyncCall:
 
 
 class TestAsyncFunctionAsyncCall:
-    def test_direct_async_call_awaits_directly(self, async_add_pf, add_packet):
-        result = asyncio.run(async_add_pf.direct_async_call(add_packet))
+    def test_direct_async_call_awaits_directly(self, async_add_pf, add_data):
+        result = asyncio.run(async_add_pf.direct_async_call(add_data))
         assert result is not None
         assert result["result"] == 3
 
-    def test_async_call_returns_correct_result(self, async_add_pf, add_packet):
-        result = asyncio.run(async_add_pf.async_call(add_packet))
+    def test_async_call_returns_correct_result(self, async_add_pf, add_data):
+        result = asyncio.run(async_add_pf.async_call(add_data))
         assert result is not None
         assert result["result"] == 3
 
-    def test_inactive_returns_none(self, async_add_pf, add_packet):
+    def test_inactive_returns_none(self, async_add_pf, add_data):
         async_add_pf.set_active(False)
-        result = asyncio.run(async_add_pf.async_call(add_packet))
+        result = asyncio.run(async_add_pf.async_call(add_data))
         assert result is None
 
     def test_multiple_outputs(self, async_multi_pf):
-        packet = Packet({"a": 3, "b": 4})
-        result = asyncio.run(async_multi_pf.async_call(packet))
+        data = Data({"a": 3, "b": 4})
+        result = asyncio.run(async_multi_pf.async_call(data))
         assert result["sum"] == 7
         assert result["product"] == 12

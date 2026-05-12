@@ -15,7 +15,7 @@ from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
     ArgumentGroup,
-    PacketProtocol,
+    DataProtocol,
     PodProtocol,
     StreamProtocol,
     TagProtocol,
@@ -101,7 +101,7 @@ class StaticOutputOperatorPod(TraceableBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        """Determine output (tag, packet) schemas without triggering computation.
+        """Determine output (tag, data) schemas without triggering computation.
 
         Args:
             *streams: Input streams to analyze.
@@ -109,7 +109,7 @@ class StaticOutputOperatorPod(TraceableBase):
             all_info: If True, include all info columns.
 
         Returns:
-            A ``(tag_schema, packet_schema)`` tuple.
+            A ``(tag_schema, data_schema)`` tuple.
 
         Raises:
             ValidationError: If input types are incompatible.
@@ -193,9 +193,9 @@ class StaticOutputOperatorPod(TraceableBase):
 
     @staticmethod
     def _materialize_to_stream(
-        rows: Sequence[tuple[TagProtocol, PacketProtocol]],
+        rows: Sequence[tuple[TagProtocol, DataProtocol]],
     ) -> StreamProtocol:
-        """Materialize a list of (Tag, Packet) pairs into an ArrowTableStream.
+        """Materialize a list of (Tag, Data) pairs into an ArrowTableStream.
 
         Used by the barrier-mode ``async_execute`` to convert collected
         channel items back into a stream suitable for ``static_process``.
@@ -207,22 +207,22 @@ class StaticOutputOperatorPod(TraceableBase):
             raise ValueError("Cannot materialize an empty list of rows into a stream")
 
         tag_tables = []
-        packet_tables = []
+        data_tables = []
 
-        for tag, packet in rows:
+        for tag, data in rows:
             tag_tables.append(tag.as_table(columns={"system_tags": True}))
-            packet_tables.append(packet.as_table(columns={"source": True}))
+            data_tables.append(data.as_table(columns={"source": True}))
 
         combined_tags = pa.concat_tables(tag_tables)
-        combined_packets = pa.concat_tables(packet_tables)
+        combined_data = pa.concat_tables(data_tables)
 
         user_tag_keys = tuple(rows[0][0].keys())
 
         # Preserve actual source_info provenance from the first row
-        # (all rows share the same packet columns and source tokens).
+        # (all rows share the same data columns and source tokens).
         source_info = rows[0][1].source_info()
 
-        full_table = arrow_utils.hstack_tables(combined_tags, combined_packets)
+        full_table = arrow_utils.hstack_tables(combined_tags, combined_data)
 
         return ArrowTableStream(
             full_table,
@@ -232,8 +232,8 @@ class StaticOutputOperatorPod(TraceableBase):
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         *,
         input_pipeline_hashes: Sequence[ContentHash] | None = None,
     ) -> None:
@@ -254,8 +254,8 @@ class StaticOutputOperatorPod(TraceableBase):
             all_rows = await asyncio.gather(*(ch.collect() for ch in inputs))
             streams = [self._materialize_to_stream(rows) for rows in all_rows]
             result = self.static_process(*streams)
-            for tag, packet in result.iter_packets():
-                await output.send((tag, packet))
+            for tag, data in result.iter_data():
+                await output.send((tag, data))
         finally:
             await output.close()
 
@@ -310,13 +310,13 @@ class DynamicPodStream(StreamBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        """Return the (tag_keys, packet_keys) column names for this stream."""
-        tag_schema, packet_schema = self._pod.output_schema(
+        """Return the (tag_keys, data_keys) column names for this stream."""
+        tag_schema, data_schema = self._pod.output_schema(
             *self.upstreams,
             columns=columns,
             all_info=all_info,
         )
-        return tuple(tag_schema.keys()), tuple(packet_schema.keys())
+        return tuple(tag_schema.keys()), tuple(data_schema.keys())
 
     def output_schema(
         self,
@@ -324,7 +324,7 @@ class DynamicPodStream(StreamBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        """Return the (tag_schema, packet_schema) for this stream."""
+        """Return the (tag_schema, data_schema) for this stream."""
         return self._pod.output_schema(
             *self.upstreams,
             columns=columns,
@@ -379,14 +379,14 @@ class DynamicPodStream(StreamBase):
         )
         return self._cached_stream.as_table(columns=columns, all_info=all_info)
 
-    def iter_packets(
+    def iter_data(
         self,
-    ) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
+    ) -> Iterator[tuple[TagProtocol, DataProtocol]]:
         self.run()
         assert self._cached_stream is not None, (
             "StreamProtocol has not been updated or is empty."
         )
-        return self._cached_stream.iter_packets()
+        return self._cached_stream.iter_data()
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(kernel={self.producer}, upstreams={self.upstreams})"

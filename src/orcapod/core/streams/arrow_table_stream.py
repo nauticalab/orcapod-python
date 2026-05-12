@@ -6,7 +6,7 @@ from itertools import repeat
 from typing import TYPE_CHECKING, Any, cast
 
 from orcapod import contexts
-from orcapod.core.datagrams import Packet, Tag
+from orcapod.core.datagrams import Data, Tag
 from orcapod.core.streams.base import StreamBase
 from orcapod.protocols.core_protocols import PodProtocol, StreamProtocol, TagProtocol
 from orcapod.protocols.hashing_protocols import PipelineElementProtocol
@@ -29,11 +29,11 @@ class ArrowTableStream(StreamBase):
     An immutable stream based on a PyArrow Table.
     This stream is designed to be used with data that is already in a tabular format,
     such as data loaded from a file or database. The columns to be treated as tags are
-    specified at initialization, and the rest of the columns are treated as packets.
+    specified at initialization, and the rest of the columns are treated as data.
     The stream is immutable, meaning that once it is created, it cannot be modified.
     This is useful for ensuring that the data in the stream remains consistent and unchanging.
 
-    The types of the tag and packet columns are inferred from the PyArrow Table schema.
+    The types of the tag and data columns are inferred from the PyArrow Table schema.
     """
 
     def __init__(
@@ -104,17 +104,17 @@ class ArrowTableStream(StreamBase):
             prefix_info,
             exclude_columns=self._all_tag_columns,
         )
-        # now table should only contain tag columns and packet columns
-        self._packet_columns = tuple(
+        # now table should only contain tag columns and data columns
+        self._data_columns = tuple(
             c for c in table.column_names if c not in self._all_tag_columns
         )
         self._table = table
         self._source_info_table = prefix_tables[constants.SOURCE_PREFIX]
         self._data_context_table = data_context_table
 
-        if len(self._packet_columns) == 0:
+        if len(self._data_columns) == 0:
             raise ValueError(
-                "No packet columns found in the table. At least one packet column is required."
+                "No data columns found in the table. At least one data column is required."
             )
 
         # Respect Arrow nullable flags as-is (after optional inference above):
@@ -126,16 +126,16 @@ class ArrowTableStream(StreamBase):
             f for f in self._table.schema if f.name in self._system_tag_columns
         )
         all_tag_schema = arrow_utils.join_arrow_schemas(tag_schema, system_tag_schema)
-        packet_schema = pa.schema(
-            f for f in self._table.schema if f.name in self._packet_columns
+        data_schema = pa.schema(
+            f for f in self._table.schema if f.name in self._data_columns
         )
 
         self._tag_schema = tag_schema
         self._system_tag_schema = system_tag_schema
         self._all_tag_schema = all_tag_schema
-        self._packet_schema = packet_schema
+        self._data_schema = data_schema
 
-        self._cached_elements: list[tuple[TagProtocol, Packet]] | None = None
+        self._cached_elements: list[tuple[TagProtocol, Data]] | None = None
         self._update_modified_time()  # set modified time to now
 
     def identity_structure(self) -> Any:
@@ -151,8 +151,8 @@ class ArrowTableStream(StreamBase):
         if self._producer is None or not isinstance(
             self._producer, PipelineElementProtocol
         ):
-            tag_schema, packet_schema = self.output_schema()
-            return (tag_schema, packet_schema)
+            tag_schema, data_schema = self.output_schema()
+            return (tag_schema, data_schema)
         return super().pipeline_identity_structure()
 
     @property
@@ -170,7 +170,7 @@ class ArrowTableStream(StreamBase):
         all_info: bool = False,
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """
-        Returns the keys of the tag and packet columns in the stream.
+        Returns the keys of the tag and data columns in the stream.
         This is useful for accessing the columns in the stream.
         """
         tag_columns = self._tag_columns
@@ -178,7 +178,7 @@ class ArrowTableStream(StreamBase):
         # TODO: add standard parsing of columns
         if columns_config.system_tags:
             tag_columns += self._system_tag_columns
-        return tag_columns, self._packet_columns
+        return tag_columns, self._data_columns
 
     def output_schema(
         self,
@@ -187,7 +187,7 @@ class ArrowTableStream(StreamBase):
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
         """
-        Returns the types of the tag and packet columns in the stream.
+        Returns the types of the tag and data columns in the stream.
         This is useful for accessing the types of the columns in the stream.
         """
         # normalize column config
@@ -200,7 +200,7 @@ class ArrowTableStream(StreamBase):
             tag_schema = self._tag_schema
         return (
             converter.arrow_schema_to_python_schema(tag_schema),
-            converter.arrow_schema_to_python_schema(self._packet_schema),
+            converter.arrow_schema_to_python_schema(self._data_schema),
         )
 
     def as_table(
@@ -222,7 +222,7 @@ class ArrowTableStream(StreamBase):
                 else columns_config.content_hash
             )
             content_hashes = [
-                str(packet.content_hash()) for _, packet in self.iter_packets()
+                str(data.content_hash()) for _, data in self.iter_data()
             ]
             output_table = output_table.append_column(
                 pa.field(hash_column_name, pa.large_string(), nullable=False),
@@ -261,10 +261,10 @@ class ArrowTableStream(StreamBase):
         """
         self._cached_elements = None
 
-    def iter_packets(self) -> Iterator[tuple[TagProtocol, Packet]]:
+    def iter_data(self) -> Iterator[tuple[TagProtocol, Data]]:
         """
-        Iterates over the packets in the stream.
-        Each packet is represented as a tuple of (TagProtocol, PacketProtocol).
+        Iterates over the data in the stream.
+        Each data is represented as a tuple of (TagProtocol, DataProtocol).
         """
         # TODO: make it work with table batch stream
         if self._cached_elements is None:
@@ -278,10 +278,10 @@ class ArrowTableStream(StreamBase):
 
             # TODO: come back and clean up this logic
 
-            packets = self._table.select(self._packet_columns)
+            data = self._table.select(self._data_columns)
 
-            for tag_batch, packet_batch in zip(tag_batches, packets.to_batches()):
-                for i in range(len(packet_batch)):
+            for tag_batch, data_batch in zip(tag_batches, data.to_batches()):
+                for i in range(len(data_batch)):
                     if tag_present:
                         tag = Tag(
                             tag_batch.slice(i, 1),  # type: ignore
@@ -291,15 +291,15 @@ class ArrowTableStream(StreamBase):
                     else:
                         tag = cast(Tag, tag_batch)
 
-                    packet = Packet(
-                        packet_batch.slice(i, 1),
+                    data = Data(
+                        data_batch.slice(i, 1),
                         source_info=self._source_info_table.slice(i, 1).to_pylist()[0],
                         data_context=self.data_context,
                     )
 
-                    yield tag, packet
+                    yield tag, data
 
-                    cached_elements.append((tag, packet))
+                    cached_elements.append((tag, data))
             self._cached_elements = cached_elements
         else:
             yield from self._cached_elements

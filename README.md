@@ -67,7 +67,7 @@ While the following is subject to change based on future development, it represe
     - Two kinds: SyncPipelineOrchestrator, AsyncPipelineOrchestrator
   - EXECUTOR
     - Two kinds: LocalExecutor, RayExecutor
-    - Executors have a slim base protocol (PacketFunctionExecutorProtocol — identity, compatibility, lifecycle) and a Python-specific subtype (PythonFunctionExecutorProtocol — adds
+    - Executors have a slim base protocol (DataFunctionExecutorProtocol — identity, compatibility, lifecycle) and a Python-specific subtype (PythonFunctionExecutorProtocol — adds
    execute_callable / async_execute_callable). This leaves room for non-Python executor types in the future.
   - PIPELINE (name, DB)
 
@@ -99,7 +99,7 @@ While the following is subject to change based on future development, it represe
   The observer is contextualized per-node: FunctionNode.execute() calls observer.contextualize(node_hash, node_label) to get a lightweight wrapper stamped with node identity. If no
    observer is provided, a NoOpObserver is used as default, eliminating all is not None checks.
 
-  The logger protocol is generic: PacketExecutionLoggerProtocol.record(**kwargs) accepts arbitrary keyword arguments, so different executor types can log different fields without
+  The logger protocol is generic: DataExecutionLoggerProtocol.record(**kwargs) accepts arbitrary keyword arguments, so different executor types can log different fields without
   the protocol being tied to any specific data structure.
 
   If no executor is set and a logger is passed, a UserWarning is emitted: "A logger was passed but no executor is set — capture will not occur."
@@ -112,26 +112,26 @@ While the following is subject to change based on future development, it represe
       │  ctx_observer = obs.contextualize(node_hash, node_label)
       │  ctx_observer.on_node_start(node_label, node_hash)
       │
-      │  for each non-cached (tag, packet):
+      │  for each non-cached (tag, data):
       │
-      │  ctx_observer.on_packet_start(node_label, tag, packet)
+      │  ctx_observer.on_data_start(node_label, tag, data)
       │
-      ├─► pkt_logger = ctx_observer.create_packet_logger(tag, packet, pipeline_path=...)
+      ├─► pkt_logger = ctx_observer.create_data_logger(tag, data, pipeline_path=...)
       │       │
-      │       └─► _ContextualizedLoggingObserver creates a PacketLogger bound to
+      │       └─► _ContextualizedLoggingObserver creates a DataLogger bound to
       │           (run_id, node_label, node_hash, tag_data, log_path)
       │
-      ├─► FunctionNode._process_packet_internal(tag, packet, logger=pkt_logger)
+      ├─► FunctionNode._process_data_internal(tag, data, logger=pkt_logger)
       │       │
-      │       ├─► CachedFunctionPod.process_packet(tag, packet, logger=pkt_logger)
+      │       ├─► CachedFunctionPod.process_data(tag, data, logger=pkt_logger)
       │       │       │
       │       │       │  checks pod-level cache (ResultCache.lookup)
-      │       │       │  cache hit? → return (tag, cached_packet)
+      │       │       │  cache hit? → return (tag, cached_data)
       │       │       │  cache miss ↓
       │       │       │
-      │       │       ├─► _FunctionPodBase.process_packet(tag, packet, logger=pkt_logger)
+      │       │       ├─► _FunctionPodBase.process_data(tag, data, logger=pkt_logger)
       │       │       │       │
-      │       │       │       ├─► PythonPacketFunction.call(packet, logger=pkt_logger)
+      │       │       │       ├─► PythonDataFunction.call(data, logger=pkt_logger)
       │       │       │       │       │
       │       │       │       │       │  executor is set? (LocalExecutor from compile,
       │       │       │       │       │  or RayExecutor from pipeline.run)
@@ -164,39 +164,39 @@ While the following is subject to change based on future development, it represe
       │       │       │       │       │
       │       │       │       │       │  no executor? warns if logger was passed, calls direct_call()
       │       │       │       │       │
-      │       │       │       │       │  builds output Packet from raw_result
+      │       │       │       │       │  builds output Data from raw_result
       │       │       │       │       │
-      │       │       │       │       └─► returns Packet | None (or raises)
+      │       │       │       │       └─► returns Data | None (or raises)
       │       │       │       │
-      │       │       │       └─► returns (tag, Packet | None)
+      │       │       │       └─► returns (tag, Data | None)
       │       │       │
       │       │       │  stores result in pod-level cache (on success)
       │       │       │
-      │       │       └─► returns (tag, Packet | None)
+      │       │       └─► returns (tag, Data | None)
       │       │
       │       │  writes pipeline provenance record (on success)
       │       │  caches result internally
       │       │
-      │       └─► returns (tag, Packet | None)
+      │       └─► returns (tag, Data | None)
       │
       │  ← back in FunctionNode.execute() with (tag_out, result)
       │
       │  (logger.record already called inside the executor — nothing to do here)
       │
-      ├─► try/except around _process_packet_internal:
+      ├─► try/except around _process_data_internal:
       │   on success:
-      │       ctx_observer.on_packet_end(node_label, tag, packet, result, cached=False)
+      │       ctx_observer.on_data_end(node_label, tag, data, result, cached=False)
       │       emit (tag_out, result) downstream
       │   on exception:
-      │       ctx_observer.on_packet_crash(node_label, tag, packet, exc)
+      │       ctx_observer.on_data_crash(node_label, tag, data, exc)
       │       if error_policy == "fail_fast": raise
-      │       otherwise: skip this packet, continue
+      │       otherwise: skip this data, continue
       │
       ctx_observer.on_node_end(node_label, node_hash)
 
-  PacketLogger.record(**kwargs)
+  DataLogger.record(**kwargs)
 
-  PacketLogger.record(**kwargs)
+  DataLogger.record(**kwargs)
       │
       └─► builds a pyarrow table row:
           Context columns (always present, prefixed with "__"):
@@ -218,8 +218,8 @@ Writes the row to the database at the mirrored log path.
   extracts the captured data, records to logger, and re-raises the original user exception type.
   - Observer is contextualized per-node — contextualize(node_hash, node_label) returns a lightweight wrapper. No GraphNode reference crosses the protocol boundary — only strings.
   NoOpObserver is used as default when no observer is provided, eliminating null checks.
-  - pipeline_path is a storage detail — passed to create_packet_logger() for routing log table location, but NOT stored as a column in log rows (only node_hash + node_label
+  - pipeline_path is a storage detail — passed to create_data_logger() for routing log table location, but NOT stored as a column in log rows (only node_hash + node_label
   identify the node).
-  - No auto-executor in the class — PacketFunctionBase.__init__ does not assign a default executor. Pipeline.compile() assigns LocalExecutor to function nodes that have none. Users
+  - No auto-executor in the class — DataFunctionBase.__init__ does not assign a default executor. Pipeline.compile() assigns LocalExecutor to function nodes that have none. Users
    can override per-node (pipeline.node.executor = ...) or globally via pipeline.run(execution_engine=...).
   - Log columns use __ prefix — fixed columns (__log_id, __stdout, __success, etc.) are prefixed to avoid collision with user-defined tag column names.

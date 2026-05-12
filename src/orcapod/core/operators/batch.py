@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import ArrowTableStream
-from orcapod.protocols.core_protocols import PacketProtocol, StreamProtocol, TagProtocol
+from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, TagProtocol
 from orcapod.types import ColumnConfig
 from orcapod.utils.lazy_module import LazyModule
 
@@ -47,7 +47,7 @@ class Batch(UnaryOperator):
         """
         table = stream.as_table(columns={"source": True, "system_tags": True})
 
-        tag_columns, packet_columns = stream.keys()
+        tag_columns, data_columns = stream.keys()
 
         data_list = table.to_pylist()
 
@@ -92,19 +92,19 @@ class Batch(UnaryOperator):
         This method should be implemented by subclasses to return the schemas of the input and output streams.
         It takes two streams as input and returns a tuple of schemas.
         """
-        tag_types, packet_types = stream.output_schema(
+        tag_types, data_types = stream.output_schema(
             columns=columns, all_info=all_info
         )
         batched_tag_types = {k: list[v] for k, v in tag_types.items()}
-        batched_packet_types = {k: list[v] for k, v in packet_types.items()}
+        batched_data_types = {k: list[v] for k, v in data_types.items()}
 
         # TODO: check if this is really necessary
-        return Schema(batched_tag_types), Schema(batched_packet_types)
+        return Schema(batched_tag_types), Schema(batched_data_types)
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         **kwargs: Any,
     ) -> None:
         """Streaming batch: emit full batches as they accumulate.
@@ -121,26 +121,26 @@ class Batch(UnaryOperator):
                 if rows:
                     stream = self._materialize_to_stream(rows)
                     result = self.unary_static_process(stream)
-                    for tag, packet in result.iter_packets():
-                        await output.send((tag, packet))
+                    for tag, data in result.iter_data():
+                        await output.send((tag, data))
                 return
 
-            batch: list[tuple[TagProtocol, PacketProtocol]] = []
-            async for tag, packet in inputs[0]:
-                batch.append((tag, packet))
+            batch: list[tuple[TagProtocol, DataProtocol]] = []
+            async for tag, data in inputs[0]:
+                batch.append((tag, data))
                 if len(batch) >= self.batch_size:
                     stream = self._materialize_to_stream(batch)
                     result = self.unary_static_process(stream)
-                    for out_tag, out_packet in result.iter_packets():
-                        await output.send((out_tag, out_packet))
+                    for out_tag, out_data in result.iter_data():
+                        await output.send((out_tag, out_data))
                     batch = []
 
             # Flush partial batch
             if batch and not self.drop_partial_batch:
                 stream = self._materialize_to_stream(batch)
                 result = self.unary_static_process(stream)
-                for out_tag, out_packet in result.iter_packets():
-                    await output.send((out_tag, out_packet))
+                for out_tag, out_data in result.iter_data():
+                    await output.send((out_tag, out_data))
         finally:
             await output.close()
 

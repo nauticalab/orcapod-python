@@ -10,13 +10,13 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.executors.base import PythonFunctionExecutorBase
 
 if TYPE_CHECKING:
-    from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
+    from orcapod.protocols.observability_protocols import DataExecutionLoggerProtocol
 
 
 class LocalPythonFunctionExecutor(PythonFunctionExecutorBase):
-    """Default executor -- runs the packet function directly in the current process.
+    """Default executor -- runs the data function directly in the current process.
 
-    Supports all packet function types (``supported_function_type_ids``
+    Supports all data function types (``supported_function_type_ids``
     returns an empty set).
     """
 
@@ -33,7 +33,7 @@ class LocalPythonFunctionExecutor(PythonFunctionExecutorBase):
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
         *,
-        logger: PacketExecutionLoggerProtocol | None = None,
+        logger: DataExecutionLoggerProtocol | None = None,
     ) -> Any:
         from orcapod.pipeline.logging_capture import LocalCaptureContext
 
@@ -97,7 +97,7 @@ class LocalPythonFunctionExecutor(PythonFunctionExecutorBase):
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
         *,
-        logger: PacketExecutionLoggerProtocol | None = None,
+        logger: DataExecutionLoggerProtocol | None = None,
     ) -> Any:
         from orcapod.pipeline.logging_capture import LocalCaptureContext
 

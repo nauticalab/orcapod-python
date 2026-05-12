@@ -1,5 +1,5 @@
 """
-Tag and Packet — datagram subclasses with system-tags and source-info support.
+Tag and Data — datagram subclasses with system-tags and source-info support.
 
 ``Tag``
     Extends ``Datagram`` with *system tags*: metadata fields whose names start with
@@ -7,7 +7,7 @@ Tag and Packet — datagram subclasses with system-tags and source-info support.
     but are excluded from content hashing and structural operations unless explicitly
     requested via ``ColumnConfig(system_tags=True)``.
 
-``Packet``
+``Data``
     Extends ``Datagram`` with *source information*: provenance tokens (strings or None)
     keyed by data-column name.  Source-info keys are stored without the
     ``constants.SOURCE_PREFIX`` internally and added back when serialising via
@@ -232,11 +232,11 @@ class Tag(Datagram):
 
 
 # ---------------------------------------------------------------------------
-# Packet
+# Data
 # ---------------------------------------------------------------------------
 
 
-class Packet(Datagram):
+class Data(Datagram):
     """
     Datagram with source-information tracking.
 

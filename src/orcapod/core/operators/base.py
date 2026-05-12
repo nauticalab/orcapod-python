@@ -9,7 +9,7 @@ from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
 from orcapod.protocols.core_protocols import (
     ArgumentGroup,
-    PacketProtocol,
+    DataProtocol,
     StreamProtocol,
     TagProtocol,
 )
@@ -41,7 +41,7 @@ class UnaryOperator(StaticOutputOperatorPod):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        """Return the (tag, packet) output schemas for the given input stream."""
+        """Return the (tag, data) output schemas for the given input stream."""
         ...
 
     def validate_inputs(self, *streams: StreamProtocol) -> None:
@@ -70,8 +70,8 @@ class UnaryOperator(StaticOutputOperatorPod):
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         *,
         input_pipeline_hashes: Sequence[ContentHash] | None = None,
     ) -> None:
@@ -80,8 +80,8 @@ class UnaryOperator(StaticOutputOperatorPod):
             rows = await inputs[0].collect()
             stream = self._materialize_to_stream(rows)
             result = self.static_process(stream)
-            for tag, packet in result.iter_packets():
-                await output.send((tag, packet))
+            for tag, data in result.iter_data():
+                await output.send((tag, data))
         finally:
             await output.close()
 
@@ -154,8 +154,8 @@ class BinaryOperator(StaticOutputOperatorPod):
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         *,
         input_pipeline_hashes: Sequence[ContentHash] | None = None,
     ) -> None:
@@ -167,8 +167,8 @@ class BinaryOperator(StaticOutputOperatorPod):
             left_stream = self._materialize_to_stream(left_rows)
             right_stream = self._materialize_to_stream(right_rows)
             result = self.static_process(left_stream, right_stream)
-            for tag, packet in result.iter_packets():
-                await output.send((tag, packet))
+            for tag, data in result.iter_data():
+                await output.send((tag, data))
         finally:
             await output.close()
 

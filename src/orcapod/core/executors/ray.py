@@ -10,16 +10,16 @@ from orcapod.types import Schema
 from orcapod.core.executors.capture_wrapper import make_capture_wrapper
 
 if TYPE_CHECKING:
-    from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
+    from orcapod.protocols.observability_protocols import DataExecutionLoggerProtocol
 
 # Guard flag: cloudpickle Logger dispatch is registered at most once per process.
 _cloudpickle_dispatch_registered = False
 
 
 class RayExecutor(PythonFunctionExecutorBase):
-    """Executor that dispatches Python packet functions to a Ray cluster.
+    """Executor that dispatches Python data functions to a Ray cluster.
 
-    Only supports ``packet_function_type_id == "python.function.v0"``.
+    Only supports ``data_function_type_id == "python.function.v0"``.
 
     If Ray has not been initialized yet, this executor will call
     ``ray.init()`` lazily on first use, passing ``ray_address`` and
@@ -165,7 +165,7 @@ class RayExecutor(PythonFunctionExecutorBase):
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
         *,
-        logger: PacketExecutionLoggerProtocol | None = None,
+        logger: DataExecutionLoggerProtocol | None = None,
     ) -> Any:
         """Execute *fn* on the Ray cluster with fd-level I/O capture.
 
@@ -201,7 +201,7 @@ class RayExecutor(PythonFunctionExecutorBase):
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
         *,
-        logger: PacketExecutionLoggerProtocol | None = None,
+        logger: DataExecutionLoggerProtocol | None = None,
     ) -> Any:
         """Async counterpart of `execute_callable`."""
         import ray
@@ -272,7 +272,7 @@ class RayExecutor(PythonFunctionExecutorBase):
         stdout_log: str,
         stderr_log: str,
         python_logs: str,
-        logger: PacketExecutionLoggerProtocol | None,
+        logger: DataExecutionLoggerProtocol | None,
     ) -> None:
         """Record a successful execution to the logger."""
         if logger is None:
@@ -285,7 +285,7 @@ class RayExecutor(PythonFunctionExecutorBase):
     @staticmethod
     def _handle_worker_error(
         exc: Exception,
-        logger: PacketExecutionLoggerProtocol | None,
+        logger: DataExecutionLoggerProtocol | None,
     ) -> Exception:
         """Extract captured I/O from a worker error, record it, and return the exception to raise.
 
@@ -347,7 +347,7 @@ class RayExecutor(PythonFunctionExecutorBase):
         """Schema reflecting actual return types of ``get_executor_data``.
 
         Note: ``remote_opts`` values are ``Any`` (ints, nested dicts, etc.)
-        but the PacketFunction layer stringifies them into ``dict[str, str]``
+        but the DataFunction layer stringifies them into ``dict[str, str]``
         before storage. The schema here describes the pre-stringification
         executor output.
         """

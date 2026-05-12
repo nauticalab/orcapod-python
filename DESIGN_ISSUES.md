@@ -20,7 +20,7 @@ Each item has a status: `open`, `in progress`, or `resolved`.
 **Severity:** medium
 
 `TraceableBase` and `PipelineElementBase` co-occur in every active computation-node class
-(`StreamBase`, `PacketFunctionBase`, `_FunctionPodBase`). The two current exceptions are design
+(`StreamBase`, `DataFunctionBase`, `_FunctionPodBase`). The two current exceptions are design
 gaps rather than intentional choices:
 
 - `StaticOutputPod(TraceableBase)` — should implement `PipelineElementProtocol`; its absence
@@ -30,12 +30,12 @@ gaps rather than intentional choices:
 
 Note: merging into `TraceableBase` is correct at the *computation-node* level.
 `ContentIdentifiableBase` (which `TraceableBase` builds on) should **not** absorb
-`PipelineElementBase` — data datagrams (`Tag`, `Packet`) are legitimately content-identifiable
+`PipelineElementBase` — data datagrams (`Tag`, `Data`) are legitimately content-identifiable
 without being pipeline elements.
 
 **Fix:** Added `PipelineElementBase` to `TraceableBase`'s bases. Added
 `pipeline_identity_structure()` to `StaticOutputPod`. Removed redundant explicit
-`PipelineElementBase` from `StreamBase`, `ArrowTableStream`, `PacketFunctionBase`,
+`PipelineElementBase` from `StreamBase`, `ArrowTableStream`, `DataFunctionBase`,
 `_FunctionPodBase`, `FunctionPodStream`, `FunctionNode`, `OperatorNode`, and
 `DynamicPodStream` declarations.
 
@@ -54,41 +54,41 @@ invalidation on context change and document when changing context is safe.
 
 ---
 
-## `src/orcapod/core/packet_function.py`
+## `src/orcapod/core/data_function.py`
 
 ### P1 — `parse_function_outputs` is dead code
 **Status:** resolved
 **Severity:** medium
 `parse_function_outputs` is a module-level function with a `self` parameter, suggesting it was
-originally a method. It is never called. `PythonPacketFunction.call` duplicates its logic verbatim.
-Should be deleted or wired up as a method on `PacketFunctionBase` and used from `call`.
+originally a method. It is never called. `PythonDataFunction.call` duplicates its logic verbatim.
+Should be deleted or wired up as a method on `DataFunctionBase` and used from `call`.
 
 **Fix:** Converted to a proper standalone function `parse_function_outputs(output_keys, values)`.
-Replaced the duplicated unpacking block in `PythonPacketFunction.call` with a call to it.
+Replaced the duplicated unpacking block in `PythonDataFunction.call` with a call to it.
 Updated tests accordingly.
 
 ---
 
-### P2 — `CachedPacketFunction.call` silently drops the `RESULT_COMPUTED_FLAG`
+### P2 — `CachedDataFunction.call` silently drops the `RESULT_COMPUTED_FLAG`
 **Status:** resolved
 **Severity:** high
 On a cache miss, the flag is set but the result is discarded:
 ```python
-output_packet.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: True})  # return value ignored
+output_data.with_meta_columns(**{self.RESULT_COMPUTED_FLAG: True})  # return value ignored
 ```
-If `with_meta_columns` returns a new packet (immutable update), the flag is never actually
+If `with_meta_columns` returns a new data (immutable update), the flag is never actually
 attached.
 
-**Fix:** Assigned the return value: `output_packet = output_packet.with_meta_columns(...)`.
+**Fix:** Assigned the return value: `output_data = output_data.with_meta_columns(...)`.
 Added tests verifying the flag is `True` on cache miss and `False` on cache hit.
 
 ---
 
-### P3 — `PacketFunctionWrapper.__init__` passes no `version` to `PacketFunctionBase`
+### P3 — `DataFunctionWrapper.__init__` passes no `version` to `DataFunctionBase`
 **Status:** open
 **Severity:** medium
-`PacketFunctionBase.__init__` requires a `version` string and parses it into
-`_major_version`/`_minor_version`. `PacketFunctionWrapper` calls `super().__init__(**kwargs)`
+`DataFunctionBase.__init__` requires a `version` string and parses it into
+`_major_version`/`_minor_version`. `DataFunctionWrapper` calls `super().__init__(**kwargs)`
 without a `version`, so it either crashes (no version in kwargs) or silently defaults to `"v0.0"`.
 Those parsed fields are then shadowed by the delegating properties, making them dead state.
 Options: pass the inner function's version through, or avoid calling the base version-parsing
@@ -96,12 +96,12 @@ logic entirely.
 
 ---
 
-### P4 — `PythonPacketFunction` computes the output schema hash twice
+### P4 — `PythonDataFunction` computes the output schema hash twice
 **Status:** open
 **Severity:** low
-`__init__` stores `self._output_schema_hash` (line ~289). `PacketFunctionBase` also lazily
-caches `self._output_packet_schema_hash` (different attribute name) via
-`output_packet_schema_hash`. Two fields holding the same value. One is redundant.
+`__init__` stores `self._output_schema_hash` (line ~289). `DataFunctionBase` also lazily
+caches `self._output_data_schema_hash` (different attribute name) via
+`output_data_schema_hash`. Two fields holding the same value. One is redundant.
 
 ---
 
@@ -119,7 +119,7 @@ ambiguous whether system columns are actually filtered.
 **Status:** open
 **Severity:** high
 
-`CachedPacketFunction.get_cached_output_for_packet()` (line ~547) accepts a `match_tier`
+`CachedDataFunction.get_cached_output_for_data()` (line ~547) accepts a `match_tier`
 parameter that is documented in the interface but completely ignored. Cache lookups always use
 exact matching. Two inline TODOs mark this:
 - `# TODO: add match based on match_tier if specified`
@@ -132,11 +132,11 @@ Requires: design a matching strategy interface; implement at least exact and fuz
 
 ---
 
-### P7 — `PythonPacketFunction.__init__` unconditionally extracts git info
+### P7 — `PythonDataFunction.__init__` unconditionally extracts git info
 **Status:** open
 **Severity:** medium
 
-`PythonPacketFunction.__init__()` (line ~324) always calls `get_git_info()`, which runs git
+`PythonDataFunction.__init__()` (line ~324) always calls `get_git_info()`, which runs git
 subprocess commands. This fails or significantly slows initialization in non-git environments
 (CI containers, notebooks, deployed services).
 
@@ -162,7 +162,7 @@ implementation.
 
 ---
 
-### F2 — Typo in `TrackedPacketFunctionPod` docstring
+### F2 — Typo in `TrackedDataFunctionPod` docstring
 **Status:** open
 **Severity:** trivial
 `"A think wrapper"` should be `"A thin wrapper"`.
@@ -172,19 +172,19 @@ implementation.
 ### F3 — Dual URI computation paths in the class hierarchy
 **Status:** open
 **Severity:** low
-`TrackedPacketFunctionPod.uri` assembles the URI from `self.packet_function.*` with its own lazy
+`TrackedDataFunctionPod.uri` assembles the URI from `self.data_function.*` with its own lazy
 schema-hash cache. `WrappedFunctionPod.uri` simply delegates to `self._function_pod.uri`. These
-should agree (and do, after the `packet_function` fix), but having two independent implementations
+should agree (and do, after the `data_function` fix), but having two independent implementations
 makes future changes fragile.
 
 ---
 
-### F4 — `FunctionPodNode` is not a subclass of `TrackedPacketFunctionPod`
+### F4 — `FunctionPodNode` is not a subclass of `TrackedDataFunctionPod`
 **Status:** open
 **Severity:** medium
-`FunctionPodNode` reimplements `process_packet`, `process`, `__call__`, `output_schema`,
+`FunctionPodNode` reimplements `process_data`, `process`, `__call__`, `output_schema`,
 `validate_inputs`, and `argument_symmetry` from scratch rather than inheriting from
-`SimpleFunctionPod`/`TrackedPacketFunctionPod` and overriding the parts that differ
+`SimpleFunctionPod`/`TrackedDataFunctionPod` and overriding the parts that differ
 (fixed input stream, pipeline record writing). The result is a large amount of structural
 duplication that diverges silently over time.
 
@@ -193,11 +193,11 @@ duplication that diverges silently over time.
 ### F5 — `FunctionPodStream` and `FunctionPodNodeStream` are near-identical copy-pastes
 **Status:** open
 **Severity:** medium
-`iter_packets`, `as_table` (including content_hash and sort_by_tags logic), `keys`,
+`iter_data`, `as_table` (including content_hash and sort_by_tags logic), `keys`,
 `output_schema`, `source`, and `upstreams` are duplicated almost line-for-line. The only
 behavioural differences are:
 - `FunctionPodNodeStream` has `refresh_cache()`
-- `FunctionPodNodeStream.output_schema` reads from `_fp_node._cached_packet_function` directly
+- `FunctionPodNodeStream.output_schema` reads from `_fp_node._cached_data_function` directly
 
 A shared base stream class would eliminate the duplication.
 
@@ -219,7 +219,7 @@ is `self`.
 **Severity:** medium
 The method checks for an existing record with `get_record_by_id` and skips insertion if found.
 But it then calls `add_record(..., skip_duplicates=False)`, which will raise on a duplicate. A
-race between the lookup and the insert (e.g. two concurrent processes handling the same tag+packet)
+race between the lookup and the insert (e.g. two concurrent processes handling the same tag+data)
 would cause a crash instead of a graceful skip. Should use `skip_duplicates=True` for consistency
 with the intent.
 
@@ -237,7 +237,7 @@ grouping. It should be co-located with `function_pod` or moved to the protocols 
 **Status:** open
 **Severity:** high
 
-`_validate_input_schema()` (line ~162) raises a generic `ValueError` when the packet schema
+`_validate_input_schema()` (line ~162) raises a generic `ValueError` when the data schema
 is incompatible:
 ```python
 # TODO: use custom exception type for better error handling
@@ -255,13 +255,13 @@ Fix: change `ValueError` to `InputValidationError`.
 **Status:** open
 **Severity:** high
 
-`FunctionPodNode.record_packet_for_cache()` (line ~1077) builds a tag table for entry-ID
+`FunctionPodNode.record_data_for_cache()` (line ~1077) builds a tag table for entry-ID
 computation but excludes system tag columns:
 ```python
 # TODO: add system tag columns
 ```
 
-Two packets with identical user tags but different provenance (arriving from different
+Two data with identical user tags but different provenance (arriving from different
 pipeline branches, thus having different system tags) produce the same cache key. This can
 cause cache collisions where a result computed for one pipeline branch is returned for
 another.
@@ -299,36 +299,36 @@ directly, eliminating the Polars dependency for this code path and reducing conv
 
 ---
 
-### F10 — `FunctionPodNodeStream.iter_packets` recomputes every packet on every call
+### F10 — `FunctionPodNodeStream.iter_data` recomputes every data on every call
 **Status:** resolved
 **Severity:** high
-`iter_packets` always iterates the full input stream and calls `process_packet` for every packet,
+`iter_data` always iterates the full input stream and calls `process_data` for every data,
 even when results are already stored in the result/pipeline databases.  This defeats the purpose
 of the two-database design (result DB + pipeline DB) used to cache computed outputs.
 
-**Fix:** Refactored `iter_packets` to first call `FunctionPodNode.get_all_records(columns={"meta": True})`
-to load already-computed (tag, output-packet) pairs from the databases (mirroring the legacy
+**Fix:** Refactored `iter_data` to first call `FunctionPodNode.get_all_records(columns={"meta": True})`
+to load already-computed (tag, output-data) pairs from the databases (mirroring the legacy
 `PodNodeStream` design), yield those via `TableStream`, then collect the set of already-processed
-`INPUT_PACKET_HASH` values and only call `process_packet` for input packets not yet in the DB.
+`INPUT_PACKET_HASH` values and only call `process_data` for input data not yet in the DB.
 Also added `FunctionPodNode.get_all_records(columns, all_info)` using `ColumnConfig` to control
 which column groups (meta, source, system_tags) are returned.
 
 ---
 
-## `src/orcapod/core/cached_function_pod.py` / `src/orcapod/core/packet_function.py`
+## `src/orcapod/core/cached_function_pod.py` / `src/orcapod/core/data_function.py`
 
-### CFP1 — Extract shared result caching logic from CachedPacketFunction and CachedFunctionPod
+### CFP1 — Extract shared result caching logic from CachedDataFunction and CachedFunctionPod
 **Status:** resolved
 **Severity:** medium
 
-`CachedPacketFunction` and `CachedFunctionPod` implement nearly identical result caching
-logic: DB lookup by `INPUT_PACKET_HASH_COL`, conflict resolution by most-recent timestamp,
+`CachedDataFunction` and `CachedFunctionPod` implement nearly identical result caching
+logic: DB lookup by `INPUT_DATA_HASH_COL`, conflict resolution by most-recent timestamp,
 record storage with variation/execution/timestamp columns, and a `RESULT_COMPUTED_FLAG`
 meta column. The match tier / matching policy design (P6) will also need to apply to both.
 
 **Fix:** Extracted `ResultCache` class (`src/orcapod/core/result_cache.py`) that owns the DB,
 record path, lookup (with `additional_constraints` for future match tiers), store, conflict
-resolution, and auto-flush logic. Both `CachedPacketFunction` and `CachedFunctionPod` now
+resolution, and auto-flush logic. Both `CachedDataFunction` and `CachedFunctionPod` now
 delegate to a `ResultCache` instance. The match tier strategy (P6) can be implemented once
 on `ResultCache.lookup` via `additional_constraints`.
 
@@ -341,7 +341,7 @@ on `ResultCache.lookup` via `additional_constraints`.
 **Severity:** high
 
 `FunctionNode.async_execute` (formerly `PersistentFunctionNode`) had a fully sequential Phase 2
-— each packet was awaited one at a time in a simple `async for` loop.  This meant async packet
+— each data was awaited one at a time in a simple `async for` loop.  This meant async data
 functions (which can overlap I/O via `await`) got no concurrency benefit when run through the
 Pipeline API.
 
@@ -391,8 +391,8 @@ Added `computed_label()` to `RootSource` returning `_explicit_source_id`.
 **Status:** resolved
 **Severity:** high
 Both `FunctionPodStream.as_table()` and `FunctionPodNodeStream.as_table()` unconditionally call
-`.drop([constants.CONTEXT_KEY])` on the tags table built from the accumulated packets. When the
-stream is empty (e.g. because the packet function is inactive), `iter_packets()` yields nothing,
+`.drop([constants.CONTEXT_KEY])` on the tags table built from the accumulated data. When the
+stream is empty (e.g. because the data function is inactive), `iter_data()` yields nothing,
 `tag_schema` stays `None`, and `pa.Table.from_pylist([], schema=None)` produces a zero-column
 table. The subsequent `.drop([constants.CONTEXT_KEY])` then raises `KeyError` because the column
 does not exist.
@@ -406,11 +406,11 @@ to only columns that exist in the table.
 
 ## `src/orcapod/core/streams/`
 
-### ST1 — `drop_packet_columns` may leave orphan source-info columns
+### ST1 — `drop_data_columns` may leave orphan source-info columns
 **Status:** open
 **Severity:** medium
 
-The `StreamProtocol.drop_packet_columns()` method (line ~309) drops data columns but it is
+The `StreamProtocol.drop_data_columns()` method (line ~309) drops data columns but it is
 unclear whether the corresponding `_source_<col>` columns are also removed:
 ```python
 # TODO: check to make sure source columns are also dropped
@@ -421,11 +421,11 @@ stale provenance data or schema mismatches.
 
 ---
 
-### ST2 — `iter_packets()` does not support table batch streaming
+### ST2 — `iter_data()` does not support table batch streaming
 **Status:** open
 **Severity:** low
 
-`ArrowTableStream.iter_packets()` (line ~261) works only with fully materialized Arrow tables,
+`ArrowTableStream.iter_data()` (line ~261) works only with fully materialized Arrow tables,
 not with `RecordBatchReader` or lazy batch iteration:
 ```python
 # TODO: make it work with table batch stream
@@ -439,15 +439,15 @@ Relevant for future streaming/chunked processing of large datasets.
 **Status:** open
 **Severity:** medium
 
-`SelectTagColumns`, `SelectPacketColumns`, `DropTagColumns`, `DropPacketColumns` (in
-`column_selection.py:58`, `137`, `214`, `292`) and `PolarsFilterByPacketColumns`
+`SelectTagColumns`, `SelectDataColumns`, `DropTagColumns`, `DropDataColumns` (in
+`column_selection.py:58`, `137`, `214`, `292`) and `PolarsFilterByDataColumns`
 (`filters.py:135`) each have near-identical `validate_unary_input()` implementations. All are
 marked:
 ```python
 # TODO: remove redundant logic
 ```
 
-The only difference between them is which key set (tag vs. packet) is checked and the error
+The only difference between them is which key set (tag vs. data) is checked and the error
 message text. A shared parameterized validation helper would eliminate the duplication.
 
 ---
@@ -469,9 +469,9 @@ Three categories of improvement are planned:
    independently:
    - ~~`PolarsFilter` — evaluate predicate per row, emit or drop immediately~~ (kept barrier:
      Polars expressions require DataFrame context for evaluation)
-   - `MapTags` / `MapPackets` — rename columns per row, emit immediately ✅
-   - `SelectTagColumns` / `SelectPacketColumns` — project columns per row, emit immediately ✅
-   - `DropTagColumns` / `DropPacketColumns` — drop columns per row, emit immediately ✅
+   - `MapTags` / `MapData` — rename columns per row, emit immediately ✅
+   - `SelectTagColumns` / `SelectDataColumns` — project columns per row, emit immediately ✅
+   - `DropTagColumns` / `DropDataColumns` — drop columns per row, emit immediately ✅
 
 2. **Incremental overrides (stateful, eager emit)** — for multi-input operators that can
    produce partial results before all inputs are consumed:
@@ -493,12 +493,12 @@ system-tag evolution respectively.
 
 ## `src/orcapod/core/` — AddResult pod and Pod Groups
 
-### G1 — `AddResult`: a first-class pod type for packet enrichment
+### G1 — `AddResult`: a first-class pod type for data enrichment
 **Status:** open
 **Severity:** medium
 
-The most common pipeline pattern is *enrichment*: run a function on a packet and append the
-computed columns to the original packet rather than replacing it. This is logically equivalent
+The most common pipeline pattern is *enrichment*: run a function on a data and append the
+computed columns to the original data rather than replacing it. This is logically equivalent
 to `FunctionPod → Join(original, computed)`, but implementing it as a first-class pod type is
 both simpler and more efficient.
 
@@ -508,12 +508,12 @@ A naïve decomposition into `FunctionPod + Join` works but has unnecessary overh
 
 1. **Materialization waste** — FunctionPod produces an intermediate stream that is only created
    to be immediately joined back. AddResult can compute new columns and merge them into the
-   original packet in a single pass, with no intermediate stream.
+   original data in a single pass, with no intermediate stream.
 2. **Redundant tag matching** — Join must re-match tags that trivially correspond (they came
-   from the same input row). AddResult already holds the (tag, packet) pair and can skip the
+   from the same input row). AddResult already holds the (tag, data) pair and can skip the
    matching entirely.
-3. **Simpler async path** — streams row-by-row like FunctionPod: read (tag, packet), call
-   the packet function, merge original packet columns + new columns, emit. No broadcast,
+3. **Simpler async path** — streams row-by-row like FunctionPod: read (tag, data), call
+   the data function, merge original data columns + new columns, emit. No broadcast,
    passthrough channel, or rejoin wiring needed.
 
 #### Provenance model: fused implementation, not a third category
@@ -534,8 +534,8 @@ semantics are *derived from* the decomposition, not an extension of the model:
 
 - **Preserved columns** — passed through from upstream, provenance transparent (operator-like).
   Source-info columns pass through unchanged, exactly as Join would propagate them.
-- **Computed columns** — produced by the wrapped PacketFunction, provenance tracked
-  (function-pod-like). Source-info columns reference the PacketFunction, exactly as
+- **Computed columns** — produced by the wrapped DataFunction, provenance tracked
+  (function-pod-like). Source-info columns reference the DataFunction, exactly as
   FunctionPod would attribute them.
 
 There is no third kind of output column. Every column in an AddResult output has a clear
@@ -551,7 +551,7 @@ checking equivalence with its decomposition.
 
 ```python
 # Sync
-grade_pf = PythonPacketFunction(compute_letter_grade, output_keys="letter_grade")
+grade_pf = PythonDataFunction(compute_letter_grade, output_keys="letter_grade")
 enriched = AddResult(grade_pf).process(stream)
 # enriched has all original columns + "letter_grade"
 
@@ -561,13 +561,13 @@ await AddResult(grade_pf).async_execute([input_ch], output_ch)
 
 #### Implementation notes
 
-- `output_schema()` returns `(input_tag_schema, input_packet_schema | function_output_schema)`
-  — the union of original packet columns and new computed columns.
-- Must raise `InputValidationError` if function output keys collide with existing packet
-  column names (same constraint as Join on overlapping packet columns).
+- `output_schema()` returns `(input_tag_schema, input_data_schema | function_output_schema)`
+  — the union of original data columns and new computed columns.
+- Must raise `InputValidationError` if function output keys collide with existing data
+  column names (same constraint as Join on overlapping data columns).
 - `pipeline_hash` should behave as if the decomposition were performed — commits to the
-  wrapped `PacketFunction`'s identity plus the upstream's pipeline hash.
-- Source-info on computed columns references the PacketFunction (as FunctionPod would).
+  wrapped `DataFunction`'s identity plus the upstream's pipeline hash.
+- Source-info on computed columns references the DataFunction (as FunctionPod would).
   Source-info on preserved columns passes through unchanged (as Join would).
 - `async_execute` can use the same semaphore-based concurrency control as `FunctionPod`.
 
@@ -580,14 +580,14 @@ await AddResult(grade_pf).async_execute([input_ch], output_ch)
 **Severity:** medium
 
 The `BaseSemanticHasher` raises `BeartypeDoorNonpepException` when hashing a
-`PythonPacketFunction` whose return type uses PEP 604 syntax (`int | None`).
+`PythonDataFunction` whose return type uses PEP 604 syntax (`int | None`).
 The hasher's `_handle_unknown` path receives `types.UnionType` (the Python 3.10+ type for
 `X | Y` expressions) and has no registered handler for it.
 
 `typing.Optional[int]` also fails (different error path through beartype).
 
-This means packet functions cannot use union return types — a common pattern for functions
-that may filter packets by returning `None`.
+This means data functions cannot use union return types — a common pattern for functions
+that may filter data by returning `None`.
 
 **Workaround:** Use non-union return types and raise/return sentinel values instead.
 
@@ -611,7 +611,7 @@ A PodGroup:
 - Participates in pipeline hashing as a single composite element
 
 Potential patterns (to be designed as needs arise):
-- **ConditionalPod** — route packets to different pods based on a predicate, merge results
+- **ConditionalPod** — route data to different pods based on a predicate, merge results
 - **FanOutFanIn** — broadcast to N pods, collect and merge/concat results
 - **FallbackPod** — try primary pod, fall back to secondary on error/None result
 
@@ -898,7 +898,7 @@ For derived sources (e.g., `DerivedSource`), the stream may not have a meaningfu
 **Status:** open
 **Severity:** medium
 
-When loading a pipeline with a `PacketFunctionProxy` (PLT-931), the
+When loading a pipeline with a `DataFunctionProxy` (PLT-931), the
 `CachedFunctionPod`'s `record_path` may differ from the original because the
 pod-level URI is recomputed from a deserialized schema (whose semantic hash
 may diverge from the original due to the `Python type → Arrow string → Python type`

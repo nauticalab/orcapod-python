@@ -6,7 +6,7 @@ from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
-from orcapod.protocols.core_protocols import PacketProtocol, StreamProtocol, TagProtocol
+from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, TagProtocol
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.lazy_module import LazyModule
@@ -46,7 +46,7 @@ class SelectTagColumns(UnaryOperator):
         return config
 
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
-        tag_columns, packet_columns = stream.keys()
+        tag_columns, data_columns = stream.keys()
         tags_to_drop = [c for c in tag_columns if c not in self.columns]
         new_tag_columns = [c for c in tag_columns if c not in tags_to_drop]
 
@@ -71,7 +71,7 @@ class SelectTagColumns(UnaryOperator):
         It takes two streams as input and raises an error if the inputs are not valid.
         """
         # TODO: remove redundant logic
-        tag_columns, packet_columns = stream.keys()
+        tag_columns, data_columns = stream.keys()
         columns_to_select = self.columns
         missing_columns = set(columns_to_select) - set(tag_columns)
         if missing_columns and self.strict:
@@ -86,7 +86,7 @@ class SelectTagColumns(UnaryOperator):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        tag_schema, packet_schema = stream.output_schema(
+        tag_schema, data_schema = stream.output_schema(
             columns=columns, all_info=all_info
         )
         tag_columns, _ = stream.keys()
@@ -95,18 +95,18 @@ class SelectTagColumns(UnaryOperator):
         # this ensures all system tag columns are preserved
         new_tag_schema = {k: v for k, v in tag_schema.items() if k not in tags_to_drop}
 
-        return Schema(new_tag_schema), packet_schema
+        return Schema(new_tag_schema), data_schema
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         **kwargs: Any,
     ) -> None:
         """Streaming: select tag columns per row without materializing."""
         try:
             tags_to_drop: list[str] | None = None
-            async for tag, packet in inputs[0]:
+            async for tag, data in inputs[0]:
                 if tags_to_drop is None:
                     tag_keys = tag.keys()
                     if self.strict:
@@ -119,9 +119,9 @@ class SelectTagColumns(UnaryOperator):
                             )
                     tags_to_drop = [c for c in tag_keys if c not in self.columns]
                 if not tags_to_drop:
-                    await output.send((tag, packet))
+                    await output.send((tag, data))
                 else:
-                    await output.send((tag.drop(*tags_to_drop), packet))
+                    await output.send((tag.drop(*tags_to_drop), data))
         finally:
             await output.close()
 
@@ -133,7 +133,7 @@ class SelectTagColumns(UnaryOperator):
         )
 
 
-class SelectPacketColumns(UnaryOperator):
+class SelectDataColumns(UnaryOperator):
     """
     Operator that selects specified columns from a stream.
     """
@@ -146,7 +146,7 @@ class SelectPacketColumns(UnaryOperator):
         super().__init__(**kwargs)
 
     def to_config(self) -> dict[str, Any]:
-        """Serialize this SelectPacketColumns operator to a config dict.
+        """Serialize this SelectDataColumns operator to a config dict.
 
         Returns:
             A dict with ``class_name``, ``module_path``, and ``config`` keys,
@@ -160,14 +160,14 @@ class SelectPacketColumns(UnaryOperator):
         return config
 
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
-        tag_columns, packet_columns = stream.keys()
-        packet_columns_to_drop = [c for c in packet_columns if c not in self.columns]
-        new_packet_columns = [
-            c for c in packet_columns if c not in packet_columns_to_drop
+        tag_columns, data_columns = stream.keys()
+        data_columns_to_drop = [c for c in data_columns if c not in self.columns]
+        new_data_columns = [
+            c for c in data_columns if c not in data_columns_to_drop
         ]
 
-        if len(new_packet_columns) == len(packet_columns):
-            logger.info("All packet columns are selected. Returning stream unaltered.")
+        if len(new_data_columns) == len(data_columns):
+            logger.info("All data columns are selected. Returning stream unaltered.")
             return stream
 
         table = stream.as_table(
@@ -175,11 +175,11 @@ class SelectPacketColumns(UnaryOperator):
         )
         # make sure to drop associated source fields
         associated_source_fields = [
-            f"{constants.SOURCE_PREFIX}{c}" for c in packet_columns_to_drop
+            f"{constants.SOURCE_PREFIX}{c}" for c in data_columns_to_drop
         ]
-        packet_columns_to_drop.extend(associated_source_fields)
+        data_columns_to_drop.extend(associated_source_fields)
 
-        modified_table = table.drop_columns(packet_columns_to_drop)
+        modified_table = table.drop_columns(data_columns_to_drop)
 
         return ArrowTableStream(
             modified_table,
@@ -192,12 +192,12 @@ class SelectPacketColumns(UnaryOperator):
         It takes two streams as input and raises an error if the inputs are not valid.
         """
         # TODO: remove redundant logic
-        tag_columns, packet_columns = stream.keys()
+        tag_columns, data_columns = stream.keys()
         columns_to_select = self.columns
-        missing_columns = set(columns_to_select) - set(packet_columns)
+        missing_columns = set(columns_to_select) - set(data_columns)
         if missing_columns and self.strict:
             raise InputValidationError(
-                f"Missing packet columns: {missing_columns}. Make sure all specified columns to select are present or use strict=False to ignore missing columns"
+                f"Missing data columns: {missing_columns}. Make sure all specified columns to select are present or use strict=False to ignore missing columns"
             )
 
     def unary_output_schema(
@@ -207,44 +207,44 @@ class SelectPacketColumns(UnaryOperator):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        tag_schema, packet_schema = stream.output_schema(
+        tag_schema, data_schema = stream.output_schema(
             columns=columns, all_info=all_info
         )
-        _, packet_columns = stream.keys()
-        packets_to_drop = [pc for pc in packet_columns if pc not in self.columns]
+        _, data_columns = stream.keys()
+        data_to_drop = [pc for pc in data_columns if pc not in self.columns]
 
         # this ensures all system tag columns are preserved
-        new_packet_schema = {
-            k: v for k, v in packet_schema.items() if k not in packets_to_drop
+        new_data_schema = {
+            k: v for k, v in data_schema.items() if k not in data_to_drop
         }
 
-        return tag_schema, Schema(new_packet_schema)
+        return tag_schema, Schema(new_data_schema)
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         **kwargs: Any,
     ) -> None:
-        """Streaming: select packet columns per row without materializing."""
+        """Streaming: select data columns per row without materializing."""
         try:
             pkts_to_drop: list[str] | None = None
-            async for tag, packet in inputs[0]:
+            async for tag, data in inputs[0]:
                 if pkts_to_drop is None:
-                    pkt_keys = packet.keys()
+                    pkt_keys = data.keys()
                     if self.strict:
                         missing = set(self.columns) - set(pkt_keys)
                         if missing:
                             raise InputValidationError(
-                                f"Missing packet columns: {missing}. Make sure all "
+                                f"Missing data columns: {missing}. Make sure all "
                                 f"specified columns to select are present or use "
                                 f"strict=False to ignore missing columns"
                             )
                     pkts_to_drop = [c for c in pkt_keys if c not in self.columns]
                 if not pkts_to_drop:
-                    await output.send((tag, packet))
+                    await output.send((tag, data))
                 else:
-                    await output.send((tag, packet.drop(*pkts_to_drop)))
+                    await output.send((tag, data.drop(*pkts_to_drop)))
         finally:
             await output.close()
 
@@ -283,7 +283,7 @@ class DropTagColumns(UnaryOperator):
         return config
 
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
-        tag_columns, packet_columns = stream.keys()
+        tag_columns, data_columns = stream.keys()
         columns_to_drop = self.columns
         if not self.strict:
             columns_to_drop = [c for c in columns_to_drop if c in tag_columns]
@@ -311,7 +311,7 @@ class DropTagColumns(UnaryOperator):
         It takes two streams as input and raises an error if the inputs are not valid.
         """
         # TODO: remove redundant logic
-        tag_columns, packet_columns = stream.keys()
+        tag_columns, data_columns = stream.keys()
         columns_to_drop = self.columns
         missing_columns = set(columns_to_drop) - set(tag_columns)
         if missing_columns and self.strict:
@@ -326,7 +326,7 @@ class DropTagColumns(UnaryOperator):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        tag_schema, packet_schema = stream.output_schema(
+        tag_schema, data_schema = stream.output_schema(
             columns=columns, all_info=all_info
         )
         tag_columns, _ = stream.keys()
@@ -334,18 +334,18 @@ class DropTagColumns(UnaryOperator):
 
         new_tag_schema = {k: v for k, v in tag_schema.items() if k in new_tag_columns}
 
-        return Schema(new_tag_schema), packet_schema
+        return Schema(new_tag_schema), data_schema
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         **kwargs: Any,
     ) -> None:
         """Streaming: drop tag columns per row without materializing."""
         try:
             effective_drops: list[str] | None = None
-            async for tag, packet in inputs[0]:
+            async for tag, data in inputs[0]:
                 if effective_drops is None:
                     tag_keys = tag.keys()
                     if self.strict:
@@ -362,9 +362,9 @@ class DropTagColumns(UnaryOperator):
                         else [c for c in self.columns if c in tag_keys]
                     )
                 if not effective_drops:
-                    await output.send((tag, packet))
+                    await output.send((tag, data))
                 else:
-                    await output.send((tag.drop(*effective_drops), packet))
+                    await output.send((tag.drop(*effective_drops), data))
         finally:
             await output.close()
 
@@ -376,7 +376,7 @@ class DropTagColumns(UnaryOperator):
         )
 
 
-class DropPacketColumns(UnaryOperator):
+class DropDataColumns(UnaryOperator):
     """
     Operator that drops specified columns from a stream.
     """
@@ -389,7 +389,7 @@ class DropPacketColumns(UnaryOperator):
         super().__init__(**kwargs)
 
     def to_config(self) -> dict[str, Any]:
-        """Serialize this DropPacketColumns operator to a config dict.
+        """Serialize this DropDataColumns operator to a config dict.
 
         Returns:
             A dict with ``class_name``, ``module_path``, and ``config`` keys,
@@ -403,13 +403,13 @@ class DropPacketColumns(UnaryOperator):
         return config
 
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
-        tag_columns, packet_columns = stream.keys()
+        tag_columns, data_columns = stream.keys()
         columns_to_drop = list(self.columns)
         if not self.strict:
-            columns_to_drop = [c for c in columns_to_drop if c in packet_columns]
+            columns_to_drop = [c for c in columns_to_drop if c in data_columns]
 
         if len(columns_to_drop) == 0:
-            logger.info("No packet columns to drop. Returning stream unaltered.")
+            logger.info("No data columns to drop. Returning stream unaltered.")
             return stream
 
         # make sure all associated source columns are dropped too
@@ -435,11 +435,11 @@ class DropPacketColumns(UnaryOperator):
         It takes two streams as input and raises an error if the inputs are not valid.
         """
         # TODO: remove redundant logic
-        _, packet_columns = stream.keys()
-        missing_columns = set(self.columns) - set(packet_columns)
+        _, data_columns = stream.keys()
+        missing_columns = set(self.columns) - set(data_columns)
         if missing_columns and self.strict:
             raise InputValidationError(
-                f"Missing packet columns: {missing_columns}. Make sure all specified columns to drop are present or use strict=False to ignore missing columns"
+                f"Missing data columns: {missing_columns}. Make sure all specified columns to drop are present or use strict=False to ignore missing columns"
             )
 
     def unary_output_schema(
@@ -449,33 +449,33 @@ class DropPacketColumns(UnaryOperator):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        tag_schema, packet_schema = stream.output_schema(
+        tag_schema, data_schema = stream.output_schema(
             columns=columns, all_info=all_info
         )
 
-        new_packet_schema = {
-            k: v for k, v in packet_schema.items() if k not in self.columns
+        new_data_schema = {
+            k: v for k, v in data_schema.items() if k not in self.columns
         }
 
-        return tag_schema, Schema(new_packet_schema)
+        return tag_schema, Schema(new_data_schema)
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         **kwargs: Any,
     ) -> None:
-        """Streaming: drop packet columns per row without materializing."""
+        """Streaming: drop data columns per row without materializing."""
         try:
             effective_drops: list[str] | None = None
-            async for tag, packet in inputs[0]:
+            async for tag, data in inputs[0]:
                 if effective_drops is None:
-                    pkt_keys = packet.keys()
+                    pkt_keys = data.keys()
                     if self.strict:
                         missing = set(self.columns) - set(pkt_keys)
                         if missing:
                             raise InputValidationError(
-                                f"Missing packet columns: {missing}. Make sure all "
+                                f"Missing data columns: {missing}. Make sure all "
                                 f"specified columns to drop are present or use "
                                 f"strict=False to ignore missing columns"
                             )
@@ -485,9 +485,9 @@ class DropPacketColumns(UnaryOperator):
                         else [c for c in self.columns if c in pkt_keys]
                     )
                 if not effective_drops:
-                    await output.send((tag, packet))
+                    await output.send((tag, data))
                 else:
-                    await output.send((tag, packet.drop(*effective_drops)))
+                    await output.send((tag, data.drop(*effective_drops)))
         finally:
             await output.close()
 
@@ -514,7 +514,7 @@ class MapTags(UnaryOperator):
         super().__init__(**kwargs)
 
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
-        tag_columns, packet_columns = stream.keys()
+        tag_columns, data_columns = stream.keys()
         missing_tags = set(tag_columns) - set(self.name_map.keys())
 
         if not any(n in tag_columns for n in self.name_map):
@@ -527,8 +527,8 @@ class MapTags(UnaryOperator):
             tc: self.name_map.get(tc, tc) for tc in tag_columns
         }  # rename the tag as necessary
         new_tag_columns = [name_map[tc] for tc in tag_columns]
-        for c in packet_columns:
-            name_map[c] = c  # no renaming on packet columns
+        for c in data_columns:
+            name_map[c] = c  # no renaming on data columns
 
         renamed_table = table.rename_columns(name_map)
 
@@ -547,7 +547,7 @@ class MapTags(UnaryOperator):
         It takes two streams as input and raises an error if the inputs are not valid.
         """
         # verify that renamed value does NOT collide with other columns
-        tag_columns, packet_columns = stream.keys()
+        tag_columns, data_columns = stream.keys()
         relevant_source = []
         relevant_target = []
         for source, target in self.name_map.items():
@@ -556,14 +556,14 @@ class MapTags(UnaryOperator):
                 relevant_target.append(target)
         remaining_tag_columns = set(tag_columns) - set(relevant_source)
         overlapping_tag_columns = remaining_tag_columns.intersection(relevant_target)
-        overlapping_packet_columns = set(packet_columns).intersection(relevant_target)
+        overlapping_data_columns = set(data_columns).intersection(relevant_target)
 
-        if overlapping_tag_columns or overlapping_packet_columns:
+        if overlapping_tag_columns or overlapping_data_columns:
             message = f"Renaming {self.name_map} would cause collisions with existing columns: "
             if overlapping_tag_columns:
                 message += f"overlapping tag columns: {overlapping_tag_columns}."
-            if overlapping_packet_columns:
-                message += f"overlapping packet columns: {overlapping_packet_columns}."
+            if overlapping_data_columns:
+                message += f"overlapping data columns: {overlapping_data_columns}."
             raise InputValidationError(message)
 
     def unary_output_schema(
@@ -573,14 +573,14 @@ class MapTags(UnaryOperator):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        tag_schema, packet_schema = stream.output_schema(
+        tag_schema, data_schema = stream.output_schema(
             columns=columns, all_info=all_info
         )
 
-        # Create new packet schema with renamed keys
+        # Create new data schema with renamed keys
         new_tag_schema = {self.name_map.get(k, k): v for k, v in tag_schema.items()}
 
-        return Schema(new_tag_schema), packet_schema
+        return Schema(new_tag_schema), data_schema
 
     def identity_structure(self) -> Any:
         return (

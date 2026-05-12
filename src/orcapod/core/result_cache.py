@@ -1,7 +1,7 @@
-"""ResultCache — shared result caching logic for CachedPacketFunction and CachedFunctionPod.
+"""ResultCache — shared result caching logic for CachedDataFunction and CachedFunctionPod.
 
 Owns the database, record path, lookup (with match strategy), store,
-conflict resolution, and auto-flush behavior.  Both ``CachedPacketFunction``
+conflict resolution, and auto-flush behavior.  Both ``CachedDataFunction``
 and ``CachedFunctionPod`` delegate to a ``ResultCache`` instance.
 """
 
@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from orcapod.protocols.core_protocols import PacketProtocol
+from orcapod.protocols.core_protocols import DataProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.system_constants import constants
 from orcapod.utils.lazy_module import LazyModule
@@ -29,12 +29,12 @@ logger = logging.getLogger(__name__)
 class ResultCache:
     """Shared result caching backed by an ``ArrowDatabaseProtocol``.
 
-    Provides lookup (by input packet hash + optional additional constraints),
+    Provides lookup (by input data hash + optional additional constraints),
     store (output data + variation/execution metadata + timestamp), conflict
     resolution (most-recent-timestamp wins), and auto-flush.
 
     The match strategy is extensible: the default lookup matches on
-    ``INPUT_PACKET_HASH_COL`` only, but callers can supply additional
+    ``INPUT_DATA_HASH_COL`` only, but callers can supply additional
     constraints (e.g. function variation columns) to narrow the match.
     This is the hook for future match-tier support (see DESIGN_ISSUES P6).
 
@@ -73,33 +73,33 @@ class ResultCache:
 
     def lookup(
         self,
-        input_packet: PacketProtocol,
+        input_data: DataProtocol,
         additional_constraints: dict[str, str] | None = None,
-    ) -> PacketProtocol | None:
-        """Look up a cached output packet for *input_packet*.
+    ) -> DataProtocol | None:
+        """Look up a cached output data for *input_data*.
 
-        The default match is by ``INPUT_PACKET_HASH_COL`` only.
+        The default match is by ``INPUT_DATA_HASH_COL`` only.
         *additional_constraints* can narrow the match further (e.g. by
         function variation hash for stricter cache invalidation).
 
         If multiple records match, the most recent (by timestamp) wins.
 
         Args:
-            input_packet: The input packet whose content hash is the
+            input_data: The input data whose content hash is the
                 primary lookup key.
             additional_constraints: Optional extra column-value pairs to
                 include in the lookup query.
 
         Returns:
-            The cached output packet with ``RESULT_COMPUTED_FLAG: False``
+            The cached output data with ``RESULT_COMPUTED_FLAG: False``
             in its meta, or ``None`` if no match was found.
         """
-        from orcapod.core.datagrams import Packet
+        from orcapod.core.datagrams import Data
 
         RECORD_ID_COL = "_record_id"
 
         constraints: dict[str, str] = {
-            constants.INPUT_PACKET_HASH_COL: input_packet.content_hash().to_string(),
+            constants.INPUT_DATA_HASH_COL: input_data.content_hash().to_string(),
         }
         if additional_constraints:
             constraints.update(additional_constraints)
@@ -125,13 +125,13 @@ class ResultCache:
             ).take([0])
 
         record_id = result_table.to_pylist()[0][RECORD_ID_COL]
-        # Drop lookup columns from the returned packet
+        # Drop lookup columns from the returned data
         drop_cols = [RECORD_ID_COL] + [
             c for c in constraints if c in result_table.column_names
         ]
         result_table = result_table.drop_columns(drop_cols)
 
-        return Packet(
+        return Data(
             result_table,
             record_id=record_id,
             meta_info={self.RESULT_COMPUTED_FLAG: False},
@@ -139,26 +139,26 @@ class ResultCache:
 
     def store(
         self,
-        input_packet: PacketProtocol,
-        output_packet: PacketProtocol,
+        input_data: DataProtocol,
+        output_data: DataProtocol,
         variation_datagram: "DatagramProtocol",
         execution_datagram: "DatagramProtocol",
         skip_duplicates: bool = False,
     ) -> None:
-        """Store an output packet in the cache.
+        """Store an output data in the cache.
 
-        Stores the output packet data alongside function variation and
-        execution metadata (as Datagrams), input packet hash, and a timestamp.
+        Stores the output data data alongside function variation and
+        execution metadata (as Datagrams), input data hash, and a timestamp.
 
         Args:
-            input_packet: The input packet (used for its content hash).
-            output_packet: The computed output packet to store.
+            input_data: The input data (used for its content hash).
+            output_data: The computed output data to store.
             variation_datagram: Function variation metadata as a Datagram.
             execution_datagram: Execution environment metadata as a Datagram.
             skip_duplicates: If True, silently skip if a record with the
                 same ID already exists.
         """
-        data_table = output_packet.as_table(columns={"source": True, "context": True})
+        data_table = output_data.as_table(columns={"source": True, "context": True})
 
         # Add variation and execution columns with prefixes.
         # Use a running counter for insertion position since add_column shifts indices.
@@ -181,11 +181,11 @@ class ResultCache:
             )
             col_idx += 1
 
-        # Add input packet hash (position 0)
+        # Add input data hash (position 0)
         data_table = data_table.add_column(
             0,
-            constants.INPUT_PACKET_HASH_COL,
-            pa.array([input_packet.content_hash().to_string()], type=pa.large_string()),
+            constants.INPUT_DATA_HASH_COL,
+            pa.array([input_data.content_hash().to_string()], type=pa.large_string()),
         )
 
         # Append timestamp as ISO 8601 string.
@@ -201,7 +201,7 @@ class ResultCache:
 
         self._result_database.add_record(
             self._record_path,
-            output_packet.datagram_id,
+            output_data.datagram_id,
             data_table,
             skip_duplicates=skip_duplicates,
         )
@@ -222,7 +222,7 @@ class ResultCache:
             A PyArrow table of cached results, or ``None`` if empty.
         """
         record_id_column = (
-            constants.PACKET_RECORD_ID if include_system_columns else None
+            constants.DATA_RECORD_ID if include_system_columns else None
         )
         result_table = self._result_database.get_all_records(
             self._record_path, record_id_column=record_id_column

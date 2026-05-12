@@ -6,7 +6,7 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams import ArrowTableStream
 
 
@@ -28,7 +28,7 @@ def to_upper(name: str) -> str:
 
 
 def make_int_stream(n: int = 3) -> ArrowTableStream:
-    """ArrowTableStream with tag=id (int), packet=x (int).
+    """ArrowTableStream with tag=id (int), data=x (int).
 
     Uses explicit nullable=False schema to simulate data that has been
     processed through SourceStreamBuilder (which normalizes nullable flags).
@@ -50,7 +50,7 @@ def make_int_stream(n: int = 3) -> ArrowTableStream:
 
 
 def make_two_col_stream(n: int = 3) -> ArrowTableStream:
-    """ArrowTableStream with tag=id, packet={x, y} for add_pf.
+    """ArrowTableStream with tag=id, data={x, y} for add_pf.
 
     Uses explicit nullable=False schema to simulate data that has been
     processed through SourceStreamBuilder (which normalizes nullable flags).
@@ -79,20 +79,20 @@ def make_two_col_stream(n: int = 3) -> ArrowTableStream:
 
 
 @pytest.fixture
-def double_pf() -> PythonPacketFunction:
-    return PythonPacketFunction(double, output_keys="result")
+def double_pf() -> PythonDataFunction:
+    return PythonDataFunction(double, output_keys="result")
 
 
 @pytest.fixture
-def add_pf() -> PythonPacketFunction:
-    return PythonPacketFunction(add, output_keys="result")
+def add_pf() -> PythonDataFunction:
+    return PythonDataFunction(add, output_keys="result")
 
 
 @pytest.fixture
 def double_pod(double_pf) -> FunctionPod:
-    return FunctionPod(packet_function=double_pf)
+    return FunctionPod(data_function=double_pf)
 
 
 @pytest.fixture
 def add_pod(add_pf) -> FunctionPod:
-    return FunctionPod(packet_function=add_pf)
+    return FunctionPod(data_function=add_pf)

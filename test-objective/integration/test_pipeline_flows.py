@@ -12,15 +12,15 @@ import pytest
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import (
     Batch,
-    DropPacketColumns,
+    DropDataColumns,
     Join,
     MapTags,
     MergeJoin,
     PolarsFilter,
-    SelectPacketColumns,
+    SelectDataColumns,
     SemiJoin,
 )
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource, DictSource
 from orcapod.core.streams import ArrowTableStream
 
@@ -46,8 +46,8 @@ def _square_doubled(doubled: int) -> int:
     return doubled * doubled
 
 
-def _make_source(tag_data: dict, packet_data: dict, tag_columns: list[str]):
-    all_data = {**tag_data, **packet_data}
+def _make_source(tag_data: dict, data_data: dict, tag_columns: list[str]):
+    all_data = {**tag_data, **data_data}
     table = pa.table(all_data)
     return ArrowTableSource(table, tag_columns=tag_columns, infer_nullable=True)
 
@@ -74,20 +74,20 @@ class TestSourceToFilter:
 
 
 class TestSourceToFunctionPod:
-    """Source → FunctionPod → Stream with transformed packets."""
+    """Source → FunctionPod → Stream with transformed data."""
 
-    def test_function_pod_transforms_all_packets(self):
+    def test_function_pod_transforms_all_data(self):
         source = _make_source(
             {"id": pa.array([0, 1, 2], type=pa.int64())},
             {"x": pa.array([10, 20, 30], type=pa.int64())},
             ["id"],
         )
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         result = pod.process(source)
-        packets = list(result.iter_packets())
-        assert len(packets) == 3
-        results = [p["result"] for _, p in packets]
+        data = list(result.iter_data())
+        assert len(data) == 3
+        results = [p["result"] for _, p in data]
         assert sorted(results) == [20, 40, 60]
 
 
@@ -134,8 +134,8 @@ class TestChainedOperators:
         filt = PolarsFilter(constraints={"group": "a"})
         filtered = filt.process(source)
 
-        # Step 2: Select only relevant packet columns
-        select = SelectPacketColumns(columns=["value"])
+        # Step 2: Select only relevant data columns
+        select = SelectDataColumns(columns=["value"])
         selected = select.process(filtered)
 
         # Step 3: Rename tag
@@ -157,8 +157,8 @@ class TestFunctionPodThenOperator:
             {"x": pa.array([1, 2, 3, 4, 5], type=pa.int64())},
             ["id"],
         )
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         transformed = pod.process(source)
 
         # Filter to only results >= 6 (i.e., x >= 3 → result >= 6)
@@ -252,13 +252,13 @@ class TestDiamondPipeline:
             ["id"],
         )
         # Branch A: double x
-        pf_a = PythonPacketFunction(_double, output_keys="doubled")
-        pod_a = FunctionPod(packet_function=pf_a)
+        pf_a = PythonDataFunction(_double, output_keys="doubled")
+        pod_a = FunctionPod(data_function=pf_a)
         branch_a = pod_a.process(source)
 
         # Branch B: negate x
-        pf_b = PythonPacketFunction(_negate, output_keys="negated")
-        pod_b = FunctionPod(packet_function=pf_b)
+        pf_b = PythonDataFunction(_negate, output_keys="negated")
+        pod_b = FunctionPod(data_function=pf_b)
         branch_b = pod_b.process(source)
 
         # Join branches
@@ -285,17 +285,17 @@ class TestChainedFunctionPods:
             ["id"],
         )
         # First: double
-        pf1 = PythonPacketFunction(_double, output_keys="doubled")
-        pod1 = FunctionPod(packet_function=pf1)
+        pf1 = PythonDataFunction(_double, output_keys="doubled")
+        pod1 = FunctionPod(data_function=pf1)
         step1 = pod1.process(source)
 
         # Second: square the doubled value
-        pf2 = PythonPacketFunction(_square_doubled, output_keys="squared")
-        pod2 = FunctionPod(packet_function=pf2)
+        pf2 = PythonDataFunction(_square_doubled, output_keys="squared")
+        pod2 = FunctionPod(data_function=pf2)
         step2 = pod2.process(step1)
 
-        packets = list(step2.iter_packets())
-        assert len(packets) == 3
+        data = list(step2.iter_data())
+        assert len(data) == 3
         # x=2 → doubled=4 → squared=16
-        results = sorted([p["squared"] for _, p in packets])
+        results = sorted([p["squared"] for _, p in data])
         assert results == [16, 36, 64]

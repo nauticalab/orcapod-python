@@ -11,11 +11,11 @@ class DuplicateTagError(ValueError):
     pass
 
 
-class PacketFunctionUnavailableError(RuntimeError):
-    """Raised when a packet function proxy is invoked without a bound function.
+class DataFunctionUnavailableError(RuntimeError):
+    """Raised when a data function proxy is invoked without a bound function.
 
     This occurs when a pipeline is loaded in an environment where the
-    original packet function is not available. Only cached results can
+    original data function is not available. Only cached results can
     be accessed.
     """
 

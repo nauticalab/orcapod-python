@@ -9,7 +9,7 @@ import pytest
 from orcapod.channels import Channel
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import Join
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource, CSVSource
 from orcapod.core.sources.dict_source import DictSource
 from orcapod.databases.delta_lake_databases import DeltaTableDatabase
@@ -33,12 +33,12 @@ def simple_pipeline(tmp_path):
         tag_columns=["x"],
         source_id="test_source",
     )
-    pf = PythonPacketFunction(
+    pf = PythonDataFunction(
         function=transform_func,
         output_keys="result",
         function_name="transform_func",
     )
-    pod = FunctionPod(packet_function=pf)
+    pod = FunctionPod(data_function=pf)
     pipeline = Pipeline(name="test", pipeline_database=db)
     with pipeline:
         result = pod.process(source, label="transform")
@@ -68,12 +68,12 @@ def multi_source_pipeline(tmp_path):
     def add_values(value: int, score: int) -> dict[str, int]:
         return {"total": value + score}
 
-    pf = PythonPacketFunction(
+    pf = PythonDataFunction(
         function=add_values,
         output_keys=["total"],
         function_name="add_values",
     )
-    pod = FunctionPod(packet_function=pf)
+    pod = FunctionPod(data_function=pf)
     join = Join()
 
     pipeline = Pipeline(name="multi", pipeline_database=db)
@@ -178,9 +178,9 @@ class TestPipelineSave:
                 f"Node {node_hash} missing fields: "
                 f"{required_fields - set(descriptor.keys())}"
             )
-            # output_schema has tag and packet sub-dicts
+            # output_schema has tag and data sub-dicts
             assert "tag" in descriptor["output_schema"]
-            assert "packet" in descriptor["output_schema"]
+            assert "data" in descriptor["output_schema"]
 
     def test_save_source_node_fields(self, simple_pipeline):
         """Source node descriptors have source-specific fields."""
@@ -271,12 +271,12 @@ class TestPipelineSave:
             tag_columns=["x"],
             source_id="test_source",
         )
-        pf = PythonPacketFunction(
+        pf = PythonDataFunction(
             function=transform_func,
             output_keys=["result"],
             function_name="transform_func",
         )
-        pod = FunctionPod(packet_function=pf)
+        pod = FunctionPod(data_function=pf)
         pipeline = Pipeline(
             name="test",
             pipeline_database=pipeline_db,
@@ -372,12 +372,12 @@ class TestPipelineSaveLoadIntegration:
             tag_columns=["x"],
             source_id="test_source",
         )
-        pf = PythonPacketFunction(
+        pf = PythonDataFunction(
             function=transform_func,
             output_keys=["result"],
             function_name="transform_func",
         )
-        pod = FunctionPod(packet_function=pf)
+        pod = FunctionPod(data_function=pf)
         pipeline = Pipeline(name="test", pipeline_database=db)
         with pipeline:
             result = pod.process(source, label="transform")
@@ -403,12 +403,12 @@ class TestPipelineSaveLoadIntegration:
             tag_columns=["x"],
             source_id="test_source",
         )
-        pf = PythonPacketFunction(
+        pf = PythonDataFunction(
             function=transform_func,
             output_keys=["result"],
             function_name="transform_func",
         )
-        pod = FunctionPod(packet_function=pf)
+        pod = FunctionPod(data_function=pf)
         pipeline = Pipeline(name="test", pipeline_database=db)
         with pipeline:
             result = pod.process(source, label="transform")
@@ -474,12 +474,12 @@ def _make_csv_pipeline(tmp_path):
         tag_columns=["x"],
         source_id="csv_source",
     )
-    pf = PythonPacketFunction(
+    pf = PythonDataFunction(
         function=transform_func,
         output_keys=["result"],
         function_name="transform_func",
     )
-    pod = FunctionPod(packet_function=pf)
+    pod = FunctionPod(data_function=pf)
     pipeline = Pipeline(name="csv_test", pipeline_database=db)
     with pipeline:
         pod.process(source, label="transform")
@@ -552,12 +552,12 @@ class TestReadOnlyMode:
         source_node = [
             n for n in loaded._persistent_node_map.values() if n.node_type == "source"
         ][0]
-        tag_schema, packet_schema = source_node.output_schema()
+        tag_schema, data_schema = source_node.output_schema()
         assert isinstance(tag_schema, Schema)
-        assert isinstance(packet_schema, Schema)
-        # The original source has tag=["x"], packet=["y"]
+        assert isinstance(data_schema, Schema)
+        # The original source has tag=["x"], data=["y"]
         assert "x" in tag_schema
-        assert "y" in packet_schema
+        assert "y" in data_schema
 
     def test_read_only_source_returns_stored_keys(self, simple_pipeline):
         """Read-only source nodes return keys from the stored descriptor."""
@@ -571,12 +571,12 @@ class TestReadOnlyMode:
         source_node = [
             n for n in loaded._persistent_node_map.values() if n.node_type == "source"
         ][0]
-        tag_keys, packet_keys = source_node.keys()
+        tag_keys, data_keys = source_node.keys()
         assert "x" in tag_keys
-        assert "y" in packet_keys
+        assert "y" in data_keys
 
-    def test_read_only_source_iter_packets_raises(self, simple_pipeline):
-        """Read-only source nodes raise RuntimeError on iter_packets."""
+    def test_read_only_source_iter_data_raises(self, simple_pipeline):
+        """Read-only source nodes raise RuntimeError on iter_data."""
         pipeline, tmp_path = simple_pipeline
         pipeline.run()
         pipeline.flush()
@@ -588,7 +588,7 @@ class TestReadOnlyMode:
             n for n in loaded._persistent_node_map.values() if n.node_type == "source"
         ][0]
         with pytest.raises(RuntimeError, match="read-only"):
-            list(source_node.iter_packets())
+            list(source_node.iter_data())
 
     def test_read_only_source_as_table_raises(self, simple_pipeline):
         """Read-only source nodes raise RuntimeError on as_table."""
@@ -615,11 +615,11 @@ class TestReadOnlyMode:
         loaded = Pipeline.load(str(path), mode="read_only")
 
         fn = loaded.compiled_nodes["transform"]
-        tag_schema, packet_schema = fn.output_schema()
+        tag_schema, data_schema = fn.output_schema()
         assert isinstance(tag_schema, Schema)
-        assert isinstance(packet_schema, Schema)
+        assert isinstance(data_schema, Schema)
         assert "x" in tag_schema
-        assert "result" in packet_schema
+        assert "result" in data_schema
 
     def test_read_only_function_returns_stored_keys(self, simple_pipeline):
         """Read-only function nodes return keys from the stored descriptor."""
@@ -631,9 +631,9 @@ class TestReadOnlyMode:
         loaded = Pipeline.load(str(path), mode="read_only")
 
         fn = loaded.compiled_nodes["transform"]
-        tag_keys, packet_keys = fn.keys()
+        tag_keys, data_keys = fn.keys()
         assert "x" in tag_keys
-        assert "result" in packet_keys
+        assert "result" in data_keys
 
     def test_read_only_function_returns_stored_hashes(self, simple_pipeline):
         """Read-only function nodes return stored content_hash and pipeline_hash."""
@@ -682,9 +682,9 @@ class TestReadOnlyMode:
         assert op_node.load_status == LoadStatus.UNAVAILABLE
 
         # Stored metadata is still accessible
-        tag_schema, packet_schema = op_node.output_schema()
+        tag_schema, data_schema = op_node.output_schema()
         assert isinstance(tag_schema, Schema)
-        assert isinstance(packet_schema, Schema)
+        assert isinstance(data_schema, Schema)
         assert "a" in tag_schema
 
     def test_read_only_pipeline_is_compiled(self, simple_pipeline):
@@ -730,8 +730,8 @@ class TestFullMode:
         assert len(source_nodes) == 1
         assert source_nodes[0].load_status == LoadStatus.FULL
         # Should be able to iterate the live source
-        packets = list(source_nodes[0].iter_packets())
-        assert len(packets) == 2
+        data = list(source_nodes[0].iter_data())
+        assert len(data) == 2
 
     def test_full_mode_csv_source_as_table(self, tmp_path):
         """A fully loaded CSV source can produce an Arrow table."""
@@ -855,18 +855,18 @@ class TestFullMode:
         assert loaded.transform is not None
         assert loaded.transform.node_type == "function"
 
-    def test_full_mode_csv_function_iter_packets(self, tmp_path):
-        """A fully loaded function node with CSV source can iterate packets."""
+    def test_full_mode_csv_function_iter_data(self, tmp_path):
+        """A fully loaded function node with CSV source can iterate data."""
         _, _, json_path, _ = _make_csv_pipeline(tmp_path)
         loaded = Pipeline.load(json_path, mode="full")
 
         fn = loaded.compiled_nodes["transform"]
-        packets = list(fn.iter_packets())
+        data = list(fn.iter_data())
         # 2 rows in the CSV
-        assert len(packets) == 2
-        # Each packet should have a "result" key
-        for tag, packet in packets:
-            assert "result" in packet.keys()
+        assert len(data) == 2
+        # Each data should have a "result" key
+        for tag, data in data:
+            assert "result" in data.keys()
 
     def test_full_mode_csv_function_as_table(self, tmp_path):
         """A fully loaded function node with CSV source produces a table."""
@@ -907,12 +907,12 @@ class TestCachedSourceWithSourceProxyRoundTrip:
         )
         cached_source = CachedSource(source, cache_database=cache_db)
 
-        pf = PythonPacketFunction(
+        pf = PythonDataFunction(
             function=transform_func,
             output_keys="result",
             function_name="transform_func",
         )
-        pod = FunctionPod(packet_function=pf)
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="cached_test", pipeline_database=db)
         with pipeline:
@@ -961,12 +961,12 @@ class TestCachedSourceWithSourceProxyRoundTrip:
         )
         cached_source = CachedSource(source, cache_database=cache_db)
 
-        pf = PythonPacketFunction(
+        pf = PythonDataFunction(
             function=transform_func,
             output_keys="result",
             function_name="transform_func",
         )
-        pod = FunctionPod(packet_function=pf)
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="cached_e2e", pipeline_database=db)
         with pipeline:
@@ -977,7 +977,7 @@ class TestCachedSourceWithSourceProxyRoundTrip:
         cache_db.flush()
 
         # Capture original results
-        original_packets = [p.as_dict()["result"] for _, p in result.iter_packets()]
+        original_data = [p.as_dict()["result"] for _, p in result.iter_data()]
 
         path = tmp_path / "pipeline.json"
         pipeline.save(str(path))
@@ -986,8 +986,8 @@ class TestCachedSourceWithSourceProxyRoundTrip:
         fn_node = loaded.compiled_nodes["transform"]
         assert fn_node.load_status == LoadStatus.FULL
 
-        loaded_packets = [p.as_dict()["result"] for _, p in fn_node.iter_packets()]
-        assert sorted(loaded_packets) == sorted(original_packets)
+        loaded_data = [p.as_dict()["result"] for _, p in fn_node.iter_data()]
+        assert sorted(loaded_data) == sorted(original_data)
 
 
 class TestLoadEdgeCases:
@@ -1077,12 +1077,12 @@ class TestLoadEdgeCases:
         pipeline_db = DeltaTableDatabase(base_path=str(tmp_path / "pdb"))
         result_db = DeltaTableDatabase(base_path=str(tmp_path / "fdb"))
         source = DictSource(data=[{"x": 1, "y": 2}], tag_columns=["x"], source_id="s")
-        pf = PythonPacketFunction(
+        pf = PythonDataFunction(
             function=transform_func,
             output_keys=["result"],
             function_name="transform_func",
         )
-        pod = FunctionPod(packet_function=pf)
+        pod = FunctionPod(data_function=pf)
         pipeline = Pipeline(
             name="test",
             pipeline_database=pipeline_db,
@@ -1120,7 +1120,7 @@ def _corrupt_function_module_path(save_path):
             # Support both new key 'function_config' and old key 'function_pod'
             fn_cfg = node.get("function_config") or node.get("function_pod")
             if fn_cfg:
-                pf_config = fn_cfg["packet_function"]["config"]
+                pf_config = fn_cfg["data_function"]["config"]
                 pf_config["module_path"] = "nonexistent.module.that.does.not.exist"
     with open(save_path, "w") as f:
         json.dump(data, f)
@@ -1160,12 +1160,12 @@ class TestPipelineLoadWithUnavailableFunction:
             tag_columns=["name"],
             source_id="people",
         )
-        pf = PythonPacketFunction(
+        pf = PythonDataFunction(
             function=_double_age,
             output_keys=["doubled_age", "original_age"],
             function_name="_double_age",
         )
-        pod = FunctionPod(packet_function=pf)
+        pod = FunctionPod(data_function=pf)
         pipeline = Pipeline(name="proxy_test", pipeline_database=db)
         with pipeline:
             pod.process(source, label="transform")
@@ -1177,12 +1177,12 @@ class TestPipelineLoadWithUnavailableFunction:
         return save_path, db_path
 
     def _build_and_save_pipeline_with_operator(self, tmp_path):
-        """Build pipeline: CSV source -> function_pod -> SelectPacketColumns.
+        """Build pipeline: CSV source -> function_pod -> SelectDataColumns.
 
         Returns:
             Tuple of (save_path, db_path).
         """
-        from orcapod.core.operators import SelectPacketColumns
+        from orcapod.core.operators import SelectDataColumns
 
         csv_path = str(tmp_path / "data.csv")
         self._write_csv(
@@ -1197,13 +1197,13 @@ class TestPipelineLoadWithUnavailableFunction:
             tag_columns=["name"],
             source_id="people",
         )
-        pf = PythonPacketFunction(
+        pf = PythonDataFunction(
             function=_double_age,
             output_keys=["doubled_age", "original_age"],
             function_name="_double_age",
         )
-        pod = FunctionPod(packet_function=pf)
-        select_op = SelectPacketColumns(columns=["doubled_age"])
+        pod = FunctionPod(data_function=pf)
+        select_op = SelectDataColumns(columns=["doubled_age"])
 
         pipeline = Pipeline(name="proxy_op_test", pipeline_database=db)
         with pipeline:
@@ -1245,22 +1245,22 @@ class TestPipelineLoadWithUnavailableFunction:
         assert records is not None
         assert records.num_rows == 2
 
-    def test_load_with_unavailable_function_iter_packets_yields_cached(self, tmp_path):
-        """A READ_ONLY function node with proxy yields cached packets via iter_packets."""
+    def test_load_with_unavailable_function_iter_data_yields_cached(self, tmp_path):
+        """A READ_ONLY function node with proxy yields cached data via iter_data."""
         save_path, _ = self._build_and_save_pipeline(tmp_path)
         _corrupt_function_module_path(save_path)
 
         loaded = Pipeline.load(save_path, mode="full")
         fn_node = loaded.compiled_nodes["transform"]
 
-        packets = list(fn_node.iter_packets())
-        assert len(packets) == 2
+        data = list(fn_node.iter_data())
+        assert len(data) == 2
 
         # Verify actual data values
-        doubled_ages = sorted(p.as_dict()["doubled_age"] for _, p in packets)
+        doubled_ages = sorted(p.as_dict()["doubled_age"] for _, p in data)
         assert doubled_ages == [50, 60]
 
-        original_ages = sorted(p.as_dict()["original_age"] for _, p in packets)
+        original_ages = sorted(p.as_dict()["original_age"] for _, p in data)
         assert original_ages == [25, 30]
 
     # -- Task 10 test --
@@ -1286,7 +1286,7 @@ class TestPipelineLoadWithUnavailableFunction:
         table = op_node.as_table()
         assert table.num_rows == 2
         assert "doubled_age" in table.column_names
-        # original_age should have been dropped by SelectPacketColumns
+        # original_age should have been dropped by SelectDataColumns
         assert "original_age" not in table.column_names
 
         doubled_ages = sorted(table.column("doubled_age").to_pylist())
@@ -1316,12 +1316,12 @@ class TestCacheOnlyMode:
             tag_columns=["x"],
             source_id="test_source",
         )
-        pf = PythonPacketFunction(
+        pf = PythonDataFunction(
             function=function,
             output_keys=["result"],
             function_name=function.__name__,
         )
-        pod = FunctionPod(packet_function=pf)
+        pod = FunctionPod(data_function=pf)
         pipeline = Pipeline(name="test", pipeline_database=db)
         with pipeline:
             pod.process(source, label="transform")
@@ -1332,7 +1332,7 @@ class TestCacheOnlyMode:
         fn_node = pipeline.compiled_nodes["transform"]
         original = sorted(
             [{"x": t.as_dict()["x"], "result": p.as_dict()["result"]}
-             for t, p in fn_node.iter_packets()],
+             for t, p in fn_node.iter_data()],
             key=lambda r: r["x"],
         )
 
@@ -1350,20 +1350,20 @@ class TestCacheOnlyMode:
         fn = loaded.compiled_nodes["transform"]
         assert fn.load_status == LoadStatus.CACHE_ONLY
 
-    def test_cache_only_mode_iter_packets_returns_all_cached_data(self, tmp_path):
-        """iter_packets() on a CACHE_ONLY node returns all previously cached results."""
+    def test_cache_only_mode_iter_data_returns_all_cached_data(self, tmp_path):
+        """iter_data() on a CACHE_ONLY node returns all previously cached results."""
         json_path, original = self._build_run_save(tmp_path, transform_func)
         loaded = Pipeline.load(json_path, mode="full")
 
         fn = loaded.compiled_nodes["transform"]
         assert fn.load_status == LoadStatus.CACHE_ONLY
 
-        packets = list(fn.iter_packets())
-        assert len(packets) == len(original)
+        data = list(fn.iter_data())
+        assert len(data) == len(original)
 
         recovered = sorted(
             [{"x": t.as_dict()["x"], "result": p.as_dict()["result"]}
-             for t, p in packets],
+             for t, p in data],
             key=lambda r: r["x"],
         )
         assert recovered == original
@@ -1372,10 +1372,10 @@ class TestCacheOnlyMode:
         self, tmp_path
     ):
         """Transient (locally-scoped) function + UNAVAILABLE source → CACHE_ONLY,
-        and iter_packets() still returns all cached results via the DB.
+        and iter_data() still returns all cached results via the DB.
         """
         # Define the function locally so it cannot be resolved by module path
-        # on reload (simulating a transient function → PacketFunctionProxy).
+        # on reload (simulating a transient function → DataFunctionProxy).
         def local_double(y: int) -> int:
             return y * 2
 
@@ -1385,12 +1385,12 @@ class TestCacheOnlyMode:
         fn = loaded.compiled_nodes["transform"]
         assert fn.load_status == LoadStatus.CACHE_ONLY
 
-        packets = list(fn.iter_packets())
-        assert len(packets) == len(original)
+        data = list(fn.iter_data())
+        assert len(data) == len(original)
 
         recovered = sorted(
             [{"x": t.as_dict()["x"], "result": p.as_dict()["result"]}
-             for t, p in packets],
+             for t, p in data],
             key=lambda r: r["x"],
         )
         assert recovered == original
@@ -1420,12 +1420,12 @@ class TestCacheOnlyMode:
             tag_columns=["x"],
             source_id="csv_source",
         )
-        pf = PythonPacketFunction(
+        pf = PythonDataFunction(
             function=transform_func,
             output_keys=["result"],
             function_name="transform_func",
         )
-        pod = FunctionPod(packet_function=pf)
+        pod = FunctionPod(data_function=pf)
         pipeline = Pipeline(name="test", pipeline_database=db)
         with pipeline:
             pod.process(source, label="transform")
@@ -1516,12 +1516,12 @@ class TestPLT1158UncachedOperatorStatus:
             source_id="data2",
         )
 
-        pf = PythonPacketFunction(
+        pf = PythonDataFunction(
             function=_adder,
             output_keys=["result"],
             function_name="_adder",
         )
-        pod = FunctionPod(packet_function=pf)
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="my_sample_pipeline", pipeline_database=db)
         with pipeline:
@@ -1536,7 +1536,7 @@ class TestPLT1158UncachedOperatorStatus:
         # Collect expected results for later comparison
         adder_node = pipeline.compiled_nodes["adder"]
         expected = sorted(
-            [p.as_dict()["result"] for _, p in adder_node.iter_packets()]
+            [p.as_dict()["result"] for _, p in adder_node.iter_data()]
         )
         return json_path, expected
 
@@ -1610,7 +1610,7 @@ class TestPLT1158UncachedOperatorStatus:
 
         # Must not raise; must return same values as the original run
         recovered = sorted(
-            [p.as_dict()["result"] for _, p in fn.iter_packets()]
+            [p.as_dict()["result"] for _, p in fn.iter_data()]
         )
         assert recovered == expected
 
@@ -1640,12 +1640,12 @@ def test_function_node_pipeline_path_two_level(tmp_path):
     def add_one(y: int) -> int:
         return y + 1
 
-    pf = PythonPacketFunction(
+    pf = PythonDataFunction(
         function=add_one,
         output_keys="result",
         function_name="add_one",
     )
-    pod = FunctionPod(packet_function=pf)
+    pod = FunctionPod(data_function=pf)
     source = DictSource(
         data=[{"x": 1, "y": 2}, {"x": 3, "y": 4}],
         tag_columns=["x"],
@@ -1718,12 +1718,12 @@ def _make_simple_pipeline_for_level_tests(tmp_path):
     """Build a simple pipeline (DictSource -> FunctionPod) for level tests."""
     db = InMemoryArrowDatabase()
 
-    pf = PythonPacketFunction(
+    pf = PythonDataFunction(
         function=transform_func,
         output_keys="result",
         function_name="transform_func",
     )
-    pod = FunctionPod(packet_function=pf)
+    pod = FunctionPod(data_function=pf)
     source = DictSource(data=[{"x": 1, "y": 2}], tag_columns=["x"], source_id="s")
     pipeline = Pipeline(name="p", pipeline_database=db)
     with pipeline:
@@ -1850,20 +1850,20 @@ def test_load_operator_node_identity_path_has_schema_instance_components(tmp_pat
     The pipeline name prefix lives in the database path, not in node_identity_path.
     With pipeline_hash scope (default), the node_identity_path ends with schema:... only.
     """
-    from orcapod.core.operators import SelectPacketColumns
+    from orcapod.core.operators import SelectDataColumns
 
     csv_path = str(tmp_path / "data.csv")
     _write_csv(csv_path, [{"name": "alice", "y": 2}, {"name": "bob", "y": 4}])
 
     db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
     source = CSVSource(file_path=csv_path, tag_columns=["name"], source_id="people")
-    pf = PythonPacketFunction(
+    pf = PythonDataFunction(
         function=transform_func,
         output_keys="result",
         function_name="transform_func",
     )
-    pod = FunctionPod(packet_function=pf)
-    select_op = SelectPacketColumns(columns=["result"])
+    pod = FunctionPod(data_function=pf)
+    select_op = SelectDataColumns(columns=["result"])
 
     pipeline = Pipeline(name="prefixtest", pipeline_database=db)
     with pipeline:
@@ -1894,12 +1894,12 @@ def test_load_raises_on_missing_result_database_registry_key(tmp_path):
     pipeline_db = DeltaTableDatabase(base_path=str(tmp_path / "pdb"))
     result_db = DeltaTableDatabase(base_path=str(tmp_path / "fdb"))
     source = DictSource(data=[{"x": 1, "y": 2}], tag_columns=["x"], source_id="s")
-    pf = PythonPacketFunction(
+    pf = PythonDataFunction(
         function=transform_func,
         output_keys=["result"],
         function_name="transform_func",
     )
-    pod = FunctionPod(packet_function=pf)
+    pod = FunctionPod(data_function=pf)
     pipeline = Pipeline(
         name="test",
         pipeline_database=pipeline_db,
@@ -1935,12 +1935,12 @@ def test_load_function_node_identity_path_has_schema_instance_components(tmp_pat
 
     db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
     source = CSVSource(file_path=csv_path, tag_columns=["name"], source_id="people")
-    pf = PythonPacketFunction(
+    pf = PythonDataFunction(
         function=transform_func,
         output_keys="result",
         function_name="transform_func",
     )
-    pod = FunctionPod(packet_function=pf)
+    pod = FunctionPod(data_function=pf)
 
     pipeline = Pipeline(name="prefixtest", pipeline_database=db)
     with pipeline:
@@ -2046,10 +2046,10 @@ def test_load_function_node_with_old_function_pod_key_is_not_reconstructed(tmp_p
     _write_csv(csv_path, [{"name": "alice", "y": 2}, {"name": "bob", "y": 4}])
     db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
     source = CSVSource(file_path=csv_path, tag_columns=["name"], source_id="people")
-    pf = PythonPacketFunction(
+    pf = PythonDataFunction(
         function=transform_func, output_keys="result", function_name="transform_func"
     )
-    pod = FunctionPod(packet_function=pf)
+    pod = FunctionPod(data_function=pf)
     pipeline = Pipeline(name="fntest", pipeline_database=db)
     with pipeline:
         pod.process(source, label="fn")
@@ -2081,17 +2081,17 @@ def test_load_operator_node_with_old_operator_key_is_not_reconstructed(tmp_path)
     A descriptor with only the old 'operator' key (not 'operator_config') should
     result in an operator node that cannot be reconstructed, falling to read-only.
     """
-    from orcapod.core.operators import SelectPacketColumns
+    from orcapod.core.operators import SelectDataColumns
 
     csv_path = str(tmp_path / "data.csv")
     _write_csv(csv_path, [{"name": "alice", "y": 2}, {"name": "bob", "y": 4}])
     db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
     source = CSVSource(file_path=csv_path, tag_columns=["name"], source_id="people")
-    pf = PythonPacketFunction(
+    pf = PythonDataFunction(
         function=transform_func, output_keys="result", function_name="transform_func"
     )
-    pod = FunctionPod(packet_function=pf)
-    select_op = SelectPacketColumns(columns=["result"])
+    pod = FunctionPod(data_function=pf)
+    select_op = SelectDataColumns(columns=["result"])
     pipeline = Pipeline(name="q", pipeline_database=db)
     with pipeline:
         fn_result = pod.process(source, label="fn")
@@ -2163,12 +2163,12 @@ class TestSaveLoadRunRoundtrip:
 
         db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
         source = CSVSource(file_path=csv_path, tag_columns=["x"], source_id="src")
-        pf = PythonPacketFunction(
+        pf = PythonDataFunction(
             function=transform_func,
             output_keys=["result"],
             function_name="transform_func",
         )
-        pod = FunctionPod(packet_function=pf)
+        pod = FunctionPod(data_function=pf)
         pipeline = Pipeline(name="roundtrip", pipeline_database=db)
         with pipeline:
             result_stream = pod.process(source, label="transform")
@@ -2177,7 +2177,7 @@ class TestSaveLoadRunRoundtrip:
         pipeline.run()
         db.flush()
         original_results = sorted(
-            p.as_dict()["result"] for _, p in result_stream.iter_packets()
+            p.as_dict()["result"] for _, p in result_stream.iter_data()
         )
         assert len(original_results) == 2
 
@@ -2190,7 +2190,7 @@ class TestSaveLoadRunRoundtrip:
         fn_node = loaded.compiled_nodes["transform"]
         assert fn_node.load_status == LoadStatus.FULL
         loaded_results = sorted(
-            p.as_dict()["result"] for _, p in fn_node.iter_packets()
+            p.as_dict()["result"] for _, p in fn_node.iter_data()
         )
         assert loaded_results == original_results
 
@@ -2207,12 +2207,12 @@ class TestSaveLoadRunRoundtrip:
 
         original_db = DeltaTableDatabase(base_path=str(tmp_path / "original_db"))
         source = CSVSource(file_path=csv_path, tag_columns=["x"], source_id="src2")
-        pf = PythonPacketFunction(
+        pf = PythonDataFunction(
             function=transform_func,
             output_keys=["result"],
             function_name="transform_func",
         )
-        pod = FunctionPod(packet_function=pf)
+        pod = FunctionPod(data_function=pf)
         pipeline = Pipeline(name="def_roundtrip", pipeline_database=original_db)
         with pipeline:
             result_stream = pod.process(source, label="transform")
@@ -2221,7 +2221,7 @@ class TestSaveLoadRunRoundtrip:
         pipeline.run()
         original_db.flush()
         original_results = sorted(
-            p.as_dict()["result"] for _, p in result_stream.iter_packets()
+            p.as_dict()["result"] for _, p in result_stream.iter_data()
         )
         assert len(original_results) == 2
 
@@ -2240,7 +2240,7 @@ class TestSaveLoadRunRoundtrip:
         # Run the loaded pipeline and compare results
         loaded.run()
         loaded_results = sorted(
-            p.as_dict()["result"] for _, p in fn_node.iter_packets()
+            p.as_dict()["result"] for _, p in fn_node.iter_data()
         )
         assert loaded_results == original_results
 
@@ -2249,24 +2249,24 @@ class TestSaveLoadRunRoundtrip:
 
         When the Python function cannot be imported in the new context (e.g. it
         was defined in a module that no longer exists, or was a lambda), the
-        pipeline should still load successfully using ``PacketFunctionProxy``
+        pipeline should still load successfully using ``DataFunctionProxy``
         to stand in for the missing function.  The function node should reach
         ``READ_ONLY`` status (source reconstructable, function proxied) and be
         able to serve previously-cached results from the supplied database.
         """
-        from orcapod.core.packet_function_proxy import PacketFunctionProxy
+        from orcapod.core.data_function_proxy import DataFunctionProxy
 
         csv_path = str(tmp_path / "data.csv")
         _write_csv(csv_path, [{"x": "1", "y": "5"}, {"x": "3", "y": "15"}])
 
         db = DeltaTableDatabase(base_path=str(tmp_path / "db"))
         source = CSVSource(file_path=csv_path, tag_columns=["x"], source_id="src3")
-        pf = PythonPacketFunction(
+        pf = PythonDataFunction(
             function=transform_func,
             output_keys=["result"],
             function_name="transform_func",
         )
-        pod = FunctionPod(packet_function=pf)
+        pod = FunctionPod(data_function=pf)
         pipeline = Pipeline(name="proxy_def", pipeline_database=db)
         with pipeline:
             result_stream = pod.process(source, label="transform")
@@ -2275,7 +2275,7 @@ class TestSaveLoadRunRoundtrip:
         pipeline.run()
         db.flush()
         original_results = sorted(
-            p.as_dict()["result"] for _, p in result_stream.iter_packets()
+            p.as_dict()["result"] for _, p in result_stream.iter_data()
         )
         assert len(original_results) == 2
 
@@ -2287,14 +2287,14 @@ class TestSaveLoadRunRoundtrip:
         _corrupt_function_module_path(str(path))
 
         # Load with the original DB (which has the cached results) supplied by caller.
-        # The unloadable function should be replaced by PacketFunctionProxy.
+        # The unloadable function should be replaced by DataFunctionProxy.
         loaded = Pipeline.load(str(path), pipeline_database=db)
 
         fn_node = loaded.compiled_nodes["transform"]
 
-        # Source is CSVSource (reconstructable → FULL); function is PacketFunctionProxy
+        # Source is CSVSource (reconstructable → FULL); function is DataFunctionProxy
         # → READ_ONLY (not FULL because live computation is unavailable).
         assert fn_node.load_status == LoadStatus.READ_ONLY
 
-        # The packet function should be a proxy standing in for the missing function
-        assert isinstance(fn_node._packet_function, PacketFunctionProxy)
+        # The data function should be a proxy standing in for the missing function
+        assert isinstance(fn_node._data_function, DataFunctionProxy)

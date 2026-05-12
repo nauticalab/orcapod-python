@@ -10,23 +10,23 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.datagrams.datagram import Datagram
-from orcapod.core.datagrams.tag_packet import Packet, Tag
+from orcapod.core.datagrams.tag_data import Data, Tag
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
 from orcapod.core.operators import (
     Batch,
-    DropPacketColumns,
+    DropDataColumns,
     DropTagColumns,
     Join,
-    MapPackets,
+    MapData,
     MapTags,
     MergeJoin,
     PolarsFilter,
-    SelectPacketColumns,
+    SelectDataColumns,
     SelectTagColumns,
     SemiJoin,
 )
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource, DictSource, ListSource
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase, NoOpArrowDatabase
@@ -34,7 +34,7 @@ from orcapod.types import ColumnConfig, ContentHash, Schema
 
 
 # ---------------------------------------------------------------------------
-# Helper functions for packet functions
+# Helper functions for data functions
 # ---------------------------------------------------------------------------
 
 
@@ -79,7 +79,7 @@ def return_none(x: int) -> int | None:
 
 
 def make_simple_table(n: int = 3) -> pa.Table:
-    """Table with tag=id (int), packet=value (int)."""
+    """Table with tag=id (int), data=value (int)."""
     return pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
@@ -88,8 +88,8 @@ def make_simple_table(n: int = 3) -> pa.Table:
     )
 
 
-def make_two_packet_col_table(n: int = 3) -> pa.Table:
-    """Table with tag=id, packet={x, y}."""
+def make_two_data_col_table(n: int = 3) -> pa.Table:
+    """Table with tag=id, data={x, y}."""
     return pa.table(
         {
             "id": pa.array(list(range(n)), type=pa.int64()),
@@ -100,7 +100,7 @@ def make_two_packet_col_table(n: int = 3) -> pa.Table:
 
 
 def make_string_table(n: int = 3) -> pa.Table:
-    """Table with tag=id, packet=name (str)."""
+    """Table with tag=id, data=name (str)."""
     names = ["alice", "bob", "charlie"][:n]
     return pa.table(
         {
@@ -111,7 +111,7 @@ def make_string_table(n: int = 3) -> pa.Table:
 
 
 def make_joinable_tables() -> tuple[pa.Table, pa.Table]:
-    """Two tables with shared tag=id, non-overlapping packet columns."""
+    """Two tables with shared tag=id, non-overlapping data columns."""
     left = pa.table(
         {
             "id": pa.array([1, 2, 3], type=pa.int64()),
@@ -127,8 +127,8 @@ def make_joinable_tables() -> tuple[pa.Table, pa.Table]:
     return left, right
 
 
-def make_overlapping_packet_tables() -> tuple[pa.Table, pa.Table]:
-    """Two tables with shared tag=id AND overlapping packet column 'value'."""
+def make_overlapping_data_tables() -> tuple[pa.Table, pa.Table]:
+    """Two tables with shared tag=id AND overlapping data column 'value'."""
     left = pa.table(
         {
             "id": pa.array([1, 2, 3], type=pa.int64()),
@@ -156,7 +156,7 @@ def simple_table() -> pa.Table:
 
 @pytest.fixture
 def two_col_table() -> pa.Table:
-    return make_two_packet_col_table()
+    return make_two_data_col_table()
 
 
 @pytest.fixture
@@ -171,25 +171,25 @@ def string_table() -> pa.Table:
 
 @pytest.fixture
 def simple_stream() -> ArrowTableStream:
-    """Stream with tag=id, packet=value."""
+    """Stream with tag=id, data=value."""
     return ArrowTableStream(make_simple_table(), tag_columns=["id"])
 
 
 @pytest.fixture
 def two_col_stream() -> ArrowTableStream:
-    """Stream with tag=id, packet={x, y}."""
-    return ArrowTableStream(make_two_packet_col_table(), tag_columns=["id"])
+    """Stream with tag=id, data={x, y}."""
+    return ArrowTableStream(make_two_data_col_table(), tag_columns=["id"])
 
 
 @pytest.fixture
 def string_stream() -> ArrowTableStream:
-    """Stream with tag=id, packet=name."""
+    """Stream with tag=id, data=name."""
     return ArrowTableStream(make_string_table(), tag_columns=["id"])
 
 
 @pytest.fixture
 def joinable_streams() -> tuple[ArrowTableStream, ArrowTableStream]:
-    """Two streams with shared tag=id, non-overlapping packet columns."""
+    """Two streams with shared tag=id, non-overlapping data columns."""
     left, right = make_joinable_tables()
     return (
         ArrowTableStream(left, tag_columns=["id"]),
@@ -217,23 +217,23 @@ def dict_source() -> DictSource:
 
 
 # ---------------------------------------------------------------------------
-# Fixtures: Packet functions
+# Fixtures: Data functions
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-def double_pf() -> PythonPacketFunction:
-    return PythonPacketFunction(double_value, output_keys="result")
+def double_pf() -> PythonDataFunction:
+    return PythonDataFunction(double_value, output_keys="result")
 
 
 @pytest.fixture
-def add_pf() -> PythonPacketFunction:
-    return PythonPacketFunction(add_values, output_keys="result")
+def add_pf() -> PythonDataFunction:
+    return PythonDataFunction(add_values, output_keys="result")
 
 
 @pytest.fixture
-def uppercase_pf() -> PythonPacketFunction:
-    return PythonPacketFunction(to_uppercase, output_keys="result")
+def uppercase_pf() -> PythonDataFunction:
+    return PythonDataFunction(to_uppercase, output_keys="result")
 
 
 # ---------------------------------------------------------------------------
@@ -243,12 +243,12 @@ def uppercase_pf() -> PythonPacketFunction:
 
 @pytest.fixture
 def double_pod(double_pf) -> FunctionPod:
-    return FunctionPod(packet_function=double_pf)
+    return FunctionPod(data_function=double_pf)
 
 
 @pytest.fixture
 def add_pod(add_pf) -> FunctionPod:
-    return FunctionPod(packet_function=add_pf)
+    return FunctionPod(data_function=add_pf)
 
 
 # ---------------------------------------------------------------------------

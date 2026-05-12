@@ -99,17 +99,17 @@ class TestFunctionNodeGetAllRecordsNullability:
 
 
 # ---------------------------------------------------------------------------
-# FunctionNode.iter_packets nullability
+# FunctionNode.iter_data nullability
 # ---------------------------------------------------------------------------
 
 
-class TestFunctionNodeIterPacketsNullability:
-    """FunctionNode.iter_packets must yield packets whose underlying Arrow schema
+class TestFunctionNodeIterDatasNullability:
+    """FunctionNode.iter_data must yield data whose underlying Arrow schema
     preserves non-nullable column constraints. Uses _load_cached_entries to
     simulate the CACHE_ONLY path used after save/load."""
 
-    def test_iter_packets_from_database_preserves_non_nullable_output(self):
-        """Packets loaded from DB via iter_packets carry non-nullable output schema."""
+    def test_iter_data_from_database_preserves_non_nullable_output(self):
+        """Datas loaded from DB via iter_data carry non-nullable output schema."""
         database = InMemoryArrowDatabase()
         source = op.sources.DictSource(
             [{"id": 1, "x": 7}],
@@ -120,7 +120,7 @@ class TestFunctionNodeIterPacketsNullability:
         def add_one(x: int) -> int:
             return x + 1
 
-        pipeline = op.Pipeline("test_iter_packets_nullable", database)
+        pipeline = op.Pipeline("test_iter_data_nullable", database)
         with pipeline:
             add_one.pod(source)
 
@@ -132,17 +132,17 @@ class TestFunctionNodeIterPacketsNullability:
         # Force a DB-backed iteration by going through _load_cached_entries
         # (simulates the CACHE_ONLY path used after save/load)
         loaded = fn_node._load_cached_entries()
-        packets_seen = list(loaded.values())
-        assert len(packets_seen) == 1, "Expected one packet from the database"
+        data_seen = list(loaded.values())
+        assert len(data_seen) == 1, "Expected one data from the database"
 
-        _tag, packet = packets_seen[0]
-        packet_schema = packet.arrow_schema()
+        _tag, data = data_seen[0]
+        data_schema = data.arrow_schema()
 
-        result_field = packet_schema.field("result")
+        result_field = data_schema.field("result")
         assert result_field.nullable is False, (
-            f"Packet 'result' field should be non-nullable (int return type), "
+            f"Data 'result' field should be non-nullable (int return type), "
             f"but got nullable={result_field.nullable}. "
-            "Arrow→Polars→Arrow round-trip in iter_packets dropped nullability."
+            "Arrow→Polars→Arrow round-trip in iter_data dropped nullability."
         )
 
 
@@ -177,8 +177,8 @@ class TestJoinOperatorNullability:
             "Arrow→Polars→Arrow round-trip in Join.op_forward dropped nullability."
         )
 
-    def test_join_preserves_non_nullable_packet_columns(self):
-        """Packet columns that are non-nullable remain so after stream join."""
+    def test_join_preserves_non_nullable_data_columns(self):
+        """Data columns that are non-nullable remain so after stream join."""
         source1 = op.sources.DictSource(
             [{"id": 1, "x": 10}, {"id": 2, "x": 20}],
             tag_columns=["id"],
@@ -191,21 +191,21 @@ class TestJoinOperatorNullability:
         joined_stream = source1.join(source2)
         table = joined_stream.as_table()
 
-        # "x" and "y" are packet columns with integer values → non-nullable
+        # "x" and "y" are data columns with integer values → non-nullable
         x_field = table.schema.field("x")
         y_field = table.schema.field("y")
 
         assert x_field.nullable is False, (
-            f"Expected 'x' packet column to be non-nullable after Join, "
+            f"Expected 'x' data column to be non-nullable after Join, "
             f"but got nullable={x_field.nullable}."
         )
         assert y_field.nullable is False, (
-            f"Expected 'y' packet column to be non-nullable after Join, "
+            f"Expected 'y' data column to be non-nullable after Join, "
             f"but got nullable={y_field.nullable}."
         )
 
     def test_join_preserves_nullable_optional_column_with_no_nulls(self):
-        """Optional[int] packet column (nullable=True) must remain nullable=True after
+        """Optional[int] data column (nullable=True) must remain nullable=True after
         Join, even when the data contains no actual null values.
 
         infer_schema_nullable incorrectly marks it nullable=False because it sees no
@@ -384,6 +384,6 @@ class TestJoinTagColumnNullability:
             f"got nullable={group_field.nullable}."
         )
         assert b_field.nullable is True, (
-            f"'b' (Optional packet column) must remain nullable=True after 3-way join, "
+            f"'b' (Optional data column) must remain nullable=True after 3-way join, "
             f"got nullable={b_field.nullable}."
         )

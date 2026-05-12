@@ -17,7 +17,7 @@ from orcapod.utils.schema_utils import (
     infer_schema_from_dict,
     intersection_schemas,
     union_schemas,
-    verify_packet_schema,
+    verify_data_schema,
 )
 
 
@@ -104,27 +104,27 @@ class TestExtractFunctionSchemas:
 
 
 # ===========================================================================
-# verify_packet_schema
+# verify_data_schema
 # ===========================================================================
 
 
-class TestVerifyPacketSchema:
+class TestVerifyDataSchema:
     """Returns True when dict matches schema types."""
 
-    def test_matching_packet(self) -> None:
+    def test_matching_data(self) -> None:
         schema = Schema({"name": str, "age": int})
-        packet = {"name": "Alice", "age": 30}
-        assert verify_packet_schema(packet, schema) is True
+        data = {"name": "Alice", "age": 30}
+        assert verify_data_schema(data, schema) is True
 
     def test_mismatched_type(self) -> None:
         schema = Schema({"name": str, "age": int})
-        packet = {"name": "Alice", "age": "thirty"}
-        assert verify_packet_schema(packet, schema) is False
+        data = {"name": "Alice", "age": "thirty"}
+        assert verify_data_schema(data, schema) is False
 
-    def test_extra_keys_in_packet(self) -> None:
+    def test_extra_keys_in_data(self) -> None:
         schema = Schema({"name": str})
-        packet = {"name": "Alice", "extra": 42}
-        assert verify_packet_schema(packet, schema) is False
+        data = {"name": "Alice", "extra": 42}
+        assert verify_data_schema(data, schema) is False
 
 
 # ===========================================================================

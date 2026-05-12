@@ -25,7 +25,7 @@ from __future__ import annotations
 from typing import Any
 
 from orcapod.pipeline.observer import NoOpLogger
-from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
+from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
 from orcapod.types import SchemaLike
 
 _NOOP_LOGGER = NoOpLogger()
@@ -68,33 +68,33 @@ class CompositeObserver:
         for o in self._observers:
             o.on_node_end(node_label, node_hash)
 
-    def on_packet_start(
-        self, node_label: str, tag: TagProtocol, packet: PacketProtocol
+    def on_data_start(
+        self, node_label: str, tag: TagProtocol, data: DataProtocol
     ) -> None:
         for o in self._observers:
-            o.on_packet_start(node_label, tag, packet)
+            o.on_data_start(node_label, tag, data)
 
-    def on_packet_end(
+    def on_data_end(
         self,
         node_label: str,
         tag: TagProtocol,
-        input_packet: PacketProtocol,
-        output_packet: PacketProtocol | None,
+        input_data: DataProtocol,
+        output_data: DataProtocol | None,
         cached: bool,
     ) -> None:
         for o in self._observers:
-            o.on_packet_end(node_label, tag, input_packet, output_packet, cached)
+            o.on_data_end(node_label, tag, input_data, output_data, cached)
 
-    def on_packet_crash(
-        self, node_label: str, tag: TagProtocol, packet: PacketProtocol, error: Exception
+    def on_data_crash(
+        self, node_label: str, tag: TagProtocol, data: DataProtocol, error: Exception
     ) -> None:
         for o in self._observers:
-            o.on_packet_crash(node_label, tag, packet, error)
+            o.on_data_crash(node_label, tag, data, error)
 
-    def create_packet_logger(
+    def create_data_logger(
         self,
         tag: TagProtocol,
-        packet: PacketProtocol,
+        data: DataProtocol,
     ) -> Any:
         """Return the first non-no-op logger from children.
 
@@ -103,7 +103,7 @@ class CompositeObserver:
         Falls back to a no-op logger if all children return no-ops.
         """
         for o in self._observers:
-            pkt_logger = o.create_packet_logger(tag, packet)
+            pkt_logger = o.create_data_logger(tag, data)
             if not isinstance(pkt_logger, NoOpLogger):
                 return pkt_logger
         return _NOOP_LOGGER

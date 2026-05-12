@@ -69,7 +69,7 @@ try:
         function_content_hash,
         get_function_signature,
         hash_function,
-        hash_packet,
+        hash_data,
         hash_pathset,
         hash_to_hex,
         hash_to_int,
@@ -80,7 +80,7 @@ except ImportError:
     function_content_hash = None  # type: ignore[assignment]
     get_function_signature = None  # type: ignore[assignment]
     hash_function = None  # type: ignore[assignment]
-    hash_packet = None  # type: ignore[assignment]
+    hash_data = None  # type: ignore[assignment]
     hash_pathset = None  # type: ignore[assignment]
     hash_to_hex = None  # type: ignore[assignment]
     hash_to_int = None  # type: ignore[assignment]
@@ -148,5 +148,5 @@ __all__ = [
     "get_function_signature",
     "function_content_hash",
     "hash_pathset",
-    "hash_packet",
+    "hash_data",
 ]

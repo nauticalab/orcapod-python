@@ -1,7 +1,7 @@
 """Concrete logging observer for orcapod pipelines.
 
 Provides ``LoggingObserver``, a drop-in observer that captures stdout,
-stderr, Python logging, and tracebacks from every packet execution and writes
+stderr, Python logging, and tracebacks from every data execution and writes
 structured log rows to any ``ArrowDatabaseProtocol`` implementation
 (in-memory, Delta Lake, etc.).
 
@@ -28,10 +28,10 @@ Log schema (fixed columns):
     - ``_log_stderr_log`` (large_utf8): Captured standard error.
     - ``_log_python_logs`` (large_utf8): Python logging output captured during execution.
     - ``_log_traceback`` (large_utf8): Full traceback on failure; ``None`` on success.
-    - ``_log_success`` (bool): ``True`` if the packet function returned normally.
+    - ``_log_success`` (bool): ``True`` if the data function returned normally.
     - ``_log_timestamp`` (large_utf8): ISO-8601 UTC timestamp when ``record()`` was called.
 
-    In addition, each tag key from the packet's tag becomes a separate
+    In addition, each tag key from the data's tag becomes a separate
     ``large_utf8`` column (queryable, not JSON-encoded).  Tag columns use
     bare names (no prefix), so they are always distinguishable from fixed
     columns.
@@ -52,7 +52,7 @@ from typing import TYPE_CHECKING, Any
 from uuid_utils import uuid7
 
 from orcapod.pipeline.logging_capture import install_capture_streams
-from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
+from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -65,8 +65,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_LOG_PATH: tuple[str, ...] = ("execution_logs",)
 
 
-class PacketLogger:
-    """Context-bound logger created by `_ContextualizedLoggingObserver` per packet.
+class DataLogger:
+    """Context-bound logger created by `_ContextualizedLoggingObserver` per data.
 
     Holds all context needed to write a structured log row
     (run_id, tag data) so the caller only needs to pass the `CapturedLogs` payload.
@@ -75,7 +75,7 @@ class PacketLogger:
     the fixed log columns.
 
     This class is not intended to be instantiated directly — use
-    `_ContextualizedLoggingObserver.create_packet_logger` instead.
+    `_ContextualizedLoggingObserver.create_data_logger` instead.
     """
 
     def __init__(
@@ -135,7 +135,7 @@ class PacketLogger:
 
 
 class LoggingObserver:
-    """Writes packet-level logs to a pre-scoped log database.
+    """Writes data-level logs to a pre-scoped log database.
 
     Instantiate once, outside the pipeline, and pass to the orchestrator::
 
@@ -199,31 +199,31 @@ class LoggingObserver:
     ) -> None:
         pass
 
-    def on_packet_start(self, node_label: str, tag: TagProtocol, packet: PacketProtocol) -> None:
+    def on_data_start(self, node_label: str, tag: TagProtocol, data: DataProtocol) -> None:
         pass
 
-    def on_packet_end(
+    def on_data_end(
         self,
         node_label: str,
         tag: TagProtocol,
-        input_packet: PacketProtocol,
-        output_packet: PacketProtocol | None,
+        input_data: DataProtocol,
+        output_data: DataProtocol | None,
         cached: bool,
     ) -> None:
         pass
 
-    def on_packet_crash(
-        self, node_label: str, tag: TagProtocol, packet: PacketProtocol, error: Exception
+    def on_data_crash(
+        self, node_label: str, tag: TagProtocol, data: DataProtocol, error: Exception
     ) -> None:
         pass
 
-    def create_packet_logger(
+    def create_data_logger(
         self,
         tag: TagProtocol,
-        packet: PacketProtocol,
-    ) -> PacketLogger:
-        """Return a `PacketLogger` bound to *tag* context using the root DB."""
-        return PacketLogger(db=self._db, log_path=DEFAULT_LOG_PATH, run_id=self._current_run_id, tag_data=dict(tag))
+        data: DataProtocol,
+    ) -> DataLogger:
+        """Return a `DataLogger` bound to *tag* context using the root DB."""
+        return DataLogger(db=self._db, log_path=DEFAULT_LOG_PATH, run_id=self._current_run_id, tag_data=dict(tag))
 
     # -- convenience --
 
@@ -333,37 +333,37 @@ class _ContextualizedLoggingObserver:
     def on_node_end(self, node_label: str, node_hash: str) -> None:
         pass
 
-    def on_packet_start(self, node_label: str, tag: TagProtocol, packet: PacketProtocol) -> None:
+    def on_data_start(self, node_label: str, tag: TagProtocol, data: DataProtocol) -> None:
         pass
 
-    def on_packet_end(
+    def on_data_end(
         self,
         node_label: str,
         tag: TagProtocol,
-        input_packet: PacketProtocol,
-        output_packet: PacketProtocol | None,
+        input_data: DataProtocol,
+        output_data: DataProtocol | None,
         cached: bool,
     ) -> None:
         pass
 
-    def on_packet_crash(
-        self, node_label: str, tag: TagProtocol, packet: PacketProtocol, error: Exception
+    def on_data_crash(
+        self, node_label: str, tag: TagProtocol, data: DataProtocol, error: Exception
     ) -> None:
         pass
 
-    def create_packet_logger(
+    def create_data_logger(
         self,
         tag: TagProtocol,
-        packet: PacketProtocol,
-    ) -> PacketLogger:
-        """Create a PacketLogger using context from this wrapper.
+        data: DataProtocol,
+    ) -> DataLogger:
+        """Create a DataLogger using context from this wrapper.
 
         Logs are written at ``DEFAULT_LOG_PATH`` within the scoped database.
         Node identity is encoded in the database path, not in column values.
         """
         tag_data = dict(tag)
 
-        return PacketLogger(
+        return DataLogger(
             db=self._db,
             log_path=DEFAULT_LOG_PATH,
             run_id=self._run_id,

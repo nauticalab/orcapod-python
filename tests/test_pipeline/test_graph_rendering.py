@@ -16,7 +16,7 @@ import pytest
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode, GraphNode, OperatorNode, SourceNode
 from orcapod.core.operators import Join
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import Pipeline
@@ -32,11 +32,11 @@ from orcapod.pipeline.graph import (
 # ---------------------------------------------------------------------------
 
 
-def _make_source(tag_col: str, packet_col: str, data: dict) -> ArrowTableSource:
+def _make_source(tag_col: str, data_col: str, data: dict) -> ArrowTableSource:
     table = pa.table(
         {
             tag_col: pa.array(data[tag_col], type=pa.large_string()),
-            packet_col: pa.array(data[packet_col], type=pa.int64()),
+            data_col: pa.array(data[data_col], type=pa.int64()),
         }
     )
     return ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
@@ -66,8 +66,8 @@ def pipeline_db() -> InMemoryArrowDatabase:
 def compiled_pipeline(pipeline_db: InMemoryArrowDatabase) -> Pipeline:
     """A compiled pipeline with source, operator, and function nodes."""
     src_a, src_b = _make_two_sources()
-    pf = PythonPacketFunction(_add_values, output_keys="total")
-    pod = FunctionPod(packet_function=pf)
+    pf = PythonDataFunction(_add_values, output_keys="total")
+    pod = FunctionPod(data_function=pf)
 
     pipeline = Pipeline(name="test_render", pipeline_database=pipeline_db)
     with pipeline:

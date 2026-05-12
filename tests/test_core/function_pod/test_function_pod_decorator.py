@@ -72,7 +72,7 @@ class TestFunctionPodDecoratorAttachment:
 
 class TestFunctionPodDecoratorProperties:
     def test_canonical_name_matches_function_name(self):
-        assert triple.pod.packet_function.canonical_function_name == "triple"
+        assert triple.pod.data_function.canonical_function_name == "triple"
 
     def test_pod_label_defaults_to_function_name(self):
         assert triple.pod.label == "triple"
@@ -81,13 +81,13 @@ class TestFunctionPodDecoratorProperties:
         assert renamed.pod.label == "custom_name"
 
     def test_explicit_function_name_overrides(self):
-        assert renamed.pod.packet_function.canonical_function_name == "custom_name"
+        assert renamed.pod.data_function.canonical_function_name == "custom_name"
 
     def test_version_is_set(self):
-        assert stats.pod.packet_function.major_version == 1
+        assert stats.pod.data_function.major_version == 1
 
     def test_output_keys_are_set(self):
-        schema = stats.pod.packet_function.output_packet_schema
+        schema = stats.pod.data_function.output_data_schema
         assert "total" in schema
         assert "diff" in schema
 
@@ -122,21 +122,21 @@ class TestFunctionPodDecoratorEndToEnd:
         assert isinstance(triple.pod.process(make_int_stream(n=3)), StreamProtocol)
 
     def test_pod_process_correct_values(self):
-        for i, (_, packet) in enumerate(
-            triple.pod.process(make_int_stream(n=4)).iter_packets()
+        for i, (_, data) in enumerate(
+            triple.pod.process(make_int_stream(n=4)).iter_data()
         ):
-            assert packet["result"] == i * 3
+            assert data["result"] == i * 3
 
     def test_pod_process_correct_row_count(self):
-        assert len(list(triple.pod.process(make_int_stream(n=5)).iter_packets())) == 5
+        assert len(list(triple.pod.process(make_int_stream(n=5)).iter_data())) == 5
 
     def test_pod_call_operator_same_as_process(self):
         stream = make_int_stream(n=3)
         via_process = [
-            (t["id"], p["result"]) for t, p in triple.pod.process(stream).iter_packets()
+            (t["id"], p["result"]) for t, p in triple.pod.process(stream).iter_data()
         ]
         via_call = [
-            (t["id"], p["result"]) for t, p in triple.pod(stream).iter_packets()
+            (t["id"], p["result"]) for t, p in triple.pod(stream).iter_data()
         ]
         assert via_process == via_call
 
@@ -159,9 +159,9 @@ class TestFunctionPodDecoratorEndToEnd:
             ),
             tag_columns=["id"],
         )
-        for i, (_, packet) in enumerate(stats.pod.process(stream).iter_packets()):
-            assert packet["total"] == i + i
-            assert packet["diff"] == 0
+        for i, (_, data) in enumerate(stats.pod.process(stream).iter_data()):
+            assert data["total"] == i + i
+            assert data["diff"] == 0
 
     def test_as_table_has_correct_columns(self):
         table = triple.pod.process(make_int_stream(n=3)).as_table()
@@ -197,17 +197,17 @@ class TestFunctionPodDecoratorWrapperImplementation:
         """The original function should have no extra attributes attached."""
         assert triple.__wrapped__.__dict__ == {}
 
-    def test_packet_function_holds_original_function(self):
-        """packet_function._function must be the original undecorated function.
+    def test_data_function_holds_original_function(self):
+        """data_function._function must be the original undecorated function.
 
         RayExecutor (and other remote executors) access this attribute
         directly to obtain a clean, serialisable callable.
         """
-        assert triple.pod._packet_function._function is triple.__wrapped__
+        assert triple.pod._data_function._function is triple.__wrapped__
 
-    def test_packet_function_does_not_hold_wrapper(self):
-        """packet_function._function must not be the wrapper itself."""
-        assert triple.pod._packet_function._function is not triple
+    def test_data_function_does_not_hold_wrapper(self):
+        """data_function._function must not be the wrapper itself."""
+        assert triple.pod._data_function._function is not triple
 
     def test_wraps_preserves_name(self):
         assert triple.__name__ == "triple"

@@ -7,7 +7,7 @@
 # import os
 # from pathlib import Path
 
-# from orcapod.types import PathLike, PathSet, PacketLike
+# from orcapod.types import PathLike, PathSet, DataLike
 # from collections.abc import Collection, Callable
 
 
@@ -369,10 +369,10 @@
 
 
 # def virtual_mount(
-#     packet: PacketLike,
-# ) -> tuple[PacketLike, dict[str, str], dict[str, str]]:
+#     data: DataLike,
+# ) -> tuple[DataLike, dict[str, str], dict[str, str]]:
 #     """
-#     Visit all pathset within the packet, and convert them to alternative path
+#     Visit all pathset within the data, and convert them to alternative path
 #     representation. By default, full path is mapped to the file name. If two or
 #     more paths have the same file name, the second one is suffixed with "_1", the
 #     third one with "_2", etc. This is useful for creating a virtual mount point
@@ -381,12 +381,12 @@
 #     """
 #     forward_lut = {}  # mapping from original path to new path
 #     reverse_lut = {}  # mapping from new path to original path
-#     new_packet = {}
+#     new_data = {}
 
-#     for key, value in packet.items():
-#         new_packet[key] = convert_pathset(value, forward_lut, reverse_lut)  # type: ignore
+#     for key, value in data.items():
+#         new_data[key] = convert_pathset(value, forward_lut, reverse_lut)  # type: ignore
 
-#     return new_packet, forward_lut, reverse_lut
+#     return new_data, forward_lut, reverse_lut
 
 
 # # TODO: re-assess the structure of PathSet and consider making it recursive

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod.core.base import TraceableBase
 from orcapod.protocols.core_protocols import (
-    PacketProtocol,
+    DataProtocol,
     PodProtocol,
     StreamProtocol,
     TagProtocol,
@@ -98,7 +98,7 @@ class StreamBase(TraceableBase):
     ) -> StreamBase:
         """
         Performs a semi-join with another stream, returning a new stream that contains
-        only the packets from this stream that have matching tags in the other stream.
+        only the data from this stream that have matching tags in the other stream.
         """
         from orcapod.core.operators import SemiJoin
 
@@ -118,19 +118,19 @@ class StreamBase(TraceableBase):
 
         return MapTags(name_map, drop_unmapped)(self, label=label)
 
-    def map_packets(
+    def map_data(
         self,
         name_map: Mapping[str, str],
         drop_unmapped: bool = True,
         label: str | None = None,
     ) -> StreamBase:
         """
-        Maps the packets in this stream according to the provided packet_map.
-        If drop_unmapped is True, any packets that are not in the packet_map will be dropped.
+        Maps the data in this stream according to the provided data_map.
+        If drop_unmapped is True, any data that are not in the data_map will be dropped.
         """
-        from orcapod.core.operators import MapPackets
+        from orcapod.core.operators import MapData
 
-        return MapPackets(name_map, drop_unmapped)(self, label=label)
+        return MapData(name_map, drop_unmapped)(self, label=label)
 
     def batch(
         self,
@@ -179,19 +179,19 @@ class StreamBase(TraceableBase):
 
         return SelectTagColumns(tag_columns, strict=strict)(self, label=label)
 
-    def select_packet_columns(
+    def select_data_columns(
         self,
-        packet_columns: str | Collection[str],
+        data_columns: str | Collection[str],
         strict: bool = True,
         label: str | None = None,
     ) -> StreamBase:
         """
-        Select the specified packet columns from the stream. A ValueError is raised
-        if one or more specified packet columns do not exist in the stream unless strict = False.
+        Select the specified data columns from the stream. A ValueError is raised
+        if one or more specified data columns do not exist in the stream unless strict = False.
         """
-        from orcapod.core.operators import SelectPacketColumns
+        from orcapod.core.operators import SelectDataColumns
 
-        return SelectPacketColumns(packet_columns, strict=strict)(self, label=label)
+        return SelectDataColumns(data_columns, strict=strict)(self, label=label)
 
     def drop_tag_columns(
         self,
@@ -203,15 +203,15 @@ class StreamBase(TraceableBase):
 
         return DropTagColumns(tag_columns, strict=strict)(self, label=label)
 
-    def drop_packet_columns(
+    def drop_data_columns(
         self,
-        packet_columns: str | Collection[str],
+        data_columns: str | Collection[str],
         strict: bool = True,
         label: str | None = None,
     ) -> StreamBase:
-        from orcapod.core.operators import DropPacketColumns
+        from orcapod.core.operators import DropDataColumns
 
-        return DropPacketColumns(packet_columns, strict=strict)(self, label=label)
+        return DropDataColumns(data_columns, strict=strict)(self, label=label)
 
     @abstractmethod
     def keys(
@@ -231,23 +231,23 @@ class StreamBase(TraceableBase):
 
     def __iter__(
         self,
-    ) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
-        return self.iter_packets()
+    ) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+        return self.iter_data()
 
     @abstractmethod
-    def iter_packets(
+    def iter_data(
         self,
-    ) -> Iterator[tuple[TagProtocol, PacketProtocol]]: ...
+    ) -> Iterator[tuple[TagProtocol, DataProtocol]]: ...
 
-    async def async_iter_packets(
+    async def async_iter_data(
         self,
-    ) -> AsyncIterator[tuple[TagProtocol, PacketProtocol]]:
-        """Async iterator over (tag, packet) pairs.
+    ) -> AsyncIterator[tuple[TagProtocol, DataProtocol]]:
+        """Async iterator over (tag, data) pairs.
 
         Subclasses should override this to provide true async iteration.
         """
         raise NotImplementedError(
-            f"{type(self).__name__} does not implement async_iter_packets"
+            f"{type(self).__name__} does not implement async_iter_data"
         )
         # Make this an async generator so the return type is correct
         yield  # pragma: no cover
@@ -324,15 +324,15 @@ class StreamBase(TraceableBase):
 
     def flow(
         self,
-    ) -> list[tuple[TagProtocol, PacketProtocol]]:
+    ) -> list[tuple[TagProtocol, DataProtocol]]:
         """Materialize the stream into a concrete collection of
-        ``(TagProtocol, PacketProtocol)`` pairs.
+        ``(TagProtocol, DataProtocol)`` pairs.
 
-        This is implemented by iterating over :meth:`iter_packets`. Depending on
+        This is implemented by iterating over :meth:`iter_data`. Depending on
         the concrete stream implementation, iterating may trigger computation or
         upstream work, or it may simply materialize already-computed results.
         """
-        return [e for e in self.iter_packets()]
+        return [e for e in self.iter_data()]
 
     def _repr_html_(self) -> str:
         df = self.as_polars_df()

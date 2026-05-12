@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING, Any
 from orcapod.types import Schema
 
 if TYPE_CHECKING:
-    from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
+    from orcapod.protocols.observability_protocols import DataExecutionLoggerProtocol
 
 
 class PythonFunctionExecutorBase(ABC):
-    """Abstract base class for executors that run PythonPacketFunction callables.
+    """Abstract base class for executors that run PythonDataFunction callables.
 
-    An executor defines *where* and *how* a PythonPacketFunction's computation
+    An executor defines *where* and *how* a PythonDataFunction's computation
     runs (e.g. in-process, on a Ray cluster, in a container).
 
     Subclasses must implement ``execute_callable`` and optionally
@@ -29,24 +29,24 @@ class PythonFunctionExecutorBase(ABC):
 
     @abstractmethod
     def supported_function_type_ids(self) -> frozenset[str]:
-        """Return the set of ``packet_function_type_id`` values this executor can run.
+        """Return the set of ``data_function_type_id`` values this executor can run.
 
         Return an empty ``frozenset`` to indicate support for *all* types.
         """
         ...
 
-    def supports(self, packet_function_type_id: str) -> bool:
+    def supports(self, data_function_type_id: str) -> bool:
         """Return ``True`` if this executor can handle the given function type.
 
         Default implementation checks membership in
         ``supported_function_type_ids()``; an empty set means "supports all".
         """
         ids = self.supported_function_type_ids()
-        return len(ids) == 0 or packet_function_type_id in ids
+        return len(ids) == 0 or data_function_type_id in ids
 
     @property
     def supports_concurrent_execution(self) -> bool:
-        """Whether this executor can run multiple packets concurrently.
+        """Whether this executor can run multiple data concurrently.
 
         Default is ``False``.  Subclasses that support truly concurrent
         execution (e.g. via a remote cluster) should override to ``True``.
@@ -73,7 +73,7 @@ class PythonFunctionExecutorBase(ABC):
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
         *,
-        logger: PacketExecutionLoggerProtocol | None = None,
+        logger: DataExecutionLoggerProtocol | None = None,
     ) -> Any:
         """Synchronously execute *fn* with *kwargs*, returning the raw result.
 
@@ -98,7 +98,7 @@ class PythonFunctionExecutorBase(ABC):
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
         *,
-        logger: PacketExecutionLoggerProtocol | None = None,
+        logger: DataExecutionLoggerProtocol | None = None,
     ) -> Any:
         """Asynchronously execute *fn* with *kwargs*, returning the raw result.
 

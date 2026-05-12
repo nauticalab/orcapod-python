@@ -135,7 +135,7 @@ class TestMergeJoinBasic:
         assert set(tag_keys) == {"id", "group"}
 
     def test_colliding_columns_become_sorted_lists(self, left_stream, right_stream):
-        """Colliding packet columns must be sorted, not just in input order.
+        """Colliding data columns must be sorted, not just in input order.
         id=2: left=500, right=200 => must sort to [200, 500] (proves reordering).
         id=3: left=30, right=300 => [30, 300]."""
         op = MergeJoin()
@@ -148,7 +148,7 @@ class TestMergeJoinBasic:
         assert rows[3]["value"] == [30, 300]
 
     def test_non_colliding_columns_stay_scalar(self, left_stream, right_stream):
-        """Non-colliding packet columns should remain as scalars."""
+        """Non-colliding data columns should remain as scalars."""
         op = MergeJoin()
         result = op.static_process(left_stream, right_stream)
         rows = result.as_table().to_pylist()
@@ -196,9 +196,9 @@ class TestMergeJoinBasic:
 
 
 class TestMergeJoinSourceColumns:
-    def test_source_columns_follow_packet_sort_order(self, left_source, right_source):
-        """Source columns for colliding packet columns should be reordered
-        to match the sort order of the corresponding packet values.
+    def test_source_columns_follow_data_sort_order(self, left_source, right_source):
+        """Source columns for colliding data columns should be reordered
+        to match the sort order of the corresponding data values.
         For id=2: left=500>right=200, so right's source entry must come first."""
         from orcapod.system_constants import constants
 
@@ -216,14 +216,14 @@ class TestMergeJoinSourceColumns:
         assert len(rows[2][source_col_name]) == 2
         # The first source entry corresponds to the smaller value (200 from right)
         assert "value" in rows[2][source_col_name][0]
-        # Verify packet values are actually sorted
+        # Verify data values are actually sorted
         assert rows[2]["value"] == [200, 500]
 
         # id=3: value=[30, 300], left's source first (30 is left's value)
         assert rows[3]["value"] == [30, 300]
 
     def test_non_colliding_source_columns_preserved(self, left_source, right_source):
-        """Source columns for non-colliding packet columns should remain as scalars."""
+        """Source columns for non-colliding data columns should remain as scalars."""
         from orcapod.system_constants import constants
 
         op = MergeJoin()
@@ -243,7 +243,7 @@ class TestMergeJoinSourceColumns:
 
     def test_source_columns_sorted_independently_per_colliding_column(self):
         """With two colliding columns (math, reading) where sort order differs
-        per column, each source column must track its own packet column's sort.
+        per column, each source column must track its own data column's sort.
 
         east math=95 > west math=70 but east reading=30 < west reading=92 (id=1)
         east math=40 < west math=85 but east reading=88 > west reading=10 (id=2)
@@ -413,17 +413,17 @@ class TestMergeJoinOutputSchema:
     def test_colliding_columns_become_list_type(self, left_stream, right_stream):
         """Output schema should have list[T] for colliding columns."""
         op = MergeJoin()
-        _, packet_schema = op.output_schema(left_stream, right_stream)
+        _, data_schema = op.output_schema(left_stream, right_stream)
 
-        assert packet_schema["value"] == list[int]
+        assert data_schema["value"] == list[int]
 
     def test_non_colliding_columns_stay_original_type(self, left_stream, right_stream):
         """Output schema should keep original type for non-colliding columns."""
         op = MergeJoin()
-        _, packet_schema = op.output_schema(left_stream, right_stream)
+        _, data_schema = op.output_schema(left_stream, right_stream)
 
-        assert packet_schema["extra_left"] == str
-        assert packet_schema["extra_right"] == str
+        assert data_schema["extra_left"] == str
+        assert data_schema["extra_right"] == str
 
     def test_tag_schema_is_union(self, left_stream, right_stream):
         """Tag schema should be the union of both input tag schemas."""
@@ -552,7 +552,7 @@ class TestMergeJoinOutputSchema:
         self, left_source, right_source
     ):
         """Operator's predicted output_schema must equal the result stream's
-        output_schema — both tag and packet schemas, without system tags."""
+        output_schema — both tag and data schemas, without system tags."""
         op = MergeJoin()
 
         predicted_tag, predicted_pkt = op.output_schema(left_source, right_source)

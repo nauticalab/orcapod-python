@@ -1,7 +1,7 @@
 """Tests for CompositeObserver.
 
 Verifies that CompositeObserver correctly delegates all hooks to
-multiple child observers and that create_packet_logger returns the
+multiple child observers and that create_data_logger returns the
 first real (non-no-op) logger.
 """
 
@@ -12,7 +12,7 @@ import pyarrow as pa
 
 from orcapod.core.executors import LocalPythonFunctionExecutor
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import (
@@ -20,7 +20,7 @@ from orcapod.pipeline import (
     SyncPipelineOrchestrator,
 )
 from orcapod.pipeline.composite_observer import CompositeObserver
-from orcapod.pipeline.logging_observer import LoggingObserver, PacketLogger
+from orcapod.pipeline.logging_observer import LoggingObserver, DataLogger
 from orcapod.pipeline.observer import NoOpLogger
 from orcapod.pipeline.serialization import DatabaseRegistry, resolve_observer_from_config
 from orcapod.pipeline.status_observer import StatusObserver
@@ -53,7 +53,7 @@ class TestLoggingAndStatusTogether:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_composite", pipeline_database=pipeline_db)
@@ -79,11 +79,11 @@ class TestLoggingAndStatusTogether:
 
 
 # ---------------------------------------------------------------------------
-# 2. create_packet_logger returns the real logger, not no-op
+# 2. create_data_logger returns the real logger, not no-op
 # ---------------------------------------------------------------------------
 
 
-class TestCreatePacketLoggerDelegation:
+class TestCreateDataLoggerDelegation:
     def test_returns_logging_observer_logger(self):
         pipeline_db = InMemoryArrowDatabase()
         obs_db = InMemoryArrowDatabase()
@@ -93,7 +93,7 @@ class TestCreatePacketLoggerDelegation:
             print("hello")
             return x
 
-        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_logger_delegation", pipeline_database=pipeline_db)
@@ -132,9 +132,9 @@ class TestContextualizeReturnsComposite:
         def triple(result: int) -> int:
             return result * 3
 
-        pf1 = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf1 = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod1 = FunctionPod(pf1)
-        pf2 = PythonPacketFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
+        pf2 = PythonDataFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
         pod2 = FunctionPod(pf2)
 
         pipeline = Pipeline(name="test_ctx_composite", pipeline_database=pipeline_db)
@@ -150,13 +150,13 @@ class TestContextualizeReturnsComposite:
         pipeline.run(orchestrator=orch, observer=observer)
 
         # Both observers should have received events for both function nodes
-        # 2 nodes × 2 packets each = 4 log rows total
-        # 2 nodes × 2 packets × 2 events (RUNNING + SUCCESS) = 8 status rows total
+        # 2 nodes × 2 data each = 4 log rows total
+        # 2 nodes × 2 data × 2 events (RUNNING + SUCCESS) = 8 status rows total
         logs = log_obs.get_logs()
         status = status_obs.get_status()
         assert logs is not None
         assert status is not None
-        assert logs.num_rows == 4   # 2 nodes × 2 packets
+        assert logs.num_rows == 4   # 2 nodes × 2 data
         assert status.num_rows == 8  # 2 nodes × 2 × (RUNNING + SUCCESS)
 
 
@@ -174,7 +174,7 @@ class TestCompositeWithFailures:
         def failing(x: int) -> int:
             raise ValueError("boom")
 
-        pf = PythonPacketFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_composite_fail", pipeline_database=pipeline_db)

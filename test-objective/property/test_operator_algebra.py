@@ -14,10 +14,10 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.operators import (
-    DropPacketColumns,
+    DropDataColumns,
     Join,
     PolarsFilter,
-    SelectPacketColumns,
+    SelectDataColumns,
 )
 from orcapod.core.streams import ArrowTableStream
 
@@ -38,8 +38,8 @@ def _sorted_rows(table: pa.Table, sort_col: str = "id") -> list[dict]:
     return sorted(rows, key=lambda r: r.get(sort_col, 0))
 
 
-def _make_stream(tag_data: dict, packet_data: dict, tag_cols: list[str]) -> ArrowTableStream:
-    all_data = {**tag_data, **packet_data}
+def _make_stream(tag_data: dict, data_data: dict, tag_cols: list[str]) -> ArrowTableStream:
+    all_data = {**tag_data, **data_data}
     return ArrowTableStream(pa.table(all_data), tag_columns=tag_cols)
 
 
@@ -78,7 +78,7 @@ class TestJoinCommutativity:
 
 class TestJoinAssociativity:
     """Per design: join(join(A,B),C) should produce same data as join(A,join(B,C))
-    when all have non-overlapping packet columns."""
+    when all have non-overlapping data columns."""
 
     def test_three_way_associativity(self):
         sa = _make_stream(
@@ -158,14 +158,14 @@ class TestSelectComposition:
         )
 
         # select(S, {a, b}) then select(result, {b, c}) → should keep only {b}
-        sel1 = SelectPacketColumns(columns=["a", "b"])
+        sel1 = SelectDataColumns(columns=["a", "b"])
         step1 = sel1.process(stream)
 
-        sel2 = SelectPacketColumns(columns=["b"])
+        sel2 = SelectDataColumns(columns=["b"])
         step2 = sel2.process(step1)
 
         # Direct intersection: select {a,b} ∩ {b,c} = {b}
-        sel_direct = SelectPacketColumns(columns=["b"])
+        sel_direct = SelectDataColumns(columns=["b"])
         direct = sel_direct.process(stream)
 
         _, step2_keys = step2.keys()
@@ -193,14 +193,14 @@ class TestDropComposition:
         )
 
         # drop(S, {a}) then drop(result, {b}) → should drop {a, b}
-        drop1 = DropPacketColumns(columns=["a"])
+        drop1 = DropDataColumns(columns=["a"])
         step1 = drop1.process(stream)
 
-        drop2 = DropPacketColumns(columns=["b"])
+        drop2 = DropDataColumns(columns=["b"])
         step2 = drop2.process(step1)
 
         # Direct: drop {a} ∪ {b} = drop {a, b}
-        drop_direct = DropPacketColumns(columns=["a", "b"])
+        drop_direct = DropDataColumns(columns=["a", "b"])
         direct = drop_direct.process(stream)
 
         _, step2_keys = step2.keys()

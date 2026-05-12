@@ -35,13 +35,13 @@ class TestSourceNodeProtocol:
 
         assert isinstance(GoodSource(), SourceNodeProtocol)
 
-    def test_rejects_old_iter_packets_only(self):
-        """SourceNodeProtocol no longer accepts iter_packets alone."""
+    def test_rejects_old_iter_data_only(self):
+        """SourceNodeProtocol no longer accepts iter_data alone."""
 
         class OldSource:
             node_type = "source"
 
-            def iter_packets(self):
+            def iter_data(self):
                 return iter([])
 
         assert not isinstance(OldSource(), SourceNodeProtocol)
@@ -77,10 +77,10 @@ class TestFunctionNodeProtocol:
             def get_cached_results(self, entry_ids):
                 return {}
 
-            def compute_pipeline_entry_id(self, tag, packet):
+            def compute_pipeline_entry_id(self, tag, data):
                 return ""
 
-            def execute_packet(self, tag, packet):
+            def execute_data(self, tag, data):
                 return (tag, None)
 
             def execute(self, input_stream):
@@ -177,9 +177,9 @@ class TestSourceNodeExecute:
                 events.append(("start", node_label))
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("end", node_label))
-            def on_packet_start(self, node_label, t, p):
+            def on_data_start(self, node_label, t, p):
                 pass
-            def on_packet_end(self, node_label, t, ip, op, cached):
+            def on_data_end(self, node_label, t, ip, op, cached):
                 pass
 
         node.execute(observer=Obs())
@@ -227,9 +227,9 @@ class TestSourceNodeAsyncExecuteProtocol:
                 events.append("start")
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append("end")
-            def on_packet_start(self, node_label, t, p):
+            def on_data_start(self, node_label, t, p):
                 pass
-            def on_packet_end(self, node_label, t, ip, op, cached):
+            def on_data_end(self, node_label, t, ip, op, cached):
                 pass
 
         output_ch = Channel(buffer_size=16)
@@ -242,7 +242,7 @@ class TestSourceNodeAsyncExecuteProtocol:
 # ===========================================================================
 
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.nodes import FunctionNode
 
 
@@ -257,7 +257,7 @@ class TestFunctionNodeExecute:
             "value": pa.array([1, 2], type=pa.int64()),
         })
         src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
-        pf = PythonPacketFunction(double_value, output_keys="result")
+        pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
         return FunctionNode(pod, src)
 
@@ -272,13 +272,13 @@ class TestFunctionNodeExecute:
                 events.append(("node_start", node_label))
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
-            def on_packet_start(self, node_label, t, p):
-                events.append(("packet_start",))
-            def on_packet_end(self, node_label, t, ip, op, cached):
-                events.append(("packet_end", cached))
-            def on_packet_crash(self, node_label, t, p, exc):
+            def on_data_start(self, node_label, t, p):
+                events.append(("data_start",))
+            def on_data_end(self, node_label, t, ip, op, cached):
+                events.append(("data_end", cached))
+            def on_data_crash(self, node_label, t, p, exc):
                 pass
-            def create_packet_logger(self, t, p, **kwargs):
+            def create_data_logger(self, t, p, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
 
@@ -288,8 +288,8 @@ class TestFunctionNodeExecute:
         assert len(result) == 2
         assert events[0][0] == "node_start"
         assert events[-1][0] == "node_end"
-        packet_events = [e for e in events if e[0].startswith("packet")]
-        assert len(packet_events) == 4  # 2 start + 2 end
+        data_events = [e for e in events if e[0].startswith("data")]
+        assert len(data_events) == 4  # 2 start + 2 end
 
     def test_execute_without_observer(self):
         node = self._make_function_node()
@@ -314,15 +314,15 @@ class TestFunctionNodeAsyncExecute:
             "value": pa.array([1, 2], type=pa.int64()),
         })
         src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
-        pf = PythonPacketFunction(double_value, output_keys="result")
+        pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
         node = FunctionNode(pod, src)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
 
-        for tag, packet in src.iter_packets():
-            await input_ch.writer.send((tag, packet))
+        for tag, data in src.iter_data():
+            await input_ch.writer.send((tag, data))
         await input_ch.writer.close()
 
         await node.async_execute(input_ch.reader, output_ch.writer)
@@ -338,7 +338,7 @@ class TestFunctionNodeAsyncExecute:
             "value": pa.array([1], type=pa.int64()),
         })
         src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
-        pf = PythonPacketFunction(double_value, output_keys="result")
+        pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
         node = FunctionNode(pod, src)
 
@@ -351,20 +351,20 @@ class TestFunctionNodeAsyncExecute:
                 events.append("node_start")
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append("node_end")
-            def on_packet_start(self, node_label, t, p):
+            def on_data_start(self, node_label, t, p):
                 events.append("pkt_start")
-            def on_packet_end(self, node_label, t, ip, op, cached):
+            def on_data_end(self, node_label, t, ip, op, cached):
                 events.append("pkt_end")
-            def on_packet_crash(self, node_label, t, p, exc):
+            def on_data_crash(self, node_label, t, p, exc):
                 pass
-            def create_packet_logger(self, t, p, **kwargs):
+            def create_data_logger(self, t, p, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
-        for tag, packet in src.iter_packets():
-            await input_ch.writer.send((tag, packet))
+        for tag, data in src.iter_data():
+            await input_ch.writer.send((tag, data))
         await input_ch.writer.close()
 
         await node.async_execute(input_ch.reader, output_ch.writer, observer=Obs())
@@ -405,9 +405,9 @@ class TestOperatorNodeExecute:
                 events.append(("node_start", node_label))
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
-            def on_packet_start(self, node_label, t, p):
+            def on_data_start(self, node_label, t, p):
                 pass
-            def on_packet_end(self, node_label, t, ip, op, cached):
+            def on_data_end(self, node_label, t, ip, op, cached):
                 pass
 
         result = node.execute(*node._input_streams, observer=Obs())
@@ -425,7 +425,7 @@ class TestOperatorNodeExecute:
 # OperatorNode.async_execute() with observer
 # ===========================================================================
 
-from orcapod.core.operators import SelectPacketColumns
+from orcapod.core.operators import SelectDataColumns
 
 
 class TestOperatorNodeAsyncExecute:
@@ -436,7 +436,7 @@ class TestOperatorNodeAsyncExecute:
             "value": pa.array([10, 20], type=pa.int64()),
         })
         src_a = ArrowTableSource(table_a, tag_columns=["key"], infer_nullable=True)
-        op = SelectPacketColumns(columns=["value"])
+        op = SelectDataColumns(columns=["value"])
         op_node = OperatorNode(op, input_streams=[src_a])
 
         events = []
@@ -448,15 +448,15 @@ class TestOperatorNodeAsyncExecute:
                 events.append("start")
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append("end")
-            def on_packet_start(self, node_label, t, p):
+            def on_data_start(self, node_label, t, p):
                 pass
-            def on_packet_end(self, node_label, t, ip, op, cached):
+            def on_data_end(self, node_label, t, ip, op, cached):
                 pass
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
-        for tag, packet in src_a.iter_packets():
-            await input_ch.writer.send((tag, packet))
+        for tag, data in src_a.iter_data():
+            await input_ch.writer.send((tag, data))
         await input_ch.writer.close()
 
         await op_node.async_execute(

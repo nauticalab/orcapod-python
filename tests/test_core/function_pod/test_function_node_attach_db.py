@@ -7,7 +7,7 @@ import pytest
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 
@@ -17,7 +17,7 @@ def _make_pod():
         return x * 2
 
     return FunctionPod(
-        packet_function=PythonPacketFunction(double, output_keys="result"),
+        data_function=PythonDataFunction(double, output_keys="result"),
     )
 
 
@@ -43,10 +43,10 @@ class TestFunctionNodeWithoutDatabase:
         node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream())
         assert node._pipeline_database is None
 
-    def test_iter_packets_without_database(self):
+    def test_iter_data_without_database(self):
         node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream(n=3))
         node.run()
-        results = list(node.iter_packets())
+        results = list(node.iter_data())
         assert len(results) == 3
         assert results[0][1]["result"] == 0
 
@@ -78,10 +78,10 @@ class TestFunctionNodeAttachDatabases:
     def test_attach_databases_clears_caches(self):
         node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream())
         node.run()  # populate cache
-        assert len(node._cached_output_packets) > 0
+        assert len(node._cached_output_datas) > 0
         db = InMemoryArrowDatabase()
         node.attach_databases(pipeline_database=db, result_database=db)
-        assert len(node._cached_output_packets) == 0
+        assert len(node._cached_output_datas) == 0
 
     def test_attach_databases_computes_node_identity_path(self):
         node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream())
@@ -104,12 +104,12 @@ class TestFunctionNodeAttachDatabases:
             node._cached_function_pod._function_pod, CachedFunctionPod
         )
 
-    def test_iter_packets_after_attach_works(self):
+    def test_iter_data_after_attach_works(self):
         node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream(n=2))
         db = InMemoryArrowDatabase()
         node.attach_databases(pipeline_database=db, result_database=db)
         node.run()
-        results = list(node.iter_packets())
+        results = list(node.iter_data())
         assert len(results) == 2
 
 
@@ -134,7 +134,7 @@ class TestFunctionNodeWithDatabase:
         )
         assert len(node.node_identity_path) > 0
 
-    def test_iter_packets_with_database(self):
+    def test_iter_data_with_database(self):
         db = InMemoryArrowDatabase()
         node = FunctionNode(
             function_pod=_make_pod(),
@@ -143,5 +143,5 @@ class TestFunctionNodeWithDatabase:
             result_database=db,
         )
         node.run()
-        results = list(node.iter_packets())
+        results = list(node.iter_data())
         assert len(results) == 3

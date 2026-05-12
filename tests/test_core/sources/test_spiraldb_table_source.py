@@ -195,23 +195,23 @@ class TestPKAsDefaultTags:
         tag_schema, _ = src.output_schema()
         assert "session_id" in tag_schema
 
-    def test_pk_not_in_packet_schema(self):
+    def test_pk_not_in_data_schema(self):
         from orcapod.core.sources import SpiralDBTableSource
 
         connector = _make_mock_connector(pk_columns=["session_id"])
         with _patch_connector(connector):
             src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        _, packet_schema = src.output_schema()
-        assert "session_id" not in packet_schema
+        _, data_schema = src.output_schema()
+        assert "session_id" not in data_schema
 
-    def test_non_pk_columns_in_packet_schema(self):
+    def test_non_pk_columns_in_data_schema(self):
         from orcapod.core.sources import SpiralDBTableSource
 
         connector = _make_mock_connector(pk_columns=["session_id"])
         with _patch_connector(connector):
             src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        _, packet_schema = src.output_schema()
-        assert "firing_rate" in packet_schema
+        _, data_schema = src.output_schema()
+        assert "firing_rate" in data_schema
 
     def test_composite_pk_all_columns_are_tags(self):
         from orcapod.core.sources import SpiralDBTableSource
@@ -223,14 +223,14 @@ class TestPKAsDefaultTags:
         assert "session_id" in tag_schema
         assert "probe_id" in tag_schema
 
-    def test_composite_pk_data_column_in_packet(self):
+    def test_composite_pk_data_column_in_data(self):
         from orcapod.core.sources import SpiralDBTableSource
 
         connector = _make_composite_pk_connector()
         with _patch_connector(connector):
             src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        _, packet_schema = src.output_schema()
-        assert "neuron_count" in packet_schema
+        _, data_schema = src.output_schema()
+        assert "neuron_count" in data_schema
 
     def test_default_source_id_is_table_name(self):
         from orcapod.core.sources import SpiralDBTableSource
@@ -260,7 +260,7 @@ class TestExplicitTagOverride:
 
         connector = _make_mock_connector(pk_columns=["session_id"])
         # Provide explicit tag_columns — PK should be ignored
-        # Use "firing_rate" as tag by overriding, and "session_id" as packet
+        # Use "firing_rate" as tag by overriding, and "session_id" as data
         batches = [
             pa.record_batch(
                 {
@@ -415,22 +415,22 @@ class TestStreamBehaviour:
             src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
         assert src.upstreams == ()
 
-    def test_iter_packets_yields_one_per_row(self):
+    def test_iter_data_yields_one_per_row(self):
         from orcapod.core.sources import SpiralDBTableSource
 
         connector = _make_mock_connector()
         with _patch_connector(connector):
             src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        packets = list(src.iter_packets())
-        assert len(packets) == 3
+        data = list(src.iter_data())
+        assert len(data) == 3
 
-    def test_iter_packets_tags_contain_pk(self):
+    def test_iter_data_tags_contain_pk(self):
         from orcapod.core.sources import SpiralDBTableSource
 
         connector = _make_mock_connector()
         with _patch_connector(connector):
             src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        for tags, _ in src.iter_packets():
+        for tags, _ in src.iter_data():
             assert "session_id" in tags
 
     def test_output_schema_returns_two_schemas(self):
@@ -459,13 +459,13 @@ class TestStreamBehaviour:
             src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
         assert src.as_table().num_rows == 3
 
-    def test_packet_values_are_correct(self):
+    def test_data_values_are_correct(self):
         from orcapod.core.sources import SpiralDBTableSource
 
         connector = _make_mock_connector()
         with _patch_connector(connector):
             src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        firing_rates = sorted(pkt["firing_rate"] for _, pkt in src.iter_packets())
+        firing_rates = sorted(pkt["firing_rate"] for _, pkt in src.iter_data())
         assert firing_rates == pytest.approx([0.1, 0.2, 0.3])
 
     def test_tag_values_are_correct(self):
@@ -474,7 +474,7 @@ class TestStreamBehaviour:
         connector = _make_mock_connector()
         with _patch_connector(connector):
             src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
-        session_ids = sorted(tags["session_id"] for tags, _ in src.iter_packets())
+        session_ids = sorted(tags["session_id"] for tags, _ in src.iter_data())
         assert session_ids == ["s1", "s2", "s3"]
 
 
@@ -534,9 +534,9 @@ class TestDeterministicHashing:
         """pipeline_hash is schema-only; different column schemas → different hash."""
         from orcapod.core.sources import SpiralDBTableSource
 
-        # src1: tag=session_id (large_string), packet=firing_rate (float64)
+        # src1: tag=session_id (large_string), data=firing_rate (float64)
         c1 = _make_mock_connector()
-        # src2: tag=session_id (large_string), packet=neuron_count (int64)
+        # src2: tag=session_id (large_string), data=neuron_count (int64)
         batches2 = [
             pa.record_batch(
                 {
@@ -726,7 +726,7 @@ class TestPipelineIntegration:
     def test_spiraldb_source_in_pipeline(self):
         """Verify SpiralDBTableSource drives a full pipeline end-to-end."""
         from orcapod.core.function_pod import FunctionPod
-        from orcapod.core.packet_function import PythonPacketFunction
+        from orcapod.core.data_function import PythonDataFunction
         from orcapod.core.sources import SpiralDBTableSource
         from orcapod.databases import InMemoryArrowDatabase
         from orcapod.pipeline import Pipeline
@@ -739,7 +739,7 @@ class TestPipelineIntegration:
         with _patch_connector(connector):
             src = SpiralDBTableSource(_PROJECT_ID, _TABLE_NAME)
 
-        pf = PythonPacketFunction(double_rate, output_keys="doubled")
+        pf = PythonDataFunction(double_rate, output_keys="doubled")
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(

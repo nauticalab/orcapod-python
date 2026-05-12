@@ -3,7 +3,7 @@
 Sources are the entry points for external data into an Orcapod pipeline. Every pipeline begins
 with one or more sources that load raw data -- from Python dicts, lists, CSV files, Delta Lake
 tables, or Pandas DataFrames -- and present it as an immutable
-[stream](streams.md) of (Tag, Packet) pairs. Sources also attach provenance metadata
+[stream](streams.md) of (Tag, Data) pairs. Sources also attach provenance metadata
 (source-info columns and system tag columns) so that every downstream value can be traced back
 to its origin.
 
@@ -27,8 +27,8 @@ hashing) and produces the final immutable stream.
 | Source | Input type | Notes |
 |---|---|---|
 | `ArrowTableSource` | PyArrow `Table` | Accepts an Arrow table directly |
-| `DictSource` | `list[dict]` | Each dict becomes one (Tag, Packet) pair |
-| `ListSource` | `list[Any]` | Each element stored under a named packet column |
+| `DictSource` | `list[dict]` | Each dict becomes one (Tag, Data) pair |
+| `ListSource` | `list[Any]` | Each element stored under a named data column |
 | `DataFrameSource` | Pandas `DataFrame` | Converts via Arrow |
 | `CSVSource` | File path (string) | Reads CSV into Arrow |
 | `DeltaTableSource` | File path (string) | Reads Delta Lake table |
@@ -44,8 +44,8 @@ stages: run a node, then use its output as input to a new pipeline.
 When you create a source, Orcapod automatically adds two kinds of hidden columns to track
 data lineage:
 
-**Source-info columns** (prefix `_source_`) store a provenance token for each packet column.
-For example, a packet column `weight` gets a companion `_source_weight` column. These tokens
+**Source-info columns** (prefix `_source_`) store a provenance token for each data column.
+For example, a data column `weight` gets a companion `_source_weight` column. These tokens
 identify which source originally produced each value.
 
 **System tag columns** (prefix `_tag::`) track which source contributed each row. These
@@ -59,7 +59,7 @@ These columns are hidden by default. You can reveal them using `ColumnConfig`:
 table = source.as_table(columns={"source": True})
 
 # Show system tag columns
-tag_schema, packet_schema = source.output_schema(columns={"system_tags": True})
+tag_schema, data_schema = source.output_schema(columns={"system_tags": True})
 
 # Show everything
 table = source.as_table(all_info=True)
@@ -82,23 +82,23 @@ source = DictSource(
 )
 
 # Inspect the schema
-tag_schema, packet_schema = source.output_schema()
+tag_schema, data_schema = source.output_schema()
 print("Tag schema:", dict(tag_schema))
 # Tag schema: {'subject_id': <class 'str'>}
-print("Packet schema:", dict(packet_schema))
-# Packet schema: {'age': <class 'int'>, 'weight': <class 'float'>}
+print("Data schema:", dict(data_schema))
+# Data schema: {'age': <class 'int'>, 'weight': <class 'float'>}
 
 # Get column names
-tag_keys, packet_keys = source.keys()
+tag_keys, data_keys = source.keys()
 print("Tag keys:", tag_keys)    # ('subject_id',)
-print("Packet keys:", packet_keys)  # ('age', 'weight')
+print("Data keys:", data_keys)  # ('age', 'weight')
 
-# Iterate over (Tag, Packet) pairs
-for tag, packet in source.iter_packets():
-    print(f"  Tag: {tag.as_dict()}, Packet: {packet.as_dict()}")
-# Tag: {'subject_id': 'mouse_01'}, Packet: {'age': 12, 'weight': 25.3}
-# Tag: {'subject_id': 'mouse_02'}, Packet: {'age': 8, 'weight': 22.1}
-# Tag: {'subject_id': 'mouse_03'}, Packet: {'age': 15, 'weight': 27.8}
+# Iterate over (Tag, Data) pairs
+for tag, data in source.iter_data():
+    print(f"  Tag: {tag.as_dict()}, Data: {data.as_dict()}")
+# Tag: {'subject_id': 'mouse_01'}, Data: {'age': 12, 'weight': 25.3}
+# Tag: {'subject_id': 'mouse_02'}, Data: {'age': 8, 'weight': 22.1}
+# Tag: {'subject_id': 'mouse_03'}, Data: {'age': 15, 'weight': 27.8}
 
 # Convert to a PyArrow table
 table = source.as_table()
@@ -111,7 +111,7 @@ print(table.to_pandas())
 
 ## How it connects to other concepts
 
-- Sources produce [Streams](streams.md) -- immutable sequences of (Tag, Packet) pairs
+- Sources produce [Streams](streams.md) -- immutable sequences of (Tag, Data) pairs
 - Streams flow into [Operators](operators.md) for structural transforms (joins, filters,
   column selection)
 - Streams flow into [Function Pods](function-pods.md) for value-level transforms

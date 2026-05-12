@@ -19,7 +19,7 @@ from orcapod.core.nodes import (
     OperatorNode,
 )
 from orcapod.core.operators import Join
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource, DerivedSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.types import CacheMode
@@ -71,51 +71,51 @@ def _make_joinable_streams() -> tuple[ArrowTableSource, ArrowTableSource]:
 class TestFunctionNode:
     """Per design, FunctionNode wraps a FunctionPod for stream-based execution."""
 
-    def test_iter_packets(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+    def test_iter_data(self):
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream(3)
         node = FunctionNode(function_pod=pod, input_stream=stream)
-        packets = list(node.iter_packets())
-        assert len(packets) == 3
-        for tag, packet in packets:
-            assert "result" in packet.keys()
+        data = list(node.iter_data())
+        assert len(data) == 3
+        for tag, data in data:
+            assert "result" in data.keys()
 
-    def test_process_packet(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+    def test_process_data(self):
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         node = FunctionNode(function_pod=pod, input_stream=stream)
-        # Get first tag/packet from input
-        tag, packet = next(iter(stream.iter_packets()))
-        out_tag, out_packet = node.process_packet(tag, packet)
-        assert out_packet is not None
-        assert "result" in out_packet.keys()
+        # Get first tag/data from input
+        tag, data = next(iter(stream.iter_data()))
+        out_tag, out_data = node.process_data(tag, data)
+        assert out_data is not None
+        assert "result" in out_data.keys()
 
     def test_producer_is_function_pod(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         node = FunctionNode(function_pod=pod, input_stream=stream)
         assert node.producer is pod
 
     def test_upstreams(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         node = FunctionNode(function_pod=pod, input_stream=stream)
         assert stream in node.upstreams
 
     def test_clear_cache(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         node = FunctionNode(function_pod=pod, input_stream=stream)
-        list(node.iter_packets())
+        list(node.iter_data())
         node.clear_cache()
         # Should be able to iterate again after clearing
-        packets = list(node.iter_packets())
-        assert len(packets) == 3
+        data = list(node.iter_data())
+        assert len(data) == 3
 
 
 # ===================================================================
@@ -128,8 +128,8 @@ class TestFunctionNode:
     Phase 2 computes missing. Uses pipeline_hash for DB path scoping."""
 
     def test_caches_computed_results(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream(3)
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
@@ -139,14 +139,14 @@ class TestFunctionNode:
             pipeline_database=pipeline_db,
             result_database=result_db,
         )
-        # run() computes all; iter_packets() is read-only and serves from cache
+        # run() computes all; iter_data() is read-only and serves from cache
         node.run()
-        packets = list(node.iter_packets())
-        assert len(packets) == 3
+        data = list(node.iter_data())
+        assert len(data) == 3
 
     def test_run_eagerly_processes_all(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream(3)
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
@@ -163,8 +163,8 @@ class TestFunctionNode:
         assert records.num_rows == 3
 
     def test_as_source_returns_derived_source(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream(3)
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
@@ -179,8 +179,8 @@ class TestFunctionNode:
         assert isinstance(source, DerivedSource)
 
     def test_node_identity_path_uses_pipeline_hash(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()

@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     import networkx as nx
 
     from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
-    from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
+    from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class SyncPipelineOrchestrator:
     """Execute a compiled pipeline synchronously via node ``execute()`` methods.
 
     Walks the node graph in topological order. For each node, delegates
-    to ``node.execute(observer=...)`` which owns all per-packet logic,
+    to ``node.execute(observer=...)`` which owns all per-data logic,
     cache lookups, and observer hooks internally.
 
     The orchestrator is responsible only for topological ordering,
@@ -78,7 +78,7 @@ class SyncPipelineOrchestrator:
 
         try:
             topo_order = list(nx.topological_sort(graph))
-            buffers: dict[Any, list[tuple[TagProtocol, PacketProtocol]]] = {}
+            buffers: dict[Any, list[tuple[TagProtocol, DataProtocol]]] = {}
             processed: set[Any] = set()
 
             for node in topo_order:
@@ -148,14 +148,14 @@ class SyncPipelineOrchestrator:
 
     @staticmethod
     def _materialize_as_stream(buf: list[tuple[Any, Any]], upstream_node: Any) -> Any:
-        """Wrap a (tag, packet) buffer as an ArrowTableStream.
+        """Wrap a (tag, data) buffer as an ArrowTableStream.
 
         Uses the same column selection pattern as
         ``StaticOutputOperatorPod._materialize_to_stream``: system_tags
-        for tags, source info for packets.
+        for tags, source info for data.
 
         Args:
-            buf: List of (tag, packet) tuples.
+            buf: List of (tag, data) tuples.
             upstream_node: The node that produced this buffer (used to
                 determine tag column names).
 
@@ -170,12 +170,12 @@ class SyncPipelineOrchestrator:
 
         if not buf:
             # Build an empty stream with the correct schema from the upstream node
-            tag_schema, packet_schema = upstream_node.output_schema(
+            tag_schema, data_schema = upstream_node.output_schema(
                 columns={"system_tags": True, "source": True}
             )
             type_converter = upstream_node.data_context.type_converter
             empty_fields = {}
-            for name, py_type in {**tag_schema, **packet_schema}.items():
+            for name, py_type in {**tag_schema, **data_schema}.items():
                 arrow_type = type_converter.python_type_to_arrow_type(py_type)
                 empty_fields[name] = pa.array([], type=arrow_type)
             empty_table = pa.table(empty_fields)
@@ -188,15 +188,15 @@ class SyncPipelineOrchestrator:
             )
 
         tag_tables = [tag.as_table(columns={"system_tags": True}) for tag, _ in buf]
-        packet_tables = [pkt.as_table(columns={"source": True}) for _, pkt in buf]
+        data_tables = [pkt.as_table(columns={"source": True}) for _, pkt in buf]
 
         combined_tags = pa.concat_tables(tag_tables)
-        combined_packets = pa.concat_tables(packet_tables)
+        combined_data = pa.concat_tables(data_tables)
 
         user_tag_keys = tuple(buf[0][0].keys())
         source_info = buf[0][1].source_info()
 
-        full_table = arrow_utils.hstack_tables(combined_tags, combined_packets)
+        full_table = arrow_utils.hstack_tables(combined_tags, combined_data)
 
         # Pass the upstream node's producer and upstreams so the
         # materialized stream inherits the correct identity_structure

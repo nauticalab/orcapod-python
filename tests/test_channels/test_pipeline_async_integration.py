@@ -16,7 +16,7 @@ Pipeline::
     grades  ───┘
 
 Tags:   student_id
-Packet: name, score  →  letter_grade
+Data: name, score  →  letter_grade
 """
 
 from __future__ import annotations

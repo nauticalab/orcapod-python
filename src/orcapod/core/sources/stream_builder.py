@@ -114,20 +114,20 @@ class SourceStreamBuilder:
                 f"{table.column_names}"
             )
 
-        # 4. Compute schema hash from tag/packet python schemas.
+        # 4. Compute schema hash from tag/data python schemas.
         # Nullable flags in the incoming table are trusted as-is — callers must
         # set them correctly before calling build().
         non_sys = arrow_utils.drop_system_columns(table)
         tag_schema = non_sys.select(list(tag_columns_tuple)).schema
-        packet_schema = non_sys.drop(list(tag_columns_tuple)).schema
+        data_schema = non_sys.drop(list(tag_columns_tuple)).schema
         tag_python = self._data_context.type_converter.arrow_schema_to_python_schema(
             tag_schema
         )
-        packet_python = self._data_context.type_converter.arrow_schema_to_python_schema(
-            packet_schema
+        data_python = self._data_context.type_converter.arrow_schema_to_python_schema(
+            data_schema
         )
         schema_hash = self._data_context.semantic_hasher.hash_object(
-            (tag_python, packet_python)
+            (tag_python, data_python)
         ).to_hex(char_count=self._config.schema_hash_n_char)
 
         # 5. Compute table hash for data identity.

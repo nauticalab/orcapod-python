@@ -7,7 +7,7 @@ Test sections:
  3. DBTableSource protocol conformance (SourceProtocol, StreamProtocol, PipelineElementProtocol)
  4. Construction — default tag columns (PK), explicit tag columns, source_id
  5. Construction error cases — missing table, no PK columns, empty table
- 6. Stream behaviour — iter_packets count, output_schema, as_table, producer/upstreams
+ 6. Stream behaviour — iter_data count, output_schema, as_table, producer/upstreams
  7. Deterministic hashing (pipeline_hash, content_hash)
  8. Config — to_config shape, from_config raises NotImplementedError
 """
@@ -185,8 +185,8 @@ class TestProtocolConformance:
     def test_is_pipeline_element_protocol(self, source):
         assert isinstance(source, PipelineElementProtocol)
 
-    def test_has_iter_packets(self, source):
-        assert callable(source.iter_packets)
+    def test_has_iter_data(self, source):
+        assert callable(source.iter_data)
 
     def test_has_output_schema(self, source):
         assert callable(source.output_schema)
@@ -211,19 +211,19 @@ class TestConstruction:
         tag_schema, _ = source.output_schema()
         assert "session_id" in tag_schema
 
-    def test_pk_tag_column_not_in_packet_schema(self, source):
-        tag_schema, packet_schema = source.output_schema()
+    def test_pk_tag_column_not_in_data_schema(self, source):
+        tag_schema, data_schema = source.output_schema()
         assert "session_id" in tag_schema
-        assert "session_id" not in packet_schema
+        assert "session_id" not in data_schema
 
-    def test_non_pk_columns_in_packet_schema(self, source):
-        _, packet_schema = source.output_schema()
-        assert "trial" in packet_schema
-        assert "response" in packet_schema
+    def test_non_pk_columns_in_data_schema(self, source):
+        _, data_schema = source.output_schema()
+        assert "trial" in data_schema
+        assert "response" in data_schema
 
     def test_explicit_tag_columns_override_pk(self, connector):
         src = DBTableSource(connector, "measurements", tag_columns=["trial"])
-        tag_schema, packet_schema = src.output_schema()
+        tag_schema, data_schema = src.output_schema()
         assert "trial" in tag_schema
         assert "session_id" not in tag_schema
 
@@ -322,16 +322,16 @@ class TestStreamBehaviour:
     def test_upstreams_is_empty(self, source):
         assert source.upstreams == ()
 
-    def test_iter_packets_yields_one_packet_per_row(self, source, measurements_table):
-        packets = list(source.iter_packets())
-        assert len(packets) == measurements_table.num_rows
+    def test_iter_data_yields_one_data_per_row(self, source, measurements_table):
+        data = list(source.iter_data())
+        assert len(data) == measurements_table.num_rows
 
-    def test_iter_packets_each_has_tag_and_packet(self, source):
-        # Tag and Packet are named types (not plain dict) but support
+    def test_iter_data_each_has_tag_and_data(self, source):
+        # Tag and Data are named types (not plain dict) but support
         # dict-like access and containment checks.
-        for tags, packet in source.iter_packets():
+        for tags, data in source.iter_data():
             assert "session_id" in tags
-            assert "trial" in packet or "response" in packet
+            assert "trial" in data or "response" in data
 
     def test_output_schema_returns_two_schemas(self, source):
         result = source.output_schema()
@@ -341,10 +341,10 @@ class TestStreamBehaviour:
         tag_schema, _ = source.output_schema()
         assert "session_id" in tag_schema
 
-    def test_output_schema_packet_schema_has_payload_columns(self, source):
-        _, packet_schema = source.output_schema()
-        assert "trial" in packet_schema
-        assert "response" in packet_schema
+    def test_output_schema_data_schema_has_payload_columns(self, source):
+        _, data_schema = source.output_schema()
+        assert "trial" in data_schema
+        assert "response" in data_schema
 
     def test_as_table_returns_pyarrow_table(self, source):
         t = source.as_table()
@@ -356,7 +356,7 @@ class TestStreamBehaviour:
 
     def test_source_with_explicit_tags_yields_correct_keys(self, connector):
         src = DBTableSource(connector, "measurements", tag_columns=["session_id"])
-        for tags, _ in src.iter_packets():
+        for tags, _ in src.iter_data():
             assert "session_id" in tags
 
 
@@ -377,7 +377,7 @@ class TestDeterministicHashing:
         assert src1.content_hash() == src2.content_hash()
 
     def test_pipeline_hash_is_schema_only_not_source_id(self, connector):
-        # pipeline_identity_structure() is (tag_schema, packet_schema) by design —
+        # pipeline_identity_structure() is (tag_schema, data_schema) by design —
         # source_id is intentionally excluded so sources with identical schemas
         # share the same pipeline hash and therefore the same pipeline DB table.
         src1 = DBTableSource(connector, "measurements", source_id="a")
@@ -420,7 +420,7 @@ class TestConfig:
 
     def test_to_config_has_identity_fields(self, source):
         config = source.to_config()
-        # identity_config() adds content_hash, pipeline_hash, tag_schema, packet_schema
+        # identity_config() adds content_hash, pipeline_hash, tag_schema, data_schema
         assert "content_hash" in config
         assert "pipeline_hash" in config
 

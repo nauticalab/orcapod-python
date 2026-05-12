@@ -605,18 +605,18 @@ class TestPKAsDefaultTags:
         tag_schema, _ = src.output_schema()
         assert "session_id" in tag_schema
 
-    def test_pk_not_in_packet_schema(self, pk_connector):
+    def test_pk_not_in_data_schema(self, pk_connector):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(pk_connector._db_path, "measurements")
-        _, packet_schema = src.output_schema()
-        assert "session_id" not in packet_schema
+        _, data_schema = src.output_schema()
+        assert "session_id" not in data_schema
 
-    def test_non_pk_columns_in_packet_schema(self, pk_connector):
+    def test_non_pk_columns_in_data_schema(self, pk_connector):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(pk_connector._db_path, "measurements")
-        _, packet_schema = src.output_schema()
-        assert "trial" in packet_schema
-        assert "response" in packet_schema
+        _, data_schema = src.output_schema()
+        assert "trial" in data_schema
+        assert "response" in data_schema
 
     def test_composite_pk_all_columns_are_tags(self, composite_pk_connector):
         from orcapod.core.sources import SQLiteTableSource
@@ -675,16 +675,16 @@ class TestRowidFallback:
         tag_schema, _ = src.output_schema()
         assert "rowid" in tag_schema
 
-    def test_rowid_is_not_in_packet_schema(self, rowid_connector):
+    def test_rowid_is_not_in_data_schema(self, rowid_connector):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(rowid_connector._db_path, "logs")
-        _, packet_schema = src.output_schema()
-        assert "rowid" not in packet_schema
+        _, data_schema = src.output_schema()
+        assert "rowid" not in data_schema
 
     def test_rowid_values_are_positive_integers(self, rowid_connector):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(rowid_connector._db_path, "logs")
-        for tags, _ in src.iter_packets():
+        for tags, _ in src.iter_data():
             assert isinstance(tags["rowid"], int)
             assert tags["rowid"] > 0
 
@@ -692,7 +692,7 @@ class TestRowidFallback:
         """Verify rowid is actually typed as int64, not large_string."""
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(rowid_connector._db_path, "logs")
-        # The raw stream table (before tag/packet split) holds all columns.
+        # The raw stream table (before tag/data split) holds all columns.
         # We can verify the Arrow type via the internal stream table.
         raw = src._stream._table  # ArrowTableStream stores the enriched table
         assert "rowid" in raw.schema.names
@@ -701,8 +701,8 @@ class TestRowidFallback:
     def test_all_rows_returned_for_rowid_table(self, rowid_connector):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(rowid_connector._db_path, "logs")
-        packets = list(src.iter_packets())
-        assert len(packets) == 3
+        data = list(src.iter_data())
+        assert len(data) == 3
 
 
 # ===========================================================================
@@ -738,16 +738,16 @@ class TestStreamBehaviour:
         src = SQLiteTableSource(pk_connector._db_path, "measurements")
         assert src.upstreams == ()
 
-    def test_iter_packets_yields_one_per_row(self, pk_connector):
+    def test_iter_data_yields_one_per_row(self, pk_connector):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(pk_connector._db_path, "measurements")
-        packets = list(src.iter_packets())
-        assert len(packets) == 3
+        data = list(src.iter_data())
+        assert len(data) == 3
 
-    def test_iter_packets_tags_contain_pk(self, pk_connector):
+    def test_iter_data_tags_contain_pk(self, pk_connector):
         from orcapod.core.sources import SQLiteTableSource
         src = SQLiteTableSource(pk_connector._db_path, "measurements")
-        for tags, _ in src.iter_packets():
+        for tags, _ in src.iter_data():
             assert "session_id" in tags
 
     def test_output_schema_returns_two_schemas(self, pk_connector):
@@ -1060,7 +1060,7 @@ git commit -m "test(sources): add config round-trip tests for SQLiteTableSource"
 
 ## Task 6: Integration test — `SQLiteTableSource` in a pipeline
 
-**Background:** `Pipeline` wires sources into a node graph. A `FunctionPod` consumes packets from the source. We verify end-to-end that tag columns flow through and the pipeline produces the expected results.
+**Background:** `Pipeline` wires sources into a node graph. A `FunctionPod` consumes data from the source. We verify end-to-end that tag columns flow through and the pipeline produces the expected results.
 
 **Files:**
 - Modify: `tests/test_core/sources/test_sqlite_table_source.py`
@@ -1080,7 +1080,7 @@ class TestPipelineIntegration:
     def test_sqlite_source_in_pipeline(self, pk_connector):
         """Verify SQLiteTableSource drives a full pipeline end-to-end."""
         from orcapod.core.function_pod import FunctionPod
-        from orcapod.core.packet_function import PythonPacketFunction
+        from orcapod.core.data_function import PythonDataFunction
         from orcapod.core.sources import SQLiteTableSource
         from orcapod.databases import InMemoryArrowDatabase
         from orcapod.pipeline import Pipeline
@@ -1090,7 +1090,7 @@ class TestPipelineIntegration:
             return response * 2.0
 
         src = SQLiteTableSource(pk_connector._db_path, "measurements")
-        pf = PythonPacketFunction(double_response, output_keys="doubled")
+        pf = PythonDataFunction(double_response, output_keys="doubled")
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(

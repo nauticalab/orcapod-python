@@ -1,7 +1,7 @@
 """Specification-derived tests for all operators.
 
 Tests based on the design specification's operator semantics:
-- Operators inspect tags, never packet content
+- Operators inspect tags, never data content
 - Operators can rename columns but never synthesize new values
 - System tag evolution rules: name-preserving, name-extending, type-evolving
 """
@@ -13,14 +13,14 @@ import pytest
 
 from orcapod.core.operators import (
     Batch,
-    DropPacketColumns,
+    DropDataColumns,
     DropTagColumns,
     Join,
-    MapPackets,
+    MapData,
     MapTags,
     MergeJoin,
     PolarsFilter,
-    SelectPacketColumns,
+    SelectDataColumns,
     SelectTagColumns,
     SemiJoin,
 )
@@ -37,15 +37,15 @@ from orcapod.types import ColumnConfig
 
 
 def _make_stream(
-    tag_data: dict, packet_data: dict, tag_columns: list[str]
+    tag_data: dict, data_data: dict, tag_columns: list[str]
 ) -> ArrowTableStream:
-    all_data = {**tag_data, **packet_data}
+    all_data = {**tag_data, **data_data}
     table = pa.table(all_data)
     return ArrowTableStream(table, tag_columns=tag_columns)
 
 
 def _stream_a() -> ArrowTableStream:
-    """Stream with tag=id, packet=age."""
+    """Stream with tag=id, data=age."""
     return _make_stream(
         {"id": pa.array([1, 2, 3], type=pa.int64())},
         {"age": pa.array([25, 30, 35], type=pa.int64())},
@@ -54,7 +54,7 @@ def _stream_a() -> ArrowTableStream:
 
 
 def _stream_b() -> ArrowTableStream:
-    """Stream with tag=id, packet=score (overlaps with A on id=2,3)."""
+    """Stream with tag=id, data=score (overlaps with A on id=2,3)."""
     return _make_stream(
         {"id": pa.array([2, 3, 4], type=pa.int64())},
         {"score": pa.array([85, 90, 95], type=pa.int64())},
@@ -62,8 +62,8 @@ def _stream_b() -> ArrowTableStream:
     )
 
 
-def _stream_b_overlapping_packet() -> ArrowTableStream:
-    """Stream with tag=id, packet=age (same packet col name as A)."""
+def _stream_b_overlapping_data() -> ArrowTableStream:
+    """Stream with tag=id, data=age (same data col name as A)."""
     return _make_stream(
         {"id": pa.array([2, 3, 4], type=pa.int64())},
         {"age": pa.array([40, 45, 50], type=pa.int64())},
@@ -72,7 +72,7 @@ def _stream_b_overlapping_packet() -> ArrowTableStream:
 
 
 def _stream_with_two_tags() -> ArrowTableStream:
-    """Stream with tag={id, group}, packet=value."""
+    """Stream with tag={id, group}, data=value."""
     return _make_stream(
         {
             "id": pa.array([1, 2, 3], type=pa.int64()),
@@ -90,7 +90,7 @@ def _stream_with_two_tags() -> ArrowTableStream:
 
 class TestJoin:
     """Per design: N-ary inner join on shared tag columns. Requires
-    non-overlapping packet columns. Commutative. System tags: name-extending."""
+    non-overlapping data columns. Commutative. System tags: name-extending."""
 
     def test_two_streams_on_common_tags(self):
         join = Join()
@@ -101,10 +101,10 @@ class TestJoin:
         assert "age" in table.column_names
         assert "score" in table.column_names
 
-    def test_non_overlapping_packet_columns_required(self):
+    def test_non_overlapping_data_columns_required(self):
         join = Join()
         with pytest.raises(InputValidationError):
-            join.validate_inputs(_stream_a(), _stream_b_overlapping_packet())
+            join.validate_inputs(_stream_a(), _stream_b_overlapping_data())
 
     def test_commutative(self):
         """join(A, B) should produce the same data as join(B, A)."""
@@ -189,11 +189,11 @@ class TestJoin:
     def test_output_schema_prediction(self):
         join = Join()
         sa, sb = _stream_a(), _stream_b()
-        predicted_tag, predicted_packet = join.output_schema(sa, sb)
+        predicted_tag, predicted_data = join.output_schema(sa, sb)
         result = join.process(sa, sb)
-        actual_tag, actual_packet = result.output_schema()
+        actual_tag, actual_data = result.output_schema()
         assert set(predicted_tag.keys()) == set(actual_tag.keys())
-        assert set(predicted_packet.keys()) == set(actual_packet.keys())
+        assert set(predicted_data.keys()) == set(actual_data.keys())
 
 
 # ===================================================================
@@ -202,13 +202,13 @@ class TestJoin:
 
 
 class TestMergeJoin:
-    """Per design: binary join where colliding packet columns merge into
+    """Per design: binary join where colliding data columns merge into
     sorted list[T]. Requires identical types for colliding columns."""
 
     def test_colliding_columns_become_sorted_lists(self):
         merge = MergeJoin()
-        sa = _stream_a()  # packet: age
-        sb = _stream_b_overlapping_packet()  # packet: age
+        sa = _stream_a()  # data: age
+        sb = _stream_b_overlapping_data()  # data: age
         result = merge.process(sa, sb)
         table = result.as_table()
         # age should now be list[int] type
@@ -238,10 +238,10 @@ class TestMergeJoin:
     def test_output_schema_predicts_list_types(self):
         merge = MergeJoin()
         sa = _stream_a()
-        sb = _stream_b_overlapping_packet()
-        predicted_tag, predicted_packet = merge.output_schema(sa, sb)
+        sb = _stream_b_overlapping_data()
+        predicted_tag, predicted_data = merge.output_schema(sa, sb)
         # The 'age' column should be predicted as list type
-        assert "age" in predicted_packet
+        assert "age" in predicted_data
 
 
 # ===================================================================
@@ -251,7 +251,7 @@ class TestMergeJoin:
 
 class TestSemiJoin:
     """Per design: binary non-commutative join. Keeps left rows matching
-    right tags. Right packet columns are dropped."""
+    right tags. Right data columns are dropped."""
 
     def test_filters_left_by_right_tags(self):
         semi = SemiJoin()
@@ -268,11 +268,11 @@ class TestSemiJoin:
         # Generally not the same (different left/right roles)
         table_ab = result_ab.as_table()
         table_ba = result_ba.as_table()
-        # AB keeps A's packets (age), BA keeps B's packets (score)
+        # AB keeps A's data (age), BA keeps B's data (score)
         assert "age" in table_ab.column_names
         assert "score" in table_ba.column_names
 
-    def test_preserves_left_packet_columns(self):
+    def test_preserves_left_data_columns(self):
         semi = SemiJoin()
         result = semi.process(_stream_a(), _stream_b())
         table = result.as_table()
@@ -286,7 +286,7 @@ class TestSemiJoin:
 
 
 class TestBatch:
-    """Per design: groups rows by tag, aggregates packets. Packet column
+    """Per design: groups rows by tag, aggregates data. Data column
     types become list[T]. System tag type evolves from str to list[str]."""
 
     def test_groups_rows(self):
@@ -325,11 +325,11 @@ class TestBatch:
             ["group"],
         )
         batch = Batch()
-        predicted_tag, predicted_packet = batch.output_schema(stream)
+        predicted_tag, predicted_data = batch.output_schema(stream)
         result = batch.process(stream)
-        actual_tag, actual_packet = result.output_schema()
+        actual_tag, actual_data = result.output_schema()
         assert set(predicted_tag.keys()) == set(actual_tag.keys())
-        assert set(predicted_packet.keys()) == set(actual_packet.keys())
+        assert set(predicted_data.keys()) == set(actual_data.keys())
 
     def test_batch_with_batch_size(self):
         stream = _make_stream(
@@ -379,20 +379,20 @@ class TestSelectTagColumns:
             select.process(stream)
 
 
-class TestSelectPacketColumns:
-    """Per design: keeps only specified packet columns."""
+class TestSelectDataColumns:
+    """Per design: keeps only specified data columns."""
 
-    def test_select_packet_columns(self):
+    def test_select_data_columns(self):
         stream = _make_stream(
             {"id": pa.array([1, 2], type=pa.int64())},
             {"a": pa.array([10, 20], type=pa.int64()), "b": pa.array([30, 40], type=pa.int64())},
             ["id"],
         )
-        select = SelectPacketColumns(columns=["a"])
+        select = SelectDataColumns(columns=["a"])
         result = select.process(stream)
-        _, packet_keys = result.keys()
-        assert "a" in packet_keys
-        assert "b" not in packet_keys
+        _, data_keys = result.keys()
+        assert "a" in data_keys
+        assert "b" not in data_keys
 
 
 class TestDropTagColumns:
@@ -407,24 +407,24 @@ class TestDropTagColumns:
         assert "id" in tag_keys
 
 
-class TestDropPacketColumns:
-    """Per design: removes specified packet columns."""
+class TestDropDataColumns:
+    """Per design: removes specified data columns."""
 
-    def test_drop_packet_columns(self):
+    def test_drop_data_columns(self):
         stream = _make_stream(
             {"id": pa.array([1, 2], type=pa.int64())},
             {"a": pa.array([10, 20], type=pa.int64()), "b": pa.array([30, 40], type=pa.int64())},
             ["id"],
         )
-        drop = DropPacketColumns(columns=["b"])
+        drop = DropDataColumns(columns=["b"])
         result = drop.process(stream)
-        _, packet_keys = result.keys()
-        assert "a" in packet_keys
-        assert "b" not in packet_keys
+        _, data_keys = result.keys()
+        assert "a" in data_keys
+        assert "b" not in data_keys
 
 
 # ===================================================================
-# MapTags / MapPackets
+# MapTags / MapData
 # ===================================================================
 
 
@@ -448,20 +448,20 @@ class TestMapTags:
         assert "group" not in tag_keys
 
 
-class TestMapPackets:
-    """Per design: renames packet columns."""
+class TestMapData:
+    """Per design: renames data columns."""
 
-    def test_renames_packet_columns(self):
+    def test_renames_data_columns(self):
         stream = _make_stream(
             {"id": pa.array([1, 2], type=pa.int64())},
             {"value": pa.array([10, 20], type=pa.int64())},
             ["id"],
         )
-        mapper = MapPackets(name_map={"value": "score"})
+        mapper = MapData(name_map={"value": "score"})
         result = mapper.process(stream)
-        _, packet_keys = result.keys()
-        assert "score" in packet_keys
-        assert "value" not in packet_keys
+        _, data_keys = result.keys()
+        assert "score" in data_keys
+        assert "value" not in data_keys
 
 
 # ===================================================================
@@ -484,11 +484,11 @@ class TestPolarsFilter:
     def test_filter_preserves_schema(self):
         stream = _stream_a()
         filt = PolarsFilter(constraints={"id": 2})
-        predicted_tag, predicted_packet = filt.output_schema(stream)
+        predicted_tag, predicted_data = filt.output_schema(stream)
         result = filt.process(stream)
-        actual_tag, actual_packet = result.output_schema()
+        actual_tag, actual_data = result.output_schema()
         assert set(predicted_tag.keys()) == set(actual_tag.keys())
-        assert set(predicted_packet.keys()) == set(actual_packet.keys())
+        assert set(predicted_data.keys()) == set(actual_data.keys())
 
 
 # ===================================================================

@@ -5,7 +5,7 @@ Tests for CachedSource covering:
 - Cumulative caching: data from prior runs is preserved
 - Dedup by per-row content hash
 - Transparent streaming: downstream consumers see same schema as live source
-- iter_packets and as_table produce consistent results
+- iter_data and as_table produce consistent results
 - System tags are preserved through caching
 - Source info columns are preserved through caching
 - clear_cache forces rebuild on next access
@@ -157,7 +157,7 @@ class TestCachedSourceSchema:
 
 
 # ---------------------------------------------------------------------------
-# Streaming: iter_packets and as_table
+# Streaming: iter_data and as_table
 # ---------------------------------------------------------------------------
 
 
@@ -169,16 +169,16 @@ class TestCachedSourceStreaming:
         assert ps_table.num_rows == src_table.num_rows
         assert set(ps_table.column_names) == set(src_table.column_names)
 
-    def test_iter_packets_count(self, simple_source, db):
+    def test_iter_data_count(self, simple_source, db):
         ps = CachedSource(simple_source, cache_database=db)
-        packets = list(ps.iter_packets())
-        assert len(packets) == 3
+        data = list(ps.iter_data())
+        assert len(data) == 3
 
-    def test_iter_packets_tags_and_packets(self, simple_source, db):
+    def test_iter_data_tags_and_data(self, simple_source, db):
         ps = CachedSource(simple_source, cache_database=db)
-        for tag, packet in ps.iter_packets():
+        for tag, data in ps.iter_data():
             assert "name" in tag.keys()
-            assert "age" in packet.keys()
+            assert "age" in data.keys()
 
     def test_system_tags_preserved(self, simple_source, db):
         """System tags flow through the cache correctly."""
@@ -331,22 +331,22 @@ class TestCachedSourceIntegration:
     def test_function_pod_with_cached_source(self, db):
         """CachedSource works as input to a FunctionPod."""
         from orcapod.core.function_pod import FunctionPod
-        from orcapod.core.packet_function import PythonPacketFunction
+        from orcapod.core.data_function import PythonDataFunction
 
         def double_age(age: int) -> int:
             return age * 2
 
-        pf = PythonPacketFunction(double_age, output_keys="doubled_age")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(double_age, output_keys="doubled_age")
+        pod = FunctionPod(data_function=pf)
 
         table = pa.table({"name": ["Alice", "Bob"], "age": [30, 25]})
         source = ArrowTableSource(table, tag_columns=["name"], source_id="test", infer_nullable=True)
         ps = CachedSource(source, cache_database=db)
 
         result = pod(ps)
-        packets = list(result.iter_packets())
-        assert len(packets) == 2
-        ages = [p.as_dict()["doubled_age"] for _, p in packets]
+        data = list(result.iter_data())
+        assert len(data) == 2
+        ages = [p.as_dict()["doubled_age"] for _, p in data]
         assert sorted(ages) == [50, 60]
 
 
@@ -365,13 +365,13 @@ class TestCachedSourceWithSourceProxy:
         from orcapod.core.sources.source_proxy import SourceProxy
         from orcapod.types import Schema
 
-        tag_schema, packet_schema = source.output_schema()
+        tag_schema, data_schema = source.output_schema()
         return SourceProxy(
             source_id=source.source_id,
             content_hash_str=source.content_hash().to_string(),
             pipeline_hash_str=source.pipeline_hash().to_string(),
             tag_schema=tag_schema,
-            packet_schema=packet_schema,
+            data_schema=data_schema,
             expected_class_name=source.__class__.__name__,
         )
 

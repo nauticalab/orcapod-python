@@ -16,8 +16,8 @@ if TYPE_CHECKING:
 class ListSource(RootSource):
     """A source backed by a Python list.
 
-    Each element in the list becomes one (tag, packet) pair. The element is
-    stored as the packet under ``name``; the tag is either the element's index
+    Each element in the list becomes one (tag, data) pair. The element is
+    stored as the data under ``name``; the tag is either the element's index
     (default) or the dict returned by ``tag_function(element, index)``.
     """
 

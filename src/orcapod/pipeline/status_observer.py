@@ -1,6 +1,6 @@
 """Run status observer for orcapod pipelines.
 
-Provides ``StatusObserver``, a drop-in observer that records per-packet
+Provides ``StatusObserver``, a drop-in observer that records per-data
 execution state transitions (``RUNNING``, ``SUCCESS``, ``FAILED``) to any
 ``ArrowDatabaseProtocol`` implementation (in-memory, Delta Lake, etc.).
 
@@ -31,7 +31,7 @@ Status schema (fixed columns):
     - ``_status_timestamp`` (large_utf8): ISO-8601 UTC timestamp.
     - ``_status_error_summary`` (large_utf8): Brief error on ``FAILED``; ``None`` otherwise.
 
-    In addition, each tag key from the packet's tag becomes a separate
+    In addition, each tag key from the data's tag becomes a separate
     ``large_utf8`` column (queryable, not JSON-encoded).  Tag columns use
     bare names (no prefix), so they are always distinguishable from fixed
     columns.
@@ -59,7 +59,7 @@ from typing import TYPE_CHECKING, Any
 from uuid_utils import uuid7
 
 from orcapod.pipeline.observer import NoOpLogger
-from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
+from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
 from orcapod.types import SchemaLike
 
 if TYPE_CHECKING:
@@ -149,35 +149,35 @@ class StatusObserver:
     ) -> None:
         self._tag_schema_per_node.pop(node_label, None)
 
-    def on_packet_start(
-        self, node_label: str, tag: TagProtocol, packet: PacketProtocol
+    def on_data_start(
+        self, node_label: str, tag: TagProtocol, data: DataProtocol
     ) -> None:
         self._write_event(node_label, tag, state="RUNNING")
 
-    def on_packet_end(
+    def on_data_end(
         self,
         node_label: str,
         tag: TagProtocol,
-        input_packet: PacketProtocol,
-        output_packet: PacketProtocol | None,
+        input_data: DataProtocol,
+        output_data: DataProtocol | None,
         cached: bool,
     ) -> None:
         self._write_event(node_label, tag, state="CACHED" if cached else "SUCCESS")
 
-    def on_packet_crash(
-        self, node_label: str, tag: TagProtocol, packet: PacketProtocol, error: Exception
+    def on_data_crash(
+        self, node_label: str, tag: TagProtocol, data: DataProtocol, error: Exception
     ) -> None:
         self._write_event(node_label, tag, state="FAILED", error=error)
 
-    def create_packet_logger(
+    def create_data_logger(
         self,
         tag: TagProtocol,
-        packet: PacketProtocol,
+        data: DataProtocol,
     ) -> NoOpLogger:
         """Return a no-op logger.
 
         Status events are written from observer hooks, not from the
-        packet logger.
+        data logger.
         """
         return _NOOP_LOGGER
 
@@ -354,34 +354,34 @@ class _ContextualizedStatusObserver:
     ) -> None:
         self._tag_schema = {}
 
-    def on_packet_start(
-        self, node_label: str, tag: TagProtocol, packet: PacketProtocol
+    def on_data_start(
+        self, node_label: str, tag: TagProtocol, data: DataProtocol
     ) -> None:
         self._write_event(node_label, tag, state="RUNNING")
 
-    def on_packet_end(
+    def on_data_end(
         self,
         node_label: str,
         tag: TagProtocol,
-        input_packet: PacketProtocol,
-        output_packet: PacketProtocol | None,
+        input_data: DataProtocol,
+        output_data: DataProtocol | None,
         cached: bool,
     ) -> None:
         self._write_event(node_label, tag, state="CACHED" if cached else "SUCCESS")
 
-    def on_packet_crash(
+    def on_data_crash(
         self,
         node_label: str,
         tag: TagProtocol,
-        packet: PacketProtocol,
+        data: DataProtocol,
         error: Exception,
     ) -> None:
         self._write_event(node_label, tag, state="FAILED", error=error)
 
-    def create_packet_logger(
+    def create_data_logger(
         self,
         tag: TagProtocol,
-        packet: PacketProtocol,
+        data: DataProtocol,
     ) -> NoOpLogger:
         return _NOOP_LOGGER
 

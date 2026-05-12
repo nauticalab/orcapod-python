@@ -6,15 +6,15 @@ from typing import TYPE_CHECKING, Any, Protocol, Self, runtime_checkable
 from orcapod.types import Schema
 
 if TYPE_CHECKING:
-    from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
+    from orcapod.protocols.observability_protocols import DataExecutionLoggerProtocol
 
 
 @runtime_checkable
-class PacketFunctionExecutorProtocol(Protocol):
+class DataFunctionExecutorProtocol(Protocol):
     """Base executor protocol — defines identity, compatibility, and lifecycle.
 
-    Executors decouple *what* a packet function computes from *where/how* it
-    runs.  Each executor declares which ``packet_function_type_id`` values it
+    Executors decouple *what* a data function computes from *where/how* it
+    runs.  Each executor declares which ``data_function_type_id`` values it
     supports.  Subtype protocols (e.g. ``PythonFunctionExecutorProtocol``)
     add execution methods specific to the function type.
     """
@@ -25,21 +25,21 @@ class PacketFunctionExecutorProtocol(Protocol):
         ...
 
     def supported_function_type_ids(self) -> frozenset[str]:
-        """Return the set of ``packet_function_type_id`` values this executor can handle.
+        """Return the set of ``data_function_type_id`` values this executor can handle.
 
         Return an empty frozenset to indicate support for *all* function types.
         """
         ...
 
-    def supports(self, packet_function_type_id: str) -> bool:
+    def supports(self, data_function_type_id: str) -> bool:
         """Return ``True`` if this executor can run functions of the given type."""
         ...
 
     @property
     def supports_concurrent_execution(self) -> bool:
-        """Whether this executor can meaningfully run multiple packets concurrently.
+        """Whether this executor can meaningfully run multiple data concurrently.
 
-        When ``True``, iteration machinery may submit all packets via
+        When ``True``, iteration machinery may submit all data via
         async execution concurrently and collect results before yielding.
         """
         ...
@@ -69,13 +69,13 @@ class PacketFunctionExecutorProtocol(Protocol):
 
 
 @runtime_checkable
-class PythonFunctionExecutorProtocol(PacketFunctionExecutorProtocol, Protocol):
-    """Executor protocol for Python callable-based packet functions.
+class PythonFunctionExecutorProtocol(DataFunctionExecutorProtocol, Protocol):
+    """Executor protocol for Python callable-based data functions.
 
-    Extends ``PacketFunctionExecutorProtocol`` with callable-level
+    Extends ``DataFunctionExecutorProtocol`` with callable-level
     execution methods.  The executor receives the raw Python function
-    and its keyword arguments directly — the packet function handles
-    packet construction/deconstruction around the executor call.
+    and its keyword arguments directly — the data function handles
+    data construction/deconstruction around the executor call.
     """
 
     def execute_callable(
@@ -84,7 +84,7 @@ class PythonFunctionExecutorProtocol(PacketFunctionExecutorProtocol, Protocol):
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
         *,
-        logger: PacketExecutionLoggerProtocol | None = None,
+        logger: DataExecutionLoggerProtocol | None = None,
     ) -> Any:
         """Synchronously execute *fn* with *kwargs*, capturing I/O.
 
@@ -109,7 +109,7 @@ class PythonFunctionExecutorProtocol(PacketFunctionExecutorProtocol, Protocol):
         kwargs: dict[str, Any],
         executor_options: dict[str, Any] | None = None,
         *,
-        logger: PacketExecutionLoggerProtocol | None = None,
+        logger: DataExecutionLoggerProtocol | None = None,
     ) -> Any:
         """Asynchronously execute *fn* with *kwargs*, capturing I/O.
 

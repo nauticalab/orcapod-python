@@ -2,14 +2,14 @@
 
 from orcapod.core.operators import (
     Batch,
-    DropPacketColumns,
+    DropDataColumns,
     DropTagColumns,
     Join,
-    MapPackets,
+    MapData,
     MapTags,
     MergeJoin,
     PolarsFilter,
-    SelectPacketColumns,
+    SelectDataColumns,
     SelectTagColumns,
     SemiJoin,
 )
@@ -102,20 +102,20 @@ class TestDropTagColumnsConfig:
         assert config["class_name"] == "DropTagColumns"
 
 
-class TestSelectPacketColumnsConfig:
+class TestSelectDataColumnsConfig:
     def test_round_trip(self):
-        op = SelectPacketColumns(columns=["a"])
+        op = SelectDataColumns(columns=["a"])
         config = op.to_config()
-        restored = SelectPacketColumns.from_config(config)
-        assert isinstance(restored, SelectPacketColumns)
+        restored = SelectDataColumns.from_config(config)
+        assert isinstance(restored, SelectDataColumns)
 
 
-class TestDropPacketColumnsConfig:
+class TestDropDataColumnsConfig:
     def test_round_trip(self):
-        op = DropPacketColumns(columns=["a"])
+        op = DropDataColumns(columns=["a"])
         config = op.to_config()
-        restored = DropPacketColumns.from_config(config)
-        assert isinstance(restored, DropPacketColumns)
+        restored = DropDataColumns.from_config(config)
+        assert isinstance(restored, DropDataColumns)
 
 
 class TestMapTagsConfig:
@@ -132,12 +132,12 @@ class TestMapTagsConfig:
         assert isinstance(restored, MapTags)
 
 
-class TestMapPacketsConfig:
+class TestMapDataConfig:
     def test_round_trip(self):
-        op = MapPackets(name_map={"old": "new"}, drop_unmapped=True)
+        op = MapData(name_map={"old": "new"}, drop_unmapped=True)
         config = op.to_config()
-        restored = MapPackets.from_config(config)
-        assert isinstance(restored, MapPackets)
+        restored = MapData.from_config(config)
+        assert isinstance(restored, MapData)
 
 
 class TestPolarsFilterConfig:

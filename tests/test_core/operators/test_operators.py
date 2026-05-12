@@ -7,13 +7,13 @@ import pytest
 
 from orcapod.core.operators import (
     Batch,
-    DropPacketColumns,
+    DropDataColumns,
     DropTagColumns,
     Join,
-    MapPackets,
+    MapData,
     MapTags,
     PolarsFilter,
-    SelectPacketColumns,
+    SelectDataColumns,
     SelectTagColumns,
     SemiJoin,
 )
@@ -28,7 +28,7 @@ from orcapod.protocols.core_protocols import PodProtocol, StreamProtocol
 
 @pytest.fixture
 def simple_stream() -> ArrowTableStream:
-    """Stream with 1 tag (animal) and 2 packet columns (weight, legs)."""
+    """Stream with 1 tag (animal) and 2 data columns (weight, legs)."""
     table = pa.table(
         {
             "animal": ["cat", "dog", "bird"],
@@ -41,7 +41,7 @@ def simple_stream() -> ArrowTableStream:
 
 @pytest.fixture
 def two_tag_stream() -> ArrowTableStream:
-    """Stream with 2 tags (region, animal) and 1 packet column (count)."""
+    """Stream with 2 tags (region, animal) and 1 data column (count)."""
     table = pa.table(
         {
             "region": ["east", "east", "west"],
@@ -78,7 +78,7 @@ def right_stream() -> ArrowTableStream:
 
 @pytest.fixture
 def disjoint_stream() -> ArrowTableStream:
-    """Stream with no overlapping packet columns for join tests."""
+    """Stream with no overlapping data columns for join tests."""
     table = pa.table(
         {
             "animal": ["cat", "dog", "bird"],
@@ -104,20 +104,20 @@ class TestPodProtocolConformance:
         op = SelectTagColumns(columns=["x"])
         assert isinstance(op, PodProtocol)
 
-    def test_select_packet_columns_is_pod(self):
-        op = SelectPacketColumns(columns=["x"])
+    def test_select_data_columns_is_pod(self):
+        op = SelectDataColumns(columns=["x"])
         assert isinstance(op, PodProtocol)
 
     def test_drop_tag_columns_is_pod(self):
         op = DropTagColumns(columns=["x"])
         assert isinstance(op, PodProtocol)
 
-    def test_drop_packet_columns_is_pod(self):
-        op = DropPacketColumns(columns=["x"])
+    def test_drop_data_columns_is_pod(self):
+        op = DropDataColumns(columns=["x"])
         assert isinstance(op, PodProtocol)
 
-    def test_map_packets_is_pod(self):
-        op = MapPackets(name_map={"a": "b"})
+    def test_map_data_is_pod(self):
+        op = MapData(name_map={"a": "b"})
         assert isinstance(op, PodProtocol)
 
     def test_map_tags_is_pod(self):
@@ -157,8 +157,8 @@ class TestOutputStreamLineage:
         assert isinstance(out, StreamProtocol)
         assert out.producer is op
 
-    def test_select_packet_columns_producer(self, simple_stream):
-        op = SelectPacketColumns(columns=["weight"])
+    def test_select_data_columns_producer(self, simple_stream):
+        op = SelectDataColumns(columns=["weight"])
         out = op.process(simple_stream)
         assert isinstance(out, StreamProtocol)
         assert out.producer is op
@@ -169,14 +169,14 @@ class TestOutputStreamLineage:
         assert isinstance(out, StreamProtocol)
         assert out.producer is op
 
-    def test_drop_packet_columns_producer(self, simple_stream):
-        op = DropPacketColumns(columns=["legs"])
+    def test_drop_data_columns_producer(self, simple_stream):
+        op = DropDataColumns(columns=["legs"])
         out = op.process(simple_stream)
         assert isinstance(out, StreamProtocol)
         assert out.producer is op
 
-    def test_map_packets_producer(self, simple_stream):
-        op = MapPackets(name_map={"weight": "mass"})
+    def test_map_data_producer(self, simple_stream):
+        op = MapData(name_map={"weight": "mass"})
         out = op.process(simple_stream)
         assert isinstance(out, StreamProtocol)
         assert out.producer is op
@@ -239,8 +239,8 @@ class TestInputValidation:
         with pytest.raises(ValueError, match="at least one"):
             op.process()
 
-    def test_select_packet_strict_rejects_missing(self, simple_stream):
-        op = SelectPacketColumns(columns=["nonexistent"], strict=True)
+    def test_select_data_strict_rejects_missing(self, simple_stream):
+        op = SelectDataColumns(columns=["nonexistent"], strict=True)
         with pytest.raises(Exception):
             op.process(simple_stream)
 
@@ -249,8 +249,8 @@ class TestInputValidation:
         with pytest.raises(Exception):
             op.process(simple_stream)
 
-    def test_drop_packet_strict_rejects_missing(self, simple_stream):
-        op = DropPacketColumns(columns=["nonexistent"], strict=True)
+    def test_drop_data_strict_rejects_missing(self, simple_stream):
+        op = DropDataColumns(columns=["nonexistent"], strict=True)
         with pytest.raises(Exception):
             op.process(simple_stream)
 
@@ -281,10 +281,10 @@ class TestPolarsFilterBehavior:
 
     def test_filter_preserves_schema(self, simple_stream):
         op = PolarsFilter(constraints={"legs": 4})
-        tag_schema, packet_schema = op.output_schema(simple_stream)
+        tag_schema, data_schema = op.output_schema(simple_stream)
         orig_tag, orig_pkt = simple_stream.output_schema()
         assert set(tag_schema.keys()) == set(orig_tag.keys())
-        assert set(packet_schema.keys()) == set(orig_pkt.keys())
+        assert set(data_schema.keys()) == set(orig_pkt.keys())
 
 
 class TestSelectTagColumnsBehavior:
@@ -294,7 +294,7 @@ class TestSelectTagColumnsBehavior:
         tag_keys, pkt_keys = out.keys()
         assert "region" in tag_keys
         assert "animal" not in tag_keys
-        # packet columns unchanged
+        # data columns unchanged
         assert "count" in pkt_keys
 
     def test_output_schema_matches_result(self, two_tag_stream):
@@ -305,9 +305,9 @@ class TestSelectTagColumnsBehavior:
         assert "count" in pkt_schema
 
 
-class TestSelectPacketColumnsBehavior:
-    def test_keeps_only_selected_packets(self, simple_stream):
-        op = SelectPacketColumns(columns=["weight"])
+class TestSelectDataColumnsBehavior:
+    def test_keeps_only_selected_data(self, simple_stream):
+        op = SelectDataColumns(columns=["weight"])
         out = op.process(simple_stream)
         tag_keys, pkt_keys = out.keys()
         assert pkt_keys == ("weight",)
@@ -316,7 +316,7 @@ class TestSelectPacketColumnsBehavior:
         assert "animal" in tag_keys
 
     def test_output_schema_matches_result(self, simple_stream):
-        op = SelectPacketColumns(columns=["weight"])
+        op = SelectDataColumns(columns=["weight"])
         tag_schema, pkt_schema = op.output_schema(simple_stream)
         assert "weight" in pkt_schema
         assert "legs" not in pkt_schema
@@ -338,9 +338,9 @@ class TestDropTagColumnsBehavior:
         assert "animal" in tag_schema
 
 
-class TestDropPacketColumnsBehavior:
-    def test_drops_specified_packets(self, simple_stream):
-        op = DropPacketColumns(columns=["legs"])
+class TestDropDataColumnsBehavior:
+    def test_drops_specified_data(self, simple_stream):
+        op = DropDataColumns(columns=["legs"])
         out = op.process(simple_stream)
         tag_keys, pkt_keys = out.keys()
         assert "legs" not in pkt_keys
@@ -348,15 +348,15 @@ class TestDropPacketColumnsBehavior:
         assert "animal" in tag_keys
 
     def test_output_schema_matches_result(self, simple_stream):
-        op = DropPacketColumns(columns=["legs"])
+        op = DropDataColumns(columns=["legs"])
         tag_schema, pkt_schema = op.output_schema(simple_stream)
         assert "legs" not in pkt_schema
         assert "weight" in pkt_schema
 
 
-class TestMapPacketsBehavior:
-    def test_renames_packet_column(self, simple_stream):
-        op = MapPackets(name_map={"weight": "mass"})
+class TestMapDataBehavior:
+    def test_renames_data_column(self, simple_stream):
+        op = MapData(name_map={"weight": "mass"})
         out = op.process(simple_stream)
         tag_keys, pkt_keys = out.keys()
         assert "mass" in pkt_keys
@@ -366,13 +366,13 @@ class TestMapPacketsBehavior:
         assert result.column("mass").to_pylist() == [4.0, 12.0, 0.5]
 
     def test_output_schema_reflects_rename(self, simple_stream):
-        op = MapPackets(name_map={"weight": "mass"})
+        op = MapData(name_map={"weight": "mass"})
         tag_schema, pkt_schema = op.output_schema(simple_stream)
         assert "mass" in pkt_schema
         assert "weight" not in pkt_schema
 
     def test_collision_with_existing_column_raises(self, simple_stream):
-        op = MapPackets(name_map={"weight": "legs"})
+        op = MapData(name_map={"weight": "legs"})
         with pytest.raises(Exception):
             op.process(simple_stream)
 
@@ -471,7 +471,7 @@ class TestJoinMetaColumnCollision:
     with stream-index-based suffixes (e.g. ``__computed_1``, ``__computed_2``)."""
 
     def _make_stream(self, id_vals, pkt_col, pkt_vals, meta_val):
-        """Helper: stream with shared tag 'id', one packet column, and ``__computed``."""
+        """Helper: stream with shared tag 'id', one data column, and ``__computed``."""
         table = pa.table(
             {
                 "id": pa.array(id_vals, type=pa.int64()),
@@ -691,7 +691,7 @@ class TestJoinOutputSchemaSystemTags:
 
     def test_predicted_schema_matches_result_stream_schema(self):
         """Operator's predicted output_schema must equal the result stream's
-        output_schema — both tag and packet schemas, without system tags."""
+        output_schema — both tag and data schemas, without system tags."""
         from orcapod.core.sources.arrow_table_source import ArrowTableSource
 
         src_a = ArrowTableSource(
@@ -802,9 +802,9 @@ class TestIdentityStructure:
         b = SelectTagColumns(columns=["y"])
         assert a.content_hash() != b.content_hash()
 
-    def test_select_packet_columns_different_params_different_hash(self):
-        a = SelectPacketColumns(columns=["x"])
-        b = SelectPacketColumns(columns=["y"])
+    def test_select_data_columns_different_params_different_hash(self):
+        a = SelectDataColumns(columns=["x"])
+        b = SelectDataColumns(columns=["y"])
         assert a.content_hash() != b.content_hash()
 
     def test_drop_tag_columns_different_params_different_hash(self):
@@ -812,14 +812,14 @@ class TestIdentityStructure:
         b = DropTagColumns(columns=["y"])
         assert a.content_hash() != b.content_hash()
 
-    def test_drop_packet_columns_different_params_different_hash(self):
-        a = DropPacketColumns(columns=["x"])
-        b = DropPacketColumns(columns=["y"])
+    def test_drop_data_columns_different_params_different_hash(self):
+        a = DropDataColumns(columns=["x"])
+        b = DropDataColumns(columns=["y"])
         assert a.content_hash() != b.content_hash()
 
-    def test_map_packets_different_params_different_hash(self):
-        a = MapPackets(name_map={"a": "b"})
-        b = MapPackets(name_map={"a": "c"})
+    def test_map_data_different_params_different_hash(self):
+        a = MapData(name_map={"a": "b"})
+        b = MapData(name_map={"a": "c"})
         assert a.content_hash() != b.content_hash()
 
     def test_map_tags_different_params_different_hash(self):
@@ -860,8 +860,8 @@ class TestArgumentSymmetryType:
         assert isinstance(sym, tuple)
         assert sym == (two_tag_stream,)
 
-    def test_select_packet_columns_argument_symmetry(self, simple_stream):
-        op = SelectPacketColumns(columns=["weight"])
+    def test_select_data_columns_argument_symmetry(self, simple_stream):
+        op = SelectDataColumns(columns=["weight"])
         sym = op.argument_symmetry([simple_stream])
         assert isinstance(sym, tuple)
         assert sym == (simple_stream,)
@@ -872,14 +872,14 @@ class TestArgumentSymmetryType:
         assert isinstance(sym, tuple)
         assert sym == (two_tag_stream,)
 
-    def test_drop_packet_columns_argument_symmetry(self, simple_stream):
-        op = DropPacketColumns(columns=["legs"])
+    def test_drop_data_columns_argument_symmetry(self, simple_stream):
+        op = DropDataColumns(columns=["legs"])
         sym = op.argument_symmetry([simple_stream])
         assert isinstance(sym, tuple)
         assert sym == (simple_stream,)
 
-    def test_map_packets_argument_symmetry(self, simple_stream):
-        op = MapPackets(name_map={"weight": "mass"})
+    def test_map_data_argument_symmetry(self, simple_stream):
+        op = MapData(name_map={"weight": "mass"})
         sym = op.argument_symmetry([simple_stream])
         assert isinstance(sym, tuple)
         assert sym == (simple_stream,)
@@ -977,20 +977,20 @@ class TestArgumentSymmetryIdentity:
     def test_select_tag_columns_identity(self, two_tag_stream):
         self._check_unary_identity(SelectTagColumns(columns=["region"]), two_tag_stream)
 
-    def test_select_packet_columns_identity(self, simple_stream):
+    def test_select_data_columns_identity(self, simple_stream):
         self._check_unary_identity(
-            SelectPacketColumns(columns=["weight"]), simple_stream
+            SelectDataColumns(columns=["weight"]), simple_stream
         )
 
     def test_drop_tag_columns_identity(self, two_tag_stream):
         self._check_unary_identity(DropTagColumns(columns=["region"]), two_tag_stream)
 
-    def test_drop_packet_columns_identity(self, simple_stream):
-        self._check_unary_identity(DropPacketColumns(columns=["legs"]), simple_stream)
+    def test_drop_data_columns_identity(self, simple_stream):
+        self._check_unary_identity(DropDataColumns(columns=["legs"]), simple_stream)
 
-    def test_map_packets_identity(self, simple_stream):
+    def test_map_data_identity(self, simple_stream):
         self._check_unary_identity(
-            MapPackets(name_map={"weight": "mass"}), simple_stream
+            MapData(name_map={"weight": "mass"}), simple_stream
         )
 
     def test_map_tags_identity(self, two_tag_stream):
@@ -1145,7 +1145,7 @@ class TestJoinSystemTagNameExtension:
         assert sys_cols_1 == sys_cols_2
 
     def test_different_schema_produces_different_system_tag_names(self):
-        """Two sources with different packet schemas should produce different
+        """Two sources with different data schemas should produce different
         system tag column names after Join."""
         from orcapod.core.sources.arrow_table_source import ArrowTableSource
         from orcapod.system_constants import constants
@@ -1210,7 +1210,7 @@ class TestSourceSystemTagSchemaHash:
 
     def test_source_schema_hash_matches_pipeline_hash(self):
         """ArrowTableSource._schema_hash should match the truncated
-        pipeline_hash, since both hash (tag_schema, packet_schema)."""
+        pipeline_hash, since both hash (tag_schema, data_schema)."""
         from orcapod.core.sources.arrow_table_source import ArrowTableSource
 
         table = pa.table(
@@ -1232,7 +1232,7 @@ class TestJoinSystemTagCanonicalOrdering:
 
     @pytest.fixture
     def three_sources(self):
-        """Three ArrowTableSources with distinct packet schemas sharing tag 'id'."""
+        """Three ArrowTableSources with distinct data schemas sharing tag 'id'."""
         from orcapod.core.sources.arrow_table_source import ArrowTableSource
 
         src_a = ArrowTableSource(
@@ -1405,7 +1405,7 @@ class TestJoinSystemTagCanonicalOrdering:
 
         Column format: _tag_{field_type}::{schema_hash}::{stream_hash}:{index}
 
-        With an intermediate MapPackets, stream_hash comes from the
+        With an intermediate MapData, stream_hash comes from the
         DynamicPodStream which has a different pipeline_hash than the
         original source."""
         from orcapod.config import Config
@@ -1446,9 +1446,9 @@ class TestJoinSystemTagCanonicalOrdering:
         )
 
         # Pass each source through an intermediate operator
-        map_a = MapPackets({"alpha": "a_renamed"})
-        map_b = MapPackets({"beta": "b_renamed"})
-        map_c = MapPackets({"gamma": "c_renamed"})
+        map_a = MapData({"alpha": "a_renamed"})
+        map_b = MapData({"beta": "b_renamed"})
+        map_c = MapData({"gamma": "c_renamed"})
 
         stream_a = map_a.static_process(src_a)
         stream_b = map_b.static_process(src_b)
@@ -1495,7 +1495,7 @@ class TestJoinSystemTagCanonicalOrdering:
             )
 
             # stream_hash should match the intermediate stream's pipeline_hash
-            # (different from schema_hash due to the MapPackets operator)
+            # (different from schema_hash due to the MapData operator)
             expected_stream_hash = expected_stream.pipeline_hash().to_hex(n_char)
             assert stream_hash == expected_stream_hash, (
                 f"Position {expected_idx}: expected stream_hash "

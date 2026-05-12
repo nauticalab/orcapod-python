@@ -2,8 +2,8 @@
 Tests for FunctionNode covering:
 - Construction, pipeline_path, uri
 - output_schema and keys
-- execute_packet and add_pipeline_record
-- iter_packets, run(), stream interface
+- execute_data and add_pipeline_record
+- iter_data, run(), stream interface
 - get_all_records: empty DB, correctness, ColumnConfig (meta/source/system_tags/all_info)
 - pipeline_identity_structure and pipeline_hash
 - pipeline_path_prefix
@@ -17,10 +17,10 @@ from collections.abc import Mapping
 import pyarrow as pa
 import pytest
 
-from orcapod.core.datagrams import Packet, Tag
+from orcapod.core.datagrams import Data, Tag
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.protocols.core_protocols import StreamProtocol
@@ -35,21 +35,21 @@ from ..conftest import make_int_stream
 
 
 def _make_node(
-    pf: PythonPacketFunction,
+    pf: PythonDataFunction,
     n: int = 3,
     db: InMemoryArrowDatabase | None = None,
 ) -> FunctionNode:
     if db is None:
         db = InMemoryArrowDatabase()
     return FunctionNode(
-        function_pod=FunctionPod(packet_function=pf),
+        function_pod=FunctionPod(data_function=pf),
         input_stream=make_int_stream(n=n),
         pipeline_database=db,
     )
 
 
 def _make_node_with_system_tags(
-    pf: PythonPacketFunction,
+    pf: PythonDataFunction,
     n: int = 3,
     db: InMemoryArrowDatabase | None = None,
 ) -> FunctionNode:
@@ -73,14 +73,14 @@ def _make_node_with_system_tags(
     )
     stream = ArrowTableStream(table, tag_columns=["id"], system_tag_columns=["run"])
     return FunctionNode(
-        function_pod=FunctionPod(packet_function=pf),
+        function_pod=FunctionPod(data_function=pf),
         input_stream=stream,
         pipeline_database=db,
     )
 
 
 def _fill_node(node: FunctionNode) -> None:
-    """Process all packets so the DB is populated."""
+    """Process all data so the DB is populated."""
     node.run()
 
 
@@ -95,7 +95,7 @@ class TestFunctionNodeConstruction:
         db = InMemoryArrowDatabase()
         stream = make_int_stream(n=3)
         return FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=FunctionPod(data_function=double_pf),
             input_stream=stream,
             pipeline_database=db,
         )
@@ -122,8 +122,8 @@ class TestFunctionNodeConstruction:
         assert path[-1].startswith("schema:")
         assert not any(seg.startswith("instance:") for seg in path)
 
-    def test_pipeline_path_contains_packet_function_uri(self, node):
-        pf_uri = node._packet_function.uri
+    def test_pipeline_path_contains_data_function_uri(self, node):
+        pf_uri = node._data_function.uri
         for part in pf_uri:
             assert part in node.node_identity_path
 
@@ -159,7 +159,7 @@ class TestFunctionNodeConstruction:
         )
         with pytest.raises(ValueError):
             FunctionNode(
-                function_pod=FunctionPod(packet_function=double_pf),
+                function_pod=FunctionPod(data_function=double_pf),
                 input_stream=bad_stream,
                 pipeline_database=db,
             )
@@ -167,7 +167,7 @@ class TestFunctionNodeConstruction:
     def test_result_database_defaults_to_pipeline_database(self, double_pf):
         db = InMemoryArrowDatabase()
         node = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
         )
@@ -177,7 +177,7 @@ class TestFunctionNodeConstruction:
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
         node = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=2),
             pipeline_database=pipeline_db,
             result_database=result_db,
@@ -195,25 +195,25 @@ class TestFunctionNodeOutputSchema:
     def node(self, double_pf) -> FunctionNode:
         db = InMemoryArrowDatabase()
         return FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
 
     def test_output_schema_returns_two_mappings(self, node: FunctionNode):
-        tag_schema, packet_schema = node.output_schema()
+        tag_schema, data_schema = node.output_schema()
         assert isinstance(tag_schema, Mapping)
-        assert isinstance(packet_schema, Mapping)
+        assert isinstance(data_schema, Mapping)
         assert "id" in tag_schema
         assert len(tag_schema) == 1
-        assert "result" in packet_schema
-        assert len(packet_schema) == 1
+        assert "result" in data_schema
+        assert len(data_schema) == 1
         assert tag_schema["id"] is int
-        assert packet_schema["result"] is int
+        assert data_schema["result"] is int
 
-    def test_packet_schema_matches_function_output(self, node, double_pf):
-        _, packet_schema = node.output_schema()
-        assert packet_schema == double_pf.output_packet_schema
+    def test_data_schema_matches_function_output(self, node, double_pf):
+        _, data_schema = node.output_schema()
+        assert data_schema == double_pf.output_data_schema
 
     def test_tag_schema_matches_input_stream(self, node):
         tag_schema, _ = node.output_schema()
@@ -222,71 +222,71 @@ class TestFunctionNodeOutputSchema:
 
 
 # ---------------------------------------------------------------------------
-# 3. execute_packet and add_pipeline_record
+# 3. execute_data and add_pipeline_record
 # ---------------------------------------------------------------------------
 
 
-class TestFunctionNodeExecutePacket:
+class TestFunctionNodeExecuteData:
     @pytest.fixture
     def node(self, double_pf) -> FunctionNode:
         db = InMemoryArrowDatabase()
         return FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
 
-    def test_execute_packet_returns_tag_and_packet(self, node):
+    def test_execute_data_returns_tag_and_data(self, node):
         tag = Tag({"id": 0})
-        packet = Packet({"x": 5})
-        out_tag, out_packet = node.execute_packet(tag, packet)
+        data = Data({"x": 5})
+        out_tag, out_data = node.execute_data(tag, data)
         assert out_tag is tag
-        assert out_packet is not None
+        assert out_data is not None
 
-    def test_execute_packet_value_correct(self, node):
+    def test_execute_data_value_correct(self, node):
         tag = Tag({"id": 0})
-        packet = Packet({"x": 6})
-        _, out_packet = node.execute_packet(tag, packet)
-        assert out_packet["result"] == 12  # 6 * 2
+        data = Data({"x": 6})
+        _, out_data = node.execute_data(tag, data)
+        assert out_data["result"] == 12  # 6 * 2
 
-    def test_execute_packet_adds_pipeline_record(self, node, double_pf):
-        """execute_packet writes pipeline records (compute + persist + cache)."""
+    def test_execute_data_adds_pipeline_record(self, node, double_pf):
+        """execute_data writes pipeline records (compute + persist + cache)."""
         tag = Tag({"id": 0})
-        packet = Packet({"x": 3})
-        node.execute_packet(tag, packet)
+        data = Data({"x": 3})
+        node.execute_data(tag, data)
         db = node._pipeline_database
         db.flush()
         all_records = db.get_all_records(node.node_identity_path)
         assert all_records is not None
         assert all_records.num_rows >= 1
 
-    def test_execute_packet_internal_adds_pipeline_record(self, node, double_pf):
+    def test_execute_data_internal_adds_pipeline_record(self, node, double_pf):
         tag = Tag({"id": 0})
-        packet = Packet({"x": 3})
-        node._process_packet_internal(tag, packet)
+        data = Data({"x": 3})
+        node._process_data_internal(tag, data)
         db = node._pipeline_database
         db.flush()
         all_records = db.get_all_records(node.node_identity_path)
         assert all_records is not None
         assert all_records.num_rows >= 1
 
-    def test_execute_packet_second_call_same_input_deduplicates(self, node):
+    def test_execute_data_second_call_same_input_deduplicates(self, node):
         tag = Tag({"id": 0})
-        packet = Packet({"x": 3})
-        node._process_packet_internal(tag, packet)
-        node._process_packet_internal(tag, packet)
+        data = Data({"x": 3})
+        node._process_data_internal(tag, data)
+        node._process_data_internal(tag, data)
         db = node._pipeline_database
         db.flush()
         all_records = db.get_all_records(node.node_identity_path)
         assert all_records is not None
         assert all_records.num_rows == 1
 
-    def test_process_and_store_two_packets_add_two_entries(self, node):
+    def test_process_and_store_two_data_add_two_entries(self, node):
         tag = Tag({"id": 0})
-        packet1 = Packet({"x": 3})
-        packet2 = Packet({"x": 4})
-        node._process_packet_internal(tag, packet1)
-        node._process_packet_internal(tag, packet2)
+        data1 = Data({"x": 3})
+        data2 = Data({"x": 4})
+        node._process_data_internal(tag, data1)
+        node._process_data_internal(tag, data2)
         db = node._pipeline_database
         all_records = db.get_all_records(node.node_identity_path)
         assert all_records is not None
@@ -294,7 +294,7 @@ class TestFunctionNodeExecutePacket:
 
 
 # ---------------------------------------------------------------------------
-# 4. iter_packets / run() stream interface
+# 4. iter_data / run() stream interface
 # ---------------------------------------------------------------------------
 
 
@@ -303,21 +303,21 @@ class TestFunctionNodeStreamInterface:
     def node(self, double_pf) -> FunctionNode:
         db = InMemoryArrowDatabase()
         node = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
         node.run()
         return node
 
-    def test_iter_packets_correct_values(self, node):
-        assert [packet["result"] for _, packet in node.iter_packets()] == [0, 2, 4]
+    def test_iter_data_correct_values(self, node):
+        assert [data["result"] for _, data in node.iter_data()] == [0, 2, 4]
 
     def test_node_is_stream_protocol(self, node):
         assert isinstance(node, StreamProtocol)
 
-    def test_dunder_iter_delegates_to_iter_packets(self, node):
-        assert len(list(node)) == len(list(node.iter_packets()))
+    def test_dunder_iter_delegates_to_iter_data(self, node):
+        assert len(list(node)) == len(list(node.iter_data()))
 
     def test_run_fills_database(self, node):
         node.run()
@@ -335,12 +335,12 @@ class TestFunctionNodePipelineIdentity:
     def test_pipeline_hash_same_schema_same_hash(self, double_pf):
         db = InMemoryArrowDatabase()
         node1 = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
         node2 = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=5),  # different data, same schema
             pipeline_database=db,
         )
@@ -363,12 +363,12 @@ class TestFunctionNodePipelineIdentity:
             tag_columns=["id"],
         )
         node_a = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=FunctionPod(data_function=double_pf),
             input_stream=stream_a,
             pipeline_database=db,
         )
         node_b = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=FunctionPod(data_function=double_pf),
             input_stream=stream_b,
             pipeline_database=db,
         )
@@ -387,12 +387,12 @@ class TestFunctionNodePipelineIdentity:
         is achieved via the _node_content_hash row column."""
         db = InMemoryArrowDatabase()
         node1 = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
         node2 = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=99),  # different data
             pipeline_database=db,
         )
@@ -442,7 +442,7 @@ class TestGetAllRecordsValues:
         assert result is not None
         assert "id" in result.column_names
 
-    def test_contains_output_packet_column(self, filled_node):
+    def test_contains_output_data_column(self, filled_node):
         result = filled_node.get_all_records()
         assert result is not None
         assert "result" in result.column_names
@@ -478,15 +478,15 @@ class TestGetAllRecordsMetaColumns:
         ]
         assert meta_cols == [], f"Unexpected meta columns: {meta_cols}"
 
-    def test_meta_true_includes_packet_record_id(self, filled_node):
+    def test_meta_true_includes_data_record_id(self, filled_node):
         result = filled_node.get_all_records(columns={"meta": True})
         assert result is not None
-        assert constants.PACKET_RECORD_ID in result.column_names
+        assert constants.DATA_RECORD_ID in result.column_names
 
-    def test_meta_true_includes_input_packet_hash(self, filled_node):
+    def test_meta_true_includes_input_data_hash(self, filled_node):
         result = filled_node.get_all_records(columns={"meta": True})
         assert result is not None
-        assert constants.INPUT_PACKET_HASH_COL in result.column_names
+        assert constants.INPUT_DATA_HASH_COL in result.column_names
 
     def test_meta_true_still_has_data_columns(self, filled_node):
         result = filled_node.get_all_records(columns={"meta": True})
@@ -494,16 +494,16 @@ class TestGetAllRecordsMetaColumns:
         assert "id" in result.column_names
         assert "result" in result.column_names
 
-    def test_input_packet_hash_values_are_non_empty_strings(self, filled_node):
+    def test_input_data_hash_values_are_non_empty_strings(self, filled_node):
         result = filled_node.get_all_records(columns={"meta": True})
         assert result is not None
-        hashes = result.column(constants.INPUT_PACKET_HASH_COL).to_pylist()
+        hashes = result.column(constants.INPUT_DATA_HASH_COL).to_pylist()
         assert all(isinstance(h, str) and len(h) > 0 for h in hashes)
 
-    def test_packet_record_id_values_are_non_empty_strings(self, filled_node):
+    def test_data_record_id_values_are_non_empty_strings(self, filled_node):
         result = filled_node.get_all_records(columns={"meta": True})
         assert result is not None
-        ids = result.column(constants.PACKET_RECORD_ID).to_pylist()
+        ids = result.column(constants.DATA_RECORD_ID).to_pylist()
         assert all(isinstance(rid, str) and len(rid) > 0 for rid in ids)
 
 
@@ -654,11 +654,11 @@ class TestFunctionNodeIdentityPath:
     def test_node_identity_path_starts_with_pf_uri(self, double_pf):
         db = InMemoryArrowDatabase()
         node = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
         )
-        pf_uri = node._packet_function.uri
+        pf_uri = node._data_function.uri
         assert node.node_identity_path[: len(pf_uri)] == pf_uri
         # With pipeline_hash scope (default): ends with schema:{hash} only
         assert node.node_identity_path[-1].startswith("schema:")
@@ -675,15 +675,15 @@ class TestFunctionNodeResultPath:
         """Result records are stored under the pod's URI — no _result prefix
         since the database is pre-scoped at compile time (ENG-340/ENG-349)."""
         db = InMemoryArrowDatabase()
-        pod = FunctionPod(packet_function=double_pf)
+        pod = FunctionPod(data_function=double_pf)
         node = FunctionNode(
             function_pod=pod,
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
         )
         tag = Tag({"id": 0})
-        packet = Packet({"x": 5})
-        node.execute_packet(tag, packet)
+        data = Data({"x": 5})
+        node.execute_data(tag, data)
         db.flush()
 
         result_path = node._cached_function_pod.record_path

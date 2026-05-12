@@ -22,7 +22,7 @@ import pytest
 from orcapod.core.function_pod import FunctionPod, function_pod
 from orcapod.core.nodes import FunctionNode, OperatorNode, SourceNode
 from orcapod.core.operators import Join, SelectTagColumns
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
 from orcapod.core.streams import ArrowTableStream
 from orcapod.core.tracker import BasicTrackerManager
@@ -55,7 +55,7 @@ def _make_pipeline(
 
 
 def _make_stream(n: int = 3) -> ArrowTableStream:
-    """Simple stream with tag=id, packet=x. Uses nullable=False schema."""
+    """Simple stream with tag=id, data=x. Uses nullable=False schema."""
     schema = pa.schema(
         [pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]
     )
@@ -67,7 +67,7 @@ def _make_stream(n: int = 3) -> ArrowTableStream:
 
 
 def _make_two_col_stream(n: int = 3) -> ArrowTableStream:
-    """Stream with tag=id, packet={a, b} for binary operator tests. Uses nullable=False schema."""
+    """Stream with tag=id, data={a, b} for binary operator tests. Uses nullable=False schema."""
     schema = pa.schema(
         [
             pa.field("id", pa.int64(), nullable=False),
@@ -87,7 +87,7 @@ def _make_two_col_stream(n: int = 3) -> ArrowTableStream:
 
 
 def _make_y_stream(n: int = 3) -> ArrowTableStream:
-    """Stream with tag=id, packet=y (non-overlapping with _make_stream). Uses nullable=False schema."""
+    """Stream with tag=id, data=y (non-overlapping with _make_stream). Uses nullable=False schema."""
     schema = pa.schema(
         [pa.field("id", pa.int64(), nullable=False), pa.field("y", pa.int64(), nullable=False)]
     )
@@ -171,12 +171,12 @@ class TestSourceNode:
         stream_table = stream.as_table()
         assert node_table.equals(stream_table)
 
-    def test_delegates_iter_packets(self):
+    def test_delegates_iter_data(self):
         stream = _make_stream()
         node = SourceNode(stream=stream)
-        node_packets = list(node.iter_packets())
-        stream_packets = list(stream.iter_packets())
-        assert len(node_packets) == len(stream_packets)
+        node_data = list(node.iter_data())
+        stream_data = list(stream.iter_data())
+        assert len(node_data) == len(stream_data)
 
     def test_run_is_noop(self):
         stream = _make_stream()
@@ -213,8 +213,8 @@ class TestNodeContextDelegation:
 
     def test_function_node_context_matches_pod(self):
         stream = _make_stream()
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         node = FunctionNode(function_pod=pod, input_stream=stream)
         assert node.data_context_key == pod.data_context_key
         assert node.data_context.context_key == pod.data_context_key
@@ -235,8 +235,8 @@ class TestNodeContextDelegation:
 
     def test_function_node_hash_uses_pod_context(self):
         stream = _make_stream()
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         node = FunctionNode(function_pod=pod, input_stream=stream)
         # Node should produce stable hashes without error
         assert node.content_hash() is not None
@@ -336,8 +336,8 @@ class TestPipelineLifecycle:
 
 class TestPipelineRecording:
     def test_record_function_pod_creates_function_node(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
@@ -351,8 +351,8 @@ class TestPipelineRecording:
         assert fn_node.node_type == "function"
 
     def test_record_function_pod_stores_edge(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
@@ -365,8 +365,8 @@ class TestPipelineRecording:
         assert node_hash in tracker._node_lut
 
     def test_record_function_pod_stores_upstream_stream(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
@@ -403,8 +403,8 @@ class TestPipelineRecording:
 
     def test_nodes_returns_copy(self):
         mgr = BasicTrackerManager()
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_function_pod_invocation(pod, _make_stream())
@@ -414,8 +414,8 @@ class TestPipelineRecording:
             assert len(tracker.nodes) == 1
 
     def test_reset_clears_all(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
@@ -445,8 +445,8 @@ class TestPipelineCompile:
 
     def test_compile_single_function_pod(self):
         """Source stream -> FunctionNode: compile creates SourceNode and wires upstream."""
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
@@ -516,10 +516,10 @@ class TestPipelineCompile:
         identity_structure for the same (function_pod, input_stream), so
         content hashes match and edges connect across the chain.
         """
-        pf1 = PythonPacketFunction(_double, output_keys="result")
-        pf2 = PythonPacketFunction(_inc_result, output_keys="out")
-        pod1 = FunctionPod(packet_function=pf1)
-        pod2 = FunctionPod(packet_function=pf2)
+        pf1 = PythonDataFunction(_double, output_keys="result")
+        pf2 = PythonDataFunction(_inc_result, output_keys="out")
+        pod1 = FunctionPod(data_function=pf1)
+        pod2 = FunctionPod(data_function=pf2)
         stream = _make_stream()
         mgr = BasicTrackerManager()
         pod1.tracker_manager = mgr
@@ -537,9 +537,9 @@ class TestPipelineCompile:
         assert len(source_nodes) == 1
         assert len(fn_nodes) == 2
 
-        # Identify fn1 and fn2 by checking their function_pod's packet_function
-        fn1 = next(n for n in fn_nodes if n._function_pod.packet_function is pf1)
-        fn2 = next(n for n in fn_nodes if n._function_pod.packet_function is pf2)
+        # Identify fn1 and fn2 by checking their function_pod's data_function
+        fn1 = next(n for n in fn_nodes if n._function_pod.data_function is pf1)
+        fn2 = next(n for n in fn_nodes if n._function_pod.data_function is pf2)
 
         # Chain: SourceNode -> fn1 -> fn2
         assert fn1.upstreams == (source_nodes[0],)
@@ -547,8 +547,8 @@ class TestPipelineCompile:
 
     def test_compile_function_then_operator(self):
         """Source -> FunctionPod -> Operator: compile wires SourceNode -> FunctionNode -> OperatorNode."""
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         op = SelectTagColumns(columns=["id"])
         stream = _make_stream()
         mgr = BasicTrackerManager()
@@ -575,8 +575,8 @@ class TestPipelineCompile:
         """Source -> Operator -> FunctionPod: compile wires SourceNode -> OperatorNode -> FunctionNode."""
         stream = _make_stream()
         op = SelectTagColumns(columns=["id"])
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         mgr = BasicTrackerManager()
         op.tracker_manager = mgr
         pod.tracker_manager = mgr
@@ -602,10 +602,10 @@ class TestPipelineCompile:
 
         Same source used twice -> single SourceNode (dedup by content hash).
         """
-        pf1 = PythonPacketFunction(_double, output_keys="result")
-        pf2 = PythonPacketFunction(_double, output_keys="out")
-        pod1 = FunctionPod(packet_function=pf1)
-        pod2 = FunctionPod(packet_function=pf2)
+        pf1 = PythonDataFunction(_double, output_keys="result")
+        pf2 = PythonDataFunction(_double, output_keys="out")
+        pod1 = FunctionPod(data_function=pf1)
+        pod2 = FunctionPod(data_function=pf2)
         op = Join()
         stream = _make_stream()
         mgr = BasicTrackerManager()
@@ -639,10 +639,10 @@ class TestPipelineCompile:
 
     def test_compile_source_deduplication(self):
         """Same stream used as input to two separate function pods -> single SourceNode."""
-        pf1 = PythonPacketFunction(_double, output_keys="result")
-        pf2 = PythonPacketFunction(_double, output_keys="out")
-        pod1 = FunctionPod(packet_function=pf1)
-        pod2 = FunctionPod(packet_function=pf2)
+        pf1 = PythonDataFunction(_double, output_keys="result")
+        pf2 = PythonDataFunction(_double, output_keys="out")
+        pod1 = FunctionPod(data_function=pf1)
+        pod2 = FunctionPod(data_function=pf2)
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
@@ -662,8 +662,8 @@ class TestPipelineCompile:
 
     def test_compile_two_independent_sources(self):
         """Two different source streams -> two distinct SourceNodes."""
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream_a = _make_stream(n=3)
         stream_b = _make_stream(n=5)
         mgr = BasicTrackerManager()
@@ -695,8 +695,8 @@ class TestPipelineCompile:
 class TestFunctionPodTrackerIntegration:
     def test_function_pod_process_records_to_tracker(self):
         """FunctionPod.process() automatically records to an active Pipeline."""
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         mgr = BasicTrackerManager()
         pod.tracker_manager = mgr
@@ -715,10 +715,10 @@ class TestFunctionPodTrackerIntegration:
 
     def test_chained_function_pods_end_to_end(self):
         """Two FunctionPods chained: source -> fn1 -> fn2."""
-        pf1 = PythonPacketFunction(_double, output_keys="result")
-        pf2 = PythonPacketFunction(_inc_result, output_keys="out")
-        pod1 = FunctionPod(packet_function=pf1)
-        pod2 = FunctionPod(packet_function=pf2)
+        pf1 = PythonDataFunction(_double, output_keys="result")
+        pf2 = PythonDataFunction(_inc_result, output_keys="out")
+        pod1 = FunctionPod(data_function=pf1)
+        pod2 = FunctionPod(data_function=pf2)
         stream = _make_stream()
         mgr = BasicTrackerManager()
         pod1.tracker_manager = mgr
@@ -735,8 +735,8 @@ class TestFunctionPodTrackerIntegration:
         assert len(source_nodes) == 1
         assert len(fn_nodes) == 2
 
-        fn1 = next(n for n in fn_nodes if n._function_pod.packet_function is pf1)
-        fn2 = next(n for n in fn_nodes if n._function_pod.packet_function is pf2)
+        fn1 = next(n for n in fn_nodes if n._function_pod.data_function is pf1)
+        fn2 = next(n for n in fn_nodes if n._function_pod.data_function is pf2)
         assert fn1.upstreams == (source_nodes[0],)
         assert fn2.upstreams == (fn1,)
 
@@ -794,8 +794,8 @@ class TestOperatorTrackerIntegration:
 class TestManagerBroadcast:
     def test_records_broadcast_to_all_active_trackers(self):
         """BasicTrackerManager broadcasts recordings to all active trackers."""
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
@@ -810,8 +810,8 @@ class TestManagerBroadcast:
 
     def test_no_tracking_suppresses_recording(self):
         """no_tracking context suppresses recording."""
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         mgr = BasicTrackerManager()
 
@@ -893,10 +893,10 @@ class TestBMIPipelineEndToEnd:
             joined = Join()(converted, weights)
             bmi_stream = _compute_bmi.pod(joined)
 
-        for tag, packet in bmi_stream.iter_packets():
+        for tag, data in bmi_stream.iter_data():
             pid = tag["person_id"]
-            assert packet["bmi"] == expected_bmi[pid], (
-                f"person_id={pid}: got {packet['bmi']}, expected {expected_bmi[pid]}"
+            assert data["bmi"] == expected_bmi[pid], (
+                f"person_id={pid}: got {data['bmi']}, expected {expected_bmi[pid]}"
             )
 
     def test_compiled_graph_structure(self, sources):
@@ -959,7 +959,7 @@ class TestBMIPipelineEndToEnd:
         cm_node = next(
             n
             for n in fn_nodes
-            if n._function_pod.packet_function is _cm_to_m.pod.packet_function
+            if n._function_pod.data_function is _cm_to_m.pod.data_function
         )
         assert len(cm_node.upstreams) == 1
         assert isinstance(cm_node.upstreams[0], SourceNode)
@@ -974,7 +974,7 @@ class TestBMIPipelineEndToEnd:
         bmi_node = next(
             n
             for n in fn_nodes
-            if n._function_pod.packet_function is _compute_bmi.pod.packet_function
+            if n._function_pod.data_function is _compute_bmi.pod.data_function
         )
         assert len(bmi_node.upstreams) == 1
         assert isinstance(bmi_node.upstreams[0], OperatorNode)

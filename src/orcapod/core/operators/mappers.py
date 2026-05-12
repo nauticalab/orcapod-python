@@ -5,7 +5,7 @@ from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import UnaryOperator
 from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
-from orcapod.protocols.core_protocols import PacketProtocol, StreamProtocol, TagProtocol
+from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, TagProtocol
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.lazy_module import LazyModule
@@ -16,10 +16,10 @@ else:
     pa = LazyModule("pyarrow")
 
 
-class MapPackets(UnaryOperator):
+class MapData(UnaryOperator):
     """
-    Operator that maps packets in a stream using a user-defined function.
-    The function is applied to each packet in the stream, and the resulting packets
+    Operator that maps data in a stream using a user-defined function.
+    The function is applied to each data in the stream, and the resulting data
     are returned as a new stream.
     """
 
@@ -31,7 +31,7 @@ class MapPackets(UnaryOperator):
         super().__init__(**kwargs)
 
     def to_config(self) -> dict[str, Any]:
-        """Serialize this MapPackets operator to a config dict.
+        """Serialize this MapData operator to a config dict.
 
         Returns:
             A dict with ``class_name``, ``module_path``, and ``config`` keys,
@@ -45,11 +45,11 @@ class MapPackets(UnaryOperator):
         return config
 
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
-        tag_columns, packet_columns = stream.keys()
-        unmapped_columns = set(packet_columns) - set(self.name_map.keys())
+        tag_columns, data_columns = stream.keys()
+        unmapped_columns = set(data_columns) - set(self.name_map.keys())
 
-        if not any(n in packet_columns for n in self.name_map):
-            # nothing to rename in the packet, return stream as is
+        if not any(n in data_columns for n in self.name_map):
+            # nothing to rename in the data, return stream as is
             return stream
 
         table = stream.as_table(
@@ -59,14 +59,14 @@ class MapPackets(UnaryOperator):
         name_map = {
             c: c
             for c in table.column_names
-            if c not in packet_columns and not c.startswith("")
+            if c not in data_columns and not c.startswith("")
         }
         name_map = {
             tc: tc
             for tc in table.column_names
-            if tc not in packet_columns and not tc.startswith(constants.SOURCE_PREFIX)
+            if tc not in data_columns and not tc.startswith(constants.SOURCE_PREFIX)
         }  # no renaming on tag columns
-        for c in packet_columns:
+        for c in data_columns:
             if c in self.name_map:
                 name_map[c] = self.name_map[c]
                 name_map[f"{constants.SOURCE_PREFIX}{c}"] = (
@@ -84,23 +84,23 @@ class MapPackets(UnaryOperator):
 
     def validate_unary_input(self, stream: StreamProtocol) -> None:
         # verify that renamed value does NOT collide with other columns
-        tag_columns, packet_columns = stream.keys()
+        tag_columns, data_columns = stream.keys()
         relevant_source = []
         relevant_target = []
         for source, target in self.name_map.items():
-            if source in packet_columns:
+            if source in data_columns:
                 relevant_source.append(source)
                 relevant_target.append(target)
-        remaining_packet_columns = set(packet_columns) - set(relevant_source)
-        overlapping_packet_columns = remaining_packet_columns.intersection(
+        remaining_data_columns = set(data_columns) - set(relevant_source)
+        overlapping_data_columns = remaining_data_columns.intersection(
             relevant_target
         )
         overlapping_tag_columns = set(tag_columns).intersection(relevant_target)
 
-        if overlapping_packet_columns or overlapping_tag_columns:
+        if overlapping_data_columns or overlapping_tag_columns:
             message = f"Renaming {self.name_map} would cause collisions with existing columns: "
-            if overlapping_packet_columns:
-                message += f"overlapping packet columns: {overlapping_packet_columns}, "
+            if overlapping_data_columns:
+                message += f"overlapping data columns: {overlapping_data_columns}, "
             if overlapping_tag_columns:
                 message += f"overlapping tag columns: {overlapping_tag_columns}."
             raise InputValidationError(message)
@@ -112,41 +112,41 @@ class MapPackets(UnaryOperator):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        tag_schema, packet_schema = stream.output_schema(
+        tag_schema, data_schema = stream.output_schema(
             columns=columns, all_info=all_info
         )
 
-        # Create new packet schema with renamed keys
-        new_packet_schema = {
+        # Create new data schema with renamed keys
+        new_data_schema = {
             self.name_map.get(k, k): v
-            for k, v in packet_schema.items()
+            for k, v in data_schema.items()
             if k in self.name_map or not self.drop_unmapped
         }
 
-        return tag_schema, Schema(new_packet_schema)
+        return tag_schema, Schema(new_data_schema)
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         **kwargs: Any,
     ) -> None:
-        """Streaming: rename packet columns per row without materializing."""
+        """Streaming: rename data columns per row without materializing."""
         try:
             rename_map: dict[str, str] | None = None
             unmapped: list[str] | None = None
-            async for tag, packet in inputs[0]:
+            async for tag, data in inputs[0]:
                 if rename_map is None:
-                    pkt_keys = packet.keys()
+                    pkt_keys = data.keys()
                     rename_map = {
                         k: self.name_map[k] for k in pkt_keys if k in self.name_map
                     }
                     if self.drop_unmapped:
                         unmapped = [k for k in pkt_keys if k not in self.name_map]
                 if not rename_map:
-                    await output.send((tag, packet))
+                    await output.send((tag, data))
                 else:
-                    new_pkt = packet.rename(rename_map)
+                    new_pkt = data.rename(rename_map)
                     if unmapped:
                         new_pkt = new_pkt.drop(*unmapped)
                     await output.send((tag, new_pkt))
@@ -190,7 +190,7 @@ class MapTags(UnaryOperator):
         return config
 
     def unary_static_process(self, stream: StreamProtocol) -> StreamProtocol:
-        tag_columns, packet_columns = stream.keys()
+        tag_columns, data_columns = stream.keys()
         missing_tags = set(tag_columns) - set(self.name_map.keys())
 
         if not any(n in tag_columns for n in self.name_map):
@@ -207,8 +207,8 @@ class MapTags(UnaryOperator):
             if tc in self.name_map or not self.drop_unmapped
         }  # rename the tag as necessary
         new_tag_columns = list(name_map.values())
-        for c in packet_columns:
-            name_map[c] = c  # no renaming on packet columns
+        for c in data_columns:
+            name_map[c] = c  # no renaming on data columns
 
         renamed_table = table.rename_columns(name_map)
 
@@ -227,7 +227,7 @@ class MapTags(UnaryOperator):
         It takes two streams as input and raises an error if the inputs are not valid.
         """
         # verify that renamed value does NOT collide with other columns
-        tag_columns, packet_columns = stream.keys()
+        tag_columns, data_columns = stream.keys()
         relevant_source = []
         relevant_target = []
         for source, target in self.name_map.items():
@@ -236,14 +236,14 @@ class MapTags(UnaryOperator):
                 relevant_target.append(target)
         remaining_tag_columns = set(tag_columns) - set(relevant_source)
         overlapping_tag_columns = remaining_tag_columns.intersection(relevant_target)
-        overlapping_packet_columns = set(packet_columns).intersection(relevant_target)
+        overlapping_data_columns = set(data_columns).intersection(relevant_target)
 
-        if overlapping_tag_columns or overlapping_packet_columns:
+        if overlapping_tag_columns or overlapping_data_columns:
             message = f"Renaming {self.name_map} would cause collisions with existing columns: "
             if overlapping_tag_columns:
                 message += f"overlapping tag columns: {overlapping_tag_columns}."
-            if overlapping_packet_columns:
-                message += f"overlapping packet columns: {overlapping_packet_columns}."
+            if overlapping_data_columns:
+                message += f"overlapping data columns: {overlapping_data_columns}."
             raise InputValidationError(message)
 
     def unary_output_schema(
@@ -253,7 +253,7 @@ class MapTags(UnaryOperator):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        tag_schema, packet_schema = stream.output_schema(
+        tag_schema, data_schema = stream.output_schema(
             columns=columns, all_info=all_info
         )
 
@@ -263,19 +263,19 @@ class MapTags(UnaryOperator):
             if k in self.name_map or not self.drop_unmapped
         }
 
-        return Schema(new_tag_schema), packet_schema
+        return Schema(new_tag_schema), data_schema
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         **kwargs: Any,
     ) -> None:
         """Streaming: rename tag columns per row without materializing."""
         try:
             rename_map: dict[str, str] | None = None
             unmapped: list[str] | None = None
-            async for tag, packet in inputs[0]:
+            async for tag, data in inputs[0]:
                 if rename_map is None:
                     tag_keys = tag.keys()
                     rename_map = {
@@ -284,12 +284,12 @@ class MapTags(UnaryOperator):
                     if self.drop_unmapped:
                         unmapped = [k for k in tag_keys if k not in self.name_map]
                 if not rename_map:
-                    await output.send((tag, packet))
+                    await output.send((tag, data))
                 else:
                     new_tag = tag.rename(rename_map)
                     if unmapped:
                         new_tag = new_tag.drop(*unmapped)
-                    await output.send((new_tag, packet))
+                    await output.send((new_tag, data))
         finally:
             await output.close()
 

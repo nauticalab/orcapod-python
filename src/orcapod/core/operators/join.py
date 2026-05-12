@@ -8,7 +8,7 @@ from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
 from orcapod.protocols.core_protocols import (
     ArgumentGroup,
-    PacketProtocol,
+    DataProtocol,
     StreamProtocol,
     TagProtocol,
 )
@@ -66,19 +66,19 @@ class Join(NonZeroInputOperator):
         # Always get input schemas WITHOUT system tags for the base computation.
         # System tags are computed separately because the join renames them.
         stream = streams[0]
-        tag_schema, packet_schema = stream.output_schema()
+        tag_schema, data_schema = stream.output_schema()
         for other_stream in streams[1:]:
-            other_tag_schema, other_packet_schema = other_stream.output_schema()
+            other_tag_schema, other_data_schema = other_stream.output_schema()
             tag_schema = schema_utils.union_schemas(tag_schema, other_tag_schema)
-            intersection_packet_schema = schema_utils.intersection_schemas(
-                packet_schema, other_packet_schema
+            intersection_data_schema = schema_utils.intersection_schemas(
+                data_schema, other_data_schema
             )
-            packet_schema = schema_utils.union_schemas(
-                packet_schema, other_packet_schema
+            data_schema = schema_utils.union_schemas(
+                data_schema, other_data_schema
             )
-            if intersection_packet_schema:
+            if intersection_data_schema:
                 raise InputValidationError(
-                    f"Packets should not have overlapping keys, but {packet_schema.keys()} found in {stream} and {other_stream}."
+                    f"Datas should not have overlapping keys, but {data_schema.keys()} found in {stream} and {other_stream}."
                 )
 
         # Add system tag columns if requested
@@ -86,7 +86,7 @@ class Join(NonZeroInputOperator):
             system_tag_schema = self._predict_system_tag_schema(*streams)
             tag_schema = schema_utils.union_schemas(tag_schema, system_tag_schema)
 
-        return tag_schema, packet_schema
+        return tag_schema, data_schema
 
     def _predict_system_tag_schema(self, *streams: StreamProtocol) -> Schema:
         """Predict the system tag columns that the join would produce.
@@ -258,8 +258,8 @@ class Join(NonZeroInputOperator):
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         *,
         input_pipeline_hashes: Sequence[ContentHash] | None = None,
     ) -> None:
@@ -286,8 +286,8 @@ class Join(NonZeroInputOperator):
         """
         try:
             if len(inputs) == 1:
-                async for tag, packet in inputs[0]:
-                    await output.send((tag, packet))
+                async for tag, data in inputs[0]:
+                    await output.send((tag, data))
                 return
 
             n = len(inputs)
@@ -307,8 +307,8 @@ class Join(NonZeroInputOperator):
 
     async def _streaming_join(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         suffixes: list[str],
     ) -> None:
         """Dispatch between binary join (N=2) and staggered chain (N>=3).
@@ -325,10 +325,10 @@ class Join(NonZeroInputOperator):
 
             def merge_fn(
                 lt: TagProtocol,
-                lp: PacketProtocol,
+                lp: DataProtocol,
                 rt: TagProtocol,
-                rp: PacketProtocol,
-            ) -> tuple[TagProtocol, PacketProtocol]:
+                rp: DataProtocol,
+            ) -> tuple[TagProtocol, DataProtocol]:
                 return self._merge_pair_rename(lt, lp, rt, rp, suffixes, block_sep)
 
             await self._binary_streaming_join(inputs[0], inputs[1], output, merge_fn)
@@ -339,8 +339,8 @@ class Join(NonZeroInputOperator):
 
     async def _staggered_join(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         suffixes: list[str],
     ) -> None:
         """Staggered pairwise binary joins: ``join(join(x, y), z)``.
@@ -380,10 +380,10 @@ class Join(NonZeroInputOperator):
             # Pre-rename system tags for each input so binary joins
             # can pass them through without modification
             renamed_readers: list[
-                ReadableChannel[tuple[TagProtocol, PacketProtocol]]
+                ReadableChannel[tuple[TagProtocol, DataProtocol]]
             ] = []
             for orig_idx in canon_order:
-                ch: Channel[tuple[TagProtocol, PacketProtocol]] = Channel(
+                ch: Channel[tuple[TagProtocol, DataProtocol]] = Channel(
                     buffer_size=64
                 )
                 tg.create_task(
@@ -405,7 +405,7 @@ class Join(NonZeroInputOperator):
                     target_writer = output
                 else:
                     intermediate: Channel[
-                        tuple[TagProtocol, PacketProtocol]
+                        tuple[TagProtocol, DataProtocol]
                     ] = Channel(buffer_size=64)
                     target_writer = intermediate.writer
 
@@ -423,12 +423,12 @@ class Join(NonZeroInputOperator):
 
     async def _binary_streaming_join(
         self,
-        left: ReadableChannel[tuple[TagProtocol, PacketProtocol]],
-        right: ReadableChannel[tuple[TagProtocol, PacketProtocol]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        left: ReadableChannel[tuple[TagProtocol, DataProtocol]],
+        right: ReadableChannel[tuple[TagProtocol, DataProtocol]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         merge_fn: Callable[
-            [TagProtocol, PacketProtocol, TagProtocol, PacketProtocol],
-            tuple[TagProtocol, PacketProtocol],
+            [TagProtocol, DataProtocol, TagProtocol, DataProtocol],
+            tuple[TagProtocol, DataProtocol],
         ],
     ) -> None:
         """Binary symmetric hash join.
@@ -444,13 +444,13 @@ class Join(NonZeroInputOperator):
             right: Right input channel.
             output: Output channel for matched rows.
             merge_fn: Callable(left_tag, left_pkt, right_tag, right_pkt)
-                that produces the merged (Tag, Packet) pair.
+                that produces the merged (Tag, Data) pair.
         """
         _SENTINEL = object()
         queue: asyncio.Queue = asyncio.Queue(maxsize=64)
 
         async def _drain(
-            ch: ReadableChannel[tuple[TagProtocol, PacketProtocol]],
+            ch: ReadableChannel[tuple[TagProtocol, DataProtocol]],
             side: int,
         ) -> None:
             async for item in ch:
@@ -462,7 +462,7 @@ class Join(NonZeroInputOperator):
                 tg.create_task(_drain(left, 0))
                 tg.create_task(_drain(right, 1))
 
-                buffers: list[list[tuple[TagProtocol, PacketProtocol]]] = [
+                buffers: list[list[tuple[TagProtocol, DataProtocol]]] = [
                     [],
                     [],
                 ]
@@ -528,8 +528,8 @@ class Join(NonZeroInputOperator):
 
     @staticmethod
     async def _rename_sys_tags(
-        ch_in: ReadableChannel[tuple[TagProtocol, PacketProtocol]],
-        ch_out: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        ch_in: ReadableChannel[tuple[TagProtocol, DataProtocol]],
+        ch_out: WritableChannel[tuple[TagProtocol, DataProtocol]],
         suffix: str,
         block_sep: str,
         sys_prefix: str,
@@ -562,18 +562,18 @@ class Join(NonZeroInputOperator):
     @staticmethod
     def _merge_pair_rename(
         left_tag: TagProtocol,
-        left_pkt: PacketProtocol,
+        left_pkt: DataProtocol,
         right_tag: TagProtocol,
-        right_pkt: PacketProtocol,
+        right_pkt: DataProtocol,
         suffixes: list[str],
         block_sep: str,
-    ) -> tuple[TagProtocol, PacketProtocol]:
+    ) -> tuple[TagProtocol, DataProtocol]:
         """Merge a matched pair, renaming system tags with per-side suffixes.
 
         Used for direct 2-input joins where system tags are renamed
         during the merge (not pre-renamed).
         """
-        from orcapod.core.datagrams import Packet, Tag
+        from orcapod.core.datagrams import Data, Tag
 
         sys_prefix = constants.SYSTEM_TAG_PREFIX
 
@@ -599,7 +599,7 @@ class Join(NonZeroInputOperator):
         merged_sys = Join._sort_merged_system_tags(merged_sys)
         merged_tag = Tag(merged_tag_d, system_tags=merged_sys)
 
-        # Merge packet dicts (non-overlapping by Join's validation)
+        # Merge data dicts (non-overlapping by Join's validation)
         merged_pkt_d: dict = {}
         merged_si: dict = {}
         merged_pkt_d.update(left_pkt.as_dict())
@@ -607,22 +607,22 @@ class Join(NonZeroInputOperator):
         merged_si.update(left_pkt.source_info())
         merged_si.update(right_pkt.source_info())
 
-        merged_pkt = Packet(merged_pkt_d, source_info=merged_si)
+        merged_pkt = Data(merged_pkt_d, source_info=merged_si)
         return merged_tag, merged_pkt
 
     @staticmethod
     def _merge_pair_passthrough(
         left_tag: TagProtocol,
-        left_pkt: PacketProtocol,
+        left_pkt: DataProtocol,
         right_tag: TagProtocol,
-        right_pkt: PacketProtocol,
-    ) -> tuple[TagProtocol, PacketProtocol]:
+        right_pkt: DataProtocol,
+    ) -> tuple[TagProtocol, DataProtocol]:
         """Merge a matched pair, passing system tags through without renaming.
 
         Used in the staggered chain where system tags have already been
         pre-renamed by ``_rename_sys_tags``.
         """
-        from orcapod.core.datagrams import Packet, Tag
+        from orcapod.core.datagrams import Data, Tag
 
         # Merge tag dicts — shared keys come from left
         merged_tag_d: dict = {}
@@ -641,7 +641,7 @@ class Join(NonZeroInputOperator):
         merged_sys = Join._sort_merged_system_tags(merged_sys)
         merged_tag = Tag(merged_tag_d, system_tags=merged_sys)
 
-        # Merge packet dicts (non-overlapping by Join's validation)
+        # Merge data dicts (non-overlapping by Join's validation)
         merged_pkt_d: dict = {}
         merged_si: dict = {}
         merged_pkt_d.update(left_pkt.as_dict())
@@ -649,7 +649,7 @@ class Join(NonZeroInputOperator):
         merged_si.update(left_pkt.source_info())
         merged_si.update(right_pkt.source_info())
 
-        merged_pkt = Packet(merged_pkt_d, source_info=merged_si)
+        merged_pkt = Data(merged_pkt_d, source_info=merged_si)
         return merged_tag, merged_pkt
 
     @staticmethod

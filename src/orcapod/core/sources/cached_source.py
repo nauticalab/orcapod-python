@@ -8,7 +8,7 @@ from orcapod import contexts
 from orcapod.config import Config
 from orcapod.core.sources.base import RootSource
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
-from orcapod.protocols.core_protocols import PacketProtocol, SourceProtocol, TagProtocol
+from orcapod.protocols.core_protocols import DataProtocol, SourceProtocol, TagProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.lazy_module import LazyModule
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class CachedSource(RootSource):
-    """DB-backed wrapper around a source that caches every packet.
+    """DB-backed wrapper around a source that caches every data.
 
     Accepts any ``SourceProtocol`` implementation as the inner source.
     Implements ``StreamProtocol`` transparently so downstream consumers
@@ -38,7 +38,7 @@ class CachedSource(RootSource):
 
     Semantic guarantee:
         The cache is a correct cumulative record.  The union of cache + live
-        packets is the full set of data ever available from that source.
+        data is the full set of data ever available from that source.
 
     Example::
 
@@ -267,9 +267,9 @@ class CachedSource(RootSource):
 
     def _empty_table(self) -> pa.Table:
         """Build an empty Arrow table matching the source's output schema."""
-        tag_schema, packet_schema = self._source.output_schema()
+        tag_schema, data_schema = self._source.output_schema()
         merged = dict(tag_schema)
-        merged.update(packet_schema)
+        merged.update(data_schema)
         type_converter = self.data_context.type_converter
         arrow_schema = type_converter.python_schema_to_arrow_schema(merged)
         return pa.Table.from_pylist([], schema=arrow_schema)
@@ -299,10 +299,10 @@ class CachedSource(RootSource):
         """Discard in-memory cached stream (forces rebuild on next access)."""
         self._cached_stream = None
 
-    def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
+    def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
         self._ensure_stream()
         assert self._cached_stream is not None
-        return self._cached_stream.iter_packets()
+        return self._cached_stream.iter_data()
 
     def as_table(
         self,

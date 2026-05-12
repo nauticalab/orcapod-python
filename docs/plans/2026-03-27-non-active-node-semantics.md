@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make `OperatorNode.iter_packets()` and `as_table()` read-only so they never trigger upstream computation — only `run()` / `execute()` may compute.
+**Goal:** Make `OperatorNode.iter_data()` and `as_table()` read-only so they never trigger upstream computation — only `run()` / `execute()` may compute.
 
 **Architecture:** Extract two private helpers (`_make_empty_table`, `_load_cached_stream_from_db`) then rewrite the two read methods to use a 3-step passive lookup: in-memory cache → DB (REPLAY mode only) → empty result. Fix four existing tests that relied on the old eager behaviour, and add a new test file. One docstring update in `StreamBase`.
 
@@ -14,10 +14,10 @@
 
 | Action | Path | What changes |
 |--------|------|-------------|
-| Modify | `src/orcapod/core/nodes/operator_node.py` | Add `_make_empty_table()`, `_load_cached_stream_from_db()`; rewrite `iter_packets()`, `as_table()`; refactor `_replay_from_cache()` |
+| Modify | `src/orcapod/core/nodes/operator_node.py` | Add `_make_empty_table()`, `_load_cached_stream_from_db()`; rewrite `iter_data()`, `as_table()`; refactor `_replay_from_cache()` |
 | Modify | `src/orcapod/core/streams/base.py` | Docstring of `flow()` only |
-| Modify | `tests/test_core/operators/test_operator_node.py` | Add `node.run()` to `test_iter_packets`, `test_as_table` |
-| Modify | `tests/test_core/operators/test_operator_node_attach_db.py` | Add `node.run()` to `test_iter_packets_without_database`, `test_iter_packets_with_database` |
+| Modify | `tests/test_core/operators/test_operator_node.py` | Add `node.run()` to `test_iter_data`, `test_as_table` |
+| Modify | `tests/test_core/operators/test_operator_node_attach_db.py` | Add `node.run()` to `test_iter_data_without_database`, `test_iter_data_with_database` |
 | Create | `tests/test_core/operators/test_operator_node_non_active.py` | New test file — passive semantics, cascade isolation, CacheMode variants |
 
 ---
@@ -27,7 +27,7 @@
 Before starting, skim these sections of `operator_node.py`:
 
 - **Lines 493–554** — `_compute_and_store`, `_replay_from_cache`, `run()` (the computation paths, left untouched)
-- **Lines 555–568** — `iter_packets()`, `as_table()` (the two methods we fix)
+- **Lines 555–568** — `iter_data()`, `as_table()` (the two methods we fix)
 - **Lines 506–525** — `_replay_from_cache()` contains the inline empty-table code we extract into `_make_empty_table()`
 - **Line 14** — `ArrowTableStream` already imported
 - **Lines 31–36** — `pa` is a `LazyModule`; return type annotations must use string literals (`"pa.Table"`)
@@ -59,7 +59,7 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.nodes import OperatorNode
-from orcapod.core.operators import Join, MapPackets
+from orcapod.core.operators import Join, MapData
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.types import CacheMode
@@ -72,7 +72,7 @@ from orcapod.types import CacheMode
 
 @pytest.fixture
 def simple_source() -> ArrowTableStream:
-    """Single-tag stream: id (tag), x (packet), 3 rows."""
+    """Single-tag stream: id (tag), x (data), 3 rows."""
     return ArrowTableStream(
         pa.table(
             {
@@ -85,8 +85,8 @@ def simple_source() -> ArrowTableStream:
 
 
 @pytest.fixture
-def map_op() -> MapPackets:
-    return MapPackets({"x": "renamed_x"})
+def map_op() -> MapData:
+    return MapData({"x": "renamed_x"})
 
 
 def _node(operator, streams, *, db=None, cache_mode=CacheMode.OFF):
@@ -102,12 +102,12 @@ def _node(operator, streams, *, db=None, cache_mode=CacheMode.OFF):
 # ---------------------------------------------------------------------------
 
 
-class TestIterPacketsIsPassive:
-    def test_iter_packets_without_run_returns_empty(self, simple_source, map_op):
-        """iter_packets() must not call operator.process before run()."""
+class TestIterDatasIsPassive:
+    def test_iter_data_without_run_returns_empty(self, simple_source, map_op):
+        """iter_data() must not call operator.process before run()."""
         node = _node(map_op, (simple_source,))
         with patch.object(map_op, "process", wraps=map_op.process) as spy:
-            result = list(node.iter_packets())
+            result = list(node.iter_data())
         assert result == []
         spy.assert_not_called()
 
@@ -129,14 +129,14 @@ class TestIterPacketsIsPassive:
         node = _node(map_op, (simple_source,))
         assert node.flow() == []
 
-    def test_iter_packets_after_run_returns_results(self, simple_source, map_op):
-        """After run(), iter_packets() returns the computed packets."""
+    def test_iter_data_after_run_returns_results(self, simple_source, map_op):
+        """After run(), iter_data() returns the computed data."""
         node = _node(map_op, (simple_source,))
         node.run()
-        result = list(node.iter_packets())
+        result = list(node.iter_data())
         assert len(result) == 3
-        for _, packet in result:
-            assert "renamed_x" in packet.keys()
+        for _, data in result:
+            assert "renamed_x" in data.keys()
 
     def test_as_table_after_run_returns_results(self, simple_source, map_op):
         """After run(), as_table() returns the computed table."""
@@ -155,9 +155,9 @@ uv run python -m pytest tests/test_core/operators/test_operator_node_non_active.
 ```
 
 Expected: most tests FAIL.
-`test_iter_packets_without_run_returns_empty` fails because `process` IS called.
+`test_iter_data_without_run_returns_empty` fails because `process` IS called.
 `test_as_table_without_run_returns_empty_table` fails because `num_rows == 3`, not 0.
-`test_iter_packets_after_run_returns_results` and `test_as_table_after_run_returns_results` may PASS (they call `run()` first).
+`test_iter_data_after_run_returns_results` and `test_as_table_after_run_returns_results` may PASS (they call `run()` first).
 
 - [ ] **Step 1.3: Confirm existing tests still pass (baseline)**
 
@@ -189,10 +189,10 @@ def _make_empty_table(self) -> "pa.Table":
     Requires ``self._operator is not None`` (pre-existing limitation shared
     with ``_replay_from_cache``).
     """
-    tag_schema, packet_schema = self.output_schema()
+    tag_schema, data_schema = self.output_schema()
     type_converter = self.data_context.type_converter
     empty_fields: dict = {}
-    for name, py_type in {**tag_schema, **packet_schema}.items():
+    for name, py_type in {**tag_schema, **data_schema}.items():
         arrow_type = type_converter.python_type_to_arrow_type(py_type)
         empty_fields[name] = pa.array([], type=arrow_type)
     return pa.table(empty_fields)
@@ -292,7 +292,7 @@ git commit -m "feat(operator_node): add _load_cached_stream_from_db() state-free
 
 ---
 
-## Task 4: Fix `iter_packets()` and `as_table()` — make them passive
+## Task 4: Fix `iter_data()` and `as_table()` — make them passive
 
 This is the core fix. Both methods stop calling `self.run()` and instead do a 3-step passive lookup. Four existing tests will break (they depended on the eager behaviour); fix them in the same task.
 
@@ -301,23 +301,23 @@ This is the core fix. Both methods stop calling `self.run()` and instead do a 3-
 - Modify: `tests/test_core/operators/test_operator_node.py`
 - Modify: `tests/test_core/operators/test_operator_node_attach_db.py`
 
-- [ ] **Step 4.1: Replace `iter_packets()` in `operator_node.py`**
+- [ ] **Step 4.1: Replace `iter_data()` in `operator_node.py`**
 
-Replace lines 555–558 (current `iter_packets()`):
+Replace lines 555–558 (current `iter_data()`):
 
 ```python
-def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
-    """Return an iterator over (tag, packet) pairs.
+def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+    """Return an iterator over (tag, data) pairs.
 
     Read-only: never triggers computation. Returns empty before ``run()``
     or ``execute()`` populates the cache. Call ``node.is_stale`` before
     iterating if you need to detect outdated cached data.
     """
     if self._cached_output_stream is not None:
-        return self._cached_output_stream.iter_packets()
+        return self._cached_output_stream.iter_data()
     db_stream = self._load_cached_stream_from_db()
     if db_stream is not None:
-        return db_stream.iter_packets()
+        return db_stream.iter_data()
     return iter([])
 ```
 
@@ -352,27 +352,27 @@ uv run python -m pytest tests/test_core/operators/ -q 2>&1 | tail -20
 ```
 
 Expected failures (4 tests):
-- `test_operator_node.py::TestOperatorNodeRunAndRetrieve::test_iter_packets`
+- `test_operator_node.py::TestOperatorNodeRunAndRetrieve::test_iter_data`
 - `test_operator_node.py::TestOperatorNodeRunAndRetrieve::test_as_table`
-- `test_operator_node_attach_db.py::TestOperatorNodeWithoutDatabase::test_iter_packets_without_database`
-- `test_operator_node_attach_db.py::TestOperatorNodeWithDatabase::test_iter_packets_with_database`
+- `test_operator_node_attach_db.py::TestOperatorNodeWithoutDatabase::test_iter_data_without_database`
+- `test_operator_node_attach_db.py::TestOperatorNodeWithDatabase::test_iter_data_with_database`
 
-- [ ] **Step 4.4: Fix `test_iter_packets` and `test_as_table` in `test_operator_node.py`**
+- [ ] **Step 4.4: Fix `test_iter_data` and `test_as_table` in `test_operator_node.py`**
 
 Find these two tests (around lines 332–345) and add `node.run()`:
 
 ```python
-def test_iter_packets(self, simple_stream, db):
-    op = MapPackets({"x": "renamed_x"})
+def test_iter_data(self, simple_stream, db):
+    op = MapData({"x": "renamed_x"})
     node = _make_node(op, (simple_stream,), db=db)
     node.run()                          # <-- add this line
-    packets = list(node.iter_packets())
-    assert len(packets) == 3
-    for tag, packet in packets:
-        assert "renamed_x" in packet.keys()
+    data = list(node.iter_data())
+    assert len(data) == 3
+    for tag, data in data:
+        assert "renamed_x" in data.keys()
 
 def test_as_table(self, simple_stream, db):
-    op = MapPackets({"x": "renamed_x"})
+    op = MapData({"x": "renamed_x"})
     node = _make_node(op, (simple_stream,), db=db)
     node.run()                          # <-- add this line
     table = node.as_table()
@@ -380,19 +380,19 @@ def test_as_table(self, simple_stream, db):
     assert "renamed_x" in table.column_names
 ```
 
-- [ ] **Step 4.5: Fix `test_iter_packets_without_database` and `test_iter_packets_with_database` in `test_operator_node_attach_db.py`**
+- [ ] **Step 4.5: Fix `test_iter_data_without_database` and `test_iter_data_with_database` in `test_operator_node_attach_db.py`**
 
 ```python
-def test_iter_packets_without_database(self):
+def test_iter_data_without_database(self):
     node = OperatorNode(
         operator=Join(),
         input_streams=(_make_stream("a"), _make_stream("b")),
     )
     node.run()                          # <-- add this line
-    results = list(node.iter_packets())
+    results = list(node.iter_data())
     assert len(results) == 3
 
-def test_iter_packets_with_database(self):
+def test_iter_data_with_database(self):
     db = InMemoryArrowDatabase()
     node = OperatorNode(
         operator=Join(),
@@ -400,7 +400,7 @@ def test_iter_packets_with_database(self):
         pipeline_database=db,
     )
     node.run()                          # <-- add this line
-    results = list(node.iter_packets())
+    results = list(node.iter_data())
     assert len(results) == 3
 ```
 
@@ -410,7 +410,7 @@ def test_iter_packets_with_database(self):
 uv run python -m pytest tests/test_core/operators/ -v 2>&1 | tail -25
 ```
 
-Expected: all 44 existing tests pass. The new tests from Task 1 (`test_iter_packets_without_run_returns_empty`, `test_as_table_without_run_returns_empty_table`, `test_dunder_iter_without_run_returns_empty`, `test_flow_without_run_returns_empty`, `test_iter_packets_after_run_returns_results`, `test_as_table_after_run_returns_results`) now PASS too.
+Expected: all 44 existing tests pass. The new tests from Task 1 (`test_iter_data_without_run_returns_empty`, `test_as_table_without_run_returns_empty_table`, `test_dunder_iter_without_run_returns_empty`, `test_flow_without_run_returns_empty`, `test_iter_data_after_run_returns_results`, `test_as_table_after_run_returns_results`) now PASS too.
 
 - [ ] **Step 4.7: Commit**
 
@@ -420,14 +420,14 @@ git add \
   tests/test_core/operators/test_operator_node.py \
   tests/test_core/operators/test_operator_node_attach_db.py \
   tests/test_core/operators/test_operator_node_non_active.py
-git commit -m "fix(operator_node): make iter_packets() and as_table() read-only (PLT-1182)
+git commit -m "fix(operator_node): make iter_data() and as_table() read-only (PLT-1182)
 
 Remove self.run() from both methods. Replace with 3-step passive lookup:
 1. in-memory _cached_output_stream
 2. DB in CacheMode.REPLAY via _load_cached_stream_from_db()
 3. empty result (iter([]) / _make_empty_table())
 
-Update 4 existing tests that relied on eager run() in iter_packets/as_table."
+Update 4 existing tests that relied on eager run() in iter_data/as_table."
 ```
 
 ---
@@ -448,27 +448,27 @@ Now that the fix is live, add the remaining tests.
 
 
 class TestCascadeIsolation:
-    def test_iter_packets_does_not_cascade_upstream_operator(self, simple_source):
+    def test_iter_data_does_not_cascade_upstream_operator(self, simple_source):
         """Key regression test for PLT-1182.
 
         Chain: SourceNode → OperatorNode(A) → OperatorNode(B)
         Iterating B without run() must not call A's operator.process.
         """
-        op_a = MapPackets({"x": "y"})
-        op_b = MapPackets({"y": "z"})
+        op_a = MapData({"x": "y"})
+        op_b = MapData({"y": "z"})
         node_a = _node(op_a, (simple_source,))
         node_b = _node(op_b, (node_a,))
 
         with patch.object(op_a, "process", wraps=op_a.process) as spy_a:
-            result = list(node_b.iter_packets())
+            result = list(node_b.iter_data())
 
         assert result == []
         spy_a.assert_not_called()
 
     def test_pipeline_run_then_iterate(self, simple_source):
         """After pipeline.run() (simulated), iteration returns correct results."""
-        op_a = MapPackets({"x": "y"})
-        op_b = MapPackets({"y": "z"})
+        op_a = MapData({"x": "y"})
+        op_b = MapData({"y": "z"})
         node_a = _node(op_a, (simple_source,))
         node_b = _node(op_b, (node_a,))
 
@@ -476,12 +476,12 @@ class TestCascadeIsolation:
         node_a.run()
         node_b.run()
 
-        result_a = list(node_a.iter_packets())
-        result_b = list(node_b.iter_packets())
+        result_a = list(node_a.iter_data())
+        result_b = list(node_b.iter_data())
         assert len(result_a) == 3
         assert len(result_b) == 3
-        for _, packet in result_b:
-            assert "z" in packet.keys()
+        for _, data in result_b:
+            assert "z" in data.keys()
 ```
 
 - [ ] **Step 5.2: Append CacheMode tests**
@@ -493,24 +493,24 @@ class TestCascadeIsolation:
 
 
 class TestCacheModeNonActive:
-    def test_iter_packets_no_db_no_run_returns_empty(self, simple_source, map_op):
+    def test_iter_data_no_db_no_run_returns_empty(self, simple_source, map_op):
         """No DB, no run() → empty (step 3 fallback)."""
         node = OperatorNode(operator=map_op, input_streams=(simple_source,))
-        assert list(node.iter_packets()) == []
+        assert list(node.iter_data()) == []
 
-    def test_iter_packets_replay_mode_no_records_returns_empty(
+    def test_iter_data_replay_mode_no_records_returns_empty(
         self, simple_source, map_op
     ):
         """REPLAY + fresh DB (no LOG run) → empty table with correct schema."""
         db = InMemoryArrowDatabase()
         node = _node(map_op, (simple_source,), db=db, cache_mode=CacheMode.REPLAY)
-        result = list(node.iter_packets())
+        result = list(node.iter_data())
         assert result == []
 
-    def test_iter_packets_replay_mode_returns_db_contents(
+    def test_iter_data_replay_mode_returns_db_contents(
         self, simple_source, map_op
     ):
-        """REPLAY + prior LOG run → iter_packets returns DB records without run()."""
+        """REPLAY + prior LOG run → iter_data returns DB records without run()."""
         db = InMemoryArrowDatabase()
         # Populate DB via LOG run
         node_log = _node(map_op, (simple_source,), db=db, cache_mode=CacheMode.LOG)
@@ -520,15 +520,15 @@ class TestCacheModeNonActive:
         node_replay = _node(
             map_op, (simple_source,), db=db, cache_mode=CacheMode.REPLAY
         )
-        result = list(node_replay.iter_packets())
+        result = list(node_replay.iter_data())
         assert len(result) == 3
-        for _, packet in result:
-            assert "renamed_x" in packet.keys()
+        for _, data in result:
+            assert "renamed_x" in data.keys()
 
-    def test_iter_packets_log_mode_no_run_returns_empty(
+    def test_iter_data_log_mode_no_run_returns_empty(
         self, simple_source, map_op
     ):
-        """LOG mode: DB has prior records but iter_packets() without run() returns empty.
+        """LOG mode: DB has prior records but iter_data() without run() returns empty.
 
         This verifies the CacheMode guard in _load_cached_stream_from_db.
         """
@@ -543,7 +543,7 @@ class TestCacheModeNonActive:
         node_fresh = _node(
             map_op, (simple_source,), db=db, cache_mode=CacheMode.LOG
         )
-        result = list(node_fresh.iter_packets())
+        result = list(node_fresh.iter_data())
         assert result == []
 ```
 
@@ -586,14 +586,14 @@ Replace the body of the `flow()` docstring:
 ```python
 def flow(
     self,
-) -> Collection[tuple[TagProtocol, PacketProtocol]]:
+) -> Collection[tuple[TagProtocol, DataProtocol]]:
     """
-    Returns the entire collection of (TagProtocol, PacketProtocol) as a list.
+    Returns the entire collection of (TagProtocol, DataProtocol) as a list.
     This is a read-only operation — results reflect whatever has been computed
     by a prior ``run()`` or ``execute()`` call. If no computation has been
     performed, returns an empty list.
     """
-    return [e for e in self.iter_packets()]
+    return [e for e in self.iter_data()]
 ```
 
 - [ ] **Step 6.2: Run the full test suite to confirm nothing broke**
@@ -629,25 +629,25 @@ Expected: all tests pass.
 # Quick sanity check — paste into uv run python
 import pyarrow as pa
 from orcapod.core.nodes import OperatorNode
-from orcapod.core.operators import MapPackets
+from orcapod.core.operators import MapData
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 
 src = ArrowTableStream(
     pa.table({"id": [1, 2], "x": [10, 20]}),
     tag_columns=["id"],
 )
-op_a = MapPackets({"x": "y"})
-op_b = MapPackets({"y": "z"})
+op_a = MapData({"x": "y"})
+op_b = MapData({"y": "z"})
 node_a = OperatorNode(operator=op_a, input_streams=(src,))
 node_b = OperatorNode(operator=op_b, input_streams=(node_a,))
 
 # Before run: must be empty
-assert list(node_b.iter_packets()) == [], "Should be empty before run()"
+assert list(node_b.iter_data()) == [], "Should be empty before run()"
 
 # After run: must have data
 node_a.run()
 node_b.run()
-assert len(list(node_b.iter_packets())) == 2, "Should have data after run()"
+assert len(list(node_b.iter_data())) == 2, "Should have data after run()"
 print("All assertions passed.")
 ```
 
@@ -663,9 +663,9 @@ gh pr create \
   --body "$(cat <<'EOF'
 ## Summary
 
-- `OperatorNode.iter_packets()` and `as_table()` previously called `self.run()` unconditionally, cascading upstream computation on every read
+- `OperatorNode.iter_data()` and `as_table()` previously called `self.run()` unconditionally, cascading upstream computation on every read
 - Add two private helpers: `_make_empty_table()` (pure schema → zero-row table) and `_load_cached_stream_from_db()` (state-free REPLAY-only DB read)
-- Rewrite `iter_packets()` and `as_table()` to be passive: check in-memory cache → DB (REPLAY only) → return empty
+- Rewrite `iter_data()` and `as_table()` to be passive: check in-memory cache → DB (REPLAY only) → return empty
 - Refactor `_replay_from_cache()` to use `_make_empty_table()` (deduplication)
 - Update 4 existing tests that relied on eager behaviour; add 14 new tests in `test_operator_node_non_active.py`
 - Update `StreamBase.flow()` docstring
@@ -673,7 +673,7 @@ gh pr create \
 ## Test plan
 
 - [ ] All existing 44 operator node tests pass
-- [ ] 14 new tests in `test_operator_node_non_active.py` pass: core passive invariants, cascade isolation (`test_iter_packets_does_not_cascade_upstream_operator`), all 3 CacheModes
+- [ ] 14 new tests in `test_operator_node_non_active.py` pass: core passive invariants, cascade isolation (`test_iter_data_does_not_cascade_upstream_operator`), all 3 CacheModes
 - [ ] `uv run python -m pytest -q` passes
 
 Closes PLT-1182

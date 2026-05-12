@@ -15,7 +15,7 @@ from orcapod.core.nodes import (
     OperatorNode,
 )
 from orcapod.core.operators import Join
-from orcapod.core.packet_function import CachedPacketFunction, PythonPacketFunction
+from orcapod.core.data_function import CachedDataFunction, PythonDataFunction
 from orcapod.core.sources import ArrowTableSource, DerivedSource
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
@@ -50,8 +50,8 @@ class TestFunctionNodeCaching:
     """Per design: first run computes and stores; second run replays cached."""
 
     def test_first_run_computes_all(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         source = _make_source(3)
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
@@ -67,8 +67,8 @@ class TestFunctionNodeCaching:
         assert records.num_rows == 3
 
     def test_second_run_uses_cache(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         source = _make_source(3)
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
@@ -89,16 +89,16 @@ class TestFunctionNodeCaching:
             pipeline_database=pipeline_db,
             result_database=result_db,
         )
-        packets = list(node2.iter_packets())
-        assert len(packets) == 3
+        data = list(node2.iter_data())
+        assert len(data) == 3
 
 
 class TestDerivedSourceReingestion:
     """Per design: FunctionNode → DerivedSource → further pipeline."""
 
     def test_derived_source_as_pipeline_input(self):
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         source = _make_source(3)
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
@@ -115,9 +115,9 @@ class TestDerivedSourceReingestion:
         derived = node.as_source()
         assert isinstance(derived, DerivedSource)
 
-        # Should be able to iterate packets from derived source
-        packets = list(derived.iter_packets())
-        assert len(packets) == 3
+        # Should be able to iterate data from derived source
+        data = list(derived.iter_data())
+        assert len(data) == 3
 
 
 # ===================================================================
@@ -208,24 +208,24 @@ class TestOperatorNodeCaching:
 
 
 # ===================================================================
-# CachedPacketFunction end-to-end
+# CachedDataFunction end-to-end
 # ===================================================================
 
 
-class TestCachedPacketFunctionEndToEnd:
-    """End-to-end test of CachedPacketFunction with InMemoryArrowDatabase."""
+class TestCachedDataFunctionEndToEnd:
+    """End-to-end test of CachedDataFunction with InMemoryArrowDatabase."""
 
     def test_full_caching_flow(self):
         db = InMemoryArrowDatabase()
-        inner_pf = PythonPacketFunction(_double, output_keys="result")
-        cached_pf = CachedPacketFunction(inner_pf, result_database=db)
+        inner_pf = PythonDataFunction(_double, output_keys="result")
+        cached_pf = CachedDataFunction(inner_pf, result_database=db)
         cached_pf.set_auto_flush(True)
 
-        from orcapod.core.datagrams.tag_packet import Packet
+        from orcapod.core.datagrams.tag_data import Data
 
-        # Process multiple packets
+        # Process multiple data
         for x in [1, 2, 3]:
-            result = cached_pf.call(Packet({"x": x}))
+            result = cached_pf.call(Data({"x": x}))
             assert result is not None
             assert result["result"] == x * 2
 
@@ -236,6 +236,6 @@ class TestCachedPacketFunctionEndToEnd:
 
         # Re-calling should use cache
         for x in [1, 2, 3]:
-            result = cached_pf.call(Packet({"x": x}))
+            result = cached_pf.call(Data({"x": x}))
             assert result is not None
             assert result["result"] == x * 2

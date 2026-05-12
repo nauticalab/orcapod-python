@@ -1,7 +1,7 @@
 """Integration tests for LoggingObserver with real pipelines.
 
 Exercises the full logging pipeline: capture → CapturedLogs return type →
-FunctionNode → observer → PacketLogger → database, using InMemoryArrowDatabase
+FunctionNode → observer → DataLogger → database, using InMemoryArrowDatabase
 and real Pipeline objects.
 """
 
@@ -12,7 +12,7 @@ import pytest
 
 from orcapod.core.executors import LocalPythonFunctionExecutor
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import (
@@ -47,7 +47,7 @@ def _get_function_node(pipeline: Pipeline):
 
 
 # ---------------------------------------------------------------------------
-# 1. Sync pipeline — succeeding packets → log rows with stdout captured
+# 1. Sync pipeline — succeeding data → log rows with stdout captured
 # ---------------------------------------------------------------------------
 
 
@@ -60,7 +60,7 @@ class TestSyncPipelineSuccessLogs:
             print(f"doubling {x}")
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_logs", pipeline_database=db)
@@ -80,11 +80,11 @@ class TestSyncPipelineSuccessLogs:
 
 
 # ---------------------------------------------------------------------------
-# 2. Failing packets → success=False, traceback populated
+# 2. Failing data → success=False, traceback populated
 # ---------------------------------------------------------------------------
 
 
-class TestFailingPacketsLogged:
+class TestFailingDatasLogged:
     def test_failure_logged_with_traceback(self):
         db = InMemoryArrowDatabase()
         source = _make_source(2)
@@ -92,7 +92,7 @@ class TestFailingPacketsLogged:
         def failing(x: int) -> int:
             raise ValueError("boom")
 
-        pf = PythonPacketFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_fail", pipeline_database=db)
@@ -128,7 +128,7 @@ class TestFlatLogStorage:
         def identity(x: int) -> int:
             return x
 
-        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_flat", pipeline_database=db)
@@ -160,7 +160,7 @@ class TestQueryableTagColumns:
         def identity(x: int) -> int:
             return x
 
-        pf = PythonPacketFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_tags", pipeline_database=db)
@@ -194,7 +194,7 @@ class TestAsyncOrchestratorLogs:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_async_logs", pipeline_database=db)
@@ -225,7 +225,7 @@ class TestFailFastErrorPolicy:
         def failing(x: int) -> int:
             raise RuntimeError("crash")
 
-        pf = PythonPacketFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_failfast", pipeline_database=db)
@@ -247,7 +247,7 @@ class TestFailFastErrorPolicy:
 
 
 # ---------------------------------------------------------------------------
-# 7. Mixed success/failure — correct log row per packet
+# 7. Mixed success/failure — correct log row per data
 # ---------------------------------------------------------------------------
 
 
@@ -266,7 +266,7 @@ class TestMixedSuccessFailure:
         def safe_div(x: int) -> float:
             return 100 / x
 
-        pf = PythonPacketFunction(safe_div, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf = PythonDataFunction(safe_div, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="test_mixed", pipeline_database=db)
@@ -302,9 +302,9 @@ class TestMultipleFunctionNodesCombinedLogs:
         def triple(result: int) -> int:
             return result * 3
 
-        pf1 = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf1 = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod1 = FunctionPod(pf1)
-        pf2 = PythonPacketFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
+        pf2 = PythonDataFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
         pod2 = FunctionPod(pf2)
 
         pipeline = Pipeline(name="test_multi", pipeline_database=db)
@@ -318,7 +318,7 @@ class TestMultipleFunctionNodesCombinedLogs:
 
         logs = obs.get_logs()
         assert logs is not None
-        # 2 packets × 2 nodes = 4 log rows total
+        # 2 data × 2 nodes = 4 log rows total
         assert logs.num_rows == 4
 
 
@@ -338,9 +338,9 @@ class TestGetLogsNodeSpecific:
         def triple(result: int) -> int:
             return result * 3
 
-        pf1 = PythonPacketFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pf1 = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod1 = FunctionPod(pf1)
-        pf2 = PythonPacketFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
+        pf2 = PythonDataFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
         pod2 = FunctionPod(pf2)
 
         pipeline = Pipeline(name="test_filter", pipeline_database=db)
@@ -355,7 +355,7 @@ class TestGetLogsNodeSpecific:
         logs = obs.get_logs()
         assert logs is not None
         # Node identity is in path — row count confirms both nodes written
-        # 2 packets × 2 nodes = 4 log rows total
+        # 2 data × 2 nodes = 4 log rows total
         assert logs.num_rows == 4
 
 

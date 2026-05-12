@@ -4,7 +4,7 @@ Tests for FunctionPodStream.
 Covers:
 - StreamProtocol protocol conformance
 - keys() and output_schema()
-- iter_packets()
+- iter_data()
 - as_table()
 """
 
@@ -15,7 +15,7 @@ from collections.abc import Mapping
 import pyarrow as pa
 
 from orcapod.protocols.core_protocols import StreamProtocol
-from orcapod.protocols.core_protocols.datagrams import PacketProtocol, TagProtocol
+from orcapod.protocols.core_protocols.datagrams import DataProtocol, TagProtocol
 
 from ..conftest import make_int_stream
 
@@ -32,13 +32,13 @@ class TestFunctionPodLabel:
 
     def test_explicit_label_overrides_function_name(self):
         from orcapod.core.function_pod import FunctionPod
-        from orcapod.core.packet_function import PythonPacketFunction
+        from orcapod.core.data_function import PythonDataFunction
 
         def my_func(x: int) -> int:
             return x
 
         pod = FunctionPod(
-            packet_function=PythonPacketFunction(my_func, output_keys="result"),
+            data_function=PythonDataFunction(my_func, output_keys="result"),
             label="custom_label",
         )
         assert pod.label == "custom_label"
@@ -55,19 +55,19 @@ class TestFunctionPodStreamProtocolConformance:
         assert isinstance(double_pod.process(make_int_stream()).upstreams, tuple)
 
     def test_has_keys_method(self, double_pod):
-        tag_keys, packet_keys = double_pod.process(make_int_stream()).keys()
+        tag_keys, data_keys = double_pod.process(make_int_stream()).keys()
         assert isinstance(tag_keys, tuple)
-        assert isinstance(packet_keys, tuple)
+        assert isinstance(data_keys, tuple)
 
     def test_has_output_schema_method(self, double_pod):
-        tag_schema, packet_schema = double_pod.process(
+        tag_schema, data_schema = double_pod.process(
             make_int_stream()
         ).output_schema()
         assert isinstance(tag_schema, Mapping)
-        assert isinstance(packet_schema, Mapping)
+        assert isinstance(data_schema, Mapping)
 
-    def test_has_iter_packets_method(self, double_pod):
-        it = double_pod.process(make_int_stream()).iter_packets()
+    def test_has_iter_data_method(self, double_pod):
+        it = double_pod.process(make_int_stream()).iter_data()
         assert len(next(it)) == 2
 
     def test_has_as_table_method(self, double_pod):
@@ -84,56 +84,56 @@ class TestFunctionPodStreamKeysAndSchema:
         tag_keys, _ = double_pod.process(make_int_stream()).keys()
         assert "id" in tag_keys
 
-    def test_packet_keys_come_from_function_output(self, double_pod):
-        _, packet_keys = double_pod.process(make_int_stream()).keys()
-        assert "result" in packet_keys
+    def test_data_keys_come_from_function_output(self, double_pod):
+        _, data_keys = double_pod.process(make_int_stream()).keys()
+        assert "result" in data_keys
 
-    def test_packet_keys_do_not_include_input_keys(self, double_pod):
-        _, packet_keys = double_pod.process(make_int_stream()).keys()
-        assert "x" not in packet_keys
+    def test_data_keys_do_not_include_input_keys(self, double_pod):
+        _, data_keys = double_pod.process(make_int_stream()).keys()
+        assert "x" not in data_keys
 
     def test_output_schema_keys_match_keys_method(self, double_pod):
         stream = double_pod.process(make_int_stream())
-        tag_keys, packet_keys = stream.keys()
-        tag_schema, packet_schema = stream.output_schema()
+        tag_keys, data_keys = stream.keys()
+        tag_schema, data_schema = stream.output_schema()
         assert set(tag_schema.keys()) == set(tag_keys)
-        assert set(packet_schema.keys()) == set(packet_keys)
+        assert set(data_schema.keys()) == set(data_keys)
 
-    def test_packet_schema_type_is_correct(self, double_pod):
-        _, packet_schema = double_pod.process(make_int_stream()).output_schema()
-        assert packet_schema["result"] is int
+    def test_data_schema_type_is_correct(self, double_pod):
+        _, data_schema = double_pod.process(make_int_stream()).output_schema()
+        assert data_schema["result"] is int
 
 
 # ---------------------------------------------------------------------------
-# 3. iter_packets()
+# 3. iter_data()
 # ---------------------------------------------------------------------------
 
 
-class TestFunctionPodStreamIterPackets:
+class TestFunctionPodStreamIterDatas:
     def test_yields_correct_count(self, double_pod):
         n = 5
-        assert len(list(double_pod.process(make_int_stream(n=n)).iter_packets())) == n
+        assert len(list(double_pod.process(make_int_stream(n=n)).iter_data())) == n
 
-    def test_each_pair_has_tag_and_packet(self, double_pod):
-        for tag, packet in double_pod.process(make_int_stream()).iter_packets():
+    def test_each_pair_has_tag_and_data(self, double_pod):
+        for tag, data in double_pod.process(make_int_stream()).iter_data():
             assert isinstance(tag, TagProtocol)
-            assert isinstance(packet, PacketProtocol)
+            assert isinstance(data, DataProtocol)
 
-    def test_output_packet_values_are_doubled(self, double_pod):
-        for i, (_, packet) in enumerate(
-            double_pod.process(make_int_stream(n=4)).iter_packets()
+    def test_output_data_values_are_doubled(self, double_pod):
+        for i, (_, data) in enumerate(
+            double_pod.process(make_int_stream(n=4)).iter_data()
         ):
-            assert packet["result"] == i * 2
+            assert data["result"] == i * 2
 
     def test_iter_is_repeatable_after_first_pass(self, double_pod):
         result = double_pod.process(make_int_stream(n=3))
-        first = [(t["id"], p["result"]) for t, p in result.iter_packets()]
-        second = [(t["id"], p["result"]) for t, p in result.iter_packets()]
+        first = [(t["id"], p["result"]) for t, p in result.iter_data()]
+        second = [(t["id"], p["result"]) for t, p in result.iter_data()]
         assert first == second
 
-    def test_dunder_iter_delegates_to_iter_packets(self, double_pod):
+    def test_dunder_iter_delegates_to_iter_data(self, double_pod):
         result = double_pod.process(make_int_stream(n=3))
-        assert len(list(result)) == len(list(result.iter_packets()))
+        assert len(list(result)) == len(list(result.iter_data()))
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +152,7 @@ class TestFunctionPodStreamAsTable:
     def test_table_contains_tag_columns(self, double_pod):
         assert "id" in double_pod.process(make_int_stream()).as_table().column_names
 
-    def test_table_contains_packet_columns(self, double_pod):
+    def test_table_contains_data_columns(self, double_pod):
         assert "result" in double_pod.process(make_int_stream()).as_table().column_names
 
     def test_table_result_values_are_correct(self, double_pod):
@@ -193,7 +193,7 @@ class TestFunctionPodStreamStaleness:
 
         input_stream = make_int_stream(n=3)
         stream = double_pod.process(input_stream)
-        list(stream.iter_packets())  # populate cache
+        list(stream.iter_data())  # populate cache
 
         time.sleep(0.01)
         input_stream._update_modified_time()
@@ -205,42 +205,42 @@ class TestFunctionPodStreamStaleness:
         import time
 
         stream = double_pod.process(make_int_stream(n=3))
-        list(stream.iter_packets())  # populate cache
+        list(stream.iter_data())  # populate cache
 
         time.sleep(0.01)
         double_pod._update_modified_time()  # simulate pod being modified
 
         assert stream.is_stale
 
-    def test_iter_packets_auto_clears_when_upstream_updated(self, double_pod):
-        """iter_packets re-populates automatically when the upstream stream is modified."""
+    def test_iter_data_auto_clears_when_upstream_updated(self, double_pod):
+        """iter_data re-populates automatically when the upstream stream is modified."""
         import time
 
         input_stream = make_int_stream(n=3)
         stream = double_pod.process(input_stream)
-        first = list(stream.iter_packets())
+        first = list(stream.iter_data())
 
         time.sleep(0.01)
         input_stream._update_modified_time()
         assert stream.is_stale
 
-        second = list(stream.iter_packets())
+        second = list(stream.iter_data())
         assert len(second) == len(first)
         assert [p["result"] for _, p in second] == [p["result"] for _, p in first]
 
-    def test_iter_packets_auto_clears_when_producer_updated(self, double_pod):
-        """iter_packets re-populates automatically when the source pod is modified."""
+    def test_iter_data_auto_clears_when_producer_updated(self, double_pod):
+        """iter_data re-populates automatically when the source pod is modified."""
         import time
 
         stream = double_pod.process(make_int_stream(n=3))
-        first = list(stream.iter_packets())
-        assert len(stream._cached_output_packets) == 3
+        first = list(stream.iter_data())
+        assert len(stream._cached_output_datas) == 3
 
         time.sleep(0.01)
         double_pod._update_modified_time()
         assert stream.is_stale
 
-        second = list(stream.iter_packets())
+        second = list(stream.iter_data())
         assert len(second) == len(first)
         assert [p["result"] for _, p in second] == [p["result"] for _, p in first]
 
@@ -262,10 +262,10 @@ class TestFunctionPodStreamStaleness:
         )
 
     def test_no_auto_clear_when_not_stale(self, double_pod):
-        """When neither upstream nor pod has changed, iter_packets preserves the cache."""
+        """When neither upstream nor pod has changed, iter_data preserves the cache."""
         stream = double_pod.process(make_int_stream(n=3))
-        list(stream.iter_packets())
-        cached_count = len(stream._cached_output_packets)
+        list(stream.iter_data())
+        cached_count = len(stream._cached_output_datas)
 
-        list(stream.iter_packets())
-        assert len(stream._cached_output_packets) == cached_count
+        list(stream.iter_data())
+        assert len(stream._cached_output_datas) == cached_count

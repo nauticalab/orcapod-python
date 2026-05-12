@@ -92,13 +92,13 @@ def delta_path(tmp_path: Path) -> Path:
 class TestCSVSource:
     def test_construction_reads_rows(self, csv_path):
         src = CSVSource(file_path=csv_path, tag_columns=["user_id"])
-        assert len(list(src.iter_packets())) == 3
+        assert len(list(src.iter_data())) == 3
 
-    def test_tag_and_packet_keys(self, csv_path):
+    def test_tag_and_data_keys(self, csv_path):
         src = CSVSource(file_path=csv_path, tag_columns=["user_id"])
-        tag_keys, packet_keys = src.keys()
+        tag_keys, data_keys = src.keys()
         assert "user_id" in tag_keys
-        assert "score" in packet_keys
+        assert "score" in data_keys
 
     def test_source_id_defaults_to_file_path(self, csv_path):
         src = CSVSource(file_path=csv_path)
@@ -126,9 +126,9 @@ class TestCSVSource:
 
     def test_output_schema_returns_two_schemas(self, csv_path):
         src = CSVSource(file_path=csv_path, tag_columns=["user_id"])
-        tag_schema, packet_schema = src.output_schema()
+        tag_schema, data_schema = src.output_schema()
         assert isinstance(tag_schema, Schema)
-        assert isinstance(packet_schema, Schema)
+        assert isinstance(data_schema, Schema)
 
     def test_source_id_explicit(self, csv_path):
         src = CSVSource(file_path=csv_path, source_id="my_csv_id")
@@ -183,13 +183,13 @@ class TestCSVSource:
 class TestDeltaTableSource:
     def test_construction_reads_rows(self, delta_path):
         src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
-        assert len(list(src.iter_packets())) == 3
+        assert len(list(src.iter_data())) == 3
 
-    def test_tag_and_packet_keys(self, delta_path):
+    def test_tag_and_data_keys(self, delta_path):
         src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
-        tag_keys, packet_keys = src.keys()
+        tag_keys, data_keys = src.keys()
         assert "id" in tag_keys
-        assert "value" in packet_keys
+        assert "value" in data_keys
 
     def test_source_id_defaults_to_directory_name(self, delta_path):
         src = DeltaTableSource(delta_table_path=delta_path)
@@ -217,9 +217,9 @@ class TestDeltaTableSource:
 
     def test_output_schema_returns_two_schemas(self, delta_path):
         src = DeltaTableSource(delta_table_path=delta_path, tag_columns=["id"])
-        tag_schema, packet_schema = src.output_schema()
+        tag_schema, data_schema = src.output_schema()
         assert isinstance(tag_schema, Schema)
-        assert isinstance(packet_schema, Schema)
+        assert isinstance(data_schema, Schema)
 
     def test_source_id_explicit(self, delta_path):
         src = DeltaTableSource(delta_table_path=delta_path, source_id="delta_id")
@@ -259,9 +259,9 @@ class TestDeltaTableSourceNullability:
         source = DeltaTableSource(
             delta_mixed_nullable_path, tag_columns=["id"]
         )
-        _, packet_schema = source.output_schema()
+        _, data_schema = source.output_schema()
         # score is nullable=False in the Delta schema → must be float, not float | None
-        assert packet_schema["score"] is float
+        assert data_schema["score"] is float
 
     def test_nullable_columns_produce_optional_python_types(
         self, delta_mixed_nullable_path: Path
@@ -270,10 +270,10 @@ class TestDeltaTableSourceNullability:
         source = DeltaTableSource(
             delta_mixed_nullable_path, tag_columns=["id"]
         )
-        _, packet_schema = source.output_schema()
+        _, data_schema = source.output_schema()
         # label is nullable=True in the Delta schema → must be str | None
         import types
-        assert packet_schema["label"] == str | None
+        assert data_schema["label"] == str | None
 
 
 # ---------------------------------------------------------------------------
@@ -286,9 +286,9 @@ class TestDataFrameSourceAdditional:
         """tag_columns as a plain string (not a list) should work."""
         df = pl.DataFrame({"id": [1, 2, 3], "value": ["a", "b", "c"]})
         src = DataFrameSource(data=df, tag_columns="id")
-        tag_keys, packet_keys = src.keys()
+        tag_keys, data_keys = src.keys()
         assert "id" in tag_keys
-        assert "value" in packet_keys
+        assert "value" in data_keys
 
     def test_resolve_field_raises_not_implemented(self):
         """DataFrameSource does not override resolve_field; must raise."""
@@ -306,9 +306,9 @@ class TestDataFrameSourceAdditional:
             }
         )
         src = DataFrameSource(data=df)
-        tag_keys, packet_keys = src.keys()
+        tag_keys, data_keys = src.keys()
         assert "_tag_something" not in tag_keys
-        assert "_tag_something" not in packet_keys
+        assert "_tag_something" not in data_keys
 
     def test_source_id_in_provenance_tokens(self):
         df = pl.DataFrame({"id": [1, 2, 3], "value": ["a", "b", "c"]})
@@ -322,9 +322,9 @@ class TestDataFrameSourceAdditional:
     def test_multiple_tag_columns(self):
         df = pl.DataFrame({"a": [1, 2], "b": [3, 4], "val": ["x", "y"]})
         src = DataFrameSource(data=df, tag_columns=["a", "b"])
-        tag_keys, packet_keys = src.keys()
+        tag_keys, data_keys = src.keys()
         assert set(tag_keys) == {"a", "b"}
-        assert "val" in packet_keys
+        assert "val" in data_keys
 
     def test_content_hash_same_data(self):
         df1 = pl.DataFrame({"x": [1, 2, 3]})
@@ -353,9 +353,9 @@ class TestDictSourceAdditional:
             tag_columns=["id"],
             data_schema={"id": int, "value": str},
         )
-        tag_schema, packet_schema = src.output_schema()
+        tag_schema, data_schema = src.output_schema()
         assert "id" in tag_schema
-        assert "value" in packet_schema
+        assert "value" in data_schema
 
     def test_empty_data_raises(self):
         """An empty DictSource cannot build a valid ArrowTableStream."""
@@ -455,9 +455,9 @@ class TestListSourceAdditional:
             return {"group": el % 3}
 
         src = ListSource(name="val", data=[0, 1, 2], tag_function=tag_fn)
-        tag_keys, packet_keys = src.keys()
+        tag_keys, data_keys = src.keys()
         assert "group" in tag_keys
-        assert "val" in packet_keys
+        assert "val" in data_keys
 
     def test_tag_as_dict_protocol(self):
         """If the tag function returns an object with .as_dict(), it is unwrapped."""
@@ -478,7 +478,7 @@ class TestListSourceAdditional:
             tag_function=tag_fn,
             expected_tag_keys=["slot"],
         )
-        pairs = list(src.iter_packets())
+        pairs = list(src.iter_data())
         slots = {tag["slot"] for tag, _ in pairs}
         assert slots == {0, 1, 2}
 
@@ -603,9 +603,9 @@ class TestArrowTableSourceAdditional:
             }
         )
         src = ArrowTableSource(table=table, tag_columns=["id"], infer_nullable=True)
-        tag_keys, packet_keys = src.keys()
+        tag_keys, data_keys = src.keys()
         assert "id" in tag_keys
-        assert "val" in packet_keys
+        assert "val" in data_keys
 
 
 # ---------------------------------------------------------------------------

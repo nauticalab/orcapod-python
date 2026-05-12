@@ -11,24 +11,24 @@ from orcapod.types import Schema, SchemaLike
 logger = logging.getLogger(__name__)
 
 
-def verify_packet_schema(packet: dict, schema: SchemaLike) -> bool:
+def verify_data_schema(data: dict, schema: SchemaLike) -> bool:
     """Verify that the dictionary's types match the expected types in the schema."""
     from beartype.door import is_bearable
 
-    # verify that packet contains no keys not in schema
-    if set(packet.keys()) - set(schema.keys()):
+    # verify that data contains no keys not in schema
+    if set(data.keys()) - set(schema.keys()):
         logger.warning(
-            f"PacketProtocol contains keys not in schema: {set(packet.keys()) - set(schema.keys())}. "
+            f"DataProtocol contains keys not in schema: {set(data.keys()) - set(schema.keys())}. "
         )
         return False
     for key, type_info in schema.items():
-        if key not in packet:
+        if key not in data:
             logger.warning(
-                f"Key '{key}' not found in packet. Assuming None but this behavior may change in the future"
+                f"Key '{key}' not found in data. Assuming None but this behavior may change in the future"
             )
-        if not is_bearable(packet.get(key), type_info):
+        if not is_bearable(data.get(key), type_info):
             logger.warning(
-                f"Type mismatch for key '{key}': expected {type_info}, got {packet.get(key)}."
+                f"Type mismatch for key '{key}': expected {type_info}, got {data.get(key)}."
             )
             return False
     return True

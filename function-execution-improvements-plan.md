@@ -3,7 +3,7 @@
 ## Overview
 
 This document captures design decisions for improving the executor integration in the
-packet function / function pod / function node execution chain. The changes address four
+data function / function pod / function node execution chain. The changes address four
 areas:
 
 1. **`with_options` semantics** — executors become immutable; `with_options()` always returns
@@ -11,7 +11,7 @@ areas:
 2. **`execution_engine_opts` ownership** — removed from FunctionNode; owned exclusively by
    the pipeline's executor-assignment logic.
 3. **`CachedFunctionPod`** — a new pod-level caching wrapper complementing the existing
-   `CachedPacketFunction` (packet-level caching).
+   `CachedDataFunction` (data-level caching).
 4. **Type-safe executor dispatch via `Generic[E]` + `__init_subclass__`** — eliminates
    redundant `isinstance` checks in the hot path by resolving the executor protocol once at
    class definition time.
@@ -22,7 +22,7 @@ areas:
 
 ### Current state
 
-`PacketFunctionExecutorBase.with_options()` returns `self` by default. `RayExecutor`
+`DataFunctionExecutorBase.with_options()` returns `self` by default. `RayExecutor`
 overrides it to return a new instance. This is inconsistent — callers cannot rely on
 `with_options()` being side-effect-free without checking the concrete type.
 
@@ -35,10 +35,10 @@ variant without mutating the original.
 
 ### Changes
 
-- **`PacketFunctionExecutorBase.with_options()`**: Default implementation returns
+- **`DataFunctionExecutorBase.with_options()`**: Default implementation returns
   `copy.copy(self)` (shallow clone) instead of `self`. Subclasses that carry mutable state
   (e.g. Ray handles) override to produce a properly configured new instance.
-- **`PacketFunctionExecutorProtocol.with_options()`**: Docstring updated to specify "returns
+- **`DataFunctionExecutorProtocol.with_options()`**: Docstring updated to specify "returns
   a **new** executor instance".
 - **`LocalExecutor.with_options()`**: Returns a new `LocalExecutor()`. Trivial since it
   carries no state.
@@ -59,7 +59,7 @@ belongs to the pipeline's executor-assignment step.
 `execution_engine_opts` is **removed from FunctionNode entirely**. The pipeline's
 `apply_executor` (or equivalent) logic is the sole owner: it reads per-node options from
 the pipeline config, calls `executor.with_options(**merged_opts)`, and sets the resulting
-executor directly on the packet function. The node never sees raw option dicts.
+executor directly on the data function. The node never sees raw option dicts.
 
 ### Changes
 
@@ -76,30 +76,30 @@ executor directly on the packet function. The node never sees raw option dicts.
 
 ### Current state
 
-Caching exists only at the packet-function level (`CachedPacketFunction`), which wraps
+Caching exists only at the data-function level (`CachedDataFunction`), which wraps
 `call()` / `async_call()` with DB lookup/insert. This works but cannot leverage tag
-information (which is invisible to packet functions).
+information (which is invisible to data functions).
 
 ### Design decision
 
 Add a **`CachedFunctionPod`** that wraps a `FunctionPod` and intercepts at the
-`process_packet(tag, packet)` level. This complements `CachedPacketFunction`:
+`process_data(tag, data)` level. This complements `CachedDataFunction`:
 
-| Layer | `CachedPacketFunction` | `CachedFunctionPod` |
+| Layer | `CachedDataFunction` | `CachedFunctionPod` |
 |-------|------------------------|---------------------|
-| Intercepts at | `call(packet)` | `process_packet(tag, packet)` |
+| Intercepts at | `call(data)` | `process_data(tag, data)` |
 | Has tag access | No | Yes |
-| Cache key includes | Packet content hash | Tag + packet content hash |
-| Delegates to | Wrapped `PacketFunction.call()` | Inner `FunctionPod.process_packet()` |
+| Cache key includes | Data content hash | Tag + data content hash |
+| Delegates to | Wrapped `DataFunction.call()` | Inner `FunctionPod.process_data()` |
 
-Both are useful: `CachedPacketFunction` deduplicates purely on data content;
+Both are useful: `CachedDataFunction` deduplicates purely on data content;
 `CachedFunctionPod` can incorporate tag metadata into cache decisions.
 
 ### Implementation sketch
 
 ```python
 class CachedFunctionPod(WrappedFunctionPod):
-    """Pod-level caching wrapper that intercepts process_packet()."""
+    """Pod-level caching wrapper that intercepts process_data()."""
 
     def __init__(
         self,
@@ -112,15 +112,15 @@ class CachedFunctionPod(WrappedFunctionPod):
         self._result_database = result_database
         self._record_path_prefix = record_path_prefix
 
-    def process_packet(
-        self, tag: TagProtocol, packet: PacketProtocol
-    ) -> tuple[TagProtocol, PacketProtocol | None]:
-        # Cache key incorporates both tag and packet content
-        cache_key = self._compute_cache_key(tag, packet)
+    def process_data(
+        self, tag: TagProtocol, data: DataProtocol
+    ) -> tuple[TagProtocol, DataProtocol | None]:
+        # Cache key incorporates both tag and data content
+        cache_key = self._compute_cache_key(tag, data)
         cached = self._lookup(cache_key)
         if cached is not None:
             return tag, cached
-        tag, output = self._function_pod.process_packet(tag, packet)
+        tag, output = self._function_pod.process_data(tag, data)
         if output is not None:
             self._store(cache_key, tag, output)
         return tag, output
@@ -130,8 +130,8 @@ class CachedFunctionPod(WrappedFunctionPod):
 
 - **New file**: `src/orcapod/core/cached_function_pod.py` containing `CachedFunctionPod`.
 - **`function_pod` decorator**: Add `pod_cache_database` parameter that wraps the pod in
-  `CachedFunctionPod` when provided (distinct from `result_database` which wraps the packet
-  function in `CachedPacketFunction`).
+  `CachedFunctionPod` when provided (distinct from `result_database` which wraps the data
+  function in `CachedDataFunction`).
 
 ---
 
@@ -139,7 +139,7 @@ class CachedFunctionPod(WrappedFunctionPod):
 
 ### Problem
 
-Currently, each `PacketFunctionBase` subclass that cares about executor-specific capabilities
+Currently, each `DataFunctionBase` subclass that cares about executor-specific capabilities
 must do `isinstance` checks in the hot path (`call()` / `direct_call()`). This is both
 verbose and error-prone — forgetting to check means silent misuse.
 
@@ -149,7 +149,7 @@ checking, but we can get close.
 
 ### Design decision
 
-Use `Generic[E]` on `PacketFunctionBase` combined with `__init_subclass__` to resolve the
+Use `Generic[E]` on `DataFunctionBase` combined with `__init_subclass__` to resolve the
 concrete executor protocol **once at class definition time**. The single `isinstance` check
 moves to `set_executor()` (assignment boundary), and the hot path (`call()`) is clean.
 
@@ -158,9 +158,9 @@ moves to `set_executor()` (assignment boundary), and the hot path (`call()`) is 
 ```python
 from typing import Generic, TypeVar
 
-E = TypeVar("E", bound=PacketFunctionExecutorProtocol)
+E = TypeVar("E", bound=DataFunctionExecutorProtocol)
 
-class PacketFunctionBase(TraceableBase, Generic[E]):
+class DataFunctionBase(TraceableBase, Generic[E]):
     _resolved_executor_protocol: ClassVar[type]  # auto-set by __init_subclass__
     _executor: E | None = None
 
@@ -168,13 +168,13 @@ class PacketFunctionBase(TraceableBase, Generic[E]):
         super().__init_subclass__(**kwargs)
         for base in cls.__orig_bases__:
             origin = typing.get_origin(base)
-            if origin is PacketFunctionBase:
+            if origin is DataFunctionBase:
                 args = typing.get_args(base)
                 if args and not isinstance(args[0], TypeVar):
                     cls._resolved_executor_protocol = args[0]
                     return
 
-    def set_executor(self, executor: PacketFunctionExecutorProtocol) -> None:
+    def set_executor(self, executor: DataFunctionExecutorProtocol) -> None:
         """Single isinstance check at assignment boundary."""
         proto = getattr(type(self), '_resolved_executor_protocol', None)
         if proto is not None and not isinstance(executor, proto):
@@ -188,7 +188,7 @@ class PacketFunctionBase(TraceableBase, Generic[E]):
 Subclasses declare the executor type **once** via the generic parameter:
 
 ```python
-class PythonPacketFunction(PacketFunctionBase[PythonExecutorProtocol]):
+class PythonDataFunction(DataFunctionBase[PythonExecutorProtocol]):
     # No _executor_protocol ClassVar needed — __init_subclass__ extracts it
     # from Generic[PythonExecutorProtocol] automatically.
     ...
@@ -198,51 +198,51 @@ class PythonPacketFunction(PacketFunctionBase[PythonExecutorProtocol]):
 
 - **`__orig_bases__`** is set by Python's type machinery on every class that inherits from
   a `Generic`. It contains the parameterized base (e.g.
-  `PacketFunctionBase[PythonExecutorProtocol]`).
+  `DataFunctionBase[PythonExecutorProtocol]`).
 - **`typing.get_args()`** extracts the type parameters.
 - **`__init_subclass__`** runs at class definition time (import), not at instance creation.
   Zero per-instance overhead.
 - The `isinstance(args[0], TypeVar)` guard skips intermediate abstract subclasses that
-  haven't bound `E` yet (e.g. `PacketFunctionWrapper(PacketFunctionBase[E])`).
+  haven't bound `E` yet (e.g. `DataFunctionWrapper(DataFunctionBase[E])`).
 
 ### Requirements
 
 - Executor protocols used as type parameters **must** be decorated with
-  `@runtime_checkable` (already the case for `PacketFunctionExecutorProtocol`).
+  `@runtime_checkable` (already the case for `DataFunctionExecutorProtocol`).
 - Any new executor protocol (e.g. `PythonExecutorProtocol`) needs `@runtime_checkable` too.
 
 ### Hot path after this change
 
 ```python
-def call(self, packet: PacketProtocol) -> PacketProtocol | None:
+def call(self, data: DataProtocol) -> DataProtocol | None:
     if self._executor is not None:
         # self._executor is statically typed as E (e.g. PythonExecutorProtocol).
         # No isinstance check needed — validated at set_executor() time.
-        return self._executor.execute(self, packet)
-    return self.direct_call(packet)
+        return self._executor.execute(self, data)
+    return self.direct_call(data)
 ```
 
 ### Changes
 
-- **`PacketFunctionBase`**: Add `Generic[E]`, `__init_subclass__` resolver,
+- **`DataFunctionBase`**: Add `Generic[E]`, `__init_subclass__` resolver,
   `set_executor()` method. Existing `executor` property setter delegates to `set_executor()`.
-- **`PythonPacketFunction`**: Change to `PacketFunctionBase[PythonExecutorProtocol]`
+- **`PythonDataFunction`**: Change to `DataFunctionBase[PythonExecutorProtocol]`
   (or a more specific `PythonExecutorProtocol` if we introduce one).
-- **`PacketFunctionWrapper`**: Change to `PacketFunctionBase[E]` (remains generic, passes
+- **`DataFunctionWrapper`**: Change to `DataFunctionBase[E]` (remains generic, passes
   through).
-- **`CachedPacketFunction`**: Inherits from `PacketFunctionWrapper` — no changes needed
+- **`CachedDataFunction`**: Inherits from `DataFunctionWrapper` — no changes needed
   since executor delegation already targets the wrapped leaf function.
 - **Executor protocols**: Ensure `@runtime_checkable` on all protocols that will be used as
   generic parameters.
 
 ---
 
-## 5. `FunctionPod.packet_function` Remains a Read-Only Property
+## 5. `FunctionPod.data_function` Remains a Read-Only Property
 
 ### Decision
 
-`FunctionPod.packet_function` stays as a property on the protocol (as currently implemented).
-It is understood to be **read-only** — callers should not replace the packet function after
+`FunctionPod.data_function` stays as a property on the protocol (as currently implemented).
+It is understood to be **read-only** — callers should not replace the data function after
 pod construction. The property exists for introspection and executor wiring, not mutation.
 
 No code changes needed — this is a documentation/convention clarification.
@@ -253,7 +253,7 @@ No code changes needed — this is a documentation/convention clarification.
 
 ### Phase 1: Executor immutability + remove `execution_engine_opts`
 
-1. Update `PacketFunctionExecutorBase.with_options()` default to return a shallow copy.
+1. Update `DataFunctionExecutorBase.with_options()` default to return a shallow copy.
 2. Update `LocalExecutor.with_options()` to return `LocalExecutor()`.
 3. Verify `RayExecutor.with_options()` already returns a new instance (it does).
 4. Remove `self.execution_engine_opts` from `FunctionNode.__init__`.
@@ -264,12 +264,12 @@ No code changes needed — this is a documentation/convention clarification.
 
 ### Phase 2: Type-safe executor dispatch
 
-1. Add `Generic[E]` and `__init_subclass__` to `PacketFunctionBase`.
+1. Add `Generic[E]` and `__init_subclass__` to `DataFunctionBase`.
 2. Update `executor` setter to delegate to `set_executor()` with `__init_subclass__`-resolved
    protocol check.
-3. Parameterize `PythonPacketFunction` as `PacketFunctionBase[PacketFunctionExecutorProtocol]`
+3. Parameterize `PythonDataFunction` as `DataFunctionBase[DataFunctionExecutorProtocol]`
    (or a narrower protocol if we introduce executor-type-specific protocols later).
-4. Parameterize `PacketFunctionWrapper` as `PacketFunctionBase[E]`.
+4. Parameterize `DataFunctionWrapper` as `DataFunctionBase[E]`.
 5. Ensure all executor protocols are `@runtime_checkable`.
 6. Update tests to verify type checking at assignment time.
 
@@ -278,7 +278,7 @@ No code changes needed — this is a documentation/convention clarification.
 1. Create `src/orcapod/core/cached_function_pod.py`.
 2. Implement `CachedFunctionPod(WrappedFunctionPod)` with tag-aware cache key computation.
 3. Add `pod_cache_database` parameter to `function_pod` decorator.
-4. Add tests for pod-level vs packet-level caching interaction.
+4. Add tests for pod-level vs data-level caching interaction.
 
 ### Phase 4: Documentation and cleanup
 
@@ -290,11 +290,11 @@ No code changes needed — this is a documentation/convention clarification.
 
 ## Open Questions
 
-- **Executor-type-specific protocols**: Currently all packet functions accept the base
-  `PacketFunctionExecutorProtocol`. If we later want `PythonPacketFunction` to only accept
+- **Executor-type-specific protocols**: Currently all data functions accept the base
+  `DataFunctionExecutorProtocol`. If we later want `PythonDataFunction` to only accept
   executors with a `PythonExecutorProtocol` (which might require `execute(func, args)`
-  rather than `execute(pf, packet)`), the `Generic[E]` mechanism already supports this —
+  rather than `execute(pf, data)`), the `Generic[E]` mechanism already supports this —
   just parameterize with the narrower protocol.
 - **`CachedFunctionPod` cache key design**: The exact composition of the cache key (which
   tag columns to include, whether to include system tags) needs detailed design during
-  implementation. A reasonable default is tag content hash + packet content hash.
+  implementation. A reasonable default is tag content hash + data content hash.

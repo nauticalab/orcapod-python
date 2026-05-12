@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from orcapod.protocols.core_protocols.datagrams import PacketProtocol
-from orcapod.protocols.core_protocols.executor import PacketFunctionExecutorProtocol
+from orcapod.protocols.core_protocols.datagrams import DataProtocol
+from orcapod.protocols.core_protocols.executor import DataFunctionExecutorProtocol
 from orcapod.protocols.core_protocols.labelable import LabelableProtocol
 from orcapod.protocols.hashing_protocols import (
     ContentIdentifiableProtocol,
@@ -12,21 +12,21 @@ from orcapod.protocols.hashing_protocols import (
 from orcapod.types import Schema
 
 if TYPE_CHECKING:
-    from orcapod.protocols.observability_protocols import PacketExecutionLoggerProtocol
+    from orcapod.protocols.observability_protocols import DataExecutionLoggerProtocol
 
 
 @runtime_checkable
-class PacketFunctionProtocol(
+class DataFunctionProtocol(
     ContentIdentifiableProtocol, PipelineElementProtocol, LabelableProtocol, Protocol
 ):
-    """Protocol for a packet-processing function.
+    """Protocol for a data-processing function.
 
-    Processes individual packets with declared input/output schemas.
+    Processes individual data with declared input/output schemas.
     """
 
     # ==================== Identity & Metadata ====================
     @property
-    def packet_function_type_id(self) -> str:
+    def data_function_type_id(self) -> str:
         """How functions are defined and executed (e.g., python.function.v2)"""
         ...
 
@@ -46,13 +46,13 @@ class PacketFunctionProtocol(
         ...
 
     @property
-    def input_packet_schema(self) -> Schema:
-        """Schema describing the input packets this function accepts."""
+    def input_data_schema(self) -> Schema:
+        """Schema describing the input data this function accepts."""
         ...
 
     @property
-    def output_packet_schema(self) -> Schema:
-        """Schema describing the output packets this function produces."""
+    def output_data_schema(self) -> Schema:
+        """Schema describing the output data this function produces."""
         ...
 
     # ==================== Content-Addressable Identity ====================
@@ -75,12 +75,12 @@ class PacketFunctionProtocol(
     # ==================== Executor ====================
 
     @property
-    def executor(self) -> PacketFunctionExecutorProtocol | None:
+    def executor(self) -> DataFunctionExecutorProtocol | None:
         """The executor used to run this function, or ``None`` for direct execution."""
         ...
 
     @executor.setter
-    def executor(self, executor: PacketFunctionExecutorProtocol | None) -> None:
+    def executor(self, executor: DataFunctionExecutorProtocol | None) -> None:
         """Set or clear the executor."""
         ...
 
@@ -88,70 +88,70 @@ class PacketFunctionProtocol(
 
     def call(
         self,
-        packet: PacketProtocol,
+        data: DataProtocol,
         *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
-    ) -> PacketProtocol | None:
-        """Process a single packet, routing through the executor if one is set.
+        logger: "DataExecutionLoggerProtocol | None" = None,
+    ) -> DataProtocol | None:
+        """Process a single data, routing through the executor if one is set.
 
         Args:
-            packet: The data payload to process.
+            data: The data payload to process.
             logger: Optional logger for recording captured I/O.
 
         Returns:
-            The output packet, or ``None`` when the function filters the
-            packet out or when execution failed (exception is re-raised).
+            The output data, or ``None`` when the function filters the
+            data out or when execution failed (exception is re-raised).
         """
         ...
 
     async def async_call(
         self,
-        packet: PacketProtocol,
+        data: DataProtocol,
         *,
-        logger: "PacketExecutionLoggerProtocol | None" = None,
-    ) -> PacketProtocol | None:
-        """Asynchronously process a single packet, routing through the executor if set.
+        logger: "DataExecutionLoggerProtocol | None" = None,
+    ) -> DataProtocol | None:
+        """Asynchronously process a single data, routing through the executor if set.
 
         Args:
-            packet: The data payload to process.
+            data: The data payload to process.
             logger: Optional logger for recording captured I/O.
 
         Returns:
-            The output packet, or ``None``.
+            The output data, or ``None``.
         """
         ...
 
     def direct_call(
         self,
-        packet: PacketProtocol,
-    ) -> PacketProtocol | None:
-        """Execute the function's native computation on *packet*.
+        data: DataProtocol,
+    ) -> DataProtocol | None:
+        """Execute the function's native computation on *data*.
 
         This is the method executors invoke, bypassing executor routing.
         On user-function failure the exception is re-raised.
 
         Args:
-            packet: The data payload to process.
+            data: The data payload to process.
 
         Returns:
-            The output packet, or ``None`` if filtered.
+            The output data, or ``None`` if filtered.
         """
         ...
 
     async def direct_async_call(
         self,
-        packet: PacketProtocol,
-    ) -> PacketProtocol | None:
+        data: DataProtocol,
+    ) -> DataProtocol | None:
         """Asynchronous counterpart of ``direct_call``."""
         ...
 
     # ==================== Serialization ====================
 
     def to_config(self) -> dict[str, Any]:
-        """Serialize this packet function to a JSON-compatible config dict."""
+        """Serialize this data function to a JSON-compatible config dict."""
         ...
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "PacketFunctionProtocol":
-        """Reconstruct a packet function from a config dict."""
+    def from_config(cls, config: dict[str, Any]) -> "DataFunctionProtocol":
+        """Reconstruct a data function from a config dict."""
         ...

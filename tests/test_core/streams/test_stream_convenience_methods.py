@@ -18,18 +18,18 @@ from orcapod.core.streams import ArrowTableStream
 # ---------------------------------------------------------------------------
 
 
-def _make_stream(tag_col: str, packet_cols: dict, tag_data: list) -> ArrowTableStream:
+def _make_stream(tag_col: str, data_cols: dict, tag_data: list) -> ArrowTableStream:
     """Build an ArrowTableStream from column specs."""
     columns = {tag_col: pa.array(tag_data, type=pa.large_string())}
-    for name, values in packet_cols.items():
+    for name, values in data_cols.items():
         columns[name] = pa.array(values, type=pa.int64())
     return ArrowTableStream(pa.table(columns), tag_columns=[tag_col])
 
 
-def _make_source(tag_col: str, packet_cols: dict, tag_data: list) -> ArrowTableSource:
+def _make_source(tag_col: str, data_cols: dict, tag_data: list) -> ArrowTableSource:
     """Build an ArrowTableSource from column specs."""
     columns = {tag_col: pa.array(tag_data, type=pa.large_string())}
-    for name, values in packet_cols.items():
+    for name, values in data_cols.items():
         columns[name] = pa.array(values, type=pa.int64())
     return ArrowTableSource(pa.table(columns), tag_columns=[tag_col], infer_nullable=True)
 
@@ -119,34 +119,34 @@ class TestMapTagsConvenience:
 
 
 # ---------------------------------------------------------------------------
-# Tests: map_packets
+# Tests: map_data
 # ---------------------------------------------------------------------------
 
 
-class TestMapPacketsConvenience:
-    def test_map_packets_renames(self):
+class TestMapDataConvenience:
+    def test_map_data_renames(self):
         s = _make_stream("k", {"a": [1, 2]}, ["x", "y"])
-        result = s.map_packets({"a": "alpha"})
-        _, packet_keys = result.keys()
-        assert "alpha" in packet_keys
-        assert "a" not in packet_keys
+        result = s.map_data({"a": "alpha"})
+        _, data_keys = result.keys()
+        assert "alpha" in data_keys
+        assert "a" not in data_keys
 
-    def test_map_packets_drop_unmapped_false(self):
+    def test_map_data_drop_unmapped_false(self):
         s = _make_stream("k", {"a": [1], "b": [2]}, ["x"])
-        result = s.map_packets({"a": "alpha"}, drop_unmapped=False)
-        _, packet_keys = result.keys()
-        assert "alpha" in packet_keys
-        assert "b" in packet_keys
+        result = s.map_data({"a": "alpha"}, drop_unmapped=False)
+        _, data_keys = result.keys()
+        assert "alpha" in data_keys
+        assert "b" in data_keys
 
-    def test_map_packets_with_label(self):
+    def test_map_data_with_label(self):
         s = _make_stream("k", {"a": [1]}, ["x"])
-        result = s.map_packets({"a": "alpha"}, label="rename_pkt")
+        result = s.map_data({"a": "alpha"}, label="rename_pkt")
         assert result.label == "rename_pkt"
         assert result.has_assigned_label
 
 
 # ---------------------------------------------------------------------------
-# Tests: select_tag_columns / select_packet_columns
+# Tests: select_tag_columns / select_data_columns
 # ---------------------------------------------------------------------------
 
 
@@ -164,7 +164,7 @@ class TestSelectColumnsConvenience:
         tag_keys, _ = result.keys()
         assert tag_keys == ("k1",)
 
-    def test_select_packet_columns(self):
+    def test_select_data_columns(self):
         table = pa.table(
             {
                 "k": pa.array(["a"], type=pa.large_string()),
@@ -173,9 +173,9 @@ class TestSelectColumnsConvenience:
             }
         )
         s = ArrowTableStream(table, tag_columns=["k"])
-        result = s.select_packet_columns(["v1"])
-        _, packet_keys = result.keys()
-        assert packet_keys == ("v1",)
+        result = s.select_data_columns(["v1"])
+        _, data_keys = result.keys()
+        assert data_keys == ("v1",)
 
     def test_select_tag_columns_with_label(self):
         table = pa.table(
@@ -192,7 +192,7 @@ class TestSelectColumnsConvenience:
 
 
 # ---------------------------------------------------------------------------
-# Tests: drop_tag_columns / drop_packet_columns
+# Tests: drop_tag_columns / drop_data_columns
 # ---------------------------------------------------------------------------
 
 
@@ -211,7 +211,7 @@ class TestDropColumnsConvenience:
         assert "k1" in tag_keys
         assert "k2" not in tag_keys
 
-    def test_drop_packet_columns(self):
+    def test_drop_data_columns(self):
         table = pa.table(
             {
                 "k": pa.array(["a"], type=pa.large_string()),
@@ -220,10 +220,10 @@ class TestDropColumnsConvenience:
             }
         )
         s = ArrowTableStream(table, tag_columns=["k"])
-        result = s.drop_packet_columns(["v2"])
-        _, packet_keys = result.keys()
-        assert "v1" in packet_keys
-        assert "v2" not in packet_keys
+        result = s.drop_data_columns(["v2"])
+        _, data_keys = result.keys()
+        assert "v1" in data_keys
+        assert "v2" not in data_keys
 
 
 # ---------------------------------------------------------------------------
@@ -275,14 +275,14 @@ class TestChaining:
     def test_join_then_select(self):
         s1 = _make_stream("k", {"a": [1, 2]}, ["x", "y"])
         s2 = _make_stream("k", {"b": [10, 20]}, ["x", "y"])
-        result = s1.join(s2).select_packet_columns(["a"])
-        _, packet_keys = result.keys()
-        assert packet_keys == ("a",)
+        result = s1.join(s2).select_data_columns(["a"])
+        _, data_keys = result.keys()
+        assert data_keys == ("a",)
         assert result.as_table().num_rows == 2
 
     def test_map_then_filter(self):
         s = _make_stream("k", {"val": [1, 2, 3]}, ["a", "b", "c"])
-        result = s.map_packets({"val": "value"}).polars_filter(k="b")
+        result = s.map_data({"val": "value"}).polars_filter(k="b")
         table = result.as_table()
         assert table.num_rows == 1
         assert "value" in table.column_names
@@ -290,7 +290,7 @@ class TestChaining:
     def test_source_join_then_map(self):
         src1 = _make_source("k", {"a": [1, 2]}, ["x", "y"])
         src2 = _make_source("k", {"b": [10, 20]}, ["x", "y"])
-        result = src1.join(src2).map_packets({"a": "alpha", "b": "beta"})
-        _, packet_keys = result.keys()
-        assert "alpha" in packet_keys
-        assert "beta" in packet_keys
+        result = src1.join(src2).map_data({"a": "alpha", "b": "beta"})
+        _, data_keys = result.keys()
+        assert "alpha" in data_keys
+        assert "beta" in data_keys

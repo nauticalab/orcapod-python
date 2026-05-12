@@ -1,6 +1,6 @@
 # Operators
 
-Operators perform structural transformations on streams without inspecting or synthesizing packet values.
+Operators perform structural transformations on streams without inspecting or synthesizing data values.
 
 ::: orcapod.core.operators.Join
 
@@ -12,14 +12,14 @@ Operators perform structural transformations on streams without inspecting or sy
 
 ::: orcapod.core.operators.SelectTagColumns
 
-::: orcapod.core.operators.SelectPacketColumns
+::: orcapod.core.operators.SelectDataColumns
 
 ::: orcapod.core.operators.DropTagColumns
 
-::: orcapod.core.operators.DropPacketColumns
+::: orcapod.core.operators.DropDataColumns
 
 ::: orcapod.core.operators.MapTags
 
-::: orcapod.core.operators.MapPackets
+::: orcapod.core.operators.MapData
 
 ::: orcapod.core.operators.PolarsFilter

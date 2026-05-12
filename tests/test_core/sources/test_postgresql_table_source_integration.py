@@ -85,7 +85,7 @@ class TestSinglePKTable:
         tag_schema, _ = src.output_schema()
         assert "session_id" in tag_schema
 
-    def test_non_pk_columns_in_packet_schema(self, schema_dsn: str) -> None:
+    def test_non_pk_columns_in_data_schema(self, schema_dsn: str) -> None:
         from orcapod.core.sources import PostgreSQLTableSource
 
         with psycopg.connect(schema_dsn) as conn:
@@ -101,11 +101,11 @@ class TestSinglePKTable:
             conn.commit()
 
         src = PostgreSQLTableSource(schema_dsn, "measurements")
-        _, packet_schema = src.output_schema()
-        assert "trial" in packet_schema
-        assert "response" in packet_schema
+        _, data_schema = src.output_schema()
+        assert "trial" in data_schema
+        assert "response" in data_schema
 
-    def test_iter_packets_count_matches_rows(self, schema_dsn: str) -> None:
+    def test_iter_data_count_matches_rows(self, schema_dsn: str) -> None:
         from orcapod.core.sources import PostgreSQLTableSource
 
         with psycopg.connect(schema_dsn) as conn:
@@ -121,7 +121,7 @@ class TestSinglePKTable:
             conn.commit()
 
         src = PostgreSQLTableSource(schema_dsn, "measurements")
-        assert len(list(src.iter_packets())) == 3
+        assert len(list(src.iter_data())) == 3
 
     def test_tag_values_are_correct(self, schema_dsn: str) -> None:
         from orcapod.core.sources import PostgreSQLTableSource
@@ -139,7 +139,7 @@ class TestSinglePKTable:
             conn.commit()
 
         src = PostgreSQLTableSource(schema_dsn, "measurements")
-        tag_values = sorted([tags["session_id"] for tags, _ in src.iter_packets()])
+        tag_values = sorted([tags["session_id"] for tags, _ in src.iter_data()])
         assert tag_values == ["s1", "s2", "s3"]
 
 
@@ -203,7 +203,7 @@ class TestPipelineIntegration:
 
     def test_postgresql_source_in_pipeline(self, schema_dsn: str) -> None:
         from orcapod.core.function_pod import FunctionPod
-        from orcapod.core.packet_function import PythonPacketFunction
+        from orcapod.core.data_function import PythonDataFunction
         from orcapod.core.sources import PostgreSQLTableSource
         from orcapod.databases import InMemoryArrowDatabase
         from orcapod.pipeline import Pipeline
@@ -225,7 +225,7 @@ class TestPipelineIntegration:
             return response * 2.0
 
         src = PostgreSQLTableSource(schema_dsn, "measurements")
-        pf = PythonPacketFunction(double_response, output_keys="doubled")
+        pf = PythonDataFunction(double_response, output_keys="doubled")
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(

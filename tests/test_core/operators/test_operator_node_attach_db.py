@@ -31,13 +31,13 @@ class TestOperatorNodeWithoutDatabase:
         )
         assert node._pipeline_database is None
 
-    def test_iter_packets_without_database(self):
+    def test_iter_data_without_database(self):
         node = OperatorNode(
             operator=Join(),
             input_streams=(_make_stream("a"), _make_stream("b")),
         )
         node.run()                          # <-- add this line
-        results = list(node.iter_packets())
+        results = list(node.iter_data())
         assert len(results) == 3
 
     def test_get_all_records_without_database_returns_none(self):
@@ -98,7 +98,7 @@ class TestOperatorNodeWithDatabase:
         )
         assert node._pipeline_database is db
 
-    def test_iter_packets_with_database(self):
+    def test_iter_data_with_database(self):
         db = InMemoryArrowDatabase()
         node = OperatorNode(
             operator=Join(),
@@ -106,5 +106,5 @@ class TestOperatorNodeWithDatabase:
             pipeline_database=db,
         )
         node.run()                          # <-- add this line
-        results = list(node.iter_packets())
+        results = list(node.iter_data())
         assert len(results) == 3

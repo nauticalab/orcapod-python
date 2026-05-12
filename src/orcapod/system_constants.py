@@ -6,8 +6,8 @@ POD_ID_PREFIX = "pod_id_"
 PF_VARIATION_PREFIX = "pf_var_"
 PF_EXECUTION_PREFIX = "pf_exec_"
 DATA_CONTEXT_KEY = "context_key"
-INPUT_PACKET_HASH_COL = "input_packet_hash"
-PACKET_RECORD_ID = "packet_id"
+INPUT_DATA_HASH_COL = "input_data_hash"
+DATA_RECORD_ID = "data_id"
 NODE_CONTENT_HASH_COL = "node_content_hash"
 SYSTEM_TAG_PREFIX_NAME = "tag"
 SYSTEM_TAG_SOURCE_ID_FIELD = "source_id"
@@ -61,12 +61,12 @@ class SystemConstant:
         return f"{self._global_prefix}{SYSTEM_COLUMN_PREFIX}{PF_EXECUTION_PREFIX}"
 
     @property
-    def INPUT_PACKET_HASH_COL(self) -> str:
-        return f"{self._global_prefix}{SYSTEM_COLUMN_PREFIX}{INPUT_PACKET_HASH_COL}"
+    def INPUT_DATA_HASH_COL(self) -> str:
+        return f"{self._global_prefix}{SYSTEM_COLUMN_PREFIX}{INPUT_DATA_HASH_COL}"
 
     @property
-    def PACKET_RECORD_ID(self) -> str:
-        return f"{self._global_prefix}{SYSTEM_COLUMN_PREFIX}{PACKET_RECORD_ID}"
+    def DATA_RECORD_ID(self) -> str:
+        return f"{self._global_prefix}{SYSTEM_COLUMN_PREFIX}{DATA_RECORD_ID}"
 
     @property
     def NODE_CONTENT_HASH_COL(self) -> str:

@@ -24,7 +24,7 @@ from orcapod.protocols.node_protocols import (
 if TYPE_CHECKING:
     import networkx as nx
 
-    from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
+    from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
     from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
 
 logger = logging.getLogger(__name__)
@@ -172,7 +172,7 @@ class AsyncPipelineOrchestrator:
                     terminal_channels.append(ch)
 
             # Result collection
-            collectors: dict[Any, list[tuple[TagProtocol, PacketProtocol]]] = {}
+            collectors: dict[Any, list[tuple[TagProtocol, DataProtocol]]] = {}
             if materialize_results:
                 for node in topo_order:
                     collectors[node] = []

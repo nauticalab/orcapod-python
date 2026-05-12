@@ -8,7 +8,7 @@ Covers:
 - NonZeroInputOperator barrier-mode async_execute (Join)
 - FunctionPod streaming async_execute
 - FunctionPod concurrency control (max_concurrency)
-- PythonPacketFunction.direct_async_call via run_in_executor
+- PythonDataFunction.direct_async_call via run_in_executor
 - End-to-end multi-stage async pipeline wiring
 - Error propagation through channels
 - NodeConfig / PipelineConfig integration with FunctionPod
@@ -23,23 +23,23 @@ import pyarrow as pa
 import pytest
 
 from orcapod.channels import Channel
-from orcapod.core.datagrams import Packet
+from orcapod.core.datagrams import Data
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import (
     Batch,
-    DropPacketColumns,
+    DropDataColumns,
     DropTagColumns,
     Join,
-    MapPackets,
+    MapData,
     MapTags,
     MergeJoin,
     PolarsFilter,
-    SelectPacketColumns,
+    SelectDataColumns,
     SelectTagColumns,
     SemiJoin,
 )
 from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.types import NodeConfig, PipelineConfig
 
@@ -49,7 +49,7 @@ from orcapod.types import NodeConfig, PipelineConfig
 
 
 def make_stream(n: int = 3) -> ArrowTableStream:
-    """Stream with tag=id, packet=x (ints). Uses nullable=False schema."""
+    """Stream with tag=id, data=x (ints). Uses nullable=False schema."""
     schema = pa.schema(
         [pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]
     )
@@ -61,7 +61,7 @@ def make_stream(n: int = 3) -> ArrowTableStream:
 
 
 def make_two_col_stream(n: int = 3) -> ArrowTableStream:
-    """Stream with tag=id, packet={x, y}. Uses nullable=False schema."""
+    """Stream with tag=id, data={x, y}. Uses nullable=False schema."""
     schema = pa.schema(
         [
             pa.field("id", pa.int64(), nullable=False),
@@ -81,7 +81,7 @@ def make_two_col_stream(n: int = 3) -> ArrowTableStream:
 
 
 def make_name_stream() -> ArrowTableStream:
-    """Stream with tag=id, packet=name (str). Uses nullable=False schema."""
+    """Stream with tag=id, data=name (str). Uses nullable=False schema."""
     schema = pa.schema(
         [
             pa.field("id", pa.int64(), nullable=False),
@@ -99,14 +99,14 @@ def make_name_stream() -> ArrowTableStream:
 
 
 async def feed_stream_to_channel(stream: ArrowTableStream, ch: Channel) -> None:
-    """Push all (tag, packet) pairs from a stream into a channel, then close."""
-    for tag, packet in stream.iter_packets():
-        await ch.writer.send((tag, packet))
+    """Push all (tag, data) pairs from a stream into a channel, then close."""
+    for tag, data in stream.iter_data():
+        await ch.writer.send((tag, data))
     await ch.writer.close()
 
 
 async def collect_output(ch: Channel) -> list[tuple]:
-    """Collect all (tag, packet) pairs from a channel's reader."""
+    """Collect all (tag, data) pairs from a channel's reader."""
     return await ch.reader.collect()
 
 
@@ -118,7 +118,7 @@ async def collect_output(ch: Channel) -> list[tuple]:
 class TestMaterializeToStream:
     def test_round_trip_preserves_data(self):
         stream = make_stream(5)
-        rows = list(stream.iter_packets())
+        rows = list(stream.iter_data())
         rebuilt = StaticOutputOperatorPod._materialize_to_stream(rows)
 
         original_table = stream.as_table()
@@ -135,7 +135,7 @@ class TestMaterializeToStream:
 
     def test_round_trip_preserves_schema(self):
         stream = make_stream(3)
-        rows = list(stream.iter_packets())
+        rows = list(stream.iter_data())
         rebuilt = StaticOutputOperatorPod._materialize_to_stream(rows)
 
         orig_tag, orig_pkt = stream.output_schema()
@@ -149,7 +149,7 @@ class TestMaterializeToStream:
 
     def test_round_trip_two_col_stream(self):
         stream = make_two_col_stream(4)
-        rows = list(stream.iter_packets())
+        rows = list(stream.iter_data())
         rebuilt = StaticOutputOperatorPod._materialize_to_stream(rows)
 
         original = stream.as_table()
@@ -159,7 +159,7 @@ class TestMaterializeToStream:
 
 
 # ---------------------------------------------------------------------------
-# 3. PythonPacketFunction.direct_async_call
+# 3. PythonDataFunction.direct_async_call
 # ---------------------------------------------------------------------------
 
 
@@ -169,22 +169,22 @@ class TestDirectAsyncCall:
         def add(x: int, y: int) -> int:
             return x + y
 
-        pf = PythonPacketFunction(add, output_keys="result")
-        packet = Packet({"x": 3, "y": 5})
-        result = await pf.direct_async_call(packet)
+        pf = PythonDataFunction(add, output_keys="result")
+        data = Data({"x": 3, "y": 5})
+        result = await pf.direct_async_call(data)
         assert result is not None
         assert result.as_dict()["result"] == 8
 
     @pytest.mark.asyncio
-    async def test_async_call_multiple_packets(self):
+    async def test_async_call_multiple_data(self):
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result")
+        pf = PythonDataFunction(double, output_keys="result")
         results = await asyncio.gather(
-            pf.async_call(Packet({"x": 1})),
-            pf.async_call(Packet({"x": 2})),
-            pf.async_call(Packet({"x": 3})),
+            pf.async_call(Data({"x": 1})),
+            pf.async_call(Data({"x": 2})),
+            pf.async_call(Data({"x": 3})),
         )
         assert all(r is not None for r in results)
         values = [r.as_dict()["result"] for r in results if r is not None]
@@ -201,8 +201,8 @@ class TestDirectAsyncCall:
             call_threads.append(threading.current_thread().name)
             return x
 
-        pf = PythonPacketFunction(record_thread, output_keys="result")
-        result = await pf.direct_async_call(Packet({"x": 42}))
+        pf = PythonDataFunction(record_thread, output_keys="result")
+        result = await pf.direct_async_call(Data({"x": 42}))
         assert result is not None
         assert len(call_threads) == 1
 
@@ -226,13 +226,13 @@ class TestUnaryOperatorAsyncExecute:
 
         results = await output_ch.reader.collect()
         assert len(results) == 3
-        for tag, packet in results:
+        for tag, data in results:
             assert "id" in tag.keys()
 
     @pytest.mark.asyncio
-    async def test_select_packet_columns(self):
+    async def test_select_data_columns(self):
         stream = make_two_col_stream(3)
-        op = SelectPacketColumns(["x"])
+        op = SelectDataColumns(["x"])
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -242,15 +242,15 @@ class TestUnaryOperatorAsyncExecute:
 
         results = await output_ch.reader.collect()
         assert len(results) == 3
-        for _, packet in results:
-            pkt_dict = packet.as_dict()
+        for _, data in results:
+            pkt_dict = data.as_dict()
             assert "x" in pkt_dict
             assert "y" not in pkt_dict
 
     @pytest.mark.asyncio
-    async def test_drop_packet_columns(self):
+    async def test_drop_data_columns(self):
         stream = make_two_col_stream(3)
-        op = DropPacketColumns(["y"])
+        op = DropDataColumns(["y"])
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -260,8 +260,8 @@ class TestUnaryOperatorAsyncExecute:
 
         results = await output_ch.reader.collect()
         assert len(results) == 3
-        for _, packet in results:
-            pkt_dict = packet.as_dict()
+        for _, data in results:
+            pkt_dict = data.as_dict()
             assert "x" in pkt_dict
             assert "y" not in pkt_dict
 
@@ -309,9 +309,9 @@ class TestUnaryOperatorAsyncExecute:
             assert "id" not in tag.keys()
 
     @pytest.mark.asyncio
-    async def test_map_packets(self):
+    async def test_map_data(self):
         stream = make_stream(3)
-        op = MapPackets({"x": "value"}, drop_unmapped=True)
+        op = MapData({"x": "value"}, drop_unmapped=True)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -321,8 +321,8 @@ class TestUnaryOperatorAsyncExecute:
 
         results = await output_ch.reader.collect()
         assert len(results) == 3
-        for _, packet in results:
-            pkt_dict = packet.as_dict()
+        for _, data in results:
+            pkt_dict = data.as_dict()
             assert "value" in pkt_dict
             assert "x" not in pkt_dict
 
@@ -339,9 +339,9 @@ class TestUnaryOperatorAsyncExecute:
 
         results = await output_ch.reader.collect()
         assert len(results) == 1
-        tag, packet = results[0]
+        tag, data = results[0]
         assert tag.as_dict()["id"] == 2
-        assert packet.as_dict()["x"] == 2
+        assert data.as_dict()["x"] == 2
 
     @pytest.mark.asyncio
     async def test_batch_operator(self):
@@ -463,9 +463,9 @@ class TestJoinAsyncExecute:
         ids = sorted(tag.as_dict()["id"] for tag, _ in results)
         assert ids == [0, 1, 2]
 
-        # Verify both packet columns present
-        for _, packet in results:
-            pkt = packet.as_dict()
+        # Verify both data columns present
+        for _, data in results:
+            pkt = data.as_dict()
             assert "x" in pkt
             assert "y" in pkt
 
@@ -481,7 +481,7 @@ class TestFunctionPodAsyncExecute:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result")
+        pf = PythonDataFunction(double, output_keys="result")
         pod = FunctionPod(pf)
 
         stream = make_stream(5)
@@ -502,7 +502,7 @@ class TestFunctionPodAsyncExecute:
         def add(x: int, y: int) -> int:
             return x + y
 
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         pod = FunctionPod(pf)
 
         stream = make_two_col_stream(3)
@@ -524,7 +524,7 @@ class TestFunctionPodAsyncExecute:
         def noop(x: int) -> int:
             return x
 
-        pf = PythonPacketFunction(noop, output_keys="result")
+        pf = PythonDataFunction(noop, output_keys="result")
         pod = FunctionPod(pf)
 
         stream = make_stream(3)
@@ -545,7 +545,7 @@ class TestFunctionPodAsyncExecute:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result")
+        pf = PythonDataFunction(double, output_keys="result")
         pod = FunctionPod(pf)
 
         input_ch = Channel(buffer_size=4)
@@ -566,14 +566,14 @@ class TestFunctionPodAsyncExecute:
 class TestFunctionPodConcurrency:
     @pytest.mark.asyncio
     async def test_max_concurrency_limits_in_flight(self):
-        """With max_concurrency=1, packets should be processed sequentially."""
+        """With max_concurrency=1, data should be processed sequentially."""
         processing_order = []
 
         def record_order(x: int) -> int:
             processing_order.append(x)
             return x
 
-        pf = PythonPacketFunction(record_order, output_keys="result")
+        pf = PythonDataFunction(record_order, output_keys="result")
         pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=1))
 
         stream = make_stream(5)
@@ -588,12 +588,12 @@ class TestFunctionPodConcurrency:
 
     @pytest.mark.asyncio
     async def test_unlimited_concurrency(self):
-        """With max_concurrency=None, all packets run concurrently."""
+        """With max_concurrency=None, all data run concurrently."""
 
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result")
+        pf = PythonDataFunction(double, output_keys="result")
         pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=None))
         pipeline_cfg = PipelineConfig(default_max_concurrency=None)
 
@@ -618,7 +618,7 @@ class TestFunctionPodConcurrency:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result")
+        pf = PythonDataFunction(double, output_keys="result")
         pod = FunctionPod(pf)  # NodeConfig default (None)
         pipeline_cfg = PipelineConfig(default_max_concurrency=2)
 
@@ -653,7 +653,7 @@ class TestEndToEndPipeline:
         def triple(x: int) -> int:
             return x * 3
 
-        func_pod = FunctionPod(PythonPacketFunction(triple, output_keys="result"))
+        func_pod = FunctionPod(PythonDataFunction(triple, output_keys="result"))
 
         # Channels
         ch1 = Channel(buffer_size=16)
@@ -662,8 +662,8 @@ class TestEndToEndPipeline:
 
         # Wire
         async def source():
-            for tag, packet in stream.iter_packets():
-                await ch1.writer.send((tag, packet))
+            for tag, data in stream.iter_data():
+                await ch1.writer.send((tag, data))
             await ch1.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -704,7 +704,7 @@ class TestEndToEndPipeline:
             return x + y
 
         join_op = Join()
-        func_pod = FunctionPod(PythonPacketFunction(add, output_keys="result"))
+        func_pod = FunctionPod(PythonDataFunction(add, output_keys="result"))
 
         ch_left = Channel(buffer_size=16)
         ch_right = Channel(buffer_size=16)
@@ -712,8 +712,8 @@ class TestEndToEndPipeline:
         ch_out = Channel(buffer_size=16)
 
         async def push(stream, ch):
-            for tag, packet in stream.iter_packets():
-                await ch.writer.send((tag, packet))
+            for tag, data in stream.iter_data():
+                await ch.writer.send((tag, data))
             await ch.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -745,14 +745,14 @@ class TestEndToEndPipeline:
 class TestErrorPropagation:
     @pytest.mark.asyncio
     async def test_function_exception_returns_none(self):
-        """An exception in the packet function is caught by process_packet — no raise."""
+        """An exception in the data function is caught by process_data — no raise."""
 
         def failing(x: int) -> int:
             if x == 2:
                 raise ValueError("boom")
             return x
 
-        pf = PythonPacketFunction(failing, output_keys="result")
+        pf = PythonDataFunction(failing, output_keys="result")
         pod = FunctionPod(pf)
 
         stream = make_stream(5)
@@ -763,7 +763,7 @@ class TestErrorPropagation:
         await pod.async_execute([input_ch.reader], output_ch.writer)
 
         results = await output_ch.reader.collect()
-        # The failing packet (x=2) is silently dropped; 4 of 5 succeed
+        # The failing data (x=2) is silently dropped; 4 of 5 succeed
         assert len(results) == 4
         values = sorted(pkt.as_dict()["result"] for _, pkt in results)
         assert values == [0, 1, 3, 4]
@@ -775,9 +775,9 @@ class TestErrorPropagation:
         def failing(x: int) -> int:
             raise ValueError("boom")
 
-        pf = PythonPacketFunction(failing, output_keys="result")
+        pf = PythonDataFunction(failing, output_keys="result")
         with pytest.raises(ValueError, match="boom"):
-            await pf.direct_async_call(Packet({"x": 1}))
+            await pf.direct_async_call(Data({"x": 1}))
 
 
 # ---------------------------------------------------------------------------
@@ -792,12 +792,12 @@ class TestSyncBehaviorUnchanged:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result")
+        pf = PythonDataFunction(double, output_keys="result")
         pod = FunctionPod(pf)
 
         stream = make_stream(3)
         output = pod.process(stream)
-        results = list(output.iter_packets())
+        results = list(output.iter_data())
         assert len(results) == 3
         values = [pkt.as_dict()["result"] for _, pkt in results]
         assert values == [0, 2, 4]
@@ -808,7 +808,7 @@ class TestSyncBehaviorUnchanged:
         stream = make_stream(5)
         op = PolarsFilter(predicates=(pl.col("id").is_in([1, 3]),))
         output = op.process(stream)
-        results = list(output.iter_packets())
+        results = list(output.iter_data())
         ids = sorted(cast(int, tag.as_dict()["id"]) for tag, _ in results)
         assert ids == [1, 3]
 
@@ -830,7 +830,7 @@ class TestSyncBehaviorUnchanged:
 
         join = Join()
         output = join.process(left, right)
-        results = list(output.iter_packets())
+        results = list(output.iter_data())
         assert len(results) == 2
 
     def test_function_pod_with_node_config_sync_still_works(self):
@@ -839,12 +839,12 @@ class TestSyncBehaviorUnchanged:
         def add(x: int, y: int) -> int:
             return x + y
 
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=2))
 
         stream = make_two_col_stream(3)
         output = pod.process(stream)
-        results = list(output.iter_packets())
+        results = list(output.iter_data())
         assert len(results) == 3
         values = sorted(cast(int, pkt.as_dict()["result"]) for _, pkt in results)
         assert values == [0, 11, 22]

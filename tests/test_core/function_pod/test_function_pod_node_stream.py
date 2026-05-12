@@ -1,15 +1,15 @@
 """
 Tests for FunctionNode's stream interface covering:
-- iter_packets: correctness, repeatability, __iter__
+- iter_data: correctness, repeatability, __iter__
 - as_table: correctness, ColumnConfig (content_hash, sort_by_tags)
 - output_schema and keys
 - source / upstreams properties
-- Inactive packet function behaviour
+- Inactive data function behaviour
 - DB-backed Phase 1: cached results served without recomputation
 - DB Phase 2: only missing entries computed
 - is_stale: freshly created, after upstream modified
 - clear_cache: resets state, produces same results on re-iteration
-- Automatic staleness detection in iter_packets / as_table
+- Automatic staleness detection in iter_data / as_table
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from collections.abc import Mapping
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 
@@ -34,26 +34,26 @@ from ..conftest import make_int_stream
 
 
 def _make_node(
-    pf: PythonPacketFunction,
+    pf: PythonDataFunction,
     n: int = 3,
     db: InMemoryArrowDatabase | None = None,
 ) -> FunctionNode:
     if db is None:
         db = InMemoryArrowDatabase()
     return FunctionNode(
-        function_pod=FunctionPod(packet_function=pf),
+        function_pod=FunctionPod(data_function=pf),
         input_stream=make_int_stream(n=n),
         pipeline_database=db,
     )
 
 
 def _fill_node(node: FunctionNode) -> None:
-    """Process all packets so the DB is populated."""
+    """Process all data so the DB is populated."""
     node.run()
 
 
 # ---------------------------------------------------------------------------
-# 1. Basic iter_packets and as_table correctness
+# 1. Basic iter_data and as_table correctness
 # ---------------------------------------------------------------------------
 
 
@@ -62,27 +62,27 @@ class TestFunctionNodeStreamBasic:
     def node(self, double_pf) -> FunctionNode:
         db = InMemoryArrowDatabase()
         node = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
         node.run()
         return node
 
-    def test_iter_packets_yields_correct_count(self, node):
-        assert len(list(node.iter_packets())) == 3
+    def test_iter_data_yields_correct_count(self, node):
+        assert len(list(node.iter_data())) == 3
 
-    def test_iter_packets_correct_values(self, node):
-        for i, (_, packet) in enumerate(node.iter_packets()):
-            assert packet["result"] == i * 2
+    def test_iter_data_correct_values(self, node):
+        for i, (_, data) in enumerate(node.iter_data()):
+            assert data["result"] == i * 2
 
     def test_iter_is_repeatable(self, node):
-        first = [(t["id"], p["result"]) for t, p in node.iter_packets()]
-        second = [(t["id"], p["result"]) for t, p in node.iter_packets()]
+        first = [(t["id"], p["result"]) for t, p in node.iter_data()]
+        second = [(t["id"], p["result"]) for t, p in node.iter_data()]
         assert first == second
 
-    def test_dunder_iter_delegates_to_iter_packets(self, node):
-        assert len(list(node)) == len(list(node.iter_packets()))
+    def test_dunder_iter_delegates_to_iter_data(self, node):
+        assert len(list(node)) == len(list(node.iter_data()))
 
     def test_as_table_returns_pyarrow_table(self, node):
         assert isinstance(node.as_table(), pa.Table)
@@ -93,7 +93,7 @@ class TestFunctionNodeStreamBasic:
     def test_as_table_contains_tag_columns(self, node):
         assert "id" in node.as_table().column_names
 
-    def test_as_table_contains_packet_columns(self, node):
+    def test_as_table_contains_data_columns(self, node):
         assert "result" in node.as_table().column_names
 
     def test_producer_is_function_pod(self, node, double_pf):
@@ -104,11 +104,11 @@ class TestFunctionNodeStreamBasic:
         assert isinstance(upstreams, tuple)
         assert len(upstreams) == 1
 
-    def test_output_schema_has_result_in_packet_schema(self, node):
-        tag_schema, packet_schema = node.output_schema()
+    def test_output_schema_has_result_in_data_schema(self, node):
+        tag_schema, data_schema = node.output_schema()
         assert isinstance(tag_schema, Mapping)
-        assert isinstance(packet_schema, Mapping)
-        assert "result" in packet_schema
+        assert isinstance(data_schema, Mapping)
+        assert "result" in data_schema
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +137,7 @@ class TestFunctionNodeColumnConfig:
         )
         input_stream = ArrowTableStream(reversed_table, tag_columns=["id"])
         node = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=FunctionPod(data_function=double_pf),
             input_stream=input_stream,
             pipeline_database=db,
         )
@@ -148,19 +148,19 @@ class TestFunctionNodeColumnConfig:
 
 
 # ---------------------------------------------------------------------------
-# 3. Inactive packet function behaviour
+# 3. Inactive data function behaviour
 # ---------------------------------------------------------------------------
 
 
 class TestFunctionNodeInactive:
-    def test_as_table_returns_empty_when_packet_function_inactive(self, double_pf):
+    def test_as_table_returns_empty_when_data_function_inactive(self, double_pf):
         double_pf.set_active(False)
         node = _make_node(double_pf, n=3)
         table = node.as_table()
         assert isinstance(table, pa.Table)
         assert len(table) == 0
 
-    def test_as_table_returns_cached_results_when_packet_function_inactive(
+    def test_as_table_returns_cached_results_when_data_function_inactive(
         self, double_pf
     ):
         """
@@ -185,10 +185,10 @@ class TestFunctionNodeInactive:
             table2.column("result").to_pylist() == table1.column("result").to_pylist()
         )
 
-    def test_inactive_fresh_db_yields_no_packets(self, double_pf):
+    def test_inactive_fresh_db_yields_no_data(self, double_pf):
         double_pf.set_active(False)
         node = _make_node(double_pf, n=3)
-        assert list(node.iter_packets()) == []
+        assert list(node.iter_data()) == []
 
     def test_inactive_filled_db_serves_cached_results(self, double_pf):
         n = 3
@@ -197,8 +197,8 @@ class TestFunctionNodeInactive:
 
         double_pf.set_active(False)
         node2 = _make_node(double_pf, n=n, db=db)
-        packets = list(node2.iter_packets())
-        assert len(packets) == n
+        data = list(node2.iter_data())
+        assert len(data) == n
 
     def test_inactive_node_with_separate_fresh_db_yields_empty(self, double_pf):
         n = 3
@@ -217,7 +217,7 @@ class TestFunctionNodeInactive:
 # ---------------------------------------------------------------------------
 
 
-class TestIterPacketsDbPhase:
+class TestIterDatasDbPhase:
     def test_cached_results_served_without_recomputation(self, double_pf):
         """
         After node1 fills the DB, node2 (sharing the same DB) serves all results
@@ -230,7 +230,7 @@ class TestIterPacketsDbPhase:
             call_count += 1
             return x * 2
 
-        counting_pf = PythonPacketFunction(counting_double, output_keys="result")
+        counting_pf = PythonDataFunction(counting_double, output_keys="result")
         n = 3
         db = InMemoryArrowDatabase()
 
@@ -262,8 +262,8 @@ class TestIterPacketsDbPhase:
         n = 5
         db = InMemoryArrowDatabase()
         _fill_node(_make_node(double_pf, n=n, db=db))
-        packets = list(_make_node(double_pf, n=n, db=db).iter_packets())
-        assert len(packets) == n
+        data = list(_make_node(double_pf, n=n, db=db).iter_data())
+        assert len(data) == n
 
     def test_fresh_db_always_computes(self, double_pf):
         call_count = 0
@@ -273,7 +273,7 @@ class TestIterPacketsDbPhase:
             call_count += 1
             return x * 2
 
-        counting_pf = PythonPacketFunction(counting_double, output_keys="result")
+        counting_pf = PythonDataFunction(counting_double, output_keys="result")
         n = 3
         for _ in range(2):
             _fill_node(_make_node(counting_pf, n=n, db=InMemoryArrowDatabase()))
@@ -286,7 +286,7 @@ class TestIterPacketsDbPhase:
 # ---------------------------------------------------------------------------
 
 
-class TestIterPacketsMissingEntriesOnly:
+class TestIterDatasMissingEntriesOnly:
     def test_partial_fill_computes_only_missing(self, double_pf):
         call_count = 0
 
@@ -295,7 +295,7 @@ class TestIterPacketsMissingEntriesOnly:
             call_count += 1
             return x * 2
 
-        counting_pf = PythonPacketFunction(counting_double, output_keys="result")
+        counting_pf = PythonDataFunction(counting_double, output_keys="result")
         n = 4
         db = InMemoryArrowDatabase()
 
@@ -311,8 +311,8 @@ class TestIterPacketsMissingEntriesOnly:
         _fill_node(_make_node(double_pf, n=2, db=db))
         node = _make_node(double_pf, n=n, db=db)
         node.run()
-        packets = list(node.iter_packets())
-        assert len(packets) == n
+        data = list(node.iter_data())
+        assert len(data) == n
 
     def test_partial_fill_all_values_correct(self, double_pf):
         n = 4
@@ -327,7 +327,7 @@ class TestIterPacketsMissingEntriesOnly:
         """run() then as_table() on the same node with partial DB records.
 
         Regression test: Phase 2 must assign contiguous indices to new
-        entries in _cached_output_packets so that the replay path
+        entries in _cached_output_datas so that the replay path
         (range(len(...))) can iterate without gaps.
         """
         n = 4
@@ -336,9 +336,9 @@ class TestIterPacketsMissingEntriesOnly:
         _fill_node(_make_node(double_pf, n=2, db=db))
         # Create node with 4 inputs (2 cached, 2 new)
         node = _make_node(double_pf, n=n, db=db)
-        # run() exhausts iter_packets (Phase 1 + Phase 2)
+        # run() exhausts iter_data (Phase 1 + Phase 2)
         node.run()
-        # as_table() re-enters iter_packets via the else/replay branch
+        # as_table() re-enters iter_data via the else/replay branch
         table = node.as_table()
         assert sorted(table.column("result").to_pylist()) == [0, 2, 4, 6]
 
@@ -350,7 +350,7 @@ class TestIterPacketsMissingEntriesOnly:
             call_count += 1
             return x * 2
 
-        counting_pf = PythonPacketFunction(counting_double, output_keys="result")
+        counting_pf = PythonDataFunction(counting_double, output_keys="result")
         n = 3
         db = InMemoryArrowDatabase()
 
@@ -380,11 +380,11 @@ class TestFunctionNodeStaleness:
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
         node = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=FunctionPod(data_function=double_pf),
             input_stream=input_stream,
             pipeline_database=db,
         )
-        list(node.iter_packets())
+        list(node.iter_data())
 
         time.sleep(0.01)
         input_stream._update_modified_time()
@@ -397,11 +397,11 @@ class TestFunctionNodeStaleness:
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
         node = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=FunctionPod(data_function=double_pf),
             input_stream=input_stream,
             pipeline_database=db,
         )
-        list(node.iter_packets())
+        list(node.iter_data())
 
         time.sleep(0.01)
         input_stream._update_modified_time()
@@ -412,13 +412,13 @@ class TestFunctionNodeStaleness:
 
     # --- clear_cache ---
 
-    def test_clear_cache_resets_output_packets(self, double_pf):
+    def test_clear_cache_resets_output_datas(self, double_pf):
         node = _make_node(double_pf, n=3)
         node.run()
-        assert len(node._cached_output_packets) == 3
+        assert len(node._cached_output_datas) == 3
 
         node.clear_cache()
-        assert len(node._cached_output_packets) == 0
+        assert len(node._cached_output_datas) == 0
         assert node._cached_output_table is None
 
     def test_clear_cache_produces_same_results_on_re_iteration(self, double_pf):
@@ -435,23 +435,23 @@ class TestFunctionNodeStaleness:
 
     # --- automatic staleness detection ---
 
-    def test_iter_packets_auto_detects_stale_and_repopulates(self, double_pf):
+    def test_iter_data_auto_detects_stale_and_repopulates(self, double_pf):
         import time
 
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
         node = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=FunctionPod(data_function=double_pf),
             input_stream=input_stream,
             pipeline_database=db,
         )
-        first = list(node.iter_packets())
+        first = list(node.iter_data())
 
         time.sleep(0.01)
         input_stream._update_modified_time()
         assert node.is_stale
 
-        second = list(node.iter_packets())
+        second = list(node.iter_data())
         assert len(second) == len(first)
         assert [p["result"] for _, p in second] == [p["result"] for _, p in first]
 
@@ -461,7 +461,7 @@ class TestFunctionNodeStaleness:
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
         node = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_pf),
+            function_pod=FunctionPod(data_function=double_pf),
             input_stream=input_stream,
             pipeline_database=db,
         )
@@ -480,11 +480,11 @@ class TestFunctionNodeStaleness:
 
     def test_no_auto_clear_when_not_stale(self, double_pf):
         node = _make_node(double_pf, n=3)
-        list(node.iter_packets())
-        cached_count = len(node._cached_output_packets)
+        list(node.iter_data())
+        cached_count = len(node._cached_output_datas)
 
-        list(node.iter_packets())
-        assert len(node._cached_output_packets) == cached_count
+        list(node.iter_data())
+        assert len(node._cached_output_datas) == cached_count
 
     def test_as_table_no_auto_clear_when_not_stale(self, double_pf):
         node = _make_node(double_pf, n=3)

@@ -8,17 +8,17 @@
 
 The **datagram** is the universal immutable data container in OrcaPod. A datagram holds named columns with explicit type information and supports lazy conversion between Python dict and Apache Arrow representations. Datagrams come in two specialized forms:
 
-- **Tag** — metadata columns attached to a packet for routing, filtering, and annotation. Tags carry additional **system tags** — framework-managed hidden provenance columns that are excluded from content identity by default.
+- **Tag** — metadata columns attached to a data for routing, filtering, and annotation. Tags carry additional **system tags** — framework-managed hidden provenance columns that are excluded from content identity by default.
 
-- **Packet** — data columns carrying the computational payload. Packets carry additional **source info** — per-column provenance tokens tracing each value back to its originating source and record.
+- **Data** — data columns carrying the computational payload. Datas carry additional **source info** — per-column provenance tokens tracing each value back to its originating source and record.
 
 Datagrams are always constructed from either a Python dict or an Arrow table/record batch. The alternative representation is computed lazily and cached. Content hashing always uses the Arrow representation; value access always uses the Python dict.
 
 ### Stream
 
-A **stream** is a sequence of (Tag, Packet) pairs over a shared schema. Streams define two column groups — tag columns and packet columns — and provide lazy iteration, table materialization, and schema introspection. Streams are the fundamental data-flow abstraction: every source emits one, every operator consumes and produces them, and every function pod iterates over them.
+A **stream** is a sequence of (Tag, Data) pairs over a shared schema. Streams define two column groups — tag columns and data columns — and provide lazy iteration, table materialization, and schema introspection. Streams are the fundamental data-flow abstraction: every source emits one, every operator consumes and produces them, and every function pod iterates over them.
 
-The concrete implementation is `ArrowTableStream`, backed by an immutable PyArrow Table with explicit tag/packet column assignment.
+The concrete implementation is `ArrowTableStream`, backed by an immutable PyArrow Table with explicit tag/data column assignment.
 
 ### Source
 
@@ -32,29 +32,29 @@ Every source has a `source_id` — a canonical registry name used to register th
 
 ### Function Pod
 
-A **function pod** wraps a **packet function** — a stateless computation that consumes a single packet and produces an output packet. Function pods never inspect tags or stream structure; they operate purely on packet content. When given multiple input streams, a function pod joins them via a configurable multi-stream handler (defaulting to `Join`) before iterating.
+A **function pod** wraps a **data function** — a stateless computation that consumes a single data and produces an output data. Function pods never inspect tags or stream structure; they operate purely on data content. When given multiple input streams, a function pod joins them via a configurable multi-stream handler (defaulting to `Join`) before iterating.
 
-Packet functions support pluggable executors (see **Packet Function Executor System**). When an executor is set, `call()` routes through `executor.execute()` and `async_call()` routes through `executor.async_execute()`. When no executor is set, the function's native `direct_call()` / `direct_async_call()` is invoked directly. For `PythonPacketFunction`, `direct_async_call` runs the synchronous function in a thread pool via `asyncio.run_in_executor`.
+Data functions support pluggable executors (see **Data Function Executor System**). When an executor is set, `call()` routes through `executor.execute()` and `async_call()` routes through `executor.async_execute()`. When no executor is set, the function's native `direct_call()` / `direct_async_call()` is invoked directly. For `PythonDataFunction`, `direct_async_call` runs the synchronous function in a thread pool via `asyncio.run_in_executor`.
 
 Two execution models exist:
 
-- **FunctionPod + FunctionPodStream** — lazy, in-memory evaluation. The function pod processes each (tag, packet) pair from the input stream on demand, caching results by index. When the attached executor declares `supports_concurrent_execution = True`, `iter_packets()` materializes all remaining inputs and dispatches them concurrently via `asyncio.gather` over `async_call`, yielding results in order.
+- **FunctionPod + FunctionPodStream** — lazy, in-memory evaluation. The function pod processes each (tag, data) pair from the input stream on demand, caching results by index. When the attached executor declares `supports_concurrent_execution = True`, `iter_data()` materializes all remaining inputs and dispatches them concurrently via `asyncio.gather` over `async_call`, yielding results in order.
 
 - **FunctionNode** — database-backed evaluation with incremental computation. Execution proceeds in two phases:
   1. **Phase 1**: yield cached results from the pipeline database for inputs whose hashes are already stored.
-  2. **Phase 2**: compute results for any remaining input packets, store them in the database, and yield.
+  2. **Phase 2**: compute results for any remaining input data, store them in the database, and yield.
 
   Pipeline database scoping uses `pipeline_hash()` (schema+topology only), so FunctionNodes with identical functions and schema-compatible sources share the same database table.
 
 ### Operator
 
-An **operator** is a structural pod that transforms streams without synthesizing new packet values. Every packet value in an operator's output must be traceable to a concrete value already present in the input packets — operators perform joins, merges, splits, selections, column renames, batching, and tag operations within this constraint.
+An **operator** is a structural pod that transforms streams without synthesizing new data values. Every data value in an operator's output must be traceable to a concrete value already present in the input data — operators perform joins, merges, splits, selections, column renames, batching, and tag operations within this constraint.
 
 Operators are subclasses of `StaticOutputPod` organized by input arity:
 
 | Base Class | Arity | Examples |
 |---|---|---|
-| `UnaryOperator` | Exactly 1 input | Batch, SelectTagColumns, DropPacketColumns, MapTags, MapPackets, PolarsFilter |
+| `UnaryOperator` | Exactly 1 input | Batch, SelectTagColumns, DropDataColumns, MapTags, MapData, PolarsFilter |
 | `BinaryOperator` | Exactly 2 inputs | MergeJoin, SemiJoin |
 | `NonZeroInputOperator` | 1 or more inputs | Join |
 
@@ -69,10 +69,10 @@ Every operator inherits a default barrier-mode `async_execute` from its base cla
 ## Operator Catalog
 
 ### Join
-Variable-arity inner join on shared tag columns. Non-overlapping packet columns are required — colliding packet columns raise `InputValidationError`. Tag schema is the union of all input tag schemas; packet schema is the union. Inputs are canonically ordered by `pipeline_hash` for deterministic system tag column naming. Commutative (declared via `frozenset` argument symmetry).
+Variable-arity inner join on shared tag columns. Non-overlapping data columns are required — colliding data columns raise `InputValidationError`. Tag schema is the union of all input tag schemas; data schema is the union. Inputs are canonically ordered by `pipeline_hash` for deterministic system tag column naming. Commutative (declared via `frozenset` argument symmetry).
 
 ### MergeJoin
-Binary inner join that handles colliding packet columns by merging their values into sorted `list[T]`. Colliding columns must have identical types. Non-colliding columns are kept as scalars. Corresponding source-info columns are reordered to match the sort order of their packet column. Commutative — commutativity comes from sorting merged values, not from ordering input streams.
+Binary inner join that handles colliding data columns by merging their values into sorted `list[T]`. Colliding columns must have identical types. Non-colliding columns are kept as scalars. Corresponding source-info columns are reordered to match the sort order of their data column. Commutative — commutativity comes from sorting merged values, not from ordering input streams.
 
 ### SemiJoin
 Binary semi-join: returns entries from the left stream that match on overlapping columns in the right stream. Output schema matches the left stream exactly. Non-commutative.
@@ -80,14 +80,14 @@ Binary semi-join: returns entries from the left stream that match on overlapping
 ### Batch
 Groups rows into batches of a configurable size. All column types become `list[T]`. Optionally drops incomplete final batches.
 
-### SelectTagColumns / SelectPacketColumns
-Keep only specified tag or packet columns. Optional `strict` mode raises on missing columns.
+### SelectTagColumns / SelectDataColumns
+Keep only specified tag or data columns. Optional `strict` mode raises on missing columns.
 
-### DropTagColumns / DropPacketColumns
-Remove specified tag or packet columns. `DropPacketColumns` also removes associated source-info columns.
+### DropTagColumns / DropDataColumns
+Remove specified tag or data columns. `DropDataColumns` also removes associated source-info columns.
 
-### MapTags / MapPackets
-Rename tag or packet columns via a name mapping. `MapPackets` automatically renames associated source-info columns. Optional `drop_unmapped` mode removes columns not in the mapping.
+### MapTags / MapData
+Rename tag or data columns via a name mapping. `MapData` automatically renames associated source-info columns. Optional `drop_unmapped` mode removes columns not in the mapping.
 
 ### PolarsFilter
 Applies Polars filtering predicates to rows. Output schema is unchanged from input.
@@ -96,7 +96,7 @@ Applies Polars filtering predicates to rows. Output schema is unchanged from inp
 
 ## Schema as a First-Class Citizen
 
-Every stream exposes `output_schema()` returning `(tag_schema, packet_schema)` as `Schema` objects — immutable mappings from field names to Python types with support for optional fields. Schema is embedded explicitly at every level rather than resolved against a central registry, making streams fully self-describing.
+Every stream exposes `output_schema()` returning `(tag_schema, data_schema)` as `Schema` objects — immutable mappings from field names to Python types with support for optional fields. Schema is embedded explicitly at every level rather than resolved against a central registry, making streams fully self-describing.
 
 The `ColumnConfig` dataclass controls what metadata columns are included in schema and data output:
 
@@ -115,14 +115,14 @@ Operators predict their output schema — including system tag column names — 
 
 ## Tags
 
-Tags are key-value pairs attached to every packet providing human-friendly metadata for navigation, filtering, and annotation. They are:
+Tags are key-value pairs attached to every data providing human-friendly metadata for navigation, filtering, and annotation. They are:
 
 - **Non-authoritative** — never used for cache lookup or pod identity computation
 - **Auto-propagated** — tags flow forward through the pipeline automatically
-- **The basis for joins** — operator pods join streams by matching tag keys, never by inspecting packet content
+- **The basis for joins** — operator pods join streams by matching tag keys, never by inspecting data content
 
 **Tag merging in joins:**
-- **Shared tag keys** — act as the join predicate; values must match for packets to be joined
+- **Shared tag keys** — act as the join predicate; values must match for data to be joined
 - **Non-shared tag keys** — propagate freely into the joined output's tags
 
 ---
@@ -133,7 +133,7 @@ This is a strict and critical separation:
 
 | | Operator | Function Pod |
 |---|---|---|
-| Inspects packet content | Never | Yes |
+| Inspects data content | Never | Yes |
 | Inspects / uses tags | Yes | No |
 | Can rename columns | Yes | No |
 | Stream arity | Configurable (unary/binary/N-ary) | Single stream in, single stream out |
@@ -155,7 +155,7 @@ Data-inclusive identity capturing the precise semantic content of an object:
 | Component | What Gets Hashed |
 |---|---|
 | RootSource | Class name + tag columns + table content hash |
-| PacketFunction | URI (canonical name + output schema hash + version + type ID) |
+| DataFunction | URI (canonical name + output schema hash + version + type ID) |
 | FunctionPodStream | Function pod + argument symmetry of inputs |
 | Operator | Operator class + identity structure |
 | ArrowTableStream | Producer + upstreams (or table content if no producer) |
@@ -170,12 +170,12 @@ Schema-and-topology-only identity used for database path scoping. Excludes data 
 
 | Component | What Gets Hashed |
 |---|---|
-| RootSource | `(tag_schema, packet_schema)` — base case |
-| PacketFunction | Raw packet function object (via content hash) |
+| RootSource | `(tag_schema, data_schema)` — base case |
+| DataFunction | Raw data function object (via content hash) |
 | FunctionPodStream | Function pod + input stream pipeline hashes |
 | Operator | Operator class + argument symmetry (pipeline hashes of inputs) |
 | ArrowTableStream | Producer + upstreams pipeline hashes (or schema if no producer) |
-| DerivedSource | Inherited from RootSource: `(tag_schema, packet_schema)` |
+| DerivedSource | Inherited from RootSource: `(tag_schema, data_schema)` |
 
 Pipeline hash uses a **resolver pattern** — a callback that routes `PipelineElementProtocol` objects through `pipeline_hash()` and other `ContentIdentifiable` objects through `content_hash()` — ensuring the correct identity chain is used for nested objects within a single hash computation.
 
@@ -193,12 +193,12 @@ Each pod declares how upstream hashes are combined:
 
 ---
 
-## Packet Function Signatures
+## Data Function Signatures
 
-Every packet function has a unique signature reflecting its input/output schemas and implementation. The function's URI encodes:
+Every data function has a unique signature reflecting its input/output schemas and implementation. The function's URI encodes:
 
 ```
-(canonical_function_name, output_schema_hash, major_version, packet_function_type_id)
+(canonical_function_name, output_schema_hash, major_version, data_function_type_id)
 ```
 
 For Python functions specifically, the identity structure includes the function's bytecode hash, input parameters signature, and Git version information.
@@ -207,7 +207,7 @@ For Python functions specifically, the identity structure includes the function'
 
 ## Source Info
 
-Every packet column carries a **source info** string — a provenance pointer to the source and record that produced the value:
+Every data column carries a **source info** string — a provenance pointer to the source and record that produced the value:
 
 ```
 {source_id}::{record_id}::{column_name}
@@ -226,7 +226,7 @@ Source info is **immutable through the pipeline** — set once when a source cre
 
 ## System Tags
 
-System tags are **framework-managed, hidden provenance columns** automatically attached to every packet. Unlike user tags, they are authoritative and guaranteed to maintain perfect traceability from any result row back to its original source rows.
+System tags are **framework-managed, hidden provenance columns** automatically attached to every data. Unlike user tags, they are authoritative and guaranteed to maintain perfect traceability from any result row back to its original source rows.
 
 ### Flat Column Design
 
@@ -245,7 +245,7 @@ _tag_source_id::{schema_hash}    — the source's canonical source_id
 _tag_record_id::{schema_hash}    — the row identifier within that source
 ```
 
-Where `schema_hash` is derived from the source's `(tag_schema, packet_schema)`. The `::` delimiter separates segments of the system tag column name, maintaining consistency with the extension pattern used downstream.
+Where `schema_hash` is derived from the source's `(tag_schema, data_schema)`. The `::` delimiter separates segments of the system tag column name, maintaining consistency with the extension pattern used downstream.
 
 Example at the root level:
 
@@ -299,26 +299,26 @@ OrcaPod uses a differentiated caching strategy across its three pod types — so
 
 **Cache table identity:** Canonical source identity (content hash).
 
-Each source gets its own dedicated cache table. Sources are provenance roots — there is no upstream system tag mechanism to disambiguate rows from different sources within a shared table. A cached source table represents a cumulative record of all packets ever observed from that specific source.
+Each source gets its own dedicated cache table. Sources are provenance roots — there is no upstream system tag mechanism to disambiguate rows from different sources within a shared table. A cached source table represents a cumulative record of all data ever observed from that specific source.
 
 **Behavior:**
 - Cache is **always on** by default.
-- Each packet yielded by the source is stored in the cache table keyed by its content-addressable hash.
-- On access, the source pod yields the **merged content of the cache and any new packets** from the live source.
-- **Deduplication is performed at the source pod level** during merge, using content-addressable packet hashes. This ensures the yielded stream represents the complete known universe from the source with no redundancy.
+- Each data yielded by the source is stored in the cache table keyed by its content-addressable hash.
+- On access, the source pod yields the **merged content of the cache and any new data** from the live source.
+- **Deduplication is performed at the source pod level** during merge, using content-addressable data hashes. This ensures the yielded stream represents the complete known universe from the source with no redundancy.
 
-**Semantic guarantee:** The cache is a **correct cumulative record**. The union of cache + live packets is the full set of data ever available from that source.
+**Semantic guarantee:** The cache is a **correct cumulative record**. The union of cache + live data is the full set of data ever available from that source.
 
 ### Function Pod Caching
 
 Function pod caching is split into two tiers:
 
-1. **Packet-level cache (global):** Maps input packet hash → output packet. Shared globally across all pipelines, enabling identical function calls to reuse results regardless of context.
-2. **Tag-level cache (per structural pipeline):** Maps tag → input packet hash. Scoped to the structural pipeline hash.
+1. **Data-level cache (global):** Maps input data hash → output data. Shared globally across all pipelines, enabling identical function calls to reuse results regardless of context.
+2. **Tag-level cache (per structural pipeline):** Maps tag → input data hash. Scoped to the structural pipeline hash.
 
 **Tag-level cache table identity:** Structural pipeline hash (`pipeline_hash()`).
 
-A single cache table is used for all runs of structurally identical pipelines (same tag and packet schemas at source, followed by the same sequence of operator and function pods), regardless of which specific source combinations were involved. This is safe because function pods operate on individual packets independently — each cached mapping is self-contained and valid regardless of what other rows exist in the table.
+A single cache table is used for all runs of structurally identical pipelines (same tag and data schemas at source, followed by the same sequence of operator and function pods), regardless of which specific source combinations were involved. This is safe because function pods operate on individual data independently — each cached mapping is self-contained and valid regardless of what other rows exist in the table.
 
 **Why structural hash, not content hash:**
 - System tags already carry full provenance, including source identity as separate queryable columns. Rows from different source combinations are distinguishable within a shared table via equality predicates on `source_id` columns (e.g., `WHERE _tag_source_id::schema1 = 'X'`).
@@ -327,10 +327,10 @@ A single cache table is used for all runs of structurally identical pipelines (s
 
 **Behavior:**
 - Cache is **always on** by default.
-- On a pipeline run, incoming packets are scoped to the current source combination (determined by upstream source pods).
-- The function pod checks the tag-level cache for existing mappings among the incoming tag-packets.
-- **Cache hits** (from this or any prior run over the same structural pipeline) are yielded directly. Cross-source sharing falls out naturally because packet-level computation is source-independent.
-- **Cache misses** trigger computation; results are stored in both the packet-level and tag-level caches.
+- On a pipeline run, incoming data are scoped to the current source combination (determined by upstream source pods).
+- The function pod checks the tag-level cache for existing mappings among the incoming tag-data.
+- **Cache hits** (from this or any prior run over the same structural pipeline) are yielded directly. Cross-source sharing falls out naturally because data-level computation is source-independent.
+- **Cache misses** trigger computation; results are stored in both the data-level and tag-level caches.
 
 **Semantic guarantee:** The cache is a **correct reusable lookup**. Every entry is independently valid. The table as a whole is a historical record of all computations processed through this function within this structural pipeline context.
 
@@ -340,19 +340,19 @@ A single cache table is used for all runs of structurally identical pipelines (s
 
 **Cache table identity:** Content hash (structural pipeline hash + identity hashes of all upstream sources).
 
-Each unique combination of pipeline structure and source identities gets its own cache table. This reflects the fact that operator results are holistic — they depend on the entire input stream, not individual packets.
+Each unique combination of pipeline structure and source identities gets its own cache table. This reflects the fact that operator results are holistic — they depend on the entire input stream, not individual data.
 
 **Why content hash, not structural hash:**
 Operators compute over the stream (joins, aggregations, window functions). Their outputs are meaningful only as a complete set given a specific input. Unlike function pods, operator results cannot be safely mixed across source combinations within a shared table because the distributive property does not hold for most operators. For example, with a join: `(X ⋈ Y) ∪ (X' ⋈ Y') ≠ (X ∪ X') ⋈ (Y ∪ Y')`. The shared table would miss cross-terms `X ⋈ Y'` and `X' ⋈ Y`. Cache invalidation is also cleaner per-table (drop/mark stale) rather than selectively purging rows by system tag.
 
 **Critical correctness caveat:**
-Even scoped to content hash, operator caches are **not guaranteed to be complete** with respect to the full picture of all packets ever yielded by the sources. Because sources may use canonical identity for their content hash, the same source identity may yield different packet sets over time. The cache accumulates result rows across runs:
+Even scoped to content hash, operator caches are **not guaranteed to be complete** with respect to the full picture of all data ever yielded by the sources. Because sources may use canonical identity for their content hash, the same source identity may yield different data sets over time. The cache accumulates result rows across runs:
 
 - Run 1: `X ⋈ Y` is cached.
 - Run 2: Sources yield `X'` and `Y'`. The operator computes `X' ⋈ Y'` and appends new rows to cache.
 - The cache now contains `(X ⋈ Y) ∪ (X' ⋈ Y')`, which is **not** equivalent to `(X ∪ X') ⋈ (Y ∪ Y')`.
 
-The operator cache is strictly an **append-only historical record**, not a cumulative materialization. Identical output rows across runs naturally deduplicate (keyed by `hash(tag + packet + system_tag)`). Run-level grouping and tracking is managed separately outside the cache mechanism.
+The operator cache is strictly an **append-only historical record**, not a cumulative materialization. Identical output rows across runs naturally deduplicate (keyed by `hash(tag + data + system_tag)`). Run-level grouping and tracking is managed separately outside the cache mechanism.
 
 **Behavior:**
 - Cache is **off by default**. Operator computation is always triggered fresh in a typical run.
@@ -422,7 +422,7 @@ Derived sources serve two purposes:
 
 ## Provenance Graph
 
-Data provenance focuses on **data-generating entities only** — sources and function pods. Since operators never synthesize new packet values, they leave no computational footprint on the data itself.
+Data provenance focuses on **data-generating entities only** — sources and function pods. Since operators never synthesize new data values, they leave no computational footprint on the data itself.
 
 The provenance graph is a **bipartite graph of sources and function pods**, with edges encoded as source info pointers per output field. Operator pod topology is captured implicitly in system tag column names and the pipeline Merkle chain but operators do not appear as nodes in the provenance graph.
 
@@ -444,16 +444,16 @@ The default model. Callers invoke `process()` on a pod, which returns a stream. 
 Three variants exist within the synchronous model:
 
 **1. Lazy In-Memory (FunctionPod → FunctionPodStream)**
-The function pod processes each packet on demand via `iter_packets()`. Results are cached by index in memory. No database persistence. Suitable for exploration and one-off computations.
+The function pod processes each data on demand via `iter_data()`. Results are cached by index in memory. No database persistence. Suitable for exploration and one-off computations.
 
 **2. Static with Recomputation (StaticOutputPod → DynamicPodStream)**
 The operator's `static_process` produces a complete output stream. `DynamicPodStream` wraps it with timestamp-based staleness detection and automatic recomputation when upstreams change.
 
 **3. Database-Backed Incremental (FunctionNode / OperatorNode → PersistentFunctionNode / PersistentOperatorNode)**
-Results are persisted in a pipeline database. Incremental computation: only process inputs whose hashes are not already in the database. Per-row record hashes enable deduplication. Suitable for production pipelines with expensive computations. `PersistentFunctionNode` extends `FunctionNode` with result caching via `CachedPacketFunction` and two-phase iteration (Phase 1: yield cached results, Phase 2: compute missing). `PersistentOperatorNode` extends `OperatorNode` with three-tier caching (off / log / replay).
+Results are persisted in a pipeline database. Incremental computation: only process inputs whose hashes are not already in the database. Per-row record hashes enable deduplication. Suitable for production pipelines with expensive computations. `PersistentFunctionNode` extends `FunctionNode` with result caching via `CachedDataFunction` and two-phase iteration (Phase 1: yield cached results, Phase 2: compute missing). `PersistentOperatorNode` extends `OperatorNode` with three-tier caching (off / log / replay).
 
 **Concurrent execution within sync mode:**
-When a `PacketFunctionExecutor` with `supports_concurrent_execution = True` is attached (e.g. `RayExecutor`), `FunctionPodStream.iter_packets()` materializes all remaining input packets and dispatches them concurrently via the executor's `async_execute`, collecting results in order. This provides data-parallel speedup without leaving the synchronous call model.
+When a `DataFunctionExecutor` with `supports_concurrent_execution = True` is attached (e.g. `RayExecutor`), `FunctionPodStream.iter_data()` materializes all remaining input data and dispatches them concurrently via the executor's `async_execute`, collecting results in order. This provides data-parallel speedup without leaving the synchronous call model.
 
 ### Asynchronous Execution (Push-Based Channels)
 
@@ -461,14 +461,14 @@ Every pipeline node — source, operator, or function pod — implements the `As
 
 ```python
 async def async_execute(
-    inputs: Sequence[ReadableChannel[tuple[Tag, Packet]]],
-    output: WritableChannel[tuple[Tag, Packet]],
+    inputs: Sequence[ReadableChannel[tuple[Tag, Data]]],
+    output: WritableChannel[tuple[Tag, Data]],
 ) -> None
 ```
 
-Nodes consume `(Tag, Packet)` pairs from input channels and produce them to an output channel. This enables push-based, streaming execution where data flows through the pipeline as soon as it's available, with backpressure propagated via bounded channel buffers.
+Nodes consume `(Tag, Data)` pairs from input channels and produce them to an output channel. This enables push-based, streaming execution where data flows through the pipeline as soon as it's available, with backpressure propagated via bounded channel buffers.
 
-**FunctionPod async strategy:** Streaming mode — each input `(tag, packet)` is processed independently with semaphore-controlled concurrency. Uses `asyncio.TaskGroup` for structured concurrency.
+**FunctionPod async strategy:** Streaming mode — each input `(tag, data)` is processed independently with semaphore-controlled concurrency. Uses `asyncio.TaskGroup` for structured concurrency.
 
 #### Operator Async Strategies
 
@@ -476,7 +476,7 @@ Each operator overrides `async_execute` with the most efficient streaming patter
 
 | Strategy | Description | Operators |
 |---|---|---|
-| **Per-row streaming** | Transform each `(Tag, Packet)` independently as it arrives; zero buffering beyond the current row | SelectTagColumns, SelectPacketColumns, DropTagColumns, DropPacketColumns, MapTags, MapPackets |
+| **Per-row streaming** | Transform each `(Tag, Data)` independently as it arrives; zero buffering beyond the current row | SelectTagColumns, SelectDataColumns, DropTagColumns, DropDataColumns, MapTags, MapData |
 | **Accumulate-and-emit** | Buffer rows up to `batch_size`, emit full batches immediately, flush partial at end | Batch (`batch_size > 0`) |
 | **Build-probe** | Collect one side fully (build), then stream the other through a hash lookup (probe) | SemiJoin |
 | **Symmetric hash join** | Read both sides concurrently, buffer + index both, emit matches as they're found | Join (2 inputs) |
@@ -484,7 +484,7 @@ Each operator overrides `async_execute` with the most efficient streaming patter
 
 #### Per-Row Streaming (Unary Column/Map Operators)
 
-For operators that transform each row independently (column selection, column dropping, column renaming), the async path iterates `async for tag, packet in inputs[0]` and applies the transformation per row. Column metadata (which columns to drop, the rename map, etc.) is computed lazily on the first row and cached for subsequent rows. This avoids materializing the entire input into an Arrow table, enabling true pipeline-level streaming where upstream producers and downstream consumers run concurrently.
+For operators that transform each row independently (column selection, column dropping, column renaming), the async path iterates `async for tag, data in inputs[0]` and applies the transformation per row. Column metadata (which columns to drop, the rename map, etc.) is computed lazily on the first row and cached for subsequent rows. This avoids materializing the entire input into an Arrow table, enabling true pipeline-level streaming where upstream producers and downstream consumers run concurrently.
 
 #### Accumulate-and-Emit (Batch)
 
@@ -552,20 +552,20 @@ Backpressure propagates naturally: when a downstream reader is slow, the writer 
 
 ---
 
-## Packet Function Executor System
+## Data Function Executor System
 
-Executors decouple **what** a packet function computes from **where** and **how** it runs. Every `PacketFunctionBase` has an optional `executor` slot. When set, `call()` and `async_call()` route through the executor instead of calling the function directly.
+Executors decouple **what** a data function computes from **where** and **how** it runs. Every `DataFunctionBase` has an optional `executor` slot. When set, `call()` and `async_call()` route through the executor instead of calling the function directly.
 
 ### Routing
 
 ```
-packet_function.call(packet)
-    ├── executor is set → executor.execute(packet_function, packet)
-    └── executor is None → packet_function.direct_call(packet)
+data_function.call(data)
+    ├── executor is set → executor.execute(data_function, data)
+    └── executor is None → data_function.direct_call(data)
 
-packet_function.async_call(packet)
-    ├── executor is set → executor.async_execute(packet_function, packet)
-    └── executor is None → packet_function.direct_async_call(packet)
+data_function.async_call(data)
+    ├── executor is set → executor.async_execute(data_function, data)
+    └── executor is None → data_function.direct_async_call(data)
 ```
 
 Executors call `direct_call()` / `direct_async_call()` internally, which are the native computation methods that subclasses implement. This two-level routing ensures executors can wrap the computation without infinite recursion.
@@ -592,7 +592,7 @@ Two-level configuration controls per-node concurrency in async mode:
 - **`PipelineConfig`** — pipeline-level defaults: `executor` type, `channel_buffer_size`, `default_max_concurrency`.
 - **`NodeConfig`** — per-node override: `max_concurrency`. `None` inherits from pipeline config. `1` forces sequential execution (useful for rate-limited APIs or order-preserving operations).
 
-`resolve_concurrency(node_config, pipeline_config)` returns the effective limit. In `FunctionPod.async_execute`, this limit governs an `asyncio.Semaphore` controlling how many packets are in-flight concurrently.
+`resolve_concurrency(node_config, pipeline_config)` returns the effective limit. In `FunctionPod.async_execute`, this limit governs an `asyncio.Semaphore` controlling how many data are in-flight concurrently.
 
 ---
 
@@ -634,7 +634,7 @@ Compilation is **incremental**: re-entering the context, adding more operations,
 | Node type | Behavior |
 |---|---|
 | `PersistentSourceNode` | Materializes the wrapped stream into a cache DB with per-row deduplication via content hash. On subsequent access, returns the union of cached + live data. |
-| `PersistentFunctionNode` | DB-backed two-phase iteration: Phase 1 yields cached results from the pipeline database, Phase 2 computes only missing inputs. Uses `CachedPacketFunction` for packet-level result caching. |
+| `PersistentFunctionNode` | DB-backed two-phase iteration: Phase 1 yields cached results from the pipeline database, Phase 2 computes only missing inputs. Uses `CachedDataFunction` for data-level result caching. |
 | `PersistentOperatorNode` | DB-backed with three-tier cache mode: OFF (default, always recompute), LOG (compute and write to DB), REPLAY (skip computation, load from DB). |
 
 ### Pipeline Composition
@@ -651,7 +651,7 @@ Pipelines can be composed across boundaries:
 
 The strict operator / function pod boundary is central to OrcaPod's provenance guarantees: operators never synthesize values (provenance transparent), function pods always synthesize values (provenance tracked). This two-category model keeps provenance tracking simple and robust.
 
-However, certain common patterns require combining both behaviors in a single logical operation. The most common is **enrichment** — running a function on a packet and appending the computed columns to the original packet rather than replacing it. The naïve decomposition into `FunctionPod + Join` works but incurs unnecessary overhead: an intermediate stream is materialized only to be immediately joined back, and the join must re-match tags that trivially correspond because they came from the same input row.
+However, certain common patterns require combining both behaviors in a single logical operation. The most common is **enrichment** — running a function on a data and appending the computed columns to the original data rather than replacing it. The naïve decomposition into `FunctionPod + Join` works but incurs unnecessary overhead: an intermediate stream is materialized only to be immediately joined back, and the join must re-match tags that trivially correspond because they came from the same input row.
 
 ### Fused Pods as Optimization, Not Extension
 
@@ -660,7 +660,7 @@ A **fused pod** is an implementation-level pod type that combines the behaviors 
 The key invariant: **every column in a fused pod's output maps to exactly one existing provenance category.**
 
 - **Preserved columns** (from upstream) — provenance transparent, source-info passes through unchanged. This is the operator-like component.
-- **Computed columns** (from the wrapped PacketFunction) — provenance tracked, source-info references the PacketFunction. This is the function-pod-like component.
+- **Computed columns** (from the wrapped DataFunction) — provenance tracked, source-info references the DataFunction. This is the function-pod-like component.
 
 There is no third kind of output column. The theoretical provenance model stays clean (Source, Operator, FunctionPod), and fused pods are justified as performance/ergonomic optimizations whose provenance semantics are *derived from* the existing model rather than extending it.
 
@@ -668,10 +668,10 @@ This is analogous to how a database query optimizer fuses filter+project into a 
 
 ### AddResult
 
-The first planned fused pod. Wraps a `PacketFunction` and merges the function output back into the original packet:
+The first planned fused pod. Wraps a `DataFunction` and merges the function output back into the original data:
 
 ```python
-grade_pf = PythonPacketFunction(compute_letter_grade, output_keys="letter_grade")
+grade_pf = PythonDataFunction(compute_letter_grade, output_keys="letter_grade")
 enriched = AddResult(grade_pf).process(stream)
 # enriched has all original columns + "letter_grade"
 ```
@@ -681,10 +681,10 @@ Equivalent decomposition: `FunctionPod(pf).process(stream)` → `Join()(stream, 
 Efficiency gains: no intermediate stream materialization, no redundant tag matching, no broadcast/rejoin wiring. The async path streams row-by-row like FunctionPod.
 
 Implementation constraints:
-- `output_schema()` returns `(input_tag_schema, input_packet_schema | function_output_schema)`.
-- Raises `InputValidationError` if function output keys collide with existing packet column names.
-- `pipeline_hash` commits to the wrapped PacketFunction's identity plus the upstream's pipeline hash (as if the decomposition were performed).
-- Source-info on computed columns references the PacketFunction. Source-info on preserved columns passes through unchanged.
+- `output_schema()` returns `(input_tag_schema, input_data_schema | function_output_schema)`.
+- Raises `InputValidationError` if function output keys collide with existing data column names.
+- `pipeline_hash` commits to the wrapped DataFunction's identity plus the upstream's pipeline hash (as if the decomposition were performed).
+- Source-info on computed columns references the DataFunction. Source-info on preserved columns passes through unchanged.
 
 ---
 

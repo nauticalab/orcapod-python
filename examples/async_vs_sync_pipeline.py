@@ -5,7 +5,7 @@ Demonstrates the interplay of two independent concurrency axes:
 1. **Pipeline executor** — sync (sequential node execution) vs async
    (concurrent node execution via channels).
 
-2. **Packet function** — sync (GIL-holding busy-wait) vs async
+2. **Data function** — sync (GIL-holding busy-wait) vs async
    (non-blocking ``asyncio.sleep``).
 
 The sync function uses a pure-Python busy-wait loop that holds the GIL,
@@ -19,7 +19,7 @@ async+sync and async+async clearly visible:
 |                     |                            | called via sync fallback)  |
 +---------------------+----------------------------+----------------------------+
 | async executor      | branches overlap, but      | branches overlap AND       |
-|                     | packets serialize on GIL   | packets run concurrently   |
+|                     | data serialize on GIL   | data run concurrently   |
 |                     | (thread pool can't help)   | (native coroutines)        |
 +---------------------+----------------------------+----------------------------+
 
@@ -36,7 +36,7 @@ import pyarrow as pa
 
 from orcapod.sources import ArrowTableSource
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import Pipeline
 from orcapod.types import ExecutorType, NodeConfig, PipelineConfig
@@ -45,8 +45,8 @@ from orcapod.types import ExecutorType, NodeConfig, PipelineConfig
 # Configuration
 # ---------------------------------------------------------------------------
 
-SLEEP_SECONDS = 0.1  # per-packet delay (kept short since busy-wait burns CPU)
-NUM_PACKETS = 6
+SLEEP_SECONDS = 0.1  # per-data delay (kept short since busy-wait burns CPU)
+NUM_DATA = 6
 
 # ---------------------------------------------------------------------------
 # Source data
@@ -54,8 +54,8 @@ NUM_PACKETS = 6
 
 SOURCE_TABLE = pa.table(
     {
-        "id": pa.array(list(range(NUM_PACKETS)), type=pa.int64()),
-        "x": pa.array(list(range(NUM_PACKETS)), type=pa.int64()),
+        "id": pa.array(list(range(NUM_DATA)), type=pa.int64()),
+        "x": pa.array(list(range(NUM_DATA)), type=pa.int64()),
     }
 )
 
@@ -102,15 +102,15 @@ def build_pipeline(use_async_fn: bool) -> Pipeline:
     fn = async_slow_double if use_async_fn else sync_slow_double
     with pipeline:
         source = ArrowTableSource(SOURCE_TABLE, tag_columns=["id"])
-        pf_a = PythonPacketFunction(fn, output_keys="result", function_name="branch_a")
-        pf_b = PythonPacketFunction(fn, output_keys="result", function_name="branch_b")
+        pf_a = PythonDataFunction(fn, output_keys="result", function_name="branch_a")
+        pf_b = PythonDataFunction(fn, output_keys="result", function_name="branch_b")
         FunctionPod(
-            packet_function=pf_a,
-            node_config=NodeConfig(max_concurrency=NUM_PACKETS),
+            data_function=pf_a,
+            node_config=NodeConfig(max_concurrency=NUM_DATA),
         )(source, label="branch_a")
         FunctionPod(
-            packet_function=pf_b,
-            node_config=NodeConfig(max_concurrency=NUM_PACKETS),
+            data_function=pf_b,
+            node_config=NodeConfig(max_concurrency=NUM_DATA),
         )(source, label="branch_b")
 
     return pipeline
@@ -140,13 +140,13 @@ def run_case(label: str, use_async_fn: bool, use_async_executor: bool) -> float:
 
 
 def main() -> None:
-    total = NUM_PACKETS * 2  # packets per branch * 2 branches
+    total = NUM_DATA * 2  # data per branch * 2 branches
     seq_time = SLEEP_SECONDS * total
 
     print("=" * 64)
     print("Pipeline execution: 2x2 comparison matrix")
     print("=" * 64)
-    print(f"  {NUM_PACKETS} packets x 2 branches, {SLEEP_SECONDS}s sleep each")
+    print(f"  {NUM_DATA} data x 2 branches, {SLEEP_SECONDS}s sleep each")
     print(f"  Sequential baseline: {seq_time:.1f}s\n")
 
     print("  Pipeline topology:")
@@ -161,14 +161,14 @@ def main() -> None:
     print()
     print("  Analysis:")
     print(
-        f"    sync+sync   {t1:.2f}s  — fully sequential ({NUM_PACKETS}x2 x {SLEEP_SECONDS}s)"
+        f"    sync+sync   {t1:.2f}s  — fully sequential ({NUM_DATA}x2 x {SLEEP_SECONDS}s)"
     )
     print(
         f"    sync+async  {t2:.2f}s  — still sequential (sync executor runs nodes one by one)"
     )
     print(f"    async+sync  {t3:.2f}s  — branches overlap, but GIL-holding busy-wait")
-    print(f"                          serializes packets even across threads")
-    print(f"    async+async {t4:.2f}s  — branches overlap AND packets overlap")
+    print(f"                          serializes data even across threads")
+    print(f"    async+async {t4:.2f}s  — branches overlap AND data overlap")
     print(
         f"                          (native coroutines yield at await points, enabling I/O overlap)"
     )

@@ -21,9 +21,9 @@ class PodNodeProtocol(cp.CachedPod, Protocol):
         self, include_system_columns: bool = False
     ) -> "pa.Table | None":
         """
-        Retrieve all tag and packet processed by this PodProtocol.
+        Retrieve all tag and data processed by this PodProtocol.
 
-        This method returns a table containing all packets processed by the PodProtocol,
+        This method returns a table containing all data processed by the PodProtocol,
         including metadata and system columns if requested. It is useful for:
         - Debugging and analysis
         - Auditing and data lineage tracking
@@ -53,8 +53,8 @@ class PodNodeProtocol(cp.CachedPod, Protocol):
     def add_pipeline_record(
         self,
         tag: cp.TagProtocol,
-        input_packet: cp.PacketProtocol,
-        packet_record_id: str,
+        input_data: cp.DataProtocol,
+        data_record_id: str,
         retrieved: bool | None = None,
         skip_cache_lookup: bool = False,
     ) -> None: ...

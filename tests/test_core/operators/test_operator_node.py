@@ -5,7 +5,7 @@ Tests for OperatorNode covering:
 - output_schema and keys
 - identity_structure, content_hash, pipeline_identity_structure, pipeline_hash
 - run() + get_all_records: DB storage and retrieval
-- iter_packets / as_table stream interface
+- iter_data / as_table stream interface
 - Staleness detection
 - as_source (DerivedSource round-trip)
 - Argument symmetry: commutative operators produce same pipeline_hash regardless of input order
@@ -19,9 +19,9 @@ import pytest
 
 from orcapod.core.nodes import OperatorNode
 from orcapod.core.operators import (
-    DropPacketColumns,
+    DropDataColumns,
     Join,
-    MapPackets,
+    MapData,
 )
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
@@ -37,7 +37,7 @@ from orcapod.types import CacheMode
 
 @pytest.fixture
 def simple_stream() -> ArrowTableStream:
-    """Stream with 1 tag (id) and 1 packet column (x)."""
+    """Stream with 1 tag (id) and 1 data column (x)."""
     table = pa.table(
         {
             "id": pa.array([1, 2, 3], type=pa.int64()),
@@ -48,8 +48,8 @@ def simple_stream() -> ArrowTableStream:
 
 
 @pytest.fixture
-def two_packet_stream() -> ArrowTableStream:
-    """Stream with 1 tag (id) and 2 packet columns (x, y)."""
+def two_data_stream() -> ArrowTableStream:
+    """Stream with 1 tag (id) and 2 data columns (x, y)."""
     table = pa.table(
         {
             "id": pa.array([1, 2, 3], type=pa.int64()),
@@ -117,37 +117,37 @@ def _make_node(
 
 class TestOperatorNodeConstruction:
     def test_producer_is_operator(self, simple_stream):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
         assert node.producer is op
 
     def test_upstreams_match_input(self, simple_stream):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
         assert node.upstreams == (simple_stream,)
 
     def test_output_schema(self, simple_stream):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
-        tag_schema, packet_schema = node.output_schema()
+        tag_schema, data_schema = node.output_schema()
         assert "id" in tag_schema
-        assert "renamed_x" in packet_schema
-        assert "x" not in packet_schema
+        assert "renamed_x" in data_schema
+        assert "x" not in data_schema
 
     def test_keys(self, simple_stream):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
-        tag_keys, packet_keys = node.keys()
+        tag_keys, data_keys = node.keys()
         assert "id" in tag_keys
-        assert "renamed_x" in packet_keys
+        assert "renamed_x" in data_keys
 
     def test_stream_protocol_conformance(self, simple_stream):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
         assert isinstance(node, StreamProtocol)
 
     def test_pipeline_element_conformance(self, simple_stream):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
         assert isinstance(node, PipelineElementProtocol)
 
@@ -159,15 +159,15 @@ class TestOperatorNodeConstruction:
 
 class TestOperatorNodePipelinePath:
     def test_pipeline_path_contains_operator_uri(self, simple_stream):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
         # node_identity_path = operator.uri + (f"schema:{pipeline_hash}", f"instance:{content_hash}")
         path = node.node_identity_path
         # operator.uri is a tuple starting with the class name
-        assert any("MapPackets" in segment for segment in path)
+        assert any("MapData" in segment for segment in path)
 
     def test_pipeline_path_ends_with_schema_hash(self, simple_stream):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
         path = node.node_identity_path
         # With pipeline_hash scope (default): ends with schema:{hash} only
@@ -175,7 +175,7 @@ class TestOperatorNodePipelinePath:
         assert not any(seg.startswith("instance:") for seg in path)
 
     def test_no_tag_schema_hash_in_path(self, simple_stream):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
         path = node.node_identity_path
         assert not any(segment.startswith("tag:") for segment in path)
@@ -188,26 +188,26 @@ class TestOperatorNodePipelinePath:
 
 class TestOperatorNodeIdentity:
     def test_identity_structure_contains_operator(self, simple_stream):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
         identity = node.identity_structure()
         assert op in identity
 
     def test_content_hash_is_stable(self, simple_stream):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node1 = _make_node(op, (simple_stream,))
         node2 = _make_node(op, (simple_stream,))
         assert node1.content_hash() == node2.content_hash()
 
     def test_pipeline_hash_is_stable(self, simple_stream):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node1 = _make_node(op, (simple_stream,))
         node2 = _make_node(op, (simple_stream,))
         assert node1.pipeline_hash() == node2.pipeline_hash()
 
     def test_different_operator_different_hash(self, simple_stream):
-        op1 = MapPackets({"x": "renamed_x"})
-        op2 = MapPackets({"x": "other_name"})
+        op1 = MapData({"x": "renamed_x"})
+        op2 = MapData({"x": "other_name"})
         node1 = _make_node(op1, (simple_stream,))
         node2 = _make_node(op2, (simple_stream,))
         assert node1.content_hash() != node2.content_hash()
@@ -218,7 +218,7 @@ class TestOperatorNodeIdentity:
         table2 = pa.table({"id": [3, 4], "x": [30, 40]})
         s1 = ArrowTableStream(table1, tag_columns=["id"])
         s2 = ArrowTableStream(table2, tag_columns=["id"])
-        op = MapPackets({"x": "y"})
+        op = MapData({"x": "y"})
         node1 = _make_node(op, (s1,))
         node2 = _make_node(op, (s2,))
         assert node1.content_hash() != node2.content_hash()
@@ -239,7 +239,7 @@ class TestOperatorNodeIdentity:
         )
         s1 = ArrowTableStream(table1, tag_columns=["id"])
         s2 = ArrowTableStream(table2, tag_columns=["id"])
-        op = MapPackets({"x": "y"})
+        op = MapData({"x": "y"})
         node1 = _make_node(op, (s1,))
         node2 = _make_node(op, (s2,))
         assert node1.pipeline_hash() == node2.pipeline_hash()
@@ -273,7 +273,7 @@ class TestOperatorNodeArgumentSymmetry:
 class TestOperatorNodeRunAndStorage:
     def test_run_off_does_not_write_db(self, simple_stream, db):
         """CacheMode.OFF: compute but do not write to DB."""
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.OFF)
         node.run()
         records = node.get_all_records()
@@ -281,7 +281,7 @@ class TestOperatorNodeRunAndStorage:
 
     def test_run_log_populates_db(self, simple_stream, db):
         """CacheMode.LOG: compute and write to DB."""
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         node.run()
         records = node.get_all_records()
@@ -289,13 +289,13 @@ class TestOperatorNodeRunAndStorage:
         assert records.num_rows == 3
 
     def test_get_all_records_before_run_returns_none(self, simple_stream, db):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         records = node.get_all_records()
         assert records is None
 
     def test_get_all_records_has_correct_columns(self, simple_stream, db):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         node.run()
         records = node.get_all_records()
@@ -304,7 +304,7 @@ class TestOperatorNodeRunAndStorage:
         assert "renamed_x" in records.column_names
 
     def test_get_all_records_column_config_source(self, simple_stream, db):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         node.run()
         records = node.get_all_records(columns={"source": True})
@@ -313,7 +313,7 @@ class TestOperatorNodeRunAndStorage:
         assert len(source_cols) > 0
 
     def test_run_idempotent(self, simple_stream, db):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         node.run()
         records1 = node.get_all_records()
@@ -322,17 +322,17 @@ class TestOperatorNodeRunAndStorage:
         assert records1 is not None and records2 is not None
         assert records1.num_rows == records2.num_rows
 
-    def test_iter_packets(self, simple_stream, db):
-        op = MapPackets({"x": "renamed_x"})
+    def test_iter_data(self, simple_stream, db):
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,), db=db)
         node.run()                          # <-- add this line
-        packets = list(node.iter_packets())
-        assert len(packets) == 3
-        for tag, packet in packets:
-            assert "renamed_x" in packet.keys()
+        data = list(node.iter_data())
+        assert len(data) == 3
+        for tag, data in data:
+            assert "renamed_x" in data.keys()
 
     def test_as_table(self, simple_stream, db):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,), db=db)
         node.run()                          # <-- add this line
         table = node.as_table()
@@ -352,9 +352,9 @@ class TestOperatorNodeRunAndStorage:
         assert "value_a" in records.column_names
         assert "value_b" in records.column_names
 
-    def test_drop_columns_run_and_retrieve(self, two_packet_stream, db):
-        op = DropPacketColumns("y")
-        node = _make_node(op, (two_packet_stream,), db=db, cache_mode=CacheMode.LOG)
+    def test_drop_columns_run_and_retrieve(self, two_data_stream, db):
+        op = DropDataColumns("y")
+        node = _make_node(op, (two_data_stream,), db=db, cache_mode=CacheMode.LOG)
         node.run()
         records = node.get_all_records()
         assert records is not None
@@ -364,7 +364,7 @@ class TestOperatorNodeRunAndStorage:
 
     def test_replay_from_cache(self, simple_stream, db):
         """CacheMode.REPLAY: skip computation, load from DB."""
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         # First, populate cache with LOG mode
         node_log = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         node_log.run()
@@ -379,15 +379,15 @@ class TestOperatorNodeRunAndStorage:
 
     def test_replay_no_cache_returns_empty_stream(self, simple_stream, db):
         """CacheMode.REPLAY with no cached data yields an empty stream."""
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.REPLAY)
         node.run()
         table = node.as_table()
         assert table.num_rows == 0
         # Schema is still correct
-        tag_keys, packet_keys = node.keys()
+        tag_keys, data_keys = node.keys()
         assert set(tag_keys).issubset(set(table.column_names))
-        assert set(packet_keys).issubset(set(table.column_names))
+        assert set(data_keys).issubset(set(table.column_names))
 
 
 # ---------------------------------------------------------------------------
@@ -399,34 +399,34 @@ class TestOperatorNodeDerivedSource:
     def test_as_source_returns_derived_source(self, simple_stream, db):
         from orcapod.core.sources.derived_source import DerivedSource
 
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         node.run()
         source = node.as_source()
         assert isinstance(source, DerivedSource)
 
     def test_as_source_round_trip(self, simple_stream, db):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         node.run()
         source = node.as_source()
-        # iter_packets should yield the same data
-        packets = list(source.iter_packets())
-        assert len(packets) == 3
+        # iter_data should yield the same data
+        data = list(source.iter_data())
+        assert len(data) == 3
 
     def test_as_source_schema_matches(self, simple_stream, db):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         node.run()
         source = node.as_source()
         assert source.output_schema() == node.output_schema()
 
     def test_as_source_before_run_returns_empty(self, simple_stream, db):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,), db=db, cache_mode=CacheMode.LOG)
         source = node.as_source()
         # Before run, DerivedSource returns an empty stream (zero rows)
-        assert list(source.iter_packets()) == []
+        assert list(source.iter_data()) == []
         table = source.as_table()
         assert table.num_rows == 0
         assert "renamed_x" in table.column_names
@@ -439,7 +439,7 @@ class TestOperatorNodeDerivedSource:
 
 class TestOperatorNodeRepr:
     def test_repr(self, simple_stream):
-        op = MapPackets({"x": "renamed_x"})
+        op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
         r = repr(node)
         assert "OperatorNode" in r

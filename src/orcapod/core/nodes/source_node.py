@@ -34,7 +34,7 @@ class SourceNode(StreamBase):
     ):
         super().__init__(label=label, config=config)
         self.stream = stream
-        self._cached_results: list[tuple[cp.TagProtocol, cp.PacketProtocol]] | None = (
+        self._cached_results: list[tuple[cp.TagProtocol, cp.DataProtocol]] | None = (
             None
         )
 
@@ -54,7 +54,7 @@ class SourceNode(StreamBase):
         When *stream* is provided the node operates in full mode — all
         delegation goes through the live stream.  When *stream* is ``None``
         the node is created in read-only mode with metadata from the
-        descriptor; data-access methods (``iter_packets``, ``as_table``)
+        descriptor; data-access methods (``iter_data``, ``as_table``)
         will raise ``RuntimeError``.
 
         Args:
@@ -213,8 +213,8 @@ class SourceNode(StreamBase):
         if self.stream is None:
             stored = getattr(self, "_stored_schema", {})
             tag_keys = tuple(stored.get("tag", {}).keys())
-            packet_keys = tuple(stored.get("packet", {}).keys())
-            return tag_keys, packet_keys
+            data_keys = tuple(stored.get("data", {}).keys())
+            return tag_keys, data_keys
         return self.stream.keys(columns=columns, all_info=all_info)
 
     def output_schema(
@@ -226,8 +226,8 @@ class SourceNode(StreamBase):
         if self.stream is None:
             stored = getattr(self, "_stored_schema", {})
             tag = Schema(stored.get("tag", {}))
-            packet = Schema(stored.get("packet", {}))
-            return tag, packet
+            data = Schema(stored.get("data", {}))
+            return tag, data
         return self.stream.output_schema(columns=columns, all_info=all_info)
 
     @property
@@ -258,27 +258,27 @@ class SourceNode(StreamBase):
             )
         return self.stream.as_table(columns=columns, all_info=all_info)
 
-    def iter_packets(self) -> Iterator[tuple[cp.TagProtocol, cp.PacketProtocol]]:
+    def iter_data(self) -> Iterator[tuple[cp.TagProtocol, cp.DataProtocol]]:
         if self.stream is None:
             raise RuntimeError(
                 "SourceNode in read-only mode has no stream data available"
             )
         if self._cached_results is not None:
             return iter(self._cached_results)
-        return self.stream.iter_packets()
+        return self.stream.iter_data()
 
     def execute(
         self,
         *,
         observer: ExecutionObserverProtocol | None = None,
-    ) -> list[tuple[cp.TagProtocol, cp.PacketProtocol]]:
-        """Execute this source: materialize packets and return.
+    ) -> list[tuple[cp.TagProtocol, cp.DataProtocol]]:
+        """Execute this source: materialize data and return.
 
         Args:
             observer: Optional execution observer for hooks.
 
         Returns:
-            List of (tag, packet) tuples.
+            List of (tag, data) tuples.
         """
         if self.stream is None:
             raise RuntimeError(
@@ -288,7 +288,7 @@ class SourceNode(StreamBase):
         node_hash = ""
         if observer is not None:
             observer.on_node_start(node_label, node_hash)
-        result = list(self.stream.iter_packets())
+        result = list(self.stream.iter_data())
         self._cached_results = result
         if observer is not None:
             observer.on_node_end(node_label, node_hash)
@@ -299,11 +299,11 @@ class SourceNode(StreamBase):
 
     async def async_execute(
         self,
-        output: WritableChannel[tuple[cp.TagProtocol, cp.PacketProtocol]],
+        output: WritableChannel[tuple[cp.TagProtocol, cp.DataProtocol]],
         *,
         observer: ExecutionObserverProtocol | None = None,
     ) -> None:
-        """Push all (tag, packet) pairs from the wrapped stream to the output channel.
+        """Push all (tag, data) pairs from the wrapped stream to the output channel.
 
         Args:
             output: Channel to write results to.
@@ -318,8 +318,8 @@ class SourceNode(StreamBase):
         try:
             if observer is not None:
                 observer.on_node_start(node_label, node_hash)
-            for tag, packet in self.stream.iter_packets():
-                await output.send((tag, packet))
+            for tag, data in self.stream.iter_data():
+                await output.send((tag, data))
             if observer is not None:
                 observer.on_node_end(node_label, node_hash)
         finally:

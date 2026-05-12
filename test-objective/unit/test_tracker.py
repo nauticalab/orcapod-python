@@ -11,7 +11,7 @@ import pytest
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import Join
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.core.tracker import BasicTrackerManager
 from orcapod.databases import InMemoryArrowDatabase
@@ -81,8 +81,8 @@ class TestPipelineTracker:
         tracker = _make_pipeline(tracker_manager=mgr)
         tracker.set_active(True)
 
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
 
         # Explicitly record the invocation
@@ -96,8 +96,8 @@ class TestPipelineTracker:
         tracker = _make_pipeline(tracker_manager=mgr)
         tracker.set_active(True)
 
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         tracker.record_function_pod_invocation(pod, stream)
 
@@ -109,8 +109,8 @@ class TestPipelineTracker:
         tracker = _make_pipeline(tracker_manager=mgr)
         tracker.set_active(True)
 
-        pf = PythonPacketFunction(_double, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(_double, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         stream = _make_stream()
         tracker.record_function_pod_invocation(pod, stream)
 

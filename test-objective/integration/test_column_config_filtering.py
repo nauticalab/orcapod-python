@@ -1,7 +1,7 @@
 """Specification-derived integration tests for ColumnConfig filtering across components.
 
 Tests that ColumnConfig consistently controls column visibility across
-Datagram, Tag, Packet, Stream, and Source components.
+Datagram, Tag, Data, Stream, and Source components.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.datagrams.datagram import Datagram
-from orcapod.core.datagrams.tag_packet import Packet, Tag
+from orcapod.core.datagrams.tag_data import Data, Tag
 from orcapod.core.sources import ArrowTableSource
 from orcapod.core.streams import ArrowTableStream
 from orcapod.system_constants import constants
@@ -97,15 +97,15 @@ class TestTagColumnConfig:
 
 
 # ===================================================================
-# Packet ColumnConfig
+# Data ColumnConfig
 # ===================================================================
 
 
-class TestPacketColumnConfig:
-    """Per design, source=True includes _source_ columns in Packet."""
+class TestDataColumnConfig:
+    """Per design, source=True includes _source_ columns in Data."""
 
     def test_source_excluded_by_default(self):
-        p = Packet(
+        p = Data(
             {"value": 42},
             source_info={"value": "src1:rec1"},
         )
@@ -114,7 +114,7 @@ class TestPacketColumnConfig:
             assert not k.startswith(constants.SOURCE_PREFIX)
 
     def test_source_included_with_config(self):
-        p = Packet(
+        p = Data(
             {"value": 42},
             source_info={"value": "src1:rec1"},
         )
@@ -123,7 +123,7 @@ class TestPacketColumnConfig:
         assert len(source_keys) > 0
 
     def test_all_info_includes_source(self):
-        p = Packet(
+        p = Data(
             {"value": 42},
             source_info={"value": "src1:rec1"},
         )
@@ -152,16 +152,16 @@ class TestStreamColumnConfigConsistency:
             tag_columns=["id"],
             infer_nullable=True,
         )
-        tag_keys, packet_keys = source.keys()
-        tag_schema, packet_schema = source.output_schema()
+        tag_keys, data_keys = source.keys()
+        tag_schema, data_schema = source.output_schema()
         table = source.as_table()
 
         # keys and schema should have same field names
         assert set(tag_keys) == set(tag_schema.keys())
-        assert set(packet_keys) == set(packet_schema.keys())
+        assert set(data_keys) == set(data_schema.keys())
 
         # Table should have all key columns
-        all_keys = set(tag_keys) | set(packet_keys)
+        all_keys = set(tag_keys) | set(data_keys)
         assert all_keys.issubset(set(table.column_names))
 
     def test_keys_schema_table_consistency_all_info(self):
@@ -175,14 +175,14 @@ class TestStreamColumnConfigConsistency:
             tag_columns=["id"],
             infer_nullable=True,
         )
-        tag_keys, packet_keys = source.keys(all_info=True)
-        tag_schema, packet_schema = source.output_schema(all_info=True)
+        tag_keys, data_keys = source.keys(all_info=True)
+        tag_schema, data_schema = source.output_schema(all_info=True)
         table = source.as_table(all_info=True)
 
         assert set(tag_keys) == set(tag_schema.keys())
-        assert set(packet_keys) == set(packet_schema.keys())
+        assert set(data_keys) == set(data_schema.keys())
 
-        all_keys = set(tag_keys) | set(packet_keys)
+        all_keys = set(tag_keys) | set(data_keys)
         assert all_keys.issubset(set(table.column_names))
 
     def test_all_info_has_more_columns_than_default(self):

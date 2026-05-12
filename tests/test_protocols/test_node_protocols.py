@@ -34,21 +34,21 @@ def source_node(_sample_source):
 @pytest.fixture
 def function_node(_sample_source):
     from orcapod.core.function_pod import FunctionPod
-    from orcapod.core.packet_function import PythonPacketFunction
+    from orcapod.core.data_function import PythonDataFunction
 
     def double(value: int) -> int:
         return value * 2
 
-    pf = PythonPacketFunction(double, output_keys="result")
+    pf = PythonDataFunction(double, output_keys="result")
     pod = FunctionPod(pf)
     return FunctionNode(pod, _sample_source)
 
 
 @pytest.fixture
 def operator_node(_sample_source):
-    from orcapod.core.operators import SelectPacketColumns
+    from orcapod.core.operators import SelectDataColumns
 
-    op = SelectPacketColumns(columns=["value"])
+    op = SelectDataColumns(columns=["value"])
     return OperatorNode(op, input_streams=[_sample_source])
 
 

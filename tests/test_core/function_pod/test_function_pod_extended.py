@@ -3,7 +3,7 @@ Extended tests for function_pod.py covering:
 - _FunctionPodBase — handle_input_streams
 - WrappedFunctionPod — delegation, uri, validate_inputs, output_schema, process
 - FunctionPodStream — as_table() with content_hash and sort_by_tags column configs
-- function_pod decorator with result_database — creates CachedPacketFunction, caching works
+- function_pod decorator with result_database — creates CachedDataFunction, caching works
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from orcapod.core.function_pod import (
     WrappedFunctionPod,
     function_pod,
 )
-from orcapod.core.packet_function import CachedPacketFunction, PythonPacketFunction
+from orcapod.core.data_function import CachedDataFunction, PythonDataFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.protocols.core_protocols import StreamProtocol
@@ -29,7 +29,7 @@ from ..conftest import make_int_stream
 # ---------------------------------------------------------------------------
 
 
-class TestTrackedPacketFunctionPodHandleInputStreams:
+class TestTrackedDataFunctionPodHandleInputStreams:
     def test_zero_streams_raises(self, double_pod):
         with pytest.raises(ValueError, match="At least one input stream"):
             double_pod.handle_input_streams()
@@ -56,7 +56,7 @@ class TestTrackedPacketFunctionPodHandleInputStreams:
         )
         result = add_pod.handle_input_streams(stream_x, stream_y)
         assert isinstance(result, StreamProtocol)
-        assert len([p for p in result.iter_packets()]) == 2
+        assert len([p for p in result.iter_data()]) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -92,10 +92,10 @@ class TestWrappedFunctionPodDelegation:
         stream = make_int_stream(n=3)
         result = wrapped.process(stream)
         assert isinstance(result, StreamProtocol)
-        packets = list(result.iter_packets())
-        assert len(packets) == 3
-        for i, (_, packet) in enumerate(packets):
-            assert packet["result"] == i * 2
+        data = list(result.iter_data())
+        assert len(data) == 3
+        for i, (_, data) in enumerate(data):
+            assert data["result"] == i * 2
 
 
 # ---------------------------------------------------------------------------
@@ -187,14 +187,14 @@ class TestFunctionPodStreamSortByTags:
 
 
 class TestFunctionPodDecoratorWithDatabase:
-    def test_creates_cached_packet_function(self):
+    def test_creates_cached_data_function(self):
         db = InMemoryArrowDatabase()
 
         @function_pod(output_keys="result", result_database=db)
         def square(x: int) -> int:
             return x * x
 
-        assert isinstance(square.pod.packet_function, CachedPacketFunction)
+        assert isinstance(square.pod.data_function, CachedDataFunction)
 
     def test_pod_is_still_simple_function_pod(self):
         db = InMemoryArrowDatabase()
@@ -215,10 +215,10 @@ class TestFunctionPodDecoratorWithDatabase:
             call_count += 1
             return x * 2
 
-        list(counted_double.pod.process(make_int_stream(n=2)).iter_packets())
+        list(counted_double.pod.process(make_int_stream(n=2)).iter_data())
         first_count = call_count
 
-        list(counted_double.pod.process(make_int_stream(n=2)).iter_packets())
+        list(counted_double.pod.process(make_int_stream(n=2)).iter_data())
         assert call_count == first_count
 
     def test_cached_results_match_direct_results(self):
@@ -228,16 +228,16 @@ class TestFunctionPodDecoratorWithDatabase:
         def triple_cached(x: int) -> int:
             return x * 3
 
-        first = list(triple_cached.pod.process(make_int_stream(n=3)).iter_packets())
-        second = list(triple_cached.pod.process(make_int_stream(n=3)).iter_packets())
+        first = list(triple_cached.pod.process(make_int_stream(n=3)).iter_data())
+        second = list(triple_cached.pod.process(make_int_stream(n=3)).iter_data())
 
         for (_, p1), (_, p2) in zip(first, second):
             assert p1["result"] == p2["result"]
 
-    def test_without_result_database_packet_function_is_plain(self):
+    def test_without_result_database_data_function_is_plain(self):
         @function_pod(output_keys="result")
         def plain(x: int) -> int:
             return x + 1
 
-        assert isinstance(plain.pod.packet_function, PythonPacketFunction)
-        assert not isinstance(plain.pod.packet_function, CachedPacketFunction)
+        assert isinstance(plain.pod.data_function, PythonDataFunction)
+        assert not isinstance(plain.pod.data_function, CachedDataFunction)

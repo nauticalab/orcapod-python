@@ -23,7 +23,7 @@ from deltalake import write_deltalake
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode, OperatorNode
 from orcapod.core.operators import Join
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource, DeltaTableSource, CachedSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.types import CacheMode
@@ -126,8 +126,8 @@ def clinic_b(delta_dir):
 
 @pytest.fixture
 def pod():
-    pf = PythonPacketFunction(risk_score, output_keys="risk")
-    return FunctionPod(packet_function=pf)
+    pf = PythonDataFunction(risk_score, output_keys="risk")
+    return FunctionPod(data_function=pf)
 
 
 # ---------------------------------------------------------------------------
@@ -479,9 +479,9 @@ class TestOperatorPodCaching:
         table = node.as_table()
         assert table.num_rows == 0
         # Schema is preserved
-        tag_keys, packet_keys = node.keys()
+        tag_keys, data_keys = node.keys()
         assert set(tag_keys).issubset(set(table.column_names))
-        assert set(packet_keys).issubset(set(table.column_names))
+        assert set(data_keys).issubset(set(table.column_names))
 
     def test_content_hash_scoping_isolates_source_combinations(
         self, clinic_a, clinic_b, source_db, operator_db

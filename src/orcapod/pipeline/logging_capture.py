@@ -2,13 +2,13 @@
 
 Provides context-variable-local capture of stdout, stderr, and Python logging
 for use in FunctionNode execution.  Thread-safe and asyncio-task-safe via
-``contextvars.ContextVar`` — captures from concurrent packets never intermingle.
+``contextvars.ContextVar`` — captures from concurrent data never intermingle.
 
 CapturedLogs travel as part of the return type through the call chain
-(``direct_call`` → ``call`` → ``process_packet`` → FunctionNode) so there
+(``direct_call`` → ``call`` → ``process_data`` → FunctionNode) so there
 is no ContextVar side-channel for logs.  Each executor's ``execute_callable``
 returns ``(raw_result, CapturedLogs)``, and ``direct_call`` returns
-``(output_packet, CapturedLogs)`` — catching user-function exceptions
+``(output_data, CapturedLogs)`` — catching user-function exceptions
 internally rather than re-raising.
 
 Typical usage
@@ -17,7 +17,7 @@ Call ``install_capture_streams()`` once when a logging Observer is created.
 The executor or ``direct_call`` wraps function execution in
 ``LocalCaptureContext`` and returns CapturedLogs alongside the result::
 
-    result, captured = packet_function.call(packet)
+    result, captured = data_function.call(data)
     pkt_logger.record(captured)
 """
 
@@ -38,7 +38,7 @@ from typing import Any
 
 @dataclass
 class CapturedLogs:
-    """I/O captured from a single packet function execution."""
+    """I/O captured from a single data function execution."""
 
     stdout_log: str = ""
     stderr_log: str = ""
@@ -61,7 +61,7 @@ class CapturedLogs:
 # Context variables
 # ---------------------------------------------------------------------------
 # Each asyncio task and thread gets its own copy of these variables, so
-# captures from concurrent packets never intermingle.
+# captures from concurrent data never intermingle.
 
 _stdout_capture: contextvars.ContextVar[io.StringIO | None] = contextvars.ContextVar(
     "_stdout_capture", default=None
@@ -189,7 +189,7 @@ def install_capture_streams() -> None:
 
 
 class LocalCaptureContext:
-    """Context manager that activates per-context capture for one packet.
+    """Context manager that activates per-context capture for one data.
 
     Requires ``install_capture_streams()`` to have been called; without it the
     ContextVars are set but nothing tees into them, so captured strings will be

@@ -4,7 +4,7 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.datagrams.datagram import Datagram
-from orcapod.core.datagrams.tag_packet import Tag
+from orcapod.core.datagrams.tag_data import Tag
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """
-Generate sample pathsets and packets and record their hashes.
+Generate sample pathsets and data and record their hashes.
 
-This script creates various pathset and packet examples using the files from
+This script creates various pathset and data examples using the files from
 hash_samples/file_samples, then computes and records their hashes in JSON lookup tables.
 """
 
@@ -12,7 +12,7 @@ from pathlib import Path
 
 # Add the parent directory to the path to import orcapod
 sys.path.append(str(Path(__file__).parent.parent.parent))
-from orcapod.hashing import hash_packet, hash_pathset
+from orcapod.hashing import hash_data, hash_pathset
 
 # Create directories if they don't exist
 HASH_SAMPLES_DIR = Path(__file__).parent / "hash_samples"
@@ -23,7 +23,7 @@ SAMPLE_FILES_DIR = HASH_SAMPLES_DIR / "file_samples"
 
 # Paths for the hash lookup tables
 PATHSET_LUT_PATH = HASH_SAMPLES_DIR / "pathset_hash_lut.json"
-PACKET_LUT_PATH = HASH_SAMPLES_DIR / "packet_hash_lut.json"
+DATA_LUT_PATH = HASH_SAMPLES_DIR / "data_hash_lut.json"
 
 
 def create_sample_pathsets():
@@ -108,9 +108,9 @@ def create_sample_pathsets():
     return pathsets_info
 
 
-def create_sample_packets():
-    """Create sample packets and compute their hashes."""
-    packets_info = []
+def create_sample_data():
+    """Create sample data and compute their hashes."""
+    data_info = []
 
     # Check if the sample files directory exists
     if not SAMPLE_FILES_DIR.exists():
@@ -122,52 +122,52 @@ def create_sample_packets():
     text_files = list(SAMPLE_FILES_DIR.glob("*.txt"))
     binary_files = list(SAMPLE_FILES_DIR.glob("*.bin"))
 
-    # Sample 1: Simple packet with one key
+    # Sample 1: Simple data with one key
     if text_files:
-        packet = {"data": text_files[0]}
-        packet_hash = hash_packet(packet)
+        data = {"data": text_files[0]}
+        data_hash = hash_data(data)
 
-        packets_info.append(
+        data_info.append(
             {
-                "name": "simple_packet",
+                "name": "simple_data",
                 "structure": {
                     "data": str(text_files[0].relative_to(Path(__file__).parent))
                 },
-                "hash": packet_hash,
+                "hash": data_hash,
             }
         )
-        print(f"Created simple packet with one key, Hash: {packet_hash}")
+        print(f"Created simple data with one key, Hash: {data_hash}")
 
-    # Sample 2: PacketProtocol with multiple keys, each pointing to a single file
+    # Sample 2: DataProtocol with multiple keys, each pointing to a single file
     if len(text_files) >= 2 and binary_files:
-        packet = {
+        data = {
             "text": text_files[0],
             "more_text": text_files[1],
             "binary": binary_files[0],
         }
-        packet_hash = hash_packet(packet)
+        data_hash = hash_data(data)
 
-        packets_info.append(
+        data_info.append(
             {
-                "name": "multi_key_packet",
+                "name": "multi_key_data",
                 "structure": {
                     "text": str(text_files[0].relative_to(Path(__file__).parent)),
                     "more_text": str(text_files[1].relative_to(Path(__file__).parent)),
                     "binary": str(binary_files[0].relative_to(Path(__file__).parent)),
                 },
-                "hash": packet_hash,
+                "hash": data_hash,
             }
         )
-        print(f"Created packet with multiple keys, Hash: {packet_hash}")
+        print(f"Created data with multiple keys, Hash: {data_hash}")
 
-    # Sample 3: PacketProtocol with keys pointing to collections of files
+    # Sample 3: DataProtocol with keys pointing to collections of files
     if len(text_files) >= 3 and len(binary_files) >= 2:
-        packet = {"texts": text_files[:3], "binaries": binary_files[:2]}
-        packet_hash = hash_packet(packet)
+        data = {"texts": text_files[:3], "binaries": binary_files[:2]}
+        data_hash = hash_data(data)
 
-        packets_info.append(
+        data_info.append(
             {
-                "name": "collection_packet",
+                "name": "collection_data",
                 "structure": {
                     "texts": [
                         str(f.relative_to(Path(__file__).parent))
@@ -178,19 +178,19 @@ def create_sample_packets():
                         for f in binary_files[:2]
                     ],
                 },
-                "hash": packet_hash,
+                "hash": data_hash,
             }
         )
-        print(f"Created packet with collections, Hash: {packet_hash}")
+        print(f"Created data with collections, Hash: {data_hash}")
 
-    # Sample 4: Hierarchical packet with directory and files
+    # Sample 4: Hierarchical data with directory and files
     if SAMPLE_FILES_DIR.exists() and text_files and binary_files:
-        packet = {"directory": SAMPLE_FILES_DIR, "specific_file": text_files[0]}
-        packet_hash = hash_packet(packet)
+        data = {"directory": SAMPLE_FILES_DIR, "specific_file": text_files[0]}
+        data_hash = hash_data(data)
 
-        packets_info.append(
+        data_info.append(
             {
-                "name": "hierarchical_packet",
+                "name": "hierarchical_data",
                 "structure": {
                     "directory": str(
                         SAMPLE_FILES_DIR.relative_to(Path(__file__).parent)
@@ -199,16 +199,16 @@ def create_sample_packets():
                         text_files[0].relative_to(Path(__file__).parent)
                     ),
                 },
-                "hash": packet_hash,
+                "hash": data_hash,
             }
         )
-        print(f"Created hierarchical packet, Hash: {packet_hash}")
+        print(f"Created hierarchical data, Hash: {data_hash}")
 
-    return packets_info
+    return data_info
 
 
 def main():
-    """Generate sample pathsets and packets, and save their hash information."""
+    """Generate sample pathsets and data, and save their hash information."""
     print(f"Generating sample pathsets using files from {SAMPLE_FILES_DIR}")
     pathsets_info = create_sample_pathsets()
 
@@ -228,23 +228,23 @@ def main():
     print(f"\nGenerated {len(pathsets_info)} sample pathsets")
     print(f"PathSet hash lookup table saved to {PATHSET_LUT_PATH}")
 
-    print(f"\nGenerating sample packets using files from {SAMPLE_FILES_DIR}")
-    packets_info = create_sample_packets()
+    print(f"\nGenerating sample data using files from {SAMPLE_FILES_DIR}")
+    data_info = create_sample_data()
 
-    # Convert to the required format for the packet hash LUT
-    packet_lut = {}
-    for info in packets_info:
-        packet_lut[info["name"]] = {
+    # Convert to the required format for the data hash LUT
+    data_lut = {}
+    for info in data_info:
+        data_lut[info["name"]] = {
             "structure": info["structure"],
             "hash": info["hash"],
         }
 
-    # Save to the packet lookup table file
-    with open(PACKET_LUT_PATH, "w", encoding="utf-8") as f:
-        json.dump(packet_lut, f, indent=2)
+    # Save to the data lookup table file
+    with open(DATA_LUT_PATH, "w", encoding="utf-8") as f:
+        json.dump(data_lut, f, indent=2)
 
-    print(f"\nGenerated {len(packets_info)} sample packets")
-    print(f"PacketProtocol hash lookup table saved to {PACKET_LUT_PATH}")
+    print(f"\nGenerated {len(data_info)} sample data")
+    print(f"DataProtocol hash lookup table saved to {DATA_LUT_PATH}")
 
 
 if __name__ == "__main__":

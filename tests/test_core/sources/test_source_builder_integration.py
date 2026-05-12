@@ -19,18 +19,18 @@ class TestDictSourceBuilder:
         src = DictSource(data=[{"id": 1, "x": 10}], tag_columns=["id"])
         assert hasattr(src, "_stream")
 
-    def test_iter_packets(self):
+    def test_iter_data(self):
         src = DictSource(
             data=[{"id": 1, "x": 10}, {"id": 2, "x": 20}],
             tag_columns=["id"],
         )
-        assert len(list(src.iter_packets())) == 2
+        assert len(list(src.iter_data())) == 2
 
     def test_output_schema(self):
         src = DictSource(data=[{"id": 1, "x": 10}], tag_columns=["id"])
-        tag_schema, packet_schema = src.output_schema()
+        tag_schema, data_schema = src.output_schema()
         assert "id" in tag_schema
-        assert "x" in packet_schema
+        assert "x" in data_schema
 
     def test_to_config(self):
         src = DictSource(data=[{"id": 1, "x": 10}], tag_columns=["id"])
@@ -57,9 +57,9 @@ class TestDataFrameSourceBuilder:
         src = DataFrameSource(data={"id": [1, 2], "x": [10, 20]}, tag_columns=["id"])
         assert hasattr(src, "_stream")
 
-    def test_iter_packets(self):
+    def test_iter_data(self):
         src = DataFrameSource(data={"id": [1, 2], "x": [10, 20]}, tag_columns=["id"])
-        assert len(list(src.iter_packets())) == 2
+        assert len(list(src.iter_data())) == 2
 
     def test_identity_uses_class_name(self):
         src = DataFrameSource(data={"id": [1], "x": [10]}, tag_columns=["id"])
@@ -84,11 +84,11 @@ class TestCSVSourceBuilder:
         src = CSVSource(file_path=str(csv_file), tag_columns=["id"])
         assert hasattr(src, "_stream")
 
-    def test_iter_packets(self, tmp_path):
+    def test_iter_data(self, tmp_path):
         csv_file = tmp_path / "test.csv"
         csv_file.write_text("id,x\n1,10\n2,20\n")
         src = CSVSource(file_path=str(csv_file), tag_columns=["id"])
-        assert len(list(src.iter_packets())) == 2
+        assert len(list(src.iter_data())) == 2
 
     def test_round_trip_config(self, tmp_path):
         csv_file = tmp_path / "test.csv"
@@ -151,9 +151,9 @@ class TestListSourceBuilder:
         src = ListSource(name="val", data=[1, 2, 3])
         assert hasattr(src, "_stream")
 
-    def test_iter_packets(self):
+    def test_iter_data(self):
         src = ListSource(name="val", data=[1, 2, 3])
-        assert len(list(src.iter_packets())) == 3
+        assert len(list(src.iter_data())) == 3
 
     def test_custom_identity_structure(self):
         src = ListSource(name="val", data=[1, 2, 3])
@@ -170,7 +170,7 @@ class TestListSourceBuilder:
             tag_function=lambda e, i: {"idx": i, "label": f"item_{i}"},
             expected_tag_keys=["idx", "label"],
         )
-        results = list(src.iter_packets())
+        results = list(src.iter_data())
         assert len(results) == 2
 
     def test_source_id_defaults(self):

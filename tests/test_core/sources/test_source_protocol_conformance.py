@@ -9,7 +9,7 @@ Tests are structured in two layers:
 1. Protocol conformance  — isinstance checks against StreamProtocol,
                            PipelineElementProtocol, RootSource
 2. StreamProtocol-side behaviour — source (None), upstreams (empty), keys,
-                                   output_schema, iter_packets, as_table
+                                   output_schema, iter_data, as_table
 """
 
 from __future__ import annotations
@@ -141,25 +141,25 @@ class TestSourceOutputSchema:
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_schemas_are_schema_instances(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
-        tag_schema, packet_schema = src.output_schema()
+        tag_schema, data_schema = src.output_schema()
         assert isinstance(tag_schema, Schema)
-        assert isinstance(packet_schema, Schema)
+        assert isinstance(data_schema, Schema)
 
     def test_arrow_src_tag_schema_has_id(self, arrow_src):
         tag_schema, _ = arrow_src.output_schema()
         assert "id" in tag_schema
 
-    def test_arrow_src_packet_schema_has_value(self, arrow_src):
-        _, packet_schema = arrow_src.output_schema()
-        assert "value" in packet_schema
+    def test_arrow_src_data_schema_has_value(self, arrow_src):
+        _, data_schema = arrow_src.output_schema()
+        assert "value" in data_schema
 
     def test_dict_src_tag_schema_has_id(self, dict_src):
         tag_schema, _ = dict_src.output_schema()
         assert "id" in tag_schema
 
-    def test_list_src_packet_schema_has_item(self, list_src):
-        _, packet_schema = list_src.output_schema()
-        assert "item" in packet_schema
+    def test_list_src_data_schema_has_item(self, list_src):
+        _, data_schema = list_src.output_schema()
+        assert "item" in data_schema
 
     def test_list_src_tag_schema_has_element_index(self, list_src):
         tag_schema, _ = list_src.output_schema()
@@ -192,30 +192,30 @@ class TestStreamKeys:
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_returns_two_tuples(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
-        tag_keys, packet_keys = src.keys()
+        tag_keys, data_keys = src.keys()
         assert isinstance(tag_keys, tuple)
-        assert isinstance(packet_keys, tuple)
+        assert isinstance(data_keys, tuple)
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_no_overlap_between_tag_and_packet_keys(self, src_fixture, request):
+    def test_no_overlap_between_tag_and_data_keys(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
-        tag_keys, packet_keys = src.keys()
-        assert set(tag_keys).isdisjoint(set(packet_keys))
+        tag_keys, data_keys = src.keys()
+        assert set(tag_keys).isdisjoint(set(data_keys))
 
     def test_arrow_src_keys(self, arrow_src):
-        tag_keys, packet_keys = arrow_src.keys()
+        tag_keys, data_keys = arrow_src.keys()
         assert "id" in tag_keys
-        assert "value" in packet_keys
+        assert "value" in data_keys
 
     def test_list_src_keys(self, list_src):
-        tag_keys, packet_keys = list_src.keys()
+        tag_keys, data_keys = list_src.keys()
         assert "element_index" in tag_keys
-        assert "item" in packet_keys
+        assert "item" in data_keys
 
     def test_dict_src_keys(self, dict_src):
-        tag_keys, packet_keys = dict_src.keys()
+        tag_keys, data_keys = dict_src.keys()
         assert "id" in tag_keys
-        assert "value" in packet_keys
+        assert "value" in data_keys
 
 
 class TestStreamOutputSchema:
@@ -224,65 +224,65 @@ class TestStreamOutputSchema:
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_returns_two_schemas(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
-        tag_schema, packet_schema = src.output_schema()
+        tag_schema, data_schema = src.output_schema()
         assert isinstance(tag_schema, Schema)
-        assert isinstance(packet_schema, Schema)
+        assert isinstance(data_schema, Schema)
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_consistent_with_keys(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
-        tag_keys, packet_keys = src.keys()
-        tag_schema, packet_schema = src.output_schema()
+        tag_keys, data_keys = src.keys()
+        tag_schema, data_schema = src.output_schema()
         assert set(tag_keys) == set(tag_schema.keys())
-        assert set(packet_keys) == set(packet_schema.keys())
+        assert set(data_keys) == set(data_schema.keys())
 
 
-class TestStreamIterPackets:
+class TestStreamIterDatas:
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_yields_tag_packet_pairs(self, src_fixture, request):
+    def test_yields_tag_data_pairs(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
-        pairs = list(src.iter_packets())
+        pairs = list(src.iter_data())
         assert len(pairs) > 0
-        for tag, packet in pairs:
+        for tag, data in pairs:
             assert tag is not None
-            assert packet is not None
+            assert data is not None
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
     def test_correct_row_count(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
-        assert len(list(src.iter_packets())) == 3
+        assert len(list(src.iter_data())) == 3
 
-    def test_arrow_src_packet_values(self, arrow_src):
-        packets = [pkt for _, pkt in arrow_src.iter_packets()]
-        values = {pkt["value"] for pkt in packets}
+    def test_arrow_src_data_values(self, arrow_src):
+        data = [pkt for _, pkt in arrow_src.iter_data()]
+        values = {pkt["value"] for pkt in data}
         assert values == {"a", "b", "c"}
 
     def test_arrow_src_tag_values(self, arrow_src):
-        tags = [tag for tag, _ in arrow_src.iter_packets()]
+        tags = [tag for tag, _ in arrow_src.iter_data()]
         ids = {tag["id"] for tag in tags}
         assert ids == {1, 2, 3}
 
-    def test_list_src_packet_values(self, list_src):
-        packets = [pkt for _, pkt in list_src.iter_packets()]
-        items = {pkt["item"] for pkt in packets}
+    def test_list_src_data_values(self, list_src):
+        data = [pkt for _, pkt in list_src.iter_data()]
+        items = {pkt["item"] for pkt in data}
         assert items == {"x", "y", "z"}
 
-    def test_dict_src_tag_and_packet_values(self, dict_src):
-        pairs = list(dict_src.iter_packets())
+    def test_dict_src_tag_and_data_values(self, dict_src):
+        pairs = list(dict_src.iter_data())
         assert len(pairs) == 3
         values = {pkt["value"] for _, pkt in pairs}
         assert values == {"a", "b", "c"}
 
     def test_df_src_values(self, df_src):
-        packets = [pkt for _, pkt in df_src.iter_packets()]
-        values = {pkt["value"] for pkt in packets}
+        data = [pkt for _, pkt in df_src.iter_data()]
+        values = {pkt["value"] for pkt in data}
         assert values == {"a", "b", "c"}
 
     @pytest.mark.parametrize("src_fixture", ALL_SOURCE_FIXTURES)
-    def test_iter_packets_is_repeatable(self, src_fixture, request):
+    def test_iter_data_is_repeatable(self, src_fixture, request):
         src = request.getfixturevalue(src_fixture)
-        first = list(src.iter_packets())
-        second = list(src.iter_packets())
+        first = list(src.iter_data())
+        second = list(src.iter_data())
         assert len(first) == len(second)
 
 
@@ -410,11 +410,11 @@ class TestPipelineHash:
 
 class TestEdgeCases:
     def test_arrow_source_no_tag_columns(self):
-        """A source with no tag columns is valid; all columns are packet columns."""
+        """A source with no tag columns is valid; all columns are data columns."""
         table = pa.table({"a": pa.array([1, 2], type=pa.int64())})
         src = ArrowTableSource(table=table, infer_nullable=True)
-        tag_keys, packet_keys = src.keys()
-        assert "a" in packet_keys
+        tag_keys, data_keys = src.keys()
+        assert "a" in data_keys
         assert tag_keys == ()
 
     def test_dict_source_multiple_tag_columns(self):
@@ -423,9 +423,9 @@ class TestEdgeCases:
             {"a": 3, "b": 4, "val": "y"},
         ]
         src = DictSource(data=data, tag_columns=["a", "b"])
-        tag_keys, packet_keys = src.keys()
+        tag_keys, data_keys = src.keys()
         assert set(tag_keys) == {"a", "b"}
-        assert "val" in packet_keys
+        assert "val" in data_keys
 
     def test_list_source_custom_tag_function(self):
         def tag_fn(element, idx):
@@ -437,10 +437,10 @@ class TestEdgeCases:
             tag_function=tag_fn,
             expected_tag_keys=["label"],
         )
-        tag_keys, packet_keys = src.keys()
+        tag_keys, data_keys = src.keys()
         assert "label" in tag_keys
-        assert "val" in packet_keys
-        pairs = list(src.iter_packets())
+        assert "val" in data_keys
+        pairs = list(src.iter_data())
         labels = {tag["label"] for tag, _ in pairs}
         assert labels == {"item_0", "item_1", "item_2"}
 
@@ -459,6 +459,6 @@ class TestEdgeCases:
         )
         src = ArrowTableSource(table=table, infer_nullable=True)
         # system columns should not appear in data keys
-        tag_keys, packet_keys = src.keys()
+        tag_keys, data_keys = src.keys()
         assert "_tag_something" not in tag_keys
-        assert "_tag_something" not in packet_keys
+        assert "_tag_something" not in data_keys

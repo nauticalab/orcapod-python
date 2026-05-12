@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
+from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
 from orcapod.types import SchemaLike
 from orcapod.protocols.observability_protocols import (  # noqa: F401  (re-exported for convenience)
     ExecutionObserverProtocol,
-    PacketExecutionLoggerProtocol,
+    DataExecutionLoggerProtocol,
 )
 
 
@@ -44,7 +44,7 @@ class NoOpObserver:
     """Observer that does nothing.
 
     Satisfies ``ExecutionObserverProtocol`` and is the default when no
-    observability is configured.  ``create_packet_logger`` returns the
+    observability is configured.  ``create_data_logger`` returns the
     shared ``_NOOP_LOGGER`` singleton.
     """
 
@@ -73,36 +73,36 @@ class NoOpObserver:
     ) -> None:
         pass
 
-    def on_packet_start(
+    def on_data_start(
         self,
         node_label: str,
         tag: TagProtocol,
-        packet: PacketProtocol,
+        data: DataProtocol,
     ) -> None:
         pass
 
-    def on_packet_end(
+    def on_data_end(
         self,
         node_label: str,
         tag: TagProtocol,
-        input_packet: PacketProtocol,
-        output_packet: PacketProtocol | None,
+        input_data: DataProtocol,
+        output_data: DataProtocol | None,
         cached: bool,
     ) -> None:
         pass
 
-    def on_packet_crash(
+    def on_data_crash(
         self,
         node_label: str,
         tag: TagProtocol,
-        packet: PacketProtocol,
+        data: DataProtocol,
         error: Exception,
     ) -> None:
         pass
 
-    def create_packet_logger(
+    def create_data_logger(
         self,
         tag: TagProtocol,
-        packet: PacketProtocol,
+        data: DataProtocol,
     ) -> NoOpLogger:
         return _NOOP_LOGGER

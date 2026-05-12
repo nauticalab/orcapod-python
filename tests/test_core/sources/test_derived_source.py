@@ -8,14 +8,14 @@ Coverage:
 - Construction via FunctionNode.as_source()
 - Protocol conformance: RootSource, StreamProtocol, PipelineElementProtocol
 - source == None, upstreams == () (pure stream, no upstream pod)
-- iter_packets() and as_table() return empty results before run()
+- iter_data() and as_table() return empty results before run()
 - Correct data after FunctionNode.run()
 - output_schema() and keys() delegate to origin FunctionNode
 - content_hash() tied to origin FunctionNode's content hash
 - Same-origin DerivedSources share content_hash
 - pipeline_hash() is schema-only (RootSource base case)
 - Different-data same-schema DerivedSources share pipeline_hash but differ in content_hash
-- Round-trip: FunctionNode → DerivedSource → iter_packets / as_table
+- Round-trip: FunctionNode → DerivedSource → iter_data / as_table
 """
 
 from __future__ import annotations
@@ -42,13 +42,13 @@ from ..conftest import double, make_int_stream
 
 
 def _make_node(n: int = 3, db: InMemoryArrowDatabase | None = None) -> FunctionNode:
-    from orcapod.core.packet_function import PythonPacketFunction
+    from orcapod.core.data_function import PythonDataFunction
 
     if db is None:
         db = InMemoryArrowDatabase()
-    pf = PythonPacketFunction(double, output_keys="result")
+    pf = PythonDataFunction(double, output_keys="result")
     return FunctionNode(
-        function_pod=FunctionPod(packet_function=pf),
+        function_pod=FunctionPod(data_function=pf),
         input_stream=make_int_stream(n=n),
         pipeline_database=db,
     )
@@ -93,9 +93,9 @@ class TestDerivedSourceConstruction:
 
 
 class TestDerivedSourceBeforeRun:
-    def test_iter_packets_empty_before_run(self):
+    def test_iter_data_empty_before_run(self):
         src = _make_node(n=3).as_source()
-        assert list(src.iter_packets()) == []
+        assert list(src.iter_data()) == []
 
     def test_as_table_empty_before_run(self):
         src = _make_node(n=3).as_source()
@@ -112,10 +112,10 @@ class TestDerivedSourceBeforeRun:
     def test_empty_table_schema_matches_origin(self):
         node = _make_node(n=3)
         src = node.as_source()
-        tag_schema, packet_schema = src.output_schema()
+        tag_schema, data_schema = src.output_schema()
         _ = src.as_table()
         assert "id" in tag_schema
-        assert "result" in packet_schema
+        assert "result" in data_schema
 
 
 # ---------------------------------------------------------------------------
@@ -130,15 +130,15 @@ class TestDerivedSourceAfterRun:
         node.run()
         return node.as_source()
 
-    def test_iter_packets_yields_correct_count(self, src):
-        assert len(list(src.iter_packets())) == 4
+    def test_iter_data_yields_correct_count(self, src):
+        assert len(list(src.iter_data())) == 4
 
-    def test_iter_packets_yields_correct_values(self, src):
-        results = sorted(p["result"] for _, p in src.iter_packets())
+    def test_iter_data_yields_correct_values(self, src):
+        results = sorted(p["result"] for _, p in src.iter_data())
         assert results == [0, 2, 4, 6]
 
-    def test_iter_packets_yields_correct_tags(self, src):
-        ids = sorted(t["id"] for t, _ in src.iter_packets())
+    def test_iter_data_yields_correct_tags(self, src):
+        ids = sorted(t["id"] for t, _ in src.iter_data())
         assert ids == [0, 1, 2, 3]
 
     def test_as_table_returns_pyarrow_table(self, src):
@@ -150,17 +150,17 @@ class TestDerivedSourceAfterRun:
     def test_as_table_has_tag_column(self, src):
         assert "id" in src.as_table().column_names
 
-    def test_as_table_has_packet_column(self, src):
+    def test_as_table_has_data_column(self, src):
         assert "result" in src.as_table().column_names
 
-    def test_as_table_values_match_iter_packets(self, src):
+    def test_as_table_values_match_iter_data(self, src):
         table_results = sorted(src.as_table().column("result").to_pylist())
-        iter_results = sorted(p["result"] for _, p in src.iter_packets())
+        iter_results = sorted(p["result"] for _, p in src.iter_data())
         assert table_results == iter_results
 
-    def test_iter_packets_is_repeatable(self, src):
-        first = [(t["id"], p["result"]) for t, p in src.iter_packets()]
-        second = [(t["id"], p["result"]) for t, p in src.iter_packets()]
+    def test_iter_data_is_repeatable(self, src):
+        first = [(t["id"], p["result"]) for t, p in src.iter_data()]
+        second = [(t["id"], p["result"]) for t, p in src.iter_data()]
         assert first == second
 
 
@@ -174,12 +174,12 @@ class TestDerivedSourceRoundTrip:
         """Data from DerivedSource must exactly match data from FunctionNode."""
         node = _make_node(n=5)
         node.run()
-        # Collect from node directly (iter_packets is read-only; run() must be called first)
-        node_results = sorted(cast(int, p["result"]) for _, p in node.iter_packets())
+        # Collect from node directly (iter_data is read-only; run() must be called first)
+        node_results = sorted(cast(int, p["result"]) for _, p in node.iter_data())
 
         # Now get via DerivedSource
         src = node.as_source()
-        src_results = sorted(cast(int, p["result"]) for _, p in src.iter_packets())
+        src_results = sorted(cast(int, p["result"]) for _, p in src.iter_data())
 
         assert node_results == src_results
 
@@ -191,17 +191,17 @@ class TestDerivedSourceRoundTrip:
         src_tag_schema, _ = src.output_schema()
         assert node_tag_schema == src_tag_schema
 
-    def test_derived_source_packet_schema_matches_node(self):
+    def test_derived_source_data_schema_matches_node(self):
         node = _make_node(n=3)
         node.run()
         src = node.as_source()
-        _, node_packet_schema = node.output_schema()
-        _, src_packet_schema = src.output_schema()
-        assert node_packet_schema == src_packet_schema
+        _, node_data_schema = node.output_schema()
+        _, src_data_schema = src.output_schema()
+        assert node_data_schema == src_data_schema
 
     def test_derived_source_can_feed_downstream_node(self):
         """DerivedSource can be used as input to another FunctionNode."""
-        from orcapod.core.packet_function import PythonPacketFunction
+        from orcapod.core.data_function import PythonDataFunction
 
         node1 = _make_node(n=3)
         node1.run()
@@ -225,16 +225,16 @@ class TestDerivedSourceRoundTrip:
 
         result_stream = ArrowTableStream(result_table, tag_columns=["id"])
 
-        double_result = PythonPacketFunction(double, output_keys="result")
+        double_result = PythonDataFunction(double, output_keys="result")
         node2 = FunctionNode(
-            function_pod=FunctionPod(packet_function=double_result),
+            function_pod=FunctionPod(data_function=double_result),
             input_stream=result_stream,
             pipeline_database=InMemoryArrowDatabase(),  # fresh DB
         )
 
         # node2 doubles the already-doubled values: 0*2*2=0, 1*2*2=4, 2*2*2=8
         node2.run()
-        results = sorted(cast(int, p["result"]) for _, p in node2.iter_packets())
+        results = sorted(cast(int, p["result"]) for _, p in node2.iter_data())
         assert results == [0, 4, 8]
 
 
@@ -248,9 +248,9 @@ class TestDerivedSourceSchema:
         node = _make_node(n=3)
         node.run()
         src = node.as_source()
-        tag_schema, packet_schema = src.output_schema()
+        tag_schema, data_schema = src.output_schema()
         assert isinstance(tag_schema, Mapping)
-        assert isinstance(packet_schema, Mapping)
+        assert isinstance(data_schema, Mapping)
 
     def test_output_schema_tag_has_id(self):
         node = _make_node(n=3)
@@ -259,12 +259,12 @@ class TestDerivedSourceSchema:
         tag_schema, _ = src.output_schema()
         assert "id" in tag_schema
 
-    def test_output_schema_packet_has_result(self):
+    def test_output_schema_data_has_result(self):
         node = _make_node(n=3)
         node.run()
         src = node.as_source()
-        _, packet_schema = src.output_schema()
-        assert "result" in packet_schema
+        _, data_schema = src.output_schema()
+        assert "result" in data_schema
 
     def test_keys_tag_has_id(self):
         node = _make_node(n=3)
@@ -273,21 +273,21 @@ class TestDerivedSourceSchema:
         tag_keys, _ = src.keys()
         assert "id" in tag_keys
 
-    def test_keys_packet_has_result(self):
+    def test_keys_data_has_result(self):
         node = _make_node(n=3)
         node.run()
         src = node.as_source()
-        _, packet_keys = src.keys()
-        assert "result" in packet_keys
+        _, data_keys = src.keys()
+        assert "result" in data_keys
 
     def test_keys_consistent_with_output_schema(self):
         node = _make_node(n=3)
         node.run()
         src = node.as_source()
-        tag_keys, packet_keys = src.keys()
-        tag_schema, packet_schema = src.output_schema()
+        tag_keys, data_keys = src.keys()
+        tag_schema, data_schema = src.output_schema()
         assert set(tag_keys) == set(tag_schema.keys())
-        assert set(packet_keys) == set(packet_schema.keys())
+        assert set(data_keys) == set(data_schema.keys())
 
 
 # ---------------------------------------------------------------------------
@@ -332,7 +332,7 @@ class TestDerivedSourceIdentity:
 
     def test_pipeline_hash_is_schema_only(self):
         """
-        DerivedSource inherits RootSource.pipeline_identity_structure() = (tag_schema, packet_schema).
+        DerivedSource inherits RootSource.pipeline_identity_structure() = (tag_schema, data_schema).
         Two DerivedSources with identical schemas share the same pipeline_hash even if
         the underlying FunctionNode processed different data.
         """
@@ -347,19 +347,19 @@ class TestDerivedSourceIdentity:
 
     def test_pipeline_hash_differs_for_different_schema(self):
         """DerivedSources with different output schemas have different pipeline_hashes."""
-        from orcapod.core.packet_function import PythonPacketFunction
+        from orcapod.core.data_function import PythonDataFunction
 
         def triple(x: int) -> tuple[int, int]:
             return x * 3, x + 1
 
-        triple_pf = PythonPacketFunction(triple, output_keys=["tripled", "incremented"])
+        triple_pf = PythonDataFunction(triple, output_keys=["tripled", "incremented"])
         db = InMemoryArrowDatabase()
         node_double = _make_node(n=3, db=db)
         node_double.run()
         src_double = node_double.as_source()
 
         node_triple = FunctionNode(
-            function_pod=FunctionPod(packet_function=triple_pf),
+            function_pod=FunctionPod(data_function=triple_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
@@ -374,18 +374,18 @@ class TestDerivedSourceIdentity:
         should still produce DerivedSources with the same content_hash (since
         content_hash depends on function + input stream, not the DB).
         """
-        from orcapod.core.packet_function import PythonPacketFunction
+        from orcapod.core.data_function import PythonDataFunction
 
-        pf = PythonPacketFunction(double, output_keys="result")
+        pf = PythonDataFunction(double, output_keys="result")
         stream = make_int_stream(n=3)
 
         node_a = FunctionNode(
-            function_pod=FunctionPod(packet_function=pf),
+            function_pod=FunctionPod(data_function=pf),
             input_stream=stream,
             pipeline_database=InMemoryArrowDatabase(),
         )
         node_b = FunctionNode(
-            function_pod=FunctionPod(packet_function=pf),
+            function_pod=FunctionPod(data_function=pf),
             input_stream=stream,
             pipeline_database=InMemoryArrowDatabase(),
         )

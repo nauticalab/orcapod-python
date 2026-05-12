@@ -1,19 +1,19 @@
-"""Tests for PacketFunctionProxy invocation, bind, and unbind behavior."""
+"""Tests for DataFunctionProxy invocation, bind, and unbind behavior."""
 
 import pytest
 
-from orcapod.core.datagrams.tag_packet import Packet, Tag
+from orcapod.core.datagrams.tag_data import Data, Tag
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.packet_function import PythonPacketFunction
-from orcapod.core.packet_function_proxy import PacketFunctionProxy
+from orcapod.core.data_function import PythonDataFunction
+from orcapod.core.data_function_proxy import DataFunctionProxy
 from orcapod.core.sources.dict_source import DictSource
-from orcapod.errors import PacketFunctionUnavailableError
+from orcapod.errors import DataFunctionUnavailableError
 
 
 # ==================== Task 2: Construction tests ====================
 
 
-class TestPacketFunctionProxyConstruction:
+class TestDataFunctionProxyConstruction:
     """Tests for proxy construction and executor property."""
 
     def test_executor_returns_none(self):
@@ -30,16 +30,16 @@ class TestPacketFunctionProxyConstruction:
 # ==================== Helpers ====================
 
 
-def _make_sample_function() -> PythonPacketFunction:
+def _make_sample_function() -> PythonDataFunction:
     def double_age(age: int) -> int:
         return age * 2
 
-    return PythonPacketFunction(double_age, output_keys="doubled_age", version="v1.0")
+    return PythonDataFunction(double_age, output_keys="doubled_age", version="v1.0")
 
 
-def _make_proxy_from_function(pf: PythonPacketFunction) -> PacketFunctionProxy:
+def _make_proxy_from_function(pf: PythonDataFunction) -> DataFunctionProxy:
     config = pf.to_config()
-    return PacketFunctionProxy(
+    return DataFunctionProxy(
         config=config,
         content_hash_str=pf.content_hash().to_string(),
         pipeline_hash_str=pf.pipeline_hash().to_string(),
@@ -49,46 +49,46 @@ def _make_proxy_from_function(pf: PythonPacketFunction) -> PacketFunctionProxy:
 # ==================== Task 3: Invocation tests ====================
 
 
-class TestPacketFunctionProxyInvocation:
+class TestDataFunctionProxyInvocation:
     """Tests for proxy behavior when no function is bound."""
 
     def test_call_raises_when_unbound(self):
         pf = _make_sample_function()
         proxy = _make_proxy_from_function(pf)
-        packet = Packet({"age": 25})
+        data = Data({"age": 25})
         with pytest.raises(
-            PacketFunctionUnavailableError, match="double_age"
+            DataFunctionUnavailableError, match="double_age"
         ):
-            proxy.call(packet)
+            proxy.call(data)
 
     @pytest.mark.asyncio
     async def test_async_call_raises_when_unbound(self):
         pf = _make_sample_function()
         proxy = _make_proxy_from_function(pf)
-        packet = Packet({"age": 25})
+        data = Data({"age": 25})
         with pytest.raises(
-            PacketFunctionUnavailableError, match="double_age"
+            DataFunctionUnavailableError, match="double_age"
         ):
-            await proxy.async_call(packet)
+            await proxy.async_call(data)
 
     def test_direct_call_raises_when_unbound(self):
         pf = _make_sample_function()
         proxy = _make_proxy_from_function(pf)
-        packet = Packet({"age": 25})
+        data = Data({"age": 25})
         with pytest.raises(
-            PacketFunctionUnavailableError, match="double_age"
+            DataFunctionUnavailableError, match="double_age"
         ):
-            proxy.direct_call(packet)
+            proxy.direct_call(data)
 
     @pytest.mark.asyncio
     async def test_direct_async_call_raises_when_unbound(self):
         pf = _make_sample_function()
         proxy = _make_proxy_from_function(pf)
-        packet = Packet({"age": 25})
+        data = Data({"age": 25})
         with pytest.raises(
-            PacketFunctionUnavailableError, match="double_age"
+            DataFunctionUnavailableError, match="double_age"
         ):
-            await proxy.direct_async_call(packet)
+            await proxy.direct_async_call(data)
 
     def test_variation_data_empty_when_unbound(self):
         pf = _make_sample_function()
@@ -104,7 +104,7 @@ class TestPacketFunctionProxyInvocation:
 # ==================== Task 4: Bind/unbind tests ====================
 
 
-class TestPacketFunctionProxyBinding:
+class TestDataFunctionProxyBinding:
     """Tests for bind/unbind and identity mismatch detection."""
 
     def test_bind_succeeds_with_matching_function(self):
@@ -117,8 +117,8 @@ class TestPacketFunctionProxyBinding:
         pf = _make_sample_function()
         proxy = _make_proxy_from_function(pf)
         proxy.bind(pf)
-        packet = Packet({"age": 25})
-        result = proxy.call(packet)
+        data = Data({"age": 25})
+        result = proxy.call(data)
         assert result is not None
         assert result.as_dict()["doubled_age"] == 50
 
@@ -144,9 +144,9 @@ class TestPacketFunctionProxyBinding:
         assert proxy.is_bound
         proxy.unbind()
         assert not proxy.is_bound
-        packet = Packet({"age": 25})
-        with pytest.raises(PacketFunctionUnavailableError):
-            proxy.call(packet)
+        data = Data({"age": 25})
+        with pytest.raises(DataFunctionUnavailableError):
+            proxy.call(data)
 
     def test_bind_rejects_mismatched_function_name(self):
         pf = _make_sample_function()
@@ -155,7 +155,7 @@ class TestPacketFunctionProxyBinding:
         def other_func(age: int) -> int:
             return age + 1
 
-        other_pf = PythonPacketFunction(
+        other_pf = PythonDataFunction(
             other_func, output_keys="doubled_age", version="v1.0"
         )
         with pytest.raises(ValueError, match="canonical_function_name"):
@@ -168,7 +168,7 @@ class TestPacketFunctionProxyBinding:
         def double_age(age: int) -> int:
             return age * 2
 
-        other_pf = PythonPacketFunction(
+        other_pf = PythonDataFunction(
             double_age, output_keys="doubled_age", version="v2.0"
         )
         with pytest.raises(ValueError, match="major_version"):
@@ -181,10 +181,10 @@ class TestPacketFunctionProxyBinding:
         def double_age(age: int) -> str:
             return str(age * 2)
 
-        other_pf = PythonPacketFunction(
+        other_pf = PythonDataFunction(
             double_age, output_keys="doubled_age", version="v1.0"
         )
-        with pytest.raises(ValueError, match="output_packet_schema"):
+        with pytest.raises(ValueError, match="output_data_schema"):
             proxy.bind(other_pf)
 
     def test_bind_rejects_mismatched_input_schema(self):
@@ -194,10 +194,10 @@ class TestPacketFunctionProxyBinding:
         def double_age(name: str) -> int:
             return len(name) * 2
 
-        other_pf = PythonPacketFunction(
+        other_pf = PythonDataFunction(
             double_age, output_keys="doubled_age", version="v1.0"
         )
-        with pytest.raises(ValueError, match="input_packet_schema"):
+        with pytest.raises(ValueError, match="input_data_schema"):
             proxy.bind(other_pf)
 
 
@@ -205,32 +205,32 @@ class TestPacketFunctionProxyBinding:
 
 
 class TestFunctionPodWithProxy:
-    """Tests for FunctionPod constructed with a PacketFunctionProxy."""
+    """Tests for FunctionPod constructed with a DataFunctionProxy."""
 
     def test_function_pod_constructs_with_proxy(self):
-        """FunctionPod accepts a proxy and exposes it as packet_function."""
+        """FunctionPod accepts a proxy and exposes it as data_function."""
         pf = _make_sample_function()
         proxy = _make_proxy_from_function(pf)
-        pod = FunctionPod(packet_function=proxy)
-        assert pod.packet_function is proxy
+        pod = FunctionPod(data_function=proxy)
+        assert pod.data_function is proxy
 
     def test_function_pod_output_schema(self):
         """FunctionPod with proxy correctly reports output schema."""
         pf = _make_sample_function()
         proxy = _make_proxy_from_function(pf)
-        pod = FunctionPod(packet_function=proxy)
+        pod = FunctionPod(data_function=proxy)
         source = DictSource(
             data=[{"age": 10}, {"age": 20}, {"age": 30}],
         )
-        _tag_schema, packet_schema = pod.output_schema(source)
-        assert "doubled_age" in packet_schema
+        _tag_schema, data_schema = pod.output_schema(source)
+        assert "doubled_age" in data_schema
 
-    def test_function_pod_process_packet_raises(self):
-        """FunctionPod with unbound proxy raises on process_packet."""
+    def test_function_pod_process_data_raises(self):
+        """FunctionPod with unbound proxy raises on process_data."""
         pf = _make_sample_function()
         proxy = _make_proxy_from_function(pf)
-        pod = FunctionPod(packet_function=proxy)
+        pod = FunctionPod(data_function=proxy)
         tag = Tag({})
-        packet = Packet({"age": 25})
-        with pytest.raises(PacketFunctionUnavailableError):
-            pod.process_packet(tag, packet)
+        data = Data({"age": 25})
+        with pytest.raises(DataFunctionUnavailableError):
+            pod.process_data(tag, data)

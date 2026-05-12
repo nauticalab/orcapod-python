@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
+    from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
 
 
 @dataclass
@@ -14,10 +14,10 @@ class OrchestratorResult:
     """Result of an orchestrator run.
 
     Attributes:
-        node_outputs: Mapping from graph node to its computed (tag, packet)
+        node_outputs: Mapping from graph node to its computed (tag, data)
             pairs. Empty when ``materialize_results=False``.
     """
 
-    node_outputs: dict[Any, list[tuple["TagProtocol", "PacketProtocol"]]] = field(
+    node_outputs: dict[Any, list[tuple["TagProtocol", "DataProtocol"]]] = field(
         default_factory=dict
     )

@@ -8,7 +8,7 @@ Covers:
 - TagProtocol preservation across chained pods
 - Row count preservation across chained pods
 - as_table() results after chaining
-- Chain where an intermediate pod is inactive (packets filtered out)
+- Chain where an intermediate pod is inactive (data filtered out)
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from __future__ import annotations
 import pytest
 
 from orcapod.core.function_pod import FunctionPodStream, FunctionPod, function_pod
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.protocols.core_protocols import StreamProtocol
 
 from ..conftest import double, make_int_stream
@@ -48,13 +48,13 @@ class TestTwoPodChain:
     @pytest.fixture
     def double_pod(self):
         return FunctionPod(
-            packet_function=PythonPacketFunction(double, output_keys="result")
+            data_function=PythonDataFunction(double, output_keys="result")
         )
 
     @pytest.fixture
     def add_one_pod(self):
         return FunctionPod(
-            packet_function=PythonPacketFunction(add_one, output_keys="result")
+            data_function=PythonDataFunction(add_one, output_keys="result")
         )
 
     def test_chain_returns_function_pod_stream(self, double_pod, add_one_pod):
@@ -71,20 +71,20 @@ class TestTwoPodChain:
         n = 5
         stream1 = double_pod.process(make_int_stream(n=n))
         stream2 = add_one_pod.process(stream1)
-        assert len(list(stream2.iter_packets())) == n
+        assert len(list(stream2.iter_data())) == n
 
     def test_chain_values_correct(self, double_pod, add_one_pod):
         # double(x) → result = x*2, then add_one(result) → result = x*2 + 1
         n = 4
-        for i, (_, packet) in enumerate(
-            add_one_pod.process(double_pod.process(make_int_stream(n=n))).iter_packets()
+        for i, (_, data) in enumerate(
+            add_one_pod.process(double_pod.process(make_int_stream(n=n))).iter_data()
         ):
-            assert packet["result"] == i * 2 + 1
+            assert data["result"] == i * 2 + 1
 
     def test_chain_tag_preserved(self, double_pod, add_one_pod):
         n = 3
         for i, (tag, _) in enumerate(
-            add_one_pod.process(double_pod.process(make_int_stream(n=n))).iter_packets()
+            add_one_pod.process(double_pod.process(make_int_stream(n=n))).iter_data()
         ):
             assert tag["id"] == i
 
@@ -116,19 +116,19 @@ class TestThreePodChain:
     @pytest.fixture
     def double_pod(self):
         return FunctionPod(
-            packet_function=PythonPacketFunction(double, output_keys="result")
+            data_function=PythonDataFunction(double, output_keys="result")
         )
 
     @pytest.fixture
     def add_one_pod(self):
         return FunctionPod(
-            packet_function=PythonPacketFunction(add_one, output_keys="result")
+            data_function=PythonDataFunction(add_one, output_keys="result")
         )
 
     @pytest.fixture
     def square_pod(self):
         return FunctionPod(
-            packet_function=PythonPacketFunction(square, output_keys="result")
+            data_function=PythonDataFunction(square, output_keys="result")
         )
 
     def test_three_pod_chain_row_count(self, double_pod, add_one_pod, square_pod):
@@ -137,7 +137,7 @@ class TestThreePodChain:
         stream = double_pod.process(stream)
         stream = add_one_pod.process(stream)
         stream = square_pod.process(stream)
-        assert len(list(stream.iter_packets())) == n
+        assert len(list(stream.iter_data())) == n
 
     def test_three_pod_chain_values(self, double_pod, add_one_pod, square_pod):
         # double(x) → x*2, add_one(x*2) → x*2+1, square(x*2+1) → (x*2+1)^2
@@ -145,16 +145,16 @@ class TestThreePodChain:
         stream = square_pod.process(
             add_one_pod.process(double_pod.process(make_int_stream(n=n)))
         )
-        for i, (_, packet) in enumerate(stream.iter_packets()):
+        for i, (_, data) in enumerate(stream.iter_data()):
             expected = (i * 2 + 1) ** 2
-            assert packet["result"] == expected
+            assert data["result"] == expected
 
     def test_three_pod_chain_tags_preserved(self, double_pod, add_one_pod, square_pod):
         n = 4
         stream = square_pod.process(
             add_one_pod.process(double_pod.process(make_int_stream(n=n)))
         )
-        for i, (tag, _) in enumerate(stream.iter_packets()):
+        for i, (tag, _) in enumerate(stream.iter_data()):
             assert tag["id"] == i
 
     def test_three_pod_chain_as_table_correct(
@@ -218,12 +218,12 @@ class TestDecoratorChaining:
     def test_two_decorator_pods_values(self):
         # double(x) → x*2, triple(x*2) → x*6
         n = 4
-        for i, (_, packet) in enumerate(
+        for i, (_, data) in enumerate(
             decor_triple.pod.process(
                 decor_double.pod.process(make_int_stream(n=n))
-            ).iter_packets()
+            ).iter_data()
         ):
-            assert packet["result"] == i * 6
+            assert data["result"] == i * 6
 
     def test_three_decorator_pods_values(self):
         # double(x) → x*2, triple(x*2) → x*6, add_five(x*6) → x*6 + 5
@@ -231,8 +231,8 @@ class TestDecoratorChaining:
         stream = decor_add_five.pod.process(
             decor_triple.pod.process(decor_double.pod.process(make_int_stream(n=n)))
         )
-        for i, (_, packet) in enumerate(stream.iter_packets()):
-            assert packet["result"] == i * 6 + 5
+        for i, (_, data) in enumerate(stream.iter_data()):
+            assert data["result"] == i * 6 + 5
 
     def test_decorator_chain_as_table_correct(self):
         n = 3
@@ -247,51 +247,51 @@ class TestDecoratorChaining:
         stream = decor_triple.pod.process(
             decor_double.pod.process(make_int_stream(n=n))
         )
-        assert len(list(stream.iter_packets())) == n
+        assert len(list(stream.iter_data())) == n
 
 
 # ---------------------------------------------------------------------------
-# 4. Chain where an intermediate pod is inactive (packets filtered out)
+# 4. Chain where an intermediate pod is inactive (data filtered out)
 # ---------------------------------------------------------------------------
 
 
 class TestChainWithInactivePod:
     """
-    When a pod's packet function is set inactive, its call() returns None and
-    those packets are silently dropped by iter_packets().  Downstream pods in
-    the chain therefore receive zero packets.
+    When a pod's data function is set inactive, its call() returns None and
+    those data are silently dropped by iter_data().  Downstream pods in
+    the chain therefore receive zero data.
     """
 
     @pytest.fixture
     def double_pf(self):
-        return PythonPacketFunction(double, output_keys="result")
+        return PythonDataFunction(double, output_keys="result")
 
     @pytest.fixture
     def add_one_pf(self):
-        return PythonPacketFunction(add_one, output_keys="result")
+        return PythonDataFunction(add_one, output_keys="result")
 
-    def test_inactive_first_pod_yields_no_packets(self, double_pf, add_one_pf):
+    def test_inactive_first_pod_yields_no_data(self, double_pf, add_one_pf):
         double_pf.set_active(False)
-        pod1 = FunctionPod(packet_function=double_pf)
-        pod2 = FunctionPod(packet_function=add_one_pf)
+        pod1 = FunctionPod(data_function=double_pf)
+        pod2 = FunctionPod(data_function=add_one_pf)
         stream = pod2.process(pod1.process(make_int_stream(n=3)))
-        assert list(stream.iter_packets()) == []
+        assert list(stream.iter_data()) == []
 
-    def test_inactive_second_pod_yields_no_packets(self, double_pf, add_one_pf):
+    def test_inactive_second_pod_yields_no_data(self, double_pf, add_one_pf):
         add_one_pf.set_active(False)
-        pod1 = FunctionPod(packet_function=double_pf)
-        pod2 = FunctionPod(packet_function=add_one_pf)
+        pod1 = FunctionPod(data_function=double_pf)
+        pod2 = FunctionPod(data_function=add_one_pf)
         stream = pod2.process(pod1.process(make_int_stream(n=3)))
-        assert list(stream.iter_packets()) == []
+        assert list(stream.iter_data()) == []
 
     def test_reactivating_pod_restores_output(self, double_pf, add_one_pf):
         double_pf.set_active(False)
-        pod1 = FunctionPod(packet_function=double_pf)
-        pod2 = FunctionPod(packet_function=add_one_pf)
+        pod1 = FunctionPod(data_function=double_pf)
+        pod2 = FunctionPod(data_function=add_one_pf)
 
         stream_inactive = pod2.process(pod1.process(make_int_stream(n=3)))
-        assert list(stream_inactive.iter_packets()) == []
+        assert list(stream_inactive.iter_data()) == []
 
         double_pf.set_active(True)
         stream_active = pod2.process(pod1.process(make_int_stream(n=3)))
-        assert len(list(stream_active.iter_packets())) == 3
+        assert len(list(stream_active.iter_data())) == 3

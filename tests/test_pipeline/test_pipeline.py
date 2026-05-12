@@ -22,23 +22,23 @@ from orcapod.core.nodes import (
     OperatorNode,
     SourceNode,
 )
-from orcapod.core.operators import Join, MapPackets
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.operators import Join, MapData
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import Pipeline
-from orcapod.protocols.core_protocols import PacketFunctionProtocol, PacketProtocol
+from orcapod.protocols.core_protocols import DataFunctionProtocol, DataProtocol
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_source(tag_col: str, packet_col: str, data: dict) -> ArrowTableSource:
+def _make_source(tag_col: str, data_col: str, data: dict) -> ArrowTableSource:
     table = pa.table(
         {
             tag_col: pa.array(data[tag_col], type=pa.large_string()),
-            packet_col: pa.array(data[packet_col], type=pa.int64()),
+            data_col: pa.array(data[data_col], type=pa.int64()),
         }
     )
     return ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
@@ -107,8 +107,8 @@ class TestCompileSourceWrapping:
 class TestCompileFunctionNode:
     def test_compile_creates_persistent_function_node(self, pipeline_db):
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="fn_pipe", pipeline_database=pipeline_db)
 
@@ -122,8 +122,8 @@ class TestCompileFunctionNode:
 
     def test_function_node_pipeline_path_prefix(self, pipeline_db):
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="fn_pipe", pipeline_database=pipeline_db)
 
@@ -177,8 +177,8 @@ class TestCompileMutatesNodes:
     def test_compile_reuses_recorded_function_node_objects(self, pipeline_db):
         """compile() should mutate recorded FunctionNodes in place, not create new ones."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
 
@@ -218,8 +218,8 @@ class TestCompileMutatesNodes:
     def test_recorded_node_identity_preserved_after_compile(self, pipeline_db):
         """The node object from recording should be the same object after compile."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(
             name="test", pipeline_database=pipeline_db, auto_compile=False
@@ -250,8 +250,8 @@ class TestFunctionDatabaseHandling:
     def test_result_database_none_uses_scoped_subfolder(self, pipeline_db):
         """When result_database=None, result db is scoped to pipeline_name/_result."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(
             name="my_pipe", pipeline_database=pipeline_db, result_database=None
@@ -268,8 +268,8 @@ class TestFunctionDatabaseHandling:
     def test_separate_result_database(self, pipeline_db, function_db):
         """When result_database is provided, it's used as the result database."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(
             name="my_pipe",
@@ -308,10 +308,10 @@ class TestLabelAccess:
         src_a = _make_source("k", "value", {"k": ["a"], "value": [1]})
         src_b = _make_source("k", "value", {"k": ["b"], "value": [2]})
 
-        pf1 = PythonPacketFunction(double_value, output_keys="result")
-        pf2 = PythonPacketFunction(double_value, output_keys="result")
-        pod1 = FunctionPod(packet_function=pf1)
-        pod2 = FunctionPod(packet_function=pf2)
+        pf1 = PythonDataFunction(double_value, output_keys="result")
+        pf2 = PythonDataFunction(double_value, output_keys="result")
+        pod1 = FunctionPod(data_function=pf1)
+        pod2 = FunctionPod(data_function=pf2)
 
         pipeline = Pipeline(name="collision", pipeline_database=pipeline_db)
 
@@ -368,8 +368,8 @@ class TestAutoCompileAndRun:
 
     def test_run_executes_all_nodes(self, pipeline_db):
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="run_test", pipeline_database=pipeline_db)
 
@@ -388,8 +388,8 @@ class TestAutoCompileAndRun:
     def test_run_auto_saves_when_path_set(self, pipeline_db, tmp_path):
         """Pipeline.run() writes a save file when auto_save_path is set."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
         save_path = tmp_path / "auto_saved.json"
 
         pipeline = Pipeline(
@@ -414,8 +414,8 @@ class TestAutoCompileAndRun:
     def test_run_does_not_save_when_path_not_set(self, pipeline_db, monkeypatch):
         """Pipeline.run() does not call save() when auto_save_path is None."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="no_save_test", pipeline_database=pipeline_db)
 
@@ -448,8 +448,8 @@ class TestAutoCompileAndRun:
     def test_pipeline_path_prefix_scoping(self, pipeline_db):
         """All persistent nodes' paths start with pipeline name prefix."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="scoped", pipeline_database=pipeline_db)
 
@@ -494,8 +494,8 @@ class TestEndToEnd:
         Verifies all nodes are persistent and DB records exist after run().
         """
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="e2e", pipeline_database=pipeline_db)
 
@@ -531,8 +531,8 @@ class TestPipelineExtension:
     def test_extend_pipeline_with_new_sources(self, pipeline_db):
         """Re-enter pipeline context to add more operations from new sources."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(
             name="extend", pipeline_database=pipeline_db, auto_compile=False
@@ -547,7 +547,7 @@ class TestPipelineExtension:
         with pipeline:
             wider = joined.join(src_c, label="wider_join")
             # select only value+score so add_values can process it
-            selected = wider.select_packet_columns(["value", "score"], label="selector")
+            selected = wider.select_data_columns(["value", "score"], label="selector")
             pod(selected, label="adder")
 
         pipeline.compile()
@@ -574,8 +574,8 @@ class TestPipelineExtension:
     def test_extend_pipeline_from_compiled_node(self, pipeline_db):
         """Second context uses an already-compiled persistent node as input."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="extend_compiled", pipeline_database=pipeline_db)
 
@@ -589,7 +589,7 @@ class TestPipelineExtension:
 
         # Second context: extend from the compiled node
         with pipeline:
-            pipeline.adder.map_packets({"total": "final_total"}, label="renamer")
+            pipeline.adder.map_data({"total": "final_total"}, label="renamer")
 
         # Re-compile picks up the extension
         assert "renamer" in pipeline.compiled_nodes
@@ -607,8 +607,8 @@ class TestPipelineExtension:
     def test_second_pipeline_from_first_pipeline_node(self, pipeline_db):
         """Pipeline B starts from Pipeline A's final compiled node."""
         src_a, src_b = _make_two_sources()
-        pf_add = PythonPacketFunction(add_values, output_keys="total")
-        pod_add = FunctionPod(packet_function=pf_add)
+        pf_add = PythonDataFunction(add_values, output_keys="total")
+        pod_add = FunctionPod(data_function=pf_add)
 
         pipe_a = Pipeline(name="pipe_a", pipeline_database=pipeline_db)
         with pipe_a:
@@ -622,13 +622,13 @@ class TestPipelineExtension:
         pipe_b = Pipeline(name="pipe_b", pipeline_database=db_b)
 
         with pipe_b:
-            pipe_a.adder.map_packets({"total": "renamed_total"}, label="renamer")
+            pipe_a.adder.map_data({"total": "renamed_total"}, label="renamer")
 
         assert "renamer" in pipe_b.compiled_nodes
         assert isinstance(pipe_b.renamer, OperatorNode)
 
         # pipe_b's renamer node_identity_path should start with the operator name
-        assert pipe_b.renamer.node_identity_path[0] == "MapPackets"
+        assert pipe_b.renamer.node_identity_path[0] == "MapData"
 
         pipe_b.run()
 
@@ -657,8 +657,8 @@ class TestHashChainExtending:
         """An operator downstream of pipe_a.adder in pipe_b has the same
         content_hash as if it were defined in a single pipeline."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         # Single pipeline baseline
         db_single = InMemoryArrowDatabase()
@@ -668,7 +668,7 @@ class TestHashChainExtending:
             pod(joined, label="adder")
         # Get content_hash of adder in single pipeline
         with single:
-            single._nodes["adder"].map_packets(
+            single._nodes["adder"].map_data(
                 {"total": "final_total"}, label="renamer"
             )
         single_renamer_content = single.renamer.content_hash()
@@ -684,7 +684,7 @@ class TestHashChainExtending:
         db_b = InMemoryArrowDatabase()
         pipe_b = Pipeline(name="b", pipeline_database=db_b)
         with pipe_b:
-            pipe_a.adder.map_packets({"total": "final_total"}, label="renamer")
+            pipe_a.adder.map_data({"total": "final_total"}, label="renamer")
 
         two_renamer_content = pipe_b.renamer.content_hash()
         two_renamer_pipeline = pipe_b.renamer.pipeline_hash()
@@ -696,8 +696,8 @@ class TestHashChainExtending:
     def test_extending_pipeline_hash_matches_single_pipeline(self, pipeline_db):
         """pipeline_hash is identical whether nodes defined in one or two pipelines."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         # Single pipeline
         db_single = InMemoryArrowDatabase()
@@ -706,7 +706,7 @@ class TestHashChainExtending:
             joined = src_a.join(src_b, label="joiner")
             pod(joined, label="adder")
         with single:
-            single.adder.map_packets({"total": "final_total"}, label="renamer")
+            single.adder.map_data({"total": "final_total"}, label="renamer")
         single_pipeline_hash = single.renamer.pipeline_hash()
 
         # Two pipelines
@@ -719,15 +719,15 @@ class TestHashChainExtending:
         db_b = InMemoryArrowDatabase()
         pipe_b = Pipeline(name="b", pipeline_database=db_b)
         with pipe_b:
-            pipe_a.adder.map_packets({"total": "final_total"}, label="renamer")
+            pipe_a.adder.map_data({"total": "final_total"}, label="renamer")
 
         assert single_pipeline_hash == pipe_b.renamer.pipeline_hash()
 
     def test_extending_same_pipeline_hashes_match_single_context(self, pipeline_db):
         """Re-entering the same pipeline context preserves hash chain."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         # Single context baseline
         db1 = InMemoryArrowDatabase()
@@ -735,7 +735,7 @@ class TestHashChainExtending:
         with single:
             joined = src_a.join(src_b, label="joiner")
             pod(joined, label="adder")
-            MapPackets({"total": "final_total"})(joined, label="renamer")
+            MapData({"total": "final_total"})(joined, label="renamer")
         single.compile()
 
         # Two contexts
@@ -745,7 +745,7 @@ class TestHashChainExtending:
             joined = src_a.join(src_b, label="joiner")
             pod(joined, label="adder")
         with multi:
-            MapPackets({"total": "final_total"})(joined, label="renamer")
+            MapData({"total": "final_total"})(joined, label="renamer")
         multi.compile()
 
         # adder hashes match (same upstream structure)
@@ -763,8 +763,8 @@ class TestHashChainDetaching:
         """DerivedSource (via .as_source()) has different content_hash than
         using the node directly for extending."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         db_a = InMemoryArrowDatabase()
         pipe_a = Pipeline(name="pipe_a", pipeline_database=db_a)
@@ -777,7 +777,7 @@ class TestHashChainDetaching:
         db_ext = InMemoryArrowDatabase()
         pipe_ext = Pipeline(name="ext", pipeline_database=db_ext)
         with pipe_ext:
-            pipe_a.adder.map_packets({"total": "final_total"}, label="renamer")
+            pipe_a.adder.map_data({"total": "final_total"}, label="renamer")
         ext_hash = pipe_ext.renamer.content_hash()
 
         # Detaching: use pipe_a.adder.as_source() as input
@@ -785,7 +785,7 @@ class TestHashChainDetaching:
         db_det = InMemoryArrowDatabase()
         pipe_det = Pipeline(name="det", pipeline_database=db_det)
         with pipe_det:
-            derived_src.map_packets({"total": "final_total"}, label="renamer")
+            derived_src.map_data({"total": "final_total"}, label="renamer")
         det_hash = pipe_det.renamer.content_hash()
 
         # Hashes should differ — detaching breaks the chain
@@ -793,10 +793,10 @@ class TestHashChainDetaching:
 
     def test_detached_pipeline_hash_is_schema_only(self, pipeline_db):
         """DerivedSource inherits RootSource.pipeline_identity_structure()
-        = (tag_schema, packet_schema), breaking the upstream Merkle chain."""
+        = (tag_schema, data_schema), breaking the upstream Merkle chain."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         db = InMemoryArrowDatabase()
         pipe = Pipeline(name="pipe", pipeline_database=db)
@@ -808,7 +808,7 @@ class TestHashChainDetaching:
         derived_src = pipe.adder.as_source()
         # DerivedSource pipeline_hash should be the RootSource base case
         # (schema-only, no upstream topology)
-        tag_schema, packet_schema = derived_src.output_schema()
+        tag_schema, data_schema = derived_src.output_schema()
         # Pipeline hash should NOT equal the origin node's pipeline hash
         assert derived_src.pipeline_hash() != pipe.adder.pipeline_hash()
         # But two DerivedSources with same schema should share pipeline_hash
@@ -821,9 +821,9 @@ class TestHashChainDetaching:
         """A full pipeline built from .as_source() produces different hashes
         at every downstream node compared to extending directly."""
         src_a, src_b = _make_two_sources()
-        pf_add = PythonPacketFunction(add_values, output_keys="total")
-        pod_add = FunctionPod(packet_function=pf_add)
-        pf_double = PythonPacketFunction(double_value, output_keys="doubled")
+        pf_add = PythonDataFunction(add_values, output_keys="total")
+        pod_add = FunctionPod(data_function=pf_add)
+        pf_double = PythonDataFunction(double_value, output_keys="doubled")
 
         # Pipeline A: sources → join → adder
         db_a = InMemoryArrowDatabase()
@@ -837,16 +837,16 @@ class TestHashChainDetaching:
         db_ext = InMemoryArrowDatabase()
         pipe_ext = Pipeline(name="ext", pipeline_database=db_ext)
         with pipe_ext:
-            renamed = pipe_a.adder.map_packets({"total": "value"}, label="renamer")
-            FunctionPod(packet_function=pf_double)(renamed, label="doubler")
+            renamed = pipe_a.adder.map_data({"total": "value"}, label="renamer")
+            FunctionPod(data_function=pf_double)(renamed, label="doubler")
 
         # Detaching: pipe_c uses pipe_a.adder.as_source() → renamer → doubler
         derived = pipe_a.adder.as_source()
         db_det = InMemoryArrowDatabase()
         pipe_det = Pipeline(name="det", pipeline_database=db_det)
         with pipe_det:
-            renamed = derived.map_packets({"total": "value"}, label="renamer")
-            FunctionPod(packet_function=pf_double)(renamed, label="doubler")
+            renamed = derived.map_data({"total": "value"}, label="renamer")
+            FunctionPod(data_function=pf_double)(renamed, label="doubler")
 
         # Both content_hash and pipeline_hash should differ at every level
         assert pipe_ext.renamer.content_hash() != pipe_det.renamer.content_hash()
@@ -865,11 +865,11 @@ class TestHashChainDetaching:
         produce identical pipeline_hash downstream, but different content_hash
         (because source_id differs → different identity_structure)."""
         src_a, src_b = _make_two_sources()
-        pf_add = PythonPacketFunction(add_values, output_keys="total")
-        pod_add = FunctionPod(packet_function=pf_add)
-        pf_double = PythonPacketFunction(double_value, output_keys="doubled")
+        pf_add = PythonDataFunction(add_values, output_keys="total")
+        pod_add = FunctionPod(data_function=pf_add)
+        pf_double = PythonDataFunction(double_value, output_keys="doubled")
 
-        # Pipeline A: sources → join → adder (schema: tag=key, packet=total)
+        # Pipeline A: sources → join → adder (schema: tag=key, data=total)
         db_a = InMemoryArrowDatabase()
         pipe_a = Pipeline(name="pipe_a", pipeline_database=db_a)
         with pipe_a:
@@ -882,11 +882,11 @@ class TestHashChainDetaching:
         db_derived = InMemoryArrowDatabase()
         pipe_derived = Pipeline(name="derived_pipe", pipeline_database=db_derived)
         with pipe_derived:
-            renamed = derived.map_packets({"total": "value"}, label="renamer")
-            FunctionPod(packet_function=pf_double)(renamed, label="doubler")
+            renamed = derived.map_data({"total": "value"}, label="renamer")
+            FunctionPod(data_function=pf_double)(renamed, label="doubler")
 
         # Branch 2: pipeline from a fresh ArrowTableSource with identical schema
-        # Same schema as DerivedSource: tag=key (large_string), packet=total (int64)
+        # Same schema as DerivedSource: tag=key (large_string), data=total (int64)
         fresh_table = pa.table(
             {
                 "key": pa.array(["x", "y"], type=pa.large_string()),
@@ -897,8 +897,8 @@ class TestHashChainDetaching:
         db_fresh = InMemoryArrowDatabase()
         pipe_fresh = Pipeline(name="fresh_pipe", pipeline_database=db_fresh)
         with pipe_fresh:
-            renamed = fresh_src.map_packets({"total": "value"}, label="renamer")
-            FunctionPod(packet_function=pf_double)(renamed, label="doubler")
+            renamed = fresh_src.map_data({"total": "value"}, label="renamer")
+            FunctionPod(data_function=pf_double)(renamed, label="doubler")
 
         # pipeline_hash should be IDENTICAL at every level
         # (both start from RootSource with same schema → same pipeline identity base case)
@@ -930,8 +930,8 @@ class TestHashChainDetaching:
     def test_detached_source_has_source_id(self, pipeline_db):
         """DerivedSource.source_id contains pipeline path info."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         db = InMemoryArrowDatabase()
         pipe = Pipeline(name="my_pipe", pipeline_database=db)
@@ -982,8 +982,8 @@ class TestHashGraph:
     def test_graph_accumulates_across_with_blocks(self, pipeline_db):
         """Edges from a second with block are added to those from the first."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="acc", pipeline_database=pipeline_db)
 
@@ -1029,8 +1029,8 @@ class TestHashGraph:
     def test_graph_node_type_function(self, pipeline_db):
         """Function nodes have node_type='function' after compile."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="types_fn", pipeline_database=pipeline_db)
 
@@ -1094,8 +1094,8 @@ class TestPipelineSnapshotHash:
         """Adding a new node to the pipeline changes the snapshot hash."""
         src_a, src_b = _make_two_sources()
         pipeline = Pipeline(name="snap2", pipeline_database=pipeline_db)
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         with pipeline:
             joined = Join()(src_a, src_b, label="joiner")
@@ -1114,10 +1114,10 @@ class TestPipelineSnapshotHash:
         because edges are included in the canonical SHA-256 input alongside
         the node ordering."""
         src_a, src_b = _make_two_sources()
-        pf_add = PythonPacketFunction(add_values, output_keys="total")
-        pf_double = PythonPacketFunction(double_value, output_keys="value")
-        pod_add = FunctionPod(packet_function=pf_add)
-        pod_double = FunctionPod(packet_function=pf_double)
+        pf_add = PythonDataFunction(add_values, output_keys="total")
+        pf_double = PythonDataFunction(double_value, output_keys="value")
+        pod_add = FunctionPod(data_function=pf_add)
+        pod_double = FunctionPod(data_function=pf_double)
 
         # Pipeline 1: join → add (two nodes, one edge between them)
         db1 = InMemoryArrowDatabase()
@@ -1154,8 +1154,8 @@ class TestIncrementalCompile:
         """After re-entering context and compiling, existing persistent nodes
         are the same Python objects (identity via `is`)."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="incr", pipeline_database=pipeline_db)
 
@@ -1169,7 +1169,7 @@ class TestIncrementalCompile:
 
         # Second context: extend
         with pipeline:
-            pipeline.adder.map_packets({"total": "final_total"}, label="renamer")
+            pipeline.adder.map_data({"total": "final_total"}, label="renamer")
 
         # Original nodes should be the exact same objects
         assert pipeline.joiner is first_joiner
@@ -1193,7 +1193,7 @@ class TestIncrementalCompile:
 
         # Extend with another operation
         with pipeline:
-            pipeline.joiner.map_packets({"value": "val"}, label="renamer")
+            pipeline.joiner.map_data({"value": "val"}, label="renamer")
 
         second_source_nodes = {
             id(n) for n in pipeline._node_graph.nodes() if isinstance(n, SourceNode)
@@ -1205,8 +1205,8 @@ class TestIncrementalCompile:
     def test_recompile_adds_new_nodes_without_replacing_old(self, pipeline_db):
         """New operations appear in compiled_nodes alongside preserved old ones."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="incr_add", pipeline_database=pipeline_db)
 
@@ -1217,7 +1217,7 @@ class TestIncrementalCompile:
         assert len(pipeline.compiled_nodes) == 4  # 2 sources + joiner + adder
 
         with pipeline:
-            pipeline.adder.map_packets({"total": "final_total"}, label="renamer")
+            pipeline.adder.map_data({"total": "final_total"}, label="renamer")
 
         assert len(pipeline.compiled_nodes) == 5  # 2 sources + joiner + adder + renamer
         assert isinstance(pipeline.renamer, OperatorNode)
@@ -1238,12 +1238,12 @@ class TestIncrementalCompile:
 
 class TestCompileDoesNotTriggerExecution:
     """Verify that Pipeline.compile() constructs persistent nodes without
-    triggering upstream iter_packets / run / as_table materialisation."""
+    triggering upstream iter_data / run / as_table materialisation."""
 
     def test_compile_does_not_trigger_source_materialization(self, pipeline_db):
         """Compile should not trigger any computation or database writes."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
+        pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="lazy_test", pipeline_database=pipeline_db)
@@ -1292,23 +1292,23 @@ class _MockExecutor(PythonFunctionExecutorBase):
 
     def execute(
         self,
-        packet_function: PacketFunctionProtocol,
-        packet: PacketProtocol,
+        data_function: DataFunctionProtocol,
+        data: DataProtocol,
         *,
         logger=None,
-    ) -> "PacketProtocol | None":
-        self.sync_calls.append(packet)
-        return packet_function.direct_call(packet)
+    ) -> "DataProtocol | None":
+        self.sync_calls.append(data)
+        return data_function.direct_call(data)
 
     async def async_execute(
         self,
-        packet_function: PacketFunctionProtocol,
-        packet: PacketProtocol,
+        data_function: DataFunctionProtocol,
+        data: DataProtocol,
         *,
         logger=None,
-    ) -> "PacketProtocol | None":
-        self.async_calls.append(packet)
-        return packet_function.direct_call(packet)
+    ) -> "DataProtocol | None":
+        self.async_calls.append(data)
+        return data_function.direct_call(data)
 
     def execute_callable(self, fn, kwargs, executor_options=None, *, logger=None):
         self.sync_calls.append(kwargs)
@@ -1328,8 +1328,8 @@ class _MockExecutor(PythonFunctionExecutorBase):
 class TestRunExecutionEngine:
     def test_engine_is_applied_to_all_function_nodes(self, pipeline_db):
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
-        pf = PythonPacketFunction(double_value, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(double_value, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         mock = _MockExecutor()
 
         pipeline = Pipeline(name="test_engine", pipeline_database=pipeline_db)
@@ -1343,8 +1343,8 @@ class TestRunExecutionEngine:
     def test_engine_without_config_triggers_async_mode(self, pipeline_db):
         """No config + execution_engine → async channels mode by default."""
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
-        pf = PythonPacketFunction(double_value, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(double_value, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         mock = _MockExecutor()
 
         pipeline = Pipeline(name="test_async_default", pipeline_database=pipeline_db)
@@ -1364,8 +1364,8 @@ class TestRunExecutionEngine:
         from orcapod.types import ExecutorType, PipelineConfig
 
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
-        pf = PythonPacketFunction(double_value, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(double_value, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         mock = _MockExecutor()
 
         pipeline = Pipeline(name="test_sync_override", pipeline_database=pipeline_db)
@@ -1384,8 +1384,8 @@ class TestRunExecutionEngine:
     def test_pipeline_opts_applied_via_with_options(self, pipeline_db):
         """Pipeline-level execution_engine_opts are applied via with_options."""
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
-        pf = PythonPacketFunction(double_value, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(double_value, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         mock = _MockExecutor()
 
         pipeline = Pipeline(name="test_pipeline_opts", pipeline_database=pipeline_db)
@@ -1403,8 +1403,8 @@ class TestRunExecutionEngine:
     def test_no_opts_produces_per_node_copy(self, pipeline_db):
         """Without execution_engine_opts, each node gets its own executor copy."""
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
-        pf = PythonPacketFunction(double_value, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(double_value, output_keys="result")
+        pod = FunctionPod(data_function=pf)
         mock = _MockExecutor()
 
         pipeline = Pipeline(name="test_no_opts", pipeline_database=pipeline_db)
@@ -1424,8 +1424,8 @@ class TestSourceNodesInPipeline:
 
     def test_source_nodes_in_compiled_nodes(self, pipeline_db):
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
         with pipeline:
@@ -1449,8 +1449,8 @@ class TestSourceNodesInPipeline:
             label="my_source",
             infer_nullable=True,
         )
-        pf = PythonPacketFunction(double_value, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(double_value, output_keys="result")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
         with pipeline:
@@ -1461,8 +1461,8 @@ class TestSourceNodesInPipeline:
 
     def test_source_node_label_defaults_to_class_name(self, pipeline_db):
         src_a, _ = _make_two_sources()
-        pf = PythonPacketFunction(double_value, output_keys="result")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(double_value, output_keys="result")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
         with pipeline:
@@ -1481,8 +1481,8 @@ class TestSourceNodeNoCaching:
     def test_source_nodes_do_not_write_to_db(self, pipeline_db):
         """Source nodes should not write anything to the pipeline DB."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="test_pipe", pipeline_database=pipeline_db)
         with pipeline:
@@ -1514,8 +1514,8 @@ class TestSourceNodeNoCaching:
         cached_a = CachedSource(src_a, cache_database=source_db)
         cached_b = CachedSource(src_b, cache_database=source_db)
 
-        pf = PythonPacketFunction(add_values, output_keys="total")
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
 
         pipeline = Pipeline(name="cached_src", pipeline_database=pipeline_db)
         with pipeline:

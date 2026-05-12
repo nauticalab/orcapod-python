@@ -1,13 +1,13 @@
 # Streams
 
-A stream is an immutable sequence of (Tag, Packet) pairs backed by a PyArrow Table. Streams
+A stream is an immutable sequence of (Tag, Data) pairs backed by a PyArrow Table. Streams
 are the universal data currency in Orcapod -- every [source](sources.md) produces a stream,
 every [operator](operators.md) consumes and produces streams, and every
-[function pod](function-pods.md) transforms packets within a stream. Immutability guarantees
+[function pod](function-pods.md) transforms data within a stream. Immutability guarantees
 that once a stream is created, its data cannot change, which is essential for reproducible
 pipelines.
 
-## Tag columns vs Packet columns
+## Tag columns vs Data columns
 
 Every stream divides its columns into two groups:
 
@@ -15,20 +15,20 @@ Every stream divides its columns into two groups:
 (e.g., `subject_id`, `session_date`). Operators like [Join](operators.md) match rows across
 streams using shared tag columns.
 
-**Packet columns** are the data payload. They hold the actual values being processed
-(e.g., `age`, `weight`, `spike_count`). [Function pods](function-pods.md) read packet
-columns as function inputs and write new packet columns as outputs.
+**Data columns** are the data payload. They hold the actual values being processed
+(e.g., `age`, `weight`, `spike_count`). [Function pods](function-pods.md) read data
+columns as function inputs and write new data columns as outputs.
 
 This separation is enforced throughout the framework:
 
-- Operators inspect and restructure tags but never look inside packets
-- Function pods inspect and transform packets but never look at tags
+- Operators inspect and restructure tags but never look inside data
+- Function pods inspect and transform data but never look at tags
 
 ## Key classes
 
 ### `ArrowTableStream`
 
-The primary stream implementation. Wraps a PyArrow Table with designated tag and packet
+The primary stream implementation. Wraps a PyArrow Table with designated tag and data
 columns. Created internally by sources and operators -- you rarely construct one directly.
 
 ### `StreamBase`
@@ -42,33 +42,33 @@ Every stream exposes four key methods:
 
 ### `output_schema()`
 
-Returns the `(tag_schema, packet_schema)` tuple describing column names and their Python types:
+Returns the `(tag_schema, data_schema)` tuple describing column names and their Python types:
 
 ```python
-tag_schema, packet_schema = stream.output_schema()
+tag_schema, data_schema = stream.output_schema()
 print(dict(tag_schema))    # {'subject_id': <class 'str'>}
-print(dict(packet_schema)) # {'age': <class 'int'>, 'weight': <class 'float'>}
+print(dict(data_schema)) # {'age': <class 'int'>, 'weight': <class 'float'>}
 ```
 
 ### `keys()`
 
-Returns column names as `(tag_keys, packet_keys)`:
+Returns column names as `(tag_keys, data_keys)`:
 
 ```python
-tag_keys, packet_keys = stream.keys()
+tag_keys, data_keys = stream.keys()
 # tag_keys = ('subject_id',)
-# packet_keys = ('age', 'weight')
+# data_keys = ('age', 'weight')
 ```
 
-### `iter_packets()`
+### `iter_data()`
 
-Iterates over (Tag, Packet) pairs. Each Tag and Packet is an immutable datagram that you can
+Iterates over (Tag, Data) pairs. Each Tag and Data is an immutable datagram that you can
 inspect with `.as_dict()`:
 
 ```python
-for tag, packet in stream.iter_packets():
+for tag, data in stream.iter_data():
     print(tag.as_dict())    # {'subject_id': 'mouse_01'}
-    print(packet.as_dict()) # {'age': 12, 'weight': 25.3}
+    print(data.as_dict()) # {'age': 12, 'weight': 25.3}
 ```
 
 ### `as_table()`
@@ -83,14 +83,14 @@ df = table.to_pandas()
 
 ## Controlling column visibility with `ColumnConfig`
 
-By default, streams only expose user-facing tag and packet columns. Orcapod also maintains
+By default, streams only expose user-facing tag and data columns. Orcapod also maintains
 hidden columns for provenance tracking and metadata. Use `ColumnConfig` (or the `all_info`
 shortcut) to control which column groups are included.
 
 | Config field | What it reveals | Column prefix |
 |---|---|---|
 | `system_tags` | System tag columns (provenance tracking) | `_tag::` |
-| `source` | Source-info columns (per-packet provenance tokens) | `_source_` |
+| `source` | Source-info columns (per-data provenance tokens) | `_source_` |
 | `context` | Data context column | `_context_key` |
 | `content_hash` | Content hash column | `_content_hash` |
 | `sort_by_tags` | Sort rows by tag columns | (ordering only) |
@@ -142,15 +142,15 @@ source = DictSource(
 )
 
 # Schema inspection
-tag_schema, packet_schema = source.output_schema()
+tag_schema, data_schema = source.output_schema()
 print("Tag schema:", dict(tag_schema))
 # Tag schema: {'subject_id': <class 'str'>}
-print("Packet schema:", dict(packet_schema))
-# Packet schema: {'age': <class 'int'>, 'weight': <class 'float'>}
+print("Data schema:", dict(data_schema))
+# Data schema: {'age': <class 'int'>, 'weight': <class 'float'>}
 
-# Iterate over (Tag, Packet) pairs
-for tag, packet in source.iter_packets():
-    print(f"  {tag.as_dict()} -> {packet.as_dict()}")
+# Iterate over (Tag, Data) pairs
+for tag, data in source.iter_data():
+    print(f"  {tag.as_dict()} -> {data.as_dict()}")
 # {'subject_id': 'mouse_01'} -> {'age': 12, 'weight': 25.3}
 # {'subject_id': 'mouse_02'} -> {'age': 8, 'weight': 22.1}
 # {'subject_id': 'mouse_03'} -> {'age': 15, 'weight': 27.8}
@@ -168,5 +168,5 @@ print(table.to_pandas())
 
 - [Sources](sources.md) produce streams from external data
 - [Operators](operators.md) consume one or more streams and produce a new stream
-- [Function Pods](function-pods.md) transform packet values within a stream
+- [Function Pods](function-pods.md) transform data values within a stream
 - Every stream carries [identity hashes](identity.md) for deduplication and DB-scoping

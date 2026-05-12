@@ -1,5 +1,5 @@
 """
-Tests verifying that Datagram/Tag/Packet keep their original representation
+Tests verifying that Datagram/Tag/Data keep their original representation
 (Arrow table or Python dict) for as long as possible, converting only when
 an operation semantically requires it.
 
@@ -15,7 +15,7 @@ would not distinguish "converted correctly" from "never converted at all".
 import pyarrow as pa
 import pytest
 
-from orcapod.core.datagrams import Datagram, Packet, Tag
+from orcapod.core.datagrams import Datagram, Data, Tag
 from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig
 
@@ -359,23 +359,23 @@ class TestTagLazySystemTagsTable:
 
 
 # ---------------------------------------------------------------------------
-# Packet — lazy source-info table
+# Data — lazy source-info table
 # ---------------------------------------------------------------------------
 
 
-class TestPacketLazySourceInfoTable:
+class TestDataLazySourceInfoTable:
     """_source_info_table is built only when source info is explicitly requested."""
 
     def test_dict_backed_starts_with_no_source_info_table(self):
-        p = Packet({"a": 1}, source_info={"a": "s::r::a"})
+        p = Data({"a": 1}, source_info={"a": "s::r::a"})
         assert p._source_info_table is None
 
     def test_arrow_backed_starts_with_no_source_info_table(self):
-        p = Packet(arrow_table(a=1), source_info={"a": "s::r::a"})
+        p = Data(arrow_table(a=1), source_info={"a": "s::r::a"})
         assert p._source_info_table is None
 
     def test_source_info_table_not_built_without_source_flag(self):
-        p = Packet({"a": 1}, source_info={"a": "s::r::a"})
+        p = Data({"a": 1}, source_info={"a": "s::r::a"})
         _ = p.as_table()
         assert p._source_info_table is None
         _ = p.as_dict()
@@ -384,39 +384,39 @@ class TestPacketLazySourceInfoTable:
         assert p._source_info_table is None
 
     def test_source_info_table_built_when_requested_via_as_table(self):
-        p = Packet({"a": 1}, source_info={"a": "s::r::a"})
+        p = Data({"a": 1}, source_info={"a": "s::r::a"})
         _ = p.as_table(columns=ColumnConfig(source=True))
         assert p._source_info_table is not None
 
     def test_source_info_table_built_when_requested_via_arrow_schema(self):
-        p = Packet({"a": 1}, source_info={"a": "s::r::a"})
+        p = Data({"a": 1}, source_info={"a": "s::r::a"})
         _ = p.arrow_schema(columns=ColumnConfig(source=True))
         assert p._source_info_table is not None
 
     def test_arrow_schema_without_source_does_not_build_table(self):
-        p = Packet({"a": 1}, source_info={"a": "s::r::a"})
+        p = Data({"a": 1}, source_info={"a": "s::r::a"})
         _ = p.arrow_schema()
         assert p._source_info_table is None
 
     def test_arrow_backed_dict_not_loaded_by_as_table_with_source(self):
-        p = Packet(arrow_table(a=1), source_info={"a": "s::r::a"})
+        p = Data(arrow_table(a=1), source_info={"a": "s::r::a"})
         _ = p.as_table(columns=ColumnConfig(source=True))
         assert p._data_dict is None
 
     def test_copy_with_cache_propagates_source_info_table(self):
-        p = Packet({"a": 1}, source_info={"a": "s::r::a"})
+        p = Data({"a": 1}, source_info={"a": "s::r::a"})
         _ = p.as_table(columns=ColumnConfig(source=True))
         p2 = p.copy(include_cache=True)
         assert p2._source_info_table is not None
 
     def test_copy_without_cache_drops_source_info_table(self):
-        p = Packet({"a": 1}, source_info={"a": "s::r::a"})
+        p = Data({"a": 1}, source_info={"a": "s::r::a"})
         _ = p.as_table(columns=ColumnConfig(source=True))
         p2 = p.copy(include_cache=False)
         assert p2._source_info_table is None
 
     def test_rename_clears_source_info_table_and_updates_keys(self):
-        p = Packet({"a": 1, "b": 2}, source_info={"a": "s1", "b": "s2"})
+        p = Data({"a": 1, "b": 2}, source_info={"a": "s1", "b": "s2"})
         _ = p.as_table(columns=ColumnConfig(source=True))  # build table
         p2 = p.rename({"a": "x"})
         # Table must be invalidated — keys changed
@@ -425,7 +425,7 @@ class TestPacketLazySourceInfoTable:
         assert p2._source_info == {"x": "s1", "b": "s2"}
 
     def test_with_columns_clears_source_info_table_and_adds_empty_entry(self):
-        p = Packet({"a": 1}, source_info={"a": "s1"})
+        p = Data({"a": 1}, source_info={"a": "s1"})
         _ = p.as_table(columns=ColumnConfig(source=True))
         p2 = p.with_columns(b=2)
         assert p2._source_info_table is None
@@ -435,7 +435,7 @@ class TestPacketLazySourceInfoTable:
 
 
 # ---------------------------------------------------------------------------
-# RecordBatch — both Tag and Packet accept pa.RecordBatch (from table.to_batches())
+# RecordBatch — both Tag and Data accept pa.RecordBatch (from table.to_batches())
 # ---------------------------------------------------------------------------
 
 
@@ -461,10 +461,10 @@ class TestRecordBatchInput:
         assert t._system_tags[sys_col] == "r1"
         assert t._data_dict is None
 
-    def test_packet_from_record_batch(self):
+    def test_data_from_record_batch(self):
         tbl = arrow_table(a=1, b=2)
         batch = tbl.to_batches()[0]
-        p = Packet(batch.slice(0, 1), source_info={"a": "s1", "b": "s2"})
+        p = Data(batch.slice(0, 1), source_info={"a": "s1", "b": "s2"})
         assert p._data_table is not None
         assert p._data_dict is None
         assert p._source_info == {"a": "s1", "b": "s2"}

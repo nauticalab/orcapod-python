@@ -34,7 +34,7 @@ class TestNoOpObserver:
     def test_noop_hooks_accept_no_pipeline_path(self):
         """Hooks no longer accept pipeline_path parameter."""
         observer = NoOpObserver()
-        for method_name in ["on_node_start", "on_node_end", "create_packet_logger"]:
+        for method_name in ["on_node_start", "on_node_end", "create_data_logger"]:
             if hasattr(observer, method_name):
                 sig = inspect.signature(getattr(observer, method_name))
                 assert "pipeline_path" not in sig.parameters, \
@@ -42,7 +42,7 @@ class TestNoOpObserver:
 
     def test_protocol_hooks_accept_no_pipeline_path(self):
         """Protocol hook signatures no longer include pipeline_path."""
-        for method_name in ["on_node_start", "on_node_end", "create_packet_logger"]:
+        for method_name in ["on_node_start", "on_node_end", "create_data_logger"]:
             if hasattr(ExecutionObserverProtocol, method_name):
                 sig = inspect.signature(getattr(ExecutionObserverProtocol, method_name))
                 assert "pipeline_path" not in sig.parameters, \

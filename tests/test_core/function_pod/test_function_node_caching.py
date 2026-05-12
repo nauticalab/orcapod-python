@@ -2,9 +2,9 @@
 
 Covers:
 - compute_pipeline_entry_id behavior
-- Pipeline entry_id based Phase 2 skip (tag + system_tags + packet_hash)
+- Pipeline entry_id based Phase 2 skip (tag + system_tags + data_hash)
 - CachedFunctionPod result cache hit with novel pipeline entry_id
-- Same packet data, different tags → 1 result record, N pipeline records
+- Same data data, different tags → 1 result record, N pipeline records
 - System tag awareness in pipeline entry_id computation
 - Phase 1 yields existing records, Phase 2 processes only novel entry_ids
 """
@@ -15,10 +15,10 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.cached_function_pod import CachedFunctionPod
-from orcapod.core.datagrams import Packet, Tag
+from orcapod.core.datagrams import Data, Tag
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
@@ -35,7 +35,7 @@ def double(x: int) -> int:
 
 
 def _make_pod():
-    pf = PythonPacketFunction(double, output_keys="result")
+    pf = PythonDataFunction(double, output_keys="result")
     return FunctionPod(pf)
 
 
@@ -88,8 +88,8 @@ class TestComputePipelineEntryId:
         stream = _make_stream([{"id": 0, "x": 10}])
         node, _ = _make_node(stream)
         tag = Tag({"id": 0})
-        packet = Packet({"x": 10})
-        entry_id = node.compute_pipeline_entry_id(tag, packet)
+        data = Data({"x": 10})
+        entry_id = node.compute_pipeline_entry_id(tag, data)
         assert isinstance(entry_id, str)
         assert len(entry_id) > 0
 
@@ -97,25 +97,25 @@ class TestComputePipelineEntryId:
         stream = _make_stream([{"id": 0, "x": 10}])
         node, _ = _make_node(stream)
         tag = Tag({"id": 0})
-        packet = Packet({"x": 10})
-        id1 = node.compute_pipeline_entry_id(tag, packet)
-        id2 = node.compute_pipeline_entry_id(tag, packet)
+        data = Data({"x": 10})
+        id1 = node.compute_pipeline_entry_id(tag, data)
+        id2 = node.compute_pipeline_entry_id(tag, data)
         assert id1 == id2
 
     def test_different_tags_produce_different_ids(self):
         stream = _make_stream([{"id": 0, "x": 10}])
         node, _ = _make_node(stream)
-        packet = Packet({"x": 10})
-        id_tag0 = node.compute_pipeline_entry_id(Tag({"id": 0}), packet)
-        id_tag1 = node.compute_pipeline_entry_id(Tag({"id": 1}), packet)
+        data = Data({"x": 10})
+        id_tag0 = node.compute_pipeline_entry_id(Tag({"id": 0}), data)
+        id_tag1 = node.compute_pipeline_entry_id(Tag({"id": 1}), data)
         assert id_tag0 != id_tag1
 
-    def test_different_packets_produce_different_ids(self):
+    def test_different_data_produce_different_ids(self):
         stream = _make_stream([{"id": 0, "x": 10}])
         node, _ = _make_node(stream)
         tag = Tag({"id": 0})
-        id_x10 = node.compute_pipeline_entry_id(tag, Packet({"x": 10}))
-        id_x99 = node.compute_pipeline_entry_id(tag, Packet({"x": 99}))
+        id_x10 = node.compute_pipeline_entry_id(tag, Data({"x": 10}))
+        id_x99 = node.compute_pipeline_entry_id(tag, Data({"x": 99}))
         assert id_x10 != id_x99
 
 
@@ -130,7 +130,7 @@ class TestSystemTagAwareness:
         must produce different pipeline entry_ids."""
         stream = _make_stream([{"id": 0, "x": 10}])
         node, _ = _make_node(stream)
-        packet = Packet({"x": 10})
+        data = Data({"x": 10})
 
         # Tags with same user value but different system tag columns
         tag_a = Tag(
@@ -142,8 +142,8 @@ class TestSystemTagAwareness:
             system_tags={f"{constants.SYSTEM_TAG_PREFIX}source:xyz": "row0"},
         )
 
-        id_a = node.compute_pipeline_entry_id(tag_a, packet)
-        id_b = node.compute_pipeline_entry_id(tag_b, packet)
+        id_a = node.compute_pipeline_entry_id(tag_a, data)
+        id_b = node.compute_pipeline_entry_id(tag_b, data)
         assert id_a != id_b
 
 
@@ -153,9 +153,9 @@ class TestSystemTagAwareness:
 
 
 class TestResultVsPipelineRecordCounts:
-    def test_same_packet_different_tags_one_result_two_pipeline_records(self):
-        """Same packet data with different tags should produce:
-        - 1 result record (CachedFunctionPod caches by packet hash only)
+    def test_same_data_different_tags_one_result_two_pipeline_records(self):
+        """Same data data with different tags should produce:
+        - 1 result record (CachedFunctionPod caches by data hash only)
         - 2 pipeline records (different tag → different entry_id)
         """
         rows = [{"id": 0, "x": 10}, {"id": 1, "x": 10}]
@@ -163,7 +163,7 @@ class TestResultVsPipelineRecordCounts:
         node, db = _make_node(stream)
         node.run()
 
-        # Result DB: 1 record (same packet hash, second is cache hit)
+        # Result DB: 1 record (same data hash, second is cache hit)
         result_records = node._cached_function_pod._result_database.get_all_records(
             node._cached_function_pod.record_path
         )
@@ -175,10 +175,10 @@ class TestResultVsPipelineRecordCounts:
         assert pipeline_records is not None
         assert pipeline_records.num_rows == 2
 
-    def test_different_packets_same_tag_two_result_two_pipeline_records(self):
-        """Different packet data with same tag should produce:
-        - 2 result records (different packet hashes)
-        - 2 pipeline records (different packet hash → different entry_id)
+    def test_different_data_same_tag_two_result_two_pipeline_records(self):
+        """Different data data with same tag should produce:
+        - 2 result records (different data hashes)
+        - 2 pipeline records (different data hash → different entry_id)
         """
         rows = [{"id": 0, "x": 10}, {"id": 0, "x": 20}]
         stream = _make_stream(rows)
@@ -196,7 +196,7 @@ class TestResultVsPipelineRecordCounts:
         assert pipeline_records.num_rows == 2
 
     def test_identical_rows_one_result_one_pipeline_record(self):
-        """Identical (tag, packet) → 1 result record, 1 pipeline record."""
+        """Identical (tag, data) → 1 result record, 1 pipeline record."""
         # A single row — process once
         stream = _make_stream([{"id": 0, "x": 10}])
         node, db = _make_node(stream)
@@ -229,7 +229,7 @@ class TestPhase1Phase2PipelineEntryId:
         # Create a second node with the same stream and shared DB
         stream2 = _make_stream([{"id": 0, "x": 10}, {"id": 1, "x": 20}])
         node2, _ = _make_node(stream2, db=db)
-        results = list(node2.iter_packets())
+        results = list(node2.iter_data())
 
         # All results should come from Phase 1 (DB), not recomputed
         assert len(results) == 2
@@ -250,7 +250,7 @@ class TestPhase1Phase2PipelineEntryId:
         )
         node2, _ = _make_node(stream2, db=db)
         node2.run()
-        results = list(node2.iter_packets())
+        results = list(node2.iter_data())
 
         # Should yield 3 total: 2 from Phase 1 + 1 from Phase 2
         assert len(results) == 3
@@ -258,10 +258,10 @@ class TestPhase1Phase2PipelineEntryId:
         result_values = sorted(p.as_dict()["result"] for _, p in results)
         assert result_values == [20, 40, 60]
 
-    def test_same_packet_new_tag_triggers_phase2(self):
+    def test_same_data_new_tag_triggers_phase2(self):
         """With pipeline_hash scope (default), nodes with same schema share one DB table.
         node2 (id=1, x=10) has a different content_hash than node1 (id=0, x=10),
-        so Phase 1 finds no records for node2 and Phase 2 executes the packet."""
+        so Phase 1 finds no records for node2 and Phase 2 executes the data."""
         db = InMemoryArrowDatabase()
 
         # First run: tag=0, x=10
@@ -272,7 +272,7 @@ class TestPhase1Phase2PipelineEntryId:
         pipeline_count_after_first = db.get_all_records(node1.node_identity_path).num_rows
         assert pipeline_count_after_first == 1
 
-        # Second run: tag=1, x=10 (same packet, different tag)
+        # Second run: tag=1, x=10 (same data, different tag)
         stream2 = _make_stream([{"id": 1, "x": 10}])
         node2, _ = _make_node(stream2, db=db)
 
@@ -281,7 +281,7 @@ class TestPhase1Phase2PipelineEntryId:
         assert node1.node_identity_path[-1].startswith("schema:")
 
         node2.run()
-        results = list(node2.iter_packets())
+        results = list(node2.iter_data())
 
         # Phase 1 finds no records for node2's content_hash → Phase 2 processes the row
         assert len(results) == 1
@@ -291,7 +291,7 @@ class TestPhase1Phase2PipelineEntryId:
         assert all_pipeline_records is not None
         assert all_pipeline_records.num_rows == 2
 
-        # Result DB should still have only 1 record (same packet hash, cache hit)
+        # Result DB should still have only 1 record (same data hash, cache hit)
         result_records = node2._cached_function_pod._result_database.get_all_records(
             node2._cached_function_pod.record_path
         )
@@ -300,7 +300,7 @@ class TestPhase1Phase2PipelineEntryId:
 
     def test_all_existing_entry_ids_skipped_in_phase2(self):
         """When all inputs already have pipeline records, Phase 2
-        should not call execute_packet at all."""
+        should not call execute_data at all."""
         db = InMemoryArrowDatabase()
 
         stream1 = _make_stream([{"id": 0, "x": 10}, {"id": 1, "x": 20}])
@@ -313,7 +313,7 @@ class TestPhase1Phase2PipelineEntryId:
 
         pipeline_count_before = db.get_all_records(node2.node_identity_path).num_rows
 
-        results = list(node2.iter_packets())
+        results = list(node2.iter_data())
         assert len(results) == 2
 
         # No new pipeline records should be added
@@ -328,7 +328,7 @@ class TestPhase1Phase2PipelineEntryId:
 
 class TestResultCacheHitPipelineNovel:
     def test_cached_result_reused_for_new_tag(self):
-        """When CachedFunctionPod has a cache hit (same packet hash) but
+        """When CachedFunctionPod has a cache hit (same data hash) but
         the pipeline entry_id is novel (different tag), the cached result
         should be reused and a new pipeline record created."""
         db = InMemoryArrowDatabase()
@@ -338,18 +338,18 @@ class TestResultCacheHitPipelineNovel:
         node1, _ = _make_node(stream1, db=db)
         node1.run()
 
-        # Process tag=1, x=10 — same packet, different tag
+        # Process tag=1, x=10 — same data, different tag
         stream2 = _make_stream([{"id": 1, "x": 10}])
         node2, _ = _make_node(stream2, db=db)
-        results = list(node2.iter_packets())
+        results = list(node2.iter_data())
 
         # Both tags should produce the same result value
         result_values = [p.as_dict()["result"] for _, p in results]
         assert all(v == 20 for v in result_values)
 
     def test_pipeline_records_reference_same_result_uuid(self):
-        """Two pipeline records for the same packet (different tags)
-        should reference the same output packet UUID in the result DB."""
+        """Two pipeline records for the same data (different tags)
+        should reference the same output data UUID in the result DB."""
         db = InMemoryArrowDatabase()
 
         stream = _make_stream([{"id": 0, "x": 10}, {"id": 1, "x": 10}])
@@ -360,8 +360,8 @@ class TestResultCacheHitPipelineNovel:
         assert pipeline_records is not None
         assert pipeline_records.num_rows == 2
 
-        # Both pipeline records should reference the same PACKET_RECORD_ID
-        record_ids = pipeline_records.column(constants.PACKET_RECORD_ID).to_pylist()
+        # Both pipeline records should reference the same DATA_RECORD_ID
+        record_ids = pipeline_records.column(constants.DATA_RECORD_ID).to_pylist()
         assert record_ids[0] == record_ids[1]
 
 
@@ -372,7 +372,7 @@ class TestResultCacheHitPipelineNovel:
 
 class TestPipelineRecordSourceColumns:
     def test_pipeline_record_contains_source_columns(self):
-        """Pipeline records should include source columns of the input packet."""
+        """Pipeline records should include source columns of the input data."""
         stream = _make_source_stream([{"id": 0, "x": 10}], source_id="my_source")
         node, db = _make_node(stream)
         node.run()
@@ -388,7 +388,7 @@ class TestPipelineRecordSourceColumns:
         assert len(source_cols) > 0
 
     def test_pipeline_record_excludes_data_columns_of_input(self):
-        """Pipeline records should NOT include data columns of the input packet."""
+        """Pipeline records should NOT include data columns of the input data."""
         stream = _make_source_stream([{"id": 0, "x": 10}])
         node, db = _make_node(stream)
         node.run()
@@ -396,6 +396,6 @@ class TestPipelineRecordSourceColumns:
         pipeline_records = db.get_all_records(node.node_identity_path)
         assert pipeline_records is not None
 
-        # "x" is the input packet data column — should not appear
+        # "x" is the input data data column — should not appear
         assert "x" not in pipeline_records.column_names
         assert "_input_x" not in pipeline_records.column_names

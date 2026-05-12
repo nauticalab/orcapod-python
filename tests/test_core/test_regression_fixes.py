@@ -1,14 +1,14 @@
 """
-Regression tests for bugs fixed in the packet-function-executor-system branch.
+Regression tests for bugs fixed in the data-function-executor-system branch.
 
 Covers:
 1. async_execute output channel closed on exception (try/finally)
-2. PacketFunctionWrapper.direct_call/direct_async_call bypass executor routing
+2. DataFunctionWrapper.direct_call/direct_async_call bypass executor routing
 3. Concurrent iteration falls back to sequential inside a running event loop
 4. FunctionPod.async_execute backpressure bounds pending tasks
 5. _materialize_to_stream preserves source_info provenance tokens
 6. RayExecutor._ensure_ray_initialized uses ray_address
-7. PacketFunctionExecutorProtocol uses PacketFunctionProtocol (not Any)
+7. DataFunctionExecutorProtocol uses DataFunctionProtocol (not Any)
 """
 
 from __future__ import annotations
@@ -21,21 +21,21 @@ import pyarrow as pa
 import pytest
 
 from orcapod.channels import Channel
-from orcapod.core.datagrams import Packet
+from orcapod.core.datagrams import Data
 from orcapod.core.executors import LocalPythonFunctionExecutor, PythonFunctionExecutorBase
 from orcapod.core.function_pod import FunctionPod, FunctionPodStream
-from orcapod.core.operators import SelectPacketColumns
+from orcapod.core.operators import SelectDataColumns
 from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
-from orcapod.core.packet_function import (
-    PacketFunctionWrapper,
-    PythonPacketFunction,
+from orcapod.core.data_function import (
+    DataFunctionWrapper,
+    PythonDataFunction,
 )
 from orcapod.core.sources.dict_source import DictSource
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.protocols.core_protocols import (
-    PacketFunctionExecutorProtocol,
-    PacketFunctionProtocol,
-    PacketProtocol,
+    DataFunctionExecutorProtocol,
+    DataFunctionProtocol,
+    DataProtocol,
 )
 from orcapod.types import NodeConfig
 
@@ -45,7 +45,7 @@ from orcapod.types import NodeConfig
 
 
 def make_stream(n: int = 3) -> ArrowTableStream:
-    """Stream with tag=id, packet=x (ints). Uses nullable=False schema."""
+    """Stream with tag=id, data=x (ints). Uses nullable=False schema."""
     schema = pa.schema(
         [pa.field("id", pa.int64(), nullable=False), pa.field("x", pa.int64(), nullable=False)]
     )
@@ -57,8 +57,8 @@ def make_stream(n: int = 3) -> ArrowTableStream:
 
 
 async def feed_stream_to_channel(stream: ArrowTableStream, ch: Channel) -> None:
-    for tag, packet in stream.iter_packets():
-        await ch.writer.send((tag, packet))
+    for tag, data in stream.iter_data():
+        await ch.writer.send((tag, data))
     await ch.writer.close()
 
 
@@ -77,13 +77,13 @@ class SpyExecutor(PythonFunctionExecutorBase):
 
     def execute(
         self,
-        packet_function: PacketFunctionProtocol,
-        packet: PacketProtocol,
+        data_function: DataFunctionProtocol,
+        data: DataProtocol,
         *,
         logger=None,
-    ) -> PacketProtocol | None:
-        self.calls.append((packet_function, packet))
-        return packet_function.direct_call(packet)
+    ) -> DataProtocol | None:
+        self.calls.append((data_function, data))
+        return data_function.direct_call(data)
 
     def execute_callable(self, fn, kwargs, executor_options=None, *, logger=None):
         self.calls.append((fn, kwargs))
@@ -100,14 +100,14 @@ class TestAsyncExecuteChannelCloseOnError:
 
     @pytest.mark.asyncio
     async def test_unary_operator_closes_channel_on_error(self):
-        """When a packet function raises, process_packet catches the exception
+        """When a data function raises, process_data catches the exception
         and returns (tag, None).  The output channel is closed
         normally and no exception propagates."""
 
         def failing(x: int) -> int:
             raise ValueError("boom")
 
-        pf = PythonPacketFunction(failing, output_keys="result")
+        pf = PythonDataFunction(failing, output_keys="result")
         pod = FunctionPod(pf)
 
         stream = make_stream(3)
@@ -121,7 +121,7 @@ class TestAsyncExecuteChannelCloseOnError:
 
         # The output channel should be closed.
         results = await output_ch.reader.collect()
-        # All packets failed so no results were sent
+        # All data failed so no results were sent
         assert isinstance(results, list)
         assert len(results) == 0
 
@@ -130,9 +130,9 @@ class TestAsyncExecuteChannelCloseOnError:
         """If static_process raises, output channel must still be closed."""
         stream = make_stream(3)
 
-        # SelectPacketColumns with non-existent column will error during
+        # SelectDataColumns with non-existent column will error during
         # static_process. Use a mock operator that raises.
-        op = SelectPacketColumns(columns=["nonexistent_col"])
+        op = SelectDataColumns(columns=["nonexistent_col"])
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -153,7 +153,7 @@ class TestAsyncExecuteChannelCloseOnError:
         Streaming async_execute processes rows individually, so empty input
         simply means zero iterations and a clean close — no error raised.
         """
-        op = SelectPacketColumns(columns=["x"])
+        op = SelectDataColumns(columns=["x"])
 
         input_ch = Channel(buffer_size=4)
         output_ch = Channel(buffer_size=4)
@@ -169,7 +169,7 @@ class TestAsyncExecuteChannelCloseOnError:
 
 
 # ===========================================================================
-# 2. PacketFunctionWrapper.direct_call bypasses executor routing
+# 2. DataFunctionWrapper.direct_call bypasses executor routing
 # ===========================================================================
 
 
@@ -180,22 +180,22 @@ class TestWrapperDirectCallBypassesExecutor:
 
     @staticmethod
     def _make_add_pf_with_spy() -> tuple[
-        PythonPacketFunction, SpyExecutor, PacketFunctionWrapper
+        PythonDataFunction, SpyExecutor, DataFunctionWrapper
     ]:
         def add(x: int, y: int) -> int:
             return x + y
 
         spy = SpyExecutor()
-        inner_pf = PythonPacketFunction(add, output_keys="result")
+        inner_pf = PythonDataFunction(add, output_keys="result")
         inner_pf.executor = spy
-        wrapper = PacketFunctionWrapper(inner_pf, version="v0.0")
+        wrapper = DataFunctionWrapper(inner_pf, version="v0.0")
         return inner_pf, spy, wrapper
 
     def test_direct_call_does_not_invoke_executor(self):
         _, spy, wrapper = self._make_add_pf_with_spy()
 
-        packet = Packet({"x": 3, "y": 4})
-        result = wrapper.direct_call(packet)
+        data = Data({"x": 3, "y": 4})
+        result = wrapper.direct_call(data)
 
         assert result is not None
         assert result.as_dict()["result"] == 7
@@ -206,8 +206,8 @@ class TestWrapperDirectCallBypassesExecutor:
     async def test_direct_async_call_does_not_invoke_executor(self):
         _, spy, wrapper = self._make_add_pf_with_spy()
 
-        packet = Packet({"x": 3, "y": 4})
-        result = await wrapper.direct_async_call(packet)
+        data = Data({"x": 3, "y": 4})
+        result = await wrapper.direct_async_call(data)
 
         assert result is not None
         assert result.as_dict()["result"] == 7
@@ -217,8 +217,8 @@ class TestWrapperDirectCallBypassesExecutor:
         """Sanity check: regular call() should still route through executor."""
         _, spy, wrapper = self._make_add_pf_with_spy()
 
-        packet = Packet({"x": 3, "y": 4})
-        result = wrapper.call(packet)
+        data = Data({"x": 3, "y": 4})
+        result = wrapper.call(data)
 
         assert result is not None
         assert result.as_dict()["result"] == 7
@@ -231,16 +231,16 @@ class TestWrapperDirectCallBypassesExecutor:
 
 
 class TestConcurrentFallbackInRunningLoop:
-    """_iter_packets_concurrent must not crash when called from inside
+    """_iter_data_concurrent must not crash when called from inside
     an already-running asyncio event loop — should fall back to sequential
-    process_packet calls."""
+    process_data calls."""
 
     @staticmethod
     def _make_concurrent_stream() -> tuple[FunctionPodStream, FunctionPod]:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result")
+        pf = PythonDataFunction(double, output_keys="result")
         # Attach an executor that reports concurrent support
         executor = LocalPythonFunctionExecutor()
         pf.executor = executor
@@ -268,7 +268,7 @@ class TestConcurrentFallbackInRunningLoop:
         """When called from async code, should fall back to sequential
         execution instead of raising RuntimeError."""
         pod_stream, _ = self._make_concurrent_stream()
-        results = list(pod_stream.iter_packets())
+        results = list(pod_stream.iter_data())
 
         assert len(results) == 3
         values = sorted(pkt.as_dict()["result"] for _, pkt in results)
@@ -278,7 +278,7 @@ class TestConcurrentFallbackInRunningLoop:
         """When there is no running event loop, it should use asyncio.run
         (concurrent path)."""
         pod_stream, _ = self._make_concurrent_stream()
-        results = list(pod_stream.iter_packets())
+        results = list(pod_stream.iter_data())
 
         assert len(results) == 3
         values = sorted(pkt.as_dict()["result"] for _, pkt in results)
@@ -310,20 +310,20 @@ class TestAsyncExecuteBackpressure:
         def double(x: int) -> int:
             return x * 2
 
-        # Build a PythonPacketFunction that uses our async-aware tracker.
+        # Build a PythonDataFunction that uses our async-aware tracker.
         # We override async_call to directly call our async function.
-        pf = PythonPacketFunction(double, output_keys="result")
+        pf = PythonDataFunction(double, output_keys="result")
 
         # Patch async_call to use our concurrency-tracking function
         original_async_call = pf.async_call
 
-        async def tracked_async_call(packet: PacketProtocol, **kwargs):
+        async def tracked_async_call(data: DataProtocol, **kwargs):
             nonlocal concurrent_count, max_concurrent
             concurrent_count += 1
             max_concurrent = max(max_concurrent, concurrent_count)
             await asyncio.sleep(0.01)
             concurrent_count -= 1
-            return await original_async_call(packet, **kwargs)
+            return await original_async_call(data, **kwargs)
 
         pf.async_call = tracked_async_call  # type: ignore
 
@@ -353,7 +353,7 @@ class TestMaterializePreservesSourceInfo:
     rather than replacing them with None."""
 
     def test_source_info_preserved_through_round_trip(self):
-        """Packets with source_info should retain their provenance tokens
+        """Datas with source_info should retain their provenance tokens
         after being materialized into a stream and back."""
         source = DictSource(
             data=[
@@ -363,17 +363,17 @@ class TestMaterializePreservesSourceInfo:
             tag_columns=["id"],
         )
 
-        rows = list(source.iter_packets())
+        rows = list(source.iter_data())
         rebuilt = StaticOutputOperatorPod._materialize_to_stream(rows)
 
-        # The original packets should have non-None source_info
+        # The original data should have non-None source_info
         original_source_info = rows[0][1].source_info()
         assert any(v is not None for v in original_source_info.values()), (
-            "Test setup: original packets should have source_info tokens"
+            "Test setup: original data should have source_info tokens"
         )
 
-        # The rebuilt stream's packets should also have non-None source_info.
-        rebuilt_rows = list(rebuilt.iter_packets())
+        # The rebuilt stream's data should also have non-None source_info.
+        rebuilt_rows = list(rebuilt.iter_data())
         for _, rebuilt_pkt in rebuilt_rows:
             for key, val in rebuilt_pkt.source_info().items():
                 orig_val = original_source_info.get(key)
@@ -391,7 +391,7 @@ class TestMaterializePreservesSourceInfo:
             ],
             tag_columns=["id"],
         )
-        rows = list(source.iter_packets())
+        rows = list(source.iter_data())
 
         rebuilt = StaticOutputOperatorPod._materialize_to_stream(rows)
         rebuilt_table = rebuilt.as_table(all_info=True)
@@ -706,7 +706,7 @@ class TestRayExecutorInitialization:
 
 
 # ===========================================================================
-# 7. PacketFunctionExecutorProtocol type safety
+# 7. DataFunctionExecutorProtocol type safety
 # ===========================================================================
 
 

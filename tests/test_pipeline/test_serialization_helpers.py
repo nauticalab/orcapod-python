@@ -8,7 +8,7 @@ import pytest
 from orcapod.pipeline.serialization import (
     DATABASE_REGISTRY,
     OPERATOR_REGISTRY,
-    PACKET_FUNCTION_REGISTRY,
+    DATA_FUNCTION_REGISTRY,
     SOURCE_REGISTRY,
     DatabaseRegistry,
     LoadStatus,
@@ -141,8 +141,8 @@ class TestRegistries:
         assert "Batch" in OPERATOR_REGISTRY
         assert "SelectTagColumns" in OPERATOR_REGISTRY
 
-    def test_packet_function_registry(self):
-        assert "python.function.v0" in PACKET_FUNCTION_REGISTRY
+    def test_data_function_registry(self):
+        assert "python.function.v0" in DATA_FUNCTION_REGISTRY
 
 
 class TestLoadStatus:
@@ -399,56 +399,56 @@ class TestSchemaRoundTrip:
 
 
 # ---------------------------------------------------------------------------
-# PacketFunction proxy fallback
+# DataFunction proxy fallback
 # ---------------------------------------------------------------------------
 
 
-class TestResolvePacketFunctionFallbackToProxy:
-    """resolve_packet_function_from_config with fallback_to_proxy."""
+class TestResolveDataFunctionFallbackToProxy:
+    """resolve_data_function_from_config with fallback_to_proxy."""
 
-    def test_resolve_packet_function_fallback_to_proxy(self):
-        from orcapod.core.packet_function_proxy import PacketFunctionProxy
-        from orcapod.pipeline.serialization import resolve_packet_function_from_config
+    def test_resolve_data_function_fallback_to_proxy(self):
+        from orcapod.core.data_function_proxy import DataFunctionProxy
+        from orcapod.pipeline.serialization import resolve_data_function_from_config
 
         config = {
-            "packet_function_type_id": "python.function.v0",
+            "data_function_type_id": "python.function.v0",
             "config": {
                 "module_path": "nonexistent.module.that.does.not.exist",
                 "callable_name": "some_func",
                 "version": "v1.0",
-                "input_packet_schema": {"x": "int64"},
-                "output_packet_schema": {"y": "float64"},
+                "input_data_schema": {"x": "int64"},
+                "output_data_schema": {"y": "float64"},
                 "output_keys": ["y"],
             },
         }
         # Without fallback, should raise ImportError/ModuleNotFoundError
         with pytest.raises((ImportError, ModuleNotFoundError)):
-            resolve_packet_function_from_config(config)
+            resolve_data_function_from_config(config)
 
         # With fallback, should return proxy
-        result = resolve_packet_function_from_config(config, fallback_to_proxy=True)
-        assert isinstance(result, PacketFunctionProxy)
+        result = resolve_data_function_from_config(config, fallback_to_proxy=True)
+        assert isinstance(result, DataFunctionProxy)
         assert result.canonical_function_name == "some_func"
 
     def test_unknown_type_id_fallback(self):
-        from orcapod.core.packet_function_proxy import PacketFunctionProxy
-        from orcapod.pipeline.serialization import resolve_packet_function_from_config
+        from orcapod.core.data_function_proxy import DataFunctionProxy
+        from orcapod.pipeline.serialization import resolve_data_function_from_config
 
         config = {
-            "packet_function_type_id": "unknown.type.v99",
+            "data_function_type_id": "unknown.type.v99",
             "config": {
                 "callable_name": "mystery",
                 "version": "v1.0",
-                "input_packet_schema": {"a": "int64"},
-                "output_packet_schema": {"b": "int64"},
+                "input_data_schema": {"a": "int64"},
+                "output_data_schema": {"b": "int64"},
                 "output_keys": ["b"],
             },
         }
-        with pytest.raises(ValueError, match="Unknown packet function type"):
-            resolve_packet_function_from_config(config)
+        with pytest.raises(ValueError, match="Unknown data function type"):
+            resolve_data_function_from_config(config)
 
-        result = resolve_packet_function_from_config(config, fallback_to_proxy=True)
-        assert isinstance(result, PacketFunctionProxy)
+        result = resolve_data_function_from_config(config, fallback_to_proxy=True)
+        assert isinstance(result, DataFunctionProxy)
         assert result.canonical_function_name == "mystery"
 
 
@@ -462,19 +462,19 @@ class TestFunctionPodFromConfigFallbackToProxy:
 
     def test_function_pod_from_config_fallback_to_proxy(self):
         from orcapod.core.function_pod import FunctionPod
-        from orcapod.core.packet_function_proxy import PacketFunctionProxy
+        from orcapod.core.data_function_proxy import DataFunctionProxy
 
         config = {
             "uri": ["some_func", "hash123", "v1", "python.function.v0"],
-            "packet_function": {
-                "packet_function_type_id": "python.function.v0",
+            "data_function": {
+                "data_function_type_id": "python.function.v0",
                 "uri": ["some_func", "hash123", "v1", "python.function.v0"],
                 "config": {
                     "module_path": "nonexistent.module",
                     "callable_name": "some_func",
                     "version": "v1.0",
-                    "input_packet_schema": {"x": "int64"},
-                    "output_packet_schema": {"y": "float64"},
+                    "input_data_schema": {"x": "int64"},
+                    "output_data_schema": {"y": "float64"},
                     "output_keys": ["y"],
                 },
             },
@@ -485,10 +485,10 @@ class TestFunctionPodFromConfigFallbackToProxy:
             FunctionPod.from_config(config)
 
         pod = FunctionPod.from_config(config, fallback_to_proxy=True)
-        assert isinstance(pod.packet_function, PacketFunctionProxy)
-        assert pod.packet_function.canonical_function_name == "some_func"
-        # URI comes from the packet function config
-        assert pod.packet_function.uri == (
+        assert isinstance(pod.data_function, DataFunctionProxy)
+        assert pod.data_function.canonical_function_name == "some_func"
+        # URI comes from the data function config
+        assert pod.data_function.uri == (
             "some_func",
             "hash123",
             "v1",
@@ -583,7 +583,7 @@ def test_cached_source_to_config_no_identity_fields():
     inner = DictSource([{"x": 1}], source_id="s")
     src = CachedSource(source=inner, cache_database=db, cache_path_prefix=("cache",))
     config = src.to_config()
-    for field in ("content_hash", "pipeline_hash", "tag_schema", "packet_schema"):
+    for field in ("content_hash", "pipeline_hash", "tag_schema", "data_schema"):
         assert field not in config, f"Identity field {field!r} must not be in source_config"
 
 
@@ -695,7 +695,7 @@ def test_source_proxy_from_node_descriptor_fields():
         "pipeline_hash": "semantic_v0.1:def456",
         "output_schema": {
             "tag": {"x": "int64"},
-            "packet": {"result": "int64"},
+            "data": {"result": "int64"},
         },
     }
     proxy = _source_proxy_from_config(source_config, node_descriptor=node_descriptor)
@@ -712,7 +712,7 @@ def test_source_proxy_from_config_backward_compat():
         "content_hash": "semantic_v0.1:abc123",
         "pipeline_hash": "semantic_v0.1:def456",
         "tag_schema": {"x": "int64"},
-        "packet_schema": {"result": "int64"},
+        "data_schema": {"result": "int64"},
     }
     proxy = _source_proxy_from_config(source_config)
     assert proxy.content_hash().to_string() == "semantic_v0.1:abc123"
@@ -728,7 +728,7 @@ def test_function_node_has_node_uri():
 
     from orcapod.core.function_pod import FunctionPod
     from orcapod.core.nodes import FunctionNode
-    from orcapod.core.packet_function import PythonPacketFunction
+    from orcapod.core.data_function import PythonDataFunction
     from orcapod.core.sources import ArrowTableSource
     from orcapod.pipeline import Pipeline
 
@@ -739,8 +739,8 @@ def test_function_node_has_node_uri():
 
     table = pa.table({"id": pa.array(["a", "b"], type=pa.large_string()), "x": pa.array([1, 2], type=pa.int64())})
     source = ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
-    pf = PythonPacketFunction(add_one, output_keys="result")
-    pod = FunctionPod(packet_function=pf)
+    pf = PythonDataFunction(add_one, output_keys="result")
+    pod = FunctionPod(data_function=pf)
 
     pipeline = Pipeline(name="test", pipeline_database=db)
     with pipeline:
@@ -765,7 +765,7 @@ def test_function_node_stored_node_uri_from_descriptor():
         "pipeline_hash": "semantic_v0.1:def",
         "table_scope": "pipeline_hash",
         "node_uri": ["add_one", "v0", "python.function.v0", "schema_repr"],
-        "output_schema": {"tag": {"x": "int64"}, "packet": {"result": "int64"}},
+        "output_schema": {"tag": {"x": "int64"}, "data": {"result": "int64"}},
         "data_context_key": "std:v0.1:default",
     }
     node = FunctionNode.from_descriptor(descriptor, function_pod=None, input_stream=None, databases={})

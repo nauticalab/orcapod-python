@@ -2,9 +2,9 @@
 
 Defines:
 
-* ``PacketExecutionLoggerProtocol`` — receives captured I/O from a single
-  packet execution and persists it to a configured sink.
-* ``ExecutionObserverProtocol`` — lifecycle hooks for pipeline/node/packet
+* ``DataExecutionLoggerProtocol`` — receives captured I/O from a single
+  data execution and persists it to a configured sink.
+* ``ExecutionObserverProtocol`` — lifecycle hooks for pipeline/node/data
   events, plus a factory method for creating context-bound loggers.
 
 Both follow the same runtime-checkable Protocol pattern used throughout the
@@ -15,16 +15,16 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-from orcapod.protocols.core_protocols import PacketProtocol, TagProtocol
+from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
 from orcapod.types import SchemaLike
 
 
 @runtime_checkable
-class PacketExecutionLoggerProtocol(Protocol):
+class DataExecutionLoggerProtocol(Protocol):
     """Receives captured execution output and persists it.
 
-    A logger is *bound* to a specific packet execution context (node, tag,
-    packet) when created by the Observer.  It knows the destination (e.g. a
+    A logger is *bound* to a specific data execution context (node, tag,
+    data) when created by the Observer.  It knows the destination (e.g. a
     Delta Lake table) but does not know how the logs were collected — that is
     the executor's responsibility.
 
@@ -36,7 +36,7 @@ class PacketExecutionLoggerProtocol(Protocol):
     def record(self, **kwargs: Any) -> None:
         """Persist captured execution output.
 
-        Called after every packet execution (success or failure), except for
+        Called after every data execution (success or failure), except for
         cache hits when ``log_cache_hits=False`` (the default).
 
         Args:
@@ -52,10 +52,10 @@ class ExecutionObserverProtocol(Protocol):
     """Observer protocol for pipeline execution lifecycle events.
 
     Instantiated once outside the pipeline and injected into the orchestrator.
-    Provides hooks for lifecycle events at the run, node, and packet level, and
+    Provides hooks for lifecycle events at the run, node, and data level, and
     acts as a factory for context-specific loggers.
 
-    ``on_packet_start`` / ``on_packet_end`` / ``on_packet_crash`` are invoked
+    ``on_data_start`` / ``on_data_end`` / ``on_data_crash`` are invoked
     only for function nodes.  ``on_node_start`` / ``on_node_end`` are invoked
     for all node types.
 
@@ -118,7 +118,7 @@ class ExecutionObserverProtocol(Protocol):
         node_hash: str,
         tag_schema: SchemaLike | None = None,
     ) -> None:
-        """Called before a node begins processing its packets.
+        """Called before a node begins processing its data.
 
         Args:
             node_label: Human-readable label of the node.
@@ -133,7 +133,7 @@ class ExecutionObserverProtocol(Protocol):
         node_label: str,
         node_hash: str,
     ) -> None:
-        """Called after a node finishes processing all packets.
+        """Called after a node finishes processing all data.
 
         Args:
             node_label: Human-readable label of the node.
@@ -141,24 +141,24 @@ class ExecutionObserverProtocol(Protocol):
         """
         ...
 
-    def on_packet_start(
+    def on_data_start(
         self,
         node_label: str,
         tag: TagProtocol,
-        packet: PacketProtocol,
+        data: DataProtocol,
     ) -> None:
-        """Called before a packet is processed by a function node."""
+        """Called before a data is processed by a function node."""
         ...
 
-    def on_packet_end(
+    def on_data_end(
         self,
         node_label: str,
         tag: TagProtocol,
-        input_packet: PacketProtocol,
-        output_packet: PacketProtocol | None,
+        input_data: DataProtocol,
+        output_data: DataProtocol | None,
         cached: bool,
     ) -> None:
-        """Called after a packet is successfully processed (or served from cache).
+        """Called after a data is successfully processed (or served from cache).
 
         Args:
             cached: ``True`` when the result came from a database cache and
@@ -166,34 +166,34 @@ class ExecutionObserverProtocol(Protocol):
         """
         ...
 
-    def on_packet_crash(
+    def on_data_crash(
         self,
         node_label: str,
         tag: TagProtocol,
-        packet: PacketProtocol,
+        data: DataProtocol,
         error: Exception,
     ) -> None:
-        """Called when a packet's execution fails.
+        """Called when a data's execution fails.
 
         Covers both user-function exceptions (captured on the worker) and
         system-level crashes (e.g. ``WorkerCrashedError`` from Ray).  The
-        pipeline continues processing remaining packets rather than aborting.
+        pipeline continues processing remaining data rather than aborting.
         """
         ...
 
-    def create_packet_logger(
+    def create_data_logger(
         self,
         tag: TagProtocol,
-        packet: PacketProtocol,
-    ) -> PacketExecutionLoggerProtocol:
-        """Create a context-bound logger for a single packet execution.
+        data: DataProtocol,
+    ) -> DataExecutionLoggerProtocol:
+        """Create a context-bound logger for a single data execution.
 
         The returned logger is pre-stamped with the node label, run ID, and
-        packet identity so every ``record()`` call writes the correct context
+        data identity so every ``record()`` call writes the correct context
         without the executor needing to know anything about the pipeline.
 
         Args:
-            tag: The tag for the packet being processed.
-            packet: The input packet being processed.
+            tag: The tag for the data being processed.
+            data: The input data being processed.
         """
         ...

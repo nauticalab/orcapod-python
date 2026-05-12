@@ -16,7 +16,7 @@ class TestSourceNodeFromDescriptor:
             source_id="test",
         )
         node = SourceNode(stream=source, label="my_source")
-        tag_schema, packet_schema = node.output_schema()
+        tag_schema, data_schema = node.output_schema()
         descriptor = {
             "node_type": "source",
             "label": "my_source",
@@ -25,7 +25,7 @@ class TestSourceNodeFromDescriptor:
             "data_context_key": node.data_context_key,
             "output_schema": {
                 "tag": {k: str(v) for k, v in tag_schema.items()},
-                "packet": {k: str(v) for k, v in packet_schema.items()},
+                "data": {k: str(v) for k, v in data_schema.items()},
             },
             "stream_type": "dict",
             "source_id": "test",
@@ -60,29 +60,29 @@ class TestSourceNodeFromDescriptor:
             stream=None,
             databases={},
         )
-        tag_schema, packet_schema = loaded.output_schema()
+        tag_schema, data_schema = loaded.output_schema()
         assert set(tag_schema.keys()) == set(descriptor["output_schema"]["tag"].keys())
-        assert set(packet_schema.keys()) == set(
-            descriptor["output_schema"]["packet"].keys()
+        assert set(data_schema.keys()) == set(
+            descriptor["output_schema"]["data"].keys()
         )
 
     def test_from_descriptor_full_mode_delegates_to_stream(self):
-        """Full-mode node should delegate output_schema, iter_packets, as_table to stream."""
+        """Full-mode node should delegate output_schema, iter_data, as_table to stream."""
         source, _, descriptor = self._make_source_and_descriptor()
         loaded = SourceNode.from_descriptor(
             descriptor=descriptor,
             stream=source,
             databases={},
         )
-        tag_schema, packet_schema = loaded.output_schema()
+        tag_schema, data_schema = loaded.output_schema()
         assert "a" in tag_schema
-        assert "b" in packet_schema
-        # iter_packets should work
-        packets = list(loaded.iter_packets())
-        assert len(packets) == 2
+        assert "b" in data_schema
+        # iter_data should work
+        data = list(loaded.iter_data())
+        assert len(data) == 2
 
-    def test_from_descriptor_read_only_iter_packets_raises(self):
-        """Read-only node should raise when iter_packets is called."""
+    def test_from_descriptor_read_only_iter_data_raises(self):
+        """Read-only node should raise when iter_data is called."""
         _, _, descriptor = self._make_source_and_descriptor()
         loaded = SourceNode.from_descriptor(
             descriptor=descriptor,
@@ -90,7 +90,7 @@ class TestSourceNodeFromDescriptor:
             databases={},
         )
         with pytest.raises(RuntimeError, match="read-only mode"):
-            list(loaded.iter_packets())
+            list(loaded.iter_data())
 
     def test_from_descriptor_read_only_as_table_raises(self):
         """Read-only node should raise when as_table is called."""
@@ -117,7 +117,7 @@ class TestSourceNodeFromDescriptor:
 
 from orcapod.core.nodes.function_node import FunctionNode
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 
 
 def _sample_func(b: int) -> dict[str, int]:
@@ -131,8 +131,8 @@ class TestFunctionNodeFromDescriptor:
             tag_columns=["a"],
             source_id="test",
         )
-        pf = PythonPacketFunction(function=_sample_func, output_keys=["result"])
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(function=_sample_func, output_keys=["result"])
+        pod = FunctionPod(data_function=pf)
         db = InMemoryArrowDatabase()
         scoped_db = db.at("test_pipeline")
         node = FunctionNode(
@@ -140,7 +140,7 @@ class TestFunctionNodeFromDescriptor:
             input_stream=source,
             pipeline_database=scoped_db,
         )
-        tag_schema, packet_schema = node.output_schema()
+        tag_schema, data_schema = node.output_schema()
         descriptor = {
             "node_type": "function",
             "label": None,
@@ -150,7 +150,7 @@ class TestFunctionNodeFromDescriptor:
             "table_scope": node._table_scope,
             "output_schema": {
                 "tag": {k: str(v) for k, v in tag_schema.items()},
-                "packet": {k: str(v) for k, v in packet_schema.items()},
+                "data": {k: str(v) for k, v in data_schema.items()},
             },
             "function_pod": pod.to_config(),
             "pipeline_path": list(node.node_identity_path),
@@ -165,8 +165,8 @@ class TestFunctionNodeFromDescriptor:
             tag_columns=["a"],
             source_id="test",
         )
-        pf = PythonPacketFunction(function=_sample_func, output_keys=["result"])
-        pod = FunctionPod(packet_function=pf)
+        pf = PythonDataFunction(function=_sample_func, output_keys=["result"])
+        pod = FunctionPod(data_function=pf)
         loaded = FunctionNode.from_descriptor(
             descriptor=descriptor,
             function_pod=pod,
@@ -202,7 +202,7 @@ class TestOperatorNodeFromDescriptor:
             "table_scope": "pipeline_hash",
             "output_schema": {
                 "tag": {"a": "int64"},
-                "packet": {"b": "int64", "c": "int64"},
+                "data": {"b": "int64", "c": "int64"},
             },
             "operator": {
                 "class_name": "Join",
@@ -241,7 +241,7 @@ class TestOperatorNodeFromDescriptor:
             "table_scope": node._table_scope,
             "output_schema": {
                 "tag": {"a": "int64"},
-                "packet": {"b": "int64", "c": "int64"},
+                "data": {"b": "int64", "c": "int64"},
             },
             "operator": op.to_config(),
             "cache_mode": "OFF",

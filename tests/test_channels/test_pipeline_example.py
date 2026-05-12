@@ -31,7 +31,7 @@ import pytest
 from orcapod.channels import Channel
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import Join, PolarsFilter
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.types import NodeConfig, PipelineConfig
 
@@ -92,7 +92,7 @@ def make_grades() -> ArrowTableStream:
 
 
 # The expected output: only students with score >= 70, with letter grades.
-# FunctionPod replaces the packet with the function's output only.
+# FunctionPod replaces the data with the function's output only.
 EXPECTED = {
     "s1": "A",
     "s2": "B",
@@ -120,17 +120,17 @@ class TestSynchronousPipeline:
         passing = PolarsFilter(predicates=(pl.col("score") >= 70,))(joined)
 
         # Step 3: Compute letter grade
-        grade_pf = PythonPacketFunction(
+        grade_pf = PythonDataFunction(
             compute_letter_grade, output_keys="letter_grade"
         )
         grade_pod = FunctionPod(grade_pf)
         with_grades = grade_pod.process(passing)
 
-        # --- Execute (pull-based: iter_packets triggers computation) ---
+        # --- Execute (pull-based: iter_data triggers computation) ---
         results = {}
-        for tag, packet in with_grades.iter_packets():
+        for tag, data in with_grades.iter_data():
             sid = tag.as_dict()["student_id"]
-            results[sid] = packet.as_dict()["letter_grade"]
+            results[sid] = data.as_dict()["letter_grade"]
 
         # --- Verify ---
         assert results == EXPECTED
@@ -142,7 +142,7 @@ class TestSynchronousPipeline:
         joined = Join()(students, grades)
         passing = PolarsFilter(predicates=(pl.col("score") >= 70,))(joined)
 
-        grade_pf = PythonPacketFunction(
+        grade_pf = PythonDataFunction(
             compute_letter_grade, output_keys="letter_grade"
         )
         with_grades = FunctionPod(grade_pf).process(passing)
@@ -167,7 +167,7 @@ class TestAsynchronousPipeline:
         join_op = Join()
         filter_op = PolarsFilter(predicates=(pl.col("score") >= 70,))
         grade_pod = FunctionPod(
-            PythonPacketFunction(compute_letter_grade, output_keys="letter_grade")
+            PythonDataFunction(compute_letter_grade, output_keys="letter_grade")
         )
 
         # --- Create channels for each edge in the DAG ---
@@ -179,8 +179,8 @@ class TestAsynchronousPipeline:
 
         # --- Source tasks push data into channels ---
         async def push_source(stream: ArrowTableStream, ch: Channel):
-            for tag, packet in stream.iter_packets():
-                await ch.writer.send((tag, packet))
+            for tag, data in stream.iter_data():
+                await ch.writer.send((tag, data))
             await ch.writer.close()
 
         # --- Run all stages concurrently via TaskGroup ---
@@ -205,7 +205,7 @@ class TestAsynchronousPipeline:
                 )
             )
 
-            # Function pod (streaming: processes packets as they arrive)
+            # Function pod (streaming: processes data as they arrive)
             tg.create_task(
                 grade_pod.async_execute(
                     [ch_filtered.reader],
@@ -217,9 +217,9 @@ class TestAsynchronousPipeline:
         output_rows = await ch_output.reader.collect()
 
         results = {}
-        for tag, packet in output_rows:
+        for tag, data in output_rows:
             sid = tag.as_dict()["student_id"]
-            results[sid] = packet.as_dict()["letter_grade"]
+            results[sid] = data.as_dict()["letter_grade"]
 
         assert results == EXPECTED
 
@@ -229,7 +229,7 @@ class TestAsynchronousPipeline:
         join_op = Join()
         filter_op = PolarsFilter(predicates=(pl.col("score") >= 70,))
         grade_pod = FunctionPod(
-            PythonPacketFunction(compute_letter_grade, output_keys="letter_grade"),
+            PythonDataFunction(compute_letter_grade, output_keys="letter_grade"),
             node_config=NodeConfig(max_concurrency=1),
         )
 
@@ -240,8 +240,8 @@ class TestAsynchronousPipeline:
         ch_output = Channel(buffer_size=16)
 
         async def push_source(stream, ch):
-            for tag, packet in stream.iter_packets():
-                await ch.writer.send((tag, packet))
+            for tag, data in stream.iter_data():
+                await ch.writer.send((tag, data))
             await ch.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -269,8 +269,8 @@ class TestAsynchronousPipeline:
 
         output_rows = await ch_output.reader.collect()
         results = {
-            tag.as_dict()["student_id"]: packet.as_dict()["letter_grade"]
-            for tag, packet in output_rows
+            tag.as_dict()["student_id"]: data.as_dict()["letter_grade"]
+            for tag, data in output_rows
         }
         assert results == EXPECTED
 
@@ -289,20 +289,20 @@ class TestSyncAsyncEquivalence:
         joined = Join()(students, grades)
         passing = PolarsFilter(predicates=(pl.col("score") >= 70,))(joined)
         grade_pod = FunctionPod(
-            PythonPacketFunction(compute_letter_grade, output_keys="letter_grade")
+            PythonDataFunction(compute_letter_grade, output_keys="letter_grade")
         )
         with_grades = grade_pod.process(passing)
 
         return {
-            tag.as_dict()["student_id"]: packet.as_dict()["letter_grade"]
-            for tag, packet in with_grades.iter_packets()
+            tag.as_dict()["student_id"]: data.as_dict()["letter_grade"]
+            for tag, data in with_grades.iter_data()
         }
 
     async def _run_async(self) -> dict[str, str]:
         join_op = Join()
         filter_op = PolarsFilter(predicates=(pl.col("score") >= 70,))
         grade_pod = FunctionPod(
-            PythonPacketFunction(compute_letter_grade, output_keys="letter_grade")
+            PythonDataFunction(compute_letter_grade, output_keys="letter_grade")
         )
 
         ch_s = Channel(buffer_size=16)
@@ -312,8 +312,8 @@ class TestSyncAsyncEquivalence:
         ch_o = Channel(buffer_size=16)
 
         async def push(stream, ch):
-            for tag, packet in stream.iter_packets():
-                await ch.writer.send((tag, packet))
+            for tag, data in stream.iter_data():
+                await ch.writer.send((tag, data))
             await ch.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -326,8 +326,8 @@ class TestSyncAsyncEquivalence:
             tg.create_task(grade_pod.async_execute([ch_f.reader], ch_o.writer))
 
         return {
-            tag.as_dict()["student_id"]: packet.as_dict()["letter_grade"]
-            for tag, packet in await ch_o.reader.collect()
+            tag.as_dict()["student_id"]: data.as_dict()["letter_grade"]
+            for tag, data in await ch_o.reader.collect()
         }
 
     @pytest.mark.asyncio

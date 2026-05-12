@@ -30,11 +30,11 @@ test-objective/
 │   ├── test_types.py                  # Schema, ColumnConfig, ContentHash
 │   ├── test_datagram.py               # Datagram core behavior
 │   ├── test_tag.py                    # Tag (system tags, ColumnConfig filtering)
-│   ├── test_packet.py                 # Packet (source info, provenance)
+│   ├── test_data.py                 # Data (source info, provenance)
 │   ├── test_stream.py                 # ArrowTableStream construction & iteration
 │   ├── test_sources.py                # All source types + error conditions
 │   ├── test_source_registry.py        # SourceRegistry CRUD + edge cases
-│   ├── test_packet_function.py        # PythonPacketFunction + CachedPacketFunction
+│   ├── test_data_function.py        # PythonDataFunction + CachedDataFunction
 │   ├── test_function_pod.py           # FunctionPod, FunctionPodStream
 │   ├── test_operators.py              # All operators (Join, MergeJoin, SemiJoin, etc.)
 │   ├── test_nodes.py                  # FunctionNode, OperatorNode, Persistent variants
@@ -170,41 +170,41 @@ test-objective/
 - `test_tag_as_datagram_conversion` — as_datagram() returns Datagram (not Tag)
 - `test_tag_system_tags_method_returns_copy` — system_tags() returns dict copy, not reference
 
-### 4. `test_packet.py` — Packet
+### 4. `test_data.py` — Data
 
-- `test_packet_construction_with_source_info` — source_info stored per data column
-- `test_packet_source_info_excluded_from_default_keys` — keys() doesn't show _source_ columns
-- `test_packet_source_info_included_with_column_config` — keys(columns={"source": True})
-- `test_packet_with_source_info_returns_new` — immutable update
-- `test_packet_rename_updates_source_info_keys` — rename() also renames source_info keys
-- `test_packet_with_columns_adds_source_info_entry` — new columns get source_info=None
-- `test_packet_as_datagram_conversion` — as_datagram() returns Datagram
-- `test_packet_as_dict_excludes_source_columns_by_default`
-- `test_packet_as_dict_all_info_includes_source_columns`
-- `test_packet_copy_preserves_source_info`
+- `test_data_construction_with_source_info` — source_info stored per data column
+- `test_data_source_info_excluded_from_default_keys` — keys() doesn't show _source_ columns
+- `test_data_source_info_included_with_column_config` — keys(columns={"source": True})
+- `test_data_with_source_info_returns_new` — immutable update
+- `test_data_rename_updates_source_info_keys` — rename() also renames source_info keys
+- `test_data_with_columns_adds_source_info_entry` — new columns get source_info=None
+- `test_data_as_datagram_conversion` — as_datagram() returns Datagram
+- `test_data_as_dict_excludes_source_columns_by_default`
+- `test_data_as_dict_all_info_includes_source_columns`
+- `test_data_copy_preserves_source_info`
 
 ### 5. `test_stream.py` — ArrowTableStream
 
 **Construction:**
-- `test_stream_from_table_with_tag_columns` — tag/packet column separation
-- `test_stream_requires_at_least_one_packet_column` — ValueError if no packet columns
+- `test_stream_from_table_with_tag_columns` — tag/data column separation
+- `test_stream_requires_at_least_one_data_column` — ValueError if no data columns
 - `test_stream_with_system_tag_columns` — system tag columns tracked
-- `test_stream_with_source_info` — source info attached to packet columns
+- `test_stream_with_source_info` — source info attached to data columns
 - `test_stream_with_producer` — producer property set
 - `test_stream_with_upstreams` — upstreams tuple set
 
 **Schema & Keys:**
-- `test_stream_keys_returns_tag_and_packet_keys` — tuple of (tag_keys, packet_keys)
-- `test_stream_output_schema_returns_two_schemas` — (tag_schema, packet_schema)
+- `test_stream_keys_returns_tag_and_data_keys` — tuple of (tag_keys, data_keys)
+- `test_stream_output_schema_returns_two_schemas` — (tag_schema, data_schema)
 - `test_stream_schema_matches_actual_data` — output_schema() types match as_table() types
 - `test_stream_keys_with_column_config` — ColumnConfig filtering works
 
 **Iteration:**
-- `test_stream_iter_packets_yields_tag_packet_pairs` — each yield is (Tag, Packet)
-- `test_stream_iter_packets_count_matches_rows` — number of yields = number of rows
-- `test_stream_iter_packets_tag_keys_correct` — tag column names match
-- `test_stream_iter_packets_packet_keys_correct` — packet column names match
-- `test_stream_as_table_matches_iter_packets` — table materialization consistent with iteration
+- `test_stream_iter_data_yields_tag_data_pairs` — each yield is (Tag, Data)
+- `test_stream_iter_data_count_matches_rows` — number of yields = number of rows
+- `test_stream_iter_data_tag_keys_correct` — tag column names match
+- `test_stream_iter_data_data_keys_correct` — data column names match
+- `test_stream_as_table_matches_iter_data` — table materialization consistent with iteration
 
 **Immutability:**
 - `test_stream_immutable` — no mutation methods available
@@ -227,8 +227,8 @@ test-objective/
 - `test_arrow_source_upstreams_empty` — root sources have no upstreams
 - `test_arrow_source_resolve_field_by_record_id` — resolves field value
 - `test_arrow_source_resolve_field_missing_raises` — FieldNotResolvableError
-- `test_arrow_source_pipeline_identity_structure` — returns (tag_schema, packet_schema)
-- `test_arrow_source_iter_packets_yields_correct_pairs`
+- `test_arrow_source_pipeline_identity_structure` — returns (tag_schema, data_schema)
+- `test_arrow_source_iter_data_yields_correct_pairs`
 - `test_arrow_source_as_table_has_all_columns`
 
 **DictSource:**
@@ -271,14 +271,14 @@ test-objective/
 - `test_registry_clear` — removes all entries
 - `test_registry_list_ids` — returns list of registered IDs
 
-### 8. `test_packet_function.py` — PythonPacketFunction, CachedPacketFunction
+### 8. `test_data_function.py` — PythonDataFunction, CachedDataFunction
 
-**PythonPacketFunction:**
+**PythonDataFunction:**
 - `test_pf_from_simple_function` — wraps a function with explicit output_keys
-- `test_pf_infers_input_schema_from_signature` — type annotations → input_packet_schema
-- `test_pf_infers_output_schema` — output type annotations or output_keys → output_packet_schema
+- `test_pf_infers_input_schema_from_signature` — type annotations → input_data_schema
+- `test_pf_infers_output_schema` — output type annotations or output_keys → output_data_schema
 - `test_pf_rejects_variadic_parameters` — *args, **kwargs raise ValueError
-- `test_pf_call_transforms_packet` — call() applies function to packet data
+- `test_pf_call_transforms_data` — call() applies function to data data
 - `test_pf_call_returns_none_if_function_returns_none` — None propagates
 - `test_pf_direct_call_bypasses_executor` — direct_call() ignores executor
 - `test_pf_call_routes_through_executor` — call() uses executor when set
@@ -288,7 +288,7 @@ test-objective/
 - `test_pf_content_hash_changes_with_function` — different function → different hash
 - `test_pf_pipeline_hash_ignores_data` — pipeline_hash based on schema only
 
-**CachedPacketFunction:**
+**CachedDataFunction:**
 - `test_cached_pf_cache_miss_computes_and_stores` — first call computes + records
 - `test_cached_pf_cache_hit_returns_stored` — second call returns cached result
 - `test_cached_pf_skip_cache_lookup_always_computes` — skip_cache_lookup=True forces compute
@@ -305,10 +305,10 @@ test-objective/
 - `test_function_pod_output_schema_prediction` — output_schema() matches actual output
 - `test_function_pod_callable_alias` — __call__ same as process()
 - `test_function_pod_never_modifies_tags` — tags pass through unchanged
-- `test_function_pod_transforms_packets` — packets are transformed by function
+- `test_function_pod_transforms_data` — data are transformed by function
 
 **FunctionPodStream:**
-- `test_fps_lazy_evaluation` — iter_packets() triggers computation
+- `test_fps_lazy_evaluation` — iter_data() triggers computation
 - `test_fps_producer_is_function_pod` — producer property returns the pod
 - `test_fps_upstreams_contains_input_stream`
 - `test_fps_keys_matches_pod_output_schema` — keys() consistent with pod.output_schema()
@@ -317,13 +317,13 @@ test-objective/
 
 **Decorator:**
 - `test_function_pod_decorator_creates_pod_attribute` — @function_pod adds .pod
-- `test_function_pod_decorator_with_result_database` — wraps in CachedPacketFunction
+- `test_function_pod_decorator_with_result_database` — wraps in CachedDataFunction
 
 ### 10. `test_operators.py` — All Operators
 
 **Join (N-ary, commutative):**
 - `test_join_two_streams_on_common_tags` — inner join on shared tag columns
-- `test_join_non_overlapping_packet_columns_required` — InputValidationError on collision
+- `test_join_non_overlapping_data_columns_required` — InputValidationError on collision
 - `test_join_commutative` — join(A, B) == join(B, A) (same rows regardless of order)
 - `test_join_three_or_more_streams` — N-ary join works
 - `test_join_empty_result_when_no_matches` — disjoint tags → empty stream
@@ -332,7 +332,7 @@ test-objective/
 - `test_join_output_schema_prediction` — output_schema() matches actual output
 
 **MergeJoin (binary):**
-- `test_merge_join_colliding_columns_become_sorted_lists` — same-name packet cols → list[T]
+- `test_merge_join_colliding_columns_become_sorted_lists` — same-name data cols → list[T]
 - `test_merge_join_requires_identical_types` — different types raise error
 - `test_merge_join_non_colliding_columns_pass_through` — unmatched columns kept as-is
 - `test_merge_join_system_tag_name_extending`
@@ -341,29 +341,29 @@ test-objective/
 **SemiJoin (binary, non-commutative):**
 - `test_semijoin_filters_left_by_right_tags` — keeps left rows matching right tags
 - `test_semijoin_non_commutative` — semijoin(A, B) != semijoin(B, A) in general
-- `test_semijoin_preserves_left_packet_columns` — right packet columns dropped
+- `test_semijoin_preserves_left_data_columns` — right data columns dropped
 - `test_semijoin_system_tag_name_extending`
 
 **Batch:**
-- `test_batch_groups_rows` — groups rows by tag, aggregates packets
-- `test_batch_types_become_lists` — packet column types become list[T]
+- `test_batch_groups_rows` — groups rows by tag, aggregates data
+- `test_batch_types_become_lists` — data column types become list[T]
 - `test_batch_system_tag_type_evolving` — system tag type becomes list[str]
 - `test_batch_with_batch_size` — batch_size limits group size
 - `test_batch_drop_partial_batch` — drop_partial_batch=True drops incomplete groups
 - `test_batch_output_schema_prediction` — predicts list[T] types
 
-**Column Selection (Select/Drop Tag/Packet):**
+**Column Selection (Select/Drop Tag/Data):**
 - `test_select_tag_columns` — keeps only specified tag columns
 - `test_select_tag_columns_strict_missing_raises` — strict=True raises on missing column
-- `test_select_packet_columns` — keeps only specified packet columns
+- `test_select_data_columns` — keeps only specified data columns
 - `test_drop_tag_columns` — removes specified tag columns
-- `test_drop_packet_columns` — removes specified packet columns
+- `test_drop_data_columns` — removes specified data columns
 - `test_column_selection_system_tag_name_preserving` — system tags unchanged
 
-**MapTags/MapPackets:**
+**MapTags/MapData:**
 - `test_map_tags_renames_tag_columns` — renames specified tag columns
 - `test_map_tags_drop_unmapped` — drop_unmapped=True removes unrenamed columns
-- `test_map_packets_renames_packet_columns`
+- `test_map_data_renames_data_columns`
 - `test_map_preserves_system_tags` — system tag columns unchanged (name-preserving)
 
 **PolarsFilter:**
@@ -380,8 +380,8 @@ test-objective/
 ### 11. `test_nodes.py` — FunctionNode, OperatorNode, Persistent variants
 
 **FunctionNode:**
-- `test_function_node_iter_packets` — iterates and transforms all packets
-- `test_function_node_process_packet` — transforms single (tag, packet) pair
+- `test_function_node_iter_data` — iterates and transforms all data
+- `test_function_node_process_data` — transforms single (tag, data) pair
 - `test_function_node_producer_is_function_pod`
 - `test_function_node_upstreams`
 - `test_function_node_clear_cache`
@@ -391,7 +391,7 @@ test-objective/
 - `test_persistent_fn_pipeline_path_uses_pipeline_hash` — path includes pipeline_hash
 - `test_persistent_fn_caches_computed_results` — computed results stored in DB
 - `test_persistent_fn_skips_already_cached` — Phase 2 skips inputs with cached outputs
-- `test_persistent_fn_run_eagerly_processes_all` — run() processes all packets
+- `test_persistent_fn_run_eagerly_processes_all` — run() processes all data
 - `test_persistent_fn_as_source_returns_derived_source` — as_source() returns DerivedSource
 
 **OperatorNode:**
@@ -461,8 +461,8 @@ test-objective/
 
 - `test_extract_function_schemas_from_annotations` — infers schemas from type hints
 - `test_extract_function_schemas_rejects_variadic` — ValueError for *args/**kwargs
-- `test_verify_packet_schema_valid` — matching dict passes
-- `test_verify_packet_schema_type_mismatch` — mismatched types fail
+- `test_verify_data_schema_valid` — matching dict passes
+- `test_verify_data_schema_type_mismatch` — mismatched types fail
 - `test_check_schema_compatibility` — compatible types pass
 - `test_infer_schema_from_dict` — infers types from values
 - `test_union_schemas_no_conflict` — merges cleanly
@@ -540,7 +540,7 @@ test-objective/
 ### `test_pipeline_flows.py` — End-to-End Pipeline Scenarios
 
 - `test_source_to_stream_to_single_operator` — Source → Filter → Stream
-- `test_source_to_function_pod` — Source → FunctionPod → Stream with transformed packets
+- `test_source_to_function_pod` — Source → FunctionPod → Stream with transformed data
 - `test_multi_source_join` — Two sources → Join → Stream with combined data
 - `test_chained_operators` — Source → Filter → Select → MapTags → Stream
 - `test_function_pod_then_operator` — Source → FunctionPod → Filter → Stream
@@ -557,7 +557,7 @@ test-objective/
 - `test_persistent_operator_node_log_mode` — CacheMode.LOG stores results
 - `test_persistent_operator_node_replay_mode` — CacheMode.REPLAY loads from DB
 - `test_derived_source_reingestion` — PersistentFunctionNode → DerivedSource → further pipeline
-- `test_cached_packet_function_with_inmemory_db` — end-to-end caching flow
+- `test_cached_data_function_with_inmemory_db` — end-to-end caching flow
 
 ### `test_hash_invariants.py` — Hash Stability & Merkle Chain Properties
 
@@ -583,7 +583,7 @@ test-objective/
 - `test_datagram_column_config_meta` — meta=True includes __ columns
 - `test_datagram_column_config_data_only` — all False = data columns only
 - `test_tag_column_config_system_tags` — system_tags=True includes _tag:: columns
-- `test_packet_column_config_source` — source=True includes _source_ columns
+- `test_data_column_config_source` — source=True includes _source_ columns
 - `test_stream_column_config_all_info` — all_info=True on keys/output_schema/as_table
 - `test_stream_column_config_consistency` — keys(), output_schema(), as_table() all respect same config
 
@@ -628,16 +628,16 @@ test-objective/
 
 ## Implementation Order
 
-1. **`conftest.py`** — shared fixtures (reusable sources, streams, packet functions, databases)
+1. **`conftest.py`** — shared fixtures (reusable sources, streams, data functions, databases)
 2. **`unit/test_types.py`** — foundational types (Schema, ContentHash, ColumnConfig)
-3. **`unit/test_datagram.py`**, **`test_tag.py`**, **`test_packet.py`** — data containers
+3. **`unit/test_datagram.py`**, **`test_tag.py`**, **`test_data.py`** — data containers
 4. **`unit/test_stream.py`** — stream construction and iteration
 5. **`unit/test_sources.py`** + **`test_source_registry.py`** — all source types
 6. **`unit/test_hashing.py`** — semantic hasher and handlers
 7. **`unit/test_schema_utils.py`** + **`test_arrow_utils.py`** + **`test_arrow_data_utils.py`** — utilities
 8. **`unit/test_semantic_types.py`** + **`test_contexts.py`** — type conversion and contexts
 9. **`unit/test_databases.py`** — database implementations
-10. **`unit/test_packet_function.py`** — packet function behavior
+10. **`unit/test_data_function.py`** — data function behavior
 11. **`unit/test_function_pod.py`** — function pod and streams
 12. **`unit/test_operators.py`** — all operators
 13. **`unit/test_nodes.py`** — function/operator nodes

@@ -5,8 +5,8 @@ Covers:
 - FunctionPodProtocol protocol conformance
 - Construction and properties
 - process() and __call__()
-- Input packet schema validation
-- process_packet()
+- Input data schema validation
+- process_data()
 - Multi-stream (join) input
 """
 
@@ -17,9 +17,9 @@ from collections.abc import Mapping
 import pyarrow as pa
 import pytest
 
-from orcapod.core.datagrams import Packet, Tag
+from orcapod.core.datagrams import Data, Tag
 from orcapod.core.function_pod import FunctionPodStream, FunctionPod
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.protocols.core_protocols import FunctionPodProtocol
 
@@ -37,8 +37,8 @@ class TestSimpleFunctionPodProtocolConformance:
             "FunctionPod does not satisfy the FunctionPodProtocol protocol"
         )
 
-    def test_has_packet_function_property(self, double_pod, double_pf):
-        assert double_pod.packet_function is double_pf
+    def test_has_data_function_property(self, double_pod, double_pf):
+        assert double_pod.data_function is double_pf
 
     def test_has_uri_property(self, double_pod):
         uri = double_pod.uri
@@ -49,20 +49,20 @@ class TestSimpleFunctionPodProtocolConformance:
     def test_has_validate_inputs_method(self, double_pod):
         double_pod.validate_inputs(make_int_stream())
 
-    def test_has_process_packet_method(self, double_pod):
+    def test_has_process_data_method(self, double_pod):
         tag = Tag({"id": 0})
-        packet = Packet({"x": 5})
-        out_tag, out_packet = double_pod.process_packet(tag, packet)
+        data = Data({"x": 5})
+        out_tag, out_data = double_pod.process_data(tag, data)
         assert out_tag is tag
-        assert out_packet is not None
+        assert out_data is not None
 
     def test_has_argument_symmetry_method(self, double_pod):
         double_pod.argument_symmetry([make_int_stream()])
 
     def test_has_output_schema_method(self, double_pod):
-        tag_schema, packet_schema = double_pod.output_schema(make_int_stream())
+        tag_schema, data_schema = double_pod.output_schema(make_int_stream())
         assert isinstance(tag_schema, Mapping)
-        assert isinstance(packet_schema, Mapping)
+        assert isinstance(data_schema, Mapping)
 
 
 # ---------------------------------------------------------------------------
@@ -71,8 +71,8 @@ class TestSimpleFunctionPodProtocolConformance:
 
 
 class TestSimpleFunctionPodConstruction:
-    def test_stores_packet_function(self, double_pod, double_pf):
-        assert double_pod.packet_function is double_pf
+    def test_stores_data_function(self, double_pod, double_pf):
+        assert double_pod.data_function is double_pf
 
     def test_uri_contains_function_name(self, double_pod, double_pf):
         assert double_pf.canonical_function_name in double_pod.uri
@@ -80,9 +80,9 @@ class TestSimpleFunctionPodConstruction:
     def test_uri_contains_version(self, double_pod, double_pf):
         assert f"v{double_pf.major_version}" in double_pod.uri
 
-    def test_output_schema_packet_matches_pf_output_schema(self, double_pod, double_pf):
-        _, packet_schema = double_pod.output_schema(make_int_stream())
-        assert packet_schema == double_pf.output_packet_schema
+    def test_output_schema_data_matches_pf_output_schema(self, double_pod, double_pf):
+        _, data_schema = double_pod.output_schema(make_int_stream())
+        assert data_schema == double_pf.output_data_schema
 
 
 # ---------------------------------------------------------------------------
@@ -101,8 +101,8 @@ class TestSimpleFunctionPodProcess:
         stream = make_int_stream(n=4)
         via_process = double_pod.process(stream)
         via_call = double_pod(stream)
-        assert len(list(via_process.iter_packets())) == len(
-            list(via_call.iter_packets())
+        assert len(list(via_process.iter_data())) == len(
+            list(via_call.iter_data())
         )
 
     def test_output_stream_producer_is_pod(self, double_pod):
@@ -114,7 +114,7 @@ class TestSimpleFunctionPodProcess:
 
     def test_schema_mismatch_raises(self):
         pod = FunctionPod(
-            packet_function=PythonPacketFunction(to_upper, output_keys="result")
+            data_function=PythonDataFunction(to_upper, output_keys="result")
         )
         with pytest.raises(ValueError):
             pod.process(make_int_stream())
@@ -150,7 +150,7 @@ class TestSimpleFunctionPodInputSchemaValidation:
         with pytest.raises(ValueError):
             double_pod.process(stream)
 
-    def test_wrong_packet_type_raises(self, double_pod):
+    def test_wrong_data_type_raises(self, double_pod):
         stream = ArrowTableStream(
             pa.table(
                 {
@@ -181,7 +181,7 @@ class TestSimpleFunctionPodInputSchemaValidation:
             return x + y
 
         pod = FunctionPod(
-            packet_function=PythonPacketFunction(add_with_default, output_keys="result")
+            data_function=PythonDataFunction(add_with_default, output_keys="result")
         )
         stream = ArrowTableStream(
             pa.table(
@@ -205,7 +205,7 @@ class TestSimpleFunctionPodInputSchemaValidation:
             return x + y
 
         pod = FunctionPod(
-            packet_function=PythonPacketFunction(add_with_default, output_keys="result")
+            data_function=PythonDataFunction(add_with_default, output_keys="result")
         )
         stream = ArrowTableStream(
             pa.table(
@@ -227,24 +227,24 @@ class TestSimpleFunctionPodInputSchemaValidation:
 
 
 # ---------------------------------------------------------------------------
-# 5. process_packet()
+# 5. process_data()
 # ---------------------------------------------------------------------------
 
 
-class TestSimpleFunctionPodProcessPacket:
-    def test_returns_tag_and_packet_tuple(self, double_pod):
-        result = double_pod.process_packet(Tag({"id": 0}), Packet({"x": 7}))
+class TestSimpleFunctionPodProcessData:
+    def test_returns_tag_and_data_tuple(self, double_pod):
+        result = double_pod.process_data(Tag({"id": 0}), Data({"x": 7}))
         assert len(result) == 2
 
     def test_output_tag_is_input_tag(self, double_pod):
         tag = Tag({"id": 42})
-        out_tag, _ = double_pod.process_packet(tag, Packet({"x": 3}))
+        out_tag, _ = double_pod.process_data(tag, Data({"x": 3}))
         assert out_tag is tag
 
-    def test_output_packet_has_correct_value(self, double_pod):
-        _, out_packet = double_pod.process_packet(Tag({"id": 0}), Packet({"x": 6}))
-        assert out_packet is not None
-        assert out_packet["result"] == 12  # 6 * 2
+    def test_output_data_has_correct_value(self, double_pod):
+        _, out_data = double_pod.process_data(Tag({"id": 0}), Data({"x": 6}))
+        assert out_data is not None
+        assert out_data["result"] == 12  # 6 * 2
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +287,7 @@ class TestSimpleFunctionPodMultiStream:
         )
         result = add_pod.process(stream_x, stream_y)
         assert isinstance(result, FunctionPodStream)
-        packets = list(result.iter_packets())
-        assert len(packets) == n
-        for i, (_, packet) in enumerate(packets):
-            assert packet["result"] == i + i * 10  # x + y
+        data = list(result.iter_data())
+        assert len(data) == n
+        for i, (_, data) in enumerate(data):
+            assert data["result"] == i + i * 10  # x + y

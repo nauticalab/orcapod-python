@@ -165,14 +165,14 @@ def _build_operator_registry() -> dict[str, type]:
     """
     from orcapod.core.operators import (
         Batch,
-        DropPacketColumns,
+        DropDataColumns,
         DropTagColumns,
         Join,
-        MapPackets,
+        MapData,
         MapTags,
         MergeJoin,
         PolarsFilter,
-        SelectPacketColumns,
+        SelectDataColumns,
         SelectTagColumns,
         SemiJoin,
     )
@@ -184,24 +184,24 @@ def _build_operator_registry() -> dict[str, type]:
         "Batch": Batch,
         "SelectTagColumns": SelectTagColumns,
         "DropTagColumns": DropTagColumns,
-        "SelectPacketColumns": SelectPacketColumns,
-        "DropPacketColumns": DropPacketColumns,
+        "SelectDataColumns": SelectDataColumns,
+        "DropDataColumns": DropDataColumns,
         "MapTags": MapTags,
-        "MapPackets": MapPackets,
+        "MapData": MapData,
         "PolarsFilter": PolarsFilter,
     }
 
 
-def _build_packet_function_registry() -> dict[str, type]:
-    """Build the packet function type registry mapping type IDs to classes.
+def _build_data_function_registry() -> dict[str, type]:
+    """Build the data function type registry mapping type IDs to classes.
 
     Returns:
-        Dict mapping type ID strings to packet function classes.
+        Dict mapping type ID strings to data function classes.
     """
-    from orcapod.core.packet_function import PythonPacketFunction
+    from orcapod.core.data_function import PythonDataFunction
 
     return {
-        "python.function.v0": PythonPacketFunction,
+        "python.function.v0": PythonDataFunction,
     }
 
 
@@ -210,7 +210,7 @@ def _build_packet_function_registry() -> dict[str, type]:
 DATABASE_REGISTRY: dict[str, type] = _build_database_registry()
 SOURCE_REGISTRY: dict[str, type] = _build_source_registry()
 OPERATOR_REGISTRY: dict[str, type] = _build_operator_registry()
-PACKET_FUNCTION_REGISTRY: dict[str, type] = _build_packet_function_registry()
+DATA_FUNCTION_REGISTRY: dict[str, type] = _build_data_function_registry()
 
 
 _observer_registry: dict[str, Any] | None = None
@@ -336,23 +336,23 @@ def resolve_operator_from_config(config: dict[str, Any]) -> Any:
     return cls.from_config(config)
 
 
-def resolve_packet_function_from_config(
+def resolve_data_function_from_config(
     config: dict[str, Any],
     *,
     fallback_to_proxy: bool = False,
 ) -> Any:
-    """Reconstruct a packet function from a config dict.
+    """Reconstruct a data function from a config dict.
 
     Args:
-        config: Dict with at least a ``"packet_function_type_id"`` key matching
-            a registered packet function type.
+        config: Dict with at least a ``"data_function_type_id"`` key matching
+            a registered data function type.
         fallback_to_proxy: If ``True`` and reconstruction fails (unknown type,
             ``ImportError``, ``AttributeError``, etc.), return a
-            ``PacketFunctionProxy`` instead of raising.
+            ``DataFunctionProxy`` instead of raising.
 
     Returns:
-        A new packet function instance constructed from the config, or a
-        ``PacketFunctionProxy`` if reconstruction fails and
+        A new data function instance constructed from the config, or a
+        ``DataFunctionProxy`` if reconstruction fails and
         *fallback_to_proxy* is ``True``.
 
     Raises:
@@ -360,29 +360,29 @@ def resolve_packet_function_from_config(
             *fallback_to_proxy* is ``False``.
     """
     _ensure_registries()
-    type_id = config.get("packet_function_type_id")
-    if type_id not in PACKET_FUNCTION_REGISTRY:
+    type_id = config.get("data_function_type_id")
+    if type_id not in DATA_FUNCTION_REGISTRY:
         if fallback_to_proxy:
-            from orcapod.core.packet_function_proxy import PacketFunctionProxy
+            from orcapod.core.data_function_proxy import DataFunctionProxy
 
-            return PacketFunctionProxy.from_config(config)
+            return DataFunctionProxy.from_config(config)
         raise ValueError(
-            f"Unknown packet function type: {type_id!r}. "
-            f"Known types: {sorted(PACKET_FUNCTION_REGISTRY.keys())}"
+            f"Unknown data function type: {type_id!r}. "
+            f"Known types: {sorted(DATA_FUNCTION_REGISTRY.keys())}"
         )
-    cls = PACKET_FUNCTION_REGISTRY[type_id]
+    cls = DATA_FUNCTION_REGISTRY[type_id]
     try:
         return cls.from_config(config)
     except (ImportError, ModuleNotFoundError, AttributeError) as exc:
         if fallback_to_proxy:
             logger.warning(
-                "Could not reconstruct packet function from config (%s); "
-                "returning PacketFunctionProxy.",
+                "Could not reconstruct data function from config (%s); "
+                "returning DataFunctionProxy.",
                 exc,
             )
-            from orcapod.core.packet_function_proxy import PacketFunctionProxy
+            from orcapod.core.data_function_proxy import DataFunctionProxy
 
-            return PacketFunctionProxy.from_config(config)
+            return DataFunctionProxy.from_config(config)
         raise
 
 
@@ -481,13 +481,13 @@ def _source_proxy_from_config(
         pipeline_hash_val = node_descriptor.get("pipeline_hash")
         output_schema = node_descriptor.get("output_schema", {})
         tag_schema_dict = output_schema.get("tag", {})
-        packet_schema_dict = output_schema.get("packet", {})
+        data_schema_dict = output_schema.get("data", {})
     else:
         # Inner sources (e.g. inside CachedSource) embed identity via _identity_config()
         content_hash = config.get("content_hash")
         pipeline_hash_val = config.get("pipeline_hash")
         tag_schema_dict = config.get("tag_schema", {})
-        packet_schema_dict = config.get("packet_schema", {})
+        data_schema_dict = config.get("data_schema", {})
 
     if not content_hash or not pipeline_hash_val:
         raise ValueError(
@@ -504,14 +504,14 @@ def _source_proxy_from_config(
         expected_class_name = SOURCE_REGISTRY[source_type].__name__
 
     tag_schema = Schema(deserialize_schema(tag_schema_dict))
-    packet_schema = Schema(deserialize_schema(packet_schema_dict))
+    data_schema = Schema(deserialize_schema(data_schema_dict))
 
     return SourceProxy(
         source_id=config.get("source_id", "unknown"),
         content_hash_str=content_hash,
         pipeline_hash_str=pipeline_hash_val,
         tag_schema=tag_schema,
-        packet_schema=packet_schema,
+        data_schema=data_schema,
         expected_class_name=expected_class_name,
         source_config=config,
     )
@@ -555,15 +555,15 @@ def register_operator(class_name: str, cls: type) -> None:
     OPERATOR_REGISTRY[class_name] = cls
 
 
-def register_packet_function(type_id: str, cls: type) -> None:
-    """Register a custom packet function implementation for deserialization.
+def register_data_function(type_id: str, cls: type) -> None:
+    """Register a custom data function implementation for deserialization.
 
     Args:
         type_id: The type ID string to use in serialized configs.
-        cls: The packet function class to register.
+        cls: The data function class to register.
     """
     _ensure_registries()
-    PACKET_FUNCTION_REGISTRY[type_id] = cls
+    DATA_FUNCTION_REGISTRY[type_id] = cls
 
 
 # ---------------------------------------------------------------------------

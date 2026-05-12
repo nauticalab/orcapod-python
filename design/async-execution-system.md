@@ -41,11 +41,11 @@ Every pipeline node — source, operator, or function pod — implements a singl
 class AsyncExecutableProtocol(Protocol):
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
     ) -> None:
         """
-        Consume (tag, packet) pairs from input channels, produce to output channel.
+        Consume (tag, data) pairs from input channels, produce to output channel.
         MUST close output channel when done (signals completion to downstream).
         """
         ...
@@ -108,7 +108,7 @@ Channels are backed by `asyncio.Queue`, which is **coroutine-safe but not thread
 This is sufficient because all channel operations happen on the event loop thread:
 
 - `async_execute` methods are coroutines running on the event loop
-- Sync `PacketFunction`s run in thread pools via `loop.run_in_executor`, but the result
+- Sync `DataFunction`s run in thread pools via `loop.run_in_executor`, but the result
   is awaited back on the event loop before `output.send()` is called — the channel is
   never touched from a worker thread
 - The `async def` signature on `send()`/`receive()` structurally prevents direct calls
@@ -128,31 +128,31 @@ in **when** the node reads, **how much** it buffers, and **when** it emits.
 
 ### 1. Streaming (Row-by-Row)
 
-**Applies to:** Filter, MapTags, MapPackets, Select/Drop columns, FunctionPod
+**Applies to:** Filter, MapTags, MapData, Select/Drop columns, FunctionPod
 
 Zero buffering. Each input row is independently transformed and emitted immediately.
 
 ```python
 # Example: PolarsFilter
 async def async_execute(self, inputs, output):
-    async for tag, packet in inputs[0]:
-        if self._evaluate_predicate(tag, packet):
-            await output.send((tag, packet))
+    async for tag, data in inputs[0]:
+        if self._evaluate_predicate(tag, data):
+            await output.send((tag, data))
     await output.close()
 
 # Example: FunctionPod with concurrency control
 async def async_execute(self, inputs, output):
     sem = asyncio.Semaphore(self.node_config.max_concurrency or _INF)
 
-    async def process_one(tag, packet):
+    async def process_one(tag, data):
         async with sem:
-            result = await self.packet_function.async_call(packet)
+            result = await self.data_function.async_call(data)
             if result is not None:
                 await output.send((tag, result))
 
     async with asyncio.TaskGroup() as tg:
-        async for tag, packet in inputs[0]:
-            tg.create_task(process_one(tag, packet))
+        async for tag, data in inputs[0]:
+            tg.create_task(process_one(tag, data))
 
     await output.close()
 ```
@@ -169,14 +169,14 @@ async def async_execute(self, inputs, output):
     indexes: list[dict[JoinKey, list[Row]]] = [{} for _ in inputs]
 
     async def consume(i: int, channel):
-        async for tag, packet in channel:
+        async for tag, data in channel:
             key = self._extract_join_key(tag)
-            indexes[i].setdefault(key, []).append((tag, packet))
+            indexes[i].setdefault(key, []).append((tag, data))
 
             # Probe all OTHER indexes for matches
             other_lists = [indexes[j].get(key, []) for j in range(len(inputs)) if j != i]
             for combo in itertools.product(*other_lists):
-                joined = self._merge_rows((tag, packet), *combo)
+                joined = self._merge_rows((tag, data), *combo)
                 await output.send(joined)
 
     async with asyncio.TaskGroup() as tg:
@@ -194,15 +194,15 @@ async def async_execute(self, inputs, output):
 
     # Phase 1: Build right-side index
     right_keys = set()
-    async for tag, packet in right:
+    async for tag, data in right:
         key = self._extract_join_key(tag)
         right_keys.add(key)
 
     # Phase 2: Stream left, emit matches
-    async for tag, packet in left:
+    async for tag, data in left:
         key = self._extract_join_key(tag)
         if key in right_keys:
-            await output.send((tag, packet))
+            await output.send((tag, data))
 
     await output.close()
 ```
@@ -224,8 +224,8 @@ async def async_execute(self, inputs, output):
     result_stream = self.static_process(*streams)
 
     # Phase 3: Emit results asynchronously
-    for tag, packet in result_stream.iter_packets():
-        await output.send((tag, packet))
+    for tag, data in result_stream.iter_data():
+        await output.send((tag, data))
 
     await output.close()
 ```
@@ -249,8 +249,8 @@ class UnaryOperator(StaticOutputPod):
         rows = await inputs[0].collect()
         stream = self._materialize_to_stream(rows)
         result = self.static_process(stream)
-        for tag, packet in result.iter_packets():
-            await output.send((tag, packet))
+        for tag, data in result.iter_data():
+            await output.send((tag, data))
         await output.close()
 
 
@@ -262,8 +262,8 @@ class BinaryOperator(StaticOutputPod):
         left_stream = self._materialize_to_stream(left_rows)
         right_stream = self._materialize_to_stream(right_rows)
         result = self.static_process(left_stream, right_stream)
-        for tag, packet in result.iter_packets():
-            await output.send((tag, packet))
+        for tag, data in result.iter_data():
+            await output.send((tag, data))
         await output.close()
 
 
@@ -272,8 +272,8 @@ class NonZeroInputOperator(StaticOutputPod):
         all_rows = await asyncio.gather(*(ch.collect() for ch in inputs))
         streams = [self._materialize_to_stream(rows) for rows in all_rows]
         result = self.static_process(*streams)
-        for tag, packet in result.iter_packets():
-            await output.send((tag, packet))
+        for tag, data in result.iter_data():
+            await output.send((tag, data))
         await output.close()
 ```
 
@@ -283,22 +283,22 @@ Concrete operators **opt into** better strategies by overriding `async_execute`.
 
 ## FunctionPod and FunctionNode
 
-FunctionPod fits the streaming pattern naturally — it processes packets independently:
+FunctionPod fits the streaming pattern naturally — it processes data independently:
 
 ```python
 class FunctionPod:
     async def async_execute(self, inputs, output):
         sem = asyncio.Semaphore(self.node_config.max_concurrency or _INF)
 
-        async def process_one(tag, packet):
+        async def process_one(tag, data):
             async with sem:
-                result_packet = await self.packet_function.async_call(packet)
-                if result_packet is not None:
-                    await output.send((tag, result_packet))
+                result_data = await self.data_function.async_call(data)
+                if result_data is not None:
+                    await output.send((tag, result_data))
 
         async with asyncio.TaskGroup() as tg:
-            async for tag, packet in inputs[0]:
-                tg.create_task(process_one(tag, packet))
+            async for tag, data in inputs[0]:
+                tg.create_task(process_one(tag, data))
 
         await output.close()
 ```
@@ -311,38 +311,38 @@ class FunctionNode:
     async def async_execute(self, inputs, output):
         sem = asyncio.Semaphore(self.node_config.max_concurrency or _INF)
 
-        async def process_one(tag, packet):
-            cache_key = self._compute_cache_key(packet)
+        async def process_one(tag, data):
+            cache_key = self._compute_cache_key(data)
             cached = await self._db_lookup(cache_key)
             if cached is not None:
                 await output.send((tag, cached))
                 return
 
             async with sem:
-                result = await self.packet_function.async_call(packet)
+                result = await self.data_function.async_call(data)
                 await self._db_store(cache_key, result)
                 if result is not None:
                     await output.send((tag, result))
 
         async with asyncio.TaskGroup() as tg:
-            async for tag, packet in inputs[0]:
-                tg.create_task(process_one(tag, packet))
+            async for tag, data in inputs[0]:
+                tg.create_task(process_one(tag, data))
 
         await output.close()
 ```
 
-### Sync PacketFunctions
+### Sync DataFunctions
 
-Existing synchronous `PacketFunction`s are bridged via `run_in_executor`:
+Existing synchronous `DataFunction`s are bridged via `run_in_executor`:
 
 ```python
-class PythonPacketFunction:
-    async def direct_async_call(self, packet):
+class PythonDataFunction:
+    async def direct_async_call(self, data):
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._thread_pool,
             self._func,
-            packet,
+            data,
         )
 ```
 
@@ -371,7 +371,7 @@ class NodeConfig:
     max_concurrency: int | None = None  # overrides pipeline default
     # None = inherit from pipeline default
     # 1 = sequential (rate-limited APIs, ordered output)
-    # N = up to N packets in-flight concurrently
+    # N = up to N data in-flight concurrently
 ```
 
 ### Concurrency Resolution
@@ -429,8 +429,8 @@ Sources have no input channels — they just push their data onto the output cha
 class SourceNode:
     async def async_execute(self, inputs, output):
         # inputs is empty for sources
-        for tag, packet in self.stream.iter_packets():
-            await output.send((tag, packet))
+        for tag, data in self.stream.iter_data():
+            await output.send((tag, data))
         await output.close()
 ```
 
@@ -447,10 +447,10 @@ while allowing each consumer to read at its own pace.
 | Operator | Default Strategy | Async Override? |
 |---|---|---|
 | PolarsFilter | Barrier (inherited) | **Streaming** — evaluate predicate per row |
-| MapTags / MapPackets | Barrier (inherited) | **Streaming** — rename per row |
-| SelectTagColumns / SelectPacketColumns | Barrier (inherited) | **Streaming** — project per row |
-| DropTagColumns / DropPacketColumns | Barrier (inherited) | **Streaming** — project per row |
-| FunctionPod | N/A (new) | **Streaming** — transform packet per row |
+| MapTags / MapData | Barrier (inherited) | **Streaming** — rename per row |
+| SelectTagColumns / SelectDataColumns | Barrier (inherited) | **Streaming** — project per row |
+| DropTagColumns / DropDataColumns | Barrier (inherited) | **Streaming** — project per row |
+| FunctionPod | N/A (new) | **Streaming** — transform data per row |
 | FunctionNode | N/A (new) | **Streaming** — cache check + transform per row |
 | Join | Barrier (inherited) | **Incremental** — symmetric hash join |
 | MergeJoin | Barrier (inherited) | **Incremental** — symmetric hash join with merge |
@@ -466,7 +466,7 @@ incrementally — the system is correct at every step.
 
 ### Synchronous Mode (ExecutorType.SYNCHRONOUS)
 
-Unchanged. The existing `static_process` / `DynamicPodStream` / `iter_packets` chain continues
+Unchanged. The existing `static_process` / `DynamicPodStream` / `iter_data` chain continues
 to work exactly as before. `async_execute` is never called.
 
 ### Async Mode (ExecutorType.ASYNC_CHANNELS)
@@ -475,14 +475,14 @@ The orchestrator calls `async_execute` on every node. The existing `static_proce
 by the barrier wrapper as an implementation detail — it's not called directly by the
 orchestrator.
 
-### PacketFunctionExecutorProtocol
+### DataFunctionExecutorProtocol
 
-The existing executor protocol (`execute` / `async_execute` for individual packets) remains
-unchanged. It controls **how a single packet function invocation runs** (local, Ray, etc.).
+The existing executor protocol (`execute` / `async_execute` for individual data) remains
+unchanged. It controls **how a single data function invocation runs** (local, Ray, etc.).
 The new `async_execute` on nodes controls **how the node participates in the pipeline DAG**.
 These are orthogonal concerns:
 
-- `PacketFunctionExecutorProtocol.async_execute(fn, packet)` → single invocation strategy
+- `DataFunctionExecutorProtocol.async_execute(fn, data)` → single invocation strategy
 - `FunctionPod.async_execute(inputs, output)` → pipeline-level data flow
 
 ### GraphTracker
@@ -497,7 +497,7 @@ to know about async execution — it only records topology.
 
 Streaming and incremental strategies may change row ordering compared to synchronous mode:
 
-- **Streaming with concurrency**: `max_concurrency > 1` on FunctionPod means packets may
+- **Streaming with concurrency**: `max_concurrency > 1` on FunctionPod means data may
   complete out of order. If ordering matters, set `max_concurrency=1`.
 - **Incremental Join**: rows are emitted as matches are found, which depends on arrival order
   from upstream. The result set is identical but row order may differ.

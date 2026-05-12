@@ -59,12 +59,12 @@ class TestSourceStreamBuilder:
         with pytest.raises(ValueError, match="record_id_column"):
             builder.build(table, tag_columns=["id"], record_id_column="bad")
 
-    def test_build_output_schema_has_tag_and_packet(self, builder):
+    def test_build_output_schema_has_tag_and_data(self, builder):
         table = pa.table({"id": pa.array([1]), "x": pa.array([10])})
         result = builder.build(table, tag_columns=["id"])
-        tag_schema, packet_schema = result.stream.output_schema()
+        tag_schema, data_schema = result.stream.output_schema()
         assert "id" in tag_schema
-        assert "x" in packet_schema
+        assert "x" in data_schema
 
     def test_build_with_record_id_column(self, builder):
         table = pa.table({"id": pa.array([1, 2]), "x": pa.array([10, 20])})
@@ -80,8 +80,8 @@ class TestSourceStreamBuilder:
             }
         )
         result = builder.build(table, tag_columns=["id"])
-        tag_schema, packet_schema = result.stream.output_schema()
-        assert "__system_col" not in packet_schema
+        tag_schema, data_schema = result.stream.output_schema()
+        assert "__system_col" not in data_schema
 
 
 class TestSourceStreamBuilderRespectsSchema:
@@ -100,8 +100,8 @@ class TestSourceStreamBuilderRespectsSchema:
         table = pa.table({"id": pa.array([1]), "val": pa.array([10], type=pa.int64())})
         # Arrow default: nullable=True
         result = builder.build(table, tag_columns=["id"])
-        _, packet_schema = result.stream.output_schema()
-        assert packet_schema["val"] == int | None
+        _, data_schema = result.stream.output_schema()
+        assert data_schema["val"] == int | None
 
     def test_nullable_false_schema_preserved(self, builder):
         """build() preserves nullable=False from incoming schema."""
@@ -113,8 +113,8 @@ class TestSourceStreamBuilderRespectsSchema:
             ]),
         )
         result = builder.build(table, tag_columns=["id"])
-        _, packet_schema = result.stream.output_schema()
-        assert packet_schema["val"] is int
+        _, data_schema = result.stream.output_schema()
+        assert data_schema["val"] is int
 
     def test_nullable_flags_affect_schema_hash(self, builder):
         """nullable=True and nullable=False schemas produce different hashes."""
@@ -140,9 +140,9 @@ class TestArrowTableSourceUsesBuilder:
         table = pa.table({"id": pa.array([1, 2]), "x": pa.array([10, 20])})
         src = ArrowTableSource(table=table, tag_columns=["id"])
         assert src.as_table().num_rows == 2
-        tag_schema, packet_schema = src.output_schema()
+        tag_schema, data_schema = src.output_schema()
         assert "id" in tag_schema
-        assert "x" in packet_schema
+        assert "x" in data_schema
 
     def test_arrow_table_source_has_stream_attr(self):
         table = pa.table({"id": pa.array([1, 2]), "x": pa.array([10, 20])})

@@ -18,7 +18,7 @@ else:
 class DictSource(RootSource):
     """A source backed by a collection of Python dictionaries.
 
-    Each dict becomes one (tag, packet) pair in the stream. The dicts are
+    Each dict becomes one (tag, data) pair in the stream. The dicts are
     converted to an Arrow table via the data-context type converter, then
     enriched by ``SourceStreamBuilder`` (source-info, schema-hash, system tags).
     """

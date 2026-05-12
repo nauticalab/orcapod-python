@@ -1,12 +1,12 @@
 """
-Tests for the packet function executor system.
+Tests for the data function executor system.
 
 Covers:
 - PythonFunctionExecutorBase (supports, get_execution_data)
 - LocalExecutor (in-process execution)
-- Executor as property on PacketFunctionBase (get/set/validation)
+- Executor as property on DataFunctionBase (get/set/validation)
 - Executor routing in call() / direct_call()
-- Executor delegation through PacketFunctionWrapper / CachedPacketFunction
+- Executor delegation through DataFunctionWrapper / CachedDataFunction
 - Custom executor with restricted type support
 """
 
@@ -16,16 +16,16 @@ from typing import Any
 
 import pytest
 
-from orcapod.core.datagrams import Packet
+from orcapod.core.datagrams import Data
 from orcapod.core.executors import LocalPythonFunctionExecutor, PythonFunctionExecutorBase
-from orcapod.core.packet_function import (
-    PacketFunctionWrapper,
-    PythonPacketFunction,
+from orcapod.core.data_function import (
+    DataFunctionWrapper,
+    PythonDataFunction,
 )
 from orcapod.protocols.core_protocols import (
-    PacketFunctionExecutorProtocol,
-    PacketFunctionProtocol,
-    PacketProtocol,
+    DataFunctionExecutorProtocol,
+    DataFunctionProtocol,
+    DataProtocol,
     PythonFunctionExecutorProtocol,
 )
 
@@ -58,11 +58,11 @@ class SpyExecutor(PythonFunctionExecutorBase):
 
     def execute(
         self,
-        packet_function: PacketFunctionProtocol,
-        packet: PacketProtocol,
-    ) -> "PacketProtocol | None":
-        self.calls.append((packet_function, packet))
-        return packet_function.direct_call(packet)
+        data_function: DataFunctionProtocol,
+        data: DataProtocol,
+    ) -> "DataProtocol | None":
+        self.calls.append((data_function, data))
+        return data_function.direct_call(data)
 
     def execute_callable(self, fn, kwargs, executor_options=None, **kw):
         self.calls.append((fn, kwargs))
@@ -103,13 +103,13 @@ class NonPythonExecutor(PythonFunctionExecutorBase):
 
 
 @pytest.fixture
-def add_pf() -> PythonPacketFunction:
-    return PythonPacketFunction(add, output_keys="result")
+def add_pf() -> PythonDataFunction:
+    return PythonDataFunction(add, output_keys="result")
 
 
 @pytest.fixture
-def add_packet() -> Packet:
-    return Packet({"x": 1, "y": 2})
+def add_data() -> Data:
+    return Data({"x": 1, "y": 2})
 
 
 @pytest.fixture
@@ -189,40 +189,40 @@ class TestLocalExecutor:
 
 
 # ---------------------------------------------------------------------------
-# 3. Executor as property on PacketFunctionBase
+# 3. Executor as property on DataFunctionBase
 # ---------------------------------------------------------------------------
 
 
 class TestExecutorProperty:
-    def test_default_executor_is_local(self, add_pf: PythonPacketFunction):
+    def test_default_executor_is_local(self, add_pf: PythonDataFunction):
         assert isinstance(add_pf.executor, LocalPythonFunctionExecutor)
 
     def test_set_executor(
-        self, add_pf: PythonPacketFunction, spy_executor: SpyExecutor
+        self, add_pf: PythonDataFunction, spy_executor: SpyExecutor
     ):
         add_pf.executor = spy_executor
         assert add_pf.executor is spy_executor
 
     def test_unset_executor_to_none(
-        self, add_pf: PythonPacketFunction, spy_executor: SpyExecutor
+        self, add_pf: PythonDataFunction, spy_executor: SpyExecutor
     ):
         add_pf.executor = spy_executor
         add_pf.executor = None
         assert add_pf.executor is None
 
-    def test_set_compatible_executor(self, add_pf: PythonPacketFunction):
+    def test_set_compatible_executor(self, add_pf: PythonDataFunction):
         executor = PythonOnlyExecutor()
         add_pf.executor = executor
         assert add_pf.executor is executor
 
-    def test_set_incompatible_executor_raises(self, add_pf: PythonPacketFunction):
+    def test_set_incompatible_executor_raises(self, add_pf: PythonDataFunction):
         executor = NonPythonExecutor()
         with pytest.raises(TypeError, match="does not support"):
             add_pf.executor = executor
 
     def test_executor_via_constructor(self):
         executor = PythonOnlyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result", executor=executor)
+        pf = PythonDataFunction(add, output_keys="result", executor=executor)
         assert pf.executor is executor
 
 
@@ -233,65 +233,65 @@ class TestExecutorProperty:
 
 class TestExecutorRouting:
     def test_call_without_executor_uses_direct_call(
-        self, add_pf: PythonPacketFunction, add_packet: Packet
+        self, add_pf: PythonDataFunction, add_data: Data
     ):
-        result = add_pf.call(add_packet)
+        result = add_pf.call(add_data)
         assert result is not None
         assert result.as_dict()["result"] == 3
 
     def test_call_with_executor_routes_through_executor(
         self,
-        add_pf: PythonPacketFunction,
-        add_packet: Packet,
+        add_pf: PythonDataFunction,
+        add_data: Data,
         spy_executor: SpyExecutor,
     ):
         add_pf.executor = spy_executor
-        result = add_pf.call(add_packet)
+        result = add_pf.call(add_data)
         assert result is not None
         assert result.as_dict()["result"] == 3
         assert len(spy_executor.calls) == 1
 
     def test_direct_call_bypasses_executor(
         self,
-        add_pf: PythonPacketFunction,
-        add_packet: Packet,
+        add_pf: PythonDataFunction,
+        add_data: Data,
         spy_executor: SpyExecutor,
     ):
         add_pf.executor = spy_executor
-        result = add_pf.direct_call(add_packet)
+        result = add_pf.direct_call(add_data)
         assert result is not None
         assert result.as_dict()["result"] == 3
         # Executor was NOT called
         assert len(spy_executor.calls) == 0
 
     def test_swapping_executor_changes_routing(
-        self, add_pf: PythonPacketFunction, add_packet: Packet
+        self, add_pf: PythonDataFunction, add_data: Data
     ):
         spy1 = SpyExecutor()
         spy2 = SpyExecutor()
 
         add_pf.executor = spy1
-        add_pf.call(add_packet)
+        add_pf.call(add_data)
         assert len(spy1.calls) == 1
         assert len(spy2.calls) == 0
 
         add_pf.executor = spy2
-        add_pf.call(add_packet)
+        add_pf.call(add_data)
         assert len(spy1.calls) == 1
         assert len(spy2.calls) == 1
 
     def test_unsetting_executor_reverts_to_direct(
         self,
-        add_pf: PythonPacketFunction,
-        add_packet: Packet,
+        add_pf: PythonDataFunction,
+        add_data: Data,
         spy_executor: SpyExecutor,
     ):
         add_pf.executor = spy_executor
-        add_pf.call(add_packet)
+        add_pf.call(add_data)
         assert len(spy_executor.calls) == 1
 
         add_pf.executor = None
-        add_pf.call(add_packet)
+        add_pf.call(add_data)
         # No additional executor calls
         assert len(spy_executor.calls) == 1
 
@@ -302,20 +302,20 @@ class TestExecutorRouting:
 
 
 class TestWrapperExecutorDelegation:
-    def test_wrapper_executor_reads_from_wrapped(self, add_pf: PythonPacketFunction):
+    def test_wrapper_executor_reads_from_wrapped(self, add_pf: PythonDataFunction):
         spy = SpyExecutor()
         add_pf.executor = spy
 
-        class SimpleWrapper(PacketFunctionWrapper):
+        class SimpleWrapper(DataFunctionWrapper):
             pass
 
         wrapper = SimpleWrapper(add_pf, version="v0.0")
         assert wrapper.executor is spy
 
-    def test_wrapper_executor_set_targets_wrapped(self, add_pf: PythonPacketFunction):
+    def test_wrapper_executor_set_targets_wrapped(self, add_pf: PythonDataFunction):
         spy = SpyExecutor()
 
-        class SimpleWrapper(PacketFunctionWrapper):
+        class SimpleWrapper(DataFunctionWrapper):
             pass
 
         wrapper = SimpleWrapper(add_pf, version="v0.0")
@@ -323,16 +323,16 @@ class TestWrapperExecutorDelegation:
         assert add_pf.executor is spy
 
     def test_wrapper_call_routes_through_inner_executor(
-        self, add_pf: PythonPacketFunction, add_packet: Packet
+        self, add_pf: PythonDataFunction, add_data: Data
     ):
         spy = SpyExecutor()
         add_pf.executor = spy
 
-        class SimpleWrapper(PacketFunctionWrapper):
+        class SimpleWrapper(DataFunctionWrapper):
             pass
 
         wrapper = SimpleWrapper(add_pf, version="v0.0")
-        result = wrapper.call(add_packet)
+        result = wrapper.call(add_data)
         assert result is not None
         assert result.as_dict()["result"] == 3
         assert len(spy.calls) == 1
@@ -346,16 +346,16 @@ class TestWrapperExecutorDelegation:
 class TestProtocolConformance:
     def test_local_executor_satisfies_protocol(self):
         executor = LocalPythonFunctionExecutor()
-        assert isinstance(executor, PacketFunctionExecutorProtocol)
+        assert isinstance(executor, DataFunctionExecutorProtocol)
 
     def test_spy_executor_satisfies_protocol(self):
         executor = SpyExecutor()
-        assert isinstance(executor, PacketFunctionExecutorProtocol)
+        assert isinstance(executor, DataFunctionExecutorProtocol)
 
-    def test_packet_function_with_executor_satisfies_protocol(self):
-        pf = PythonPacketFunction(add, output_keys="result")
+    def test_data_function_with_executor_satisfies_protocol(self):
+        pf = PythonDataFunction(add, output_keys="result")
         pf.executor = LocalPythonFunctionExecutor()
-        assert isinstance(pf, PacketFunctionProtocol)
+        assert isinstance(pf, DataFunctionProtocol)
 
 
 # ---------------------------------------------------------------------------
@@ -381,20 +381,20 @@ def _make_add_stream(rows: list[dict] | None = None):
 
 
 class TestFunctionPodExecutorAccess:
-    def test_pod_executor_reads_from_packet_function(self):
+    def test_pod_executor_reads_from_data_function(self):
         from orcapod.core.function_pod import FunctionPod
 
         spy = SpyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         pf.executor = spy
         pod = FunctionPod(pf)
         assert pod.executor is spy
 
-    def test_pod_executor_set_targets_packet_function(self):
+    def test_pod_executor_set_targets_data_function(self):
         from orcapod.core.function_pod import FunctionPod
 
         spy = SpyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         pod = FunctionPod(pf)
         pod.executor = spy
         assert pf.executor is spy
@@ -404,7 +404,7 @@ class TestFunctionPodExecutorAccess:
 
         spy = SpyExecutor()
         spy2 = SpyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         pf.executor = spy
         pod = FunctionPod(pf)
         pod.executor = spy2
@@ -414,14 +414,14 @@ class TestFunctionPodExecutorAccess:
         from orcapod.core.function_pod import FunctionPod
 
         spy = SpyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         pf.executor = spy
         pod = FunctionPod(pf)
 
         stream = _make_add_stream()
         output_stream = pod.process(stream)
 
-        results = list(output_stream.iter_packets())
+        results = list(output_stream.iter_data())
         assert len(results) == 2
         assert results[0][1].as_dict()["result"] == 3
         assert results[1][1].as_dict()["result"] == 7
@@ -429,22 +429,22 @@ class TestFunctionPodExecutorAccess:
 
 
 class TestFunctionPodStreamExecutorAccess:
-    def test_stream_executor_reads_from_packet_function(self):
+    def test_stream_executor_reads_from_data_function(self):
         from orcapod.core.function_pod import FunctionPod
 
         spy = SpyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         pf.executor = spy
         pod = FunctionPod(pf)
 
         stream = pod.process(_make_add_stream())
         assert stream.executor is spy
 
-    def test_stream_executor_set_targets_packet_function(self):
+    def test_stream_executor_set_targets_data_function(self):
         from orcapod.core.function_pod import FunctionPod
 
         spy = SpyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         pod = FunctionPod(pf)
 
         stream = pod.process(_make_add_stream())
@@ -453,24 +453,24 @@ class TestFunctionPodStreamExecutorAccess:
 
 
 class TestFunctionNodeExecutorAccess:
-    def test_node_executor_reads_from_packet_function(self):
+    def test_node_executor_reads_from_data_function(self):
         from orcapod.core.function_pod import FunctionPod
         from orcapod.core.nodes import FunctionNode
 
         spy = SpyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         pf.executor = spy
         pod = FunctionPod(pf)
 
         node = FunctionNode(pod, _make_add_stream())
         assert node.executor is spy
 
-    def test_node_executor_set_targets_packet_function(self):
+    def test_node_executor_set_targets_data_function(self):
         from orcapod.core.function_pod import FunctionPod
         from orcapod.core.nodes import FunctionNode
 
         spy = SpyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         pod = FunctionPod(pf)
 
         node = FunctionNode(pod, _make_add_stream())
@@ -482,14 +482,14 @@ class TestFunctionNodeExecutorAccess:
         from orcapod.core.nodes import FunctionNode
 
         spy = SpyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         pf.executor = spy
         pod = FunctionPod(pf)
 
         node = FunctionNode(pod, _make_add_stream())
 
         node.run()
-        results = list(node.iter_packets())
+        results = list(node.iter_data())
         assert len(results) == 2
         assert results[0][1].as_dict()["result"] == 3
         assert len(spy.calls) == 2
@@ -523,7 +523,7 @@ class TestFunctionPodDecoratorExecutor:
 
         stream = _make_add_stream()
         output = my_add.pod.process(stream)
-        results = list(output.iter_packets())
+        results = list(output.iter_data())
         assert len(results) == 2
         assert results[0][1].as_dict()["result"] == 3
         assert len(spy.calls) == 2
@@ -557,13 +557,13 @@ class TestFunctionPodDecoratorExecutor:
 class TestConstructorValidation:
     def test_constructor_validates_compatible_executor(self):
         executor = PythonOnlyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result", executor=executor)
+        pf = PythonDataFunction(add, output_keys="result", executor=executor)
         assert pf.executor is executor
 
     def test_constructor_rejects_incompatible_executor(self):
         executor = NonPythonExecutor()
         with pytest.raises(TypeError, match="does not support"):
-            PythonPacketFunction(add, output_keys="result", executor=executor)
+            PythonDataFunction(add, output_keys="result", executor=executor)
 
 
 # ---------------------------------------------------------------------------
@@ -591,19 +591,19 @@ class ConcurrentSpyExecutor(PythonFunctionExecutorBase):
 
     def execute(
         self,
-        packet_function: PacketFunctionProtocol,
-        packet: PacketProtocol,
-    ) -> "PacketProtocol | None":
-        self.sync_calls.append(packet)
-        return packet_function.direct_call(packet)
+        data_function: DataFunctionProtocol,
+        data: DataProtocol,
+    ) -> "DataProtocol | None":
+        self.sync_calls.append(data)
+        return data_function.direct_call(data)
 
     async def async_execute(
         self,
-        packet_function: PacketFunctionProtocol,
-        packet: PacketProtocol,
-    ) -> "PacketProtocol | None":
-        self.async_calls.append(packet)
-        return packet_function.direct_call(packet)
+        data_function: DataFunctionProtocol,
+        data: DataProtocol,
+    ) -> "DataProtocol | None":
+        self.async_calls.append(data)
+        return data_function.direct_call(data)
 
     def execute_callable(self, fn, kwargs, executor_options=None, **kw):
         self.sync_calls.append(kwargs)
@@ -619,12 +619,12 @@ class TestConcurrentIteration:
         from orcapod.core.function_pod import FunctionPod
 
         spy = ConcurrentSpyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pf = PythonDataFunction(add, output_keys="result", executor=spy)
         pod = FunctionPod(pf)
 
         stream = _make_add_stream()
         output_stream = pod.process(stream)
-        results = list(output_stream.iter_packets())
+        results = list(output_stream.iter_data())
 
         assert len(results) == 2
         assert results[0][1].as_dict()["result"] == 3
@@ -642,12 +642,12 @@ class TestConcurrentIteration:
         from orcapod.core.nodes import FunctionNode
 
         spy = ConcurrentSpyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pf = PythonDataFunction(add, output_keys="result", executor=spy)
         pod = FunctionPod(pf)
 
         node = FunctionNode(pod, _make_add_stream())
         node.run()
-        results = list(node.iter_packets())
+        results = list(node.iter_data())
 
         assert len(results) == 2
         assert results[0][1].as_dict()["result"] == 3
@@ -662,12 +662,12 @@ class TestConcurrentIteration:
         from orcapod.core.nodes import FunctionNode
 
         spy = SpyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pf = PythonDataFunction(add, output_keys="result", executor=spy)
         pod = FunctionPod(pf)
 
         node = FunctionNode(pod, _make_add_stream())
         node.run()
-        results = list(node.iter_packets())
+        results = list(node.iter_data())
 
         assert len(results) == 2
         # SpyExecutor.execute was called (sync path)
@@ -677,12 +677,12 @@ class TestConcurrentIteration:
         from orcapod.core.function_pod import FunctionPod
         from orcapod.core.nodes import FunctionNode
 
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         pod = FunctionPod(pf)
 
         node = FunctionNode(pod, _make_add_stream())
         node.run()
-        results = list(node.iter_packets())
+        results = list(node.iter_data())
 
         assert len(results) == 2
         assert results[0][1].as_dict()["result"] == 3
@@ -692,13 +692,13 @@ class TestConcurrentIteration:
         from orcapod.core.function_pod import FunctionPod
 
         spy = ConcurrentSpyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pf = PythonDataFunction(add, output_keys="result", executor=spy)
         pod = FunctionPod(pf)
 
         rows = [{"id": i, "x": i, "y": i * 10} for i in range(5)]
         stream = _make_add_stream(rows)
         output = pod.process(stream)
-        results = [tag_pkt[1].as_dict()["result"] for tag_pkt in output.iter_packets()]
+        results = [tag_pkt[1].as_dict()["result"] for tag_pkt in output.iter_data()]
         assert results == [0, 11, 22, 33, 44]
 
     def test_second_iteration_uses_cache(self):
@@ -706,18 +706,18 @@ class TestConcurrentIteration:
         from orcapod.core.function_pod import FunctionPod
 
         spy = ConcurrentSpyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pf = PythonDataFunction(add, output_keys="result", executor=spy)
         pod = FunctionPod(pf)
 
         stream = _make_add_stream()
         output_stream = pod.process(stream)
 
         # First iteration: concurrent
-        first = list(output_stream.iter_packets())
+        first = list(output_stream.iter_data())
         assert len(spy.async_calls) == 2
 
         # Second iteration: from cache, no new executor calls
-        second = list(output_stream.iter_packets())
+        second = list(output_stream.iter_data())
         assert len(spy.async_calls) == 2  # unchanged
         assert len(first) == len(second)
 
@@ -764,47 +764,47 @@ class _NotAnExecutor:
     def supported_function_type_ids(self) -> frozenset[str]:
         return frozenset()
 
-    def supports(self, packet_function_type_id: str) -> bool:
+    def supports(self, data_function_type_id: str) -> bool:
         return True
 
 
 class TestGenericExecutorDispatch:
     def test_python_pf_resolves_executor_protocol(self):
-        """PythonPacketFunction should have resolved PythonFunctionExecutorProtocol."""
+        """PythonDataFunction should have resolved PythonFunctionExecutorProtocol."""
         assert (
-            PythonPacketFunction._resolved_executor_protocol
+            PythonDataFunction._resolved_executor_protocol
             is PythonFunctionExecutorProtocol
         )
 
     def test_wrapper_does_not_resolve_protocol(self):
-        """PacketFunctionWrapper[E] should NOT resolve a protocol (E is unbound)."""
-        assert PacketFunctionWrapper._resolved_executor_protocol is None
+        """DataFunctionWrapper[E] should NOT resolve a protocol (E is unbound)."""
+        assert DataFunctionWrapper._resolved_executor_protocol is None
 
     def test_set_executor_accepts_compatible_protocol(self):
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         executor = LocalPythonFunctionExecutor()
         pf.set_executor(executor)
         assert pf.executor is executor
 
     def test_set_executor_accepts_none(self):
         spy = SpyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pf = PythonDataFunction(add, output_keys="result", executor=spy)
         pf.set_executor(None)
         assert pf.executor is None
 
     def test_set_executor_rejects_non_conforming_protocol(self):
         """An object that doesn't implement PythonFunctionExecutorProtocol is rejected."""
-        pf = PythonPacketFunction(add, output_keys="result")
+        pf = PythonDataFunction(add, output_keys="result")
         fake = _NotAnExecutor()
         with pytest.raises(TypeError, match="requires an executor implementing"):
             pf.set_executor(fake)
 
     def test_call_routes_through_execute_callable(self):
-        """PythonPacketFunction.call() should use execute_callable, not execute."""
+        """PythonDataFunction.call() should use execute_callable, not execute."""
         spy = SpyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
-        packet = Packet({"x": 1, "y": 2})
-        result = pf.call(packet)
+        pf = PythonDataFunction(add, output_keys="result", executor=spy)
+        data = Data({"x": 1, "y": 2})
+        result = pf.call(data)
         assert result is not None
         assert result.as_dict()["result"] == 3
         assert len(spy.calls) == 1
@@ -812,21 +812,21 @@ class TestGenericExecutorDispatch:
     def test_call_with_inactive_function_returns_none(self):
         """When the function is inactive and executor is set, call returns None."""
         spy = SpyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
+        pf = PythonDataFunction(add, output_keys="result", executor=spy)
         pf.set_active(False)
-        packet = Packet({"x": 1, "y": 2})
-        result = pf.call(packet)
+        data = Data({"x": 1, "y": 2})
+        result = pf.call(data)
         assert result is None
         assert len(spy.calls) == 0
 
     def test_async_call_routes_through_async_execute_callable(self):
-        """PythonPacketFunction.async_call() should use async_execute_callable."""
+        """PythonDataFunction.async_call() should use async_execute_callable."""
         import asyncio
 
         spy = ConcurrentSpyExecutor()
-        pf = PythonPacketFunction(add, output_keys="result", executor=spy)
-        packet = Packet({"x": 1, "y": 2})
-        result = asyncio.run(pf.async_call(packet))
+        pf = PythonDataFunction(add, output_keys="result", executor=spy)
+        data = Data({"x": 1, "y": 2})
+        result = asyncio.run(pf.async_call(data))
         assert result is not None
         assert result.as_dict()["result"] == 3
         assert len(spy.async_calls) == 1

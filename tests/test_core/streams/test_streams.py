@@ -73,7 +73,7 @@ class TestStreamBasePipelineElementBase:
             def keys(self, *, columns=None, all_info=False):
                 return (), ()
 
-            def iter_packets(self):
+            def iter_data(self):
                 return iter([])
 
             def as_table(self, *, columns=None, all_info=False):
@@ -104,7 +104,7 @@ class TestStreamBasePipelineElementBase:
             def keys(self, *, columns=None, all_info=False):
                 return (), ()
 
-            def iter_packets(self):
+            def iter_data(self):
                 return iter([])
 
             def as_table(self, *, columns=None, all_info=False):
@@ -142,24 +142,24 @@ class TestStreamProtocolConformance:
 
     def test_stream_has_keys_method(self):
         stream = make_table_stream()
-        tag_keys, packet_keys = stream.keys()
+        tag_keys, data_keys = stream.keys()
         assert isinstance(tag_keys, tuple)
-        assert isinstance(packet_keys, tuple)
+        assert isinstance(data_keys, tuple)
 
     def test_stream_has_output_schema_method(self):
         from orcapod.types import Schema
 
         stream = make_table_stream()
-        tag_schema, packet_schema = stream.output_schema()
+        tag_schema, data_schema = stream.output_schema()
         assert isinstance(tag_schema, Schema)
-        assert isinstance(packet_schema, Schema)
+        assert isinstance(data_schema, Schema)
 
-    def test_stream_has_iter_packets_method(self):
+    def test_stream_has_iter_data_method(self):
         stream = make_table_stream()
-        it = stream.iter_packets()
+        it = stream.iter_data()
         # must be iterable
         pair = next(it)
-        assert len(pair) == 2  # (TagProtocol, PacketProtocol)
+        assert len(pair) == 2  # (TagProtocol, DataProtocol)
 
     def test_stream_has_as_table_method(self):
         stream = make_table_stream()
@@ -177,20 +177,20 @@ class TestTableStreamConstruction:
         stream = make_table_stream()
         assert stream is not None
 
-    def test_tag_and_packet_columns_are_separated(self):
+    def test_tag_and_data_columns_are_separated(self):
         stream = make_table_stream(tag_columns=["id"])
-        tag_keys, packet_keys = stream.keys()
+        tag_keys, data_keys = stream.keys()
         assert "id" in tag_keys
-        assert "value" in packet_keys
-        assert "id" not in packet_keys
+        assert "value" in data_keys
+        assert "id" not in data_keys
 
     def test_missing_tag_column_raises(self):
         table = pa.table({"value": pa.array([1, 2])})
         with pytest.raises(ValueError):
             ArrowTableStream(table, tag_columns=["nonexistent"])
 
-    def test_no_packet_column_raises(self):
-        # A table where all columns are tags → no packet columns → should raise
+    def test_no_data_column_raises(self):
+        # A table where all columns are tags → no data columns → should raise
         table = pa.table({"id": pa.array([1, 2])})
         with pytest.raises(ValueError):
             ArrowTableStream(table, tag_columns=["id"])
@@ -215,17 +215,17 @@ class TestTableStreamKeys:
         tag_keys, _ = stream.keys()
         assert tag_keys == ("id",)
 
-    def test_returns_correct_packet_keys(self):
+    def test_returns_correct_data_keys(self):
         stream = make_table_stream(tag_columns=["id"])
-        _, packet_keys = stream.keys()
-        assert packet_keys == ("value",)
+        _, data_keys = stream.keys()
+        assert data_keys == ("value",)
 
     def test_no_tag_columns(self):
         table = pa.table({"a": pa.array([1]), "b": pa.array([2])})
         stream = ArrowTableStream(table, tag_columns=[])
-        tag_keys, packet_keys = stream.keys()
+        tag_keys, data_keys = stream.keys()
         assert tag_keys == ()
-        assert set(packet_keys) == {"a", "b"}
+        assert set(data_keys) == {"a", "b"}
 
 
 # ---------------------------------------------------------------------------
@@ -236,66 +236,66 @@ class TestTableStreamKeys:
 class TestTableStreamOutputSchema:
     def test_schema_keys_match_column_keys(self):
         stream = make_table_stream(tag_columns=["id"])
-        tag_schema, packet_schema = stream.output_schema()
-        tag_keys, packet_keys = stream.keys()
+        tag_schema, data_schema = stream.output_schema()
+        tag_keys, data_keys = stream.keys()
         assert set(tag_schema.keys()) == set(tag_keys)
-        assert set(packet_schema.keys()) == set(packet_keys)
+        assert set(data_schema.keys()) == set(data_keys)
 
     def test_schema_values_are_types(self):
         import types as _types
 
         stream = make_table_stream(tag_columns=["id"])
-        tag_schema, packet_schema = stream.output_schema()
-        for v in (*tag_schema.values(), *packet_schema.values()):
+        tag_schema, data_schema = stream.output_schema()
+        for v in (*tag_schema.values(), *data_schema.values()):
             assert isinstance(v, (type, _types.UnionType)), (
                 f"Expected a type or UnionType, got {v!r}"
             )
 
 
 # ---------------------------------------------------------------------------
-# ArrowTableStream.iter_packets()
+# ArrowTableStream.iter_data()
 # ---------------------------------------------------------------------------
 
 
-class TestTableStreamIterPackets:
+class TestTableStreamIterDatas:
     def test_yields_correct_number_of_pairs(self):
         n = 5
         stream = make_table_stream(n_rows=n)
-        pairs = list(stream.iter_packets())
+        pairs = list(stream.iter_data())
         assert len(pairs) == n
 
-    def test_each_pair_has_tag_and_packet(self):
+    def test_each_pair_has_tag_and_data(self):
         from orcapod.protocols.core_protocols.datagrams import (
-            PacketProtocol,
+            DataProtocol,
             TagProtocol,
         )
 
         stream = make_table_stream()
-        for tag, packet in stream.iter_packets():
+        for tag, data in stream.iter_data():
             assert isinstance(tag, TagProtocol)
-            assert isinstance(packet, PacketProtocol)
+            assert isinstance(data, DataProtocol)
 
     def test_tag_contains_tag_column(self):
         stream = make_table_stream(tag_columns=["id"])
-        for tag, _ in stream.iter_packets():
+        for tag, _ in stream.iter_data():
             assert "id" in tag.keys()
 
-    def test_packet_contains_packet_column(self):
+    def test_data_contains_data_column(self):
         stream = make_table_stream(tag_columns=["id"])
-        for _, packet in stream.iter_packets():
-            assert "value" in packet.keys()
+        for _, data in stream.iter_data():
+            assert "value" in data.keys()
 
     def test_values_are_correct(self):
         stream = make_table_stream(tag_columns=["id"], n_rows=3)
-        pairs = list(stream.iter_packets())
-        for i, (tag, packet) in enumerate(pairs):
+        pairs = list(stream.iter_data())
+        for i, (tag, data) in enumerate(pairs):
             assert tag["id"] == i
-            assert packet["value"] == f"v{i}"
+            assert data["value"] == f"v{i}"
 
     def test_iteration_is_repeatable(self):
         stream = make_table_stream(n_rows=3)
-        first = list(stream.iter_packets())
-        second = list(stream.iter_packets())
+        first = list(stream.iter_data())
+        second = list(stream.iter_data())
         assert len(first) == len(second)
         for (t1, p1), (t2, p2) in zip(first, second):
             assert t1["id"] == t2["id"]
@@ -337,7 +337,7 @@ class TestTableStreamAsTable:
 
 
 class TestTableStreamIter:
-    def test_iter_delegates_to_iter_packets(self):
+    def test_iter_delegates_to_iter_data(self):
         stream = make_table_stream(n_rows=3)
         via_iter = list(stream)
         assert len(via_iter) == len(via_iter)
@@ -484,8 +484,8 @@ class TestArrowTableStreamNullablePreservation:
         assert table.schema.field("val").nullable is True
 
         stream = ArrowTableStream(table, tag_columns=["tag"])
-        _, packet_schema = stream.output_schema()
-        assert packet_schema["val"] == int | None
+        _, data_schema = stream.output_schema()
+        assert data_schema["val"] == int | None
 
     def test_non_nullable_fields_yield_plain_type_in_output_schema(self):
         """nullable=False fields → plain T in output_schema."""
@@ -504,8 +504,8 @@ class TestArrowTableStreamNullablePreservation:
         assert table.schema.field("val").nullable is False
 
         stream = ArrowTableStream(table, tag_columns=["tag"])
-        _, packet_schema = stream.output_schema()
-        assert packet_schema["val"] is int
+        _, data_schema = stream.output_schema()
+        assert data_schema["val"] is int
 
     def test_infer_schema_nullable_before_build_produces_plain_type(self):
         """Applying infer_schema_nullable() before build() gives plain T for null-free columns."""
@@ -529,5 +529,5 @@ class TestArrowTableStreamNullablePreservation:
         # Caller infers nullable before handing off to builder
         table = table.cast(arrow_utils.infer_schema_nullable(table))
         result = builder.build(table, tag_columns=["tag"])
-        _, packet_schema = result.stream.output_schema()
-        assert packet_schema["val"] is int
+        _, data_schema = result.stream.output_schema()
+        assert data_schema["val"] is int

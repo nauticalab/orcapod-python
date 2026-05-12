@@ -5,7 +5,7 @@ from orcapod.channels import ReadableChannel, WritableChannel
 from orcapod.core.operators.base import BinaryOperator
 from orcapod.core.streams import ArrowTableStream
 from orcapod.errors import InputValidationError
-from orcapod.protocols.core_protocols import PacketProtocol, StreamProtocol, TagProtocol
+from orcapod.protocols.core_protocols import DataProtocol, StreamProtocol, TagProtocol
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils import schema_utils
 from orcapod.utils.lazy_module import LazyModule
@@ -37,15 +37,15 @@ class SemiJoin(BinaryOperator):
         Performs a semi-join between left and right streams.
         Returns entries from left stream that have matching entries in right stream.
         """
-        left_tag_schema, left_packet_schema = left_stream.output_schema()
-        right_tag_schema, right_packet_schema = right_stream.output_schema()
+        left_tag_schema, left_data_schema = left_stream.output_schema()
+        right_tag_schema, right_data_schema = right_stream.output_schema()
 
-        # Find overlapping columns across all columns (tags + packets)
+        # Find overlapping columns across all columns (tags + data)
         left_all_schema = schema_utils.union_schemas(
-            left_tag_schema, left_packet_schema
+            left_tag_schema, left_data_schema
         )
         right_all_schema = schema_utils.union_schemas(
-            right_tag_schema, right_packet_schema
+            right_tag_schema, right_data_schema
         )
 
         common_keys = tuple(
@@ -102,15 +102,15 @@ class SemiJoin(BinaryOperator):
         to determine the correct empty-right behavior without data.
         """
         try:
-            left_tag_schema, left_packet_schema = left_stream.output_schema()
-            right_tag_schema, right_packet_schema = right_stream.output_schema()
+            left_tag_schema, left_data_schema = left_stream.output_schema()
+            right_tag_schema, right_data_schema = right_stream.output_schema()
 
             # Check that overlapping columns have compatible types across all columns
             left_all_schema = schema_utils.union_schemas(
-                left_tag_schema, left_packet_schema
+                left_tag_schema, left_data_schema
             )
             right_all_schema = schema_utils.union_schemas(
-                right_tag_schema, right_packet_schema
+                right_tag_schema, right_data_schema
             )
 
             # intersection_schemas will raise an error if types are incompatible
@@ -137,8 +137,8 @@ class SemiJoin(BinaryOperator):
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         **kwargs: Any,
     ) -> None:
         """Build-probe: collect right input, then stream left through a hash lookup.
@@ -167,8 +167,8 @@ class SemiJoin(BinaryOperator):
                     await left_ch.collect()
                     return
                 # No common keys — pass all left rows through unchanged
-                async for tag, packet in left_ch:
-                    await output.send((tag, packet))
+                async for tag, data in left_ch:
+                    await output.send((tag, data))
                 return
 
             # Determine right-side keys from first row
@@ -180,17 +180,17 @@ class SemiJoin(BinaryOperator):
             common_keys: tuple[str, ...] | None = None
             right_lookup: set[tuple] | None = None
 
-            async for tag, packet in left_ch:
+            async for tag, data in left_ch:
                 if common_keys is None:
                     # First left row — determine common keys and build index
                     left_tag_keys = set(tag.keys())
-                    left_pkt_keys = set(packet.keys())
+                    left_pkt_keys = set(data.keys())
                     left_all_keys = left_tag_keys | left_pkt_keys
                     common_keys = tuple(sorted(left_all_keys & right_all_keys))
 
                     if not common_keys:
                         # No common keys — pass all left rows through
-                        await output.send((tag, packet))
+                        await output.send((tag, data))
                         async for t, p in left_ch:
                             await output.send((t, p))
                         return
@@ -204,9 +204,9 @@ class SemiJoin(BinaryOperator):
 
                 # Probe
                 ld = tag.as_dict()
-                ld.update(packet.as_dict())
+                ld.update(data.as_dict())
                 if tuple(ld[k] for k in common_keys) in right_lookup:  # type: ignore[arg-type]
-                    await output.send((tag, packet))
+                    await output.send((tag, data))
         finally:
             await output.close()
 

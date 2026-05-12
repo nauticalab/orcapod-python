@@ -2,12 +2,12 @@
 Tests for async_execute on Node classes.
 
 Covers:
-- CachedPacketFunction.async_call with cache support
+- CachedDataFunction.async_call with cache support
 - FunctionNode.async_execute basic streaming
 - FunctionNode.async_execute two-phase logic
 - OperatorNode.async_execute delegation
 - OperatorNode.async_execute with cache modes
-- execute_packet / async_process_packet routing
+- execute_data / async_process_data routing
 """
 
 from __future__ import annotations
@@ -18,16 +18,16 @@ import pyarrow as pa
 import pytest
 
 from orcapod.channels import Channel
-from orcapod.core.datagrams import Packet
+from orcapod.core.datagrams import Data
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import (
     FunctionNode,
     OperatorNode,
 )
-from orcapod.core.operators import SelectPacketColumns
+from orcapod.core.operators import SelectDataColumns
 from orcapod.core.operators.join import Join
 from orcapod.core.operators.semijoin import SemiJoin
-from orcapod.core.packet_function import CachedPacketFunction, PythonPacketFunction
+from orcapod.core.data_function import CachedDataFunction, PythonDataFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.types import CacheMode, NodeConfig
@@ -69,43 +69,43 @@ def make_two_col_stream(n: int = 3) -> ArrowTableStream:
 
 
 async def feed_stream_to_channel(stream: ArrowTableStream, ch: Channel) -> None:
-    """Push all (tag, packet) pairs from a stream into a channel, then close."""
-    for tag, packet in stream.iter_packets():
-        await ch.writer.send((tag, packet))
+    """Push all (tag, data) pairs from a stream into a channel, then close."""
+    for tag, data in stream.iter_data():
+        await ch.writer.send((tag, data))
     await ch.writer.close()
 
 
-def make_double_pod() -> tuple[PythonPacketFunction, FunctionPod]:
+def make_double_pod() -> tuple[PythonDataFunction, FunctionPod]:
     def double(x: int) -> int:
         return x * 2
 
-    pf = PythonPacketFunction(double, output_keys="result")
+    pf = PythonDataFunction(double, output_keys="result")
     pod = FunctionPod(pf)
     return pf, pod
 
 
 # ---------------------------------------------------------------------------
-# 1. CachedPacketFunction.async_call
+# 1. CachedDataFunction.async_call
 # ---------------------------------------------------------------------------
 
 
-class TestCachedPacketFunctionAsync:
+class TestCachedDataFunctionAsync:
     @pytest.mark.asyncio
     async def test_async_call_cache_miss_computes_and_records(self):
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result")
+        pf = PythonDataFunction(double, output_keys="result")
         db = InMemoryArrowDatabase()
-        cpf = CachedPacketFunction(pf, result_database=db)
+        cpf = CachedDataFunction(pf, result_database=db)
 
-        packet = Packet({"x": 5})
-        result = await cpf.async_call(packet)
+        data = Data({"x": 5})
+        result = await cpf.async_call(data)
 
         assert result is not None
         assert result.as_dict()["result"] == 10
         # Check that result was recorded in DB
-        cached = cpf.get_cached_output_for_packet(packet)
+        cached = cpf.get_cached_output_for_data(data)
         assert cached is not None
         assert cached.as_dict()["result"] == 10
 
@@ -114,19 +114,19 @@ class TestCachedPacketFunctionAsync:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result")
+        pf = PythonDataFunction(double, output_keys="result")
         db = InMemoryArrowDatabase()
-        cpf = CachedPacketFunction(pf, result_database=db)
+        cpf = CachedDataFunction(pf, result_database=db)
 
-        packet = Packet({"x": 5})
+        data = Data({"x": 5})
         # First call — computes
-        result1 = await cpf.async_call(packet)
+        result1 = await cpf.async_call(data)
         assert result1 is not None
         # Has RESULT_COMPUTED_FLAG
         assert result1.get_meta_value(cpf.RESULT_COMPUTED_FLAG, False) is True
 
         # Second call — should hit cache (no RESULT_COMPUTED_FLAG set to True)
-        result2 = await cpf.async_call(packet)
+        result2 = await cpf.async_call(data)
         assert result2 is not None
         assert result2.as_dict()["result"] == 10
         # Cache hit should NOT have RESULT_COMPUTED_FLAG=True
@@ -142,16 +142,16 @@ class TestCachedPacketFunctionAsync:
             call_count += 1
             return x * 2
 
-        pf = PythonPacketFunction(counting_double, output_keys="result")
+        pf = PythonDataFunction(counting_double, output_keys="result")
         db = InMemoryArrowDatabase()
-        cpf = CachedPacketFunction(pf, result_database=db)
+        cpf = CachedDataFunction(pf, result_database=db)
 
-        packet = Packet({"x": 5})
-        _result1 = await cpf.async_call(packet)
+        data = Data({"x": 5})
+        _result1 = await cpf.async_call(data)
         assert call_count == 1
 
         # With skip_cache_lookup, should recompute
-        _result2 = await cpf.async_call(packet, skip_cache_lookup=True)
+        _result2 = await cpf.async_call(data, skip_cache_lookup=True)
         assert call_count == 2
 
     @pytest.mark.asyncio
@@ -159,17 +159,17 @@ class TestCachedPacketFunctionAsync:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result")
+        pf = PythonDataFunction(double, output_keys="result")
         db = InMemoryArrowDatabase()
-        cpf = CachedPacketFunction(pf, result_database=db)
+        cpf = CachedDataFunction(pf, result_database=db)
 
-        packet = Packet({"x": 5})
-        result = await cpf.async_call(packet, skip_cache_insert=True)
+        data = Data({"x": 5})
+        result = await cpf.async_call(data, skip_cache_insert=True)
         assert result is not None
         assert result.as_dict()["result"] == 10
 
         # Should NOT be cached
-        cached = cpf.get_cached_output_for_packet(packet)
+        cached = cpf.get_cached_output_for_data(data)
         assert cached is None
 
 
@@ -186,7 +186,7 @@ class TestFunctionNodeAsyncExecute:
 
         # Sync results
         node_sync = FunctionNode(pod, stream)
-        sync_results = list(node_sync.iter_packets())
+        sync_results = list(node_sync.iter_data())
         sync_values = sorted(pkt.as_dict()["result"] for _, pkt in sync_results)
 
         # Async results
@@ -268,16 +268,16 @@ class TestFunctionNodeAsyncExecute:
         node1 = FunctionNode(pod, stream, pipeline_database=db)
         node1.run()
 
-        # New node with same DB — send same packets, expect cached hits
+        # New node with same DB — send same data, expect cached hits
         input_stream = make_stream(3)
         node2 = FunctionNode(pod, input_stream, pipeline_database=db)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
 
-        # Send the same packets that were already cached
-        for tag, packet in input_stream.iter_packets():
-            await input_ch.writer.send((tag, packet))
+        # Send the same data that were already cached
+        for tag, data in input_stream.iter_data():
+            await input_ch.writer.send((tag, data))
         await input_ch.writer.close()
 
         await node2.async_execute(input_ch.reader, output_ch.writer)
@@ -313,7 +313,7 @@ class TestFunctionNodeAsyncExecute:
 
     @pytest.mark.asyncio
     async def test_concurrent_execution_with_async_function(self):
-        """Async packets should run concurrently when max_concurrency > 1."""
+        """Async data should run concurrently when max_concurrency > 1."""
         peak = 0
         current = 0
         lock = asyncio.Lock()
@@ -328,7 +328,7 @@ class TestFunctionNodeAsyncExecute:
                 current -= 1
             return x * 2
 
-        pf = PythonPacketFunction(tracked_double, output_keys="result")
+        pf = PythonDataFunction(tracked_double, output_keys="result")
         pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=5))
         db = InMemoryArrowDatabase()
         stream = make_stream(5)
@@ -365,7 +365,7 @@ class TestFunctionNodeAsyncExecute:
                 current -= 1
             return x * 2
 
-        pf = PythonPacketFunction(tracked_double, output_keys="result")
+        pf = PythonDataFunction(tracked_double, output_keys="result")
         pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=1))
         db = InMemoryArrowDatabase()
         stream = make_stream(5)
@@ -401,7 +401,7 @@ class TestFunctionNodeAsyncExecute:
                 current -= 1
             return x * 2
 
-        pf = PythonPacketFunction(tracked_double, output_keys="result")
+        pf = PythonDataFunction(tracked_double, output_keys="result")
         pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=5))
         stream = make_stream(5)
         # No pipeline_database — exercises the simple (non-DB) path
@@ -451,7 +451,7 @@ class TestOperatorNodeAsyncExecute:
     @pytest.mark.asyncio
     async def test_unary_op_delegation(self):
         stream = make_two_col_stream(3)
-        op = SelectPacketColumns(["x"])
+        op = SelectDataColumns(["x"])
         node = OperatorNode(op, [stream])
 
         input_ch = Channel(buffer_size=16)
@@ -462,8 +462,8 @@ class TestOperatorNodeAsyncExecute:
 
         results = await output_ch.reader.collect()
         assert len(results) == 3
-        for _, packet in results:
-            pkt_dict = packet.as_dict()
+        for _, data in results:
+            pkt_dict = data.as_dict()
             assert "x" in pkt_dict
             assert "y" not in pkt_dict
 
@@ -534,7 +534,7 @@ class TestOperatorNodeAsyncExecute:
     @pytest.mark.asyncio
     async def test_results_match_sync(self):
         stream = make_two_col_stream(4)
-        op = SelectPacketColumns(["x"])
+        op = SelectDataColumns(["x"])
 
         # Sync
         node_sync = OperatorNode(op, [stream])
@@ -564,7 +564,7 @@ class TestOperatorNodeAsyncExecute:
     @pytest.mark.asyncio
     async def test_off_mode_no_db_write(self):
         stream = make_two_col_stream(3)
-        op = SelectPacketColumns(["x"])
+        op = SelectDataColumns(["x"])
         db = InMemoryArrowDatabase()
         node = OperatorNode(
             op, [stream], pipeline_database=db, cache_mode=CacheMode.OFF
@@ -586,7 +586,7 @@ class TestOperatorNodeAsyncExecute:
     @pytest.mark.asyncio
     async def test_log_mode_stores_results(self):
         stream = make_two_col_stream(3)
-        op = SelectPacketColumns(["x"])
+        op = SelectDataColumns(["x"])
         db = InMemoryArrowDatabase()
         node = OperatorNode(
             op, [stream], pipeline_database=db, cache_mode=CacheMode.LOG
@@ -609,7 +609,7 @@ class TestOperatorNodeAsyncExecute:
     @pytest.mark.asyncio
     async def test_replay_mode_emits_from_db(self):
         stream = make_two_col_stream(3)
-        op = SelectPacketColumns(["x"])
+        op = SelectDataColumns(["x"])
         db = InMemoryArrowDatabase()
 
         # First: sync LOG to populate DB
@@ -641,7 +641,7 @@ class TestOperatorNodeAsyncExecute:
     @pytest.mark.asyncio
     async def test_replay_empty_db_returns_empty(self):
         stream = make_two_col_stream(3)
-        op = SelectPacketColumns(["x"])
+        op = SelectDataColumns(["x"])
         db = InMemoryArrowDatabase()
 
         node = OperatorNode(
@@ -662,13 +662,13 @@ class TestOperatorNodeAsyncExecute:
 
 
 # ---------------------------------------------------------------------------
-# 7. execute_packet routing verification
+# 7. execute_data routing verification
 # ---------------------------------------------------------------------------
 
 
-class TestExecutePacketRouting:
-    def test_function_node_sequential_uses_execute_packet(self):
-        """Verify FunctionNode routes through execute_packet (not raw pf.call)."""
+class TestExecuteDataRouting:
+    def test_function_node_sequential_uses_execute_data(self):
+        """Verify FunctionNode routes through execute_data (not raw pf.call)."""
         call_log = []
 
         _, pod = make_double_pod()
@@ -676,35 +676,35 @@ class TestExecutePacketRouting:
         node = FunctionNode(pod, stream)
 
         # Monkey-patch to verify routing through internal path
-        original = node._process_packet_internal
+        original = node._process_data_internal
 
-        def patched(tag, packet, *, logger=None):
-            call_log.append("_process_packet_internal")
-            return original(tag, packet, logger=logger)
+        def patched(tag, data, *, logger=None):
+            call_log.append("_process_data_internal")
+            return original(tag, data, logger=logger)
 
-        node._process_packet_internal = patched
+        node._process_data_internal = patched
 
-        node.run()  # computation now triggered via run(), not iter_packets()
-        results = list(node.iter_packets())
+        node.run()  # computation now triggered via run(), not iter_data()
+        results = list(node.iter_data())
         assert len(results) == 3
         assert len(call_log) == 3
 
     @pytest.mark.asyncio
-    async def test_function_node_async_uses_async_process_packet_internal(self):
-        """Verify FunctionNode.async_execute routes through _async_process_packet_internal."""
+    async def test_function_node_async_uses_async_process_data_internal(self):
+        """Verify FunctionNode.async_execute routes through _async_process_data_internal."""
         call_log = []
 
         _, pod = make_double_pod()
         stream = make_stream(3)
         node = FunctionNode(pod, stream)
 
-        original = node._async_process_packet_internal
+        original = node._async_process_data_internal
 
-        async def patched(tag, packet, **kwargs):
-            call_log.append("_async_process_packet_internal")
-            return await original(tag, packet, **kwargs)
+        async def patched(tag, data, **kwargs):
+            call_log.append("_async_process_data_internal")
+            return await original(tag, data, **kwargs)
 
-        node._async_process_packet_internal = patched
+        node._async_process_data_internal = patched
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -729,7 +729,7 @@ class TestEndToEnd:
         def triple(x: int) -> int:
             return x * 3
 
-        pf = PythonPacketFunction(triple, output_keys="result")
+        pf = PythonDataFunction(triple, output_keys="result")
         pod = FunctionPod(pf)
         stream = make_stream(4)
         node = FunctionNode(pod, stream)
@@ -738,8 +738,8 @@ class TestEndToEnd:
         ch2 = Channel(buffer_size=16)
 
         async def source():
-            for tag, packet in make_stream(4).iter_packets():
-                await ch1.writer.send((tag, packet))
+            for tag, data in make_stream(4).iter_data():
+                await ch1.writer.send((tag, data))
             await ch1.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -753,17 +753,17 @@ class TestEndToEnd:
 
     @pytest.mark.asyncio
     async def test_source_to_operator_node_pipeline(self):
-        """Source → OperatorNode (SelectPacketColumns) async pipeline."""
+        """Source → OperatorNode (SelectDataColumns) async pipeline."""
         stream = make_two_col_stream(3)
-        op = SelectPacketColumns(["x"])
+        op = SelectDataColumns(["x"])
         node = OperatorNode(op, [stream])
 
         ch1 = Channel(buffer_size=16)
         ch2 = Channel(buffer_size=16)
 
         async def source():
-            for tag, packet in make_two_col_stream(3).iter_packets():
-                await ch1.writer.send((tag, packet))
+            for tag, data in make_two_col_stream(3).iter_data():
+                await ch1.writer.send((tag, data))
             await ch1.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -772,8 +772,8 @@ class TestEndToEnd:
 
         results = await ch2.reader.collect()
         assert len(results) == 3
-        for _, packet in results:
-            pkt_dict = packet.as_dict()
+        for _, data in results:
+            pkt_dict = data.as_dict()
             assert "x" in pkt_dict
             assert "y" not in pkt_dict
 
@@ -800,7 +800,7 @@ class TestAsyncPipelineThenSyncRetrieval:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result")
+        pf = PythonDataFunction(double, output_keys="result")
         pod = FunctionPod(pf)
         db = InMemoryArrowDatabase()
         stream = make_stream(5)  # ids 0..4, x values 0..4
@@ -812,8 +812,8 @@ class TestAsyncPipelineThenSyncRetrieval:
         output_ch = Channel(buffer_size=16)
 
         async def source_producer():
-            for tag, packet in make_stream(5).iter_packets():
-                await input_ch.writer.send((tag, packet))
+            for tag, data in make_stream(5).iter_data():
+                await input_ch.writer.send((tag, data))
             await input_ch.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -845,7 +845,7 @@ class TestAsyncPipelineThenSyncRetrieval:
         """OperatorNode (LOG): async execute → sync get_all_records."""
         # --- Setup ---
         stream = make_two_col_stream(4)  # ids 0..3, x 0..3, y 0,11,22,33
-        op = SelectPacketColumns(["x"])
+        op = SelectDataColumns(["x"])
         db = InMemoryArrowDatabase()
 
         node = OperatorNode(
@@ -857,8 +857,8 @@ class TestAsyncPipelineThenSyncRetrieval:
         output_ch = Channel(buffer_size=16)
 
         async def source_producer():
-            for tag, packet in make_two_col_stream(4).iter_packets():
-                await input_ch.writer.send((tag, packet))
+            for tag, data in make_two_col_stream(4).iter_data():
+                await input_ch.writer.send((tag, data))
             await input_ch.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -875,7 +875,7 @@ class TestAsyncPipelineThenSyncRetrieval:
         assert records is not None
         assert records.num_rows == 4
         assert sorted(records.column("x").to_pylist()) == [0, 1, 2, 3]
-        # 'y' column should NOT be present (was dropped by SelectPacketColumns)
+        # 'y' column should NOT be present (was dropped by SelectDataColumns)
         assert "y" not in records.column_names
 
         # --- REPLAY from DB via a new node (no computation) ---
@@ -902,7 +902,7 @@ class TestAsyncPipelineThenSyncRetrieval:
         def double(x: int) -> int:
             return x * 2
 
-        pf = PythonPacketFunction(double, output_keys="result")
+        pf = PythonDataFunction(double, output_keys="result")
         pod = FunctionPod(pf)
         fn_db = InMemoryArrowDatabase()
         stream = make_stream(3)  # ids 0..2, x 0..2
@@ -919,7 +919,7 @@ class TestAsyncPipelineThenSyncRetrieval:
             }
         )
         stage1_stream = ArrowTableStream(stage1_table, tag_columns=["id"])
-        op = SelectPacketColumns(["result"])
+        op = SelectDataColumns(["result"])
         op_db = InMemoryArrowDatabase()
         op_node = OperatorNode(
             op, [stage1_stream], pipeline_database=op_db, cache_mode=CacheMode.LOG
@@ -931,8 +931,8 @@ class TestAsyncPipelineThenSyncRetrieval:
         ch_out = Channel(buffer_size=16)
 
         async def source_producer():
-            for tag, packet in make_stream(3).iter_packets():
-                await ch_source.writer.send((tag, packet))
+            for tag, data in make_stream(3).iter_data():
+                await ch_source.writer.send((tag, data))
             await ch_source.writer.close()
 
         async with asyncio.TaskGroup() as tg:

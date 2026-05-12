@@ -49,7 +49,7 @@ class BasicTrackerManager:
         input_stream: cp.StreamProtocol,
         label: str | None = None,
     ) -> None:
-        """Record the invocation of a packet function to the tracker."""
+        """Record the invocation of a data function to the tracker."""
         for tracker in self.get_active_trackers():
             tracker.record_function_pod_invocation(pod, input_stream, label=label)
 

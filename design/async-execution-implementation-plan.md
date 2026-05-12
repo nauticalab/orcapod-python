@@ -67,10 +67,10 @@ sync execution — this just makes every node async-capable.
 
 **New file:** `src/orcapod/core/execution/materialization.py`
 
-- `materialize_to_stream(rows: list[tuple[TagProtocol, PacketProtocol]]) -> ArrowTableStream`
-  — converts a list of (tag, packet) pairs back into an ArrowTableStream
-- `stream_to_rows(stream: StreamProtocol) -> list[tuple[TagProtocol, PacketProtocol]]`
-  — the inverse (thin wrapper around `iter_packets`)
+- `materialize_to_stream(rows: list[tuple[TagProtocol, DataProtocol]]) -> ArrowTableStream`
+  — converts a list of (tag, data) pairs back into an ArrowTableStream
+- `stream_to_rows(stream: StreamProtocol) -> list[tuple[TagProtocol, DataProtocol]]`
+  — the inverse (thin wrapper around `iter_data`)
 
 **Tests:** `tests/test_core/test_execution/test_materialization.py`
 - Round-trip: stream → rows → stream preserves schema and data
@@ -114,7 +114,7 @@ This gives ALL operators (Unary, Binary, NonZeroInput) a working async_execute b
 
 **Modify:** `src/orcapod/core/tracker.py` (SourceNode)
 
-- Add `async_execute` to `SourceNode`: iterates `self.stream.iter_packets()`, sends to output
+- Add `async_execute` to `SourceNode`: iterates `self.stream.iter_data()`, sends to output
 - No input channels consumed
 
 **Tests:** `tests/test_core/test_execution/test_source_async.py`
@@ -166,8 +166,8 @@ Each step is independent — can be done in any order or in parallel.
 
 **Modify:** `src/orcapod/core/operators/column_selection.py`
 
-- Override `async_execute` on `SelectTagColumns`, `SelectPacketColumns`,
-  `DropTagColumns`, `DropPacketColumns`
+- Override `async_execute` on `SelectTagColumns`, `SelectDataColumns`,
+  `DropTagColumns`, `DropDataColumns`
 - Each: iterate input, project/drop columns per row, emit
 
 **Tests:** `tests/test_core/test_execution/test_streaming_operators.py`
@@ -178,7 +178,7 @@ Each step is independent — can be done in any order or in parallel.
 
 **Modify:** `src/orcapod/core/operators/mappers.py`
 
-- Override `async_execute` on `MapTags`, `MapPackets`
+- Override `async_execute` on `MapTags`, `MapData`
 - Each: iterate input, rename columns per row, emit
 
 **Tests:** added to `test_streaming_operators.py`
@@ -326,6 +326,6 @@ Phase 5 depends on everything above.
 - Distributed execution (network channels, Ray integration) — future work
 - Adaptive concurrency tuning — future work
 - Checkpointing / fault recovery — future work
-- Modifications to `PacketFunctionExecutorProtocol` — orthogonal concern, unchanged
+- Modifications to `DataFunctionExecutorProtocol` — orthogonal concern, unchanged
 - Changes to hashing / identity — unchanged
 - Changes to `CacheMode` semantics — unchanged

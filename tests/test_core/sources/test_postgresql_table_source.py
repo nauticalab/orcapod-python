@@ -123,24 +123,24 @@ class TestPKAsDefaultTags:
         tag_schema, _ = src.output_schema()
         assert "session_id" in tag_schema
 
-    def test_pk_not_in_packet_schema(self):
+    def test_pk_not_in_data_schema(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         with patch(_PATCH) as mock_cls:
             mock_cls.return_value = _make_mock_connector()
             src = PostgreSQLTableSource(DSN, "measurements")
-        _, packet_schema = src.output_schema()
-        assert "session_id" not in packet_schema
+        _, data_schema = src.output_schema()
+        assert "session_id" not in data_schema
 
-    def test_non_pk_columns_in_packet_schema(self):
+    def test_non_pk_columns_in_data_schema(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         with patch(_PATCH) as mock_cls:
             mock_cls.return_value = _make_mock_connector()
             src = PostgreSQLTableSource(DSN, "measurements")
-        _, packet_schema = src.output_schema()
-        assert "trial" in packet_schema
-        assert "response" in packet_schema
+        _, data_schema = src.output_schema()
+        assert "trial" in data_schema
+        assert "response" in data_schema
 
     def test_composite_pk_all_columns_are_tags(self):
         from orcapod.core.sources import PostgreSQLTableSource
@@ -275,21 +275,21 @@ class TestStreamBehaviour:
             src = PostgreSQLTableSource(DSN, "measurements")
         assert src.upstreams == ()
 
-    def test_iter_packets_yields_one_per_row(self):
+    def test_iter_data_yields_one_per_row(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         with patch(_PATCH) as mock_cls:
             mock_cls.return_value = _make_mock_connector()
             src = PostgreSQLTableSource(DSN, "measurements")
-        assert len(list(src.iter_packets())) == 3
+        assert len(list(src.iter_data())) == 3
 
-    def test_iter_packets_tags_contain_pk(self):
+    def test_iter_data_tags_contain_pk(self):
         from orcapod.core.sources import PostgreSQLTableSource
 
         with patch(_PATCH) as mock_cls:
             mock_cls.return_value = _make_mock_connector()
             src = PostgreSQLTableSource(DSN, "measurements")
-        for tags, _ in src.iter_packets():
+        for tags, _ in src.iter_data():
             assert "session_id" in tags
 
     def test_output_schema_returns_two_schemas(self):

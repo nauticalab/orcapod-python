@@ -1,8 +1,8 @@
 from .datagram import Datagram
-from .tag_packet import Packet, Tag
+from .tag_data import Data, Tag
 
 __all__ = [
     "Datagram",
     "Tag",
-    "Packet",
+    "Data",
 ]

@@ -27,11 +27,11 @@ class RootSource(StreamBase):
     As a StreamProtocol:
     - ``source`` returns ``None`` (no upstream source pod)
     - ``upstreams`` is always empty
-    - ``keys``, ``output_schema``, ``iter_packets``, ``as_table`` delegate to
+    - ``keys``, ``output_schema``, ``iter_data``, ``as_table`` delegate to
       ``self._stream`` by default; concrete subclasses may override them.
 
     As a PipelineElementProtocol:
-    - ``pipeline_identity_structure()`` returns ``(tag_schema, packet_schema)``
+    - ``pipeline_identity_structure()`` returns ``(tag_schema, data_schema)``
       — schema-only, no data content — forming the base case of the pipeline
       identity Merkle chain.
 
@@ -121,23 +121,23 @@ class RootSource(StreamBase):
         """
         from orcapod.pipeline.serialization import serialize_schema
 
-        tag_schema, packet_schema = self.output_schema()
+        tag_schema, data_schema = self.output_schema()
         type_converter = self.data_context.type_converter
         return {
             "content_hash": self.content_hash().to_string(),
             "pipeline_hash": self.pipeline_hash().to_string(),
             "tag_schema": serialize_schema(tag_schema, type_converter),
-            "packet_schema": serialize_schema(packet_schema, type_converter),
+            "data_schema": serialize_schema(data_schema, type_converter),
         }
 
     def pipeline_identity_structure(self) -> Any:
-        """Return (tag_schema, packet_schema) as the pipeline identity for this
+        """Return (tag_schema, data_schema) as the pipeline identity for this
         source.  Schema-only: no data content is included, so sources with
         identical schemas share the same pipeline hash and therefore the same
         pipeline database table.
         """
-        tag_schema, packet_schema = self.output_schema()
-        return (tag_schema, packet_schema)
+        tag_schema, data_schema = self.output_schema()
+        return (tag_schema, data_schema)
 
     # -------------------------------------------------------------------------
     # StreamProtocol protocol
@@ -175,9 +175,9 @@ class RootSource(StreamBase):
         """Delegate to the underlying stream's keys."""
         return self._stream.keys(columns=columns, all_info=all_info)
 
-    def iter_packets(self):
-        """Delegate to the underlying stream's iter_packets."""
-        return self._stream.iter_packets()
+    def iter_data(self):
+        """Delegate to the underlying stream's iter_data."""
+        return self._stream.iter_data()
 
     def as_table(
         self,

@@ -217,7 +217,7 @@ class PipelineElementBase(DataContextMixin, ABC):
     which provides self.data_context used by pipeline_hash().
 
     The only class that needs to override pipeline_identity_structure() in a
-    non-trivial way is RootSource, which returns (tag_schema, packet_schema)
+    non-trivial way is RootSource, which returns (tag_schema, data_schema)
     as the base case of the recursion. All other pipeline elements return
     structures built from the pipeline_hash() values of their upstream
     components — ContentHash objects are terminal in the semantic hasher, so
@@ -331,7 +331,7 @@ class TraceableBase(
     including data context awareness, content-based identity, (semantic) labeling,
     modification timestamp, and pipeline identity.
 
-    Every computation-node class (streams, packet functions, pods) inherits from
+    Every computation-node class (streams, data functions, pods) inherits from
     TraceableBase, getting both content identity (content_hash) and pipeline
     identity (pipeline_hash) automatically.
     """

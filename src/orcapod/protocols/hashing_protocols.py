@@ -39,7 +39,7 @@ class PipelineElementProtocol(Protocol):
     for pipeline database path scoping: the schemas and the recursive topology
     of the upstream computation.
 
-    The base case (RootSource) returns a hash of (tag_schema, packet_schema).
+    The base case (RootSource) returns a hash of (tag_schema, data_schema).
     Every other element recurses through the pipeline_hash() of its upstream
     inputs, with the hash values themselves (ContentHash objects) used as
     terminal leaves so no special hasher mode is required.
@@ -53,9 +53,9 @@ class PipelineElementProtocol(Protocol):
         """
         Return a structure representing this element's pipeline identity.
 
-        At source nodes (base case): return (tag_schema, packet_schema).
+        At source nodes (base case): return (tag_schema, data_schema).
         At all other nodes: return a structure containing references to
-        upstream pipeline elements and/or packet functions as raw objects.
+        upstream pipeline elements and/or data functions as raw objects.
         The pipeline resolver threaded through pipeline_hash() ensures that
         PipelineElementProtocol objects are resolved via pipeline_hash() and
         other ContentIdentifiable objects via content_hash(), both using the
@@ -225,7 +225,7 @@ class FileContentHasherProtocol(Protocol):
 
 @runtime_checkable
 class ArrowHasherProtocol(Protocol):
-    """Protocol for hashing arrow packets."""
+    """Protocol for hashing arrow data."""
 
     @property
     def hasher_id(self) -> str: ...

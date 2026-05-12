@@ -25,10 +25,10 @@ import pytest
 from orcapod.channels import Channel
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode, OperatorNode, SourceNode
-from orcapod.core.operators import SelectPacketColumns
+from orcapod.core.operators import SelectDataColumns
 from orcapod.core.operators.join import Join
-from orcapod.core.operators.mappers import MapPackets
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.operators.mappers import MapData
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import AsyncPipelineOrchestrator, Pipeline
@@ -40,13 +40,13 @@ from orcapod.pipeline import AsyncPipelineOrchestrator, Pipeline
 
 def _make_source(
     tag_col: str,
-    packet_col: str,
+    data_col: str,
     data: dict,
 ) -> ArrowTableSource:
     table = pa.table(
         {
             tag_col: pa.array(data[tag_col], type=pa.large_string()),
-            packet_col: pa.array(data[packet_col], type=pa.int64()),
+            data_col: pa.array(data[data_col], type=pa.int64()),
         }
     )
     return ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
@@ -104,14 +104,14 @@ class TestOperatorNodeAsyncExecute:
     @pytest.mark.asyncio
     async def test_delegates_to_operator(self):
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
-        op = SelectPacketColumns(columns=["value"])
+        op = SelectDataColumns(columns=["value"])
         op_node = OperatorNode(op, input_streams=[src])
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
 
-        for tag, packet in src.iter_packets():
-            await input_ch.writer.send((tag, packet))
+        for tag, data in src.iter_data():
+            await input_ch.writer.send((tag, data))
         await input_ch.writer.close()
 
         await op_node.async_execute([input_ch.reader], output_ch.writer)
@@ -127,17 +127,17 @@ class TestOperatorNodeAsyncExecute:
 
 class TestFunctionNodeAsyncExecute:
     @pytest.mark.asyncio
-    async def test_processes_packets(self):
+    async def test_processes_data(self):
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
-        pf = PythonPacketFunction(double_value, output_keys="result")
+        pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
         node = FunctionNode(pod, src)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
 
-        for tag, packet in src.iter_packets():
-            await input_ch.writer.send((tag, packet))
+        for tag, data in src.iter_data():
+            await input_ch.writer.send((tag, data))
         await input_ch.writer.close()
 
         await node.async_execute(input_ch.reader, output_ch.writer)
@@ -159,7 +159,7 @@ class TestOrchestratorLinearPipeline:
 
     def test_linear_source_to_function_pod(self):
         src = _make_source("key", "value", {"key": ["a", "b", "c"], "value": [1, 2, 3]})
-        pf = PythonPacketFunction(double_value, output_keys="result")
+        pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="linear", pipeline_database=InMemoryArrowDatabase())
@@ -180,7 +180,7 @@ class TestOrchestratorLinearPipeline:
     def test_matches_sync_execution(self):
         """Async results should match synchronous execution."""
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
-        pf = PythonPacketFunction(double_value, output_keys="result")
+        pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
         # Sync
@@ -217,12 +217,12 @@ class TestOrchestratorOperatorPipeline:
 
     def test_source_to_operator_to_function_pod(self):
         src = _make_source("key", "value", {"key": ["a", "b", "c"], "value": [1, 2, 3]})
-        op = MapPackets(name_map={"value": "val"})
+        op = MapData(name_map={"value": "val"})
 
         def double_val(val: int) -> int:
             return val * 2
 
-        pf = PythonPacketFunction(double_val, output_keys="result")
+        pf = PythonDataFunction(double_val, output_keys="result")
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="op_pipe", pipeline_database=InMemoryArrowDatabase())
@@ -251,7 +251,7 @@ class TestOrchestratorDiamondDag:
 
     def test_two_sources_join_function_pod(self):
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
+        pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="diamond", pipeline_database=InMemoryArrowDatabase())
@@ -272,7 +272,7 @@ class TestOrchestratorDiamondDag:
     def test_diamond_matches_sync(self):
         """Diamond DAG async results should match sync execution."""
         src_a, src_b = _make_two_sources()
-        pf = PythonPacketFunction(add_values, output_keys="total")
+        pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(pf)
 
         # Sync
@@ -314,7 +314,7 @@ class TestOrchestratorRunAsync:
     async def test_run_async_from_event_loop(self):
         """run_async should work when called from inside an event loop."""
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
-        pf = PythonPacketFunction(double_value, output_keys="result")
+        pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(
@@ -343,7 +343,7 @@ class TestBufferSizeConfiguration:
     def test_custom_buffer_size(self):
         """Pipeline should work with custom buffer sizes."""
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
-        pf = PythonPacketFunction(double_value, output_keys="result")
+        pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="bufsize", pipeline_database=InMemoryArrowDatabase())
@@ -374,9 +374,9 @@ class TestAsyncOrchestratorFanOut:
     def test_fan_out_source_to_two_functions(self):
         """Two distinct functions consuming the same source produce two nodes."""
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
-        pf1 = PythonPacketFunction(double_value, output_keys="result")
+        pf1 = PythonDataFunction(double_value, output_keys="result")
         pod1 = FunctionPod(pf1)
-        pf2 = PythonPacketFunction(triple_value, output_keys="result")
+        pf2 = PythonDataFunction(triple_value, output_keys="result")
         pod2 = FunctionPod(pf2)
 
         pipeline = Pipeline(name="fanout", pipeline_database=InMemoryArrowDatabase())
@@ -428,15 +428,15 @@ class TestAsyncOrchestratorTerminalNode:
 
 
 class TestAsyncOrchestratorErrorPropagation:
-    """Failed packets do not abort the pipeline; they are handled per-packet."""
+    """Failed data do not abort the pipeline; they are handled per-data."""
 
     def test_node_failure_does_not_abort_pipeline(self):
-        """A crashing packet function is skipped; the pipeline completes normally."""
+        """A crashing data function is skipped; the pipeline completes normally."""
         def failing_fn(value: int) -> int:
             raise ValueError("intentional failure")
 
         src = _make_source("key", "value", {"key": ["a"], "value": [1]})
-        pf = PythonPacketFunction(failing_fn, output_keys="result")
+        pf = PythonDataFunction(failing_fn, output_keys="result")
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="error", pipeline_database=InMemoryArrowDatabase())
@@ -446,18 +446,18 @@ class TestAsyncOrchestratorErrorPropagation:
         pipeline.compile()
         orch = AsyncPipelineOrchestrator()
 
-        # Pipeline must complete without raising; failing packet is silently dropped.
+        # Pipeline must complete without raising; failing data is silently dropped.
         orch.run(pipeline._node_graph)
 
-    def test_node_failure_calls_on_packet_crash(self):
-        """When an observer is set, on_packet_crash is called for the failing packet."""
+    def test_node_failure_calls_on_data_crash(self):
+        """When an observer is set, on_data_crash is called for the failing data."""
         from orcapod.pipeline.observer import NoOpObserver
 
         def failing_fn(value: int) -> int:
             raise ValueError("intentional failure")
 
         src = _make_source("key", "value", {"key": ["a"], "value": [1]})
-        pf = PythonPacketFunction(failing_fn, output_keys="result")
+        pf = PythonDataFunction(failing_fn, output_keys="result")
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="error2", pipeline_database=InMemoryArrowDatabase())
@@ -467,7 +467,7 @@ class TestAsyncOrchestratorErrorPropagation:
         crashes = []
 
         class CrashRecorder(NoOpObserver):
-            def on_packet_crash(self, node_label, tag, packet, error):
+            def on_data_crash(self, node_label, tag, data, error):
                 crashes.append(error)
 
         pipeline.compile()
@@ -484,7 +484,7 @@ class TestAsyncOrchestratorObserverInjection:
     def test_linear_pipeline_observer_hooks(self):
         """Source → Function: observer hooks fire from inside nodes."""
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
-        pf = PythonPacketFunction(double_value, output_keys="result")
+        pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(name="async_obs", pipeline_database=InMemoryArrowDatabase())
@@ -500,12 +500,12 @@ class TestAsyncOrchestratorObserverInjection:
                 events.append(("node_start", node_label))
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
-            def on_packet_start(self, node_label, tag, packet):
-                events.append(("packet_start", node_label))
-            def on_packet_end(self, node_label, tag, input_pkt, output_pkt, cached):
-                events.append(("packet_end", node_label, cached))
-            def on_packet_crash(self, node_label, tag, packet, exc): pass
-            def create_packet_logger(self, tag, packet, **kwargs):
+            def on_data_start(self, node_label, tag, data):
+                events.append(("data_start", node_label))
+            def on_data_end(self, node_label, tag, input_pkt, output_pkt, cached):
+                events.append(("data_end", node_label, cached))
+            def on_data_crash(self, node_label, tag, data, exc): pass
+            def create_data_logger(self, tag, data, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
             def contextualize(self, *identity_path):
@@ -519,26 +519,26 @@ class TestAsyncOrchestratorObserverInjection:
         source_starts = [e for e in events if e[0] == "node_start" and e[1] != "doubler"]
         assert len(source_starts) >= 1
 
-        # Function fires node_start, per-packet hooks, node_end
+        # Function fires node_start, per-data hooks, node_end
         assert ("node_start", "doubler") in events
         assert ("node_end", "doubler") in events
-        fn_packet_ends = [
+        fn_data_ends = [
             e for e in events
-            if e[0] == "packet_end" and e[1] == "doubler"
+            if e[0] == "data_end" and e[1] == "doubler"
         ]
-        assert len(fn_packet_ends) == 2
+        assert len(fn_data_ends) == 2
         # All should be cached=False (first run, no DB)
-        assert all(e[2] is False for e in fn_packet_ends)
+        assert all(e[2] is False for e in fn_data_ends)
 
     def test_operator_pipeline_observer_hooks(self):
         """Source → Operator → Function: all node types fire hooks."""
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
-        op = MapPackets(name_map={"value": "val"})
+        op = MapData(name_map={"value": "val"})
 
         def double_val(val: int) -> int:
             return val * 2
 
-        pf = PythonPacketFunction(double_val, output_keys="result")
+        pf = PythonDataFunction(double_val, output_keys="result")
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(
@@ -557,12 +557,12 @@ class TestAsyncOrchestratorObserverInjection:
                 events.append(("node_start", node_label))
             def on_node_end(self, node_label, node_hash, **kwargs):
                 events.append(("node_end", node_label))
-            def on_packet_start(self, node_label, tag, packet):
-                events.append(("packet_start", node_label))
-            def on_packet_end(self, node_label, tag, input_pkt, output_pkt, cached):
-                events.append(("packet_end", node_label))
-            def on_packet_crash(self, node_label, tag, packet, exc): pass
-            def create_packet_logger(self, tag, packet, **kwargs):
+            def on_data_start(self, node_label, tag, data):
+                events.append(("data_start", node_label))
+            def on_data_end(self, node_label, tag, input_pkt, output_pkt, cached):
+                events.append(("data_end", node_label))
+            def on_data_crash(self, node_label, tag, data, exc): pass
+            def create_data_logger(self, tag, data, **kwargs):
                 from orcapod.pipeline.observer import _NOOP_LOGGER
                 return _NOOP_LOGGER
             def contextualize(self, *identity_path):
@@ -578,14 +578,14 @@ class TestAsyncOrchestratorObserverInjection:
         assert ("node_start", "doubler") in events
         assert ("node_end", "doubler") in events
 
-        # Only function nodes fire packet-level hooks
-        assert ("packet_start", "doubler") in events
-        assert ("packet_start", "mapper") not in events
+        # Only function nodes fire data-level hooks
+        assert ("data_start", "doubler") in events
+        assert ("data_start", "mapper") not in events
 
     def test_no_observer_works(self):
         """Async pipeline runs fine with no observer."""
         src = _make_source("key", "value", {"key": ["a"], "value": [1]})
-        pf = PythonPacketFunction(double_value, output_keys="result")
+        pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
         pipeline = Pipeline(

@@ -7,11 +7,11 @@ operator tests in ``tests/test_core/operators/test_operators.py``.
 
 Covers:
 - SelectTagColumns streaming: per-row tag column selection
-- SelectPacketColumns streaming: per-row packet column selection
+- SelectDataColumns streaming: per-row data column selection
 - DropTagColumns streaming: per-row tag column dropping
-- DropPacketColumns streaming: per-row packet column dropping
+- DropDataColumns streaming: per-row data column dropping
 - MapTags streaming: per-row tag column renaming
-- MapPackets streaming: per-row packet column renaming
+- MapData streaming: per-row data column renaming
 - Batch streaming: accumulate-and-emit full batches, partial batch handling
 - SemiJoin build-probe: collect right, stream left through hash lookup
 - Join: single-input passthrough, staggered pairwise streaming join
@@ -30,12 +30,12 @@ import pytest
 from orcapod.channels import Channel
 from orcapod.core.operators import (
     Batch,
-    DropPacketColumns,
+    DropDataColumns,
     DropTagColumns,
     Join,
-    MapPackets,
+    MapData,
     MapTags,
-    SelectPacketColumns,
+    SelectDataColumns,
     SelectTagColumns,
     SemiJoin,
 )
@@ -54,7 +54,7 @@ def _make_non_nullable_schema(*fields: tuple) -> "pa.Schema":
 
 
 def make_simple_stream() -> ArrowTableStream:
-    """Stream with 1 tag (animal) and 2 packet columns (weight, legs). Uses nullable=False schema."""
+    """Stream with 1 tag (animal) and 2 data columns (weight, legs). Uses nullable=False schema."""
     schema = _make_non_nullable_schema(
         ("animal", pa.large_string()), ("weight", pa.float64()), ("legs", pa.int64())
     )
@@ -68,7 +68,7 @@ def make_simple_stream() -> ArrowTableStream:
 
 
 def make_two_tag_stream() -> ArrowTableStream:
-    """Stream with 2 tags (region, animal) and 1 packet column (count). Uses nullable=False schema."""
+    """Stream with 2 tags (region, animal) and 1 data column (count). Uses nullable=False schema."""
     schema = _make_non_nullable_schema(
         ("region", pa.large_string()), ("animal", pa.large_string()), ("count", pa.int64())
     )
@@ -82,7 +82,7 @@ def make_two_tag_stream() -> ArrowTableStream:
 
 
 def make_int_stream(n: int = 3) -> ArrowTableStream:
-    """Stream with tag=id, packet=x (ints). Uses nullable=False schema."""
+    """Stream with tag=id, data=x (ints). Uses nullable=False schema."""
     schema = _make_non_nullable_schema(("id", pa.int64()), ("x", pa.int64()))
     table = pa.table(
         {"id": pa.array(list(range(n)), type=pa.int64()), "x": pa.array(list(range(n)), type=pa.int64())},
@@ -92,7 +92,7 @@ def make_int_stream(n: int = 3) -> ArrowTableStream:
 
 
 def make_two_col_stream(n: int = 3) -> ArrowTableStream:
-    """Stream with tag=id, packet={x, y}. Uses nullable=False schema."""
+    """Stream with tag=id, data={x, y}. Uses nullable=False schema."""
     schema = _make_non_nullable_schema(("id", pa.int64()), ("x", pa.int64()), ("y", pa.int64()))
     table = pa.table(
         {"id": pa.array(list(range(n)), type=pa.int64()),
@@ -122,7 +122,7 @@ def make_right_stream() -> ArrowTableStream:
 
 
 def make_disjoint_stream() -> ArrowTableStream:
-    """Stream with same tags as simple_stream but different packet columns. Uses nullable=False schema."""
+    """Stream with same tags as simple_stream but different data columns. Uses nullable=False schema."""
     schema = _make_non_nullable_schema(("animal", pa.large_string()), ("speed", pa.float64()))
     table = pa.table(
         {"animal": pa.array(["cat", "dog", "bird"], type=pa.large_string()),
@@ -133,9 +133,9 @@ def make_disjoint_stream() -> ArrowTableStream:
 
 
 async def feed(stream: ArrowTableStream, ch: Channel) -> None:
-    """Push all (tag, packet) from a stream into a channel, then close."""
-    for tag, packet in stream.iter_packets():
-        await ch.writer.send((tag, packet))
+    """Push all (tag, data) from a stream into a channel, then close."""
+    for tag, data in stream.iter_data():
+        await ch.writer.send((tag, data))
     await ch.writer.close()
 
 
@@ -162,9 +162,9 @@ async def run_binary(
 
 
 def sync_process_to_rows(op, *streams):
-    """Run sync static_process and return list of (tag, packet) pairs."""
+    """Run sync static_process and return list of (tag, data) pairs."""
     result = op.static_process(*streams)
-    return list(result.iter_packets())
+    return list(result.iter_data())
 
 
 # ===================================================================
@@ -180,12 +180,12 @@ class TestSelectTagColumnsStreaming:
         results = await run_unary(op, stream)
 
         assert len(results) == 3
-        for tag, packet in results:
+        for tag, data in results:
             tag_keys = tag.keys()
             assert "region" in tag_keys
             assert "animal" not in tag_keys
-            # packet columns unchanged
-            assert "count" in packet.keys()
+            # data columns unchanged
+            assert "count" in data.keys()
 
     @pytest.mark.asyncio
     async def test_all_columns_selected_passthrough(self):
@@ -195,9 +195,9 @@ class TestSelectTagColumnsStreaming:
         results = await run_unary(op, stream)
 
         assert len(results) == 3
-        for tag, packet in results:
+        for tag, data in results:
             assert set(tag.keys()) == {"region", "animal"}
-            assert "count" in packet.keys()
+            assert "count" in data.keys()
 
     @pytest.mark.asyncio
     async def test_data_values_preserved(self):
@@ -258,20 +258,20 @@ class TestSelectTagColumnsStreaming:
 
 
 # ===================================================================
-# SelectPacketColumns — streaming per-row
+# SelectDataColumns — streaming per-row
 # ===================================================================
 
 
-class TestSelectPacketColumnsStreaming:
+class TestSelectDataColumnsStreaming:
     @pytest.mark.asyncio
-    async def test_keeps_only_selected_packets(self):
+    async def test_keeps_only_selected_data(self):
         stream = make_simple_stream()
-        op = SelectPacketColumns(columns=["weight"])
+        op = SelectDataColumns(columns=["weight"])
         results = await run_unary(op, stream)
 
         assert len(results) == 3
-        for _, packet in results:
-            pkt_keys = packet.keys()
+        for _, data in results:
+            pkt_keys = data.keys()
             assert "weight" in pkt_keys
             assert "legs" not in pkt_keys
             # tag columns unchanged
@@ -281,17 +281,17 @@ class TestSelectPacketColumnsStreaming:
     @pytest.mark.asyncio
     async def test_all_columns_selected_passthrough(self):
         stream = make_simple_stream()
-        op = SelectPacketColumns(columns=["weight", "legs"])
+        op = SelectDataColumns(columns=["weight", "legs"])
         results = await run_unary(op, stream)
 
         assert len(results) == 3
-        for _, packet in results:
-            assert set(packet.keys()) == {"weight", "legs"}
+        for _, data in results:
+            assert set(data.keys()) == {"weight", "legs"}
 
     @pytest.mark.asyncio
     async def test_data_values_preserved(self):
         stream = make_simple_stream()
-        op = SelectPacketColumns(columns=["weight"])
+        op = SelectDataColumns(columns=["weight"])
         results = await run_unary(op, stream)
 
         weights = sorted(pkt.as_dict()["weight"] for _, pkt in results)
@@ -302,7 +302,7 @@ class TestSelectPacketColumnsStreaming:
         input_ch = Channel(buffer_size=4)
         output_ch = Channel(buffer_size=4)
         await input_ch.writer.close()
-        op = SelectPacketColumns(columns=["weight"])
+        op = SelectDataColumns(columns=["weight"])
         await op.async_execute([input_ch.reader], output_ch.writer)
         results = await output_ch.reader.collect()
         assert results == []
@@ -310,7 +310,7 @@ class TestSelectPacketColumnsStreaming:
     @pytest.mark.asyncio
     async def test_matches_sync_output(self):
         stream = make_simple_stream()
-        op = SelectPacketColumns(columns=["weight"])
+        op = SelectDataColumns(columns=["weight"])
 
         async_results = await run_unary(op, stream)
         sync_results = sync_process_to_rows(op, stream)
@@ -322,7 +322,7 @@ class TestSelectPacketColumnsStreaming:
 
     @pytest.mark.asyncio
     async def test_source_info_for_dropped_columns_not_surfaced(self):
-        """Source info for dropped packet columns should not appear in output."""
+        """Source info for dropped data columns should not appear in output."""
         from orcapod.core.sources.arrow_table_source import ArrowTableSource
 
         src = ArrowTableSource(
@@ -336,11 +336,11 @@ class TestSelectPacketColumnsStreaming:
             tag_columns=["animal"],
             infer_nullable=True,
         )
-        op = SelectPacketColumns(columns=["weight"])
+        op = SelectDataColumns(columns=["weight"])
         results = await run_unary(op, src)
 
-        for _, packet in results:
-            si = packet.source_info()
+        for _, data in results:
+            si = data.source_info()
             assert "legs" not in si
             assert "weight" in si
 
@@ -358,10 +358,10 @@ class TestDropTagColumnsStreaming:
         results = await run_unary(op, stream)
 
         assert len(results) == 3
-        for tag, packet in results:
+        for tag, data in results:
             assert "region" not in tag.keys()
             assert "animal" in tag.keys()
-            assert "count" in packet.keys()
+            assert "count" in data.keys()
 
     @pytest.mark.asyncio
     async def test_no_columns_to_drop_passthrough(self):
@@ -407,38 +407,38 @@ class TestDropTagColumnsStreaming:
 
 
 # ===================================================================
-# DropPacketColumns — streaming per-row
+# DropDataColumns — streaming per-row
 # ===================================================================
 
 
-class TestDropPacketColumnsStreaming:
+class TestDropDataColumnsStreaming:
     @pytest.mark.asyncio
-    async def test_drops_specified_packets(self):
+    async def test_drops_specified_data(self):
         stream = make_simple_stream()
-        op = DropPacketColumns(columns=["legs"])
+        op = DropDataColumns(columns=["legs"])
         results = await run_unary(op, stream)
 
         assert len(results) == 3
-        for _, packet in results:
-            assert "legs" not in packet.keys()
-            assert "weight" in packet.keys()
+        for _, data in results:
+            assert "legs" not in data.keys()
+            assert "weight" in data.keys()
         for tag, _ in results:
             assert "animal" in tag.keys()
 
     @pytest.mark.asyncio
     async def test_no_columns_to_drop_passthrough(self):
         stream = make_simple_stream()
-        op = DropPacketColumns(columns=["nonexistent"], strict=False)
+        op = DropDataColumns(columns=["nonexistent"], strict=False)
         results = await run_unary(op, stream)
 
         assert len(results) == 3
-        for _, packet in results:
-            assert set(packet.keys()) == {"weight", "legs"}
+        for _, data in results:
+            assert set(data.keys()) == {"weight", "legs"}
 
     @pytest.mark.asyncio
     async def test_data_values_preserved(self):
         stream = make_simple_stream()
-        op = DropPacketColumns(columns=["legs"])
+        op = DropDataColumns(columns=["legs"])
         results = await run_unary(op, stream)
 
         weights = sorted(pkt.as_dict()["weight"] for _, pkt in results)
@@ -449,7 +449,7 @@ class TestDropPacketColumnsStreaming:
         input_ch = Channel(buffer_size=4)
         output_ch = Channel(buffer_size=4)
         await input_ch.writer.close()
-        op = DropPacketColumns(columns=["legs"])
+        op = DropDataColumns(columns=["legs"])
         await op.async_execute([input_ch.reader], output_ch.writer)
         results = await output_ch.reader.collect()
         assert results == []
@@ -457,7 +457,7 @@ class TestDropPacketColumnsStreaming:
     @pytest.mark.asyncio
     async def test_matches_sync_output(self):
         stream = make_simple_stream()
-        op = DropPacketColumns(columns=["legs"])
+        op = DropDataColumns(columns=["legs"])
 
         async_results = await run_unary(op, stream)
         sync_results = sync_process_to_rows(op, stream)
@@ -482,11 +482,11 @@ class TestDropPacketColumnsStreaming:
             tag_columns=["animal"],
             infer_nullable=True,
         )
-        op = DropPacketColumns(columns=["legs"])
+        op = DropDataColumns(columns=["legs"])
         results = await run_unary(op, src)
 
-        for _, packet in results:
-            si = packet.source_info()
+        for _, data in results:
+            si = data.source_info()
             assert "legs" not in si
             assert "weight" in si
 
@@ -581,27 +581,27 @@ class TestMapTagsStreaming:
 
 
 # ===================================================================
-# MapPackets — streaming per-row
+# MapData — streaming per-row
 # ===================================================================
 
 
-class TestMapPacketsStreaming:
+class TestMapDataStreaming:
     @pytest.mark.asyncio
-    async def test_renames_packet_column(self):
+    async def test_renames_data_column(self):
         stream = make_simple_stream()
-        op = MapPackets(name_map={"weight": "mass"})
+        op = MapData(name_map={"weight": "mass"})
         results = await run_unary(op, stream)
 
         assert len(results) == 3
-        for _, packet in results:
-            pkt_keys = packet.keys()
+        for _, data in results:
+            pkt_keys = data.keys()
             assert "mass" in pkt_keys
             assert "weight" not in pkt_keys
 
     @pytest.mark.asyncio
     async def test_data_values_preserved(self):
         stream = make_simple_stream()
-        op = MapPackets(name_map={"weight": "mass"})
+        op = MapData(name_map={"weight": "mass"})
         results = await run_unary(op, stream)
 
         masses = sorted(pkt.as_dict()["mass"] for _, pkt in results)
@@ -610,18 +610,18 @@ class TestMapPacketsStreaming:
     @pytest.mark.asyncio
     async def test_drop_unmapped(self):
         stream = make_simple_stream()
-        op = MapPackets(name_map={"weight": "mass"}, drop_unmapped=True)
+        op = MapData(name_map={"weight": "mass"}, drop_unmapped=True)
         results = await run_unary(op, stream)
 
         assert len(results) == 3
-        for _, packet in results:
-            pkt_keys = packet.keys()
+        for _, data in results:
+            pkt_keys = data.keys()
             assert "mass" in pkt_keys
             assert "legs" not in pkt_keys  # dropped because unmapped
 
     @pytest.mark.asyncio
     async def test_source_info_renamed(self):
-        """Packet.rename() should update source_info keys."""
+        """Data.rename() should update source_info keys."""
         from orcapod.core.sources.arrow_table_source import ArrowTableSource
 
         src = ArrowTableSource(
@@ -635,30 +635,30 @@ class TestMapPacketsStreaming:
             tag_columns=["animal"],
             infer_nullable=True,
         )
-        op = MapPackets(name_map={"weight": "mass"})
+        op = MapData(name_map={"weight": "mass"})
         results = await run_unary(op, src)
 
-        for _, packet in results:
-            si = packet.source_info()
+        for _, data in results:
+            si = data.source_info()
             assert "mass" in si
             assert "weight" not in si
 
     @pytest.mark.asyncio
     async def test_no_matching_rename_passthrough(self):
         stream = make_simple_stream()
-        op = MapPackets(name_map={"nonexistent": "nope"})
+        op = MapData(name_map={"nonexistent": "nope"})
         results = await run_unary(op, stream)
 
         assert len(results) == 3
-        for _, packet in results:
-            assert set(packet.keys()) == {"weight", "legs"}
+        for _, data in results:
+            assert set(data.keys()) == {"weight", "legs"}
 
     @pytest.mark.asyncio
     async def test_empty_input(self):
         input_ch = Channel(buffer_size=4)
         output_ch = Channel(buffer_size=4)
         await input_ch.writer.close()
-        op = MapPackets(name_map={"weight": "mass"})
+        op = MapData(name_map={"weight": "mass"})
         await op.async_execute([input_ch.reader], output_ch.writer)
         results = await output_ch.reader.collect()
         assert results == []
@@ -666,7 +666,7 @@ class TestMapPacketsStreaming:
     @pytest.mark.asyncio
     async def test_matches_sync_output(self):
         stream = make_simple_stream()
-        op = MapPackets(name_map={"weight": "mass"})
+        op = MapData(name_map={"weight": "mass"})
 
         async_results = await run_unary(op, stream)
         sync_results = sync_process_to_rows(op, stream)
@@ -717,10 +717,10 @@ class TestBatchStreaming:
         results = await run_unary(op, stream)
 
         assert len(results) == 2
-        for tag, packet in results:
+        for tag, data in results:
             # Each value should be a list
             tag_d = tag.as_dict()
-            pkt_d = packet.as_dict()
+            pkt_d = data.as_dict()
             assert isinstance(tag_d["id"], list)
             assert isinstance(pkt_d["x"], list)
             assert len(tag_d["id"]) == 2
@@ -817,10 +817,10 @@ class TestSemiJoinBuildProbe:
         op = SemiJoin()
         results = await run_binary(op, left, right)
 
-        for tag, packet in results:
+        for tag, data in results:
             assert "id" in tag.keys()
-            assert "value_a" in packet.keys()
-            assert "value_b" not in packet.keys()
+            assert "value_a" in data.keys()
+            assert "value_b" not in data.keys()
 
     @pytest.mark.asyncio
     async def test_preserves_left_data(self):
@@ -990,9 +990,9 @@ class TestJoinNativeAsync:
         results = await run_binary(op, left, right)
 
         assert len(results) == 3
-        for tag, packet in results:
+        for tag, data in results:
             assert "animal" in tag.keys()
-            pkt_d = packet.as_dict()
+            pkt_d = data.as_dict()
             assert "weight" in pkt_d
             assert "speed" in pkt_d
 
@@ -1165,7 +1165,7 @@ class TestJoinNativeAsync:
         ch3 = Channel(buffer_size=64)
         out = Channel(buffer_size=64)
 
-        from orcapod.core.datagrams import Packet, Tag
+        from orcapod.core.datagrams import Data, Tag
 
         # Start the join in the background
         join_task = asyncio.create_task(
@@ -1173,9 +1173,9 @@ class TestJoinNativeAsync:
         )
 
         # Send one matching row from each side
-        await ch1.writer.send((Tag({"id": 1}), Packet({"a": 10})))
-        await ch2.writer.send((Tag({"id": 1}), Packet({"b": 100})))
-        await ch3.writer.send((Tag({"id": 1}), Packet({"c": 1000})))
+        await ch1.writer.send((Tag({"id": 1}), Data({"a": 10})))
+        await ch2.writer.send((Tag({"id": 1}), Data({"b": 100})))
+        await ch3.writer.send((Tag({"id": 1}), Data({"c": 1000})))
 
         # The match should be emitted while channels are still open
         tag, pkt = await asyncio.wait_for(out.reader.receive(), timeout=2.0)
@@ -1221,22 +1221,22 @@ class TestJoinNativeAsync:
         ch3 = Channel(buffer_size=64)
         out = Channel(buffer_size=64)
 
-        from orcapod.core.datagrams import Packet, Tag
+        from orcapod.core.datagrams import Data, Tag
 
         join_task = asyncio.create_task(
             op.async_execute([ch1.reader, ch2.reader, ch3.reader], out.writer)
         )
 
         # Send matching rows from only 2 of 3 sides
-        await ch1.writer.send((Tag({"id": 1}), Packet({"a": 10})))
-        await ch2.writer.send((Tag({"id": 1}), Packet({"b": 100})))
+        await ch1.writer.send((Tag({"id": 1}), Data({"a": 10})))
+        await ch2.writer.send((Tag({"id": 1}), Data({"b": 100})))
 
         # Output should be empty — side 3 hasn't contributed yet
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(out.reader.receive(), timeout=0.5)
 
         # Now send the third side — match should complete
-        await ch3.writer.send((Tag({"id": 1}), Packet({"c": 1000})))
+        await ch3.writer.send((Tag({"id": 1}), Data({"c": 1000})))
         tag, pkt = await asyncio.wait_for(out.reader.receive(), timeout=2.0)
         assert pkt.as_dict() == {"a": 10, "b": 100, "c": 1000}
 
@@ -1484,22 +1484,22 @@ class TestJoinNativeAsync:
         ch2 = Channel(buffer_size=64)
         out = Channel(buffer_size=64)
 
-        from orcapod.core.datagrams import Packet, Tag
+        from orcapod.core.datagrams import Data, Tag
 
         join_task = asyncio.create_task(
             op.async_execute([ch1.reader, ch2.reader], out.writer)
         )
 
         # Buffer 2 rows on side 0 before side 1 sends anything
-        await ch1.writer.send((Tag({"id": 1}), Packet({"a": 10})))
-        await ch1.writer.send((Tag({"id": 2}), Packet({"a": 20})))
+        await ch1.writer.send((Tag({"id": 1}), Data({"a": 10})))
+        await ch1.writer.send((Tag({"id": 2}), Data({"a": 20})))
 
         # Yield to event loop so drain tasks process the sends
         await asyncio.sleep(0)
 
         # Now side 1 sends — triggers shared_keys computation and re-index
-        await ch2.writer.send((Tag({"id": 1}), Packet({"b": 100})))
-        await ch2.writer.send((Tag({"id": 2}), Packet({"b": 200})))
+        await ch2.writer.send((Tag({"id": 1}), Data({"b": 100})))
+        await ch2.writer.send((Tag({"id": 2}), Data({"b": 200})))
 
         # Close and collect
         await ch1.writer.close()
@@ -1532,8 +1532,8 @@ class TestStreamingPipelineIntegration:
         ch3 = Channel(buffer_size=16)
 
         async def source():
-            for tag, packet in stream.iter_packets():
-                await ch1.writer.send((tag, packet))
+            for tag, data in stream.iter_data():
+                await ch1.writer.send((tag, data))
             await ch1.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -1550,7 +1550,7 @@ class TestStreamingPipelineIntegration:
 
     @pytest.mark.asyncio
     async def test_join_then_select_chain(self):
-        """Join → SelectPacketColumns in a streaming pipeline."""
+        """Join → SelectDataColumns in a streaming pipeline."""
         left_table = pa.table(
             {
                 "id": pa.array([0, 1, 2], type=pa.int64()),
@@ -1567,7 +1567,7 @@ class TestStreamingPipelineIntegration:
         right = ArrowTableStream(right_table, tag_columns=["id"])
 
         join_op = Join()
-        select_op = SelectPacketColumns(columns=["x"])
+        select_op = SelectDataColumns(columns=["x"])
 
         ch_l = Channel(buffer_size=16)
         ch_r = Channel(buffer_size=16)
@@ -1575,8 +1575,8 @@ class TestStreamingPipelineIntegration:
         ch_out = Channel(buffer_size=16)
 
         async def push(stream, ch):
-            for tag, packet in stream.iter_packets():
-                await ch.writer.send((tag, packet))
+            for tag, data in stream.iter_data():
+                await ch.writer.send((tag, data))
             await ch.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -1589,9 +1589,9 @@ class TestStreamingPipelineIntegration:
 
         results = await ch_out.reader.collect()
         assert len(results) == 3
-        for _, packet in results:
-            assert "x" in packet.keys()
-            assert "y" not in packet.keys()
+        for _, data in results:
+            assert "x" in data.keys()
+            assert "y" not in data.keys()
 
     @pytest.mark.asyncio
     async def test_semijoin_then_batch_chain(self):
@@ -1608,8 +1608,8 @@ class TestStreamingPipelineIntegration:
         ch_out = Channel(buffer_size=16)
 
         async def push(stream, ch):
-            for tag, packet in stream.iter_packets():
-                await ch.writer.send((tag, packet))
+            for tag, data in stream.iter_data():
+                await ch.writer.send((tag, data))
             await ch.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -1629,13 +1629,13 @@ class TestStreamingPipelineIntegration:
 
     @pytest.mark.asyncio
     async def test_drop_map_select_three_stage(self):
-        """DropPacketColumns → MapPackets → SelectPacketColumns chain."""
+        """DropDataColumns → MapData → SelectDataColumns chain."""
         stream = make_simple_stream()  # animal | weight, legs
 
-        drop_op = DropPacketColumns(columns=["legs"])
-        map_op = MapPackets(name_map={"weight": "mass"})
-        # After map: mass (only packet column)
-        select_op = SelectPacketColumns(columns=["mass"])
+        drop_op = DropDataColumns(columns=["legs"])
+        map_op = MapData(name_map={"weight": "mass"})
+        # After map: mass (only data column)
+        select_op = SelectDataColumns(columns=["mass"])
 
         ch1 = Channel(buffer_size=16)
         ch2 = Channel(buffer_size=16)
@@ -1643,8 +1643,8 @@ class TestStreamingPipelineIntegration:
         ch4 = Channel(buffer_size=16)
 
         async def source():
-            for tag, packet in stream.iter_packets():
-                await ch1.writer.send((tag, packet))
+            for tag, data in stream.iter_data():
+                await ch1.writer.send((tag, data))
             await ch1.writer.close()
 
         async with asyncio.TaskGroup() as tg:
@@ -1655,8 +1655,8 @@ class TestStreamingPipelineIntegration:
 
         results = await ch4.reader.collect()
         assert len(results) == 3
-        for _, packet in results:
-            assert packet.keys() == ("mass",)
+        for _, data in results:
+            assert data.keys() == ("mass",)
         masses = sorted(pkt.as_dict()["mass"] for _, pkt in results)
         assert masses == [0.5, 4.0, 12.0]
 
@@ -1666,14 +1666,14 @@ class TestStreamingPipelineIntegration:
 # ===================================================================
 
 
-def _make_source(tag_col: str, packet_col: str, data: dict) -> ArrowTableStream:
+def _make_source(tag_col: str, data_col: str, data: dict) -> ArrowTableStream:
     """Build an ArrowTableSource (which generates system tags) and return its stream."""
     from orcapod.core.sources.arrow_table_source import ArrowTableSource
 
     table = pa.table(
         {
             tag_col: pa.array(data[tag_col], type=pa.large_string()),
-            packet_col: pa.array(data[packet_col], type=pa.int64()),
+            data_col: pa.array(data[data_col], type=pa.int64()),
         }
     )
     return ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
@@ -1708,7 +1708,7 @@ async def run_binary_validated(
 def _extract_system_tags(
     rows: list[tuple],
 ) -> list[dict[str, str]]:
-    """Extract sorted system-tag dicts from (tag, packet) pairs."""
+    """Extract sorted system-tag dicts from (tag, data) pairs."""
     return sorted(
         [tag.system_tags() for tag, _ in rows],
         key=lambda d: sorted(d.items()),
@@ -1740,7 +1740,7 @@ class TestJoinSystemTagEquivalence:
 
         # Sync
         sync_result = op.static_process(left, right)
-        sync_rows = list(sync_result.iter_packets())
+        sync_rows = list(sync_result.iter_data())
 
         # Async
         async_rows = await run_binary_validated(op, left, right)
@@ -1763,7 +1763,7 @@ class TestJoinSystemTagEquivalence:
         op = Join()
 
         sync_result = op.static_process(left, right)
-        sync_rows = list(sync_result.iter_packets())
+        sync_rows = list(sync_result.iter_data())
         async_rows = await run_binary_validated(op, left, right)
 
         assert len(sync_rows) == len(async_rows)
@@ -1817,7 +1817,7 @@ class TestJoinSystemTagEquivalence:
 
         # Sync
         sync_result = op.static_process(s1, s2, s3)
-        sync_rows = list(sync_result.iter_packets())
+        sync_rows = list(sync_result.iter_data())
 
         # Async (N-way Staggered join path)
         op.validate_inputs(s1, s2, s3)
@@ -1903,7 +1903,7 @@ class TestSemiJoinSystemTagEquivalence:
 
         # Sync
         sync_result = op.static_process(left, right)
-        sync_rows = list(sync_result.iter_packets())
+        sync_rows = list(sync_result.iter_data())
 
         # Async
         async_rows = await run_binary_validated(op, left, right)

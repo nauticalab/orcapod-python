@@ -7,7 +7,7 @@ import pytest
 
 from orcapod.core.cached_function_pod import CachedFunctionPod
 from orcapod.core.function_pod import FunctionPod, function_pod
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 
@@ -45,7 +45,7 @@ def cache_db():
 
 @pytest.fixture
 def double_pod():
-    pf = PythonPacketFunction(double, output_keys="result")
+    pf = PythonDataFunction(double, output_keys="result")
     return FunctionPod(pf)
 
 
@@ -88,20 +88,20 @@ class TestCacheMiss:
     def test_returns_non_none_result(self, cached_pod):
         stream = _make_stream()
         output = cached_pod.process(stream)
-        results = list(output.iter_packets())
+        results = list(output.iter_data())
         assert len(results) == 2
 
     def test_result_values_correct(self, cached_pod):
         stream = _make_stream()
         output = cached_pod.process(stream)
-        results = list(output.iter_packets())
+        results = list(output.iter_data())
         assert results[0][1].as_dict()["result"] == 20
         assert results[1][1].as_dict()["result"] == 40
 
     def test_result_stored_in_database(self, cached_pod, cache_db):
         stream = _make_stream()
         output = cached_pod.process(stream)
-        list(output.iter_packets())  # exhaust the iterator
+        list(output.iter_data())  # exhaust the iterator
 
         records = cache_db.get_all_records(cached_pod.record_path)
         assert records is not None
@@ -119,11 +119,11 @@ class TestCacheHit:
 
         # First call: cache miss
         output1 = cached_pod.process(stream)
-        first = [(t.as_dict(), p.as_dict()) for t, p in output1.iter_packets()]
+        first = [(t.as_dict(), p.as_dict()) for t, p in output1.iter_data()]
 
         # Second call: cache hit
         output2 = cached_pod.process(_make_stream())
-        second = [(t.as_dict(), p.as_dict()) for t, p in output2.iter_packets()]
+        second = [(t.as_dict(), p.as_dict()) for t, p in output2.iter_data()]
 
         assert len(first) == len(second)
         for (_, p1), (_, p2) in zip(first, second):
@@ -132,14 +132,14 @@ class TestCacheHit:
     def test_second_call_does_not_add_new_records(self, cached_pod, cache_db):
         stream = _make_stream()
         output = cached_pod.process(stream)
-        list(output.iter_packets())
+        list(output.iter_data())
 
         records_after_first = cache_db.get_all_records(cached_pod.record_path)
         assert records_after_first is not None
         count_first = records_after_first.num_rows
 
         output2 = cached_pod.process(_make_stream())
-        list(output2.iter_packets())
+        list(output2.iter_data())
 
         records_after_second = cache_db.get_all_records(cached_pod.record_path)
         assert records_after_second is not None
@@ -152,34 +152,34 @@ class TestCacheHit:
 
 
 class TestCacheKeySemantics:
-    def test_same_packet_different_tags_is_cache_hit(self, double_pod, cache_db):
-        """Same packet data with different tags is a cache hit — the function
-        output depends only on the packet, not the tag."""
+    def test_same_data_different_tags_is_cache_hit(self, double_pod, cache_db):
+        """Same data data with different tags is a cache hit — the function
+        output depends only on the data, not the tag."""
         cached_pod = CachedFunctionPod(double_pod, result_database=cache_db)
 
         stream1 = _make_stream([{"id": 0, "x": 10}])
-        list(cached_pod.process(stream1).iter_packets())
+        list(cached_pod.process(stream1).iter_data())
 
-        # Same packet data, different tag — should be cache hit
+        # Same data data, different tag — should be cache hit
         stream2 = _make_stream([{"id": 1, "x": 10}])
-        results = list(cached_pod.process(stream2).iter_packets())
+        results = list(cached_pod.process(stream2).iter_data())
 
         records = cache_db.get_all_records(cached_pod.record_path)
         assert records is not None
-        # Only 1 record since the cache key is input packet hash only
+        # Only 1 record since the cache key is input data hash only
         assert records.num_rows == 1
         # But result is still correct
         assert results[0][1].as_dict()["result"] == 20
 
-    def test_different_packet_data_cached_separately(self, double_pod, cache_db):
-        """Different packet data should produce separate cache entries."""
+    def test_different_data_data_cached_separately(self, double_pod, cache_db):
+        """Different data data should produce separate cache entries."""
         cached_pod = CachedFunctionPod(double_pod, result_database=cache_db)
 
         stream1 = _make_stream([{"id": 0, "x": 10}])
-        list(cached_pod.process(stream1).iter_packets())
+        list(cached_pod.process(stream1).iter_data())
 
         stream2 = _make_stream([{"id": 0, "x": 99}])
-        list(cached_pod.process(stream2).iter_packets())
+        list(cached_pod.process(stream2).iter_data())
 
         records = cache_db.get_all_records(cached_pod.record_path)
         assert records is not None
@@ -190,10 +190,10 @@ class TestCacheKeySemantics:
         cached_pod = CachedFunctionPod(double_pod, result_database=cache_db)
 
         stream1 = _make_stream([{"id": 0, "x": 10}])
-        list(cached_pod.process(stream1).iter_packets())
+        list(cached_pod.process(stream1).iter_data())
 
         stream2 = _make_stream([{"id": 0, "x": 10}])
-        list(cached_pod.process(stream2).iter_packets())
+        list(cached_pod.process(stream2).iter_data())
 
         records = cache_db.get_all_records(cached_pod.record_path)
         assert records is not None
@@ -212,13 +212,13 @@ class TestCacheKeySemantics:
 
 class TestInnerReturnsNone:
     def test_inactive_function_does_not_store(self, cache_db):
-        pf = PythonPacketFunction(double, output_keys="result")
+        pf = PythonDataFunction(double, output_keys="result")
         pf.set_active(False)
         pod = FunctionPod(pf)
         cached_pod = CachedFunctionPod(pod, result_database=cache_db)
 
         stream = _make_stream([{"id": 0, "x": 10}])
-        results = list(cached_pod.process(stream).iter_packets())
+        results = list(cached_pod.process(stream).iter_data())
         assert len(results) == 0
 
         records = cache_db.get_all_records(cached_pod.record_path)
@@ -239,7 +239,7 @@ class TestOutputSchema:
 
 
 # ---------------------------------------------------------------------------
-# Dual caching (CachedPacketFunction + CachedFunctionPod)
+# Dual caching (CachedDataFunction + CachedFunctionPod)
 # ---------------------------------------------------------------------------
 
 
@@ -259,7 +259,7 @@ class TestDualCaching:
 
         stream = _make_stream()
         output = my_double.pod.process(stream)
-        results = list(output.iter_packets())
+        results = list(output.iter_data())
 
         assert len(results) == 2
         assert results[0][1].as_dict()["result"] == 20
@@ -294,7 +294,7 @@ class TestDecoratorIntegration:
 
         stream = _make_stream()
         output = my_double.pod.process(stream)
-        results = list(output.iter_packets())
+        results = list(output.iter_data())
         assert len(results) == 2
         assert results[0][1].as_dict()["result"] == 20
 

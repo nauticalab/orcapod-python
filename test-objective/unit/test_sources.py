@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pyarrow as pa
 import pytest
 
-from orcapod.core.datagrams import Packet, Tag
+from orcapod.core.datagrams import Data, Tag
 from orcapod.core.sources import ArrowTableSource
 from orcapod.core.sources.derived_source import DerivedSource
 from orcapod.core.sources.dict_source import DictSource
@@ -104,12 +104,12 @@ class TestArrowTableSourceConstruction:
         assert source.upstreams == ()
 
     def test_no_tag_columns_valid(self):
-        """Construction with no tag columns is valid (all columns are packets)."""
+        """Construction with no tag columns is valid (all columns are data)."""
         source = ArrowTableSource(_simple_table(), tag_columns=[], infer_nullable=True)
-        tag_keys, packet_keys = source.keys()
+        tag_keys, data_keys = source.keys()
         assert tag_keys == ()
-        assert "name" in packet_keys
-        assert "age" in packet_keys
+        assert "name" in data_keys
+        assert "age" in data_keys
 
 
 class TestArrowTableSourceResolveField:
@@ -185,47 +185,47 @@ class TestArrowTableSourceSchema:
     """ArrowTableSource schema and identity behaviors."""
 
     def test_pipeline_identity_structure_returns_schemas(self):
-        """pipeline_identity_structure returns (tag_schema, packet_schema)."""
+        """pipeline_identity_structure returns (tag_schema, data_schema)."""
         source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
         result = source.pipeline_identity_structure()
         assert isinstance(result, tuple)
         assert len(result) == 2
-        tag_schema, packet_schema = result
+        tag_schema, data_schema = result
         assert isinstance(tag_schema, Schema)
-        assert isinstance(packet_schema, Schema)
+        assert isinstance(data_schema, Schema)
 
     def test_output_schema_returns_schemas(self):
         source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
-        tag_schema, packet_schema = source.output_schema()
+        tag_schema, data_schema = source.output_schema()
         assert "name" in tag_schema
-        assert "age" in packet_schema
+        assert "age" in data_schema
 
     def test_output_schema_types(self):
         """output_schema types match column data types."""
         source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
-        tag_schema, packet_schema = source.output_schema()
+        tag_schema, data_schema = source.output_schema()
         assert tag_schema["name"] is str
-        assert packet_schema["age"] is int
+        assert data_schema["age"] is int
 
     def test_keys_returns_correct_split(self):
-        """keys() correctly separates tag and packet columns."""
+        """keys() correctly separates tag and data columns."""
         source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
-        tag_keys, packet_keys = source.keys()
+        tag_keys, data_keys = source.keys()
         assert "name" in tag_keys
-        assert "age" in packet_keys
-        assert "name" not in packet_keys
+        assert "age" in data_keys
+        assert "name" not in data_keys
 
 
 class TestArrowTableSourceIteration:
-    """ArrowTableSource iter_packets and as_table behaviors."""
+    """ArrowTableSource iter_data and as_table behaviors."""
 
-    def test_iter_packets_yields_tag_packet_pairs(self):
+    def test_iter_data_yields_tag_data_pairs(self):
         source = ArrowTableSource(_simple_table(3), tag_columns=["name"], infer_nullable=True)
-        pairs = list(source.iter_packets())
+        pairs = list(source.iter_data())
         assert len(pairs) == 3
-        for tag, packet in pairs:
+        for tag, data in pairs:
             assert isinstance(tag, Tag)
-            assert isinstance(packet, Packet)
+            assert isinstance(data, Data)
 
     def test_as_table_has_expected_columns(self):
         source = ArrowTableSource(_simple_table(), tag_columns=["name"], infer_nullable=True)
@@ -246,10 +246,10 @@ class TestArrowTableSourceIteration:
         table_all = source.as_table(all_info=True)
         assert table_all.num_columns > table_default.num_columns
 
-    def test_iter_packets_count_matches_as_table_rows(self):
-        """iter_packets count equals as_table row count."""
+    def test_iter_data_count_matches_as_table_rows(self):
+        """iter_data count equals as_table row count."""
         source = ArrowTableSource(_simple_table(4), tag_columns=["name"], infer_nullable=True)
-        pairs = list(source.iter_packets())
+        pairs = list(source.iter_data())
         table = source.as_table()
         assert len(pairs) == table.num_rows
 
@@ -269,18 +269,18 @@ class TestDictSource:
         assert source is not None
 
     def test_delegates_to_arrow_table_source(self):
-        """DictSource produces valid iter_packets output."""
+        """DictSource produces valid iter_data output."""
         data = [{"x": 1, "y": "a"}, {"x": 2, "y": "b"}]
         source = DictSource(data=data, tag_columns=["x"])
-        pairs = list(source.iter_packets())
+        pairs = list(source.iter_data())
         assert len(pairs) == 2
 
     def test_keys_correct(self):
         data = [{"x": 1, "y": "a"}]
         source = DictSource(data=data, tag_columns=["x"])
-        tag_keys, packet_keys = source.keys()
+        tag_keys, data_keys = source.keys()
         assert "x" in tag_keys
-        assert "y" in packet_keys
+        assert "y" in data_keys
 
     def test_source_id_populated(self):
         data = [{"x": 1, "y": "a"}]
@@ -302,9 +302,9 @@ class TestDictSource:
         """DictSource output_schema delegates correctly."""
         data = [{"x": 1, "y": "a"}]
         source = DictSource(data=data, tag_columns=["x"])
-        tag_schema, packet_schema = source.output_schema()
+        tag_schema, data_schema = source.output_schema()
         assert "x" in tag_schema
-        assert "y" in packet_schema
+        assert "y" in data_schema
 
     def test_as_table_has_correct_rows(self):
         """DictSource as_table returns correct number of rows."""
@@ -313,23 +313,23 @@ class TestDictSource:
         table = source.as_table()
         assert table.num_rows == 3
 
-    def test_iter_packets_yields_tag_packet_pairs(self):
-        """DictSource iter_packets yields proper types."""
+    def test_iter_data_yields_tag_data_pairs(self):
+        """DictSource iter_data yields proper types."""
         data = [{"x": 1, "y": "a"}]
         source = DictSource(data=data, tag_columns=["x"])
-        pairs = list(source.iter_packets())
+        pairs = list(source.iter_data())
         assert len(pairs) == 1
-        tag, packet = pairs[0]
+        tag, data = pairs[0]
         assert isinstance(tag, Tag)
-        assert isinstance(packet, Packet)
+        assert isinstance(data, Data)
 
-    def test_multiple_packet_columns(self):
-        """DictSource handles multiple packet columns."""
+    def test_multiple_data_columns(self):
+        """DictSource handles multiple data columns."""
         data = [{"tag": 1, "a": "x", "b": 10}]
         source = DictSource(data=data, tag_columns=["tag"])
-        _, packet_keys = source.keys()
-        assert "a" in packet_keys
-        assert "b" in packet_keys
+        _, data_keys = source.keys()
+        assert "a" in data_keys
+        assert "b" in data_keys
 
 
 # ===========================================================================
@@ -345,9 +345,9 @@ class TestListSource:
         source = ListSource(name="item", data=["a", "b", "c"])
         assert source is not None
 
-    def test_iter_packets_yields_correct_count(self):
+    def test_iter_data_yields_correct_count(self):
         source = ListSource(name="item", data=["a", "b", "c"])
-        pairs = list(source.iter_packets())
+        pairs = list(source.iter_data())
         assert len(pairs) == 3
 
     def test_default_tag_is_element_index(self):
@@ -372,11 +372,11 @@ class TestListSource:
         tag_keys, _ = source.keys()
         assert "pos" in tag_keys
 
-    def test_packet_column_name_matches(self):
-        """The packet column is named after the 'name' parameter."""
+    def test_data_column_name_matches(self):
+        """The data column is named after the 'name' parameter."""
         source = ListSource(name="my_data", data=[1, 2, 3])
-        _, packet_keys = source.keys()
-        assert "my_data" in packet_keys
+        _, data_keys = source.keys()
+        assert "my_data" in data_keys
 
     def test_source_id_populated(self):
         """ListSource has a populated source_id."""
@@ -403,15 +403,15 @@ class TestListSource:
     def test_integer_elements(self):
         """ListSource works with integer elements."""
         source = ListSource(name="num", data=[10, 20, 30])
-        pairs = list(source.iter_packets())
+        pairs = list(source.iter_data())
         assert len(pairs) == 3
 
     def test_output_schema(self):
-        """ListSource output_schema has tag and packet fields."""
+        """ListSource output_schema has tag and data fields."""
         source = ListSource(name="item", data=["a", "b"])
-        tag_schema, packet_schema = source.output_schema()
+        tag_schema, data_schema = source.output_schema()
         assert "element_index" in tag_schema
-        assert "item" in packet_schema
+        assert "item" in data_schema
 
 
 # ===========================================================================
@@ -467,17 +467,17 @@ class TestDerivedSource:
         """output_schema delegates to origin node."""
         mock_origin = self._make_mock_origin(records=None)
         source = DerivedSource(origin=mock_origin)
-        tag_schema, packet_schema = source.output_schema()
+        tag_schema, data_schema = source.output_schema()
         assert "tag_col" in tag_schema
-        assert "data_col" in packet_schema
+        assert "data_col" in data_schema
 
     def test_keys_delegates_to_origin(self):
         """keys() delegates to origin node."""
         mock_origin = self._make_mock_origin(records=None)
         source = DerivedSource(origin=mock_origin)
-        tag_keys, packet_keys = source.keys()
+        tag_keys, data_keys = source.keys()
         assert "tag_col" in tag_keys
-        assert "data_col" in packet_keys
+        assert "data_col" in data_keys
 
     def test_after_run_with_records(self):
         """After run(), DerivedSource presents the computed records."""

@@ -19,13 +19,13 @@ else:
 
 class MergeJoin(BinaryOperator):
     """
-    Binary operator that joins two streams, merging colliding packet columns
+    Binary operator that joins two streams, merging colliding data columns
     into sorted lists.
 
-    For packet columns that exist in both streams:
+    For data columns that exist in both streams:
     - Values are combined into a list<T> and sorted independently per column.
     - Corresponding source columns are reordered to match the sort order of
-      their packet column.
+      their data column.
 
     For non-colliding columns, values are kept as scalars (same as regular Join).
 
@@ -45,20 +45,20 @@ class MergeJoin(BinaryOperator):
     def validate_binary_inputs(
         self, left_stream: StreamProtocol, right_stream: StreamProtocol
     ) -> None:
-        _, left_packet_schema = left_stream.output_schema()
-        _, right_packet_schema = right_stream.output_schema()
+        _, left_data_schema = left_stream.output_schema()
+        _, right_data_schema = right_stream.output_schema()
 
-        # Colliding packet columns must have identical types since they are
+        # Colliding data columns must have identical types since they are
         # merged into list[T] — both sides must contribute the same T.
-        colliding_keys = set(left_packet_schema.keys()) & set(
-            right_packet_schema.keys()
+        colliding_keys = set(left_data_schema.keys()) & set(
+            right_data_schema.keys()
         )
         for key in colliding_keys:
-            left_type = left_packet_schema[key]
-            right_type = right_packet_schema[key]
+            left_type = left_data_schema[key]
+            right_type = right_data_schema[key]
             if left_type != right_type:
                 raise InputValidationError(
-                    f"Colliding packet column '{key}' has incompatible types: "
+                    f"Colliding data column '{key}' has incompatible types: "
                     f"{left_type} (left) vs {right_type} (right). "
                     f"MergeJoin requires colliding columns to have identical types."
                 )
@@ -84,28 +84,28 @@ class MergeJoin(BinaryOperator):
 
         # Always get input schemas WITHOUT system tags for the base computation.
         # System tags are computed separately because the join renames them.
-        left_tag_schema, left_packet_schema = left_stream.output_schema()
-        right_tag_schema, right_packet_schema = right_stream.output_schema()
+        left_tag_schema, left_data_schema = left_stream.output_schema()
+        right_tag_schema, right_data_schema = right_stream.output_schema()
 
         # Tag schema: union of both tag schemas
         tag_schema = schema_utils.union_schemas(left_tag_schema, right_tag_schema)
 
-        # Packet schema: colliding columns become list[T], non-colliding stay scalar
+        # Data schema: colliding columns become list[T], non-colliding stay scalar
         colliding_schema = schema_utils.intersection_schemas(
-            left_packet_schema, right_packet_schema
+            left_data_schema, right_data_schema
         )
 
-        merged_packet_schema = {}
-        all_packet_keys = set(left_packet_schema.keys()) | set(
-            right_packet_schema.keys()
+        merged_data_schema = {}
+        all_data_keys = set(left_data_schema.keys()) | set(
+            right_data_schema.keys()
         )
-        for key in all_packet_keys:
+        for key in all_data_keys:
             if key in colliding_schema:
-                merged_packet_schema[key] = list[colliding_schema[key]]
-            elif key in left_packet_schema:
-                merged_packet_schema[key] = left_packet_schema[key]
+                merged_data_schema[key] = list[colliding_schema[key]]
+            elif key in left_data_schema:
+                merged_data_schema[key] = left_data_schema[key]
             else:
-                merged_packet_schema[key] = right_packet_schema[key]
+                merged_data_schema[key] = right_data_schema[key]
 
         # Add system tag columns if requested
         if columns_config.system_tags:
@@ -114,7 +114,7 @@ class MergeJoin(BinaryOperator):
             )
             tag_schema = schema_utils.union_schemas(tag_schema, system_tag_schema)
 
-        return tag_schema, Schema(merged_packet_schema)
+        return tag_schema, Schema(merged_data_schema)
 
     def _canonical_order(
         self, left_stream: StreamProtocol, right_stream: StreamProtocol
@@ -175,20 +175,20 @@ class MergeJoin(BinaryOperator):
         right_table = tables[1]
 
         # Determine shared tag keys for inner join
-        left_tag_keys, left_packet_keys = left_stream.keys()
-        right_tag_keys, right_packet_keys = right_stream.keys()
+        left_tag_keys, left_data_keys = left_stream.keys()
+        right_tag_keys, right_data_keys = right_stream.keys()
         shared_tag_keys = set(left_tag_keys) & set(right_tag_keys)
 
-        # Find colliding packet columns
-        colliding_keys = set(left_packet_keys) & set(right_packet_keys)
+        # Find colliding data columns
+        colliding_keys = set(left_data_keys) & set(right_data_keys)
 
         # Capture nullable flags from input schemas BEFORE Polars conversion.
         # Polars' join discards nullable info (defaults all to True); we derive
         # the output schema from the inputs instead of from data null counts.
-        # Only capture tag and packet columns — system tag and source columns
+        # Only capture tag and data columns — system tag and source columns
         # are internally created with Arrow's all-nullable default; those fall
         # through to null-count inference below.
-        captured_cols = set(left_tag_keys) | set(left_packet_keys) | set(right_tag_keys) | set(right_packet_keys)
+        captured_cols = set(left_tag_keys) | set(left_data_keys) | set(right_tag_keys) | set(right_data_keys)
         left_nullable = {f.name: f.nullable for f in left_table.schema if f.name in captured_cols}
         right_nullable = {f.name: f.nullable for f in right_table.schema if f.name in captured_cols}
         # Build expected output nullable map
@@ -197,7 +197,7 @@ class MergeJoin(BinaryOperator):
         for name, nullable in right_nullable.items():
             if name not in output_nullable:
                 output_nullable[name] = nullable
-        # Merged (colliding) packet columns become 2-element lists — always non-null
+        # Merged (colliding) data columns become 2-element lists — always non-null
         for col in colliding_keys:
             output_nullable[col] = False
             source_col = f"{constants.SOURCE_PREFIX}{col}"
@@ -232,7 +232,7 @@ class MergeJoin(BinaryOperator):
         )
         joined = joined.drop(COMMON_JOIN_KEY)
 
-        # Process colliding packet columns: merge into sorted lists
+        # Process colliding data columns: merge into sorted lists
         for col in colliding_keys:
             left_col_name = col
             right_col_name = f"{col}_right"
@@ -261,7 +261,7 @@ class MergeJoin(BinaryOperator):
                 lv, rv = left_vals[i], right_vals[i]
                 if has_source:
                     ls, rs = left_sources[i], right_sources[i]
-                    # Sort by packet value, carry source along
+                    # Sort by data value, carry source along
                     pairs = sorted(zip([lv, rv], [ls, rs]), key=lambda p: p[0])
                     merged_vals.append([p[0] for p in pairs])
                     merged_sources.append([p[1] for p in pairs])
@@ -302,7 +302,7 @@ class MergeJoin(BinaryOperator):
         # Sort system tag values for same-pipeline-hash streams to ensure commutativity
         joined = arrow_utils.sort_system_tag_values(joined)
 
-        # Reorder: tag columns first, then packet columns
+        # Reorder: tag columns first, then data columns
         all_tag_keys = set(left_tag_keys) | set(right_tag_keys)
         tag_cols = [c for c in joined.column_names if c in all_tag_keys]
         other_cols = [c for c in joined.column_names if c not in all_tag_keys]

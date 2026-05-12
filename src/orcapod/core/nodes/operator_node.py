@@ -15,7 +15,7 @@ from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
 from orcapod.protocols.core_protocols import (
-    PacketProtocol,
+    DataProtocol,
     StreamProtocol,
     TagProtocol,
     TrackerManagerProtocol,
@@ -350,12 +350,12 @@ class OperatorNode(StreamBase):
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         if self._operator is None:
             tag_keys = tuple(self._stored_schema.get("tag", {}).keys())
-            packet_keys = tuple(self._stored_schema.get("packet", {}).keys())
-            return tag_keys, packet_keys
-        tag_schema, packet_schema = self.output_schema(
+            data_keys = tuple(self._stored_schema.get("data", {}).keys())
+            return tag_keys, data_keys
+        tag_schema, data_schema = self.output_schema(
             columns=columns, all_info=all_info
         )
-        return tuple(tag_schema.keys()), tuple(packet_schema.keys())
+        return tuple(tag_schema.keys()), tuple(data_schema.keys())
 
     def output_schema(
         self,
@@ -366,8 +366,8 @@ class OperatorNode(StreamBase):
         """Return output schema, using stored value in read-only mode."""
         if self._operator is None:
             tag = Schema(self._stored_schema.get("tag", {}))
-            packet = Schema(self._stored_schema.get("packet", {}))
-            return tag, packet
+            data = Schema(self._stored_schema.get("data", {}))
+            return tag, data
         return self._operator.output_schema(
             *self._input_streams,
             columns=columns,
@@ -466,7 +466,7 @@ class OperatorNode(StreamBase):
             pa.repeat(self.content_hash().to_string(), n_rows).cast(pa.large_string()),
         )
 
-        # Per-row record hashes for dedup: hash(tag + packet + system_tags + node_content_hash).
+        # Per-row record hashes for dedup: hash(tag + data + system_tags + node_content_hash).
         arrow_hasher = self.data_context.arrow_hasher
         record_hashes = []
         for batch in output_table.to_batches():
@@ -502,10 +502,10 @@ class OperatorNode(StreamBase):
         Requires ``self._operator is not None`` (pre-existing limitation shared
         with ``_replay_from_cache``).
         """
-        tag_schema, packet_schema = self.output_schema()
+        tag_schema, data_schema = self.output_schema()
         type_converter = self.data_context.type_converter
         empty_fields: dict = {}
-        for name, py_type in {**tag_schema, **packet_schema}.items():
+        for name, py_type in {**tag_schema, **data_schema}.items():
             arrow_type = type_converter.python_type_to_arrow_type(py_type)
             empty_fields[name] = pa.array([], type=arrow_type)
         return pa.table(empty_fields)
@@ -570,7 +570,7 @@ class OperatorNode(StreamBase):
         self,
         *input_streams: StreamProtocol,
         observer: ExecutionObserverProtocol | None = None,
-    ) -> list[tuple[TagProtocol, PacketProtocol]]:
+    ) -> list[tuple[TagProtocol, DataProtocol]]:
         """Execute input streams: compute, persist, and cache.
 
         Args:
@@ -578,7 +578,7 @@ class OperatorNode(StreamBase):
             observer: Optional execution observer for hooks.
 
         Returns:
-            Materialized list of (tag, packet) pairs.
+            Materialized list of (tag, data) pairs.
         """
         from orcapod.pipeline.observer import NoOpObserver
 
@@ -593,7 +593,7 @@ class OperatorNode(StreamBase):
         # Check REPLAY cache first
         cached_output = self.get_cached_output()
         if cached_output is not None:
-            output = list(cached_output.iter_packets())
+            output = list(cached_output.iter_data())
             ctx_obs.on_node_end(node_label, node_hash)
             return output
 
@@ -601,7 +601,7 @@ class OperatorNode(StreamBase):
         result_stream = self._operator.process(*input_streams)
 
         # Materialize
-        output = list(result_stream.iter_packets())
+        output = list(result_stream.iter_data())
 
         # Cache
         if output:
@@ -689,18 +689,18 @@ class OperatorNode(StreamBase):
             )
             self._update_modified_time()
 
-    def iter_packets(self) -> Iterator[tuple[TagProtocol, PacketProtocol]]:
-        """Return an iterator over (tag, packet) pairs.
+    def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+        """Return an iterator over (tag, data) pairs.
 
         Read-only: never triggers computation. Returns empty before ``run()``
         or ``execute()`` populates the cache. Call ``node.is_stale`` before
         iterating if you need to detect outdated cached data.
         """
         if self._cached_output_stream is not None:
-            return self._cached_output_stream.iter_packets()
+            return self._cached_output_stream.iter_data()
         db_stream = self._load_cached_stream_from_db()
         if db_stream is not None:
-            return db_stream.iter_packets()
+            return db_stream.iter_data()
         return iter([])
 
     def as_table(
@@ -814,8 +814,8 @@ class OperatorNode(StreamBase):
 
     async def async_execute(
         self,
-        inputs: Sequence[ReadableChannel[tuple[TagProtocol, PacketProtocol]]],
-        output: WritableChannel[tuple[TagProtocol, PacketProtocol]],
+        inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         *,
         observer: ExecutionObserverProtocol | None = None,
     ) -> None:
@@ -831,7 +831,7 @@ class OperatorNode(StreamBase):
 
         Args:
             inputs: Sequence of readable channels from upstream nodes.
-            output: Writable channel for output (tag, packet) pairs.
+            output: Writable channel for output (tag, data) pairs.
             observer: Optional execution observer for hooks.
         """
         from orcapod.pipeline.observer import NoOpObserver
@@ -857,15 +857,15 @@ class OperatorNode(StreamBase):
             if self._cache_mode == CacheMode.REPLAY:
                 self._replay_from_cache()
                 assert self._cached_output_stream is not None
-                for tag, packet in self._cached_output_stream.iter_packets():
-                    await output.send((tag, packet))
+                for tag, data in self._cached_output_stream.iter_data():
+                    await output.send((tag, data))
                 ctx_obs.on_node_end(node_label, node_hash)
                 return  # finally block closes output
 
             # OFF or LOG: delegate to operator, forward results downstream
-            intermediate: Channel[tuple[TagProtocol, PacketProtocol]] = Channel()
+            intermediate: Channel[tuple[TagProtocol, DataProtocol]] = Channel()
             should_collect = self._cache_mode == CacheMode.LOG
-            collected: list[tuple[TagProtocol, PacketProtocol]] = []
+            collected: list[tuple[TagProtocol, DataProtocol]] = []
 
             async def forward() -> None:
                 async for item in intermediate.reader:

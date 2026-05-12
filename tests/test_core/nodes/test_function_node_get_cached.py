@@ -7,7 +7,7 @@ import pytest
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 
@@ -25,7 +25,7 @@ def function_node_with_db():
         }
     )
     src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
-    pf = PythonPacketFunction(double_value, output_keys="result")
+    pf = PythonDataFunction(double_value, output_keys="result")
     pod = FunctionPod(pf)
     pipeline_db = InMemoryArrowDatabase()
     result_db = InMemoryArrowDatabase()
@@ -47,7 +47,7 @@ class TestGetCachedResults:
             }
         )
         src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
-        pf = PythonPacketFunction(double_value, output_keys="result")
+        pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
         node = FunctionNode(pod, src)
         assert node.get_cached_results([]) == {}
@@ -57,12 +57,12 @@ class TestGetCachedResults:
 
     def test_returns_cached_results_for_matching_entry_ids(self, function_node_with_db):
         node = function_node_with_db
-        packets = list(node._input_stream.iter_packets())
+        data = list(node._input_stream.iter_data())
 
         entry_ids = []
-        for tag, packet in packets:
-            node.execute_packet(tag, packet)
-            entry_ids.append(node.compute_pipeline_entry_id(tag, packet))
+        for tag, data in data:
+            node.execute_data(tag, data)
+            entry_ids.append(node.compute_pipeline_entry_id(tag, data))
 
         cached = node.get_cached_results(entry_ids)
         assert len(cached) == 2
@@ -70,12 +70,12 @@ class TestGetCachedResults:
 
     def test_filters_to_requested_entry_ids_only(self, function_node_with_db):
         node = function_node_with_db
-        packets = list(node._input_stream.iter_packets())
+        data = list(node._input_stream.iter_data())
 
         entry_ids = []
-        for tag, packet in packets:
-            node.execute_packet(tag, packet)
-            entry_ids.append(node.compute_pipeline_entry_id(tag, packet))
+        for tag, data in data:
+            node.execute_data(tag, data)
+            entry_ids.append(node.compute_pipeline_entry_id(tag, data))
 
         cached = node.get_cached_results([entry_ids[0]])
         assert len(cached) == 1
@@ -83,19 +83,19 @@ class TestGetCachedResults:
         assert entry_ids[1] not in cached
 
     def test_get_cached_results_populates_internal_cache(self, function_node_with_db):
-        """get_cached_results should populate _cached_output_packets."""
+        """get_cached_results should populate _cached_output_datas."""
         node = function_node_with_db
-        packets = list(node._input_stream.iter_packets())
+        data = list(node._input_stream.iter_data())
 
         entry_ids = []
-        for tag, packet in packets:
-            node.execute_packet(tag, packet)
-            entry_ids.append(node.compute_pipeline_entry_id(tag, packet))
+        for tag, data in data:
+            node.execute_data(tag, data)
+            entry_ids.append(node.compute_pipeline_entry_id(tag, data))
 
         # Clear internal cache
-        node._cached_output_packets.clear()
-        assert len(node._cached_output_packets) == 0
+        node._cached_output_datas.clear()
+        assert len(node._cached_output_datas) == 0
 
         # get_cached_results should repopulate
         node.get_cached_results(entry_ids)
-        assert len(node._cached_output_packets) == 2
+        assert len(node._cached_output_datas) == 2

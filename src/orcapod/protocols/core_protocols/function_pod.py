@@ -1,7 +1,7 @@
 from typing import Any, Protocol, runtime_checkable
 
-from orcapod.protocols.core_protocols.datagrams import PacketProtocol, TagProtocol
-from orcapod.protocols.core_protocols.packet_function import PacketFunctionProtocol
+from orcapod.protocols.core_protocols.datagrams import DataProtocol, TagProtocol
+from orcapod.protocols.core_protocols.data_function import DataFunctionProtocol
 from orcapod.protocols.core_protocols.pod import PodProtocol
 from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 
@@ -9,23 +9,23 @@ from orcapod.protocols.hashing_protocols import PipelineElementProtocol
 @runtime_checkable
 class FunctionPodProtocol(PodProtocol, PipelineElementProtocol, Protocol):
     """
-    PodProtocol based on PacketFunctionProtocol.
+    PodProtocol based on DataFunctionProtocol.
     """
 
     @property
-    def packet_function(self) -> PacketFunctionProtocol:
+    def data_function(self) -> DataFunctionProtocol:
         """
-        The PacketFunctionProtocol that defines the computation for this FunctionPodProtocol.
+        The DataFunctionProtocol that defines the computation for this FunctionPodProtocol.
         """
         ...
 
-    def process_packet(
-        self, tag: TagProtocol, packet: PacketProtocol
-    ) -> tuple[TagProtocol, PacketProtocol | None]: ...
+    def process_data(
+        self, tag: TagProtocol, data: DataProtocol
+    ) -> tuple[TagProtocol, DataProtocol | None]: ...
 
-    async def async_process_packet(
-        self, tag: TagProtocol, packet: PacketProtocol
-    ) -> tuple[TagProtocol, PacketProtocol | None]: ...
+    async def async_process_data(
+        self, tag: TagProtocol, data: DataProtocol
+    ) -> tuple[TagProtocol, DataProtocol | None]: ...
 
     def to_config(self) -> dict[str, Any]:
         """Serialize this function pod to a JSON-compatible config dict."""

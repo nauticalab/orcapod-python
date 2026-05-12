@@ -1,6 +1,6 @@
 """Tests for node execute methods (persistence, caching).
 
-Note: execute / execute_packet are internal methods for orchestrators.
+Note: execute / execute_data are internal methods for orchestrators.
 The caller guarantees input identity — no schema validation is performed.
 """
 
@@ -11,7 +11,7 @@ import pytest
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
-from orcapod.core.packet_function import PythonPacketFunction
+from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 
@@ -29,7 +29,7 @@ def function_node_with_db():
         }
     )
     src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
-    pf = PythonPacketFunction(double_value, output_keys="result")
+    pf = PythonDataFunction(double_value, output_keys="result")
     pod = FunctionPod(pf)
     pipeline_db = InMemoryArrowDatabase()
     result_db = InMemoryArrowDatabase()
@@ -51,44 +51,44 @@ def function_node_no_db():
         }
     )
     src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
-    pf = PythonPacketFunction(double_value, output_keys="result")
+    pf = PythonDataFunction(double_value, output_keys="result")
     pod = FunctionPod(pf)
     return FunctionNode(pod, src)
 
 
-class TestFunctionNodeExecutePacket:
+class TestFunctionNodeExecuteData:
     def test_returns_correct_result(self, function_node_no_db):
         node = function_node_no_db
-        packets = list(node._input_stream.iter_packets())
-        tag, packet = packets[0]
-        tag_out, result = node.execute_packet(tag, packet)
+        data = list(node._input_stream.iter_data())
+        tag, data = data[0]
+        tag_out, result = node.execute_data(tag, data)
         assert result is not None
         assert result.as_dict()["result"] == 2
 
     def test_writes_pipeline_record(self, function_node_with_db):
         node, pipeline_db, _ = function_node_with_db
-        packets = list(node._input_stream.iter_packets())
-        tag, packet = packets[0]
-        node.execute_packet(tag, packet)
+        data = list(node._input_stream.iter_data())
+        tag, data = data[0]
+        node.execute_data(tag, data)
         records = pipeline_db.get_all_records(node.node_identity_path)
         assert records is not None
         assert records.num_rows == 1
 
     def test_writes_to_result_db(self, function_node_with_db):
         node, _, _ = function_node_with_db
-        packets = list(node._input_stream.iter_packets())
-        tag, packet = packets[0]
-        node.execute_packet(tag, packet)
+        data = list(node._input_stream.iter_data())
+        tag, data = data[0]
+        node.execute_data(tag, data)
         cached = node._cached_function_pod.get_all_cached_outputs()
         assert cached is not None
         assert cached.num_rows == 1
 
     def test_caches_internally(self, function_node_with_db):
         node, _, _ = function_node_with_db
-        packets = list(node._input_stream.iter_packets())
-        tag, packet = packets[0]
-        node.execute_packet(tag, packet)
-        assert len(node._cached_output_packets) == 1
+        data = list(node._input_stream.iter_data())
+        tag, data = data[0]
+        node.execute_data(tag, data)
+        assert len(node._cached_output_datas) == 1
 
 
 class TestFunctionNodeExecute:
@@ -110,7 +110,7 @@ class TestFunctionNodeExecute:
     def test_caches_internally(self, function_node_with_db):
         node, _, _ = function_node_with_db
         node.execute(node._input_stream)
-        assert len(node._cached_output_packets) == 2
+        assert len(node._cached_output_datas) == 2
 
 
 # ------------------------------------------------------------------
@@ -118,7 +118,7 @@ class TestFunctionNodeExecute:
 # ------------------------------------------------------------------
 
 from orcapod.core.nodes import OperatorNode
-from orcapod.core.operators import SelectPacketColumns
+from orcapod.core.operators import SelectDataColumns
 from orcapod.types import CacheMode
 
 
@@ -131,7 +131,7 @@ def operator_with_db():
         }
     )
     src = ArrowTableSource(table, tag_columns=["key"])
-    op = SelectPacketColumns(columns=["value"])
+    op = SelectDataColumns(columns=["value"])
     db = InMemoryArrowDatabase()
     node = OperatorNode(
         op,
@@ -151,7 +151,7 @@ def operator_no_db():
         }
     )
     src = ArrowTableSource(table, tag_columns=["key"])
-    op = SelectPacketColumns(columns=["value"])
+    op = SelectDataColumns(columns=["value"])
     node = OperatorNode(op, input_streams=[src])
     return node, src
 
@@ -173,7 +173,7 @@ class TestOperatorNodeExecute:
     def test_caches_internally(self, operator_no_db):
         node, src = operator_no_db
         node.execute(src)
-        cached = list(node.iter_packets())
+        cached = list(node.iter_data())
         assert len(cached) == 2
 
     def test_noop_db_in_off_mode(self, operator_no_db):

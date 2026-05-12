@@ -11,7 +11,7 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from orcapod.core.operators import Batch, Join, MapTags, PolarsFilter, SelectPacketColumns
+from orcapod.core.operators import Batch, Join, MapTags, PolarsFilter, SelectDataColumns
 from orcapod.core.sources import ArrowTableSource
 from orcapod.core.streams import ArrowTableStream
 from orcapod.system_constants import constants
@@ -23,8 +23,8 @@ from orcapod.types import ColumnConfig
 # ---------------------------------------------------------------------------
 
 
-def _make_source(tag_data: dict, packet_data: dict, tag_columns: list[str]):
-    all_data = {**tag_data, **packet_data}
+def _make_source(tag_data: dict, data_data: dict, tag_columns: list[str]):
+    all_data = {**tag_data, **data_data}
     table = pa.table(all_data)
     return ArrowTableSource(table, tag_columns=tag_columns, infer_nullable=True)
 
@@ -86,7 +86,7 @@ class TestNamePreserving:
         source_table = source.as_table(all_info=True)
         source_tag_cols = _get_system_tag_columns(source_table)
 
-        select = SelectPacketColumns(columns=["a"])
+        select = SelectDataColumns(columns=["a"])
         result = select.process(source)
         result_table = result.as_table(all_info=True)
         result_tag_cols = _get_system_tag_columns(result_table)

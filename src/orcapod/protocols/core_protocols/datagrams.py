@@ -33,8 +33,8 @@ class DatagramProtocol(ContentIdentifiableProtocol, DataContextAwareProtocol, Pr
     - **Meta columns**: Internal system metadata with {constants.META_PREFIX} (typically '__') prefixes (e.g. __processed_at, etc.)
     - **Context column**: Data context information ({constants.CONTEXT_KEY})
 
-    Derivative of datagram (such as PacketProtocol or TagProtocol) will also include some specific columns pertinent to the function of the specialized datagram:
-    - **Source info columns**: Data provenance with {constants.SOURCE_PREFIX} ('_source_') prefixes (_source_user_id, etc.) used in PacketProtocol
+    Derivative of datagram (such as DataProtocol or TagProtocol) will also include some specific columns pertinent to the function of the specialized datagram:
+    - **Source info columns**: Data provenance with {constants.SOURCE_PREFIX} ('_source_') prefixes (_source_user_id, etc.) used in DataProtocol
     - **System tags**: Internal tags for system use, typically prefixed with {constants.SYSTEM_TAG_PREFIX} ('_system_') (_system_created_at, etc.) used in TagProtocol
 
     All operations are by design immutable - methods return new datagram instances rather than modifying existing ones.
@@ -599,7 +599,7 @@ class TagProtocol(DatagramProtocol, Protocol):
     """
     Metadata associated with each data item in a stream.
 
-    Tags carry contextual information about data packets as they flow through
+    Tags carry contextual information about data data as they flow through
     the computational graph. They are immutable and provide metadata that
     helps with:
     - Data lineage tracking
@@ -618,9 +618,9 @@ class TagProtocol(DatagramProtocol, Protocol):
 
     def system_tags(self) -> dict[str, DataValue]:
         """
-        Return metadata about the packet's source/origin.
+        Return metadata about the data's source/origin.
 
-        Provides debugging and lineage information about where the packet
+        Provides debugging and lineage information about where the data
         originated. May include information like:
         - File paths for file-based sources
         - Database connection strings
@@ -634,28 +634,28 @@ class TagProtocol(DatagramProtocol, Protocol):
 
 
 @runtime_checkable
-class PacketProtocol(DatagramProtocol, Protocol):
+class DataProtocol(DatagramProtocol, Protocol):
     """
     The actual data payload in a stream.
 
-    Packets represent the core data being processed through the computational
-    graph. Unlike Tags (which are metadata), Packets contain the actual
+    Datas represent the core data being processed through the computational
+    graph. Unlike Tags (which are metadata), Datas contain the actual
     information that computations operate on.
 
-    Packets extend DatagramProtocol with additional capabilities for:
+    Datas extend DatagramProtocol with additional capabilities for:
     - Source tracking and lineage
     - Content-based hashing for caching
     - Metadata inclusion for debugging
 
-    The distinction between TagProtocol and PacketProtocol is crucial for understanding
-    data flow: Tags provide context, Packets provide content.
+    The distinction between TagProtocol and DataProtocol is crucial for understanding
+    data flow: Tags provide context, Datas provide content.
     """
 
     def source_info(self) -> dict[str, str | None]:
         """
-        Return metadata about the packet's source/origin.
+        Return metadata about the data's source/origin.
 
-        Provides debugging and lineage information about where the packet
+        Provides debugging and lineage information about where the data
         originated. May include information like:
         - File paths for file-based sources
         - Database connection strings
@@ -672,19 +672,19 @@ class PacketProtocol(DatagramProtocol, Protocol):
         **source_info: str | None,
     ) -> Self:
         """
-        Create a new packet with updated source information.
+        Create a new data with updated source information.
 
-        Adds or updates source metadata for the packet. This is useful for
+        Adds or updates source metadata for the data. This is useful for
         tracking data provenance and lineage through the computational graph.
 
         Args:
             **source_info: Source metadata as keyword arguments.
 
         Returns:
-            A new packet instance with updated source information.
+            A new data instance with updated source information.
 
         Example:
-            >>> updated_packet = packet.with_source_info(
+            >>> updated_data = data.with_source_info(
             ...     file_path="/new/path/to/file.txt",
             ...     source_id="source_123"
             ... )

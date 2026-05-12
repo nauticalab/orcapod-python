@@ -137,7 +137,7 @@ Common types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `perf`, `ci`.
 
 Examples:
 - `feat(schema): add optional_fields to Schema`
-- `fix(packet_function): reject variadic parameters at construction`
+- `fix(data_function): reject variadic parameters at construction`
 - `test(function_pod): add schema validation tests`
 - `refactor(schema_utils): use Schema.optional_fields directly`
 
@@ -155,18 +155,18 @@ src/orcapod/
 ├── protocols/
 │   ├── hashing_protocols.py    # PipelineElementProtocol, ContentIdentifiableProtocol
 │   └── core_protocols/         # StreamProtocol, PodProtocol, SourceProtocol,
-│                               # PacketFunctionProtocol, DatagramProtocol, TagProtocol,
-│                               # PacketProtocol, TrackerProtocol
+│                               # DataFunctionProtocol, DatagramProtocol, TagProtocol,
+│                               # DataProtocol, TrackerProtocol
 ├── core/
 │   ├── base.py                 # ContentIdentifiableBase, PipelineElementBase, TraceableBase
 │   ├── static_output_pod.py    # StaticOutputPod (operator base), DynamicPodStream
 │   ├── function_pod.py         # FunctionPod, FunctionPodStream, FunctionNode
-│   ├── packet_function.py      # PacketFunctionBase, PythonPacketFunction, CachedPacketFunction
+│   ├── data_function.py      # DataFunctionBase, PythonDataFunction, CachedDataFunction
 │   ├── operator_node.py        # OperatorNode (DB-backed operator execution)
 │   ├── tracker.py              # Invocation tracking
 │   ├── datagrams/
 │   │   ├── datagram.py         # Datagram (unified dict/Arrow backing, lazy conversion)
-│   │   └── tag_packet.py       # Tag (+ system tags), Packet (+ source info)
+│   │   └── tag_data.py       # Tag (+ system tags), Data (+ source info)
 │   ├── sources/
 │   │   ├── base.py             # RootSource (abstract, no upstream)
 │   │   ├── arrow_table_source.py  # Core source — all other sources delegate to it
@@ -183,8 +183,8 @@ src/orcapod/
 │       ├── merge_join.py       # MergeJoin (binary, colliding cols → sorted list[T])
 │       ├── semijoin.py         # SemiJoin (binary, non-commutative)
 │       ├── batch.py            # Batch (group rows, types become list[T])
-│       ├── column_selection.py # Select/Drop Tag/Packet columns
-│       ├── mappers.py          # MapTags, MapPackets (rename columns)
+│       ├── column_selection.py # Select/Drop Tag/Data columns
+│       ├── mappers.py          # MapTags, MapData (rename columns)
 │       └── filters.py          # PolarsFilter
 ├── hashing/
 │   └── semantic_hashing/       # BaseSemanticHasher, type handlers
@@ -203,7 +203,7 @@ tests/
 │   ├── streams/                # ArrowTableStream behavior
 │   ├── function_pod/           # FunctionPod, FunctionNode, pipeline hash integration
 │   ├── operators/              # All operators, OperatorNode, MergeJoin
-│   └── packet_function/        # PacketFunction, CachedPacketFunction
+│   └── data_function/        # DataFunction, CachedDataFunction
 ├── test_hashing/               # Semantic hasher, hash stability
 ├── test_databases/             # Delta Lake, in-memory, no-op databases
 └── test_semantic_types/        # Type converter tests
@@ -221,31 +221,31 @@ See `orcapod-design.md` at the project root for the full design specification.
 RootSource → ArrowTableStream → [Operator / FunctionPod] → ArrowTableStream → ...
 ```
 
-Every stream is an immutable sequence of (Tag, Packet) pairs backed by a PyArrow Table.
-Tag columns are join keys and metadata; packet columns are the data payload.
+Every stream is an immutable sequence of (Tag, Data) pairs backed by a PyArrow Table.
+Tag columns are join keys and metadata; data columns are the data payload.
 
 ### Core abstractions
 
 **Datagram** (`core/datagrams/datagram.py`) — immutable data container with lazy dict ↔ Arrow
 conversion. Two specializations:
 - **Tag** — metadata columns + hidden system tag columns for provenance tracking
-- **Packet** — data columns + per-column source info provenance tokens
+- **Data** — data columns + per-column source info provenance tokens
 
-**Stream** (`core/streams/arrow_table_stream.py`) — immutable (Tag, Packet) sequence.
-Key methods: `output_schema()`, `keys()`, `iter_packets()`, `as_table()`.
+**Stream** (`core/streams/arrow_table_stream.py`) — immutable (Tag, Data) sequence.
+Key methods: `output_schema()`, `keys()`, `iter_data()`, `as_table()`.
 
 **Source** (`core/sources/`) — produces a stream from external data. `ArrowTableSource` is the
 core implementation; CSV/Delta/DataFrame/Dict/List sources all delegate to it internally. Each
 source adds source-info columns and a system tag column. `DerivedSource` wraps a
 FunctionNode/OperatorNode's DB records as a new source.
 
-**Function Pod** (`core/function_pod.py`) — wraps a `PacketFunction` that transforms individual
-packets. Never inspects tags. Two execution models:
+**Function Pod** (`core/function_pod.py`) — wraps a `DataFunction` that transforms individual
+data. Never inspects tags. Two execution models:
 - `FunctionPod` → `FunctionPodStream`: lazy, in-memory
 - `FunctionNode`: DB-backed, two-phase (yield cached results first, then compute missing)
 
 **Operator** (`core/operators/`) — structural pod transforming streams without synthesizing new
-packet values. All subclass `StaticOutputPod`:
+data values. All subclass `StaticOutputPod`:
 - `UnaryOperator` — 1 input (Batch, Select/Drop columns, Map, Filter)
 - `BinaryOperator` — 2 inputs (MergeJoin, SemiJoin)
 - `NonZeroInputOperator` — 1+ inputs (Join)
@@ -257,7 +257,7 @@ FunctionNode.
 
 | | Operator | Function Pod |
 |---|---|---|
-| Inspects packet content | Never | Yes |
+| Inspects data content | Never | Yes |
 | Inspects / uses tags | Yes | No |
 | Can rename columns | Yes | No |
 | Synthesizes new values | No | Yes |
@@ -272,7 +272,7 @@ Every pipeline element has two parallel hashes:
 2. **`pipeline_hash()`** — schema + topology only. Ignores data content. Used for DB path
    scoping so that different sources with identical schemas share database tables.
 
-Base case: `RootSource.pipeline_identity_structure()` returns `(tag_schema, packet_schema)`.
+Base case: `RootSource.pipeline_identity_structure()` returns `(tag_schema, data_schema)`.
 Each downstream node's pipeline hash commits to its own identity plus the pipeline hashes of
 its upstreams, forming a Merkle chain.
 
@@ -283,7 +283,7 @@ The pipeline hash uses a **resolver pattern** — `PipelineElementProtocol` obje
 
 | Prefix | Meaning | Example | Controlled by |
 |--------|---------|---------|---------------|
-| `__` | System metadata | `__packet_id`, `__pod_version` | `ColumnConfig(meta=True)` |
+| `__` | System metadata | `__data_id`, `__pod_version` | `ColumnConfig(meta=True)` |
 | `_source_` | Source info provenance | `_source_age` | `ColumnConfig(source=True)` |
 | `_tag::` | System tag | `_tag::source:abc123` | `ColumnConfig(system_tags=True)` |
 | `_context_key` | Data context | `_context_key` | `ColumnConfig(context=True)` |
@@ -303,7 +303,7 @@ Prefixes are computed from `SystemConstant` in `system_constants.py`. The `const
 ### Schema types and ColumnConfig
 
 `Schema` (`types.py`) — immutable `Mapping[str, DataType]` with `optional_fields` support.
-`output_schema()` always returns `(tag_schema, packet_schema)` as a tuple of Schemas.
+`output_schema()` always returns `(tag_schema, data_schema)` as a tuple of Schemas.
 
 `ColumnConfig` (`types.py`) — frozen dataclass controlling which column groups are included.
 Fields: `meta`, `context`, `source`, `system_tags`, `content_hash`, `sort_by_tags`.
@@ -324,14 +324,14 @@ and `as_table()` methods. `all_info=True` sets everything to True.
 ### Important implementation details
 
 - `ArrowTableSource.__init__` raises `ValueError` if any `tag_columns` are not in the table.
-- `ArrowTableStream` requires at least one packet column; raises `ValueError` otherwise.
-- `FunctionNode.iter_packets()` Phase 1 returns ALL records in the shared `pipeline_path`
+- `ArrowTableStream` requires at least one data column; raises `ValueError` otherwise.
+- `FunctionNode.iter_data()` Phase 1 returns ALL records in the shared `pipeline_path`
   DB table (not filtered to current inputs). Phase 2 skips inputs whose hash is already
   in the DB.
 - Empty data → `ArrowTableSource` raises `ValueError("Table is empty")`.
 - `DerivedSource` before `run()` → raises `ValueError` (no computed records).
-- Join requires non-overlapping packet columns; raises `InputValidationError` on collision.
-- MergeJoin requires colliding packet columns to have identical types; merges into sorted
+- Join requires non-overlapping data columns; raises `InputValidationError` on collision.
+- MergeJoin requires colliding data columns to have identical types; merges into sorted
   `list[T]` with source columns reordered to match.
 - Operators predict their output schema (including system tag column names) without
   performing the actual computation.

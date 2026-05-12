@@ -9,7 +9,7 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.nodes import OperatorNode
-from orcapod.core.operators import MapPackets
+from orcapod.core.operators import MapData
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.types import CacheMode
@@ -22,7 +22,7 @@ from orcapod.types import CacheMode
 
 @pytest.fixture
 def simple_source() -> ArrowTableStream:
-    """Single-tag stream: id (tag), x (packet), 3 rows."""
+    """Single-tag stream: id (tag), x (data), 3 rows."""
     return ArrowTableStream(
         pa.table(
             {
@@ -35,8 +35,8 @@ def simple_source() -> ArrowTableStream:
 
 
 @pytest.fixture
-def map_op() -> MapPackets:
-    return MapPackets({"x": "renamed_x"})
+def map_op() -> MapData:
+    return MapData({"x": "renamed_x"})
 
 
 def _node(operator, streams, *, db=None, cache_mode=CacheMode.OFF):
@@ -52,12 +52,12 @@ def _node(operator, streams, *, db=None, cache_mode=CacheMode.OFF):
 # ---------------------------------------------------------------------------
 
 
-class TestIterPacketsIsPassive:
-    def test_iter_packets_without_run_returns_empty(self, simple_source, map_op):
-        """iter_packets() must not call operator.process before run()."""
+class TestIterDatasIsPassive:
+    def test_iter_data_without_run_returns_empty(self, simple_source, map_op):
+        """iter_data() must not call operator.process before run()."""
         node = _node(map_op, (simple_source,))
         with patch.object(map_op, "process", wraps=map_op.process) as spy:
-            result = list(node.iter_packets())
+            result = list(node.iter_data())
         assert result == []
         spy.assert_not_called()
 
@@ -79,14 +79,14 @@ class TestIterPacketsIsPassive:
         node = _node(map_op, (simple_source,))
         assert node.flow() == []
 
-    def test_iter_packets_after_run_returns_results(self, simple_source, map_op):
-        """After run(), iter_packets() returns the computed packets."""
+    def test_iter_data_after_run_returns_results(self, simple_source, map_op):
+        """After run(), iter_data() returns the computed data."""
         node = _node(map_op, (simple_source,))
         node.run()
-        result = list(node.iter_packets())
+        result = list(node.iter_data())
         assert len(result) == 3
-        for _, packet in result:
-            assert "renamed_x" in packet.keys()
+        for _, data in result:
+            assert "renamed_x" in data.keys()
 
     def test_as_table_after_run_returns_results(self, simple_source, map_op):
         """After run(), as_table() returns the computed table."""
@@ -103,27 +103,27 @@ class TestIterPacketsIsPassive:
 
 
 class TestCascadeIsolation:
-    def test_iter_packets_does_not_cascade_upstream_operator(self, simple_source):
+    def test_iter_data_does_not_cascade_upstream_operator(self, simple_source):
         """Key regression test for PLT-1182.
 
         Chain: SourceNode → OperatorNode(A) → OperatorNode(B)
         Iterating B without run() must not call A's operator.process.
         """
-        op_a = MapPackets({"x": "y"})
-        op_b = MapPackets({"y": "z"})
+        op_a = MapData({"x": "y"})
+        op_b = MapData({"y": "z"})
         node_a = _node(op_a, (simple_source,))
         node_b = _node(op_b, (node_a,))
 
         with patch.object(op_a, "process", wraps=op_a.process) as spy_a:
-            result = list(node_b.iter_packets())
+            result = list(node_b.iter_data())
 
         assert result == []
         spy_a.assert_not_called()
 
     def test_pipeline_run_then_iterate(self, simple_source):
         """After pipeline.run() (simulated), iteration returns correct results."""
-        op_a = MapPackets({"x": "y"})
-        op_b = MapPackets({"y": "z"})
+        op_a = MapData({"x": "y"})
+        op_b = MapData({"y": "z"})
         node_a = _node(op_a, (simple_source,))
         node_b = _node(op_b, (node_a,))
 
@@ -131,12 +131,12 @@ class TestCascadeIsolation:
         node_a.run()
         node_b.run()
 
-        result_a = list(node_a.iter_packets())
-        result_b = list(node_b.iter_packets())
+        result_a = list(node_a.iter_data())
+        result_b = list(node_b.iter_data())
         assert len(result_a) == 3
         assert len(result_b) == 3
-        for _, packet in result_b:
-            assert "z" in packet.keys()
+        for _, data in result_b:
+            assert "z" in data.keys()
 
 
 # ---------------------------------------------------------------------------
@@ -145,24 +145,24 @@ class TestCascadeIsolation:
 
 
 class TestCacheModeNonActive:
-    def test_iter_packets_no_db_no_run_returns_empty(self, simple_source, map_op):
+    def test_iter_data_no_db_no_run_returns_empty(self, simple_source, map_op):
         """No DB, no run() → empty (step 3 fallback)."""
         node = OperatorNode(operator=map_op, input_streams=(simple_source,))
-        assert list(node.iter_packets()) == []
+        assert list(node.iter_data()) == []
 
-    def test_iter_packets_replay_mode_no_records_returns_empty(
+    def test_iter_data_replay_mode_no_records_returns_empty(
         self, simple_source, map_op
     ):
         """REPLAY + fresh DB (no LOG run) → empty table with correct schema."""
         db = InMemoryArrowDatabase()
         node = _node(map_op, (simple_source,), db=db, cache_mode=CacheMode.REPLAY)
-        result = list(node.iter_packets())
+        result = list(node.iter_data())
         assert result == []
 
-    def test_iter_packets_replay_mode_returns_db_contents(
+    def test_iter_data_replay_mode_returns_db_contents(
         self, simple_source, map_op
     ):
-        """REPLAY + prior LOG run → iter_packets returns DB records without run()."""
+        """REPLAY + prior LOG run → iter_data returns DB records without run()."""
         db = InMemoryArrowDatabase()
         # Populate DB via LOG run
         node_log = _node(map_op, (simple_source,), db=db, cache_mode=CacheMode.LOG)
@@ -172,15 +172,15 @@ class TestCacheModeNonActive:
         node_replay = _node(
             map_op, (simple_source,), db=db, cache_mode=CacheMode.REPLAY
         )
-        result = list(node_replay.iter_packets())
+        result = list(node_replay.iter_data())
         assert len(result) == 3
-        for _, packet in result:
-            assert "renamed_x" in packet.keys()
+        for _, data in result:
+            assert "renamed_x" in data.keys()
 
-    def test_iter_packets_log_mode_no_run_returns_empty(
+    def test_iter_data_log_mode_no_run_returns_empty(
         self, simple_source, map_op
     ):
-        """LOG mode: DB has prior records but iter_packets() without run() returns empty.
+        """LOG mode: DB has prior records but iter_data() without run() returns empty.
 
         This verifies the CacheMode guard in _load_cached_stream_from_db.
         """
@@ -195,5 +195,5 @@ class TestCacheModeNonActive:
         node_fresh = _node(
             map_op, (simple_source,), db=db, cache_mode=CacheMode.LOG
         )
-        result = list(node_fresh.iter_packets())
+        result = list(node_fresh.iter_data())
         assert result == []

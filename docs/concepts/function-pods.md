@@ -1,7 +1,7 @@
 # Function Pods
 
-Function pods are packet-level transforms -- they take each packet in a
-[stream](streams.md), apply a Python function to its values, and produce a new packet with the
+Function pods are data-level transforms -- they take each data in a
+[stream](streams.md), apply a Python function to its values, and produce a new data with the
 function's outputs. Unlike [operators](operators.md), function pods never inspect or modify
 tags. They are the primary mechanism for adding computation to an Orcapod pipeline: data
 cleaning, feature extraction, model inference, or any transformation that produces new values
@@ -22,9 +22,9 @@ def compute_bmi(weight: float, height: float) -> float:
 
 Key points:
 
-- **`output_keys`** names the output packet column(s). A single string means one output
+- **`output_keys`** names the output data column(s). A single string means one output
   column; a list of strings means the function returns multiple values.
-- **Function parameters** must match the input stream's packet column names. Orcapod uses
+- **Function parameters** must match the input stream's data column names. Orcapod uses
   the function signature to determine which columns to read.
 - **Type annotations** on parameters are used to validate schema compatibility.
 
@@ -42,7 +42,7 @@ pod = compute_bmi.pod
 ## `FunctionPod` -- lazy in-memory execution
 
 `FunctionPod` is the pod class created by the decorator. When you call `.process()` on it, it
-returns a `FunctionPodStream` -- a lazy stream that applies the function to each packet on
+returns a `FunctionPodStream` -- a lazy stream that applies the function to each data on
 demand:
 
 ```python
@@ -64,22 +64,22 @@ source = DictSource(
 # Apply the function pod to the source stream
 result = compute_bmi.pod(source)  # shorthand for compute_bmi.pod.process(source)
 
-# Inspect the output schema -- tags pass through, packets are replaced
-tag_schema, packet_schema = result.output_schema()
+# Inspect the output schema -- tags pass through, data are replaced
+tag_schema, data_schema = result.output_schema()
 print("Tag schema:", dict(tag_schema))
 # Tag schema: {'subject_id': <class 'str'>}
-print("Packet schema:", dict(packet_schema))
-# Packet schema: {'bmi': <class 'float'>}
+print("Data schema:", dict(data_schema))
+# Data schema: {'bmi': <class 'float'>}
 
 # Iterate over results
-for tag, packet in result.iter_packets():
-    print(f"  {tag.as_dict()} -> {packet.as_dict()}")
+for tag, data in result.iter_data():
+    print(f"  {tag.as_dict()} -> {data.as_dict()}")
 # {'subject_id': 'mouse_01'} -> {'bmi': 1756.9444444444446}
 # {'subject_id': 'mouse_02'} -> {'bmi': 2209.9999999999995}
 ```
 
-The function pod preserves tags and replaces packet columns with the function's output. If the
-input stream has multiple packet columns but the function only needs some of them, Orcapod
+The function pod preserves tags and replaces data columns with the function's output. If the
+input stream has multiple data columns but the function only needs some of them, Orcapod
 extracts the matching columns by name.
 
 !!! tip
@@ -122,8 +122,8 @@ node = FunctionNode(
 node.run()
 
 # Iterate over cached results
-for tag, packet in node.iter_packets():
-    print(f"  {tag.as_dict()} -> {packet.as_dict()}")
+for tag, data in node.iter_data():
+    print(f"  {tag.as_dict()} -> {data.as_dict()}")
 ```
 
 `FunctionNode` also provides:
@@ -141,13 +141,13 @@ If you pass multiple streams to a function pod, they are automatically joined (u
 result = compute_bmi.pod(weight_stream, height_stream)
 ```
 
-The join happens on shared tag columns, and the merged packet columns are fed to the function.
+The join happens on shared tag columns, and the merged data columns are fed to the function.
 
-## PacketFunction internals
+## DataFunction internals
 
-Under the hood, the `function_pod` decorator creates a `PythonPacketFunction`, which wraps a
+Under the hood, the `function_pod` decorator creates a `PythonDataFunction`, which wraps a
 Python callable with input/output schema metadata. When a result database is provided, the
-packet function is further wrapped in a `CachedPacketFunction` that checks the database before
+data function is further wrapped in a `CachedDataFunction` that checks the database before
 calling the underlying function.
 
 These are implementation details -- the `@function_pod` decorator and `FunctionNode` are the
