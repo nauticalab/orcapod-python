@@ -16,11 +16,12 @@ from orcapod.core.nodes import (
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
 from orcapod.protocols import core_protocols as cp
 from orcapod.protocols import database_protocols as dbp
-from orcapod.types import PipelineConfig
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import networkx as nx
+    from orcapod.pipeline.execution_context import ExecutionContext
+    from orcapod.pipeline.job import PipelineJob
     from orcapod.pipeline.serialization import DatabaseRegistry
     from orcapod.protocols.database_protocols import DatabaseRegistryProtocol
     from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
@@ -36,71 +37,54 @@ logger = logging.getLogger(__name__)
 
 
 class Pipeline(AutoRegisteringContextBasedTracker):
-    """A persistent pipeline that records operator and function pod invocations.
+    """A pure computational blueprint recording operator and function pod invocations.
 
     During the ``with`` block, operator and function pod invocations are
-    recorded into an internal graph.  On context exit, ``compile()`` rewires
-    the graph into execution-ready nodes:
+    recorded into an internal graph. On context exit, ``compile()`` rewires
+    the graph into a frozen DAG:
 
-    - Leaf streams -> ``SourceNode`` (thin wrapper for graph vertex)
-    - Function pod invocations -> ``FunctionNode``
-    - Operator invocations -> ``OperatorNode``
+    - Leaf ``SourceSpec`` declarations → ``SourceNode`` (schema-only placeholders)
+    - Function pod invocations → ``FunctionNode``
+    - Operator invocations → ``OperatorNode``
 
-    Source caching is not a pipeline concern -- sources that need caching
-    should be wrapped in a ``CachedSource`` before being used in the
-    pipeline.
-
-    All persistent nodes share the same ``pipeline_database`` and use
-    ``pipeline_name`` as path prefix, scoping their cache tables.
+    All leaf inputs must be ``SourceSpec`` instances. To run a ``Pipeline``,
+    use ``Pipeline.bind(sources=..., store=...)`` to create a ``PipelineJob``.
 
     Parameters:
-        name: Pipeline name (string or tuple).  Used as the path prefix for
-            all cache/pipeline paths within the databases.
-        pipeline_database: Database for pipeline records and operator caches.
-        result_database: Optional separate database for function pod result
-            caches.  When ``None``, a ``_result`` scoped view of
-            ``pipeline_database`` is used (set during ``compile()``).
+        name: Pipeline name (string or tuple). Used as the path prefix for
+            all cache/pipeline paths when the pipeline is run via a
+            ``PipelineJob``.
         auto_compile: If ``True`` (default), ``compile()`` is called
             automatically when the context manager exits.
-        auto_save_path: Optional path to automatically save the pipeline
-            JSON after each successful ``run()`` call.  When ``None``
-            (default), no automatic save is performed.
     """
 
     def __init__(
         self,
         name: str | tuple[str, ...],
-        pipeline_database: dbp.ArrowDatabaseProtocol | None = None,
-        result_database: dbp.ArrowDatabaseProtocol | None = None,
         tracker_manager: cp.TrackerManagerProtocol | None = None,
         auto_compile: bool = True,
-        auto_save_path: str | Path | None = None,
     ) -> None:
+        """Initialize a pure computational blueprint pipeline.
+
+        Args:
+            name: Pipeline name (string or tuple). Used to scope database paths
+                when the pipeline is run via a ``PipelineJob``.
+            tracker_manager: Optional tracker manager override. Defaults to
+                ``DEFAULT_TRACKER_MANAGER``.
+            auto_compile: If ``True`` (default), ``compile()`` is called
+                automatically when the context manager exits.
+        """
         super().__init__(tracker_manager=tracker_manager)
         self._node_lut: dict[str, GraphNode] = {}
         self._upstreams: dict[str, cp.StreamProtocol] = {}
         self._graph_edges: list[tuple[str, str]] = []
         self._hash_graph: "nx.DiGraph" = nx.DiGraph()
         self._name = (name,) if isinstance(name, str) else tuple(name)
-        self._pipeline_database = pipeline_database
-        self._result_database = result_database
         self._nodes: dict[str, GraphNode] = {}
         self._persistent_node_map: dict[str, GraphNode] = {}
         self._node_graph: "nx.DiGraph | None" = None
         self._auto_compile = auto_compile
         self._compiled = False
-        if auto_save_path is not None and pipeline_database is None:
-            raise ValueError(
-                "auto_save_path requires a pipeline_database. Either provide "
-                "a pipeline_database or remove auto_save_path."
-            )
-        self._auto_save_path = auto_save_path
-        # Scoped database views (set after compile())
-        self._result_database_scoped: dbp.ArrowDatabaseProtocol | None = None
-        self._scoped_pipeline_database: dbp.ArrowDatabaseProtocol | None = None
-        self._status_database: dbp.ArrowDatabaseProtocol | None = None
-        self._log_database: dbp.ArrowDatabaseProtocol | None = None
-        self._default_observer: ExecutionObserverProtocol | None = None
 
     # ------------------------------------------------------------------
     # Recording (TrackerProtocol)
@@ -183,35 +167,6 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         return self._name
 
     @property
-    def pipeline_database(self) -> dbp.ArrowDatabaseProtocol | None:
-        return self._pipeline_database
-
-    @property
-    def result_database(self) -> dbp.ArrowDatabaseProtocol | None:
-        """The _result-scoped database view (set after compile())."""
-        if not self._compiled:
-            raise RuntimeError("Pipeline must be compiled before accessing result_database. Call compile() first.")
-        return self._result_database_scoped
-
-    @property
-    def scoped_pipeline_database(self) -> dbp.ArrowDatabaseProtocol | None:
-        if not self._compiled:
-            raise RuntimeError("Pipeline must be compiled before accessing scoped_pipeline_database. Call compile() first.")
-        return self._scoped_pipeline_database
-
-    @property
-    def status_database(self) -> dbp.ArrowDatabaseProtocol | None:
-        if not self._compiled:
-            raise RuntimeError("Pipeline must be compiled before accessing status_database. Call compile() first.")
-        return self._status_database
-
-    @property
-    def log_database(self) -> dbp.ArrowDatabaseProtocol | None:
-        if not self._compiled:
-            raise RuntimeError("Pipeline must be compiled before accessing log_database. Call compile() first.")
-        return self._log_database
-
-    @property
     def compiled_nodes(self) -> dict[str, GraphNode]:
         """Return a copy of the compiled nodes dict."""
         return self._nodes.copy()
@@ -247,30 +202,6 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             FunctionNode,
             OperatorNode,
         )
-        from orcapod.pipeline.observer import NoOpObserver
-
-        # Create scoped databases and default observer eagerly at compile time
-        if self._pipeline_database is not None:
-            pipeline_db = self._pipeline_database.at(*self._name)
-            result_db = self._result_database if self._result_database is not None else pipeline_db.at("_result")
-            status_db = pipeline_db.at("_status")
-            log_db = pipeline_db.at("_log")
-            self._scoped_pipeline_database = pipeline_db
-            self._result_database_scoped = result_db
-            self._status_database = status_db
-            self._log_database = log_db
-
-            from orcapod.pipeline.composite_observer import CompositeObserver
-            from orcapod.pipeline.status_observer import StatusObserver
-            from orcapod.pipeline.logging_observer import LoggingObserver
-            self._default_observer = CompositeObserver(
-                StatusObserver(status_db),
-                LoggingObserver(log_db),
-            )
-        else:
-            pipeline_db = None
-            result_db = self._result_database  # explicit override or None
-            self._default_observer = NoOpObserver()
 
         G = nx.DiGraph()
         for edge in self._graph_edges:
@@ -290,8 +221,16 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 continue
 
             if node_hash not in self._node_lut:
-                # -- Leaf stream: wrap in SourceNode --
+                # -- Leaf stream: must be a SourceSpec in the new design --
+                from orcapod.core.sources.source_spec import SourceSpec
                 stream = self._upstreams[node_hash]
+                if not isinstance(stream, SourceSpec):
+                    raise ValueError(
+                        f"Pipeline: all leaf inputs must be SourceSpec instances, "
+                        f"but found {type(stream).__name__!r}. "
+                        "Use 'with PipelineJob:' to record a pipeline with concrete sources, "
+                        "or replace concrete sources with SourceSpec declarations."
+                    )
                 node = SourceNode(stream=stream)
                 persistent_node_map[node_hash] = node
             else:
@@ -303,19 +242,6 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     rewired_input = persistent_node_map[input_hash]
                     node.upstreams = (rewired_input,)
 
-                    if pipeline_db is not None:
-                        node.attach_databases(
-                            pipeline_database=pipeline_db,
-                            result_database=result_db,
-                        )
-
-                    # Default to LocalPythonFunctionExecutor so capture/logging works
-                    # out of the box. Replaced if execution_engine is set.
-                    if node.executor is None:
-                        from orcapod.core.executors.local import LocalPythonFunctionExecutor
-
-                        node.executor = LocalPythonFunctionExecutor()
-
                 elif isinstance(node, OperatorNode):
                     # Rewire all input streams to persistent upstreams
                     rewired_inputs = tuple(
@@ -323,11 +249,6 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                         for s in node.upstreams
                     )
                     node.upstreams = rewired_inputs
-
-                    if pipeline_db is not None:
-                        node.attach_databases(
-                            pipeline_database=pipeline_db,
-                        )
 
                 else:
                     raise TypeError(
@@ -391,191 +312,41 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         self._compiled = True
 
     # ------------------------------------------------------------------
-    # Execution
+    # Bind
     # ------------------------------------------------------------------
 
-    def run(
+    def bind(
         self,
-        orchestrator=None,
-        config: PipelineConfig | None = None,
-        execution_engine: cp.DataFunctionExecutorProtocol | None = None,
-        execution_engine_opts: "dict[str, Any] | None" = None,
-        observer: ExecutionObserverProtocol | None = None,
-    ) -> None:
-        """Execute all compiled nodes.
+        sources: "dict[str, cp.StreamProtocol] | None" = None,
+        store: "dbp.ArrowDatabaseProtocol | None" = None,
+        execution_context: "ExecutionContext | None" = None,
+    ) -> "PipelineJob":
+        """Wrap this pipeline in a ``PipelineJob`` with the given bindings.
+
+        Non-mutating — returns a fresh ``PipelineJob``; this ``Pipeline``
+        is unchanged.
 
         Args:
-            orchestrator: Optional orchestrator instance. When provided,
-                the orchestrator drives execution and nodes handle their
-                own persistence internally. When omitted, defaults to
-                ``SyncPipelineOrchestrator`` (sync mode) or
-                ``AsyncPipelineOrchestrator`` (async mode).
-            config: Pipeline configuration. When ``config.executor`` is
-                ``ExecutorType.ASYNC_CHANNELS``, the pipeline runs
-                asynchronously via the orchestrator. When ``config`` is
-                omitted and an ``execution_engine`` is provided, async mode
-                is used by default. Passing an explicit ``config`` always
-                takes priority — supply ``ExecutorType.SYNCHRONOUS`` to force
-                synchronous execution even when an engine is present.
-            execution_engine: Optional data-function executor applied to
-                every function node before execution (e.g. a ``RayExecutor``).
-                Overrides ``config.execution_engine`` when both are provided.
-            execution_engine_opts: Resource/options dict forwarded to the
-                engine via ``with_options()`` (e.g. ``{"num_cpus": 4}``).
-                Overrides ``config.execution_engine_opts`` when both are
-                provided.
-            observer: Optional execution observer.  When provided, overrides
-                the pipeline's ``_default_observer``.  When omitted, the
-                ``_default_observer`` set during ``compile()`` is used.
-        """
-        from orcapod.types import ExecutorType, PipelineConfig
-
-        explicit_config = config is not None
-        config = config or PipelineConfig()
-
-        # Explicit kwargs take precedence over values baked into config.
-        effective_engine = (
-            execution_engine
-            if execution_engine is not None
-            else config.execution_engine
-        )
-        effective_opts = (
-            execution_engine_opts
-            if execution_engine_opts is not None
-            else config.execution_engine_opts
-        )
-
-        if not self._compiled:
-            self.compile()
-
-        if effective_engine is not None:
-            self._apply_execution_engine(effective_engine, effective_opts)
-
-        effective_observer = observer if observer is not None else self._default_observer
-
-        snapshot_hash = self._compute_pipeline_snapshot_hash()
-        pipeline_uri = "/".join(self._name) + "@" + snapshot_hash
-
-        if orchestrator is not None:
-            orchestrator.run(
-                self._node_graph,
-                observer=effective_observer,
-                pipeline_uri=pipeline_uri,
-            )
-        else:
-            # Default to async when an execution engine is provided, unless
-            # the caller explicitly supplied a config — in which case
-            # config.executor is authoritative and takes priority.
-            use_async = config.executor == ExecutorType.ASYNC_CHANNELS or (
-                effective_engine is not None and not explicit_config
-            )
-            if use_async:
-                from orcapod.pipeline.async_orchestrator import (
-                    AsyncPipelineOrchestrator,
-                )
-
-                AsyncPipelineOrchestrator(
-                    buffer_size=config.channel_buffer_size,
-                ).run(
-                    self._node_graph,
-                    observer=effective_observer,
-                    pipeline_uri=pipeline_uri,
-                )
-            else:
-                from orcapod.pipeline.sync_orchestrator import (
-                    SyncPipelineOrchestrator,
-                )
-
-                orchestrator_sync = SyncPipelineOrchestrator()
-                orchestrator_sync.run(
-                    self._node_graph,
-                    observer=effective_observer,
-                    pipeline_uri=pipeline_uri,
-                )
-
-        self.flush()
-
-        if self._auto_save_path is not None:
-            self.save(str(self._auto_save_path))
-
-    def _apply_execution_engine(
-        self,
-        execution_engine: cp.DataFunctionExecutorProtocol,
-        execution_engine_opts: dict[str, Any] | None,
-    ) -> None:
-        """Apply *execution_engine* to every ``FunctionNode`` in the pipeline.
-
-        Each node receives its own executor instance via
-        ``engine.with_options(**opts)`` — even when *opts* is empty.
-        The executor's ``with_options`` implementation decides which
-        components to copy vs share (e.g. connection handles may be
-        shared while per-node state is copied).
-
-        Args:
-            execution_engine: Executor to apply (must implement
-                ``PythonFunctionExecutorBase`` or at minimum expose
-                ``with_options``).
-            execution_engine_opts: Pipeline-level options dict, or
-                ``None`` for no defaults.
-        """
-        assert self._node_graph is not None, (
-            "_apply_execution_engine called before compile()"
-        )
-
-        opts = execution_engine_opts or {}
-
-        for node in self._node_graph.nodes:
-            if not isinstance(node, FunctionNode):
-                continue
-            node.executor = execution_engine.with_options(**opts)
-            logger.debug(
-                "Applied execution engine %r to node %r (opts=%r)",
-                type(execution_engine).__name__,
-                node.label,
-                opts or None,
-            )
-
-    def _compute_pipeline_snapshot_hash(self) -> str:
-        """Compute a content hash of the compiled pipeline structure.
-
-        Uses a deterministic topological ordering (Kahn's algorithm with a
-        min-heap frontier for O((n+e) log n) content-hash tie-breaking) over
-        the ``_hash_graph``, whose node keys are content-hash strings.
-        The canonical input to SHA-256 includes both the ordered node
-        sequence *and* all edges (sorted ``u->v`` pairs), so the digest
-        changes whenever nodes or edges are added, removed, or modified.
+            sources: Mapping of SourceSpec name to concrete source.
+            store: Database for result caching and operator records.
+            execution_context: Optional execution configuration.
 
         Returns:
-            A 16-character hex string (truncated SHA-256 prefix), or
-            ``""`` if the graph is empty.
+            A new ``PipelineJob`` with this pipeline and the given bindings.
         """
-        import hashlib
-        import heapq
+        from orcapod.pipeline.job import PipelineJob
+        from orcapod.pipeline.execution_context import ExecutionContext as _EC
 
-        g = self._hash_graph
-        if not g or len(g) == 0:
-            return ""
+        return PipelineJob(
+            _pipeline=self,
+            sources=sources or {},
+            store=store,
+            execution_context=execution_context,
+        )
 
-        # Kahn's algorithm with min-heap frontier for deterministic ordering.
-        in_degree: dict[str, int] = {n: g.in_degree(n) for n in g}
-        frontier: list[str] = [n for n, deg in in_degree.items() if deg == 0]
-        heapq.heapify(frontier)
-        ordered: list[str] = []
-
-        while frontier:
-            node = heapq.heappop(frontier)
-            ordered.append(node)
-            for successor in g.successors(node):
-                in_degree[successor] -= 1
-                if in_degree[successor] == 0:
-                    heapq.heappush(frontier, successor)
-
-        # Include both nodes (topo order) and edges (sorted) so topology
-        # changes that preserve node identity still change the hash.
-        node_lines = [f"N:{n}" for n in ordered]
-        edge_lines = [f"E:{u}->{v}" for u, v in sorted(g.edges())]
-        combined = "\n".join(node_lines + edge_lines)
-        return hashlib.sha256(combined.encode()).hexdigest()[:16]
+    # ------------------------------------------------------------------
+    # Graph display
+    # ------------------------------------------------------------------
 
     def show_graph(self, **kwargs) -> str | None:
         """Render the pipeline's node graph.
@@ -589,13 +360,6 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         if self._node_graph is None:
             raise RuntimeError("Pipeline must be compiled before showing the graph.")
         return render_graph(self._node_graph, **kwargs)
-
-    def flush(self) -> None:
-        """Flush all databases."""
-        if self._pipeline_database is not None:
-            self._pipeline_database.flush()
-        if self._result_database is not None:
-            self._result_database.flush()
 
     # ------------------------------------------------------------------
     # Serialization
