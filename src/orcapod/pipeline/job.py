@@ -73,6 +73,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         self._rec_node_lut: dict[str, "GraphNode"] = {}
         self._spec_by_name: dict[str, "SourceSpec"] = {}
         self._pipeline_name: tuple[str, ...] = (name,) if isinstance(name, str) else tuple(name)
+        self._unresolved_specs: list[str] = []
 
     # ------------------------------------------------------------------
     # Context manager — recording
@@ -410,18 +411,23 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
             List of unbound SourceSpec names from the most recent run.
             Empty list if run() has not been called or all specs were bound.
         """
-        return list(getattr(self, "_unresolved_specs", []))
+        return list(self._unresolved_specs)
 
     # ------------------------------------------------------------------
     # _build_execution_graph
     # ------------------------------------------------------------------
 
-    def _build_execution_graph(self) -> "tuple[Any, list[str]]":
+    def _build_execution_graph(self) -> "tuple[Any, list[str]]":  # Any = nx.DiGraph
         """Build a fresh execution-ready graph with concrete sources substituted.
 
         Creates new SourceNode/FunctionNode/OperatorNode objects — does NOT
         mutate the existing node objects in ``pipeline._persistent_node_map``.
-        Updates ``pipeline._nodes`` with the fresh exec nodes after building.
+
+        Note:
+            Updates ``pipeline._nodes`` with the fresh exec nodes (keyed by label)
+            so that ``job.pipeline.compiled_nodes`` returns execution-ready nodes
+            after a run. Repeated calls overwrite ``pipeline._nodes`` with a new
+            set of exec nodes each time.
 
         Returns:
             Tuple of (exec_graph, unresolved_spec_names).
@@ -513,9 +519,14 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
                     exec_node_map[node_hash] = new_fn
 
                 elif isinstance(template, OperatorNode):
-                    upstream_nodes = tuple(
-                        exec_node_map[p] for p in preds if p in exec_node_map
+                    # All predecessors that are not excluded must be in exec_node_map.
+                    # The excluded_hashes guard above (via `continue`) ensures any
+                    # excluded predecessor causes this node to be skipped already.
+                    assert all(p in exec_node_map for p in preds), (
+                        f"OperatorNode predecessor missing from exec_node_map: "
+                        f"{[p for p in preds if p not in exec_node_map]}"
                     )
+                    upstream_nodes = tuple(exec_node_map[p] for p in preds)
                     new_op = OperatorNode(
                         operator=template._operator,
                         input_streams=upstream_nodes,
