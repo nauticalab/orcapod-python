@@ -1,35 +1,36 @@
-"""
-Tests for the Pipeline class.
+"""Tests for the Pipeline and PipelineJob classes.
 
-Verifies that Pipeline correctly wraps all nodes
-during compile():
-- Leaf streams → SourceNode
+Verifies that Pipeline correctly wraps all nodes during compile():
+- Leaf streams → SourceNode (SourceSpec-only; concrete sources raise ValueError)
 - Function pod invocations → FunctionNode
 - Operator invocations → OperatorNode
+
+Also covers PipelineJob execution, hash chain behavior, hash graph
+attributes, source node access, and observer integration.
 """
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import cast
 
+import networkx as nx
 import pyarrow as pa
 import pytest
 
-from orcapod.core.executors import PythonFunctionExecutorBase
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import (
     FunctionNode,
     OperatorNode,
     SourceNode,
 )
-from orcapod.core.operators import Join, MapData
+from orcapod.core.operators import Join
 from orcapod.core.data_function import PythonDataFunction
-from orcapod.core.sources import ArrowTableSource
+from orcapod.core.sources import ArrowTableSource, CachedSource
 from orcapod.core.sources.source_spec import SourceSpec
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import Pipeline
 from orcapod.pipeline.job import PipelineJob
-from orcapod.protocols.core_protocols import DataFunctionProtocol, DataProtocol
+from orcapod.pipeline.observer import NoOpObserver
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -477,8 +478,7 @@ class TestHashChainDetaching:
 class TestHashGraph:
     def test_graph_empty_before_context(self):
         """pipeline.graph is an empty DiGraph before any with block."""
-        import networkx as nx
-
+        # Test the Pipeline object directly — no PipelineJob needed for this property check.
         pipeline = Pipeline(name="test")
         assert isinstance(pipeline.graph, nx.DiGraph)
         assert len(pipeline.graph.nodes) == 0
@@ -600,70 +600,6 @@ class TestCompileDoesNotTriggerExecution:
         assert table.num_rows == 2
 
 
-# ---------------------------------------------------------------------------
-# Tests: Pipeline.run() execution engine and async default
-# ---------------------------------------------------------------------------
-
-
-class _MockExecutor(PythonFunctionExecutorBase):
-    """In-process executor that records sync vs async calls.
-
-    Supports concurrent execution so the async pipeline orchestrator
-    routes through async_execute.  with_options() returns a new instance
-    so per-node opts can be inspected via .opts.
-    """
-
-    def __init__(self, opts: dict[str, Any] | None = None) -> None:
-        self.opts: dict[str, Any] = opts or {}
-        self.sync_calls: list[Any] = []
-        self.async_calls: list[Any] = []
-
-    @property
-    def executor_type_id(self) -> str:
-        return "mock"
-
-    def supported_function_type_ids(self) -> frozenset[str]:
-        return frozenset()  # empty frozenset = supports all types
-
-    @property
-    def supports_concurrent_execution(self) -> bool:
-        return True
-
-    def execute(
-        self,
-        data_function: DataFunctionProtocol,
-        data: DataProtocol,
-        *,
-        logger=None,
-    ) -> "DataProtocol | None":
-        self.sync_calls.append(data)
-        return data_function.direct_call(data)
-
-    async def async_execute(
-        self,
-        data_function: DataFunctionProtocol,
-        data: DataProtocol,
-        *,
-        logger=None,
-    ) -> "DataProtocol | None":
-        self.async_calls.append(data)
-        return data_function.direct_call(data)
-
-    def execute_callable(self, fn, kwargs, executor_options=None, *, logger=None):
-        self.sync_calls.append(kwargs)
-        return fn(**kwargs)
-
-    async def async_execute_callable(self, fn, kwargs, executor_options=None, *, logger=None):
-        self.async_calls.append(kwargs)
-        return fn(**kwargs)
-
-    def with_options(self, **opts: Any) -> "_MockExecutor":
-        return _MockExecutor(opts={**self.opts, **opts})
-
-    def get_execution_data(self) -> dict[str, Any]:
-        return {"executor_type": self.executor_type_id, **self.opts}
-
-
 class TestSourceNodesInPipeline:
     """Verify that source nodes are first-class pipeline members."""
 
@@ -737,7 +673,6 @@ class TestSourceNodeNoCaching:
 
     def test_pipeline_with_cached_source_input(self, pipeline_db):
         """CachedSource as pipeline input works and caches source data separately."""
-        from orcapod.core.sources import CachedSource
         src_a, src_b = _make_two_sources()
         source_db = InMemoryArrowDatabase()
         cached_a = CachedSource(src_a, cache_database=source_db)
@@ -760,7 +695,6 @@ class TestSourceNodeNoCaching:
 
 
 def test_run_with_override_observer_does_not_raise():
-    from orcapod.pipeline.observer import NoOpObserver
     src_a, src_b = _make_two_sources()
     db = InMemoryArrowDatabase()
     job = PipelineJob(store=db)
