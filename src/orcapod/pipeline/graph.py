@@ -607,16 +607,15 @@ class Pipeline(AutoRegisteringContextBasedTracker):
 
         # Restore _node_lut and _upstreams so PipelineJob._build_execution_graph()
         # can substitute bound sources and build a correct execution graph.
-        from orcapod.core.nodes import SourceNode as _SourceNode
         pipeline._node_lut = {
             h: n
             for h, n in reconstructed.items()
-            if not isinstance(n, _SourceNode)
+            if not isinstance(n, SourceNode)
         }
         pipeline._upstreams = {
             h: n.stream
             for h, n in reconstructed.items()
-            if isinstance(n, _SourceNode) and n.stream is not None
+            if isinstance(n, SourceNode) and n.stream is not None
         }
 
         pipeline._compiled = True

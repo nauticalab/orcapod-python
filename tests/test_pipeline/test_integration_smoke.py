@@ -55,8 +55,8 @@ def test_smoke_compiled_nodes_accessible_after_run():
     assert "adder" in completed.pipeline.compiled_nodes
 
 
-def test_smoke_empty_pipeline_runs():
-    """A PipelineJob with no function nodes (source-only) runs without error."""
+def test_smoke_run_raises_without_pipeline():
+    """run() raises RuntimeError when no pipeline has been recorded."""
     db = InMemoryArrowDatabase()
     job = PipelineJob(name="empty", store=db)
     # Don't enter context — no pipeline recorded

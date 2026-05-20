@@ -467,7 +467,6 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
             )
 
         # Clone pipeline so exec-node label mutations don't affect the original
-        from orcapod.pipeline.graph import Pipeline as _Pipeline
         exec_pipeline = pipeline._clone_for_execution()
 
         pipeline_db = store.at(*pipeline.name)
