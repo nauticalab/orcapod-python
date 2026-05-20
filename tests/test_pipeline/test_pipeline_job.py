@@ -1,6 +1,7 @@
 # tests/test_pipeline/test_pipeline_job.py
 from __future__ import annotations
 
+import json
 from typing import cast
 
 import pyarrow as pa
@@ -467,7 +468,6 @@ class TestPipelineJobSerialization:
         assert path.exists()
 
     def test_save_has_version(self, store, tmp_path):
-        import json
         src_a, src_b = _make_two_sources()
         job = PipelineJob(store=store)
         with job:
@@ -480,7 +480,6 @@ class TestPipelineJobSerialization:
 
     def test_save_includes_run_block(self, store, tmp_path):
         """Unsaved template has status=pending and null run fields."""
-        import json
         src_a, src_b = _make_two_sources()
         job = PipelineJob(store=store)
         with job:
@@ -507,7 +506,6 @@ class TestPipelineJobSerialization:
 
     def test_load_roundtrip_after_run(self, store, tmp_path):
         """Save after run() → load → pipeline topology and run status preserved."""
-        import json
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
@@ -531,7 +529,6 @@ class TestPipelineJobSerialization:
 
     def test_load_version_mismatch_raises(self, store, tmp_path):
         """PipelineJob.load() raises ValueError for an unsupported format version."""
-        import json
         src_a, src_b = _make_two_sources()
         job = PipelineJob(store=store)
         with job:
@@ -572,7 +569,6 @@ class TestPipelineJobSerialization:
 
     def test_load_after_partial_run_restores_unresolved_specs(self, store, tmp_path):
         """Loaded job preserves unresolved_specs from a partial run."""
-        from orcapod.core.sources.source_spec import SourceSpec
         src_a, src_b = _make_two_sources()
         tag_b, data_b = src_b.output_schema()
         spec_b = SourceSpec("unbound_b", tag_schema=tag_b, data_schema=data_b)
