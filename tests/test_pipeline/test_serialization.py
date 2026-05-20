@@ -2372,11 +2372,12 @@ class TestPipelineBlueprintSave:
 
     def test_save_has_pipeline_version(self, spec_pipeline):
         import json
+        from orcapod.pipeline.serialization import PIPELINE_FORMAT_VERSION
         pipeline, tmp_path = spec_pipeline
         path = tmp_path / "pipeline.json"
         pipeline.save(str(path))
         data = json.loads(path.read_text())
-        assert data["orcapod_pipeline_version"] == "0.1.0"
+        assert data["orcapod_pipeline_version"] == PIPELINE_FORMAT_VERSION
 
     def test_save_no_databases_block(self, spec_pipeline):
         """Pure blueprint save must not contain a 'databases' block."""
