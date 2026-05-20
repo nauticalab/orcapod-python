@@ -376,3 +376,174 @@ class TestPollingSourceSyncMode:
     def test_from_config_raises(self):
         with pytest.raises(NotImplementedError):
             PollingSource.from_config({"source_type": "polling_source"})
+
+
+# ===========================================================================
+# Task 5: PollingSource async mode tests (basic)
+# ===========================================================================
+
+
+class TestPollingSourceAsyncMode:
+    @pytest.mark.asyncio
+    async def test_async_streaming_emits_rows(self):
+        """Positive polls trigger fetch; rows are emitted to async_iter_data."""
+        fake = FakeDynamicSource(batches=[_batch(1, 10), _batch(2, 20)])
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(interval=0.05, duration=0.5, max_missed_intervals=50),
+        )
+
+        items = []
+        async for tag, data in src.async_iter_data():
+            items.append((tag, data))
+
+        assert len(items) == 2
+        assert fake.close_called
+
+    @pytest.mark.asyncio
+    async def test_negative_poll_emits_nothing(self):
+        """poll() returning False emits nothing; fetch is never called."""
+        fake = FakeDynamicSource(batches=[_batch(1, 10)], poll_always_false=True)
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(interval=0.01, duration=0.05),
+        )
+
+        items = []
+        async for tag, data in src.async_iter_data():
+            items.append((tag, data))
+
+        assert len(items) == 0
+        assert len(fake.fetch_cursors) == 0
+
+    @pytest.mark.asyncio
+    async def test_pre_seeding_yields_cached_rows_first(self):
+        """async_iter_data() yields cached rows before entering the polling loop."""
+        fake = FakeDynamicSource(batches=[_batch(1, 10)])
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(interval=1.0),
+        )
+
+        # Seed the cache synchronously first
+        list(src.iter_data())
+
+        # Now supply a second fake with no new data
+        fake2 = FakeDynamicSource(batches=[], poll_always_false=True)
+        src._impl = fake2
+
+        # async_iter_data should yield the 1 cached row, then stop after duration
+        items = []
+        src._polling_config = PollingConfig(interval=0.01, duration=0.05)
+        async for tag, data in src.async_iter_data():
+            items.append((tag, data))
+
+        assert len(items) == 1  # pre-seeded row
+        assert fake2.close_called
+
+    @pytest.mark.asyncio
+    async def test_cache_combining_accumulates_rows(self):
+        """After two delta fetches, async stream contains rows from both batches."""
+        fake = FakeDynamicSource(batches=[_batch(1, 10), _batch(2, 20)])
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(interval=0.01, duration=0.3),
+        )
+
+        items = []
+        async for tag, data in src.async_iter_data():
+            items.append((tag, data))
+
+        assert len(items) == 2
+        # Internal cache should hold both rows
+        assert src._schema_stream is not None
+        cached_rows = list(src._schema_stream.iter_data())
+        assert len(cached_rows) == 2
+
+    @pytest.mark.asyncio
+    async def test_clean_shutdown_on_cancellation(self):
+        """CancelledError causes close() to be awaited before terminating."""
+        fake = FakeDynamicSource(batches=[], poll_always_false=True)
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(interval=0.01, duration=0.0),
+        )
+
+        async def run():
+            async for _ in src.async_iter_data():
+                pass
+
+        task = asyncio.create_task(run())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        assert fake.close_called
+
+    @pytest.mark.asyncio
+    async def test_duration_limit_terminates_source(self):
+        """Source stops naturally after config.duration seconds."""
+        fake = FakeDynamicSource(batches=[], poll_always_false=True)
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(interval=0.01, duration=0.08),
+        )
+
+        items = []
+        async for tag, data in src.async_iter_data():
+            items.append((tag, data))
+
+        assert fake.close_called
+
+    @pytest.mark.asyncio
+    async def test_indefinite_mode_runs_until_cancelled(self):
+        """duration=0 runs until explicitly cancelled."""
+        fake = FakeDynamicSource(batches=[], poll_always_false=True)
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(interval=0.01, duration=0.0),
+        )
+
+        async def run():
+            async for _ in src.async_iter_data():
+                pass
+
+        task = asyncio.create_task(run())
+        # Task should still be running after a short sleep
+        await asyncio.sleep(0.05)
+        assert not task.done()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        assert fake.close_called
+
+    @pytest.mark.asyncio
+    async def test_cursor_threaded_through_async_fetches(self):
+        """In async mode fetch() receives the cursor from the previous fetch."""
+        fake = FakeDynamicSource(batches=[_batch(1, 10), _batch(2, 20)])
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(interval=0.01, duration=0.3),
+        )
+
+        async for _ in src.async_iter_data():
+            pass
+
+        # First fetch: cursor=None; second fetch: cursor=Cursor(value=1)
+        assert fake.fetch_cursors[0] is None
+        if len(fake.fetch_cursors) > 1:
+            assert fake.fetch_cursors[1] is not None
+            assert fake.fetch_cursors[1].value == 1
