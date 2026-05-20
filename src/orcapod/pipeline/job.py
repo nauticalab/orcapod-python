@@ -466,6 +466,14 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
             if node_hash not in G:
                 G.add_node(node_hash)
 
+        # Build reverse lookup: node object id → label in pipeline._nodes
+        # compile() stores nodes by their computed label (node.label) even when
+        # _label is None, so we need this reverse map to propagate labels to
+        # freshly-created exec nodes.
+        node_to_label: dict[int, str] = {
+            id(node): label for label, node in pipeline._nodes.items()
+        }
+
         exec_node_map: dict[str, "Any"] = {}
         excluded_hashes: set[str] = set()
         unresolved_specs: list[str] = []
@@ -546,11 +554,21 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
             if node not in exec_graph:
                 exec_graph.add_node(node)
 
-        # Update pipeline._nodes with fresh exec nodes (keyed by label)
-        # This allows job.pipeline.compiled_nodes["adder"] to return the exec node
-        for node in exec_node_map.values():
+        # Update pipeline._nodes with fresh exec nodes (keyed by label).
+        # This allows job.pipeline.compiled_nodes["adder"] to return the exec node.
+        # We use a two-step approach: first try node._label (set when label was
+        # explicitly supplied), then fall back to node_to_label (which maps the
+        # template node's id to its compile-time label, covering the common case
+        # where FunctionPod.pod() is called without an explicit label= argument).
+        for node_hash, node in exec_node_map.items():
+            label = None
             if hasattr(node, "_label") and node._label:
-                pipeline._nodes[node._label] = node
+                label = node._label
+            elif node_hash in pipeline._node_lut:
+                template = pipeline._node_lut[node_hash]
+                label = node_to_label.get(id(template))
+            if label:
+                pipeline._nodes[label] = node
 
         return exec_graph, unresolved_specs
 

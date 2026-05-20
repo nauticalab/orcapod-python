@@ -24,10 +24,11 @@ from orcapod.core.nodes import FunctionNode, OperatorNode, SourceNode
 from orcapod.core.operators import Join, SelectTagColumns
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
+from orcapod.core.sources.source_spec import SourceSpec
 from orcapod.core.streams import ArrowTableStream
 from orcapod.core.tracker import BasicTrackerManager
-from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import Pipeline
+from orcapod.types import Schema
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -48,9 +49,35 @@ def _make_pipeline(
     """Create a Pipeline for testing (auto_compile=False)."""
     return Pipeline(
         name="test",
-        pipeline_database=InMemoryArrowDatabase(),
         tracker_manager=tracker_manager,
         auto_compile=False,
+    )
+
+
+def _make_spec(name: str = "test_spec") -> SourceSpec:
+    """SourceSpec matching the schema of _make_stream()."""
+    return SourceSpec(
+        name=name,
+        tag_schema=Schema({"id": int}),
+        data_schema=Schema({"x": int}),
+    )
+
+
+def _make_two_col_spec(name: str = "test_two_col_spec") -> SourceSpec:
+    """SourceSpec matching the schema of _make_two_col_stream()."""
+    return SourceSpec(
+        name=name,
+        tag_schema=Schema({"id": int}),
+        data_schema=Schema({"a": int, "b": int}),
+    )
+
+
+def _make_y_spec(name: str = "test_y_spec") -> SourceSpec:
+    """SourceSpec matching the schema of _make_y_stream()."""
+    return SourceSpec(
+        name=name,
+        tag_schema=Schema({"id": int}),
+        data_schema=Schema({"y": int}),
     )
 
 
@@ -447,11 +474,11 @@ class TestPipelineCompile:
         """Source stream -> FunctionNode: compile creates SourceNode and wires upstream."""
         pf = PythonDataFunction(_double, output_keys="result")
         pod = FunctionPod(data_function=pf)
-        stream = _make_stream()
+        spec = _make_spec()
         mgr = BasicTrackerManager()
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
-            tracker.record_function_pod_invocation(pod, stream)
+            tracker.record_function_pod_invocation(pod, spec)
             tracker.compile()
 
         # After compile: 1 SourceNode + 1 FunctionNode in persistent map
@@ -462,8 +489,8 @@ class TestPipelineCompile:
         assert len(source_nodes) == 1
         assert len(fn_nodes) == 1
 
-        # SourceNode wraps the original stream
-        assert source_nodes[0].stream is stream
+        # SourceNode wraps the original spec
+        assert source_nodes[0].stream is spec
         assert source_nodes[0].upstreams == ()
 
         # FunctionNode's upstream is now the SourceNode
@@ -471,12 +498,12 @@ class TestPipelineCompile:
 
     def test_compile_single_operator(self):
         """Source stream -> Operator: compile creates SourceNode and wires upstream."""
-        stream = _make_stream()
+        spec = _make_spec()
         op = SelectTagColumns(columns=["id"])
         mgr = BasicTrackerManager()
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
-            tracker.record_operator_pod_invocation(op, upstreams=(stream,))
+            tracker.record_operator_pod_invocation(op, upstreams=(spec,))
             tracker.compile()
 
         all_nodes = self._persistent_nodes(tracker)
@@ -489,13 +516,13 @@ class TestPipelineCompile:
 
     def test_compile_operator_with_two_inputs(self):
         """Two source streams -> Join: compile creates 2 SourceNodes."""
-        stream_a = _make_stream()
-        stream_b = _make_y_stream()
+        spec_a = _make_spec("spec_a")
+        spec_b = _make_y_spec("spec_b")
         op = Join()
         mgr = BasicTrackerManager()
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
-            tracker.record_operator_pod_invocation(op, upstreams=(stream_a, stream_b))
+            tracker.record_operator_pod_invocation(op, upstreams=(spec_a, spec_b))
 
         tracker.compile()
         all_nodes = self._persistent_nodes(tracker)
@@ -520,13 +547,13 @@ class TestPipelineCompile:
         pf2 = PythonDataFunction(_inc_result, output_keys="out")
         pod1 = FunctionPod(data_function=pf1)
         pod2 = FunctionPod(data_function=pf2)
-        stream = _make_stream()
         mgr = BasicTrackerManager()
         pod1.tracker_manager = mgr
         pod2.tracker_manager = mgr
+        spec = _make_spec()
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
-            mid = pod1.process(stream)  # records fn1, returns FunctionPodStream
+            mid = pod1.process(spec)  # records fn1, returns FunctionPodStream
             _ = pod2.process(mid)  # records fn2, mid.content_hash == fn1.content_hash
             tracker.compile()
 
@@ -550,13 +577,13 @@ class TestPipelineCompile:
         pf = PythonDataFunction(_double, output_keys="result")
         pod = FunctionPod(data_function=pf)
         op = SelectTagColumns(columns=["id"])
-        stream = _make_stream()
+        spec = _make_spec()
         mgr = BasicTrackerManager()
         pod.tracker_manager = mgr
         op.tracker_manager = mgr
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
-            mid = pod.process(stream)
+            mid = pod.process(spec)
             _ = op.process(mid)
             tracker.compile()
 
@@ -573,7 +600,7 @@ class TestPipelineCompile:
 
     def test_compile_operator_then_function(self):
         """Source -> Operator -> FunctionPod: compile wires SourceNode -> OperatorNode -> FunctionNode."""
-        stream = _make_stream()
+        spec = _make_spec()
         op = SelectTagColumns(columns=["id"])
         pf = PythonDataFunction(_double, output_keys="result")
         pod = FunctionPod(data_function=pf)
@@ -582,7 +609,7 @@ class TestPipelineCompile:
         pod.tracker_manager = mgr
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
-            mid = op.process(stream)
+            mid = op.process(spec)
             _ = pod.process(mid)
             tracker.compile()
 
@@ -607,15 +634,15 @@ class TestPipelineCompile:
         pod1 = FunctionPod(data_function=pf1)
         pod2 = FunctionPod(data_function=pf2)
         op = Join()
-        stream = _make_stream()
+        spec = _make_spec()
         mgr = BasicTrackerManager()
         pod1.tracker_manager = mgr
         pod2.tracker_manager = mgr
         op.tracker_manager = mgr
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
-            mid1 = pod1.process(stream)
-            mid2 = pod2.process(stream)
+            mid1 = pod1.process(spec)
+            mid2 = pod2.process(spec)
             _ = op.process(mid1, mid2)
             tracker.compile()
 
@@ -643,12 +670,12 @@ class TestPipelineCompile:
         pf2 = PythonDataFunction(_double, output_keys="out")
         pod1 = FunctionPod(data_function=pf1)
         pod2 = FunctionPod(data_function=pf2)
-        stream = _make_stream()
+        spec = _make_spec()
         mgr = BasicTrackerManager()
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
-            tracker.record_function_pod_invocation(pod1, stream)
-            tracker.record_function_pod_invocation(pod2, stream)
+            tracker.record_function_pod_invocation(pod1, spec)
+            tracker.record_function_pod_invocation(pod2, spec)
             tracker.compile()
 
         all_nodes = self._persistent_nodes(tracker)
@@ -661,16 +688,16 @@ class TestPipelineCompile:
         assert fn_nodes[0].upstreams[0] is fn_nodes[1].upstreams[0]
 
     def test_compile_two_independent_sources(self):
-        """Two different source streams -> two distinct SourceNodes."""
+        """Two different source specs -> two distinct SourceNodes."""
         pf = PythonDataFunction(_double, output_keys="result")
         pod = FunctionPod(data_function=pf)
-        stream_a = _make_stream(n=3)
-        stream_b = _make_stream(n=5)
+        spec_a = _make_spec("spec_a")
+        spec_b = _make_spec("spec_b")
         mgr = BasicTrackerManager()
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
-            tracker.record_function_pod_invocation(pod, stream_a)
-            tracker.record_function_pod_invocation(pod, stream_b)
+            tracker.record_function_pod_invocation(pod, spec_a)
+            tracker.record_function_pod_invocation(pod, spec_b)
             tracker.compile()
 
         all_nodes = self._persistent_nodes(tracker)
@@ -697,12 +724,12 @@ class TestFunctionPodTrackerIntegration:
         """FunctionPod.process() automatically records to an active Pipeline."""
         pf = PythonDataFunction(_double, output_keys="result")
         pod = FunctionPod(data_function=pf)
-        stream = _make_stream()
+        spec = _make_spec()
         mgr = BasicTrackerManager()
         pod.tracker_manager = mgr
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
-            _ = pod.process(stream)
+            _ = pod.process(spec)
             tracker.compile()
 
         all_nodes = list(tracker._persistent_node_map.values())
@@ -719,13 +746,13 @@ class TestFunctionPodTrackerIntegration:
         pf2 = PythonDataFunction(_inc_result, output_keys="out")
         pod1 = FunctionPod(data_function=pf1)
         pod2 = FunctionPod(data_function=pf2)
-        stream = _make_stream()
+        spec = _make_spec()
         mgr = BasicTrackerManager()
         pod1.tracker_manager = mgr
         pod2.tracker_manager = mgr
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
-            mid = pod1.process(stream)
+            mid = pod1.process(spec)
             _ = pod2.process(mid)
             tracker.compile()
 
@@ -749,13 +776,13 @@ class TestFunctionPodTrackerIntegration:
 class TestOperatorTrackerIntegration:
     def test_operator_process_records_to_tracker(self):
         """StaticOutputPod.process() automatically records to an active Pipeline."""
-        stream = _make_stream()
+        spec = _make_spec()
         op = SelectTagColumns(columns=["id"])
         mgr = BasicTrackerManager()
         op.tracker_manager = mgr
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
-            _ = op.process(stream)
+            _ = op.process(spec)
             tracker.compile()
 
         all_nodes = list(tracker._persistent_node_map.values())
@@ -767,7 +794,7 @@ class TestOperatorTrackerIntegration:
 
     def test_operator_chain(self):
         """Source -> operator1 -> operator2."""
-        stream = _make_two_col_stream()
+        spec = _make_spec()
         op1 = SelectTagColumns(columns=["id"])
         op2 = SelectTagColumns(columns=["id"])
         mgr = BasicTrackerManager()
@@ -775,7 +802,7 @@ class TestOperatorTrackerIntegration:
         op2.tracker_manager = mgr
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
-            mid = op1.process(stream)
+            mid = op1.process(spec)
             _ = op2.process(mid)
             tracker.compile()
 
@@ -899,14 +926,23 @@ class TestBMIPipelineEndToEnd:
                 f"person_id={pid}: got {data['bmi']}, expected {expected_bmi[pid]}"
             )
 
-    def test_compiled_graph_structure(self, sources):
+    def test_compiled_graph_structure(self):
         """After compile(), the graph has the expected node types and count."""
-        heights, weights = sources
+        heights_spec = SourceSpec(
+            name="heights",
+            tag_schema=Schema({"person_id": int}),
+            data_schema=Schema({"height_cm": int}),
+        )
+        weights_spec = SourceSpec(
+            name="weights",
+            tag_schema=Schema({"person_id": int}),
+            data_schema=Schema({"weight_kg": int}),
+        )
 
         tracker = _make_pipeline()
         with tracker:
-            converted = _cm_to_m.pod(heights)
-            joined = Join()(converted, weights)
+            converted = _cm_to_m.pod(heights_spec)
+            joined = Join()(converted, weights_spec)
             _cm_bmi = _compute_bmi.pod(joined)
 
         tracker.compile()
@@ -920,14 +956,23 @@ class TestBMIPipelineEndToEnd:
         assert len(fn_nodes) == 2
         assert len(op_nodes) == 1
 
-    def test_compiled_graph_all_upstreams_are_nodes(self, sources):
+    def test_compiled_graph_all_upstreams_are_nodes(self):
         """Every upstream reference is a graph node after compile()."""
-        heights, weights = sources
+        heights_spec = SourceSpec(
+            name="heights",
+            tag_schema=Schema({"person_id": int}),
+            data_schema=Schema({"height_cm": int}),
+        )
+        weights_spec = SourceSpec(
+            name="weights",
+            tag_schema=Schema({"person_id": int}),
+            data_schema=Schema({"weight_kg": int}),
+        )
 
         tracker = _make_pipeline()
         with tracker:
-            converted = _cm_to_m.pod(heights)
-            joined = Join()(converted, weights)
+            converted = _cm_to_m.pod(heights_spec)
+            joined = Join()(converted, weights_spec)
             _ = _compute_bmi.pod(joined)
 
         tracker.compile()
@@ -939,14 +984,23 @@ class TestBMIPipelineEndToEnd:
                     f"Upstream of {node.label} is {type(up).__name__}, expected a graph node"
                 )
 
-    def test_compiled_graph_wiring(self, sources):
+    def test_compiled_graph_wiring(self):
         """Verify specific upstream wiring: cm_to_m<-source, join<-(cm_to_m, source), bmi<-join."""
-        heights, weights = sources
+        heights_spec = SourceSpec(
+            name="heights",
+            tag_schema=Schema({"person_id": int}),
+            data_schema=Schema({"height_cm": int}),
+        )
+        weights_spec = SourceSpec(
+            name="weights",
+            tag_schema=Schema({"person_id": int}),
+            data_schema=Schema({"weight_kg": int}),
+        )
 
         tracker = _make_pipeline()
         with tracker:
-            converted = _cm_to_m.pod(heights)
-            joined = Join()(converted, weights)
+            converted = _cm_to_m.pod(heights_spec)
+            joined = Join()(converted, weights_spec)
             _ = _compute_bmi.pod(joined)
 
         tracker.compile()

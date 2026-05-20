@@ -10,6 +10,8 @@ import pyarrow as pa
 import orcapod as op
 from orcapod.core.nodes.function_node import FunctionNode
 from orcapod.databases import InMemoryArrowDatabase
+from orcapod.pipeline import PipelineJob
+from orcapod.pipeline.graph import Pipeline
 
 
 # ---------------------------------------------------------------------------
@@ -17,7 +19,7 @@ from orcapod.databases import InMemoryArrowDatabase
 # ---------------------------------------------------------------------------
 
 
-def _get_function_nodes(pipeline: op.Pipeline) -> list[FunctionNode]:
+def _get_function_nodes(pipeline: Pipeline) -> list[FunctionNode]:
     """Return all FunctionNode instances from compiled pipeline nodes."""
     return [n for n in pipeline.compiled_nodes.values() if isinstance(n, FunctionNode)]
 
@@ -43,18 +45,18 @@ class TestFunctionNodeGetAllRecordsNullability:
         def double(x: int) -> int:
             return x * 2
 
-        pipeline = op.Pipeline("test_fn_nullable", database)
-        with pipeline:
+        job = PipelineJob(store=database)
+        with job:
             double.pod(source)
 
-        pipeline.run()
+        result_job = job.run()
 
-        fn_nodes = _get_function_nodes(pipeline)
+        fn_nodes = _get_function_nodes(result_job.pipeline)
         assert len(fn_nodes) == 1, "Expected exactly one FunctionNode"
         fn_node = fn_nodes[0]
 
         table = fn_node.get_all_records()
-        assert table is not None, "get_all_records() returned None after pipeline.run()"
+        assert table is not None, "get_all_records() returned None after job.run()"
 
         # "result" column has Python type int → nullable=False in Arrow schema
         result_field = table.schema.field("result")
@@ -78,13 +80,13 @@ class TestFunctionNodeGetAllRecordsNullability:
         def triple(x: int) -> int:
             return x * 3
 
-        pipeline = op.Pipeline("test_fn_tag_nullable", database)
-        with pipeline:
+        job = PipelineJob(store=database)
+        with job:
             triple.pod(source)
 
-        pipeline.run()
+        result_job = job.run()
 
-        fn_nodes = _get_function_nodes(pipeline)
+        fn_nodes = _get_function_nodes(result_job.pipeline)
         fn_node = fn_nodes[0]
 
         table = fn_node.get_all_records()
@@ -120,13 +122,13 @@ class TestFunctionNodeIterDatasNullability:
         def add_one(x: int) -> int:
             return x + 1
 
-        pipeline = op.Pipeline("test_iter_data_nullable", database)
-        with pipeline:
+        job = PipelineJob(store=database)
+        with job:
             add_one.pod(source)
 
-        pipeline.run()
+        result_job = job.run()
 
-        fn_nodes = _get_function_nodes(pipeline)
+        fn_nodes = _get_function_nodes(result_job.pipeline)
         fn_node = fn_nodes[0]
 
         # Force a DB-backed iteration by going through _load_cached_entries
