@@ -223,10 +223,10 @@ class TestCompileMutatesNodes:
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
-        job.run()
+        result = job.run()
 
-        # After run, compiled_nodes["adder"] is the exec node
-        exec_node = job.pipeline.compiled_nodes["adder"]
+        # After run, compiled_nodes["adder"] is the exec node in the returned result
+        exec_node = result.pipeline.compiled_nodes["adder"]
         assert isinstance(exec_node, FunctionNode)
         assert exec_node._pipeline_database is not None
 
@@ -236,9 +236,9 @@ class TestCompileMutatesNodes:
         job = PipelineJob(store=pipeline_db)
         with job:
             Join()(src_a, src_b, label="joiner")
-        job.run()
+        result = job.run()
 
-        exec_node = job.pipeline.compiled_nodes["joiner"]
+        exec_node = result.pipeline.compiled_nodes["joiner"]
         assert isinstance(exec_node, OperatorNode)
         assert exec_node._pipeline_database is not None
 
@@ -258,9 +258,9 @@ class TestFunctionDatabaseHandling:
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
-        job.run()
+        result = job.run()
 
-        exec_node = job.pipeline.compiled_nodes["adder"]
+        exec_node = result.pipeline.compiled_nodes["adder"]
         assert isinstance(exec_node, FunctionNode)
         # Verify the exec node has databases attached
         assert exec_node._pipeline_database is not None
@@ -358,10 +358,10 @@ class TestAutoCompileAndRun:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
 
-        job.run()
+        result = job.run()
 
-        # After run, function node should have records
-        node = job.pipeline.compiled_nodes["adder"]
+        # After run, function node should have records (in the returned result job)
+        node = result.pipeline.compiled_nodes["adder"]
         records = node.get_all_records()
         assert records is not None
         assert records.num_rows == 2  # two input rows (a, b)
@@ -377,14 +377,14 @@ class TestAutoCompileAndRun:
             joined = Join()(src_a, src_b, label="joiner")
             pod(joined, label="adder")
 
-        job.run()
+        result = job.run()
 
         # Check operator node
-        joiner = job.pipeline.compiled_nodes["joiner"]
+        joiner = result.pipeline.compiled_nodes["joiner"]
         assert joiner.node_identity_path[0] == "Join"
 
         # Check function node
-        adder = job.pipeline.compiled_nodes["adder"]
+        adder = result.pipeline.compiled_nodes["adder"]
         assert adder.node_identity_path[0] == "add_values"
 
 
@@ -406,13 +406,13 @@ class TestEndToEnd:
         assert isinstance(job.pipeline.compiled_nodes["joiner"], OperatorNode)
         assert isinstance(job.pipeline.compiled_nodes["adder"], FunctionNode)
 
-        job.run()
+        result = job.run()
 
-        fn_records = job.pipeline.compiled_nodes["adder"].get_all_records()
+        fn_records = result.pipeline.compiled_nodes["adder"].get_all_records()
         assert fn_records is not None
         assert fn_records.num_rows == 2
 
-        table = job.pipeline.compiled_nodes["adder"].as_table()
+        table = result.pipeline.compiled_nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]
 
@@ -434,8 +434,8 @@ class TestHashChainDetaching:
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
-        job.run()
-        fn_node = job.pipeline.compiled_nodes["adder"]
+        result = job.run()
+        fn_node = result.pipeline.compiled_nodes["adder"]
         derived = fn_node.as_source()
         # DerivedSource uses RootSource hash (schema-only), not topology hash
         assert derived.pipeline_hash() != fn_node.pipeline_hash()
@@ -449,8 +449,8 @@ class TestHashChainDetaching:
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
-        job.run()
-        fn_node = job.pipeline.compiled_nodes["adder"]
+        result = job.run()
+        fn_node = result.pipeline.compiled_nodes["adder"]
         derived = fn_node.as_source()
         assert derived.content_hash() != fn_node.content_hash()
 
@@ -463,8 +463,8 @@ class TestHashChainDetaching:
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
-        job.run()
-        fn_node = job.pipeline.compiled_nodes["adder"]
+        result = job.run()
+        fn_node = result.pipeline.compiled_nodes["adder"]
         derived1 = fn_node.as_source()
         derived2 = fn_node.as_source()
         assert derived1.pipeline_hash() == derived2.pipeline_hash()
@@ -595,8 +595,8 @@ class TestCompileDoesNotTriggerExecution:
         # After compile but before run, adder node has no records
         assert job.pipeline.compiled_nodes["adder"].get_all_records() is None
         # Running should work correctly
-        job.run()
-        table = job.pipeline.compiled_nodes["adder"].as_table()
+        result = job.run()
+        table = result.pipeline.compiled_nodes["adder"].as_table()
         assert table.num_rows == 2
 
 
@@ -660,8 +660,8 @@ class TestSourceNodeNoCaching:
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
-        job.run()
-        records = job.pipeline.compiled_nodes["adder"].get_all_records()
+        result = job.run()
+        records = result.pipeline.compiled_nodes["adder"].get_all_records()
         assert records is not None
         assert records.num_rows == 2
         source_nodes = [
@@ -683,8 +683,8 @@ class TestSourceNodeNoCaching:
         with job:
             joined = Join()(cached_a, cached_b)
             pod(joined, label="adder")
-        job.run()
-        records = job.pipeline.compiled_nodes["adder"].get_all_records()
+        result = job.run()
+        records = result.pipeline.compiled_nodes["adder"].get_all_records()
         assert records is not None
         assert records.num_rows == 2
 
