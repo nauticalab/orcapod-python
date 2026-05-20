@@ -124,3 +124,65 @@ class TestDynamicSourceProtocol:
                 return Cursor(value=0), {}
 
         assert not isinstance(NoClose(), DynamicSourceProtocol)
+
+
+# ===========================================================================
+# Task 3: StreamBase.async_iter_data default + SourceNode.async_execute
+# ===========================================================================
+
+
+from orcapod.channels import Channel
+from orcapod.core.nodes.source_node import SourceNode
+from orcapod.core.streams.arrow_table_stream import ArrowTableStream
+
+
+def _make_arrow_stream(n: int = 3) -> ArrowTableStream:
+    """Build a minimal ArrowTableStream with `id` tag and `val` data column."""
+    schema = pa.schema([
+        pa.field("id", pa.int64(), nullable=False),
+        pa.field("val", pa.int64(), nullable=False),
+    ])
+    table = pa.table(
+        {"id": pa.array(list(range(n)), type=pa.int64()),
+         "val": pa.array([i * 10 for i in range(n)], type=pa.int64())},
+        schema=schema,
+    )
+    return ArrowTableStream(table, tag_columns=["id"])
+
+
+class TestAsyncIterDataDefault:
+    @pytest.mark.asyncio
+    async def test_default_yields_same_items_as_iter_data(self):
+        stream = _make_arrow_stream(3)
+        sync_items = list(stream.iter_data())
+
+        async_items = []
+        async for item in stream.async_iter_data():
+            async_items.append(item)
+
+        assert len(async_items) == 3
+        assert len(async_items) == len(sync_items)
+
+    @pytest.mark.asyncio
+    async def test_source_node_async_execute_uses_async_iter(self):
+        """SourceNode.async_execute routes through async_iter_data — no regression."""
+        stream = _make_arrow_stream(2)
+        node = SourceNode(stream)
+
+        ch = Channel(buffer_size=8)
+        await node.async_execute(ch.writer)
+
+        rows = await ch.reader.collect()
+        assert len(rows) == 2
+
+    @pytest.mark.asyncio
+    async def test_source_node_closes_channel_after_exhaustion(self):
+        stream = _make_arrow_stream(1)
+        node = SourceNode(stream)
+
+        ch = Channel(buffer_size=4)
+        await node.async_execute(ch.writer)
+
+        # collect() only returns after channel is closed
+        rows = await ch.reader.collect()
+        assert len(rows) == 1
