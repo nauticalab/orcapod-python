@@ -176,13 +176,14 @@ class DynamicSourceProtocol(Protocol[T]):
         responsibility.
 
     Cursor contract:
-        poll() receives the framework's current cursor and returns a new
-        cursor if data has changed, or None if nothing has changed.
-        fetch() receives the same current cursor and returns rows from that
-        position onward. The cursor value is opaque to the framework — it
-        is created by poll() and passed back verbatim to both poll() and
-        fetch(). Implementations that cannot filter by cursor may ignore it
-        and return full state; the framework will combine results correctly.
+        poll() receives the framework's current cursor and returns True if new
+        data is available, False otherwise. Cursor advancement is tied to data
+        reading — fetch() returns a (new_cursor, data) tuple, and the framework
+        advances the cursor only after a successful fetch. The cursor value is
+        opaque to the framework — it is created by fetch() and passed back
+        verbatim to the next poll() and fetch() calls. Implementations that
+        cannot filter by cursor may ignore it and return full state; the
+        framework will combine results correctly.
 
     Full-state invalidation:
         If the implementation detects that previous state is no longer valid
@@ -198,17 +199,19 @@ class DynamicSourceProtocol(Protocol[T]):
 
             async def poll(
                 self, cursor: Cursor[datetime] | None = None
-            ) -> Cursor[datetime] | None:
+            ) -> bool:
                 latest = await self._db.latest_modified_at()
                 if cursor is None or latest > cursor.value:
-                    return Cursor(value=latest, modified_at=latest)
-                return None
+                    return True
+                return False
 
             async def fetch(
                 self, cursor: Cursor[datetime] | None = None
-            ) -> pl.DataFrame:
+            ) -> tuple[Cursor[datetime], pl.DataFrame]:
                 since = cursor.value if cursor else None
-                return await self._db.fetch_rows_since(since)
+                df = await self._db.fetch_rows_since(since)
+                latest = await self._db.latest_modified_at()
+                return Cursor(value=latest, modified_at=latest), df
 
             async def close(self) -> None:
                 await self._db.disconnect()
@@ -216,7 +219,7 @@ class DynamicSourceProtocol(Protocol[T]):
 
     async def poll(
         self, cursor: Cursor[T] | None = None
-    ) -> Cursor[T] | None:
+    ) -> bool:
         """Check whether new data is available.
 
         Args:
@@ -224,9 +227,8 @@ class DynamicSourceProtocol(Protocol[T]):
                 first call.
 
         Returns:
-            A new Cursor if data has changed since cursor, or None if
-            nothing has changed. The returned Cursor becomes the new current
-            position and is passed to the next poll() and fetch() calls.
+            True if new data is available since cursor, False if nothing has
+            changed.
 
         Raises:
             CursorInvalidatedError: If previous state is no longer valid.
@@ -235,21 +237,24 @@ class DynamicSourceProtocol(Protocol[T]):
 
     async def fetch(
         self, cursor: Cursor[T] | None = None
-    ) -> FrameInitTypes:
+    ) -> tuple[Cursor[T], FrameInitTypes]:
         """Fetch data from the given cursor position onward.
 
-        Called only when poll() has returned a non-None cursor. The cursor
-        argument is the framework's position *before* the new cursor — i.e.
-        "give me everything that changed since here."
+        Called only when poll() has returned True. The cursor argument is the
+        framework's current position — i.e. "give me everything that changed
+        since here." Returns both the new cursor position and the data, so
+        cursor advancement is always tied to a successful data read.
 
         Args:
-            cursor: The previous cursor position, or None on the first call.
+            cursor: The current cursor position, or None on the first call.
                 Implementations that cannot filter by cursor may ignore this
                 and return full state.
 
         Returns:
-            Anything accepted by pl.DataFrame() — polars DataFrame, pandas
-            DataFrame, PyArrow Table, dict, list, etc.
+            A tuple of (new_cursor, data) where new_cursor marks the new
+            position in the stream and data is anything accepted by
+            pl.DataFrame() — polars DataFrame, pandas DataFrame, PyArrow
+            Table, dict, list, etc.
 
         Raises:
             CursorInvalidatedError: If previous state is no longer valid.
@@ -299,15 +304,17 @@ class PollingSource(RootSource, Generic[T]):
 | `_impl` | `DynamicSourceProtocol[T]` | User-supplied implementation |
 | `_tag_columns` | `tuple[str, ...]` | Normalised tag column names |
 | `_config` | `PollingConfig` | Scheduling and error config |
-| `_cursor` | `Cursor[T] \| None` | Current cursor; advances after each positive poll |
+| `_cursor` | `Cursor[T] \| None` | Current cursor; advances after each successful fetch |
 | `_schema_stream` | `ArrowTableStream \| None` | Accumulated cache (None until first fetch) |
 
 ### Schema Inference (Lazy)
 
 `output_schema()`, `keys()`, `iter_data()`, and `as_table()` all route through an
 internal `_get_latest_stream()` method. On the first call, `_get_latest_stream()` runs
-`fetch(cursor=None)` synchronously and builds the initial `ArrowTableStream` using the
-same `pl.DataFrame(data)` → `SourceStreamBuilder` pipeline that `DataFrameSource` uses.
+`fetch(cursor=None)` synchronously, which returns `(new_cursor, data)`, and builds the
+initial `ArrowTableStream` using the same `pl.DataFrame(data)` → `SourceStreamBuilder`
+pipeline that `DataFrameSource` uses. The cursor returned from the first fetch becomes
+`_cursor`.
 
 ### Sync Mode — `iter_data()`
 
@@ -317,16 +324,16 @@ same `pl.DataFrame(data)` → `SourceStreamBuilder` pipeline that `DataFrameSour
 
 ```
 if _schema_stream is None:
-    # First access — no cache yet
-    df = run_sync(impl.fetch(cursor=None))
+    # First access — no cache yet; cursor comes from fetch
+    new_cursor, df = run_sync(impl.fetch(cursor=None))
     _schema_stream = build_stream(df)
-    _cursor = None  # no cursor from a direct fetch
+    _cursor = new_cursor
+    _update_last_modified(new_cursor)
 else:
-    # Have cache — check for updates via poll
-    new_cursor = run_sync(impl.poll(cursor=_cursor))
-    if new_cursor is not None:
-        prev = _cursor
-        df = run_sync(impl.fetch(cursor=prev))
+    # Have cache — check for updates via poll (pure bool check)
+    has_new = run_sync(impl.poll(cursor=_cursor))
+    if has_new:
+        new_cursor, df = run_sync(impl.fetch(cursor=_cursor))
         _schema_stream = _combine(_schema_stream, df)
         _cursor = new_cursor
         _update_last_modified(new_cursor)
@@ -409,13 +416,12 @@ try:
         if next_tick > now:
             await asyncio.sleep(next_tick - now)
 
-        # 2. Poll
+        # 2. Poll + fetch
         try:
-            new_cursor = await impl.poll(cursor=self._cursor)
+            has_new = await impl.poll(cursor=self._cursor)
 
-            if new_cursor is not None:
-                prev_cursor = self._cursor
-                df = await impl.fetch(cursor=prev_cursor)
+            if has_new:
+                new_cursor, df = await impl.fetch(cursor=self._cursor)
                 _schema_stream = _combine(_schema_stream, df)   # update cache
                 _cursor = new_cursor
                 _update_last_modified(new_cursor)               # update last_modified
@@ -544,13 +550,13 @@ framework) for maximum clarity.
 
 | Test | What it verifies |
 |---|---|
-| `test_async_streaming` | Positive polls emit rows; channel stays open across multiple ticks |
-| `test_sync_snapshot` | `iter_data()` calls `fetch(cursor=None)` exactly once on first call |
-| `test_sync_cache_hit` | Second `iter_data()` call polls first; returns cached rows when poll returns None |
-| `test_sync_cache_miss` | Second `iter_data()` call re-fetches and combines when poll returns new cursor |
-| `test_cursor_threading` | `fetch()` receives the cursor from the previous poll; first call gets None |
-| `test_last_modified_from_cursor` | `cursor.modified_at` updates `last_modified`; None falls back to wall clock |
-| `test_negative_poll` | `poll()` returning None emits nothing and does not advance cursor |
+| `test_async_streaming` | Positive polls (`True`) trigger fetch; rows emitted; channel stays open across multiple ticks |
+| `test_sync_snapshot` | `iter_data()` calls `fetch(cursor=None)` exactly once on first call; cursor set from returned tuple |
+| `test_sync_cache_hit` | Second `iter_data()` call polls first; returns cached rows when poll returns `False` |
+| `test_sync_cache_miss` | Second `iter_data()` call re-fetches and combines when poll returns `True`; cursor advances from fetch tuple |
+| `test_cursor_threading` | `fetch()` receives the cursor returned by the previous fetch; first call gets None |
+| `test_last_modified_from_cursor` | `cursor.modified_at` from fetch return updates `last_modified`; None falls back to wall clock |
+| `test_negative_poll` | `poll()` returning `False` emits nothing and does not advance cursor |
 | `test_pre_seeding` | `async_iter_data()` yields cached rows before entering polling loop |
 | `test_cache_combining` | After two delta fetches, cache contains all rows from both batches |
 | `test_tick_skip_overrun` | A slow tick consuming 2 intervals increments `consecutive_misses` by 2 |
