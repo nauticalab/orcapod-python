@@ -46,8 +46,6 @@ class TestPipelineBlueprintSave:
         assert path.exists()
 
     def test_save_has_pipeline_version(self, spec_pipeline):
-        import json
-        from orcapod.pipeline.serialization import PIPELINE_FORMAT_VERSION
         pipeline, tmp_path = spec_pipeline
         path = tmp_path / "pipeline.json"
         pipeline.save(str(path))
@@ -56,7 +54,6 @@ class TestPipelineBlueprintSave:
 
     def test_save_no_databases_block(self, spec_pipeline):
         """Pure blueprint save must not contain a 'databases' block."""
-        import json
         pipeline, tmp_path = spec_pipeline
         path = tmp_path / "pipeline.json"
         pipeline.save(str(path))
@@ -65,7 +62,6 @@ class TestPipelineBlueprintSave:
 
     def test_save_source_spec_nodes(self, spec_pipeline):
         """SourceSpec nodes must serialize with source_type='spec'."""
-        import json
         pipeline, tmp_path = spec_pipeline
         path = tmp_path / "pipeline.json"
         pipeline.save(str(path))
@@ -88,7 +84,6 @@ class TestPipelineBlueprintSave:
 
     def test_save_load_restores_spec_names(self, spec_pipeline):
         """SourceSpec names must survive save/load."""
-        from orcapod.core.sources.source_spec import SourceSpec
         pipeline, tmp_path = spec_pipeline
         path = tmp_path / "pipeline.json"
         pipeline.save(str(path))
