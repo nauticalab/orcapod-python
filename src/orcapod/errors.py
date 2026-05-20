@@ -34,3 +34,19 @@ class FieldNotResolvableError(LookupError):
     """
 
     pass
+
+
+class UnboundSourceError(RuntimeError):
+    """Raised when a data-producing method is called on an unbound SourceSpec.
+
+    Occurs when ``iter_data()`` or ``as_table()`` is called on a ``SourceSpec``
+    that has not been bound to a concrete source in a ``PipelineJob``.
+    """
+
+
+class SourceSpecMismatchError(ValueError):
+    """Raised when a concrete source's schema is incompatible with a SourceSpec.
+
+    Contains the spec name and a description of the incompatible field(s).
+    Raised at ``bind()`` time — schema mismatches are rejected before execution.
+    """
