@@ -52,14 +52,27 @@ def _get_sync_executor():
     return _sync_executor
 
 
-def _run_sync(coro):
-    """Run *coro* synchronously, safe even when called from within a running loop."""
+def _run_sync(async_fn, *args, **kwargs):
+    """Run ``async_fn(*args, **kwargs)`` synchronously.
+
+    Safe to call from within a running event loop — uses a thread-based
+    executor in that case (same pattern as ``data_function.py``). The
+    coroutine is created inside the executor thread so it is always owned by
+    the loop that runs it.
+
+    Args:
+        async_fn: An async callable (coroutine function).
+        *args: Positional arguments forwarded to *async_fn*.
+        **kwargs: Keyword arguments forwarded to *async_fn*.
+    """
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        return asyncio.run(async_fn(*args, **kwargs))
     else:
-        return _get_sync_executor().submit(lambda: asyncio.run(coro)).result()
+        return _get_sync_executor().submit(
+            lambda: asyncio.run(async_fn(*args, **kwargs))
+        ).result()
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +130,29 @@ class PollingSource(RootSource, Generic[T]):
             self._tag_columns: tuple[str, ...] = (tag_columns,)
         else:
             self._tag_columns = tuple(tag_columns)
+        if polling_config.interval <= 0:
+            raise ValueError(
+                f"PollingConfig.interval must be > 0, got {polling_config.interval}"
+            )
+        if polling_config.duration < 0:
+            raise ValueError(
+                f"PollingConfig.duration must be >= 0, got {polling_config.duration}"
+            )
+        if polling_config.max_missed_intervals < 1:
+            raise ValueError(
+                f"PollingConfig.max_missed_intervals must be >= 1, "
+                f"got {polling_config.max_missed_intervals}"
+            )
+        if polling_config.max_consecutive_errors < 1:
+            raise ValueError(
+                f"PollingConfig.max_consecutive_errors must be >= 1, "
+                f"got {polling_config.max_consecutive_errors}"
+            )
+        if polling_config.error_backoff_base <= 0:
+            raise ValueError(
+                f"PollingConfig.error_backoff_base must be > 0, "
+                f"got {polling_config.error_backoff_base}"
+            )
         self._polling_config = polling_config
         self._cursor: Cursor[T] | None = None
         self._schema_stream: ArrowTableStream | None = None
@@ -197,22 +233,22 @@ class PollingSource(RootSource, Generic[T]):
         if self._schema_stream is None:
             # First access — no cache yet; fetch immediately
             logger.debug("PollingSource %r: first sync access — fetching", self._source_id)
-            new_cursor, data = _run_sync(self._impl.fetch(cursor=None))
+            new_cursor, data = _run_sync(self._impl.fetch, cursor=None)
             new_stream = self._try_build_stream(data)
             if new_stream is not None:
                 self._schema_stream = new_stream
-                self._update_last_modified_from_cursor(new_cursor)
+            self._update_last_modified_from_cursor(new_cursor)
             self._cursor = new_cursor
         else:
             # Have cache — poll for updates
-            has_new = _run_sync(self._impl.poll(cursor=self._cursor))
+            has_new = _run_sync(self._impl.poll, cursor=self._cursor)
             if has_new:
                 logger.debug("PollingSource %r: sync poll found new data — fetching", self._source_id)
-                new_cursor, data = _run_sync(self._impl.fetch(cursor=self._cursor))
+                new_cursor, data = _run_sync(self._impl.fetch, cursor=self._cursor)
                 new_stream = self._try_build_stream(data)
                 if new_stream is not None:
                     self._schema_stream = self._combine(self._schema_stream, new_stream)
-                    self._update_last_modified_from_cursor(new_cursor)
+                self._update_last_modified_from_cursor(new_cursor)
                 self._cursor = new_cursor
             else:
                 logger.debug("PollingSource %r: sync poll — cache still valid", self._source_id)
@@ -230,9 +266,9 @@ class PollingSource(RootSource, Generic[T]):
             ``ArrowTableStream`` if data has rows and columns, ``None`` otherwise.
         """
         df = pl.DataFrame(data)
-        if df.is_empty() or len(df.columns) == 0:
+        if len(df.columns) == 0:
             logger.debug(
-                "PollingSource %r: fetch returned empty data — skipping stream build",
+                "PollingSource %r: fetch returned data with no columns — skipping stream build",
                 self._source_id,
             )
             return None
@@ -293,7 +329,7 @@ class PollingSource(RootSource, Generic[T]):
             ],
             promote_options="default",
         )
-        return ArrowTableStream(table=combined, tag_columns=existing._tag_columns)
+        return ArrowTableStream(table=combined, tag_columns=self._tag_columns)
 
     def _update_last_modified_from_cursor(self, cursor: Cursor[T]) -> None:
         """Update ``last_modified`` from cursor or fall back to wall clock."""
@@ -358,13 +394,13 @@ class PollingSource(RootSource, Generic[T]):
                         )
                         new_cursor, data = await self._impl.fetch(cursor=self._cursor)
                         new_stream = self._try_build_stream(data)
+                        self._cursor = new_cursor
+                        self._update_last_modified_from_cursor(new_cursor)
                         if new_stream is not None:
                             if self._schema_stream is None:
                                 self._schema_stream = new_stream
                             else:
                                 self._schema_stream = self._combine(self._schema_stream, new_stream)
-                            self._cursor = new_cursor
-                            self._update_last_modified_from_cursor(new_cursor)
 
                             # Emit new rows from just this fetch
                             rows = list(new_stream.iter_data())
@@ -375,8 +411,6 @@ class PollingSource(RootSource, Generic[T]):
                             )
                             for item in rows:
                                 yield item
-                        else:
-                            self._cursor = new_cursor
                     else:
                         logger.debug(
                             "PollingSource %r: poll returned no new data",
