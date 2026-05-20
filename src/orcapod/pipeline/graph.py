@@ -388,7 +388,19 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         nodes: dict[str, Any] = {}
         for content_hash_str, node in self._persistent_node_map.items():
             tag_schema, data_schema = node.output_schema()
-            type_converter = node.data_context.type_converter
+            try:
+                type_converter = node.data_context.type_converter
+            except (AttributeError, TypeError):
+                from orcapod.contexts import resolve_context
+                type_converter = resolve_context(None).type_converter
+
+            try:
+                data_context_key = node.data_context_key
+            except (AttributeError, TypeError):
+                # Stub nodes (loaded with no live operator/function_pod) store
+                # the data context directly on _data_context; fall back to it.
+                _dc = getattr(node, "_data_context", None)
+                data_context_key = _dc.context_key if _dc is not None else None
 
             descriptor: dict[str, Any] = {
                 "node_type": node.node_type,
@@ -400,7 +412,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     "data": serialize_schema(data_schema, type_converter),
                 },
                 "node_uri": list(node.node_uri),
-                "data_context_key": node.data_context_key,
+                "data_context_key": data_context_key,
             }
 
             if isinstance(node, SourceNode):
@@ -415,11 +427,13 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     descriptor["reconstructable"] = False
 
             elif isinstance(node, FunctionNode):
-                descriptor["function_config"] = node._function_pod.to_config()
+                if node._function_pod is not None:
+                    descriptor["function_config"] = node._function_pod.to_config()
                 descriptor["table_scope"] = node._table_scope
 
             elif isinstance(node, OperatorNode):
-                descriptor["operator_config"] = node._operator.to_config()
+                if node._operator is not None:
+                    descriptor["operator_config"] = node._operator.to_config()
                 descriptor["table_scope"] = node._table_scope
 
             nodes[content_hash_str] = descriptor
@@ -531,7 +545,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     reconstructed[h] for h in up_hashes if h in reconstructed
                 )
                 node = OperatorNode.from_descriptor(
-                    descriptor, operator=None, input_streams=(), databases={}
+                    descriptor, operator=None, input_streams=upstream_nodes, databases={}
                 )
                 reconstructed[node_hash] = node
 
@@ -539,11 +553,18 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         pipeline = cls(name=name, auto_compile=False)
         pipeline._persistent_node_map = dict(reconstructed)
 
-        pipeline._nodes = {
-            node.label: node
-            for node in reconstructed.values()
-            if node.label
-        }
+        nodes_by_label: dict[str, GraphNode] = {}
+        for node in reconstructed.values():
+            if node.label:
+                if node.label in nodes_by_label:
+                    logger.warning(
+                        "Label collision in loaded pipeline: %r. "
+                        "The first node with this label wins.",
+                        node.label,
+                    )
+                else:
+                    nodes_by_label[node.label] = node
+        pipeline._nodes = nodes_by_label
 
         pipeline._node_graph = nx.DiGraph()
         for up_hash, down_hash in edges:
