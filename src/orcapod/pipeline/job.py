@@ -75,6 +75,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         self._pipeline_name: tuple[str, ...] = (name,) if isinstance(name, str) else tuple(name)
         self._unresolved_specs: list[str] = []
         self._has_run: bool = False
+        self._run_id: str | None = None
 
     # ------------------------------------------------------------------
     # Context manager — recording
@@ -693,7 +694,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         output: dict[str, Any] = {
             "orcapod_pipeline_job_version": PIPELINE_JOB_FORMAT_VERSION,
             "run": {
-                "run_id": getattr(self, "_run_id", None),
+                "run_id": self._run_id,
                 "status": status,
                 "unresolved_specs": list(self._unresolved_specs),
             },
