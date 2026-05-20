@@ -244,13 +244,12 @@ class StreamBase(TraceableBase):
     ) -> AsyncIterator[tuple[TagProtocol, DataProtocol]]:
         """Async iterator over (tag, data) pairs.
 
-        Subclasses should override this to provide true async iteration.
+        Default implementation wraps :meth:`iter_data` as an async generator.
+        Subclasses override this to provide true async streaming behaviour
+        (e.g. :class:`~orcapod.core.sources.PollingSource`).
         """
-        raise NotImplementedError(
-            f"{type(self).__name__} does not implement async_iter_data"
-        )
-        # Make this an async generator so the return type is correct
-        yield  # pragma: no cover
+        for item in self.iter_data():
+            yield item
 
     @abstractmethod
     def as_table(
