@@ -185,15 +185,14 @@ class Pipeline(AutoRegisteringContextBasedTracker):
     # ------------------------------------------------------------------
 
     def compile(self) -> None:
-        """Compile recorded invocations into execution-ready nodes.
+        """Compile recorded invocations into a frozen DAG.
 
         Walks the graph in topological order and:
 
-        - Wraps leaf streams in ``SourceNode``
+        - Verifies leaf streams are ``SourceSpec`` instances (raises ``ValueError`` otherwise)
+        - Wraps ``SourceSpec`` leaves in ``SourceNode``
         - Rewires upstream references on recorded ``FunctionNode`` /
           ``OperatorNode`` to point at persistent (compiled) nodes
-        - Attaches databases to function/operator nodes via
-          ``attach_databases()``
 
         After compile, nodes are accessible by label as attributes on the
         pipeline instance.
@@ -263,7 +262,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         # Save persistent node map for incremental re-compile
         self._persistent_node_map = persistent_node_map
 
-        # Build node graph for run() ordering
+        # Build node graph for show_graph() and PipelineJob execution
         self._node_graph = nx.DiGraph()
         for upstream_hash, downstream_hash in self._graph_edges:
             upstream_node = persistent_node_map.get(upstream_hash)
@@ -335,7 +334,6 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             A new ``PipelineJob`` with this pipeline and the given bindings.
         """
         from orcapod.pipeline.job import PipelineJob
-        from orcapod.pipeline.execution_context import ExecutionContext as _EC
 
         return PipelineJob(
             _pipeline=self,
@@ -397,20 +395,10 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         )
 
         include_configs = level in ("definition", "standard", "full")
-        include_pipeline_dbs = level in ("standard", "full")
+        include_pipeline_dbs = False  # Pipeline no longer holds databases (use PipelineJob for DB-backed saves)
 
-        if include_pipeline_dbs and self._pipeline_database is None:
-            raise ValueError(
-                f"Cannot save pipeline at level={level!r} without a pipeline_database. "
-                "Either pass pipeline_database= when constructing the Pipeline, "
-                "or save with level='definition'."
-            )
-
-        # Observer serialization for full level
-        if level == "full" and self._default_observer is not None:
-            _observer_to_serialize = self._default_observer
-        else:
-            _observer_to_serialize = None
+        # Observer serialization — Pipeline no longer holds a default observer
+        _observer_to_serialize = None
 
         # Registry populated as nodes serialize their embedded databases
         db_registry = DatabaseRegistry()
@@ -456,23 +444,6 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             "run_id": None,
             "snapshot_time": None,
         }
-        if include_pipeline_dbs:
-            # Save the scoped pipeline database (with pipeline-name prefix in base_path)
-            # so that on load, nodes can read their records at the correct paths.
-            scoped_pipeline_db = getattr(self, "_scoped_pipeline_database", self._pipeline_database)
-            pipeline_db_key = db_registry.register(scoped_pipeline_db.to_config())
-            pipeline_block["pipeline_database"] = pipeline_db_key
-            if self._result_database is not None:
-                # User supplied an explicit result_database — save it as-is.
-                result_db_key = db_registry.register(self._result_database.to_config())
-                pipeline_block["result_database"] = result_db_key
-            else:
-                # Result database was implicitly scoped as pipeline_db.at("_result").
-                # Save null so load() knows to re-derive it from pipeline_db.
-                pipeline_block["result_database"] = None
-            if _observer_to_serialize is not None:
-                pipeline_block["observer"] = _observer_to_serialize.to_config(db_registry=db_registry)
-
         # -- Top-level output --
         output: dict[str, Any] = {
             "orcapod_pipeline_version": PIPELINE_FORMAT_VERSION,
@@ -763,12 +734,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 reconstructed[node_hash] = node
 
         # 5. Build Pipeline instance
-        pipeline = cls(
-            name=name,
-            pipeline_database=pipeline_db,
-            result_database=result_db,
-            auto_compile=False,
-        )
+        pipeline = cls(name=name, auto_compile=False)
 
         # Populate persistent node map
         pipeline._persistent_node_map = dict(reconstructed)
@@ -808,25 +774,6 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             attrs["node_type"] = node.node_type
             if node.label:
                 attrs["label"] = node.label
-
-        # Reconstruct _default_observer if serialized (full-level saves)
-        if "observer" in pipeline_meta:
-            from orcapod.pipeline.serialization import resolve_observer_from_config
-            pipeline._default_observer = resolve_observer_from_config(
-                pipeline_meta["observer"], db_registry_data if "databases" in data else None
-            )
-        else:
-            from orcapod.pipeline.observer import NoOpObserver
-            pipeline._default_observer = NoOpObserver()
-
-        # Restore scoped database view fields so that result_database,
-        # status_database, and log_database properties return meaningful values
-        # on loaded pipelines (mirrors what compile() does at runtime).
-        pipeline._scoped_pipeline_database = pipeline_db
-        pipeline._result_database_scoped = result_db
-        if pipeline_db is not None:
-            pipeline._status_database = pipeline_db.at("_status")
-            pipeline._log_database = pipeline_db.at("_log")
 
         pipeline._compiled = True
 
