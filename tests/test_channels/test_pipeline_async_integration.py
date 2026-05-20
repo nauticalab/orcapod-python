@@ -4,10 +4,9 @@ Integration test — end-to-end async pipeline.
 Shows the recommended workflow in a single, linear example:
 
 1. Define domain functions with ``@function_pod``.
-2. Build a pipeline with the ``Pipeline`` context manager.
+2. Build a pipeline job with the ``PipelineJob`` context manager.
 3. Run the pipeline asynchronously via ``AsyncPipelineOrchestrator``.
-4. Retrieve persisted results synchronously from the pipeline's
-   persistent nodes (``pipeline.<label>.get_all_records()``).
+4. Retrieve persisted results synchronously from the compiled nodes.
 
 Pipeline::
 
@@ -28,8 +27,7 @@ from orcapod import function_pod
 from orcapod.sources import ArrowTableSource
 from orcapod.core.operators import Join
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.pipeline import AsyncPipelineOrchestrator, Pipeline
-from orcapod.types import ExecutorType, PipelineConfig
+from orcapod.pipeline import AsyncPipelineOrchestrator, PipelineJob
 
 
 # ── 1. Define domain functions ───────────────────────────────────────────
@@ -76,26 +74,22 @@ EXPECTED = {
 }
 
 
-# ── 3. Build pipeline ───────────────────────────────────────────────────
+# ── 3. Build pipeline job ───────────────────────────────────────────────
 
 
-def _build_pipeline() -> Pipeline:
-    """Construct and auto-compile the pipeline."""
+def _build_job() -> PipelineJob:
+    """Construct the pipeline job."""
     db = InMemoryArrowDatabase()
-    pipeline = Pipeline(
-        name="grades_pipeline",
-        pipeline_database=db,
-        auto_compile=True,
-    )
+    job = PipelineJob(name="grades_pipeline", store=db)
 
-    with pipeline:
+    with job:
         students = ArrowTableSource(STUDENTS, tag_columns=["student_id"], infer_nullable=True)
         grades = ArrowTableSource(GRADES, tag_columns=["student_id"], infer_nullable=True)
 
         joined = Join()(students, grades, label="join")
         compute_letter_grade.pod(joined, label="letter_grade")
 
-    return pipeline
+    return job
 
 
 def _grades_from_table(table: pa.Table) -> dict[str, str]:
@@ -114,27 +108,26 @@ class TestAsyncPipelineIntegration:
 
     def test_orchestrator_then_db_retrieval(self):
         """Run via orchestrator, then retrieve results from the persistent node."""
-        pipeline = _build_pipeline()
+        job = _build_job()
+        exec_graph, _ = job._build_execution_graph()
+        AsyncPipelineOrchestrator().run(exec_graph)
+        job.store.at(*job._compiled_pipeline.name).flush()
+        job.store.at(*job._compiled_pipeline.name).at("_result").flush()
 
-        # Run asynchronously — persistent nodes write to the pipeline DB
-        pipeline.compile()
-        AsyncPipelineOrchestrator().run(pipeline._node_graph)
-        pipeline.flush()
-
-        # Retrieve results synchronously via the persistent node
-        records = pipeline.letter_grade.get_all_records()
+        records = job._compiled_pipeline.compiled_nodes["letter_grade"].get_all_records()
         assert records is not None
         assert records.num_rows == 5
         assert _grades_from_table(records) == EXPECTED
 
     def test_pipeline_run_with_async_executor(self):
-        """Pipeline.run(ASYNC_CHANNELS) delegates to the orchestrator."""
-        pipeline = _build_pipeline()
+        """Test async execution via AsyncPipelineOrchestrator directly."""
+        job = _build_job()
+        exec_graph, _ = job._build_execution_graph()
+        AsyncPipelineOrchestrator().run(exec_graph)
+        job.store.at(*job._compiled_pipeline.name).flush()
+        job.store.at(*job._compiled_pipeline.name).at("_result").flush()
 
-        config = PipelineConfig(executor=ExecutorType.ASYNC_CHANNELS)
-        pipeline.run(config=config)
-
-        records = pipeline.letter_grade.get_all_records()
+        records = job._compiled_pipeline.compiled_nodes["letter_grade"].get_all_records()
         assert records is not None
         assert records.num_rows == 5
         assert _grades_from_table(records) == EXPECTED
@@ -142,24 +135,24 @@ class TestAsyncPipelineIntegration:
     @pytest.mark.asyncio
     async def test_orchestrator_run_async_from_event_loop(self):
         """run_async() works when an event loop is already running."""
-        pipeline = _build_pipeline()
-
-        pipeline.compile()
+        job = _build_job()
+        exec_graph, _ = job._build_execution_graph()
         orchestrator = AsyncPipelineOrchestrator()
-        await orchestrator.run_async(pipeline._node_graph)
-        pipeline.flush()
+        await orchestrator.run_async(exec_graph)
+        job.store.at(*job._compiled_pipeline.name).flush()
+        job.store.at(*job._compiled_pipeline.name).at("_result").flush()
 
-        records = pipeline.letter_grade.get_all_records()
+        records = job._compiled_pipeline.compiled_nodes["letter_grade"].get_all_records()
         assert records is not None
         assert records.num_rows == 5
         assert _grades_from_table(records) == EXPECTED
 
     def test_sync_run_then_db_retrieval(self):
         """Baseline: sync run() populates the DB for later retrieval."""
-        pipeline = _build_pipeline()
-        pipeline.run()
+        job = _build_job()
+        result_job = job.run()
 
-        records = pipeline.letter_grade.get_all_records()
+        records = result_job.pipeline.compiled_nodes["letter_grade"].get_all_records()
         assert records is not None
         assert records.num_rows == 5
         assert _grades_from_table(records) == EXPECTED
@@ -167,18 +160,19 @@ class TestAsyncPipelineIntegration:
     def test_sync_and_async_produce_identical_results(self):
         """Sync and async execution paths yield the same grades."""
         # Sync path
-        sync_pipeline = _build_pipeline()
-        sync_pipeline.run()
-        sync_records = sync_pipeline.letter_grade.get_all_records()
+        sync_job = _build_job()
+        sync_result = sync_job.run()
+        sync_records = sync_result.pipeline.compiled_nodes["letter_grade"].get_all_records()
         assert sync_records is not None
         sync_grades = _grades_from_table(sync_records)
 
         # Async path
-        async_pipeline = _build_pipeline()
-        async_pipeline.compile()
-        AsyncPipelineOrchestrator().run(async_pipeline._node_graph)
-        async_pipeline.flush()
-        async_records = async_pipeline.letter_grade.get_all_records()
+        async_job = _build_job()
+        exec_graph, _ = async_job._build_execution_graph()
+        AsyncPipelineOrchestrator().run(exec_graph)
+        async_job.store.at(*async_job._compiled_pipeline.name).flush()
+        async_job.store.at(*async_job._compiled_pipeline.name).at("_result").flush()
+        async_records = async_job._compiled_pipeline.compiled_nodes["letter_grade"].get_all_records()
         assert async_records is not None
         async_grades = _grades_from_table(async_records)
 
@@ -204,18 +198,19 @@ class TestSyncAsyncSystemTagEquivalence:
 
     def test_join_pipeline_system_tags_identical(self):
         """Join pipeline: sync and async produce the same system-tag columns."""
-        sync_pipeline = _build_pipeline()
-        sync_pipeline.run()
-        sync_records = sync_pipeline.letter_grade.get_all_records(
+        sync_job = _build_job()
+        sync_result = sync_job.run()
+        sync_records = sync_result.pipeline.compiled_nodes["letter_grade"].get_all_records(
             columns={"system_tags": True}
         )
         assert sync_records is not None
 
-        async_pipeline = _build_pipeline()
-        async_pipeline.compile()
-        AsyncPipelineOrchestrator().run(async_pipeline._node_graph)
-        async_pipeline.flush()
-        async_records = async_pipeline.letter_grade.get_all_records(
+        async_job = _build_job()
+        exec_graph, _ = async_job._build_execution_graph()
+        AsyncPipelineOrchestrator().run(exec_graph)
+        async_job.store.at(*async_job._compiled_pipeline.name).flush()
+        async_job.store.at(*async_job._compiled_pipeline.name).at("_result").flush()
+        async_records = async_job._compiled_pipeline.compiled_nodes["letter_grade"].get_all_records(
             columns={"system_tags": True}
         )
         assert async_records is not None
@@ -234,11 +229,14 @@ class TestSyncAsyncSystemTagEquivalence:
     def test_join_pipeline_system_tag_column_names_contain_pipeline_hash(self):
         """System-tag columns should follow the name-extending convention."""
 
-        pipeline = _build_pipeline()
-        pipeline.compile()
-        AsyncPipelineOrchestrator().run(pipeline._node_graph)
-        pipeline.flush()
-        records = pipeline.letter_grade.get_all_records(columns={"system_tags": True})
+        job = _build_job()
+        exec_graph, _ = job._build_execution_graph()
+        AsyncPipelineOrchestrator().run(exec_graph)
+        job.store.at(*job._compiled_pipeline.name).flush()
+        job.store.at(*job._compiled_pipeline.name).at("_result").flush()
+        records = job._compiled_pipeline.compiled_nodes["letter_grade"].get_all_records(
+            columns={"system_tags": True}
+        )
         assert records is not None
 
         sys_cols = self._get_system_tag_columns(records)
@@ -257,18 +255,19 @@ class TestSyncAsyncSystemTagEquivalence:
         Source-info columns contain run-specific UUIDs and are excluded
         from this comparison.
         """
-        sync_pipeline = _build_pipeline()
-        sync_pipeline.run()
-        sync_records = sync_pipeline.letter_grade.get_all_records(
+        sync_job = _build_job()
+        sync_result = sync_job.run()
+        sync_records = sync_result.pipeline.compiled_nodes["letter_grade"].get_all_records(
             columns={"system_tags": True}
         )
         assert sync_records is not None
 
-        async_pipeline = _build_pipeline()
-        async_pipeline.compile()
-        AsyncPipelineOrchestrator().run(async_pipeline._node_graph)
-        async_pipeline.flush()
-        async_records = async_pipeline.letter_grade.get_all_records(
+        async_job = _build_job()
+        exec_graph, _ = async_job._build_execution_graph()
+        AsyncPipelineOrchestrator().run(exec_graph)
+        async_job.store.at(*async_job._compiled_pipeline.name).flush()
+        async_job.store.at(*async_job._compiled_pipeline.name).at("_result").flush()
+        async_records = async_job._compiled_pipeline.compiled_nodes["letter_grade"].get_all_records(
             columns={"system_tags": True}
         )
         assert async_records is not None
