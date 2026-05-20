@@ -327,7 +327,7 @@ class StreamBase(TraceableBase):
         """Materialize the stream into a concrete collection of
         ``(TagProtocol, DataProtocol)`` pairs.
 
-        This is implemented by iterating over :meth:`iter_data`. Depending on
+        This is implemented by iterating over ``iter_data``. Depending on
         the concrete stream implementation, iterating may trigger computation or
         upstream work, or it may simply materialize already-computed results.
         """
