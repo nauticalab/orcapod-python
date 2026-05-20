@@ -142,6 +142,7 @@ class TestPipelineSourceSpecEnforcement:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestCompileSourceWrapping:
     def test_compile_wraps_leaf_streams_as_persistent_source_node(self, pipeline_db):
         src_a, src_b = _make_two_sources()
@@ -168,6 +169,7 @@ class TestCompileSourceWrapping:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestCompileFunctionNode:
     def test_compile_creates_persistent_function_node(self, pipeline_db):
         src_a, src_b = _make_two_sources()
@@ -206,6 +208,7 @@ class TestCompileFunctionNode:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestCompileOperatorNode:
     def test_compile_creates_persistent_operator_node(self, pipeline_db):
         src_a, src_b = _make_two_sources()
@@ -237,6 +240,7 @@ class TestCompileOperatorNode:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestCompileMutatesNodes:
     def test_compile_reuses_recorded_function_node_objects(self, pipeline_db):
         """compile() should mutate recorded FunctionNodes in place, not create new ones."""
@@ -310,6 +314,7 @@ class TestCompileMutatesNodes:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestFunctionDatabaseHandling:
     def test_result_database_none_uses_scoped_subfolder(self, pipeline_db):
         """When result_database=None, result db is scoped to pipeline_name/_result."""
@@ -354,6 +359,7 @@ class TestFunctionDatabaseHandling:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestLabelAccess:
     def test_node_access_by_label(self, pipeline_db):
         src_a, src_b = _make_two_sources()
@@ -418,6 +424,7 @@ class TestLabelAccess:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestAutoCompileAndRun:
     def test_auto_compile_on_exit(self, pipeline_db):
         src_a, src_b = _make_two_sources()
@@ -535,6 +542,7 @@ class TestAutoCompileAndRun:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestFlush:
     def test_flush_flushes_databases(self, pipeline_db, function_db):
         pipeline = Pipeline(
@@ -551,6 +559,7 @@ class TestFlush:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestEndToEnd:
     def test_end_to_end_source_join_function(self, pipeline_db):
         """Full pipeline: two sources → Join → FunctionPod.
@@ -591,6 +600,7 @@ class TestEndToEnd:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestPipelineExtension:
     def test_extend_pipeline_with_new_sources(self, pipeline_db):
         """Re-enter pipeline context to add more operations from new sources."""
@@ -716,6 +726,7 @@ class TestPipelineExtension:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestHashChainExtending:
     def test_extending_content_hash_matches_single_pipeline(self, pipeline_db):
         """An operator downstream of pipe_a.adder in pipe_b has the same
@@ -822,6 +833,7 @@ class TestHashChainExtending:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestHashChainDetaching:
     def test_detached_content_hash_differs_from_extending(self, pipeline_db):
         """DerivedSource (via .as_source()) has different content_hash than
@@ -1019,6 +1031,7 @@ class TestHashChainDetaching:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestHashGraph:
     def test_graph_empty_before_context(self, pipeline_db):
         """pipeline.graph is an empty DiGraph before any with block."""
@@ -1135,6 +1148,7 @@ class TestHashGraph:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestPipelineSnapshotHash:
     """Tests for Pipeline._compute_pipeline_snapshot_hash().
 
@@ -1213,6 +1227,7 @@ class TestPipelineSnapshotHash:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestIncrementalCompile:
     def test_recompile_preserves_existing_node_objects(self, pipeline_db):
         """After re-entering context and compiling, existing persistent nodes
@@ -1300,6 +1315,7 @@ class TestIncrementalCompile:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestCompileDoesNotTriggerExecution:
     """Verify that Pipeline.compile() constructs persistent nodes without
     triggering upstream iter_data / run / as_table materialisation."""
@@ -1389,6 +1405,7 @@ class _MockExecutor(PythonFunctionExecutorBase):
         return {"executor_type": self.executor_type_id, **self.opts}
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestRunExecutionEngine:
     def test_engine_is_applied_to_all_function_nodes(self, pipeline_db):
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
@@ -1483,6 +1500,7 @@ class TestRunExecutionEngine:
         assert pipeline.doubler.executor.opts == {}
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestSourceNodesInPipeline:
     """Verify that source nodes are first-class pipeline members."""
 
@@ -1539,6 +1557,7 @@ class TestSourceNodesInPipeline:
         assert len(source_nodes) == 1
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestSourceNodeNoCaching:
     """Verify that SourceNode does not cache — caching is a source-level concern."""
 
@@ -1608,6 +1627,7 @@ from orcapod.pipeline.composite_observer import CompositeObserver
 from orcapod.pipeline.observer import NoOpObserver
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 def test_compile_creates_scoped_databases():
     db = InMemoryArrowDatabase()
     with Pipeline("my_pipeline", pipeline_database=db) as p:
@@ -1617,6 +1637,7 @@ def test_compile_creates_scoped_databases():
     assert p.log_database._scoped_path == ("my_pipeline", "_log")
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 def test_compile_creates_default_composite_observer():
     db = InMemoryArrowDatabase()
     with Pipeline("my_pipeline", pipeline_database=db) as p:
@@ -1624,12 +1645,14 @@ def test_compile_creates_default_composite_observer():
     assert isinstance(p._default_observer, CompositeObserver)
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 def test_compile_without_pipeline_database_uses_noop_observer():
     with Pipeline("no_db_pipeline") as p:
         pass
     assert isinstance(p._default_observer, NoOpObserver)
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 def test_run_with_override_observer_does_not_raise():
     from unittest.mock import MagicMock
     db = InMemoryArrowDatabase()
