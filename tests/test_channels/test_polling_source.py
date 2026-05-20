@@ -391,6 +391,9 @@ class TestPollingSourceAsyncMode:
         src = PollingSource(
             fake,
             tag_columns="id",
+            # Use a wider interval and generous overrun budget so stream-building
+            # latency (Arrow schema inference, SourceStreamBuilder) never trips
+            # the overrun guard in CI environments.
             polling_config=PollingConfig(interval=0.05, duration=0.5, max_missed_intervals=50),
         )
 
@@ -451,7 +454,9 @@ class TestPollingSourceAsyncMode:
         src = PollingSource(
             fake,
             tag_columns="id",
-            polling_config=PollingConfig(interval=0.01, duration=0.3),
+            # Wide interval + generous overrun budget — same rationale as
+            # test_async_streaming_emits_rows.
+            polling_config=PollingConfig(interval=0.05, duration=0.5, max_missed_intervals=50),
         )
 
         items = []
@@ -480,6 +485,7 @@ class TestPollingSourceAsyncMode:
 
         task = asyncio.create_task(run())
         await asyncio.sleep(0.05)
+        assert not task.done()  # confirm task is still in the polling loop
         task.cancel()
         try:
             await task
@@ -536,14 +542,16 @@ class TestPollingSourceAsyncMode:
         src = PollingSource(
             fake,
             tag_columns="id",
-            polling_config=PollingConfig(interval=0.01, duration=0.3),
+            # Wide interval + generous overrun budget — same rationale as
+            # test_async_streaming_emits_rows.
+            polling_config=PollingConfig(interval=0.05, duration=0.5, max_missed_intervals=50),
         )
 
         async for _ in src.async_iter_data():
             pass
 
         # First fetch: cursor=None; second fetch: cursor=Cursor(value=1)
+        assert len(fake.fetch_cursors) == 2
         assert fake.fetch_cursors[0] is None
-        if len(fake.fetch_cursors) > 1:
-            assert fake.fetch_cursors[1] is not None
-            assert fake.fetch_cursors[1].value == 1
+        assert fake.fetch_cursors[1] is not None
+        assert fake.fetch_cursors[1].value == 1
