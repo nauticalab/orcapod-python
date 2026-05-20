@@ -9,7 +9,12 @@ from typing import Any
 import pyarrow as pa
 import pytest
 
+from orcapod.channels import Channel
+from orcapod.core.nodes.source_node import SourceNode
+from orcapod.core.sources.polling_source import PollingSource
+from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.errors import CursorInvalidatedError
+from orcapod.protocols.core_protocols.sources import DynamicSourceProtocol
 from orcapod.types import Cursor, PollingConfig
 
 
@@ -74,9 +79,6 @@ class TestCursorInvalidatedError:
 # ===========================================================================
 
 
-from orcapod.protocols.core_protocols.sources import DynamicSourceProtocol
-
-
 class _MinimalImpl:
     """Minimal protocol-conformant implementation for isinstance checks."""
 
@@ -129,11 +131,6 @@ class TestDynamicSourceProtocol:
 # ===========================================================================
 # Task 3: StreamBase.async_iter_data default + SourceNode.async_execute
 # ===========================================================================
-
-
-from orcapod.channels import Channel
-from orcapod.core.nodes.source_node import SourceNode
-from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 
 
 def _make_arrow_stream(n: int = 3) -> ArrowTableStream:
@@ -254,9 +251,6 @@ class FakeDynamicSource:
 # ===========================================================================
 # Task 4: PollingSource sync mode tests
 # ===========================================================================
-
-
-from orcapod.core.sources.polling_source import PollingSource
 
 
 def _batch(id_: int, val: int) -> dict:
