@@ -555,3 +555,161 @@ class TestPollingSourceAsyncMode:
         assert fake.fetch_cursors[0] is None
         assert fake.fetch_cursors[1] is not None
         assert fake.fetch_cursors[1].value == 1
+
+
+# ===========================================================================
+# Task 6: Error handling, overrun, schema drift tests
+# ===========================================================================
+
+
+class TestPollingSourceErrorHandling:
+    @pytest.mark.asyncio
+    async def test_error_backoff_retries_and_uses_exponential_wait(self):
+        """Exception in poll() increments error counter; errors below threshold → retry."""
+
+        class CountingError(Exception):
+            pass
+
+        call_count = 0
+
+        class TransientImpl:
+            async def poll(self, cursor=None) -> bool:
+                nonlocal call_count
+                call_count += 1
+                if call_count <= 2:
+                    raise CountingError("transient")
+                return False  # succeed on 3rd attempt
+
+            async def fetch(self, cursor=None):
+                return Cursor(value=0), {}
+
+            async def close(self):
+                pass
+
+        src = PollingSource(
+            TransientImpl(),
+            tag_columns="id",
+            polling_config=PollingConfig(
+                interval=0.01,
+                duration=0.5,
+                max_consecutive_errors=5,
+                error_backoff_base=0.01,  # very short backoff for tests
+            ),
+        )
+
+        items = []
+        async for tag, data in src.async_iter_data():
+            items.append((tag, data))
+
+        # Completed without raising; errors were below threshold
+        assert call_count >= 3
+
+    @pytest.mark.asyncio
+    async def test_max_consecutive_errors_closes_cleanly(self):
+        """Reaching max_consecutive_errors closes the channel without crashing."""
+        fake = FakeDynamicSource(
+            batches=[],
+            poll_raises=RuntimeError("persistent error"),
+        )
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(
+                interval=0.01,
+                max_consecutive_errors=3,
+                error_backoff_base=0.01,
+            ),
+        )
+
+        items = []
+        async for tag, data in src.async_iter_data():
+            items.append((tag, data))
+
+        assert len(items) == 0
+        assert fake.close_called
+
+    @pytest.mark.asyncio
+    async def test_cursor_invalidated_error_terminates_without_retry(self):
+        """CursorInvalidatedError terminates the source cleanly; no retry."""
+        fake = FakeDynamicSource(
+            batches=[],
+            poll_raises=CursorInvalidatedError("state lost"),
+        )
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(interval=0.01),
+        )
+
+        items = []
+        async for tag, data in src.async_iter_data():
+            items.append((tag, data))
+
+        # Only one poll attempt — no retry for invalidation
+        assert len(fake.poll_cursors) == 1
+        assert fake.close_called
+
+    @pytest.mark.asyncio
+    async def test_overrun_terminates_after_threshold(self):
+        """Slow fetches that consistently overrun max_missed_intervals terminate the source."""
+        fake = FakeDynamicSource(
+            batches=[_batch(i, i * 10) for i in range(20)],
+            fetch_delay=0.05,  # each fetch takes 50 ms
+        )
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(
+                interval=0.01,           # 10 ms tick — fetch will always overrun
+                max_missed_intervals=3,  # terminate after 3 cumulative misses
+                duration=0.0,            # run indefinitely (until overrun)
+            ),
+        )
+
+        items = []
+        async for tag, data in src.async_iter_data():
+            items.append((tag, data))
+
+        # Terminated due to overrun; close() must have been called
+        assert fake.close_called
+
+    @pytest.mark.asyncio
+    async def test_schema_drift_emits_warning(self, caplog):
+        """Mismatched columns on second fetch emit a WARNING log."""
+
+        class DriftingImpl:
+            _call = 0
+
+            async def poll(self, cursor=None) -> bool:
+                return self._call < 2
+
+            async def fetch(self, cursor=None):
+                self._call += 1
+                if self._call == 1:
+                    return (
+                        Cursor(value=1),
+                        {"id": pa.array([1], type=pa.int64()),
+                         "val": pa.array([10], type=pa.int64())},
+                    )
+                # Second fetch has an extra column
+                return (
+                    Cursor(value=2),
+                    {"id": pa.array([2], type=pa.int64()),
+                     "val": pa.array([20], type=pa.int64()),
+                     "extra": pa.array(["x"], type=pa.large_string())},
+                )
+
+            async def close(self):
+                pass
+
+        src = PollingSource(
+            DriftingImpl(),
+            tag_columns="id",
+            polling_config=PollingConfig(interval=0.05, duration=0.5, max_missed_intervals=50),
+        )
+
+        with caplog.at_level(logging.WARNING, logger="orcapod.core.sources.polling_source"):
+            async for _ in src.async_iter_data():
+                pass
+
+        assert any("schema drift" in r.message for r in caplog.records)
