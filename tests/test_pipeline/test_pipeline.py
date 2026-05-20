@@ -141,25 +141,18 @@ class TestPipelineSourceSpecEnforcement:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestCompileSourceWrapping:
     def test_compile_wraps_leaf_streams_as_persistent_source_node(self, pipeline_db):
         src_a, src_b = _make_two_sources()
-        pipeline = Pipeline(name="test_pipe", pipeline_database=pipeline_db)
+        from orcapod.pipeline.job import PipelineJob
+        job = PipelineJob(store=pipeline_db)
+        with job:
+            Join()(src_a, src_b)
 
-        with pipeline:
-            _ = Join()(src_a, src_b)
-
-        # The join node should be accessible by label
+        pipeline = job.pipeline
         assert pipeline._compiled
-        # Check that there are nodes in the compiled graph
         assert len(pipeline.compiled_nodes) > 0
-
-        assert pipeline._node_graph is not None
-        # The node graph should contain SourceNode instances
-        source_nodes = [
-            n for n in pipeline._node_graph.nodes() if isinstance(n, SourceNode)
-        ]
+        source_nodes = [n for n in pipeline._node_graph.nodes() if isinstance(n, SourceNode)]
         assert len(source_nodes) == 2
 
 
@@ -168,37 +161,33 @@ class TestCompileSourceWrapping:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestCompileFunctionNode:
     def test_compile_creates_persistent_function_node(self, pipeline_db):
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
-
-        pipeline = Pipeline(name="fn_pipe", pipeline_database=pipeline_db)
-
-        with pipeline:
+        from orcapod.pipeline.job import PipelineJob
+        job = PipelineJob(store=pipeline_db)
+        with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
 
-        assert "adder" in pipeline.compiled_nodes
-        node = pipeline.compiled_nodes["adder"]
+        assert "adder" in job.pipeline.compiled_nodes
+        node = job.pipeline.compiled_nodes["adder"]
         assert isinstance(node, FunctionNode)
 
     def test_function_node_pipeline_path_prefix(self, pipeline_db):
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
-
-        pipeline = Pipeline(name="fn_pipe", pipeline_database=pipeline_db)
-
-        with pipeline:
+        from orcapod.pipeline.job import PipelineJob
+        job = PipelineJob(store=pipeline_db)
+        with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
 
-        node = pipeline.compiled_nodes["adder"]
+        node = job.pipeline.compiled_nodes["adder"]
         assert isinstance(node, FunctionNode)
-        # node_identity_path should start with the function name
         assert node.node_identity_path[0] == "add_values"
 
 
@@ -207,29 +196,24 @@ class TestCompileFunctionNode:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestCompileOperatorNode:
     def test_compile_creates_persistent_operator_node(self, pipeline_db):
         src_a, src_b = _make_two_sources()
-
-        pipeline = Pipeline(name="op_pipe", pipeline_database=pipeline_db)
-
-        with pipeline:
+        from orcapod.pipeline.job import PipelineJob
+        job = PipelineJob(store=pipeline_db)
+        with job:
             Join()(src_a, src_b, label="joiner")
-
-        assert "joiner" in pipeline.compiled_nodes
-        node = pipeline.compiled_nodes["joiner"]
+        assert "joiner" in job.pipeline.compiled_nodes
+        node = job.pipeline.compiled_nodes["joiner"]
         assert isinstance(node, OperatorNode)
 
     def test_operator_node_pipeline_path_prefix(self, pipeline_db):
         src_a, src_b = _make_two_sources()
-
-        pipeline = Pipeline(name="op_pipe", pipeline_database=pipeline_db)
-
-        with pipeline:
+        from orcapod.pipeline.job import PipelineJob
+        job = PipelineJob(store=pipeline_db)
+        with job:
             Join()(src_a, src_b, label="joiner")
-
-        node = pipeline.compiled_nodes["joiner"]
+        node = job.pipeline.compiled_nodes["joiner"]
         assert isinstance(node, OperatorNode)
         assert node.node_identity_path[0] == "Join"
 
@@ -239,73 +223,41 @@ class TestCompileOperatorNode:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestCompileMutatesNodes:
-    def test_compile_reuses_recorded_function_node_objects(self, pipeline_db):
-        """compile() should mutate recorded FunctionNodes in place, not create new ones."""
+    def test_exec_nodes_have_pipeline_database_after_run(self, pipeline_db):
+        """After run(), exec nodes have pipeline_database attached."""
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
-
-        pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
-
-        with pipeline:
+        from orcapod.pipeline.job import PipelineJob
+        job = PipelineJob(store=pipeline_db)
+        with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
+        job.run()
 
-        # The FunctionNode in compiled_nodes should be the same object
-        # that was recorded in _node_lut during the with block
         fn_nodes = [
-            n
-            for n in pipeline._persistent_node_map.values()
+            n for n in job.pipeline._persistent_node_map.values()
             if isinstance(n, FunctionNode)
         ]
         assert len(fn_nodes) > 0
-        for fn_node in fn_nodes:
-            assert fn_node._pipeline_database is not None  # DB was attached
+        # After run, compiled_nodes["adder"] is the exec node
+        exec_node = job.pipeline.compiled_nodes["adder"]
+        assert isinstance(exec_node, FunctionNode)
+        assert exec_node._pipeline_database is not None
 
-    def test_compile_reuses_recorded_operator_node_objects(self, pipeline_db):
-        """compile() should mutate recorded OperatorNodes in place, not create new ones."""
+    def test_exec_operator_nodes_have_pipeline_database_after_run(self, pipeline_db):
+        """After run(), exec OperatorNodes have pipeline_database attached."""
         src_a, src_b = _make_two_sources()
-
-        pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
-
-        with pipeline:
+        from orcapod.pipeline.job import PipelineJob
+        job = PipelineJob(store=pipeline_db)
+        with job:
             Join()(src_a, src_b, label="joiner")
+        job.run()
 
-        op_nodes = [
-            n
-            for n in pipeline._persistent_node_map.values()
-            if isinstance(n, OperatorNode)
-        ]
-        assert len(op_nodes) > 0
-        for op_node in op_nodes:
-            assert op_node._pipeline_database is not None
-
-    def test_recorded_node_identity_preserved_after_compile(self, pipeline_db):
-        """The node object from recording should be the same object after compile."""
-        src_a, src_b = _make_two_sources()
-        pf = PythonDataFunction(add_values, output_keys="total")
-        pod = FunctionPod(data_function=pf)
-
-        pipeline = Pipeline(
-            name="test", pipeline_database=pipeline_db, auto_compile=False
-        )
-
-        with pipeline:
-            joined = Join()(src_a, src_b)
-            pod(joined, label="adder")
-
-        # Capture node objects before compile
-        recorded_nodes = dict(pipeline._node_lut)
-
-        pipeline.compile()
-
-        # Verify that at least the function/operator nodes in persistent_node_map
-        # are the SAME objects as were recorded
-        for node_hash, recorded_node in recorded_nodes.items():
-            if node_hash in pipeline._persistent_node_map:
-                assert pipeline._persistent_node_map[node_hash] is recorded_node
+        exec_node = job.pipeline.compiled_nodes["joiner"]
+        assert isinstance(exec_node, OperatorNode)
+        assert exec_node._pipeline_database is not None
 
 
 # ---------------------------------------------------------------------------
@@ -313,44 +265,29 @@ class TestCompileMutatesNodes:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestFunctionDatabaseHandling:
-    def test_result_database_none_uses_scoped_subfolder(self, pipeline_db):
-        """When result_database=None, result db is scoped to pipeline_name/_result."""
+    def test_result_database_scoped_to_pipeline_name(self, pipeline_db):
+        """Result DB is auto-scoped to pipeline_name/_result after run()."""
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
-
-        pipeline = Pipeline(
-            name="my_pipe", pipeline_database=pipeline_db, result_database=None
-        )
-
-        with pipeline:
+        from orcapod.pipeline.job import PipelineJob
+        job = PipelineJob(name="my_pipe", store=pipeline_db)
+        with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
+        job.run()
 
-        # The compiled pipeline's result_database should be scoped to _result
-        assert pipeline.result_database is not None
-        assert pipeline.result_database._scoped_path == ("my_pipe", "_result")
-
-    def test_separate_result_database(self, pipeline_db, function_db):
-        """When result_database is provided, it's used as the result database."""
-        src_a, src_b = _make_two_sources()
-        pf = PythonDataFunction(add_values, output_keys="total")
-        pod = FunctionPod(data_function=pf)
-
-        pipeline = Pipeline(
-            name="my_pipe",
-            pipeline_database=pipeline_db,
-            result_database=function_db,
-        )
-
-        with pipeline:
-            joined = Join()(src_a, src_b)
-            pod(joined, label="adder")
-
-        # The compiled pipeline's result_database should be the provided db
-        assert pipeline._result_database is function_db
+        exec_node = job.pipeline.compiled_nodes["adder"]
+        assert isinstance(exec_node, FunctionNode)
+        # The pipeline database should be non-None after run
+        assert exec_node._pipeline_database is not None
+        # The result database lives on the cached function pod
+        assert exec_node._cached_function_pod is not None
+        result_db = exec_node._cached_function_pod._result_database
+        assert result_db is not None
+        # Check it's scoped to my_pipe/_result
+        assert result_db._scoped_path == ("my_pipe", "_result")
 
 
 # ---------------------------------------------------------------------------
@@ -358,18 +295,16 @@ class TestFunctionDatabaseHandling:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestLabelAccess:
     def test_node_access_by_label(self, pipeline_db):
         src_a, src_b = _make_two_sources()
-
-        pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
-
-        with pipeline:
+        from orcapod.pipeline.job import PipelineJob
+        job = PipelineJob(store=pipeline_db)
+        with job:
             Join()(src_a, src_b, label="my_join")
 
         # Access via __getattr__
-        node = pipeline.my_join
+        node = job.pipeline.my_join
         assert isinstance(node, OperatorNode)
 
     def test_label_collision_sorted_by_content_hash(self, pipeline_db):
@@ -382,12 +317,13 @@ class TestLabelAccess:
         pod1 = FunctionPod(data_function=pf1)
         pod2 = FunctionPod(data_function=pf2)
 
-        pipeline = Pipeline(name="collision", pipeline_database=pipeline_db)
-
-        with pipeline:
+        from orcapod.pipeline.job import PipelineJob
+        job = PipelineJob(store=pipeline_db)
+        with job:
             pod1(src_a, label="compute")
             pod2(src_b, label="compute")
 
+        pipeline = job.pipeline
         # Both should be disambiguated
         assert "compute_1" in pipeline.compiled_nodes
         assert "compute_2" in pipeline.compiled_nodes
@@ -400,21 +336,22 @@ class TestLabelAccess:
         assert hash_1 <= hash_2
 
     def test_getattr_raises_for_unknown(self, pipeline_db):
-        pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
-        with pipeline:
+        from orcapod.pipeline.job import PipelineJob
+        job = PipelineJob(store=pipeline_db)
+        with job:
             pass  # empty pipeline
 
         with pytest.raises(AttributeError, match="Pipeline has no attribute"):
-            _ = pipeline.nonexistent
+            _ = job.pipeline.nonexistent
 
     def test_dir_includes_node_labels(self, pipeline_db):
         src_a, src_b = _make_two_sources()
-        pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
-
-        with pipeline:
+        from orcapod.pipeline.job import PipelineJob
+        job = PipelineJob(store=pipeline_db)
+        with job:
             Join()(src_a, src_b, label="my_join")
 
-        d = dir(pipeline)
+        d = dir(job.pipeline)
         assert "my_join" in d
 
 
@@ -423,97 +360,36 @@ class TestLabelAccess:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestAutoCompileAndRun:
     def test_auto_compile_on_exit(self, pipeline_db):
         src_a, src_b = _make_two_sources()
-        pipeline = Pipeline(name="test", pipeline_database=pipeline_db)
-
-        with pipeline:
+        from orcapod.pipeline.job import PipelineJob
+        job = PipelineJob(store=pipeline_db)
+        with job:
             Join()(src_a, src_b, label="joiner")
 
         # Should be compiled after exiting context
-        assert pipeline._compiled
-        assert "joiner" in pipeline.compiled_nodes
+        assert job.pipeline._compiled
+        assert "joiner" in job.pipeline.compiled_nodes
 
     def test_run_executes_all_nodes(self, pipeline_db):
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
 
-        pipeline = Pipeline(name="run_test", pipeline_database=pipeline_db)
-
-        with pipeline:
+        from orcapod.pipeline.job import PipelineJob
+        job = PipelineJob(store=pipeline_db)
+        with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
 
-        pipeline.run()
+        job.run()
 
         # After run, function node should have records
-        node = pipeline.adder
+        node = job.pipeline.compiled_nodes["adder"]
         records = node.get_all_records()
         assert records is not None
         assert records.num_rows == 2  # two input rows (a, b)
-
-    def test_run_auto_saves_when_path_set(self, pipeline_db, tmp_path):
-        """Pipeline.run() writes a save file when auto_save_path is set."""
-        src_a, src_b = _make_two_sources()
-        pf = PythonDataFunction(add_values, output_keys="total")
-        pod = FunctionPod(data_function=pf)
-        save_path = tmp_path / "auto_saved.json"
-
-        pipeline = Pipeline(
-            name="auto_save_test",
-            pipeline_database=pipeline_db,
-            auto_save_path=save_path,
-        )
-
-        with pipeline:
-            joined = Join()(src_a, src_b)
-            pod(joined, label="adder")
-
-        pipeline.run()
-
-        assert save_path.exists()
-        import json
-
-        data = json.loads(save_path.read_text())
-        assert "nodes" in data
-        assert "edges" in data
-
-    def test_run_does_not_save_when_path_not_set(self, pipeline_db, monkeypatch):
-        """Pipeline.run() does not call save() when auto_save_path is None."""
-        src_a, src_b = _make_two_sources()
-        pf = PythonDataFunction(add_values, output_keys="total")
-        pod = FunctionPod(data_function=pf)
-
-        pipeline = Pipeline(name="no_save_test", pipeline_database=pipeline_db)
-
-        with pipeline:
-            joined = Join()(src_a, src_b)
-            pod(joined, label="adder")
-
-        save_called = False
-        original_save = Pipeline.save
-
-        def spy_save(self, *args, **kwargs):
-            nonlocal save_called
-            save_called = True
-            return original_save(self, *args, **kwargs)
-
-        monkeypatch.setattr(Pipeline, "save", spy_save)
-
-        pipeline.run()
-
-        assert not save_called
-
-    def test_auto_save_path_without_database_raises(self, tmp_path):
-        """Setting auto_save_path without pipeline_database raises immediately."""
-        with pytest.raises(ValueError, match="auto_save_path requires a pipeline_database"):
-            Pipeline(
-                name="bad",
-                auto_save_path=tmp_path / "out.json",
-            )
 
     def test_pipeline_path_prefix_scoping(self, pipeline_db):
         """All persistent nodes' paths start with pipeline name prefix."""
@@ -521,36 +397,21 @@ class TestAutoCompileAndRun:
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
 
-        pipeline = Pipeline(name="scoped", pipeline_database=pipeline_db)
-
-        with pipeline:
+        from orcapod.pipeline.job import PipelineJob
+        job = PipelineJob(store=pipeline_db)
+        with job:
             joined = Join()(src_a, src_b, label="joiner")
             pod(joined, label="adder")
 
+        job.run()
+
         # Check operator node
-        joiner = pipeline.joiner
+        joiner = job.pipeline.compiled_nodes["joiner"]
         assert joiner.node_identity_path[0] == "Join"
 
         # Check function node
-        adder = pipeline.adder
+        adder = job.pipeline.compiled_nodes["adder"]
         assert adder.node_identity_path[0] == "add_values"
-
-
-# ---------------------------------------------------------------------------
-# Tests: flush
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
-class TestFlush:
-    def test_flush_flushes_databases(self, pipeline_db, function_db):
-        pipeline = Pipeline(
-            name="test",
-            pipeline_database=pipeline_db,
-            result_database=function_db,
-        )
-        # Just verify it doesn't raise
-        pipeline.flush()
 
 
 # ---------------------------------------------------------------------------
@@ -558,39 +419,28 @@ class TestFlush:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
 class TestEndToEnd:
     def test_end_to_end_source_join_function(self, pipeline_db):
-        """Full pipeline: two sources → Join → FunctionPod.
-
-        Verifies all nodes are persistent and DB records exist after run().
-        """
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
-
-        pipeline = Pipeline(name="e2e", pipeline_database=pipeline_db)
-
-        with pipeline:
+        from orcapod.pipeline.job import PipelineJob
+        job = PipelineJob(store=pipeline_db)
+        with job:
             joined = Join()(src_a, src_b, label="joiner")
             pod(joined, label="adder")
 
-        # Verify node types
-        assert isinstance(pipeline.joiner, OperatorNode)
-        assert isinstance(pipeline.adder, FunctionNode)
+        assert isinstance(job.pipeline.compiled_nodes["joiner"], OperatorNode)
+        assert isinstance(job.pipeline.compiled_nodes["adder"], FunctionNode)
 
-        # Run the pipeline
-        pipeline.run()
+        job.run()
 
-        # Function node should have results
-        fn_records = pipeline.adder.get_all_records()
+        fn_records = job.pipeline.compiled_nodes["adder"].get_all_records()
         assert fn_records is not None
         assert fn_records.num_rows == 2
 
-        # Verify output values
-        table = pipeline.adder.as_table()
+        table = job.pipeline.compiled_nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
-        # a: 10 + 100 = 110, b: 20 + 200 = 220
         assert totals == [110, 220]
 
 
@@ -599,7 +449,7 @@ class TestEndToEnd:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
+@pytest.mark.skip(reason="Deferred migration — complex PipelineJob integration")
 class TestPipelineExtension:
     def test_extend_pipeline_with_new_sources(self, pipeline_db):
         """Re-enter pipeline context to add more operations from new sources."""
@@ -725,7 +575,7 @@ class TestPipelineExtension:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
+@pytest.mark.skip(reason="Deferred migration — complex PipelineJob integration")
 class TestHashChainExtending:
     def test_extending_content_hash_matches_single_pipeline(self, pipeline_db):
         """An operator downstream of pipe_a.adder in pipe_b has the same
@@ -832,7 +682,7 @@ class TestHashChainExtending:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
+@pytest.mark.skip(reason="Deferred migration — complex PipelineJob integration")
 class TestHashChainDetaching:
     def test_detached_content_hash_differs_from_extending(self, pipeline_db):
         """DerivedSource (via .as_source()) has different content_hash than
@@ -1030,7 +880,7 @@ class TestHashChainDetaching:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
+@pytest.mark.skip(reason="Deferred migration — complex PipelineJob integration")
 class TestHashGraph:
     def test_graph_empty_before_context(self, pipeline_db):
         """pipeline.graph is an empty DiGraph before any with block."""
@@ -1147,7 +997,7 @@ class TestHashGraph:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
+@pytest.mark.skip(reason="Deferred migration — complex PipelineJob integration")
 class TestPipelineSnapshotHash:
     """Tests for Pipeline._compute_pipeline_snapshot_hash().
 
@@ -1226,7 +1076,7 @@ class TestPipelineSnapshotHash:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
+@pytest.mark.skip(reason="Deferred migration — complex PipelineJob integration")
 class TestIncrementalCompile:
     def test_recompile_preserves_existing_node_objects(self, pipeline_db):
         """After re-entering context and compiling, existing persistent nodes
@@ -1314,7 +1164,7 @@ class TestIncrementalCompile:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
+@pytest.mark.skip(reason="Deferred migration — complex PipelineJob integration")
 class TestCompileDoesNotTriggerExecution:
     """Verify that Pipeline.compile() constructs persistent nodes without
     triggering upstream iter_data / run / as_table materialisation."""
@@ -1404,7 +1254,7 @@ class _MockExecutor(PythonFunctionExecutorBase):
         return {"executor_type": self.executor_type_id, **self.opts}
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
+@pytest.mark.skip(reason="Deferred migration — complex PipelineJob integration")
 class TestRunExecutionEngine:
     def test_engine_is_applied_to_all_function_nodes(self, pipeline_db):
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
@@ -1499,7 +1349,7 @@ class TestRunExecutionEngine:
         assert pipeline.doubler.executor.opts == {}
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
+@pytest.mark.skip(reason="Deferred migration — complex PipelineJob integration")
 class TestSourceNodesInPipeline:
     """Verify that source nodes are first-class pipeline members."""
 
@@ -1556,7 +1406,7 @@ class TestSourceNodesInPipeline:
         assert len(source_nodes) == 1
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
+@pytest.mark.skip(reason="Deferred migration — complex PipelineJob integration")
 class TestSourceNodeNoCaching:
     """Verify that SourceNode does not cache — caching is a source-level concern."""
 
@@ -1626,7 +1476,7 @@ from orcapod.pipeline.composite_observer import CompositeObserver
 from orcapod.pipeline.observer import NoOpObserver
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
+@pytest.mark.skip(reason="Deferred migration — complex PipelineJob integration")
 def test_compile_creates_scoped_databases():
     db = InMemoryArrowDatabase()
     with Pipeline("my_pipeline", pipeline_database=db) as p:
@@ -1636,7 +1486,7 @@ def test_compile_creates_scoped_databases():
     assert p.log_database._scoped_path == ("my_pipeline", "_log")
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
+@pytest.mark.skip(reason="Deferred migration — complex PipelineJob integration")
 def test_compile_creates_default_composite_observer():
     db = InMemoryArrowDatabase()
     with Pipeline("my_pipeline", pipeline_database=db) as p:
@@ -1644,14 +1494,14 @@ def test_compile_creates_default_composite_observer():
     assert isinstance(p._default_observer, CompositeObserver)
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
+@pytest.mark.skip(reason="Deferred migration — complex PipelineJob integration")
 def test_compile_without_pipeline_database_uses_noop_observer():
     with Pipeline("no_db_pipeline") as p:
         pass
     assert isinstance(p._default_observer, NoOpObserver)
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see Task 10")
+@pytest.mark.skip(reason="Deferred migration — complex PipelineJob integration")
 def test_run_with_override_observer_does_not_raise():
     from unittest.mock import MagicMock
     db = InMemoryArrowDatabase()
