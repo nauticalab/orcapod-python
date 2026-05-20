@@ -212,7 +212,6 @@ class FakeDynamicSource:
         cursor_modified_at: datetime | None = None,
     ) -> None:
         self._batches = batches
-        self._batch_index = 0
         self._poll_always_false = poll_always_false
         self._poll_raises = poll_raises
         self._fetch_raises = fetch_raises
@@ -243,7 +242,6 @@ class FakeDynamicSource:
         if current_idx >= len(self._batches):
             return Cursor(value=current_idx, modified_at=self._cursor_modified_at), {}
         data = self._batches[current_idx]
-        self._batch_index = current_idx + 1
         return (
             Cursor(value=current_idx + 1, modified_at=self._cursor_modified_at),
             data,
