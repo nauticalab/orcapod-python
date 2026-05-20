@@ -114,7 +114,6 @@ class TestPipelineSourceSpecEnforcement:
             with pipeline:
                 Join()(src_a, src_b)
 
-    @pytest.mark.skip(reason="PipelineJob not yet implemented — enabled in Task 6")
     def test_pipeline_bind_returns_pipeline_job(self):
         """Pipeline.bind() returns a PipelineJob without modifying the pipeline."""
         from orcapod.pipeline.job import PipelineJob
