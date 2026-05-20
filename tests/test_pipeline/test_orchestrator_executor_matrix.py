@@ -45,9 +45,6 @@ from orcapod.pipeline import AsyncPipelineOrchestrator, Pipeline
 from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
 from orcapod.types import ExecutorType, NodeConfig, PipelineConfig
 
-pytestmark = pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
-
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -154,6 +151,7 @@ _POOL_SYNC_MIN = _POOL_SLEEP_S * 2.5    # conservative lower bound for sync path
 # ===========================================================================
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see ENG-491")
 class TestSyncOrchestratorSyncFunction:
     """Cell (1): default sequential path — no concurrency overhead."""
 
@@ -201,6 +199,7 @@ class TestSyncOrchestratorSyncFunction:
 # ===========================================================================
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see ENG-491")
 class TestSyncOrchestratorAsyncFunction:
     """Cell (2): sync orchestrator handles ``async def`` functions gracefully.
 
@@ -245,6 +244,7 @@ class TestSyncOrchestratorAsyncFunction:
 # ===========================================================================
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see ENG-491")
 class TestAsyncOrchestratorSyncFunction:
     """Cell (3): async orchestrator + sync function.
 
@@ -287,6 +287,7 @@ class TestAsyncOrchestratorSyncFunction:
 # ===========================================================================
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see ENG-491")
 class TestAsyncOrchestratorAsyncFunction:
     """Cell (4): async orchestrator + async function — maximum concurrency.
 
@@ -338,6 +339,7 @@ class TestAsyncOrchestratorAsyncFunction:
 # ===========================================================================
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see ENG-491")
 class TestConcurrencyBenefitAcrossMatrix:
     """Verify the relative speed ordering promised by the matrix.
 
@@ -422,6 +424,7 @@ async def _cooperative_fn(x: int) -> int:
     return x * 2
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see ENG-491")
 class TestAsyncOrchestratorFunctionTypeDifference:
     """Async orchestrator: sync fn is sequential (GIL+pool), async fn is concurrent.
 
@@ -515,6 +518,7 @@ async def _run_async_with_limited_pool(
     return sorted(records.column("result").to_pylist()), elapsed
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — see ENG-491")
 class TestAsyncAsyncVsAsyncSync:
     """Verify that async+async outperforms async+sync when the thread pool
     is smaller than the number of concurrent data.
@@ -565,3 +569,34 @@ class TestAsyncAsyncVsAsyncSync:
             f"async+async ({elapsed_async:.2f}s) should be >40% faster than "
             f"async+sync ({elapsed_sync:.2f}s) under pool saturation"
         )
+
+
+# ===========================================================================
+# PipelineJob-based correctness test (ENG-491 track)
+# ===========================================================================
+
+
+class TestSyncOrchestratorSyncFunctionPipelineJob:
+    """Cell (1) correctness re-validated with the PipelineJob API (ENG-491 track)."""
+
+    def test_correctness_via_pipeline_job(self):
+        """Sync orchestrator + sync function produces correct results via PipelineJob."""
+        from orcapod.pipeline import PipelineJob
+
+        pf = PythonDataFunction(sync_double, output_keys="result")
+        pod = FunctionPod(pf)
+        db = InMemoryArrowDatabase()
+
+        job = PipelineJob(name="matrix_pj", store=db)
+        with job:
+            pod(_make_source(), label="node")
+
+        completed = job.run()
+        assert completed._has_run is True
+
+        fn_node = completed.pipeline.compiled_nodes.get("node")
+        assert fn_node is not None
+        records = fn_node.get_all_records()
+        assert records is not None
+        values = sorted(records.column("result").to_pylist())
+        assert values == _EXPECTED

@@ -544,8 +544,25 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 upstream_nodes = tuple(
                     reconstructed[h] for h in up_hashes if h in reconstructed
                 )
+                # Attempt to reconstruct the operator from its saved config.
+                # Operators use a class_name + module_path + config dict pattern.
+                operator = None
+                op_config = descriptor.get("operator_config")
+                if op_config:
+                    try:
+                        import importlib
+                        op_mod = importlib.import_module(op_config["module_path"])
+                        op_cls = getattr(op_mod, op_config["class_name"])
+                        operator = op_cls.from_config(op_config)
+                    except Exception as exc:
+                        logger.warning(
+                            "Could not reconstruct operator %r from config — "
+                            "node will be in read-only mode: %s",
+                            op_config.get("class_name"),
+                            exc,
+                        )
                 node = OperatorNode.from_descriptor(
-                    descriptor, operator=None, input_streams=upstream_nodes, databases={}
+                    descriptor, operator=operator, input_streams=upstream_nodes, databases={}
                 )
                 reconstructed[node_hash] = node
 
@@ -588,8 +605,55 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             if node.label:
                 attrs["label"] = node.label
 
+        # Restore _node_lut and _upstreams so PipelineJob._build_execution_graph()
+        # can substitute bound sources and build a correct execution graph.
+        from orcapod.core.nodes import SourceNode as _SourceNode
+        pipeline._node_lut = {
+            h: n
+            for h, n in reconstructed.items()
+            if not isinstance(n, _SourceNode)
+        }
+        pipeline._upstreams = {
+            h: n.stream
+            for h, n in reconstructed.items()
+            if isinstance(n, _SourceNode) and n.stream is not None
+        }
+
         pipeline._compiled = True
         return pipeline
+
+    def _clone_for_execution(self) -> "Pipeline":
+        """Create a lightweight copy of this compiled pipeline for isolated execution.
+
+        All structural state (``_node_lut``, ``_upstreams``, ``_graph_edges``,
+        ``_hash_graph``, ``_node_graph``, ``_persistent_node_map``) is shared
+        read-only with the original — these are immutable after ``compile()``.
+        Only ``_nodes`` (the label → exec-node mapping) gets its own copy so
+        that ``_build_execution_graph()`` can update it without affecting other
+        ``PipelineJob`` instances that reference this blueprint.
+
+        The clone is never registered as a tracker context manager.
+
+        Returns:
+            A new ``Pipeline`` instance sharing read-only state with ``self``.
+        """
+        clone = Pipeline.__new__(Pipeline)
+        # Base class state — clone is inactive and never registered
+        clone._tracker_manager = self._tracker_manager
+        clone._active = False
+        # Shared read-only structural state
+        clone._name = self._name
+        clone._node_lut = self._node_lut
+        clone._upstreams = self._upstreams
+        clone._graph_edges = self._graph_edges
+        clone._hash_graph = self._hash_graph
+        clone._persistent_node_map = self._persistent_node_map
+        clone._node_graph = self._node_graph
+        clone._auto_compile = self._auto_compile
+        clone._compiled = self._compiled
+        # Mutable per-execution state — own copy so runs don't interfere
+        clone._nodes = dict(self._nodes)
+        return clone
 
     # ------------------------------------------------------------------
     # Node access by label

@@ -320,9 +320,9 @@ class TestPipelineJobRun:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
 
-        job.run()
+        result = job.run()
 
-        node = job.pipeline.compiled_nodes["adder"]
+        node = result.pipeline.compiled_nodes["adder"]
         records = node.get_all_records()
         assert records is not None
         assert records.num_rows == 2
@@ -337,9 +337,9 @@ class TestPipelineJobRun:
             joined = Join()(src_a, src_b, label="joiner")
             pod(joined, label="adder")
 
-        job.run()
+        result = job.run()
 
-        table = job.pipeline.compiled_nodes["adder"].as_table()
+        table = result.pipeline.compiled_nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]  # a: 10+100, b: 20+200
 
@@ -370,8 +370,10 @@ class TestPipelineJobRun:
 
         result = job.run()
         assert result is not job
-        # The returned job shares the same pipeline (compilation is reused)
-        assert result.pipeline is job.pipeline
+        # The returned job uses an exec pipeline clone; original pipeline unchanged
+        assert result.pipeline is not job.pipeline
+        # The original job's pipeline remains unmodified (no exec nodes injected)
+        assert job._has_run is False
 
     def test_run_requires_store(self):
         """run() without a store raises ValueError."""
@@ -396,9 +398,9 @@ class TestPipelineJobRun:
             pod(joined, label="adder")
 
         job.run()
-        job.run()  # second run should not raise
+        result = job.run()  # second run should not raise
 
-        table = job.pipeline.compiled_nodes["adder"].as_table()
+        table = result.pipeline.compiled_nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]
 
@@ -418,13 +420,13 @@ class TestPipelineJobEndToEnd:
         assert isinstance(job.pipeline.compiled_nodes["joiner"], OperatorNode)
         assert isinstance(job.pipeline.compiled_nodes["adder"], FunctionNode)
 
-        job.run()
+        result = job.run()
 
-        fn_records = job.pipeline.compiled_nodes["adder"].get_all_records()
+        fn_records = result.pipeline.compiled_nodes["adder"].get_all_records()
         assert fn_records is not None
         assert fn_records.num_rows == 2
 
-        table = job.pipeline.compiled_nodes["adder"].as_table()
+        table = result.pipeline.compiled_nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]
 
@@ -449,9 +451,9 @@ class TestPipelineJobEndToEnd:
             sources={"src_a": src_a, "src_b": src_b},
             store=store,
         )
-        job.run()
+        result = job.run()
 
-        table = job.pipeline.compiled_nodes["adder"].as_table()
+        table = result.pipeline.compiled_nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]
 

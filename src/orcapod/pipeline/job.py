@@ -319,6 +319,18 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
                         and node.stream.name in sources
                     ):
                         node.stream.validate(sources[node.stream.name])
+                # Check that every provided key corresponds to a SourceSpec leaf
+                spec_names = {
+                    node.stream.name
+                    for node in pipeline._persistent_node_map.values()
+                    if isinstance(node, SourceNode) and isinstance(node.stream, SourceSpec)
+                }
+                unknown = set(sources.keys()) - spec_names
+                if unknown:
+                    raise ValueError(
+                        f"bind() received source keys with no matching SourceSpec in the pipeline: "
+                        f"{sorted(unknown)}. Known spec names: {sorted(spec_names)}"
+                    )
             merged_sources.update(sources)
 
         return PipelineJob(
@@ -419,20 +431,20 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
     # _build_execution_graph
     # ------------------------------------------------------------------
 
-    def _build_execution_graph(self) -> "tuple[Any, list[str]]":  # Any = nx.DiGraph
+    def _build_execution_graph(self) -> "tuple[Any, list[str], Pipeline]":  # Any = nx.DiGraph
         """Build a fresh execution-ready graph with concrete sources substituted.
 
         Creates new SourceNode/FunctionNode/OperatorNode objects — does NOT
         mutate the existing node objects in ``pipeline._persistent_node_map``.
 
         Note:
-            Updates ``pipeline._nodes`` with the fresh exec nodes (keyed by label)
-            so that ``job.pipeline.compiled_nodes`` returns execution-ready nodes
-            after a run. Repeated calls overwrite ``pipeline._nodes`` with a new
-            set of exec nodes each time.
+            Updates the cloned ``exec_pipeline._nodes`` with the fresh exec nodes
+            (keyed by label) so that the returned pipeline's ``compiled_nodes``
+            returns execution-ready nodes after a run. The original
+            ``self._compiled_pipeline`` is never mutated.
 
         Returns:
-            Tuple of (exec_graph, unresolved_spec_names).
+            Tuple of (exec_graph, unresolved_spec_names, exec_pipeline).
 
         Raises:
             ValueError: If ``self.store`` is ``None``.
@@ -453,6 +465,10 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
                 "PipelineJob.run() requires a store. "
                 "Call job.bind(store=db) before run()."
             )
+
+        # Clone pipeline so exec-node label mutations don't affect the original
+        from orcapod.pipeline.graph import Pipeline as _Pipeline
+        exec_pipeline = pipeline._clone_for_execution()
 
         pipeline_db = store.at(*pipeline.name)
         result_db = pipeline_db.at("_result")
@@ -532,17 +548,22 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
                     # All predecessors that are not excluded must be in exec_node_map.
                     # The excluded_hashes guard above (via `continue`) ensures any
                     # excluded predecessor causes this node to be skipped already.
-                    assert all(p in exec_node_map for p in preds), (
-                        f"OperatorNode predecessor missing from exec_node_map: "
-                        f"{[p for p in preds if p not in exec_node_map]}"
-                    )
+                    missing = [p for p in preds if p not in exec_node_map]
+                    if missing:
+                        raise RuntimeError(
+                            f"OperatorNode predecessor missing from exec_node_map: {missing}"
+                        )
                     upstream_nodes = tuple(exec_node_map[p] for p in preds)
                     new_op = OperatorNode(
                         operator=template._operator,
                         input_streams=upstream_nodes,
                         label=template._label,
                     )
-                    new_op.attach_databases(pipeline_database=pipeline_db)
+                    from orcapod.core.nodes.operator_node import CacheMode
+                    new_op.attach_databases(
+                        pipeline_database=pipeline_db,
+                        cache_mode=CacheMode.LOG,
+                    )
                     exec_node_map[node_hash] = new_op
 
         # Build execution DiGraph with node objects as vertices
@@ -554,12 +575,9 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
             if node not in exec_graph:
                 exec_graph.add_node(node)
 
-        # Update pipeline._nodes with fresh exec nodes (keyed by label).
-        # This allows job.pipeline.compiled_nodes["adder"] to return the exec node.
-        # We use a two-step approach: first try node._label (set when label was
-        # explicitly supplied), then fall back to node_to_label (which maps the
-        # template node's id to its compile-time label, covering the common case
-        # where FunctionPod.pod() is called without an explicit label= argument).
+        # Update exec_pipeline._nodes with fresh exec nodes (keyed by label).
+        # The clone's _nodes is independent of the original pipeline, so
+        # running one job does not affect other jobs sharing the same blueprint.
         for node_hash, node in exec_node_map.items():
             label = None
             if hasattr(node, "_label") and node._label:
@@ -568,9 +586,9 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
                 template = pipeline._node_lut[node_hash]
                 label = node_to_label.get(id(template))
             if label:
-                pipeline._nodes[label] = node
+                exec_pipeline._nodes[label] = node
 
-        return exec_graph, unresolved_specs
+        return exec_graph, unresolved_specs, exec_pipeline
 
     # ------------------------------------------------------------------
     # run()
@@ -601,11 +619,14 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
             RuntimeError: If no pipeline has been recorded.
         """
         import hashlib
+        import uuid
 
         from orcapod.pipeline.observer import NoOpObserver
         from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
 
-        exec_graph, unresolved_specs = self._build_execution_graph()
+        run_id = uuid.uuid4().hex[:16]
+
+        exec_graph, unresolved_specs, exec_pipeline = self._build_execution_graph()
 
         effective_observer = observer or NoOpObserver()
 
@@ -632,16 +653,17 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
             pipeline_db.flush()
             result_db.flush()
 
-        # Return new job (different object); shares same compiled pipeline
+        # Return new job (different object); uses exec_pipeline (clone with exec nodes)
         result = PipelineJob(
             name=self._pipeline_name,
             store=self._store,
             execution_context=self._execution_context,
-            _pipeline=self._compiled_pipeline,
+            _pipeline=exec_pipeline,        # exec_pipeline (clone), not self._compiled_pipeline
             sources=dict(self._sources),
         )
         result._unresolved_specs = unresolved_specs
         result._has_run = True
+        result._run_id = run_id
         return result
 
     def __repr__(self) -> str:
@@ -707,7 +729,12 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         if self._store is not None and hasattr(self._store, "to_config"):
             store_block = self._store.to_config()
 
-        status = "complete" if self._has_run else "pending"
+        if not self._has_run:
+            status = "pending"
+        elif self._unresolved_specs:
+            status = "partial"
+        else:
+            status = "complete"
 
         output: dict[str, Any] = {
             "orcapod_pipeline_job_version": PIPELINE_JOB_FORMAT_VERSION,
@@ -812,8 +839,11 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
 
         # Restore run metadata
         run_block = data.get("run", {})
-        if run_block.get("status") == "complete":
+        status = run_block.get("status", "pending")
+        if status in ("complete", "partial"):
             job._has_run = True
             job._unresolved_specs = run_block.get("unresolved_specs", [])
+        if run_id := run_block.get("run_id"):
+            job._run_id = run_id
 
         return job
