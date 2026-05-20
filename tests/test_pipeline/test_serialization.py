@@ -2298,3 +2298,99 @@ class TestSaveLoadRunRoundtrip:
 
         # The data function should be a proxy standing in for the missing function
         assert isinstance(fn_node._data_function, DataFunctionProxy)
+
+
+# ---------------------------------------------------------------------------
+# Task 5: Blueprint-only save/load with SourceSpec support
+# ---------------------------------------------------------------------------
+
+import pyarrow as pa
+from orcapod.core.nodes import SourceNode
+
+
+@pytest.fixture
+def spec_pipeline(tmp_path):
+    """A compiled Pipeline using SourceSpec leaves."""
+    from orcapod.core.sources import ArrowTableSource
+    from orcapod.core.sources.source_spec import SourceSpec
+    from orcapod.core.operators import Join
+
+    def _src(tag, data):
+        tbl = pa.table({tag: pa.array(["a"], type=pa.large_string()), data: pa.array([1], type=pa.int64())})
+        return ArrowTableSource(tbl, tag_columns=[tag], infer_nullable=True)
+
+    src_a = _src("key", "value")
+    src_b = _src("key", "score")
+    tag_a, data_a = src_a.output_schema()
+    tag_b, data_b = src_b.output_schema()
+
+    spec_a = SourceSpec("source_a", tag_schema=tag_a, data_schema=data_a)
+    spec_b = SourceSpec("source_b", tag_schema=tag_b, data_schema=data_b)
+
+    pipeline = Pipeline(name="spec_pipe")
+    with pipeline:
+        Join()(spec_a, spec_b, label="joiner")
+
+    return pipeline, tmp_path
+
+
+class TestPipelineBlueprintSave:
+    def test_save_creates_file(self, spec_pipeline):
+        pipeline, tmp_path = spec_pipeline
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        assert path.exists()
+
+    def test_save_has_pipeline_version(self, spec_pipeline):
+        import json
+        pipeline, tmp_path = spec_pipeline
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        data = json.loads(path.read_text())
+        assert data["orcapod_pipeline_version"] == "0.1.0"
+
+    def test_save_no_databases_block(self, spec_pipeline):
+        """Pure blueprint save must not contain a 'databases' block."""
+        import json
+        pipeline, tmp_path = spec_pipeline
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        data = json.loads(path.read_text())
+        assert "databases" not in data
+
+    def test_save_source_spec_nodes(self, spec_pipeline):
+        """SourceSpec nodes must serialize with source_type='spec'."""
+        import json
+        pipeline, tmp_path = spec_pipeline
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        data = json.loads(path.read_text())
+        spec_nodes = [
+            n for n in data["nodes"].values()
+            if n.get("node_type") == "source"
+            and n.get("source_config", {}).get("source_type") == "spec"
+        ]
+        assert len(spec_nodes) == 2
+
+    def test_save_load_roundtrip_preserves_topology(self, spec_pipeline):
+        """load() reconstructs the same number of nodes and edges."""
+        pipeline, tmp_path = spec_pipeline
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path))
+        assert len(loaded._persistent_node_map) == len(pipeline._persistent_node_map)
+        assert len(list(loaded._node_graph.edges())) == len(list(pipeline._node_graph.edges()))
+
+    def test_save_load_restores_spec_names(self, spec_pipeline):
+        """SourceSpec names must survive save/load."""
+        from orcapod.core.sources.source_spec import SourceSpec
+        pipeline, tmp_path = spec_pipeline
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+        loaded = Pipeline.load(str(path))
+        spec_names = {
+            node.stream.name
+            for node in loaded._persistent_node_map.values()
+            if isinstance(node, SourceNode) and isinstance(node.stream, SourceSpec)
+        }
+        assert spec_names == {"source_a", "source_b"}
