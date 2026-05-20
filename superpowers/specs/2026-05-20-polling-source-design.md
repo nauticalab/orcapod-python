@@ -57,9 +57,14 @@ Out of scope:
 - Database-backed dynamic source (follow-up issue).
 - Framework-level deduplication or row-identity tracking.
 - Schema enforcement across `fetch()` calls (drift is warned, not rejected).
-- Backpressure beyond existing channel semantics.
 - Pipeline serialization / `from_config` for `PollingSource` (non-reconstructable,
   same as `DataFrameSource`).
+
+**Natural backpressure:** `PollingSource` inherits backpressure automatically from the
+channel. `SourceNode.async_execute` calls `await output.send(...)` for each item yielded
+by `async_iter_data()`. If the downstream channel is full (bounded), `send()` suspends,
+which suspends the `async for` loop, which suspends the polling loop at the `yield item`
+point. No additional mechanism is needed.
 
 ---
 
@@ -404,6 +409,9 @@ pipeline runs).
 ### Polling Loop
 
 ```
+log.info("PollingSource %r starting (interval=%.1fs, duration=%.1fs)",
+         source_id, config.interval, config.duration)
+
 start_time  = loop.time()
 next_tick   = start_time       # first tick fires immediately
 consecutive_misses  = 0
@@ -421,13 +429,18 @@ try:
             has_new = await impl.poll(cursor=self._cursor)
 
             if has_new:
+                log.debug("PollingSource %r: new data detected, fetching", source_id)
                 new_cursor, df = await impl.fetch(cursor=self._cursor)
                 _schema_stream = _combine(_schema_stream, df)   # update cache
                 _cursor = new_cursor
                 _update_last_modified(new_cursor)               # update last_modified
                 warn_on_schema_drift(df)
-                for item in convert(df):
+                rows = list(convert(df))
+                log.debug("PollingSource %r: emitting %d row(s)", source_id, len(rows))
+                for item in rows:
                     yield item
+            else:
+                log.debug("PollingSource %r: poll returned no new data", source_id)
 
             consecutive_errors = 0
 
@@ -435,19 +448,21 @@ try:
             raise
 
         except CursorInvalidatedError:
-            log.error("Cursor invalidated — previous state cannot be reconciled "
-                      "with already-emitted rows. Terminating source.")
+            log.error("PollingSource %r: cursor invalidated — previous state cannot "
+                      "be reconciled with already-emitted rows. Terminating source.",
+                      source_id)
             return   # → finally block
 
         except Exception as e:
-            log.error("poll/fetch error: %s", e)
             consecutive_errors += 1
+            backoff = config.error_backoff_base * 2 ** (consecutive_errors - 1)
+            log.error("PollingSource %r: poll/fetch error (consecutive=%d, "
+                      "backoff=%.1fs): %s", source_id, consecutive_errors, backoff, e)
             if consecutive_errors >= config.max_consecutive_errors:
-                log.error("Max consecutive errors reached. Terminating source.")
+                log.error("PollingSource %r: max consecutive errors (%d) reached. "
+                          "Terminating source.", source_id, config.max_consecutive_errors)
                 return   # → finally block
-            await asyncio.sleep(
-                config.error_backoff_base * 2 ** (consecutive_errors - 1)
-            )
+            await asyncio.sleep(backoff)
             continue   # retry — do not advance next_tick
 
         # 3. Tick advancement (start-to-start)
@@ -455,8 +470,13 @@ try:
         intervals_consumed = floor((now - next_tick) / config.interval)
         if intervals_consumed > 0:
             consecutive_misses += intervals_consumed
+            log.warning("PollingSource %r: tick overrun — consumed %d interval(s) "
+                        "(consecutive_misses=%d/%d)",
+                        source_id, intervals_consumed,
+                        consecutive_misses, config.max_missed_intervals)
             if consecutive_misses >= config.max_missed_intervals:
-                log.error("Overrun threshold exceeded. Terminating source.")
+                log.error("PollingSource %r: overrun threshold exceeded. "
+                          "Terminating source.", source_id)
                 return   # → finally block
         else:
             consecutive_misses = 0
@@ -464,13 +484,17 @@ try:
 
         # 4. Duration check
         if config.duration > 0 and (loop.time() - start_time) >= config.duration:
+            log.info("PollingSource %r: duration limit (%.1fs) reached. "
+                     "Terminating source.", source_id, config.duration)
             return   # → finally block
 
 except CancelledError:
-    pass   # clean cancellation — → finally block
+    log.info("PollingSource %r: cancelled — shutting down cleanly.", source_id)
 
 finally:
+    log.debug("PollingSource %r: calling impl.close()", source_id)
     await impl.close()
+    log.info("PollingSource %r: closed.", source_id)
 ```
 
 ### `_update_last_modified(cursor)`
@@ -581,8 +605,12 @@ framework) for maximum clarity.
 - **Cache growth:** The accumulated cache is unbounded for true-delta implementations.
   No eviction is implemented in this version. Document explicitly.
 - **Schema drift:** Silent schema changes across `fetch()` calls corrupt downstream
-  operators. The warning is the only safeguard in this version; enforcement is deferred.
+  operators. The `WARNING` log and drift warning are the only safeguards in this version;
+  enforcement is deferred.
 - **`SourceNode.async_execute` change** removes the sync fallback. Any `RootSource`
   subclass that previously relied on the absence of `async_iter_data()` will now use the
   default wrapper, which is behaviourally equivalent. The regression test above confirms
   this.
+- **Backpressure:** Provided naturally by the channel. `await output.send()` suspends
+  when the downstream channel buffer is full, which back-propagates through
+  `async_iter_data()` at the `yield item` point. No additional mechanism required.
