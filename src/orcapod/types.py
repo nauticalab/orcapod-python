@@ -73,7 +73,7 @@ SchemaLike: TypeAlias = Mapping[str, DataType]
 Accepted wherever a ``Schema`` is expected so callers can pass plain dicts."""
 
 T = TypeVar("T")
-"""Generic cursor value type for :class:`Cursor` and :class:`DynamicSourceProtocol`."""
+"""Generic cursor value type for ``Cursor`` and ``DynamicSourceProtocol``."""
 
 
 class Schema(Mapping[str, DataType]):
@@ -611,7 +611,7 @@ class Cursor(Generic[T]):
 
 @dataclass(frozen=True, slots=True)
 class PollingConfig:
-    """Configuration for a :class:`~orcapod.core.sources.PollingSource`.
+    """Configuration for a ``PollingSource``.
 
     Args:
         interval: Seconds between ``poll()`` calls, measured start-to-start.

@@ -76,9 +76,9 @@ class DynamicSourceProtocol(Protocol[T]):
         framework advances the cursor only after a successful fetch.
 
     Full-state invalidation:
-        Raise :exc:`~orcapod.errors.CursorInvalidatedError` from ``poll()``
-        or ``fetch()`` when previous state is no longer valid. This is a
-        terminal condition — ``PollingSource`` will close its channel cleanly.
+        Raise ``CursorInvalidatedError`` from ``poll()`` or ``fetch()`` when
+        previous state is no longer valid. This is a terminal condition —
+        ``PollingSource`` will close its channel cleanly.
 
     Example::
 
@@ -149,7 +149,7 @@ class DynamicSourceProtocol(Protocol[T]):
 
         Called on every termination path: normal duration expiry, pipeline
         cancellation, max error threshold exceeded, or
-        :exc:`~orcapod.errors.CursorInvalidatedError`. The framework
-        guarantees ``close()`` is awaited before the output channel is closed.
+        ``CursorInvalidatedError``. The framework guarantees ``close()`` is
+        awaited before the output channel is closed.
         """
         ...

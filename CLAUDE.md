@@ -55,6 +55,10 @@ import path doesn't work, create a proper re-export package with an `__init__.py
 Use [Google style](https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings)
 Python docstrings everywhere.
 
+**Never mix in ReST markup.** Do not use `:meth:`, `:class:`, `:exc:`, `:attr:`,
+`:func:`, or any other ReST cross-reference roles. Use plain ``backtick`` notation
+to refer to names (e.g. ``PollingSource``, ``iter_data``, ``CursorInvalidatedError``).
+
 ## Linear issue tracking
 
 All work must be linked to a Linear issue. Before starting any feature, bug fix, or
