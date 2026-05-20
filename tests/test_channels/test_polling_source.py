@@ -66,6 +66,30 @@ class TestPollingConfig:
         with pytest.raises((AttributeError, TypeError)):
             cfg.interval = 99.0  # type: ignore[misc]
 
+    def test_invalid_interval(self):
+        with pytest.raises(ValueError, match="interval"):
+            PollingConfig(interval=0.0)
+        with pytest.raises(ValueError, match="interval"):
+            PollingConfig(interval=-1.0)
+
+    def test_invalid_duration(self):
+        with pytest.raises(ValueError, match="duration"):
+            PollingConfig(duration=-1.0)
+
+    def test_invalid_max_missed_intervals(self):
+        with pytest.raises(ValueError, match="max_missed_intervals"):
+            PollingConfig(max_missed_intervals=0)
+
+    def test_invalid_max_consecutive_errors(self):
+        with pytest.raises(ValueError, match="max_consecutive_errors"):
+            PollingConfig(max_consecutive_errors=0)
+
+    def test_invalid_error_backoff_base(self):
+        with pytest.raises(ValueError, match="error_backoff_base"):
+            PollingConfig(error_backoff_base=0.0)
+        with pytest.raises(ValueError, match="error_backoff_base"):
+            PollingConfig(error_backoff_base=-0.5)
+
 
 class TestCursorInvalidatedError:
     def test_is_exception(self):
@@ -248,6 +272,25 @@ class FakeDynamicSource:
         self.close_called = True
 
 
+class NoArgSource:
+    """Minimal ``DynamicSourceProtocol`` impl with a no-argument constructor.
+
+    Used to test ``PollingSource.from_config`` reconstruction: the impl must
+    be importable and instantiable without arguments.
+    """
+
+    async def poll(self, cursor: Cursor[int] | None = None) -> bool:
+        return False
+
+    async def fetch(
+        self, cursor: Cursor[int] | None = None
+    ) -> tuple[Cursor[int], Any]:
+        return Cursor(value=0), []
+
+    async def close(self) -> None:
+        pass
+
+
 # ===========================================================================
 # Task 4: PollingSource sync mode tests
 # ===========================================================================
@@ -351,13 +394,23 @@ class TestPollingSourceSyncMode:
         fake = FakeDynamicSource(batches=[])
         src = PollingSource(
             fake, tag_columns="id", polling_config=PollingConfig(interval=1.0),
-            source_id="test_source"
         )
         # Should not raise even though no fetch has occurred
         ident = src.identity_structure()
-        assert "test_source" in str(ident)
+        # Identity encodes the impl class location and tag columns
+        assert "FakeDynamicSource" in str(ident)
+        assert "id" in str(ident)
 
-    def test_to_config_returns_non_reconstructable_descriptor(self):
+    def test_identity_differs_for_different_impl_classes(self):
+        """Different impl classes produce different identity structures."""
+        fake1 = FakeDynamicSource(batches=[])
+        fake2 = NoArgSource()
+        src1 = PollingSource(fake1, tag_columns="id", polling_config=PollingConfig(interval=1.0))
+        src2 = PollingSource(fake2, tag_columns="id", polling_config=PollingConfig(interval=1.0))
+        assert src1.identity_structure() != src2.identity_structure()
+
+    def test_to_config_includes_impl_location(self):
+        """to_config() serializes impl class module/qualname and polling config."""
         fake = FakeDynamicSource(batches=[])
         src = PollingSource(
             fake, tag_columns="id", polling_config=PollingConfig(),
@@ -366,10 +419,29 @@ class TestPollingSourceSyncMode:
         cfg = src.to_config()
         assert cfg["source_type"] == "polling_source"
         assert cfg["source_id"] == "my_source"
+        assert cfg["impl_module"] == FakeDynamicSource.__module__
+        assert cfg["impl_class"] == FakeDynamicSource.__qualname__
+        assert cfg["tag_columns"] == ["id"]
+        assert "polling_config" in cfg
+        assert cfg["polling_config"]["interval"] == 1.0
 
-    def test_from_config_raises(self):
-        with pytest.raises(NotImplementedError):
-            PollingSource.from_config({"source_type": "polling_source"})
+    def test_from_config_reconstructs_no_arg_impl(self):
+        """from_config() reconstructs a PollingSource when impl has a no-arg constructor."""
+        src = PollingSource(
+            NoArgSource(), tag_columns="id", polling_config=PollingConfig(interval=2.0),
+            source_id="recon_source"
+        )
+        cfg = src.to_config()
+        reconstructed = PollingSource.from_config(cfg)
+        assert isinstance(reconstructed, PollingSource)
+        assert reconstructed._tag_columns == ("id",)
+        assert reconstructed._polling_config.interval == 2.0
+        assert isinstance(reconstructed._impl, NoArgSource)
+
+    def test_from_config_raises_on_missing_impl_module(self):
+        """from_config() raises KeyError when impl_module is absent."""
+        with pytest.raises(KeyError):
+            PollingSource.from_config({"source_type": "polling_source", "tag_columns": ["id"]})
 
 
 # ===========================================================================
