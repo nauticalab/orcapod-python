@@ -528,3 +528,63 @@ class TestPipelineJobSerialization:
         # Load and verify topology
         loaded = PipelineJob.load(str(path))
         assert "adder" in loaded.pipeline.compiled_nodes
+
+    def test_load_version_mismatch_raises(self, store, tmp_path):
+        """PipelineJob.load() raises ValueError for an unsupported format version."""
+        import json
+        src_a, src_b = _make_two_sources()
+        job = PipelineJob(store=store)
+        with job:
+            Join()(src_a, src_b)
+        path = tmp_path / "job_bad.json"
+        job.save(str(path))
+        data = json.loads(path.read_text())
+        data["orcapod_pipeline_job_version"] = "99.0.0"
+        path.write_text(json.dumps(data))
+        with pytest.raises(ValueError, match="version"):
+            PipelineJob.load(str(path))
+
+    def test_load_before_run_has_run_false(self, store, tmp_path):
+        """Loaded job saved before run() has _has_run=False."""
+        src_a, src_b = _make_two_sources()
+        job = PipelineJob(store=store)
+        with job:
+            Join()(src_a, src_b)
+        path = tmp_path / "pending.json"
+        job.save(str(path))
+        loaded = PipelineJob.load(str(path), store=store)
+        assert loaded._has_run is False
+
+    def test_load_after_run_restores_has_run_true(self, store, tmp_path):
+        """Loaded job saved after run() has _has_run=True."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
+        job = PipelineJob(store=store)
+        with job:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+        completed = job.run()
+        path = tmp_path / "completed.json"
+        completed.save(str(path))
+        loaded = PipelineJob.load(str(path), store=store)
+        assert loaded._has_run is True
+
+    def test_load_after_partial_run_restores_unresolved_specs(self, store, tmp_path):
+        """Loaded job preserves unresolved_specs from a partial run."""
+        from orcapod.core.sources.source_spec import SourceSpec
+        src_a, src_b = _make_two_sources()
+        tag_b, data_b = src_b.output_schema()
+        spec_b = SourceSpec("unbound_b", tag_schema=tag_b, data_schema=data_b)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
+        job = PipelineJob(store=store)
+        with job:
+            joined = Join()(src_a, spec_b)
+            pod(joined, label="adder")
+        result = job.run()
+        assert "unbound_b" in result.unresolved_specs
+        path = tmp_path / "partial.json"
+        result.save(str(path))
+        loaded = PipelineJob.load(str(path), store=store)
+        assert "unbound_b" in loaded.unresolved_specs
