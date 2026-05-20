@@ -75,8 +75,8 @@ class TestPipelineJobRecording:
     def test_concrete_source_stored_in_sources(self, store):
         """Concrete sources from with-block are stored by label in job.sources."""
         src_a, src_b = _make_two_sources()
-        src_a._label = "source_a"
-        src_b._label = "source_b"
+        src_a.label = "source_a"
+        src_b.label = "source_b"
 
         job = PipelineJob(store=store)
         with job:
@@ -222,7 +222,7 @@ class TestPipelineJobCompleteness:
         src_a, src_b = _make_two_sources()
         job = PipelineJob(store=store)
         with job:
-            Join()(src_a, src_b)  # both auto-bound from labels
+            Join()(src_a, src_b)  # both auto-bound via content-hash-based spec names
 
         assert job.unbound_specs() == []
 
@@ -252,3 +252,51 @@ class TestPipelineJobCompleteness:
             Join()(src_a, spec_b)
 
         assert not job.is_complete()
+
+
+# ---------------------------------------------------------------------------
+# Tests: is_runnable and __repr__
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineJobIsRunnable:
+    def test_is_runnable_true_when_all_upstreams_bound(self, store):
+        """is_runnable returns True when all upstream SourceSpecs are bound."""
+        src_a, src_b = _make_two_sources()
+
+        job = PipelineJob(store=store)
+        with job:
+            Join()(src_a, src_b, label="joiner")
+
+        assert job.is_runnable("joiner")
+
+    def test_is_runnable_false_when_spec_unbound(self, store):
+        """is_runnable returns False when an upstream SourceSpec is unbound."""
+        src_a, src_b = _make_two_sources()
+        tag_b, data_b = src_b.output_schema()
+        spec_b = SourceSpec("spec_b", tag_schema=tag_b, data_schema=data_b)
+
+        job = PipelineJob(store=store)
+        with job:
+            Join()(src_a, spec_b, label="joiner")
+
+        assert not job.is_runnable("joiner")
+
+    def test_is_runnable_false_for_unknown_label(self, store):
+        """is_runnable returns False for a node label that doesn't exist."""
+        src_a, src_b = _make_two_sources()
+        job = PipelineJob(store=store)
+        with job:
+            Join()(src_a, src_b)
+
+        assert not job.is_runnable("nonexistent")
+
+    def test_repr_includes_class_name(self, store):
+        """repr() includes PipelineJob class name."""
+        src_a, src_b = _make_two_sources()
+        job = PipelineJob(store=store)
+        with job:
+            Join()(src_a, src_b)
+
+        r = repr(job)
+        assert "PipelineJob" in r
