@@ -133,7 +133,7 @@ Then add the following block **after** the existing `SchemaLike` alias (around l
 
 ```python
 T = TypeVar("T")
-"""Generic cursor value type for :class:`Cursor` and :class:`DynamicSourceProtocol`."""
+"""Generic cursor value type for ``Cursor`` and ``DynamicSourceProtocol``."""
 ```
 
 Then add the following block **at the end of `types.py`**, after the `ColumnInfo` class:
@@ -160,7 +160,7 @@ class Cursor(Generic[T]):
 
 @dataclass(frozen=True)
 class PollingConfig:
-    """Configuration for a :class:`~orcapod.core.sources.PollingSource`.
+    """Configuration for a ``PollingSource``.
 
     Args:
         interval: Seconds between ``poll()`` calls, measured start-to-start.
@@ -366,7 +366,7 @@ class DynamicSourceProtocol(Protocol[T]):
         framework advances the cursor only after a successful fetch.
 
     Full-state invalidation:
-        Raise :exc:`~orcapod.errors.CursorInvalidatedError` from ``poll()``
+        Raise ``CursorInvalidatedError`` from ``poll()``
         or ``fetch()`` when previous state is no longer valid. This is a
         terminal condition — ``PollingSource`` will close its channel cleanly.
 
@@ -439,7 +439,7 @@ class DynamicSourceProtocol(Protocol[T]):
 
         Called on every termination path: normal duration expiry, pipeline
         cancellation, max error threshold exceeded, or
-        :exc:`~orcapod.errors.CursorInvalidatedError`. The framework
+        ``CursorInvalidatedError``. The framework
         guarantees ``close()`` is awaited before the output channel is closed.
         """
         ...
@@ -596,9 +596,9 @@ with:
     ) -> AsyncIterator[tuple[TagProtocol, DataProtocol]]:
         """Async iterator over (tag, data) pairs.
 
-        Default implementation wraps :meth:`iter_data` as an async generator.
+        Default implementation wraps ``iter_data`` as an async generator.
         Subclasses override this to provide true async streaming behaviour
-        (e.g. :class:`~orcapod.core.sources.PollingSource`).
+        (e.g. ``PollingSource``).
         """
         for item in self.iter_data():
             yield item
@@ -617,8 +617,8 @@ In `src/orcapod/core/nodes/source_node.py`, replace the `async_execute` method (
     ) -> None:
         """Push all (tag, data) pairs from the wrapped stream to the output channel.
 
-        Delegates to :meth:`~orcapod.core.streams.base.StreamBase.async_iter_data`
-        so that dynamic sources (e.g. :class:`~orcapod.core.sources.PollingSource`)
+        Delegates to ``async_iter_data``
+        so that dynamic sources (e.g. ``PollingSource``)
         stream continuously without modification to this node.
 
         Args:
@@ -885,8 +885,8 @@ Expected: `ImportError` — `PollingSource` not yet defined.
 ```python
 """Protocol-based polling source for async pipelines.
 
-Provides :class:`PollingSource`, a :class:`~orcapod.core.sources.base.RootSource`
-that wraps a :class:`~orcapod.protocols.core_protocols.sources.DynamicSourceProtocol`
+Provides ``PollingSource``, a ``RootSource``
+that wraps a ``DynamicSourceProtocol``
 implementation. The framework handles scheduling, cursor tracking, cache management,
 error handling, and shutdown; the implementation only supplies ``poll``, ``fetch``,
 and ``close``.
@@ -956,7 +956,7 @@ def _run_sync(coro):
 class PollingSource(RootSource, Generic[T]):
     """A root source that continuously emits data via a polling loop.
 
-    Wraps a :class:`~orcapod.protocols.core_protocols.sources.DynamicSourceProtocol`
+    Wraps a ``DynamicSourceProtocol``
     implementation. Under async execution (``async_iter_data``), the framework
     polls on a fixed interval and yields new rows as they arrive. Under sync
     execution (``iter_data``), a single poll+fetch cycle is performed on each
@@ -1174,7 +1174,7 @@ class PollingSource(RootSource, Generic[T]):
         Pre-seeds from the cached stream (if any) before entering the polling
         loop. The loop runs until: the configured duration elapses, the maximum
         consecutive error or overrun threshold is exceeded, a
-        :exc:`~orcapod.errors.CursorInvalidatedError` is raised, or the task
+        ``CursorInvalidatedError`` is raised, or the task
         is cancelled.
 
         ``impl.close()`` is always awaited before returning.
