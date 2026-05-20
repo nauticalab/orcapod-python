@@ -74,6 +74,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         self._spec_by_name: dict[str, "SourceSpec"] = {}
         self._pipeline_name: tuple[str, ...] = (name,) if isinstance(name, str) else tuple(name)
         self._unresolved_specs: list[str] = []
+        self._has_run: bool = False
 
     # ------------------------------------------------------------------
     # Context manager — recording
@@ -621,6 +622,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
             sources=dict(self._sources),
         )
         result._unresolved_specs = unresolved_specs
+        result._has_run = True
         return result
 
     def __repr__(self) -> str:
@@ -631,3 +633,168 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
             f"PipelineJob(sources={n_sources}, store={has_store}, "
             f"pipeline={'compiled' if has_pipeline else 'unrecorded'})"
         )
+
+    # ------------------------------------------------------------------
+    # save() / load()
+    # ------------------------------------------------------------------
+
+    def save(self, path: "str | Path") -> None:
+        """Serialize this job to a JSON file.
+
+        Saves topology (via the embedded Pipeline) plus bindings metadata and
+        run state. The format covers both "template" (pre-run) and
+        "completed" (post-run) states — distinguished by ``run.status``.
+
+        Args:
+            path: File path to write JSON output to.
+
+        Raises:
+            ValueError: If no compiled pipeline exists.
+        """
+        import json as _json
+        import os
+        import tempfile
+        from pathlib import Path as _Path
+
+        from orcapod.pipeline.serialization import PIPELINE_JOB_FORMAT_VERSION
+
+        pipeline = self._compiled_pipeline
+        if pipeline is None:
+            raise ValueError("No compiled pipeline to save.")
+
+        path = _Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Save the pipeline blueprint inline via a temporary file
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as tmp:
+            tmp_path = tmp.name
+        try:
+            pipeline.save(tmp_path)
+            with open(tmp_path) as f:
+                pipeline_data = _json.load(f)
+        finally:
+            os.unlink(tmp_path)
+
+        # Serialize source configs (best-effort — skip non-reconstructable sources)
+        sources_block: dict[str, Any] = {}
+        for spec_name, source in self._sources.items():
+            if hasattr(source, "to_config"):
+                sources_block[spec_name] = source.to_config()
+            else:
+                sources_block[spec_name] = {"source_type": "unknown"}
+
+        # Store config (best-effort)
+        store_block = None
+        if self._store is not None and hasattr(self._store, "to_config"):
+            store_block = self._store.to_config()
+
+        status = "complete" if self._has_run else "pending"
+
+        output: dict[str, Any] = {
+            "orcapod_pipeline_job_version": PIPELINE_JOB_FORMAT_VERSION,
+            "run": {
+                "run_id": getattr(self, "_run_id", None),
+                "status": status,
+                "unresolved_specs": list(self._unresolved_specs),
+            },
+            "pipeline": pipeline_data,
+            "bindings": {
+                "sources": sources_block,
+                "store": store_block,
+            },
+        }
+
+        with open(path, "w") as f:
+            _json.dump(output, f, indent=2)
+
+    @classmethod
+    def load(
+        cls,
+        path: "str | Path",
+        store: "ArrowDatabaseProtocol | None" = None,
+    ) -> "PipelineJob":
+        """Deserialize a ``PipelineJob`` from a JSON file.
+
+        The embedded ``Pipeline`` blueprint is always restored. Concrete source
+        bindings are restored for reconstructable source types. Pass *store*
+        explicitly to override any serialized store configuration.
+
+        Args:
+            path: Path to the JSON file produced by :meth:`save`.
+            store: Optional store override. When provided, takes precedence
+                over any store configuration in the file.
+
+        Returns:
+            A ``PipelineJob`` ready to run (call ``bind()`` if sources are
+            missing).
+
+        Raises:
+            ValueError: If the file's format version is unsupported.
+        """
+        import json as _json
+        import os
+        import tempfile
+        from pathlib import Path as _Path
+
+        from orcapod.pipeline.graph import Pipeline
+        from orcapod.pipeline.serialization import (
+            SUPPORTED_JOB_FORMAT_VERSIONS,
+            resolve_source_from_config,
+        )
+
+        path = _Path(path)
+        with open(path) as f:
+            data = _json.load(f)
+
+        version = data.get("orcapod_pipeline_job_version", "")
+        if version not in SUPPORTED_JOB_FORMAT_VERSIONS:
+            raise ValueError(
+                f"Unsupported PipelineJob format version {version!r}. "
+                f"Supported: {sorted(SUPPORTED_JOB_FORMAT_VERSIONS)}"
+            )
+
+        # Reconstruct pipeline from embedded blueprint data
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w") as tmp:
+            tmp_path = tmp.name
+            _json.dump(data["pipeline"], tmp)
+        try:
+            pipeline = Pipeline.load(tmp_path)
+        finally:
+            os.unlink(tmp_path)
+
+        # Reconstruct sources (best-effort)
+        sources: dict[str, cp.StreamProtocol] = {}
+        for spec_name, src_config in data.get("bindings", {}).get("sources", {}).items():
+            try:
+                source = resolve_source_from_config(src_config)
+                if source is not None:
+                    sources[spec_name] = source
+            except Exception:
+                logger.warning(
+                    "Could not reconstruct source %r from config — skipping.", spec_name
+                )
+
+        # Reconstruct store
+        effective_store = store
+        if effective_store is None:
+            store_config = data.get("bindings", {}).get("store")
+            if store_config:
+                try:
+                    from orcapod.pipeline.serialization import resolve_database_from_config
+                    effective_store = resolve_database_from_config(store_config)
+                except Exception:
+                    logger.warning("Could not reconstruct store from config — skipping.")
+
+        job = cls(
+            store=effective_store,
+            _pipeline=pipeline,
+            sources=sources,
+        )
+
+        # Restore run metadata
+        run_block = data.get("run", {})
+        if run_block.get("status") == "complete":
+            job._has_run = True
+            job._unresolved_specs = run_block.get("unresolved_specs", [])
+
+        return job

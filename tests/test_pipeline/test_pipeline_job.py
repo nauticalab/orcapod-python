@@ -453,3 +453,78 @@ class TestPipelineJobEndToEnd:
         table = job.pipeline.compiled_nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]
+
+
+class TestPipelineJobSerialization:
+    def test_save_creates_file(self, store, tmp_path):
+        src_a, src_b = _make_two_sources()
+        job = PipelineJob(store=store)
+        with job:
+            Join()(src_a, src_b)
+
+        path = tmp_path / "job.json"
+        job.save(str(path))
+        assert path.exists()
+
+    def test_save_has_version(self, store, tmp_path):
+        import json
+        src_a, src_b = _make_two_sources()
+        job = PipelineJob(store=store)
+        with job:
+            Join()(src_a, src_b)
+
+        path = tmp_path / "job.json"
+        job.save(str(path))
+        data = json.loads(path.read_text())
+        assert data["orcapod_pipeline_job_version"] == "0.1.0"
+
+    def test_save_includes_run_block(self, store, tmp_path):
+        """Unsaved template has status=pending and null run fields."""
+        import json
+        src_a, src_b = _make_two_sources()
+        job = PipelineJob(store=store)
+        with job:
+            Join()(src_a, src_b)
+
+        path = tmp_path / "job.json"
+        job.save(str(path))
+        data = json.loads(path.read_text())
+        assert data["run"]["status"] == "pending"
+        assert data["run"]["run_id"] is None
+
+    def test_load_roundtrip_restores_pipeline(self, store, tmp_path):
+        """load() restores the pipeline topology."""
+        src_a, src_b = _make_two_sources()
+        job = PipelineJob(store=store)
+        with job:
+            Join()(src_a, src_b, label="joiner")
+
+        path = tmp_path / "job.json"
+        job.save(str(path))
+        loaded = PipelineJob.load(str(path))
+
+        assert "joiner" in loaded.pipeline.compiled_nodes
+
+    def test_load_roundtrip_after_run(self, store, tmp_path):
+        """Save after run() → load → pipeline topology and run status preserved."""
+        import json
+        src_a, src_b = _make_two_sources()
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
+
+        job = PipelineJob(store=store)
+        with job:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        completed = job.run()
+        path = tmp_path / "completed.json"
+        completed.save(str(path))
+
+        # Verify the file has correct status
+        data = json.loads(path.read_text())
+        assert data["run"]["status"] == "complete"
+
+        # Load and verify topology
+        loaded = PipelineJob.load(str(path))
+        assert "adder" in loaded.pipeline.compiled_nodes
