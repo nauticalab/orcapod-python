@@ -296,6 +296,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
             merged_sources.update(sources)
 
         return PipelineJob(
+            name=self._pipeline_name,
             store=store if store is not None else self._store,
             execution_context=execution_context if execution_context is not None else self._execution_context,
             _pipeline=self._compiled_pipeline,
