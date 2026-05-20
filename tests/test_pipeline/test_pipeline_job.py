@@ -360,15 +360,17 @@ class TestPipelineJobRun:
         assert "spec_b" in result.unresolved_specs
 
     def test_run_is_non_mutating(self, store):
-        """run() returns a new PipelineJob; original is unchanged."""
+        """run() returns a new PipelineJob; original job object is not the same."""
         src_a, src_b = _make_two_sources()
 
         job = PipelineJob(store=store)
         with job:
-            Join()(src_a, src_b)
+            Join()(src_a, src_b, label="joiner")
 
         result = job.run()
         assert result is not job
+        # The returned job shares the same pipeline (compilation is reused)
+        assert result.pipeline is job.pipeline
 
     def test_run_requires_store(self):
         """run() without a store raises ValueError."""
@@ -380,6 +382,24 @@ class TestPipelineJobRun:
 
         with pytest.raises(ValueError, match="store"):
             job.run()
+
+    def test_run_twice_is_safe(self, store):
+        """Calling run() twice on the same job does not raise."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
+
+        job = PipelineJob(store=store)
+        with job:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        job.run()
+        job.run()  # second run should not raise
+
+        table = job.pipeline.compiled_nodes["adder"].as_table()
+        totals = sorted(cast(list[int], table.column("total").to_pylist()))
+        assert totals == [110, 220]
 
 
 class TestPipelineJobEndToEnd:
