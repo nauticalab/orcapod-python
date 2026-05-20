@@ -239,11 +239,6 @@ class PollingSource(RootSource, Generic[T]):
             return None
         return self._build_stream_from_df(df)
 
-    def _build_stream(self, data: FrameInitTypes) -> ArrowTableStream:
-        """Build an ``ArrowTableStream`` from raw ``FrameInitTypes`` data."""
-        df = pl.DataFrame(data)
-        return self._build_stream_from_df(df)
-
     def _build_stream_from_df(self, df: pl.DataFrame) -> ArrowTableStream:
         """Build an ``ArrowTableStream`` from a Polars DataFrame."""
         from orcapod.core.streams.arrow_table_stream import ArrowTableStream
