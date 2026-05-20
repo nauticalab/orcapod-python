@@ -305,9 +305,9 @@ class SourceNode(StreamBase):
     ) -> None:
         """Push all (tag, data) pairs from the wrapped stream to the output channel.
 
-        Delegates to :meth:`~orcapod.core.streams.base.StreamBase.async_iter_data`
-        so that dynamic sources (e.g. :class:`~orcapod.core.sources.PollingSource`)
-        stream continuously without modification to this node.
+        Delegates to ``async_iter_data`` so that dynamic sources
+        (e.g. ``PollingSource``) stream continuously without modification
+        to this node.
 
         Args:
             output: Channel to write results to.

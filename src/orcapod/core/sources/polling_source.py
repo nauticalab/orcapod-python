@@ -1,10 +1,9 @@
 """Protocol-based polling source for async pipelines.
 
-Provides :class:`PollingSource`, a :class:`~orcapod.core.sources.base.RootSource`
-that wraps a :class:`~orcapod.protocols.core_protocols.sources.DynamicSourceProtocol`
-implementation. The framework handles scheduling, cursor tracking, cache management,
-error handling, and shutdown; the implementation only supplies ``poll``, ``fetch``,
-and ``close``.
+Provides ``PollingSource``, a ``RootSource`` that wraps a
+``DynamicSourceProtocol`` implementation. The framework handles scheduling,
+cursor tracking, cache management, error handling, and shutdown; the
+implementation only supplies ``poll``, ``fetch``, and ``close``.
 """
 from __future__ import annotations
 
@@ -71,8 +70,8 @@ def _run_sync(coro):
 class PollingSource(RootSource, Generic[T]):
     """A root source that continuously emits data via a polling loop.
 
-    Wraps a :class:`~orcapod.protocols.core_protocols.sources.DynamicSourceProtocol`
-    implementation. Under async execution (``async_iter_data``), the framework
+    Wraps a ``DynamicSourceProtocol`` implementation. Under async execution
+    (``async_iter_data``), the framework
     polls on a fixed interval and yields new rows as they arrive. Under sync
     execution (``iter_data``), a single poll+fetch cycle is performed on each
     access and results are served from an accumulated in-memory cache.
@@ -312,9 +311,8 @@ class PollingSource(RootSource, Generic[T]):
 
         Pre-seeds from the cached stream (if any) before entering the polling
         loop. The loop runs until: the configured duration elapses, the maximum
-        consecutive error or overrun threshold is exceeded, a
-        :exc:`~orcapod.errors.CursorInvalidatedError` is raised, or the task
-        is cancelled.
+        consecutive error or overrun threshold is exceeded,
+        ``CursorInvalidatedError`` is raised, or the task is cancelled.
 
         ``impl.close()`` is always awaited before returning.
         """
