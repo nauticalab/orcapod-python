@@ -160,6 +160,33 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
     # TrackerProtocol — recording with source interception
     # ------------------------------------------------------------------
 
+    def _to_spec_stream(self, stream: cp.StreamProtocol) -> cp.StreamProtocol:
+        """Convert *stream* to a spec-based equivalent for consistent hash recording.
+
+        Concrete ``RootSource`` instances are promoted to ``SourceSpec`` via
+        ``_ensure_spec``. ``DynamicPodStream`` instances have their upstreams
+        recursively converted so that their content hash matches the
+        ``OperatorNode`` recorded in ``_rec_node_lut``.
+
+        Args:
+            stream: The upstream stream to convert.
+
+        Returns:
+            A spec-based stream with a stable hash for recording.
+        """
+        from orcapod.core.operators.static_output_pod import DynamicPodStream
+
+        if self._is_concrete_source(stream):
+            return self._ensure_spec(stream)
+        if isinstance(stream, DynamicPodStream):
+            spec_upstreams = tuple(self._to_spec_stream(s) for s in stream.upstreams)
+            return DynamicPodStream(
+                pod=stream._pod,
+                upstreams=spec_upstreams,
+                label=stream._label,
+            )
+        return stream
+
     def record_function_pod_invocation(
         self,
         pod: cp.FunctionPodProtocol,
@@ -175,8 +202,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         """
         from orcapod.core.nodes import FunctionNode
 
-        if self._is_concrete_source(input_stream):
-            input_stream = self._ensure_spec(input_stream)
+        input_stream = self._to_spec_stream(input_stream)
 
         input_hash = input_stream.content_hash().to_string()
         function_node = FunctionNode(function_pod=pod, input_stream=input_stream, label=label)
@@ -201,10 +227,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         """
         from orcapod.core.nodes import OperatorNode
 
-        processed = tuple(
-            self._ensure_spec(s) if self._is_concrete_source(s) else s
-            for s in upstreams
-        )
+        processed = tuple(self._to_spec_stream(s) for s in upstreams)
 
         operator_node = OperatorNode(operator=pod, input_streams=processed, label=label)
         op_hash = operator_node.content_hash().to_string()
@@ -374,6 +397,220 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
             ):
                 return False
         return True
+
+    # ------------------------------------------------------------------
+    # unresolved_specs property
+    # ------------------------------------------------------------------
+
+    @property
+    def unresolved_specs(self) -> list[str]:
+        """Spec names that were unbound at run time (excluded from execution).
+
+        Returns:
+            List of unbound SourceSpec names from the most recent run.
+            Empty list if run() has not been called or all specs were bound.
+        """
+        return list(getattr(self, "_unresolved_specs", []))
+
+    # ------------------------------------------------------------------
+    # _build_execution_graph
+    # ------------------------------------------------------------------
+
+    def _build_execution_graph(self) -> "tuple[Any, list[str]]":
+        """Build a fresh execution-ready graph with concrete sources substituted.
+
+        Creates new SourceNode/FunctionNode/OperatorNode objects — does NOT
+        mutate the existing node objects in ``pipeline._persistent_node_map``.
+        Updates ``pipeline._nodes`` with the fresh exec nodes after building.
+
+        Returns:
+            Tuple of (exec_graph, unresolved_spec_names).
+
+        Raises:
+            ValueError: If ``self.store`` is ``None``.
+            RuntimeError: If no compiled pipeline is available.
+        """
+        import networkx as nx
+        from orcapod.core.nodes import FunctionNode, OperatorNode, SourceNode
+        from orcapod.core.sources.source_spec import SourceSpec
+        from orcapod.core.executors.local import LocalPythonFunctionExecutor
+
+        pipeline = self._compiled_pipeline
+        if pipeline is None:
+            raise RuntimeError("No compiled pipeline — use 'with job:' first.")
+
+        store = self._store
+        if store is None:
+            raise ValueError(
+                "PipelineJob.run() requires a store. "
+                "Call job.bind(store=db) before run()."
+            )
+
+        pipeline_db = store.at(*pipeline.name)
+        result_db = pipeline_db.at("_result")
+
+        # Build topological graph from hash-based edges
+        G: "nx.DiGraph" = nx.DiGraph()
+        for edge in pipeline._graph_edges:
+            G.add_edge(*edge)
+        # Also add isolated nodes that might not appear in edges
+        for node_hash in list(pipeline._node_lut.keys()) + list(pipeline._upstreams.keys()):
+            if node_hash not in G:
+                G.add_node(node_hash)
+
+        exec_node_map: dict[str, "Any"] = {}
+        excluded_hashes: set[str] = set()
+        unresolved_specs: list[str] = []
+
+        for node_hash in nx.topological_sort(G):
+            if node_hash in excluded_hashes:
+                continue
+
+            if node_hash not in pipeline._node_lut:
+                # Leaf stream — must be in _upstreams
+                stream = pipeline._upstreams.get(node_hash)
+                if stream is None:
+                    continue
+                if isinstance(stream, SourceSpec):
+                    if stream.name in self._sources:
+                        # Bound — use concrete source
+                        exec_node_map[node_hash] = SourceNode(
+                            stream=self._sources[stream.name]
+                        )
+                    else:
+                        # Unbound — exclude this branch
+                        excluded_hashes.add(node_hash)
+                        if stream.name not in unresolved_specs:
+                            unresolved_specs.append(stream.name)
+                else:
+                    exec_node_map[node_hash] = SourceNode(stream=stream)
+            else:
+                template = pipeline._node_lut[node_hash]
+                preds = list(G.predecessors(node_hash))
+
+                if any(p in excluded_hashes for p in preds):
+                    excluded_hashes.add(node_hash)
+                    continue
+
+                if isinstance(template, FunctionNode):
+                    if not preds:
+                        excluded_hashes.add(node_hash)
+                        continue
+                    input_node = exec_node_map[preds[0]]
+                    new_fn = FunctionNode(
+                        function_pod=template._function_pod,
+                        input_stream=input_node,
+                        label=template._label,
+                    )
+                    new_fn.attach_databases(
+                        pipeline_database=pipeline_db,
+                        result_database=result_db,
+                    )
+                    if template.executor is not None:
+                        new_fn.executor = template.executor
+                    else:
+                        new_fn.executor = LocalPythonFunctionExecutor()
+                    exec_node_map[node_hash] = new_fn
+
+                elif isinstance(template, OperatorNode):
+                    upstream_nodes = tuple(
+                        exec_node_map[p] for p in preds if p in exec_node_map
+                    )
+                    new_op = OperatorNode(
+                        operator=template._operator,
+                        input_streams=upstream_nodes,
+                        label=template._label,
+                    )
+                    new_op.attach_databases(pipeline_database=pipeline_db)
+                    exec_node_map[node_hash] = new_op
+
+        # Build execution DiGraph with node objects as vertices
+        exec_graph: "nx.DiGraph" = nx.DiGraph()
+        for up_hash, down_hash in pipeline._graph_edges:
+            if up_hash in exec_node_map and down_hash in exec_node_map:
+                exec_graph.add_edge(exec_node_map[up_hash], exec_node_map[down_hash])
+        for node in exec_node_map.values():
+            if node not in exec_graph:
+                exec_graph.add_node(node)
+
+        # Update pipeline._nodes with fresh exec nodes (keyed by label)
+        # This allows job.pipeline.compiled_nodes["adder"] to return the exec node
+        for node in exec_node_map.values():
+            if hasattr(node, "_label") and node._label:
+                pipeline._nodes[node._label] = node
+
+        return exec_graph, unresolved_specs
+
+    # ------------------------------------------------------------------
+    # run()
+    # ------------------------------------------------------------------
+
+    def run(
+        self,
+        observer: "ExecutionObserverProtocol | None" = None,
+    ) -> "PipelineJob":
+        """Execute the resolvable subgraph.
+
+        Nodes whose upstream includes an unbound SourceSpec (and all their
+        dependents) are excluded from execution. Partial execution is a
+        first-class outcome — excluded spec names are recorded in the
+        returned job's ``unresolved_specs``.
+
+        After a successful run, ``job.pipeline.compiled_nodes`` returns the
+        execution-ready nodes with databases attached.
+
+        Args:
+            observer: Optional execution observer.
+
+        Returns:
+            A new ``PipelineJob`` with run metadata populated.
+
+        Raises:
+            ValueError: If no store is set.
+            RuntimeError: If no pipeline has been recorded.
+        """
+        import hashlib
+
+        from orcapod.pipeline.observer import NoOpObserver
+        from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
+
+        exec_graph, unresolved_specs = self._build_execution_graph()
+
+        effective_observer = observer or NoOpObserver()
+
+        # Compute snapshot hash for run URI
+        node_strs = sorted(
+            str(n.content_hash().to_string())
+            for n in exec_graph.nodes()
+            if hasattr(n, "content_hash")
+        )
+        snapshot_hash = hashlib.sha256("\n".join(node_strs).encode()).hexdigest()[:16]
+        pipeline_uri = "/".join(self._compiled_pipeline.name) + "@" + snapshot_hash
+
+        SyncPipelineOrchestrator().run(
+            exec_graph,
+            observer=effective_observer,
+            pipeline_uri=pipeline_uri,
+        )
+
+        # Flush databases
+        store = self._store
+        if store is not None:
+            pipeline_db = store.at(*self._compiled_pipeline.name)
+            result_db = pipeline_db.at("_result")
+            pipeline_db.flush()
+            result_db.flush()
+
+        # Return new job (different object); shares same compiled pipeline
+        result = PipelineJob(
+            name=self._pipeline_name,
+            store=self._store,
+            execution_context=self._execution_context,
+            _pipeline=self._compiled_pipeline,
+            sources=dict(self._sources),
+        )
+        result._unresolved_specs = unresolved_specs
+        return result
 
     def __repr__(self) -> str:
         n_sources = len(self._sources)

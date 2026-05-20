@@ -300,3 +300,136 @@ class TestPipelineJobIsRunnable:
 
         r = repr(job)
         assert "PipelineJob" in r
+
+
+# ---------------------------------------------------------------------------
+# Tests: PipelineJob.run()
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineJobRun:
+    def test_run_executes_all_nodes(self, store):
+        """run() executes all nodes when all specs are bound."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
+
+        job = PipelineJob(store=store)
+        with job:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        job.run()
+
+        node = job.pipeline.compiled_nodes["adder"]
+        records = node.get_all_records()
+        assert records is not None
+        assert records.num_rows == 2
+
+    def test_run_produces_correct_values(self, store):
+        src_a, src_b = _make_two_sources()
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
+
+        job = PipelineJob(store=store)
+        with job:
+            joined = Join()(src_a, src_b, label="joiner")
+            pod(joined, label="adder")
+
+        job.run()
+
+        table = job.pipeline.compiled_nodes["adder"].as_table()
+        totals = sorted(cast(list[int], table.column("total").to_pylist()))
+        assert totals == [110, 220]  # a: 10+100, b: 20+200
+
+    def test_run_partial_execution_skips_unbound_subgraph(self, store):
+        """Nodes with unbound upstream SourceSpecs are excluded from execution."""
+        src_a, src_b = _make_two_sources()
+        tag_b, data_b = src_b.output_schema()
+        spec_b = SourceSpec("spec_b", tag_schema=tag_b, data_schema=data_b)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
+
+        job = PipelineJob(store=store)
+        with job:
+            joined = Join()(src_a, spec_b)
+            pod(joined, label="adder")
+
+        result = job.run()
+        # Unresolved specs should be reported
+        assert "spec_b" in result.unresolved_specs
+
+    def test_run_is_non_mutating(self, store):
+        """run() returns a new PipelineJob; original is unchanged."""
+        src_a, src_b = _make_two_sources()
+
+        job = PipelineJob(store=store)
+        with job:
+            Join()(src_a, src_b)
+
+        result = job.run()
+        assert result is not job
+
+    def test_run_requires_store(self):
+        """run() without a store raises ValueError."""
+        src_a, src_b = _make_two_sources()
+
+        job = PipelineJob()  # no store
+        with job:
+            Join()(src_a, src_b)
+
+        with pytest.raises(ValueError, match="store"):
+            job.run()
+
+
+class TestPipelineJobEndToEnd:
+    def test_end_to_end_source_join_function(self, store):
+        """Two sources → Join → FunctionPod all execute correctly."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
+
+        job = PipelineJob(store=store)
+        with job:
+            joined = Join()(src_a, src_b, label="joiner")
+            pod(joined, label="adder")
+
+        assert isinstance(job.pipeline.compiled_nodes["joiner"], OperatorNode)
+        assert isinstance(job.pipeline.compiled_nodes["adder"], FunctionNode)
+
+        job.run()
+
+        fn_records = job.pipeline.compiled_nodes["adder"].get_all_records()
+        assert fn_records is not None
+        assert fn_records.num_rows == 2
+
+        table = job.pipeline.compiled_nodes["adder"].as_table()
+        totals = sorted(cast(list[int], table.column("total").to_pylist()))
+        assert totals == [110, 220]
+
+    def test_bind_then_run(self, store):
+        """Pipeline.bind() + job.run() produces correct results."""
+        from orcapod.pipeline.graph import Pipeline
+
+        src_a, src_b = _make_two_sources()
+        tag_a, data_a = src_a.output_schema()
+        tag_b, data_b = src_b.output_schema()
+        spec_a = SourceSpec("src_a", tag_schema=tag_a, data_schema=data_a)
+        spec_b = SourceSpec("src_b", tag_schema=tag_b, data_schema=data_b)
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
+
+        pipeline = Pipeline(name="bp")
+        with pipeline:
+            joined = Join()(spec_a, spec_b)
+            pod(joined, label="adder")
+
+        job = pipeline.bind(
+            sources={"src_a": src_a, "src_b": src_b},
+            store=store,
+        )
+        job.run()
+
+        table = job.pipeline.compiled_nodes["adder"].as_table()
+        totals = sorted(cast(list[int], table.column("total").to_pylist()))
+        assert totals == [110, 220]
