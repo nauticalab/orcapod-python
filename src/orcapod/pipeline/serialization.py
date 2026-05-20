@@ -824,3 +824,10 @@ _BUILTIN_TYPE_MAP: dict[str, type] = {
     "<class 'bool'>": bool,
     "<class 'bytes'>": bytes,
 }
+
+# ---------------------------------------------------------------------------
+# PipelineJob format version
+# ---------------------------------------------------------------------------
+
+PIPELINE_JOB_FORMAT_VERSION = "0.1.0"
+SUPPORTED_JOB_FORMAT_VERSIONS = frozenset({"0.1.0"})
