@@ -558,10 +558,9 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
                         input_streams=upstream_nodes,
                         label=template._label,
                     )
-                    from orcapod.core.nodes.operator_node import CacheMode
                     new_op.attach_databases(
                         pipeline_database=pipeline_db,
-                        cache_mode=CacheMode.LOG,
+                        cache_mode=template._cache_mode,
                     )
                     exec_node_map[node_hash] = new_op
 
@@ -831,6 +830,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
                     logger.warning("Could not reconstruct store from config — skipping.")
 
         job = cls(
+            name=pipeline.name,
             store=effective_store,
             _pipeline=pipeline,
             sources=sources,

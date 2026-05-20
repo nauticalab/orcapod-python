@@ -198,6 +198,25 @@ class TestPipelineJobBind:
         assert isinstance(job, PipelineJob)
         assert job.pipeline is pipeline
 
+    def test_pipeline_bind_propagates_name(self, store):
+        """Pipeline.bind() must propagate the pipeline's name to the job."""
+        from orcapod.pipeline.graph import Pipeline
+
+        src_a, src_b = _make_two_sources()
+        tag_a, data_a = src_a.output_schema()
+        tag_b, data_b = src_b.output_schema()
+        spec_a = SourceSpec("a", tag_schema=tag_a, data_schema=data_a)
+        spec_b = SourceSpec("b", tag_schema=tag_b, data_schema=data_b)
+
+        pipeline = Pipeline(name="my_pipeline")
+        with pipeline:
+            Join()(spec_a, spec_b)
+
+        job = pipeline.bind(sources={"a": src_a, "b": src_b}, store=store)
+        assert job._pipeline_name == ("my_pipeline",), (
+            "PipelineJob._pipeline_name should match Pipeline.name after bind()"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Tests: completeness
@@ -374,6 +393,38 @@ class TestPipelineJobRun:
         assert result.pipeline is not job.pipeline
         # The original job's pipeline remains unmodified (no exec nodes injected)
         assert job._has_run is False
+
+    def test_run_does_not_mutate_blueprint_nodes(self, store):
+        """_build_execution_graph() must not mutate the original pipeline's _nodes.
+
+        The pipeline blueprint is a shared, reusable object. Running one job must
+        not replace blueprint template nodes with live exec nodes — that would break
+        subsequent jobs (and ``Pipeline.bind()`` callers) that share the same pipeline.
+        """
+        src_a, src_b = _make_two_sources()
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
+
+        job = PipelineJob(store=store)
+        with job:
+            joined = Join()(src_a, src_b, label="joiner")
+            pod(joined, label="adder")
+
+        blueprint = job.pipeline
+        # Capture the identity of each template node before running
+        blueprint_node_ids_before = {
+            label: id(node) for label, node in blueprint._nodes.items()
+        }
+
+        job.run()
+
+        # Blueprint _nodes must still point to the exact same objects
+        blueprint_node_ids_after = {
+            label: id(node) for label, node in blueprint._nodes.items()
+        }
+        assert blueprint_node_ids_before == blueprint_node_ids_after, (
+            "run() mutated blueprint._nodes — exec nodes replaced template nodes"
+        )
 
     def test_run_requires_store(self):
         """run() without a store raises ValueError."""
@@ -568,6 +619,25 @@ class TestPipelineJobSerialization:
         completed.save(str(path))
         loaded = PipelineJob.load(str(path), store=store)
         assert loaded._has_run is True
+
+    def test_load_restores_pipeline_name(self, store, tmp_path):
+        """PipelineJob.load() must restore _pipeline_name from the blueprint."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
+
+        job = PipelineJob(name="named_pipeline", store=store)
+        with job:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        path = tmp_path / "named.json"
+        job.save(str(path))
+        loaded = PipelineJob.load(str(path), store=store)
+
+        assert loaded._pipeline_name == ("named_pipeline",), (
+            "PipelineJob.load() should restore _pipeline_name from the saved pipeline name"
+        )
 
     def test_load_after_partial_run_restores_unresolved_specs(self, store, tmp_path):
         """Loaded job preserves unresolved_specs from a partial run."""

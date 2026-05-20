@@ -332,6 +332,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         from orcapod.pipeline.job import PipelineJob
 
         return PipelineJob(
+            name=self._name,
             _pipeline=self,
             sources=sources or {},
             store=store,
