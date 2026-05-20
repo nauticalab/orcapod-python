@@ -162,6 +162,7 @@ class TestAsyncIterDataDefault:
 
         assert len(async_items) == 3
         assert len(async_items) == len(sync_items)
+        assert async_items == sync_items
 
     @pytest.mark.asyncio
     async def test_source_node_async_execute_uses_async_iter(self):
