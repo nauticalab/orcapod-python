@@ -25,6 +25,7 @@ from orcapod.core.nodes import (
 from orcapod.core.operators import Join, MapData
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
+from orcapod.core.sources.source_spec import SourceSpec
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import Pipeline
 from orcapod.protocols.core_protocols import DataFunctionProtocol, DataProtocol
@@ -71,6 +72,69 @@ def pipeline_db():
 @pytest.fixture
 def function_db():
     return InMemoryArrowDatabase()
+
+
+# ---------------------------------------------------------------------------
+# Tests: SourceSpec enforcement (Task 4)
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineSourceSpecEnforcement:
+    def test_pipeline_no_database_params(self):
+        """New Pipeline() takes only name (no pipeline_database)."""
+        pipeline = Pipeline(name="test")
+        with pipeline:
+            pass
+        assert pipeline._compiled
+
+    def test_pipeline_with_spec_leaves_compiles(self):
+        """Pipeline with SourceSpec leaves compiles without error."""
+        src_a, src_b = _make_two_sources()
+        tag_a, data_a = src_a.output_schema()
+        tag_b, data_b = src_b.output_schema()
+        spec_a = SourceSpec("input_a", tag_schema=tag_a, data_schema=data_a)
+        spec_b = SourceSpec("input_b", tag_schema=tag_b, data_schema=data_b)
+
+        pipeline = Pipeline(name="spec_pipe")
+        with pipeline:
+            Join()(spec_a, spec_b)
+
+        assert pipeline._compiled
+        source_nodes = [
+            n for n in pipeline._node_graph.nodes() if isinstance(n, SourceNode)
+        ]
+        assert len(source_nodes) == 2
+
+    def test_pipeline_with_concrete_leaf_raises(self):
+        """Pipeline.compile() raises ValueError if any leaf is not a SourceSpec."""
+        src_a, src_b = _make_two_sources()
+
+        pipeline = Pipeline(name="bad_pipe")
+        with pytest.raises(ValueError, match="SourceSpec"):
+            with pipeline:
+                Join()(src_a, src_b)
+
+    @pytest.mark.skip(reason="PipelineJob not yet implemented — enabled in Task 6")
+    def test_pipeline_bind_returns_pipeline_job(self):
+        """Pipeline.bind() returns a PipelineJob without modifying the pipeline."""
+        from orcapod.pipeline.job import PipelineJob
+
+        src_a, src_b = _make_two_sources()
+        tag_a, data_a = src_a.output_schema()
+        tag_b, data_b = src_b.output_schema()
+        spec_a = SourceSpec("a", tag_schema=tag_a, data_schema=data_a)
+        spec_b = SourceSpec("b", tag_schema=tag_b, data_schema=data_b)
+
+        pipeline = Pipeline(name="p")
+        with pipeline:
+            Join()(spec_a, spec_b)
+
+        db = InMemoryArrowDatabase()
+        job = pipeline.bind(sources={"a": src_a, "b": src_b}, store=db)
+
+        assert isinstance(job, PipelineJob)
+        assert job.pipeline is pipeline
+        assert job.store is db
 
 
 # ---------------------------------------------------------------------------
