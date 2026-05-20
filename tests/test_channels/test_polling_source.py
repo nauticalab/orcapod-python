@@ -67,3 +67,60 @@ class TestCursorInvalidatedError:
         e = CursorInvalidatedError("state lost")
         assert isinstance(e, Exception)
         assert "state lost" in str(e)
+
+
+# ===========================================================================
+# Task 2: DynamicSourceProtocol conformance
+# ===========================================================================
+
+
+from orcapod.protocols.core_protocols.sources import DynamicSourceProtocol
+
+
+class _MinimalImpl:
+    """Minimal protocol-conformant implementation for isinstance checks."""
+
+    async def poll(self, cursor: Cursor[int] | None = None) -> bool:
+        return False
+
+    async def fetch(self, cursor: Cursor[int] | None = None) -> tuple[Cursor[int], dict]:
+        return Cursor(value=0), {}
+
+    async def close(self) -> None:
+        pass
+
+
+class TestDynamicSourceProtocol:
+    def test_minimal_impl_satisfies_protocol(self):
+        impl = _MinimalImpl()
+        assert isinstance(impl, DynamicSourceProtocol)
+
+    def test_missing_poll_fails_isinstance(self):
+        class NoPoll:
+            async def fetch(self, cursor=None):
+                return Cursor(value=0), {}
+
+            async def close(self):
+                pass
+
+        assert not isinstance(NoPoll(), DynamicSourceProtocol)
+
+    def test_missing_fetch_fails_isinstance(self):
+        class NoFetch:
+            async def poll(self, cursor=None):
+                return False
+
+            async def close(self):
+                pass
+
+        assert not isinstance(NoFetch(), DynamicSourceProtocol)
+
+    def test_missing_close_fails_isinstance(self):
+        class NoClose:
+            async def poll(self, cursor=None):
+                return False
+
+            async def fetch(self, cursor=None):
+                return Cursor(value=0), {}
+
+        assert not isinstance(NoClose(), DynamicSourceProtocol)
