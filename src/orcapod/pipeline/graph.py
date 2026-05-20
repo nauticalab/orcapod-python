@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Literal
+from typing import TYPE_CHECKING, Any
 
 from orcapod.core.nodes import (
     FunctionNode,
@@ -22,9 +21,6 @@ if TYPE_CHECKING:
     import networkx as nx
     from orcapod.pipeline.execution_context import ExecutionContext
     from orcapod.pipeline.job import PipelineJob
-    from orcapod.pipeline.serialization import DatabaseRegistry
-    from orcapod.protocols.database_protocols import DatabaseRegistryProtocol
-    from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
 else:
     nx = LazyModule("networkx")
 
@@ -363,48 +359,33 @@ class Pipeline(AutoRegisteringContextBasedTracker):
     # Serialization
     # ------------------------------------------------------------------
 
-    def save(self, path: str, level: Literal["minimal", "definition", "standard", "full"] = "standard") -> None:
-        """Serialize the pipeline to a JSON file.
+    def save(self, path: str | Path) -> None:
+        """Serialize the pure pipeline blueprint to a JSON file.
+
+        Saves topology and SourceSpec declarations only — no databases,
+        no execution context, no run metadata.
 
         Args:
             path: File path to write JSON output to.
-            level: Save detail level. One of:
-                - ``"minimal"``: topology + identity only. Not round-trippable.
-                - ``"definition"``: adds full pod/stream configs. No pipeline-level DBs.
-                  Loadable via :meth:`Pipeline.load` with an optional ``pipeline_database``
-                  argument; without one, all nodes load as UNAVAILABLE.
-                - ``"standard"`` (default): adds pipeline-level DB registry. Round-trippable.
-                - ``"full"``: same as standard, plus serializes the default observer
-                  (status + logging configuration) for full round-trip reconstruction.
-        """
-        _VALID_LEVELS = ("minimal", "definition", "standard", "full")
-        if level not in _VALID_LEVELS:
-            raise ValueError(f"level must be one of {_VALID_LEVELS}, got {level!r}")
 
+        Raises:
+            ValueError: If the pipeline has not been compiled.
+        """
         if not self._compiled:
             raise ValueError(
                 "Pipeline is not compiled. Call compile() or use "
                 "auto_compile=True before saving."
             )
 
-        from orcapod.core.nodes import OperatorNode
+        import json as _json
         from orcapod.pipeline.serialization import (
             PIPELINE_FORMAT_VERSION,
-            DatabaseRegistry,
             serialize_schema,
         )
+        from orcapod.core.sources.source_spec import SourceSpec
+        from orcapod.core.nodes import OperatorNode, FunctionNode
 
-        include_configs = level in ("definition", "standard", "full")
-        include_pipeline_dbs = False  # Pipeline no longer holds databases (use PipelineJob for DB-backed saves)
-
-        # Observer serialization — Pipeline no longer holds a default observer
-        _observer_to_serialize = None
-
-        # Registry populated as nodes serialize their embedded databases
-        db_registry = DatabaseRegistry()
-
-        # -- Build node descriptors --
-        nodes: dict[str, dict[str, Any]] = {}
+        nodes: dict[str, Any] = {}
         for content_hash_str, node in self._persistent_node_map.items():
             tag_schema, data_schema = node.output_schema()
             type_converter = node.data_context.type_converter
@@ -418,251 +399,99 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                     "tag": serialize_schema(tag_schema, type_converter),
                     "data": serialize_schema(data_schema, type_converter),
                 },
+                "node_uri": list(node.node_uri),
+                "data_context_key": node.data_context_key,
             }
 
-            # node_uri: at all levels — use node.node_uri property for all node types
-            descriptor["node_uri"] = list(node.node_uri)
+            if isinstance(node, SourceNode):
+                if isinstance(node.stream, SourceSpec):
+                    descriptor["source_config"] = {
+                        "source_type": "spec",
+                        "spec_name": node.stream.name,
+                    }
+                    descriptor["reconstructable"] = True
+                else:
+                    descriptor["source_config"] = None
+                    descriptor["reconstructable"] = False
 
-            # data_context_key: definition+ only
-            if include_configs:
-                descriptor["data_context_key"] = node.data_context_key
+            elif isinstance(node, FunctionNode):
+                descriptor["function_config"] = node._function_pod.to_config()
+                descriptor["table_scope"] = node._table_scope
 
-            # Node-type-specific fields: definition+ only
-            if include_configs:
-                if isinstance(node, SourceNode):
-                    descriptor.update(self._build_source_descriptor(node, db_registry))
-                elif isinstance(node, FunctionNode):
-                    descriptor.update(self._build_function_descriptor(node))
-                elif isinstance(node, OperatorNode):
-                    descriptor.update(self._build_operator_descriptor(node, level))
+            elif isinstance(node, OperatorNode):
+                descriptor["operator_config"] = node._operator.to_config()
+                descriptor["table_scope"] = node._table_scope
 
             nodes[content_hash_str] = descriptor
 
-        # -- Pipeline block --
-        pipeline_block: dict[str, Any] = {
-            "name": list(self._name),
-            "run_id": None,
-            "snapshot_time": None,
-        }
-        # -- Top-level output --
         output: dict[str, Any] = {
             "orcapod_pipeline_version": PIPELINE_FORMAT_VERSION,
-            "level": level,
-            "pipeline": pipeline_block,
+            "pipeline": {"name": list(self._name)},
             "nodes": nodes,
             "edges": [list(edge) for edge in self._graph_edges],
         }
-        # Only include databases block if there's something in it
-        db_dict = db_registry.to_dict()
-        if db_dict:
-            output["databases"] = db_dict
 
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
-            json.dump(output, f, indent=2)
-
-    # Reconstructable source types: file-backed sources that can be
-    # rebuilt from config alone.
-    _RECONSTRUCTABLE_SOURCE_TYPES = frozenset({"csv", "delta_table", "cached"})
-
-    def _build_source_descriptor(self, node: SourceNode, db_registry: DatabaseRegistryProtocol | None = None) -> dict[str, Any]:
-        """Build source-specific descriptor fields for a SourceNode.
-
-        Args:
-            node: The SourceNode to describe.
-            db_registry: Optional registry forwarded to all sources via
-                ``to_config``.  Sources that do not embed database references
-                ignore it; ``CachedSource`` uses it to deduplicate its cache
-                database config.
-
-        Returns:
-            Dict with source-specific fields.
-        """
-        stream = node.stream
-
-        if stream is not None and hasattr(stream, "to_config"):
-            # All sources accept db_registry — always forward it.
-            config = stream.to_config(db_registry=db_registry)
-            stream_type = config.get("source_type", "stream")
-            # Remove identity fields — they live in the node descriptor
-            source_config = {
-                k: v for k, v in config.items()
-                if k not in ("content_hash", "pipeline_hash", "tag_schema", "data_schema")
-            }
-            reconstructable = stream_type in self._RECONSTRUCTABLE_SOURCE_TYPES
-        else:
-            source_config = None
-            reconstructable = False
-
-        return {
-            "source_config": source_config,
-            "reconstructable": reconstructable,
-        }
-
-    def _build_function_descriptor(self, node: "FunctionNode") -> dict[str, Any]:
-        """Build function-specific descriptor fields for a FunctionNode.
-
-        Args:
-            node: The FunctionNode to describe.
-
-        Returns:
-            Dict with function-specific fields (uses function_config key).
-        """
-        return {
-            "function_config": node._function_pod.to_config(),
-            "table_scope": node._table_scope,
-        }
-
-    def _build_operator_descriptor(self, node: OperatorNode, level: str = "standard") -> dict[str, Any]:
-        """Build operator-specific descriptor fields for a OperatorNode.
-
-        Args:
-            node: The OperatorNode to describe.
-            level: Save detail level; cache_mode only included at standard+.
-
-        Returns:
-            Dict with operator-specific fields.
-        """
-        result: dict[str, Any] = {
-            "operator_config": node._operator.to_config(),
-            "table_scope": node._table_scope,
-        }
-        # cache_mode at standard+ only
-        if level in ("standard", "full"):
-            result["cache_mode"] = node._cache_mode.value
-        return result
+            _json.dump(output, f, indent=2)
 
     @classmethod
-    def load(
-        cls,
-        path: str | Path,
-        mode: str = "full",
-        *,
-        pipeline_database: dbp.ArrowDatabaseProtocol | None = None,
-        result_database: dbp.ArrowDatabaseProtocol | None = None,
-    ) -> "Pipeline":
-        """Deserialize a pipeline from a JSON file.
+    def load(cls, path: str | Path) -> "Pipeline":
+        """Deserialize a pure pipeline blueprint from a JSON file.
 
-        Reconstructs the pipeline graph from the serialized descriptor,
-        rebuilding nodes in topological order.  The *mode* parameter
-        controls how aggressively live objects are reconstructed:
-
-        - ``"full"``: attempt to reconstruct live sources, function pods,
-          and operators so the pipeline can be re-run.  Falls back to
-          read-only per-node when reconstruction fails.
-        - ``"read_only"``: load metadata only; no live sources or
-          function pods are reconstructed.
-
-        For ``"definition"``-level saves (which contain node configs but no
-        pipeline database configuration), *pipeline_database* and
-        *function_database* can be passed here to attach storage.  Without
-        them, nodes load as UNAVAILABLE.
+        Reconstructs topology and SourceSpec declarations. The loaded
+        pipeline is topology-only — to run it, call
+        ``pipeline.bind(sources=..., store=...)`` first.
 
         Args:
-            path: Path to the JSON file produced by `save`.
-            mode: ``"full"`` (default) or ``"read_only"``.
-            pipeline_database: Optional database to attach when loading a
-                ``"definition"``-level save that has no embedded DB config.
-            result_database: Optional function-result database to attach when
-                loading a ``"definition"``-level save.
+            path: Path to the JSON file produced by :meth:`save`.
 
         Returns:
-            A compiled ``Pipeline`` instance.
+            A compiled ``Pipeline`` instance with SourceSpec leaf nodes.
 
         Raises:
             ValueError: If the file's format version is unsupported.
         """
-
+        import json as _json
         from orcapod.pipeline.serialization import (
             SUPPORTED_FORMAT_VERSIONS,
-            DatabaseRegistry,
-            LoadStatus,
-            resolve_database_from_config,
-            resolve_operator_from_config,
-            resolve_source_from_config,
+            deserialize_schema,
         )
+        from orcapod.core.sources.source_spec import SourceSpec
+        from orcapod.core.nodes import FunctionNode, OperatorNode
+        from orcapod.types import Schema
 
         path = Path(path)
         with open(path) as f:
-            data = json.load(f)
+            data = _json.load(f)
 
-        # 1. Validate version
         version = data.get("orcapod_pipeline_version", "")
         if version not in SUPPORTED_FORMAT_VERSIONS:
             raise ValueError(
                 f"Unsupported pipeline format version {version!r}. "
-                f"Supported versions: {sorted(SUPPORTED_FORMAT_VERSIONS)}"
+                f"Supported: {sorted(SUPPORTED_FORMAT_VERSIONS)}"
             )
 
-        level = data.get("level", "standard")
-        if level == "minimal":
-            raise ValueError(
-                "Cannot load a 'minimal'-level save: it contains topology and identity "
-                "only, not enough to reconstruct the pipeline. "
-                "Save with level='standard' or higher."
-            )
-
-        # 2. Reconstruct databases
         pipeline_meta = data["pipeline"]
-
-        load_db_registry: DatabaseRegistryProtocol | None = None
-        if "databases" in data and "pipeline_database" in pipeline_meta:
-            # Standard/full format: top-level databases registry
-            db_registry_data = data["databases"]
-            load_db_registry = DatabaseRegistry.from_dict(db_registry_data)
-            pipeline_db_key = pipeline_meta["pipeline_database"]
-            if pipeline_db_key not in db_registry_data:
-                raise ValueError(
-                    f"Pipeline database key {pipeline_db_key!r} not found in databases registry. "
-                    f"Available keys: {sorted(db_registry_data.keys())}"
-                )
-            pipeline_db = resolve_database_from_config(db_registry_data[pipeline_db_key], db_registry=db_registry_data)
-            # Support both old "function_database" key and new "result_database" key
-            result_db_key = pipeline_meta.get("result_database") or pipeline_meta.get("function_database")
-            if result_db_key is None:
-                # Null means the result DB was implicitly pipeline_db.at("_result") at run time.
-                # Re-derive it here so loaded nodes can find their cached records.
-                result_db = pipeline_db.at("_result") if pipeline_db is not None else None
-            elif result_db_key not in db_registry_data:
-                raise ValueError(
-                    f"Result database key {result_db_key!r} not found in databases registry. "
-                    f"Available keys: {sorted(db_registry_data.keys())}"
-                )
-            else:
-                result_db = resolve_database_from_config(db_registry_data[result_db_key], db_registry=db_registry_data)
-        elif level == "definition":
-            # Definition-level: no embedded DB config; caller may supply databases
-            pipeline_db = pipeline_database
-            result_db = result_database
-        else:
-            raise ValueError(
-                "Cannot determine database configuration from pipeline JSON. "
-                "Expected a top-level 'databases' registry with a "
-                "'pipeline_database' key in the pipeline block."
-            )
-
         name = tuple(pipeline_meta["name"])
-
-        # 3. Build edge graph and derive topological order
         nodes_data = data["nodes"]
         edges = data["edges"]
 
-        edge_graph: nx.DiGraph = nx.DiGraph()
-        for upstream_hash, downstream_hash in edges:
-            edge_graph.add_edge(upstream_hash, downstream_hash)
-        # Add isolated nodes (nodes with no edges)
+        # Build topological order
+        edge_graph: "nx.DiGraph" = nx.DiGraph()
+        for up_hash, down_hash in edges:
+            edge_graph.add_edge(up_hash, down_hash)
         for node_hash in nodes_data:
             if node_hash not in edge_graph:
                 edge_graph.add_node(node_hash)
-
         topo_order = list(nx.topological_sort(edge_graph))
 
-        # 4. Walk nodes in topological order, reconstruct each
-        reconstructed: dict[str, SourceNode | FunctionNode | OperatorNode] = {}
-
-        # Build reverse edge map: downstream -> list of upstream hashes
         upstream_map: dict[str, list[str]] = {}
         for up_hash, down_hash in edges:
             upstream_map.setdefault(down_hash, []).append(up_hash)
+
+        reconstructed: dict[str, GraphNode] = {}
 
         for node_hash in topo_order:
             descriptor = nodes_data.get(node_hash)
@@ -670,35 +499,29 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 continue
 
             node_type = descriptor.get("node_type")
+            source_config = descriptor.get("source_config") or {}
 
             if node_type == "source":
-                node = cls._load_source_node(
-                    descriptor, mode, resolve_source_from_config, load_db_registry
-                )
+                if source_config.get("source_type") == "spec":
+                    spec_name = source_config["spec_name"]
+                    tag_schema = Schema(deserialize_schema(descriptor["output_schema"]["tag"]))
+                    data_schema = Schema(deserialize_schema(descriptor["output_schema"]["data"]))
+                    stream = SourceSpec(
+                        name=spec_name,
+                        tag_schema=tag_schema,
+                        data_schema=data_schema,
+                    )
+                else:
+                    stream = None  # non-spec source — schema known but not rebuildable
+
+                node = SourceNode.from_descriptor(descriptor, stream=stream, databases={})
                 reconstructed[node_hash] = node
 
             elif node_type == "function":
-                # Determine upstream node
                 up_hashes = upstream_map.get(node_hash, [])
                 upstream_node = reconstructed.get(up_hashes[0]) if up_hashes else None
-
-                # Check if upstream is usable for full mode
-                upstream_usable = (
-                    upstream_node is not None
-                    and hasattr(upstream_node, "load_status")
-                    and upstream_node.load_status
-                    in (LoadStatus.FULL, LoadStatus.READ_ONLY, LoadStatus.CACHE_ONLY)
-                )
-
-                # Build databases dict
-                node_result_db = result_db if result_db is not None else pipeline_db
-                dbs = {
-                    "pipeline": pipeline_db,
-                    "result": node_result_db,
-                }
-
-                node = cls._load_function_node(
-                    descriptor, mode, upstream_node, upstream_usable, dbs
+                node = FunctionNode.from_descriptor(
+                    descriptor, function_pod=None, input_stream=upstream_node, databases={}
                 )
                 reconstructed[node_hash] = node
 
@@ -707,49 +530,21 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 upstream_nodes = tuple(
                     reconstructed[h] for h in up_hashes if h in reconstructed
                 )
-
-                # Check if all upstreams are usable
-                all_upstreams_usable = (
-                    all(
-                        hasattr(n, "load_status")
-                        and n.load_status in (LoadStatus.FULL, LoadStatus.READ_ONLY)
-                        for n in upstream_nodes
-                    )
-                    if upstream_nodes
-                    else False
-                )
-
-                dbs = {
-                    "pipeline": pipeline_db,
-                }
-
-                node = cls._load_operator_node(
-                    descriptor,
-                    mode,
-                    upstream_nodes,
-                    all_upstreams_usable,
-                    dbs,
-                    resolve_operator_from_config,
+                node = OperatorNode.from_descriptor(
+                    descriptor, operator=None, input_streams=(), databases={}
                 )
                 reconstructed[node_hash] = node
 
-        # 5. Build Pipeline instance
+        # Build Pipeline instance
         pipeline = cls(name=name, auto_compile=False)
-
-        # Populate persistent node map
         pipeline._persistent_node_map = dict(reconstructed)
 
-        # Populate _nodes (label -> node) for all labeled nodes.
-        # Unlike compile() which excludes source nodes from _nodes,
-        # loaded pipelines include them so users can inspect load_status
-        # and metadata for all nodes via attribute access.
-        pipeline._nodes = {}
-        for node_hash, node in reconstructed.items():
-            label = node.label
-            if label:
-                pipeline._nodes[label] = node
+        pipeline._nodes = {
+            node.label: node
+            for node in reconstructed.values()
+            if node.label
+        }
 
-        # Build node graph
         pipeline._node_graph = nx.DiGraph()
         for up_hash, down_hash in edges:
             up_node = reconstructed.get(up_hash)
@@ -760,10 +555,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             if node not in pipeline._node_graph:
                 pipeline._node_graph.add_node(node)
 
-        # Restore graph edges as content_hash string pairs
         pipeline._graph_edges = [(up, down) for up, down in edges]
-
-        # Rebuild _hash_graph
         pipeline._hash_graph = nx.DiGraph()
         for up_hash, down_hash in edges:
             pipeline._hash_graph.add_edge(up_hash, down_hash)
@@ -776,201 +568,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 attrs["label"] = node.label
 
         pipeline._compiled = True
-
         return pipeline
-
-    @staticmethod
-    def _load_source_node(
-        descriptor: dict[str, Any],
-        mode: str,
-        resolve_source_from_config: Callable[..., Any],
-        db_registry: DatabaseRegistryProtocol | None = None,
-    ) -> SourceNode:
-        """Reconstruct a SourceNode from a descriptor.
-
-        Args:
-            descriptor: The serialized node descriptor.
-            mode: Load mode (``"full"`` or ``"read_only"``).
-            resolve_source_from_config: Callable to reconstruct a source.
-            db_registry: Optional registry forwarded to all sources via
-                ``from_config``; sources that don't embed DB refs ignore it.
-
-        Returns:
-            A ``SourceNode`` instance.
-        """
-
-        reconstructable = descriptor.get("reconstructable", False)
-        source_config = descriptor.get("source_config")
-        fallback_to_proxy = source_config is not None
-
-        stream = None
-        if reconstructable and mode != "read_only" and source_config is not None:
-            try:
-                stream = resolve_source_from_config(
-                    source_config,
-                    db_registry=db_registry,
-                    node_descriptor=descriptor,
-                    fallback_to_proxy=fallback_to_proxy,
-                )
-            except Exception:
-                logger.warning(
-                    "Failed to reconstruct source %r, falling back to read-only.",
-                    descriptor.get("label"),
-                )
-                stream = None
-
-        return SourceNode.from_descriptor(descriptor, stream=stream, databases={})
-
-    @staticmethod
-    def _load_function_node(
-        descriptor: dict[str, Any],
-        mode: str,
-        upstream_node: Any | None,
-        upstream_usable: bool,
-        databases: dict[str, Any],
-    ) -> FunctionNode:
-        """Reconstruct a FunctionNode from a descriptor.
-
-        When the upstream is usable and mode is not ``"read_only"``, attempts
-        to reconstruct the function pod with ``fallback_to_proxy=True`` so
-        that a ``DataFunctionProxy`` is used when the original function
-        cannot be imported.
-
-        When the upstream is UNAVAILABLE (but exists), still builds the proxy
-        pod and wires it up — ``from_descriptor`` will detect the unavailable
-        stream and set ``LoadStatus.CACHE_ONLY`` so the node can serve all
-        cached results from persistent storage without touching the upstream.
-
-        Args:
-            descriptor: The serialized node descriptor.
-            mode: Load mode.
-            upstream_node: The reconstructed upstream node, or ``None``.
-            upstream_usable: Whether the upstream is usable (FULL or
-                READ_ONLY).
-            databases: Database role mapping.
-
-        Returns:
-            A ``FunctionNode`` instance.
-        """
-        from orcapod.core.function_pod import FunctionPod
-        from orcapod.pipeline.serialization import LoadStatus
-
-        fn_config = descriptor.get("function_config")
-
-        if mode != "read_only" and upstream_usable:
-            try:
-                pod = FunctionPod.from_config(
-                    fn_config, fallback_to_proxy=True
-                )
-                node = FunctionNode.from_descriptor(
-                    descriptor,
-                    function_pod=pod,
-                    input_stream=upstream_node,
-                    databases=databases,
-                )
-                # load_status is set inside from_descriptor based on
-                # upstream availability and function proxy status.
-                return node
-            except Exception:
-                logger.warning(
-                    "Failed to reconstruct function node %r, "
-                    "falling back to read-only.",
-                    descriptor.get("label"),
-                )
-        elif (
-            mode != "read_only"
-            and upstream_node is not None
-            and hasattr(upstream_node, "load_status")
-            and upstream_node.load_status == LoadStatus.UNAVAILABLE
-        ):
-            # Upstream exists but is explicitly UNAVAILABLE — build a proxy pod
-            # so the node can serve cached results in CACHE_ONLY mode.
-            try:
-                pod = FunctionPod.from_config(
-                    fn_config, fallback_to_proxy=True
-                )
-                node = FunctionNode.from_descriptor(
-                    descriptor,
-                    function_pod=pod,
-                    input_stream=upstream_node,
-                    databases=databases,
-                )
-                return node
-            except Exception:
-                logger.warning(
-                    "Failed to reconstruct function node %r in cache-only mode, "
-                    "falling back to unavailable.",
-                    descriptor.get("label"),
-                )
-        elif mode != "read_only" and not upstream_usable:
-            logger.warning(
-                "Upstream for function node %r is not usable, "
-                "falling back to read-only.",
-                descriptor.get("label"),
-            )
-
-        return FunctionNode.from_descriptor(
-            descriptor,
-            function_pod=None,
-            input_stream=None,
-            databases=databases,
-        )
-
-    @staticmethod
-    def _load_operator_node(
-        descriptor: dict[str, Any],
-        mode: str,
-        upstream_nodes: tuple,
-        all_upstreams_usable: bool,
-        databases: dict[str, Any],
-        resolve_operator_from_config: Any,
-    ) -> "OperatorNode":
-        """Reconstruct a OperatorNode from a descriptor.
-
-        Args:
-            descriptor: The serialized node descriptor.
-            mode: Load mode.
-            upstream_nodes: Tuple of reconstructed upstream nodes.
-            all_upstreams_usable: Whether all upstreams are in FULL mode.
-            databases: Database role mapping.
-            resolve_operator_from_config: Callable to reconstruct an operator.
-
-        Returns:
-            A ``OperatorNode`` instance.
-        """
-        from orcapod.core.nodes import OperatorNode
-
-        op_config = descriptor.get("operator_config")
-
-        if mode != "read_only":
-            if not all_upstreams_usable:
-                logger.warning(
-                    "Upstream(s) for operator node %r are not usable, "
-                    "falling back to read-only.",
-                    descriptor.get("label"),
-                )
-            else:
-                try:
-                    op = resolve_operator_from_config(op_config)
-                    return OperatorNode.from_descriptor(
-                        descriptor,
-                        operator=op,
-                        input_streams=upstream_nodes,
-                        databases=databases,
-                    )
-                except Exception:
-                    logger.warning(
-                        "Failed to reconstruct operator node %r, "
-                        "falling back to read-only.",
-                        descriptor.get("label"),
-                    )
-
-        return OperatorNode.from_descriptor(
-            descriptor,
-            operator=None,
-            input_streams=(),
-            databases=databases,
-        )
 
     # ------------------------------------------------------------------
     # Node access by label
