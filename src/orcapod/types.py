@@ -16,9 +16,9 @@ import os
 import uuid
 from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from types import UnionType
-from datetime import datetime
 from typing import TYPE_CHECKING, Any, Generic, Self, TypeAlias, TypeVar
 
 if TYPE_CHECKING:
@@ -609,7 +609,7 @@ class Cursor(Generic[T]):
     modified_at: datetime | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class PollingConfig:
     """Configuration for a :class:`~orcapod.core.sources.PollingSource`.
 
