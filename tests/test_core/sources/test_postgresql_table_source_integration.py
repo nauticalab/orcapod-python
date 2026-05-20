@@ -206,7 +206,7 @@ class TestPipelineIntegration:
         from orcapod.core.data_function import PythonDataFunction
         from orcapod.core.sources import PostgreSQLTableSource
         from orcapod.databases import InMemoryArrowDatabase
-        from orcapod.pipeline import Pipeline
+        from orcapod.pipeline import PipelineJob
         from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
 
         with psycopg.connect(schema_dsn) as conn:
@@ -228,14 +228,13 @@ class TestPipelineIntegration:
         pf = PythonDataFunction(double_response, output_keys="doubled")
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(
-            name="pg_integration", pipeline_database=InMemoryArrowDatabase()
-        )
-        with pipeline:
+        job = PipelineJob(name="pg_integration", store=InMemoryArrowDatabase())
+        with job:
             pod(src, label="doubler")
 
+        exec_graph, _ = job._build_execution_graph()
         orch = SyncPipelineOrchestrator()
-        result = orch.run(pipeline._node_graph)
+        result = orch.run(exec_graph)
 
         fn_outputs = [
             v for k, v in result.node_outputs.items() if k.node_type == "function"

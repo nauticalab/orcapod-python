@@ -13,9 +13,10 @@ from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import Join
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
+from orcapod.core.sources.source_spec import SourceSpec
 from orcapod.core.tracker import BasicTrackerManager
-from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import Pipeline
+from orcapod.types import Schema
 
 
 def _double(x: int) -> int:
@@ -27,7 +28,6 @@ def _make_pipeline(
 ) -> Pipeline:
     return Pipeline(
         name="test",
-        pipeline_database=InMemoryArrowDatabase(),
         tracker_manager=tracker_manager,
         auto_compile=False,
     )
@@ -111,8 +111,13 @@ class TestPipelineTracker:
 
         pf = PythonDataFunction(_double, output_keys="result")
         pod = FunctionPod(data_function=pf)
-        stream = _make_stream()
-        tracker.record_function_pod_invocation(pod, stream)
+        # compile() enforces SourceSpec-only leaves — use SourceSpec instead of raw stream
+        spec = SourceSpec(
+            name="test_spec",
+            tag_schema=Schema({"id": int}),
+            data_schema=Schema({"x": int}),
+        )
+        tracker.record_function_pod_invocation(pod, spec)
 
         tracker.compile()
         graph = tracker.graph
