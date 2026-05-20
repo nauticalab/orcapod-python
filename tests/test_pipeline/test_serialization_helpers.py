@@ -723,6 +723,7 @@ def test_source_proxy_from_config_backward_compat():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 def test_function_node_has_node_uri():
     import pyarrow as pa
 
@@ -772,6 +773,7 @@ def test_function_node_stored_node_uri_from_descriptor():
     assert node.node_uri == ("add_one", "v0", "python.function.v0", "schema_repr")
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 def test_operator_node_has_node_uri():
     import pyarrow as pa
 

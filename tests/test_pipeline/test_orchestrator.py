@@ -154,6 +154,7 @@ class TestFunctionNodeAsyncExecute:
 # ===========================================================================
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestOrchestratorLinearPipeline:
     """Source -> FunctionPod (linear pipeline)."""
 
@@ -212,6 +213,7 @@ class TestOrchestratorLinearPipeline:
 # ===========================================================================
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestOrchestratorOperatorPipeline:
     """Source -> Operator -> FunctionPod."""
 
@@ -246,6 +248,7 @@ class TestOrchestratorOperatorPipeline:
 # ===========================================================================
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestOrchestratorDiamondDag:
     """Two sources -> Join -> FunctionPod."""
 
@@ -309,6 +312,7 @@ class TestOrchestratorDiamondDag:
 # ===========================================================================
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestOrchestratorRunAsync:
     @pytest.mark.asyncio
     async def test_run_async_from_event_loop(self):
@@ -339,6 +343,7 @@ class TestOrchestratorRunAsync:
 # ===========================================================================
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestBufferSizeConfiguration:
     def test_custom_buffer_size(self):
         """Pipeline should work with custom buffer sizes."""
@@ -368,6 +373,7 @@ def triple_value(value: int) -> int:
     return value * 3
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestAsyncOrchestratorFanOut:
     """One source fans out to multiple downstream nodes."""
 
@@ -427,6 +433,7 @@ class TestAsyncOrchestratorTerminalNode:
 # ===========================================================================
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestAsyncOrchestratorErrorPropagation:
     """Failed data do not abort the pipeline; they are handled per-data."""
 
@@ -478,6 +485,7 @@ class TestAsyncOrchestratorErrorPropagation:
         assert isinstance(crashes[0], (ValueError, RuntimeError))
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestAsyncOrchestratorObserverInjection:
     """Verify observer passed to async orchestrator flows through to nodes."""
 

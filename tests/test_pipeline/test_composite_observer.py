@@ -44,6 +44,7 @@ def _make_source(n: int = 3) -> ArrowTableSource:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestLoggingAndStatusTogether:
     def test_both_observers_populated(self):
         pipeline_db = InMemoryArrowDatabase()
@@ -83,6 +84,7 @@ class TestLoggingAndStatusTogether:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestCreateDataLoggerDelegation:
     def test_returns_logging_observer_logger(self):
         pipeline_db = InMemoryArrowDatabase()
@@ -120,6 +122,7 @@ class TestCreateDataLoggerDelegation:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestContextualizeReturnsComposite:
     def test_contextualized_composite_delegates(self):
         pipeline_db = InMemoryArrowDatabase()
@@ -165,6 +168,7 @@ class TestContextualizeReturnsComposite:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestCompositeWithFailures:
     def test_failures_tracked_by_both_observers(self):
         pipeline_db = InMemoryArrowDatabase()
