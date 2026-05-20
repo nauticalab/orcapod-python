@@ -50,3 +50,17 @@ class SourceSpecMismatchError(ValueError):
     Contains the spec name and a description of the incompatible field(s).
     Raised at ``bind()`` time — schema mismatches are rejected before execution.
     """
+
+
+class CursorInvalidatedError(Exception):
+    """Raised by a ``DynamicSourceProtocol`` implementation when the previous
+    cursor is no longer valid and the source state must be rebuilt from scratch.
+
+    This is a terminal condition for ``PollingSource``. Rows already emitted
+    downstream cannot be retracted, so continuing would leave downstream
+    operators with a corrupted view. ``PollingSource`` catches this, logs a
+    clear error, closes its output channel cleanly, and calls ``close()``.
+
+    If full-reset semantics are required, use a static source re-run instead
+    of ``PollingSource``.
+    """

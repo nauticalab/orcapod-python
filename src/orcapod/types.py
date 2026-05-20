@@ -18,7 +18,8 @@ from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from types import UnionType
-from typing import TYPE_CHECKING, Any, Self, TypeAlias
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Generic, Self, TypeAlias, TypeVar
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -70,6 +71,9 @@ as a lightweight, protocol-free representation of a data."""
 SchemaLike: TypeAlias = Mapping[str, DataType]
 """A dict-like structure mapping field names to ``DataType`` entries.
 Accepted wherever a ``Schema`` is expected so callers can pass plain dicts."""
+
+T = TypeVar("T")
+"""Generic cursor value type for :class:`Cursor` and :class:`DynamicSourceProtocol`."""
 
 
 class Schema(Mapping[str, DataType]):
@@ -584,3 +588,47 @@ class ContentHash:
             A string like ``"arrow_v2.1:1a2b3c4d"``.
         """
         return f"{self.method}:{self.to_hex(length)}"
+
+
+@dataclass
+class Cursor(Generic[T]):
+    """Marks the current position in a DynamicSource's data stream.
+
+    Args:
+        value: Implementation-defined cursor value. May be a datetime
+            timestamp, integer offset, string pagination token, or any
+            other type meaningful to the implementation.
+        modified_at: Optional wall-clock time when the source content at
+            this cursor position was last modified. When provided,
+            ``PollingSource`` uses this to update its ``last_modified``
+            timestamp for downstream staleness detection. When ``None``,
+            the framework falls back to its own wall clock.
+    """
+
+    value: T
+    modified_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class PollingConfig:
+    """Configuration for a :class:`~orcapod.core.sources.PollingSource`.
+
+    Args:
+        interval: Seconds between ``poll()`` calls, measured start-to-start.
+        duration: Total seconds to run. ``0`` means indefinite (run until
+            cancelled).
+        max_missed_intervals: Maximum consecutive tick windows consumed by a
+            single poll+fetch cycle before the source terminates.
+            Resets to zero on any clean tick.
+        max_consecutive_errors: Maximum consecutive ``poll()``/``fetch()``
+            failures before the source closes its channel cleanly.
+        error_backoff_base: Base wait in seconds for exponential backoff on
+            errors. Wait after the nth error is
+            ``error_backoff_base * 2 ** (n - 1)``.
+    """
+
+    interval: float = 1.0
+    duration: float = 0.0
+    max_missed_intervals: int = 5
+    max_consecutive_errors: int = 3
+    error_backoff_base: float = 1.0
