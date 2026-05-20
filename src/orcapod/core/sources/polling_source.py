@@ -11,12 +11,14 @@ import asyncio
 import logging
 from collections.abc import Collection
 from math import floor
-from typing import TYPE_CHECKING, Any, Generic
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.errors import CursorInvalidatedError
-from orcapod.types import ColumnConfig, Cursor, PollingConfig, T
+from orcapod.types import ColumnConfig, Cursor, PollingConfig
+
+T = TypeVar("T")
 from orcapod.utils import arrow_utils, polars_data_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -84,29 +86,39 @@ class PollingSource(RootSource, Generic[T]):
     """A root source that continuously emits data via a polling loop.
 
     Wraps a ``DynamicSourceProtocol`` implementation. Under async execution
-    (``async_iter_data``), the framework
-    polls on a fixed interval and yields new rows as they arrive. Under sync
-    execution (``iter_data``), a single poll+fetch cycle is performed on each
-    access and results are served from an accumulated in-memory cache.
+    (``async_iter_data``), the framework polls on a fixed interval and yields
+    new rows as they arrive. Under sync execution (``iter_data``), a single
+    poll+fetch cycle is performed on each access and results are served from
+    an accumulated in-memory cache.
 
     Args:
-        impl: User-supplied protocol implementation.
-        tag_columns: Column name(s) that form the tag (key) for each row.
-            All other columns are data columns.
-        polling_config: Scheduling and error configuration.
-        source_id: Optional stable identifier for this source.
-        label: Optional human-readable label.
-        data_context: Optional data context key or instance.
+        impl: User-supplied ``DynamicSourceProtocol`` implementation that
+            provides ``poll``, ``fetch``, and ``close`` async methods.
+        tag_columns: Column name(s) that form the tag (join key) for each
+            row. All other columns become data columns.
+        polling_config: Scheduling and error-handling configuration.
+            Defaults to ``PollingConfig()`` which polls every 1 second,
+            runs indefinitely (``duration=0``), tolerates up to 5
+            consecutive missed intervals, retries up to 3 consecutive
+            errors with 1-second exponential backoff base. All five fields
+            are validated at construction time — ``ValueError`` is raised
+            for out-of-range values.
+        source_id: Optional stable string identifier for provenance
+            tracking. Auto-generated on first fetch if not provided.
+        label: Optional human-readable label shown in pipeline diagrams.
+        data_context: Optional data context key or instance for type
+            conversion and hashing.
         config: Optional Orcapod framework config.
 
     Note:
-        Sync mode calls ``asyncio.run()`` (or a thread executor when inside a
-        running loop). This fails without a shim in Jupyter notebooks. Async
-        mode has no such restriction.
+        Sync mode calls ``asyncio.run()`` (or a ``ThreadPoolExecutor``
+        when called from within a running event loop). This can fail in
+        Jupyter notebooks without a nest-asyncio shim. Async mode has no
+        such restriction.
 
     Note:
-        The accumulated cache is unbounded for true-delta implementations.
-        No eviction policy is implemented in this version.
+        The accumulated in-memory cache is unbounded for true-delta
+        implementations. No eviction policy is implemented.
     """
 
     def __init__(
@@ -130,29 +142,6 @@ class PollingSource(RootSource, Generic[T]):
             self._tag_columns: tuple[str, ...] = (tag_columns,)
         else:
             self._tag_columns = tuple(tag_columns)
-        if polling_config.interval <= 0:
-            raise ValueError(
-                f"PollingConfig.interval must be > 0, got {polling_config.interval}"
-            )
-        if polling_config.duration < 0:
-            raise ValueError(
-                f"PollingConfig.duration must be >= 0, got {polling_config.duration}"
-            )
-        if polling_config.max_missed_intervals < 1:
-            raise ValueError(
-                f"PollingConfig.max_missed_intervals must be >= 1, "
-                f"got {polling_config.max_missed_intervals}"
-            )
-        if polling_config.max_consecutive_errors < 1:
-            raise ValueError(
-                f"PollingConfig.max_consecutive_errors must be >= 1, "
-                f"got {polling_config.max_consecutive_errors}"
-            )
-        if polling_config.error_backoff_base <= 0:
-            raise ValueError(
-                f"PollingConfig.error_backoff_base must be > 0, "
-                f"got {polling_config.error_backoff_base}"
-            )
         self._polling_config = polling_config
         self._cursor: Cursor[T] | None = None
         self._schema_stream: ArrowTableStream | None = None
@@ -162,8 +151,20 @@ class PollingSource(RootSource, Generic[T]):
     # -------------------------------------------------------------------------
 
     def identity_structure(self) -> Any:
-        """Schema-independent identity (schema is unknown until first fetch)."""
-        return (self.__class__.__name__, self._tag_columns, self._source_id or "")
+        """Identity derived from the impl class location and tag columns.
+
+        Uses the impl's ``__module__`` and ``__qualname__`` so that two
+        ``PollingSource`` instances wrapping different impl classes always
+        produce different hashes, and two instances wrapping the same impl
+        class with the same tag columns produce the same hash.
+        """
+        impl_type = type(self._impl)
+        return (
+            self.__class__.__name__,
+            impl_type.__module__,
+            impl_type.__qualname__,
+            self._tag_columns,
+        )
 
     # -------------------------------------------------------------------------
     # Sync stream delegation — all route through _get_latest_stream()
@@ -205,23 +206,72 @@ class PollingSource(RootSource, Generic[T]):
     # -------------------------------------------------------------------------
 
     def to_config(self, db_registry: Any = None) -> dict[str, Any]:
-        """Return a non-reconstructable descriptor for this source."""
+        """Serialize this source to a JSON-compatible config dict.
+
+        The config stores the impl class's module path and qualified name so
+        that ``from_config`` can reconstruct the source when the impl class
+        has a no-argument constructor. If the impl requires constructor
+        arguments, callers should subclass ``PollingSource`` and override
+        both methods.
+
+        Args:
+            db_registry: Unused; present for protocol compatibility.
+
+        Returns:
+            A dict suitable for passing to ``from_config``.
+        """
+        impl_type = type(self._impl)
         return {
             "source_type": "polling_source",
+            "impl_module": impl_type.__module__,
+            "impl_class": impl_type.__qualname__,
             "tag_columns": list(self._tag_columns),
+            "polling_config": {
+                "interval": self._polling_config.interval,
+                "duration": self._polling_config.duration,
+                "max_missed_intervals": self._polling_config.max_missed_intervals,
+                "max_consecutive_errors": self._polling_config.max_consecutive_errors,
+                "error_backoff_base": self._polling_config.error_backoff_base,
+            },
             "source_id": self._source_id,
         }
 
     @classmethod
     def from_config(cls, config: dict[str, Any], db_registry: Any = None) -> PollingSource:
-        """Not supported — ``PollingSource`` cannot be reconstructed from config.
+        """Reconstruct a ``PollingSource`` by importing the impl class.
+
+        The impl class is imported from ``config["impl_module"]`` and
+        instantiated with no arguments. If the impl requires constructor
+        arguments, override this method in a subclass.
+
+        Args:
+            config: A dict as produced by ``to_config``.
+            db_registry: Unused; present for protocol compatibility.
+
+        Returns:
+            A new ``PollingSource`` wrapping the imported impl.
 
         Raises:
-            NotImplementedError: Always.
+            KeyError: If ``config`` is missing a required key.
+            ImportError: If the impl module cannot be imported.
+            AttributeError: If the impl class does not exist in the module.
+            TypeError: If the impl class cannot be instantiated with no args.
         """
-        raise NotImplementedError(
-            "PollingSource cannot be reconstructed from config — "
-            "the DynamicSourceProtocol implementation is not serializable."
+        import importlib
+
+        module = importlib.import_module(config["impl_module"])
+        # Walk dotted qualname to support nested classes (e.g. "Outer.Inner")
+        impl_obj: Any = module
+        for part in config["impl_class"].split("."):
+            impl_obj = getattr(impl_obj, part)
+        impl = impl_obj()
+
+        polling_config = PollingConfig(**config.get("polling_config", {}))
+        return cls(
+            impl=impl,
+            tag_columns=config["tag_columns"],
+            polling_config=polling_config,
+            source_id=config.get("source_id"),
         )
 
     # -------------------------------------------------------------------------

@@ -73,7 +73,7 @@ SchemaLike: TypeAlias = Mapping[str, DataType]
 Accepted wherever a ``Schema`` is expected so callers can pass plain dicts."""
 
 T = TypeVar("T")
-"""Generic cursor value type for ``Cursor`` and ``DynamicSourceProtocol``."""
+"""Generic cursor value type used internally by ``Cursor``."""
 
 
 class Schema(Mapping[str, DataType]):
@@ -632,3 +632,28 @@ class PollingConfig:
     max_missed_intervals: int = 5
     max_consecutive_errors: int = 3
     error_backoff_base: float = 1.0
+
+    def __post_init__(self) -> None:
+        if self.interval <= 0:
+            raise ValueError(
+                f"PollingConfig.interval must be > 0, got {self.interval}"
+            )
+        if self.duration < 0:
+            raise ValueError(
+                f"PollingConfig.duration must be >= 0, got {self.duration}"
+            )
+        if self.max_missed_intervals < 1:
+            raise ValueError(
+                f"PollingConfig.max_missed_intervals must be >= 1, "
+                f"got {self.max_missed_intervals}"
+            )
+        if self.max_consecutive_errors < 1:
+            raise ValueError(
+                f"PollingConfig.max_consecutive_errors must be >= 1, "
+                f"got {self.max_consecutive_errors}"
+            )
+        if self.error_backoff_base <= 0:
+            raise ValueError(
+                f"PollingConfig.error_backoff_base must be > 0, "
+                f"got {self.error_backoff_base}"
+            )
