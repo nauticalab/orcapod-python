@@ -40,6 +40,9 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
     workflow.
 
     Args:
+        name: Pipeline name (string or tuple). Used as the path prefix for
+            all cache/pipeline paths when the pipeline is run. Defaults to
+            ``"pipeline"``.
         store: Database for result caching and operator records.
         execution_context: Optional execution configuration.
         tracker_manager: Optional tracker manager override.
@@ -50,6 +53,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
 
     def __init__(
         self,
+        name: str | tuple[str, ...] = "pipeline",
         store: "ArrowDatabaseProtocol | None" = None,
         execution_context: "ExecutionContext | None" = None,
         tracker_manager: cp.TrackerManagerProtocol | None = None,
@@ -68,7 +72,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         self._rec_upstreams: dict[str, cp.StreamProtocol] = {}
         self._rec_node_lut: dict[str, "GraphNode"] = {}
         self._spec_by_name: dict[str, "SourceSpec"] = {}
-        self._pipeline_name: tuple[str, ...] = ("pipeline",)
+        self._pipeline_name: tuple[str, ...] = (name,) if isinstance(name, str) else tuple(name)
 
     # ------------------------------------------------------------------
     # Context manager — recording
@@ -102,6 +106,19 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         for edge in self._rec_graph_edges:
             pipeline._hash_graph.add_edge(*edge)
 
+        # Annotate node_type on each recorded node (function/operator).
+        for node_hash, node in self._rec_node_lut.items():
+            if node_hash in pipeline._hash_graph.nodes:
+                pipeline._hash_graph.nodes[node_hash]["node_type"] = node.node_type
+                if node.label:
+                    pipeline._hash_graph.nodes[node_hash]["label"] = node.label
+
+        # Annotate upstream (source) nodes that are not in _rec_node_lut.
+        for node_hash, stream in self._rec_upstreams.items():
+            if node_hash in pipeline._hash_graph.nodes:
+                if not pipeline._hash_graph.nodes[node_hash].get("node_type"):
+                    pipeline._hash_graph.nodes[node_hash]["node_type"] = "source"
+
         pipeline.compile()
         self._compiled_pipeline = pipeline
 
@@ -118,7 +135,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
 
         # Use explicit label when set; otherwise fall back to content hash
         # to avoid two unlabeled sources getting the same spec name.
-        has_label = getattr(source, "has_assigned_label", False)
+        has_label = source.has_assigned_label
         if has_label:
             name = source.label  # type: ignore[attr-defined]
         else:
@@ -265,7 +282,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         from orcapod.core.sources.source_spec import SourceSpec
 
         merged_sources = dict(self._sources)
-        if sources:
+        if sources is not None:
             # Validate each supplied source against its SourceSpec
             pipeline = self._compiled_pipeline
             if pipeline is not None:
@@ -341,6 +358,9 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
 
         target = pipeline._nodes.get(node_label)
         if target is None:
+            return False
+
+        if pipeline._node_graph is None:
             return False
 
         import networkx as nx
