@@ -1051,23 +1051,52 @@ class PollingSource(RootSource, Generic[T]):
     # -------------------------------------------------------------------------
 
     def to_config(self, db_registry: Any = None) -> dict[str, Any]:
-        """Return a non-reconstructable descriptor for this source."""
+        """Serialize this source to a JSON-compatible dict.
+
+        Delegates to the ``DynamicSourceProtocol`` implementation's
+        ``to_config()``. If the implementation returns ``None`` (not
+        serializable), returns a non-reconstructable descriptor.
+        """
+        impl_config = self._impl.to_config()
+        if impl_config is None:
+            return {
+                "source_type": "polling_source",
+                "reconstructable": False,
+                "source_id": self._source_id,
+            }
         return {
             "source_type": "polling_source",
+            "impl_class": f"{type(self._impl).__module__}.{type(self._impl).__qualname__}",
+            "impl_config": impl_config,
             "tag_columns": list(self._tag_columns),
             "source_id": self._source_id,
         }
 
     @classmethod
     def from_config(cls, config: dict[str, Any], db_registry: Any = None) -> PollingSource:
-        """Not supported — ``PollingSource`` cannot be reconstructed from config.
+        """Reconstruct a ``PollingSource`` from a config dict.
+
+        Uses the stored ``impl_class`` to import and call
+        ``DynamicSourceProtocol.from_config(impl_config)``.
 
         Raises:
-            NotImplementedError: Always.
+            NotImplementedError: If the stored config has ``reconstructable: False``.
         """
-        raise NotImplementedError(
-            "PollingSource cannot be reconstructed from config — "
-            "the DynamicSourceProtocol implementation is not serializable."
+        if not config.get("reconstructable", True):
+            raise NotImplementedError(
+                "PollingSource cannot be reconstructed — "
+                "the DynamicSourceProtocol implementation is not serializable."
+            )
+        import importlib
+
+        module_name, _, class_name = config["impl_class"].rpartition(".")
+        module = importlib.import_module(module_name)
+        impl_cls = getattr(module, class_name)
+        impl = impl_cls.from_config(config["impl_config"])
+        return cls(
+            impl,
+            tag_columns=config["tag_columns"],
+            source_id=config.get("source_id"),
         )
 
     # -------------------------------------------------------------------------
@@ -1128,32 +1157,23 @@ class PollingSource(RootSource, Generic[T]):
         return result.stream
 
     def _combine(
-        self, existing: ArrowTableStream, new_data: FrameInitTypes
+        self, existing: ArrowTableStream, new_stream: ArrowTableStream
     ) -> ArrowTableStream:
-        """Append *new_data* rows to *existing*, warning on schema drift."""
+        """Append *new_stream* rows to *existing*, raising on schema mismatch.
+
+        Raises:
+            InputValidationError: If the column sets differ or any column type
+                has changed between batches.
+        """
         from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 
-        new_stream = self._build_stream(new_data)
-
-        # Schema drift check (user-facing columns only)
-        old_tag_keys, old_data_keys = existing.keys()
-        new_tag_keys, new_data_keys = new_stream.keys()
-        old_cols = set(old_tag_keys) | set(old_data_keys)
-        new_cols = set(new_tag_keys) | set(new_data_keys)
-        if old_cols != new_cols:
-            logger.warning(
-                "PollingSource %r: schema drift detected — added: %r, removed: %r",
-                self._source_id,
-                sorted(new_cols - old_cols),
-                sorted(old_cols - new_cols),
-            )
+        self._validate_combining_schemas(existing, new_stream)
 
         combined = pa.concat_tables(
             [
                 existing.as_table(all_info=True),
                 new_stream.as_table(all_info=True),
             ],
-            promote_options="default",
         )
         return ArrowTableStream(table=combined, tag_columns=existing._tag_columns)
 

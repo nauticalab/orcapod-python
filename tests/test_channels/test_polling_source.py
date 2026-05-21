@@ -944,7 +944,8 @@ class TestPollingSourceSchemaValidation:
     # Combining-schema validation
     # -----------------------------------------------------------------------
 
-    def test_combining_type_mismatch_raises(self):
+    @pytest.mark.asyncio
+    async def test_combining_type_mismatch_raises(self):
         """A type change between batches raises InputValidationError on combine."""
         from orcapod.errors import InputValidationError
 
@@ -973,8 +974,6 @@ class TestPollingSourceSchemaValidation:
             async def close(self):
                 pass
 
-        import asyncio
-
         src = PollingSource(
             TypeDriftImpl(),
             tag_columns="id",
@@ -982,9 +981,8 @@ class TestPollingSourceSchemaValidation:
         )
 
         with pytest.raises(InputValidationError, match="schema"):
-            asyncio.run(src.async_iter_data().__anext__())
-            # Drain the rest to trigger the second fetch
-            asyncio.run(_drain_async(src.async_iter_data()))
+            async for _ in src.async_iter_data():
+                pass
 
     @pytest.mark.asyncio
     async def test_combining_column_set_mismatch_raises(self):

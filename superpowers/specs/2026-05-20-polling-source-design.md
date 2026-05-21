@@ -22,7 +22,8 @@ error handling, and shutdown.
 
 ## Goals & Success Criteria
 
-- `DynamicSourceProtocol[T]` is defined with `poll`, `fetch`, and `close`.
+- `DynamicSourceProtocol[T]` is defined with six methods: `identity`, `to_config`,
+  `from_config`, `poll`, `fetch`, and `close`.
 - `Cursor[T]` is a generic dataclass carrying an opaque cursor value and an optional
   modification timestamp.
 - `PollingSource[T](RootSource)` wraps a `DynamicSourceProtocol[T]` implementation and
@@ -32,10 +33,12 @@ error handling, and shutdown.
 - `StreamBase.async_iter_data()` gains a real default implementation (wrapping
   `iter_data()`), replacing the current `raise NotImplementedError` stub.
 - `SourceNode.async_execute` is simplified to always call `async_iter_data()`.
+- Schema mismatches (between declared schemas and fetched data, or between consecutive
+  batches) raise `InputValidationError` immediately.
 - Tests cover: async streaming, sync snapshot, cursor threading, staleness/cache,
   overrun skip, overrun error, error backoff, clean shutdown, duration limit,
-  indefinite mode, schema drift warning, `CursorInvalidatedError` terminal exit, and
-  `async_iter_data` default regression.
+  indefinite mode, schema validation, `CursorInvalidatedError` terminal exit,
+  `async_iter_data` default regression, and serialization round-trip.
 
 ---
 
@@ -49,6 +52,10 @@ In scope:
 - `PollingSource[T](RootSource, Generic[T])`.
 - Default `StreamBase.async_iter_data()` implementation.
 - Simplified `SourceNode.async_execute`.
+- Schema enforcement: mismatches between declared/actual schemas and between consecutive
+  batches raise `InputValidationError`.
+- Serialization: `to_config()` / `from_config()` round-trip via
+  `DynamicSourceProtocol.to_config()` / `from_config()`.
 - Tests for all behaviour described here.
 - Docstring example showing a minimal `DynamicSourceProtocol` implementation.
 
@@ -56,9 +63,6 @@ Out of scope:
 
 - Database-backed dynamic source (follow-up issue).
 - Framework-level deduplication or row-identity tracking.
-- Schema enforcement across `fetch()` calls (drift is warned, not rejected).
-- Pipeline serialization / `from_config` for `PollingSource` (non-reconstructable,
-  same as `DataFrameSource`).
 
 **Natural backpressure:** `PollingSource` inherits backpressure automatically from the
 channel. `SourceNode.async_execute` calls `await output.send(...)` for each item yielded
@@ -168,10 +172,10 @@ Lives in `src/orcapod/protocols/core_protocols/sources.py` alongside the existin
 class DynamicSourceProtocol(Protocol[T]):
     """User-supplied protocol for a polling data source.
 
-    Implementations provide three async methods. The framework handles
-    scheduling, cursor tracking, cache management, error handling, and
-    lifecycle — the implementation only needs to know how to check for new
-    data, fetch it, and release resources.
+    Implementations provide six methods. The framework handles scheduling,
+    cursor tracking, cache management, error handling, and lifecycle — the
+    implementation supplies identity information, serialization, and the core
+    async data-access trio.
 
     Type parameter T is the cursor value type (e.g. datetime, int, str).
 
@@ -202,13 +206,21 @@ class DynamicSourceProtocol(Protocol[T]):
             def __init__(self, db):
                 self._db = db
 
+            def identity(self):
+                return ("MyDBSource", self._db.url)
+
+            def to_config(self):
+                return {"url": self._db.url}
+
+            @classmethod
+            def from_config(cls, config):
+                return cls(connect(config["url"]))
+
             async def poll(
                 self, cursor: Cursor[datetime] | None = None
             ) -> bool:
                 latest = await self._db.latest_modified_at()
-                if cursor is None or latest > cursor.value:
-                    return True
-                return False
+                return cursor is None or latest > cursor.value
 
             async def fetch(
                 self, cursor: Cursor[datetime] | None = None
@@ -221,6 +233,43 @@ class DynamicSourceProtocol(Protocol[T]):
             async def close(self) -> None:
                 await self._db.disconnect()
     """
+
+    def identity(self) -> Any:
+        """Return an implementation-defined identity value for this source.
+
+        Must be consistent across invocations for the same logical source
+        (same database, same feed, etc.). Used by ``PollingSource`` to
+        establish a stable ``source_id`` and to contribute to the pipeline
+        identity hash.
+
+        Returns:
+            Any hashable value that uniquely identifies this source.
+        """
+        ...
+
+    def to_config(self) -> dict[str, Any] | None:
+        """Serialize implementation state to a JSON-compatible dict.
+
+        Return ``None`` if this implementation cannot be serialized (e.g. it
+        holds live connections with no stable config).
+
+        Returns:
+            A dict suitable for passing to ``from_config``, or ``None`` if
+            not serializable.
+        """
+        ...
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> DynamicSourceProtocol[T]:
+        """Reconstruct an instance from a config dict.
+
+        Args:
+            config: Dict as produced by ``to_config``.
+
+        Returns:
+            A new instance of this class.
+        """
+        ...
 
     async def poll(
         self, cursor: Cursor[T] | None = None
@@ -245,10 +294,9 @@ class DynamicSourceProtocol(Protocol[T]):
     ) -> tuple[Cursor[T], FrameInitTypes]:
         """Fetch data from the given cursor position onward.
 
-        Called only when poll() has returned True. The cursor argument is the
-        framework's current position — i.e. "give me everything that changed
-        since here." Returns both the new cursor position and the data, so
-        cursor advancement is always tied to a successful data read.
+        Called only when poll() has returned True. Returns both the new cursor
+        position and the data, so cursor advancement is always tied to a
+        successful data read.
 
         Args:
             cursor: The current cursor position, or None on the first call.
@@ -256,9 +304,8 @@ class DynamicSourceProtocol(Protocol[T]):
                 and return full state.
 
         Returns:
-            A tuple of (new_cursor, data) where new_cursor marks the new
-            position in the stream and data is anything accepted by
-            pl.DataFrame() — polars DataFrame, pandas DataFrame, PyArrow
+            A tuple of (new_cursor, data) where data is anything accepted by
+            ``pl.DataFrame()`` — polars DataFrame, pandas DataFrame, PyArrow
             Table, dict, list, etc.
 
         Raises:
@@ -370,11 +417,18 @@ the deduplication contract.
 implementations. This is a conscious trade-off; no eviction policy is implemented in
 this version.
 
-### Schema Drift Warning
+### Schema Validation
 
-After each `fetch()`, if the returned DataFrame's columns differ from the cached
-stream's schema, a `WARNING`-level log message is emitted identifying which columns
-appeared or disappeared. No enforcement is performed.
+After each `fetch()`, two checks run:
+
+1. **Declared-schema check** — if `tag_schema` or `data_schema` was supplied at
+   construction, the fetched batch must be compatible with the declared schema.
+2. **Combining-schema check** — if a previous batch has already been accumulated, the
+   new batch's column set and column types must match exactly.
+
+Both checks raise `InputValidationError` immediately if a mismatch is detected.
+`InputValidationError` is re-raised before the generic error-backoff handler so it
+propagates to the caller rather than triggering retry logic.
 
 ### `identity_structure()`
 
@@ -383,8 +437,17 @@ not known at construction time.
 
 ### `to_config()` / `from_config()`
 
-`to_config()` returns a non-reconstructable descriptor (`source_type: "polling_source"`).
-`from_config()` raises `NotImplementedError` — same pattern as `DataFrameSource`.
+`PollingSource.to_config()` delegates to `DynamicSourceProtocol.to_config()`:
+
+- If the implementation returns a non-`None` dict, `PollingSource.to_config()` wraps
+  it as `{"source_type": "polling_source", "impl_class": ..., "impl_config": ...,
+  "tag_columns": ..., "source_id": ...}`.
+- If the implementation returns `None`, `to_config()` returns a non-reconstructable
+  descriptor (`{"source_type": "polling_source", "reconstructable": False}`).
+
+`PollingSource.from_config()` uses the stored `impl_class` to call
+`DynamicSourceProtocol.from_config(impl_config)` and reconstruct a fully-functioning
+source.
 
 ---
 
@@ -431,14 +494,18 @@ try:
             if has_new:
                 log.debug("PollingSource %r: new data detected, fetching", source_id)
                 new_cursor, df = await impl.fetch(cursor=self._cursor)
-                _schema_stream = _combine(_schema_stream, df)   # update cache
+                new_stream = _build_stream(df)
+                # Schema validation raises InputValidationError on mismatch
+                if _schema_stream is not None:
+                    _validate_combining_schemas(_schema_stream, new_stream)
+                _schema_stream = _combine(_schema_stream, new_stream)  # update cache
                 _cursor = new_cursor
                 _update_last_modified(new_cursor)               # update last_modified
-                warn_on_schema_drift(df)
-                rows = list(convert(df))
-                log.debug("PollingSource %r: emitting %d row(s)", source_id, len(rows))
-                for item in rows:
+                emitted = 0
+                for item in new_stream.iter_data():
                     yield item
+                    emitted += 1
+                log.debug("PollingSource %r: emitted %d row(s)", source_id, emitted)
             else:
                 log.debug("PollingSource %r: poll returned no new data", source_id)
 
@@ -446,6 +513,9 @@ try:
 
         except CancelledError:
             raise
+
+        except InputValidationError:
+            raise   # schema mismatches propagate immediately, no backoff
 
         except CursorInvalidatedError:
             log.error("PollingSource %r: cursor invalidated — previous state cannot "
