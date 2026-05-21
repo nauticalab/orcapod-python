@@ -72,8 +72,7 @@ SchemaLike: TypeAlias = Mapping[str, DataType]
 """A dict-like structure mapping field names to ``DataType`` entries.
 Accepted wherever a ``Schema`` is expected so callers can pass plain dicts."""
 
-T = TypeVar("T")
-"""Generic cursor value type used internally by ``Cursor``."""
+_T = TypeVar("_T")
 
 
 class Schema(Mapping[str, DataType]):
@@ -591,7 +590,7 @@ class ContentHash:
 
 
 @dataclass
-class Cursor(Generic[T]):
+class Cursor(Generic[_T]):
     """Marks the current position in a DynamicSource's data stream.
 
     Args:
@@ -605,11 +604,11 @@ class Cursor(Generic[T]):
             the framework falls back to its own wall clock.
     """
 
-    value: T
+    value: _T
     modified_at: datetime | None = None
 
     @classmethod
-    def now(cls, value: T) -> Cursor[T]:
+    def now(cls, value: _T) -> Cursor[_T]:
         """Create a cursor whose ``modified_at`` is the current UTC wall time.
 
         Args:
