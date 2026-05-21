@@ -10,7 +10,8 @@
 ## Executive Summary
 
 OrcaPod should replace `networkx` with a lean, in-house `OrcaDAG` class
-(`src/orcapod/pipeline/dag.py`, ~120 lines of pure Python). The case rests on
+(`src/orcapod/pipeline/dag.py`, ~255 lines including full docstrings and type
+annotations; core logic is under 80 lines). The case rests on
 three converging facts:
 
 1. OrcaPod's networkx API surface is minimal — nine call shapes covering basic
@@ -162,9 +163,14 @@ tests) is tracked as a follow-on issue (ENG-494, created as part of this spike).
 
 ```python
 from __future__ import annotations
-from typing import Generic, TypeVar, Iterable, Any
+from collections.abc import Hashable
+from typing import Any, Generic, Iterable, Protocol, TypeVar
 
-NodeT = TypeVar("NodeT")
+class Comparable(Hashable, Protocol):
+    """Nodes must be hashable (dict keys) and support < (heapq / sorted)."""
+    def __lt__(self, other: Any) -> bool: ...
+
+NodeT = TypeVar("NodeT", bound=Comparable)
 
 class OrcaDAG(Generic[NodeT]):
     """Minimal directed acyclic graph for OrcaPod pipeline topology.
@@ -177,6 +183,7 @@ class OrcaDAG(Generic[NodeT]):
     def add_node(self, node: NodeT, **attrs: Any) -> None: ...
     def add_edge(self, u: NodeT, v: NodeT) -> None: ...
         # Implicitly calls add_node for u and v if not already present.
+        # Adding a duplicate edge is a no-op (idempotent).
 
     # Node attribute access — replaces nx.DiGraph.nodes[key]
     def node_attrs(self, node: NodeT) -> dict[str, Any]: ...
@@ -189,7 +196,9 @@ class OrcaDAG(Generic[NodeT]):
     # Traversal
     def nodes(self) -> Iterable[NodeT]: ...
     def edges(self) -> Iterable[tuple[NodeT, NodeT]]: ...
-    def successors(self, node: NodeT) -> Iterable[NodeT]: ...
+    def successors(self, node: NodeT) -> frozenset[NodeT]: ...
+        # Returns a snapshot frozenset — callers cannot corrupt _in_degree
+        # by mutating the returned collection.
     def in_degree(self, node: NodeT) -> int: ...
 
     # Ordering
@@ -198,15 +207,15 @@ class OrcaDAG(Generic[NodeT]):
         # Raises CycleError if the graph contains a cycle.
 
     def topological_sort_deterministic(self) -> list[NodeT]: ...
-        # Deterministic (Kahn's + min-heap). NodeT must be orderable (str).
-        # Used for snapshot hash computation where ordering must be stable
-        # across runs and Python versions.
+        # Deterministic (Kahn's + min-heap). Type-safe because NodeT is
+        # bounded to Comparable. Used for snapshot hash computation where
+        # ordering must be stable across runs and Python versions.
 ```
 
 ### Internal representation
 
 ```
-_nodes:      dict[NodeT, dict[str, Any]]   # node → attribute dict
+_attrs:      dict[NodeT, dict[str, Any]]   # node → attribute dict
 _successors: dict[NodeT, set[NodeT]]       # node → set of outgoing neighbours
 _in_degree:  dict[NodeT, int]              # node → count of incoming edges
 ```
@@ -249,7 +258,7 @@ left to the follow-on issue (ENG-494) to keep this spike's diff reviewable.
 
 ---
 
-## 7. Migration Surface Map (for follow-on issue ENG-493)
+## 7. Migration Surface Map (for follow-on issue ENG-494)
 
 The full migration requires changes in exactly five places:
 

@@ -18,12 +18,28 @@ Example:
 from __future__ import annotations
 
 import heapq
+from collections.abc import Hashable
 from graphlib import CycleError, TopologicalSorter
-from typing import Any, Generic, Iterable, Iterator, TypeVar
+from typing import Any, Generic, Iterable, Iterator, Protocol, TypeVar
 
-__all__ = ["OrcaDAG", "CycleError"]
+__all__ = ["Comparable", "OrcaDAG", "CycleError"]
 
-NodeT = TypeVar("NodeT")
+
+class Comparable(Hashable, Protocol):
+    """Protocol for node types that support both hashing and ordering.
+
+    Nodes must be hashable to serve as dict keys and must support ``<``
+    for deterministic topological sort via ``heapq``.
+
+    Any type that implements ``__hash__`` (or inherits it from ``object``)
+    and ``__lt__`` satisfies this protocol — e.g. ``str``, ``int``, or a
+    custom dataclass with those methods defined.
+    """
+
+    def __lt__(self, other: Any) -> bool: ...
+
+
+NodeT = TypeVar("NodeT", bound=Comparable)
 
 
 class OrcaDAG(Generic[NodeT]):
@@ -34,8 +50,9 @@ class OrcaDAG(Generic[NodeT]):
     dependencies; backed entirely by plain dicts and stdlib ``graphlib``.
 
     Args:
-        NodeT: The node type.  May be any hashable type (``str``, a dataclass,
-            an object instance, etc.).
+        NodeT: The node type.  Must satisfy ``Comparable`` — i.e. be hashable
+            and support ``<`` comparison (e.g. ``str``, ``int``, or a custom
+            type that implements ``__hash__`` and ``__lt__``).
     """
 
     def __init__(self) -> None:
@@ -70,15 +87,12 @@ class OrcaDAG(Generic[NodeT]):
     def add_edge(self, u: NodeT, v: NodeT) -> None:
         """Add a directed edge from *u* to *v*.
 
-        Both nodes are implicitly added if not already present.
+        Both nodes are implicitly added if not already present.  Adding an
+        edge that already exists is a no-op (idempotent).
 
         Args:
             u: Source node.
             v: Target node.
-
-        Raises:
-            ValueError: If the edge already exists (duplicate edges are not
-                permitted in a DAG).
         """
         self.add_node(u)
         self.add_node(v)
@@ -142,19 +156,22 @@ class OrcaDAG(Generic[NodeT]):
             for v in successors:
                 yield u, v
 
-    def successors(self, node: NodeT) -> Iterable[NodeT]:
+    def successors(self, node: NodeT) -> frozenset[NodeT]:
         """Return the immediate successors (outgoing neighbours) of *node*.
+
+        Returns a snapshot ``frozenset`` so callers cannot mutate internal
+        graph state through the returned value.
 
         Args:
             node: The source node.
 
         Returns:
-            Iterable of nodes that *node* has a directed edge to.
+            Frozen set of nodes that *node* has a directed edge to.
 
         Raises:
             KeyError: If *node* is not in the graph.
         """
-        return self._successors[node]
+        return frozenset(self._successors[node])
 
     def in_degree(self, node: NodeT) -> int:
         """Return the number of incoming edges for *node*.
@@ -205,8 +222,9 @@ class OrcaDAG(Generic[NodeT]):
         """Return nodes in a deterministic topological order.
 
         Implements Kahn's algorithm with a min-heap frontier so that the
-        output ordering is stable across runs and Python versions for any
-        graph whose nodes support ``<`` comparison (e.g. ``str``).
+        output ordering is stable across runs and Python versions.  Because
+        ``NodeT`` is bounded to ``Comparable``, ``heapq`` operations and
+        ``sorted()`` are fully type-safe with no suppression needed.
 
         This is a direct port of the existing Kahn's implementation already
         present in ``graph.py`` (``_compute_pipeline_snapshot_hash``), moved
@@ -217,22 +235,16 @@ class OrcaDAG(Generic[NodeT]):
 
         Raises:
             graphlib.CycleError: If the graph contains a cycle.
-            TypeError: If the node type does not support ``<`` comparison.
         """
         in_deg: dict[NodeT, int] = dict(self._in_degree)
-        # heapq requires elements to support <. NodeT is unconstrained at the
-        # class level, so we use list[Any] for the heap; the ordering invariant
-        # (NodeT must be orderable) is a documented runtime precondition of
-        # this method, not something the type system can enforce here.
-        frontier: list[Any] = [n for n, d in in_deg.items() if d == 0]
+        frontier: list[NodeT] = [n for n, d in in_deg.items() if d == 0]
         heapq.heapify(frontier)
         ordered: list[NodeT] = []
 
         while frontier:
             node: NodeT = heapq.heappop(frontier)
             ordered.append(node)
-            successors_sorted: list[Any] = sorted(self._successors[node])
-            for successor in successors_sorted:
+            for successor in sorted(self._successors[node]):
                 in_deg[successor] -= 1
                 if in_deg[successor] == 0:
                     heapq.heappush(frontier, successor)

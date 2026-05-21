@@ -384,6 +384,10 @@ class TestGenericNodeTypes:
             def __init__(self, name: str) -> None:
                 self.name = name
 
+            def __lt__(self, other: object) -> bool:
+                assert isinstance(other, FakeNode)
+                return self.name < other.name
+
         a, b = FakeNode("a"), FakeNode("b")
         dag: OrcaDAG[FakeNode] = OrcaDAG()
         dag.add_edge(a, b)
