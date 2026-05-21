@@ -106,6 +106,16 @@ class TestCursorInvalidatedError:
 class _MinimalImpl:
     """Minimal protocol-conformant implementation for isinstance checks."""
 
+    def identity(self) -> Any:
+        return "_MinimalImpl"
+
+    def to_config(self) -> dict[str, Any] | None:
+        return None
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> _MinimalImpl:
+        return cls()
+
     async def poll(self, cursor: Cursor[int] | None = None) -> bool:
         return False
 
@@ -242,6 +252,16 @@ class FakeDynamicSource:
         self.poll_cursors: list[Cursor[int] | None] = []
         self.fetch_cursors: list[Cursor[int] | None] = []
 
+    def identity(self) -> Any:
+        return "FakeDynamicSource"
+
+    def to_config(self) -> dict[str, Any] | None:
+        return None
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> FakeDynamicSource:
+        raise NotImplementedError("FakeDynamicSource is not serializable")
+
     async def poll(self, cursor: Cursor[int] | None = None) -> bool:
         self.poll_cursors.append(cursor)
         if self._poll_raises is not None:
@@ -278,6 +298,16 @@ class NoArgSource:
     Used to test ``PollingSource.from_config`` reconstruction: the impl must
     be importable and instantiable without arguments.
     """
+
+    def identity(self) -> Any:
+        return "NoArgSource"
+
+    def to_config(self) -> dict[str, Any] | None:
+        return None
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> NoArgSource:
+        return cls()
 
     async def poll(self, cursor: Cursor[int] | None = None) -> bool:
         return False
@@ -531,8 +561,8 @@ class TestPollingSourceAsyncMode:
 
         assert len(items) == 2
         # Internal cache should hold both rows
-        assert src._schema_stream is not None
-        cached_rows = list(src._schema_stream.iter_data())
+        assert src._accumulated_stream is not None
+        cached_rows = list(src._accumulated_stream.iter_data())
         assert len(cached_rows) == 2
 
     @pytest.mark.asyncio
@@ -639,6 +669,9 @@ class TestPollingSourceErrorHandling:
         call_count = 0
 
         class TransientImpl:
+            def identity(self):
+                return "TransientImpl"
+
             async def poll(self, cursor=None) -> bool:
                 nonlocal call_count
                 call_count += 1
@@ -740,11 +773,15 @@ class TestPollingSourceErrorHandling:
         assert fake.close_called
 
     @pytest.mark.asyncio
-    async def test_schema_drift_emits_warning(self, caplog):
-        """Mismatched columns on second fetch emit a WARNING log."""
+    async def test_schema_mismatch_raises_on_column_change(self):
+        """A second fetch with a different column set raises InputValidationError."""
+        from orcapod.errors import InputValidationError
 
         class DriftingImpl:
             _call = 0
+
+            def identity(self):
+                return "DriftingImpl"
 
             async def poll(self, cursor=None) -> bool:
                 return self._call < 2
@@ -757,7 +794,7 @@ class TestPollingSourceErrorHandling:
                         {"id": pa.array([1], type=pa.int64()),
                          "val": pa.array([10], type=pa.int64())},
                     )
-                # Second fetch has an extra column
+                # Second fetch has an extra column — schema mismatch
                 return (
                     Cursor(value=2),
                     {"id": pa.array([2], type=pa.int64()),
@@ -774,8 +811,223 @@ class TestPollingSourceErrorHandling:
             polling_config=PollingConfig(interval=0.05, duration=0.5, max_missed_intervals=50),
         )
 
-        with caplog.at_level(logging.WARNING, logger="orcapod.core.sources.polling_source"):
+        with pytest.raises(InputValidationError, match="schema mismatch"):
             async for _ in src.async_iter_data():
                 pass
 
-        assert any("schema drift" in r.message for r in caplog.records)
+
+# ===========================================================================
+# Task 7: Schema validation tests
+# ===========================================================================
+
+
+class TestCursorNow:
+    def test_now_sets_modified_at_to_current_time(self):
+        before = datetime.now(timezone.utc)
+        c = Cursor.now(value=42)
+        after = datetime.now(timezone.utc)
+
+        assert c.value == 42
+        assert c.modified_at is not None
+        assert before <= c.modified_at <= after
+
+    def test_now_modified_at_is_timezone_aware(self):
+        c = Cursor.now(value="tok")
+        assert c.modified_at is not None
+        assert c.modified_at.tzinfo is not None
+
+
+class TestPollingSourceSchemaValidation:
+    # -----------------------------------------------------------------------
+    # Declared-schema short-circuit
+    # -----------------------------------------------------------------------
+
+    def test_output_schema_returns_declared_without_fetch(self):
+        """output_schema() uses declared schemas before any data is fetched."""
+        from orcapod.types import Schema
+
+        tag_schema = Schema({"id": int})
+        data_schema = Schema({"val": int})
+        fake = FakeDynamicSource(batches=[_batch(1, 10)])
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(interval=1.0),
+            tag_schema=tag_schema,
+            data_schema=data_schema,
+        )
+
+        # No fetch should have occurred
+        assert len(fake.fetch_cursors) == 0
+        ts, ds = src.output_schema()
+        assert ts == tag_schema
+        assert ds == data_schema
+        # Still no fetch triggered
+        assert len(fake.fetch_cursors) == 0
+
+    def test_keys_returns_declared_without_fetch(self):
+        """keys() uses declared schemas before any data is fetched."""
+        from orcapod.types import Schema
+
+        tag_schema = Schema({"id": int})
+        data_schema = Schema({"val": int})
+        fake = FakeDynamicSource(batches=[_batch(1, 10)])
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(interval=1.0),
+            tag_schema=tag_schema,
+            data_schema=data_schema,
+        )
+
+        assert len(fake.fetch_cursors) == 0
+        tag_keys, data_keys = src.keys()
+        assert "id" in tag_keys
+        assert "val" in data_keys
+        assert len(fake.fetch_cursors) == 0
+
+    # -----------------------------------------------------------------------
+    # Declared-schema compatibility checking (first fetch)
+    # -----------------------------------------------------------------------
+
+    def test_compatible_declared_schema_passes_silently(self):
+        """Fetched data matching the declared schema succeeds without error."""
+        from orcapod.types import Schema
+
+        fake = FakeDynamicSource(batches=[_batch(1, 10)])
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(interval=1.0),
+            tag_schema=Schema({"id": int}),
+            data_schema=Schema({"val": int}),
+        )
+        # Should not raise
+        rows = list(src.iter_data())
+        assert len(rows) == 1
+
+    def test_declared_tag_schema_mismatch_raises(self):
+        """Missing declared tag field in fetched data raises InputValidationError."""
+        from orcapod.errors import InputValidationError
+        from orcapod.types import Schema
+
+        # Declare a tag field "missing_col" that won't appear in the fetched data
+        fake = FakeDynamicSource(batches=[_batch(1, 10)])
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(interval=1.0),
+            tag_schema=Schema({"id": int, "missing_col": str}),
+        )
+
+        with pytest.raises(InputValidationError, match="tag schema incompatible"):
+            list(src.iter_data())
+
+    def test_declared_data_schema_type_mismatch_raises(self):
+        """A type conflict between declared and actual data schema raises InputValidationError."""
+        from orcapod.errors import InputValidationError
+        from orcapod.types import Schema
+
+        # Declare val as str, but fetched data has val as int
+        fake = FakeDynamicSource(batches=[_batch(1, 10)])
+        src = PollingSource(
+            fake,
+            tag_columns="id",
+            polling_config=PollingConfig(interval=1.0),
+            data_schema=Schema({"val": str}),  # wrong type
+        )
+
+        with pytest.raises(InputValidationError, match="data schema incompatible"):
+            list(src.iter_data())
+
+    # -----------------------------------------------------------------------
+    # Combining-schema validation
+    # -----------------------------------------------------------------------
+
+    def test_combining_type_mismatch_raises(self):
+        """A type change between batches raises InputValidationError on combine."""
+        from orcapod.errors import InputValidationError
+
+        class TypeDriftImpl:
+            _call = 0
+
+            def identity(self):
+                return "TypeDriftImpl"
+
+            async def poll(self, cursor=None) -> bool:
+                return self._call < 2
+
+            async def fetch(self, cursor=None):
+                self._call += 1
+                if self._call == 1:
+                    return Cursor(value=1), {
+                        "id": pa.array([1], type=pa.int64()),
+                        "val": pa.array([10], type=pa.int64()),
+                    }
+                # Second fetch: val changes from int to string
+                return Cursor(value=2), {
+                    "id": pa.array([2], type=pa.int64()),
+                    "val": pa.array(["twenty"], type=pa.large_string()),
+                }
+
+            async def close(self):
+                pass
+
+        import asyncio
+
+        src = PollingSource(
+            TypeDriftImpl(),
+            tag_columns="id",
+            polling_config=PollingConfig(interval=0.05, duration=0.5, max_missed_intervals=50),
+        )
+
+        with pytest.raises(InputValidationError, match="schema"):
+            asyncio.run(src.async_iter_data().__anext__())
+            # Drain the rest to trigger the second fetch
+            asyncio.run(_drain_async(src.async_iter_data()))
+
+    @pytest.mark.asyncio
+    async def test_combining_column_set_mismatch_raises(self):
+        """Column set changes between batches raise InputValidationError."""
+        from orcapod.errors import InputValidationError
+
+        class ColumnDriftImpl:
+            _call = 0
+
+            def identity(self):
+                return "ColumnDriftImpl"
+
+            async def poll(self, cursor=None) -> bool:
+                return self._call < 2
+
+            async def fetch(self, cursor=None):
+                self._call += 1
+                if self._call == 1:
+                    return Cursor(value=1), {
+                        "id": pa.array([1], type=pa.int64()),
+                        "val": pa.array([10], type=pa.int64()),
+                    }
+                # Second fetch removes val and adds extra
+                return Cursor(value=2), {
+                    "id": pa.array([2], type=pa.int64()),
+                    "extra": pa.array([99], type=pa.int64()),
+                }
+
+            async def close(self):
+                pass
+
+        src = PollingSource(
+            ColumnDriftImpl(),
+            tag_columns="id",
+            polling_config=PollingConfig(interval=0.05, duration=0.5, max_missed_intervals=50),
+        )
+
+        with pytest.raises(InputValidationError, match="schema mismatch"):
+            async for _ in src.async_iter_data():
+                pass
+
+
+async def _drain_async(agen):
+    """Consume all items from an async generator."""
+    async for _ in agen:
+        pass

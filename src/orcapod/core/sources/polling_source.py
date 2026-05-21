@@ -3,11 +3,13 @@
 Provides ``PollingSource``, a ``RootSource`` that wraps a
 ``DynamicSourceProtocol`` implementation. The framework handles scheduling,
 cursor tracking, cache management, error handling, and shutdown; the
-implementation only supplies ``poll``, ``fetch``, and ``close``.
+implementation only supplies ``identity``, ``to_config``, ``from_config``,
+``poll``, ``fetch``, and ``close``.
 """
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 from collections.abc import Collection
 from math import floor
@@ -15,10 +17,8 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
-from orcapod.errors import CursorInvalidatedError
+from orcapod.errors import CursorInvalidatedError, InputValidationError
 from orcapod.types import ColumnConfig, Cursor, PollingConfig
-
-T = TypeVar("T")
 from orcapod.utils import arrow_utils, polars_data_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -30,9 +30,12 @@ if TYPE_CHECKING:
     from orcapod.core.streams.arrow_table_stream import ArrowTableStream
     from orcapod.protocols.core_protocols.sources import DynamicSourceProtocol
     from orcapod.types import Schema
+
 else:
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")
+
+T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +80,44 @@ def _run_sync(async_fn, *args, **kwargs):
         ).result()
 
 
+def _assert_schema_match(
+    schema_kind: str,
+    declared: Schema,
+    actual: Schema,
+    source_id: str | None,
+) -> None:
+    """Raise ``InputValidationError`` when *actual* is incompatible with *declared*.
+
+    Checks that every field in *declared* is present in *actual* with the same
+    type. Extra fields in *actual* are allowed.
+
+    Args:
+        schema_kind: Human-readable label (``"tag"`` or ``"data"``) used in
+            the error message.
+        declared: The expected schema (e.g. from ``tag_schema`` / ``data_schema``
+            constructor arguments, or the accumulated stream's schema).
+        actual: The observed schema from the most recently fetched data.
+        source_id: Source identifier for error messages.
+
+    Raises:
+        InputValidationError: If any declared field is absent from *actual* or
+            has a mismatched type.
+    """
+    mismatches: list[str] = []
+    for field, expected_type in declared.items():
+        if field not in actual:
+            mismatches.append(f"{field!r} missing from fetched data")
+        elif actual[field] != expected_type:
+            mismatches.append(
+                f"{field!r}: declared {expected_type!r}, got {actual[field]!r}"
+            )
+    if mismatches:
+        raise InputValidationError(
+            f"PollingSource {source_id!r}: {schema_kind} schema incompatible — "
+            + "; ".join(mismatches)
+        )
+
+
 # ---------------------------------------------------------------------------
 # PollingSource
 # ---------------------------------------------------------------------------
@@ -93,7 +134,8 @@ class PollingSource(RootSource, Generic[T]):
 
     Args:
         impl: User-supplied ``DynamicSourceProtocol`` implementation that
-            provides ``poll``, ``fetch``, and ``close`` async methods.
+            provides ``identity``, ``to_config``, ``from_config``, ``poll``,
+            ``fetch``, and ``close`` methods.
         tag_columns: Column name(s) that form the tag (join key) for each
             row. All other columns become data columns.
         polling_config: Scheduling and error-handling configuration.
@@ -103,8 +145,14 @@ class PollingSource(RootSource, Generic[T]):
             errors with 1-second exponential backoff base. All five fields
             are validated at construction time — ``ValueError`` is raised
             for out-of-range values.
-        source_id: Optional stable string identifier for provenance
-            tracking. Auto-generated on first fetch if not provided.
+        tag_schema: Optional expected tag schema. When provided, ``output_schema``
+            and ``keys`` can answer without triggering a fetch, and each fetched
+            batch is validated against this schema — ``InputValidationError`` is
+            raised on any mismatch.
+        data_schema: Optional expected data schema. Same behaviour as
+            *tag_schema* above.
+        source_id: Optional stable string identifier for provenance tracking.
+            Defaults to ``str(impl.identity())`` when omitted.
         label: Optional human-readable label shown in pipeline diagrams.
         data_context: Optional data context key or instance for type
             conversion and hashing.
@@ -126,6 +174,8 @@ class PollingSource(RootSource, Generic[T]):
         impl: DynamicSourceProtocol[T],
         tag_columns: str | Collection[str],
         polling_config: PollingConfig = PollingConfig(),
+        tag_schema: Schema | None = None,
+        data_schema: Schema | None = None,
         source_id: str | None = None,
         label: str | None = None,
         data_context: str | Any | None = None,
@@ -143,26 +193,27 @@ class PollingSource(RootSource, Generic[T]):
         else:
             self._tag_columns = tuple(tag_columns)
         self._polling_config = polling_config
+        self._tag_schema = tag_schema
+        self._data_schema = data_schema
         self._cursor: Cursor[T] | None = None
-        self._schema_stream: ArrowTableStream | None = None
+        self._accumulated_stream: ArrowTableStream | None = None
+        # Derive source_id from impl identity if not explicitly provided
+        if self._source_id is None:
+            self._source_id = str(self._impl.identity())
 
     # -------------------------------------------------------------------------
     # Identity
     # -------------------------------------------------------------------------
 
     def identity_structure(self) -> Any:
-        """Identity derived from the impl class location and tag columns.
+        """Identity derived from the impl's own identity and tag columns.
 
-        Uses the impl's ``__module__`` and ``__qualname__`` so that two
-        ``PollingSource`` instances wrapping different impl classes always
-        produce different hashes, and two instances wrapping the same impl
-        class with the same tag columns produce the same hash.
+        Delegates to ``impl.identity()`` so that the implementer controls
+        what makes two ``PollingSource`` instances distinct.
         """
-        impl_type = type(self._impl)
         return (
             self.__class__.__name__,
-            impl_type.__module__,
-            impl_type.__qualname__,
+            self._impl.identity(),
             self._tag_columns,
         )
 
@@ -176,7 +227,20 @@ class PollingSource(RootSource, Generic[T]):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[Schema, Schema]:
-        """Return the output schema, triggering a fetch on first access."""
+        """Return the output schema.
+
+        When both ``tag_schema`` and ``data_schema`` were provided at
+        construction and no data has been fetched yet, returns them directly
+        without triggering a fetch. Otherwise triggers a fetch on first access.
+        """
+        if (
+            self._tag_schema is not None
+            and self._data_schema is not None
+            and self._accumulated_stream is None
+            and columns is None
+            and not all_info
+        ):
+            return self._tag_schema, self._data_schema
         return self._get_latest_stream().output_schema(columns=columns, all_info=all_info)
 
     def keys(
@@ -185,7 +249,20 @@ class PollingSource(RootSource, Generic[T]):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        """Return tag and data column keys, triggering a fetch on first access."""
+        """Return tag and data column keys.
+
+        When both ``tag_schema`` and ``data_schema`` were provided at
+        construction and no data has been fetched yet, derives keys from them
+        directly without triggering a fetch.
+        """
+        if (
+            self._tag_schema is not None
+            and self._data_schema is not None
+            and self._accumulated_stream is None
+            and columns is None
+            and not all_info
+        ):
+            return tuple(self._tag_schema.keys()), tuple(self._data_schema.keys())
         return self._get_latest_stream().keys(columns=columns, all_info=all_info)
 
     def iter_data(self):
@@ -208,11 +285,12 @@ class PollingSource(RootSource, Generic[T]):
     def to_config(self, db_registry: Any = None) -> dict[str, Any]:
         """Serialize this source to a JSON-compatible config dict.
 
-        The config stores the impl class's module path and qualified name so
-        that ``from_config`` can reconstruct the source when the impl class
-        has a no-argument constructor. If the impl requires constructor
-        arguments, callers should subclass ``PollingSource`` and override
-        both methods.
+        The config stores the impl class's module path and qualified name for
+        reconstruction, plus the output of ``impl.to_config()`` under the
+        ``"impl_config"`` key (``None`` if the impl does not support
+        serialization). ``PollingSource.from_config`` calls
+        ``impl_class.from_config(impl_config)`` when ``impl_config`` is
+        non-``None``, and falls back to a no-argument constructor otherwise.
 
         Args:
             db_registry: Unused; present for protocol compatibility.
@@ -226,23 +304,18 @@ class PollingSource(RootSource, Generic[T]):
             "impl_module": impl_type.__module__,
             "impl_class": impl_type.__qualname__,
             "tag_columns": list(self._tag_columns),
-            "polling_config": {
-                "interval": self._polling_config.interval,
-                "duration": self._polling_config.duration,
-                "max_missed_intervals": self._polling_config.max_missed_intervals,
-                "max_consecutive_errors": self._polling_config.max_consecutive_errors,
-                "error_backoff_base": self._polling_config.error_backoff_base,
-            },
+            "polling_config": dataclasses.asdict(self._polling_config),
             "source_id": self._source_id,
+            "impl_config": self._impl.to_config(),
         }
 
     @classmethod
     def from_config(cls, config: dict[str, Any], db_registry: Any = None) -> PollingSource:
         """Reconstruct a ``PollingSource`` by importing the impl class.
 
-        The impl class is imported from ``config["impl_module"]`` and
-        instantiated with no arguments. If the impl requires constructor
-        arguments, override this method in a subclass.
+        When ``config["impl_config"]`` is non-``None``, the impl is
+        reconstructed via ``impl_class.from_config(impl_config)``. Otherwise
+        the impl class is instantiated with no arguments.
 
         Args:
             config: A dict as produced by ``to_config``.
@@ -255,16 +328,21 @@ class PollingSource(RootSource, Generic[T]):
             KeyError: If ``config`` is missing a required key.
             ImportError: If the impl module cannot be imported.
             AttributeError: If the impl class does not exist in the module.
-            TypeError: If the impl class cannot be instantiated with no args.
+            TypeError: If the impl class cannot be instantiated.
         """
         import importlib
 
         module = importlib.import_module(config["impl_module"])
         # Walk dotted qualname to support nested classes (e.g. "Outer.Inner")
-        impl_obj: Any = module
+        impl_class: Any = module
         for part in config["impl_class"].split("."):
-            impl_obj = getattr(impl_obj, part)
-        impl = impl_obj()
+            impl_class = getattr(impl_class, part)
+
+        impl_config = config.get("impl_config")
+        if impl_config is None:
+            impl = impl_class()
+        else:
+            impl = impl_class.from_config(impl_config)
 
         polling_config = PollingConfig(**config.get("polling_config", {}))
         return cls(
@@ -280,13 +358,15 @@ class PollingSource(RootSource, Generic[T]):
 
     def _get_latest_stream(self) -> ArrowTableStream:
         """Return the current accumulated stream, fetching/polling as needed."""
-        if self._schema_stream is None:
+        if self._accumulated_stream is None:
             # First access — no cache yet; fetch immediately
             logger.debug("PollingSource %r: first sync access — fetching", self._source_id)
             new_cursor, data = _run_sync(self._impl.fetch, cursor=None)
             new_stream = self._try_build_stream(data)
             if new_stream is not None:
-                self._schema_stream = new_stream
+                if self._tag_schema is not None or self._data_schema is not None:
+                    self._validate_against_declared_schemas(new_stream)
+                self._accumulated_stream = new_stream
             self._update_last_modified_from_cursor(new_cursor)
             self._cursor = new_cursor
         else:
@@ -297,17 +377,19 @@ class PollingSource(RootSource, Generic[T]):
                 new_cursor, data = _run_sync(self._impl.fetch, cursor=self._cursor)
                 new_stream = self._try_build_stream(data)
                 if new_stream is not None:
-                    self._schema_stream = self._combine(self._schema_stream, new_stream)
+                    if self._tag_schema is not None or self._data_schema is not None:
+                        self._validate_against_declared_schemas(new_stream)
+                    self._accumulated_stream = self._combine(self._accumulated_stream, new_stream)
                 self._update_last_modified_from_cursor(new_cursor)
                 self._cursor = new_cursor
             else:
                 logger.debug("PollingSource %r: sync poll — cache still valid", self._source_id)
 
-        if self._schema_stream is None:
+        if self._accumulated_stream is None:
             raise ValueError(
                 "PollingSource: no data available yet — first fetch returned empty data."
             )
-        return self._schema_stream
+        return self._accumulated_stream
 
     def _try_build_stream(self, data: FrameInitTypes) -> ArrowTableStream | None:
         """Build an ``ArrowTableStream`` from raw data, returning ``None`` for empty data.
@@ -347,30 +429,81 @@ class PollingSource(RootSource, Generic[T]):
             tag_columns=self._tag_columns,
             source_id=self._source_id,
         )
-
-        if self._source_id is None:
-            self._source_id = result.source_id
-
         return result.stream
+
+    def _validate_against_declared_schemas(self, stream: ArrowTableStream) -> None:
+        """Validate *stream*'s schema against the declared ``tag_schema`` / ``data_schema``.
+
+        Called whenever a new batch is fetched and declared schemas were provided
+        at construction. Raises if the fetched data is incompatible.
+
+        Args:
+            stream: The newly built stream whose schema is to be validated.
+
+        Raises:
+            InputValidationError: If the stream's tag or data schema is
+                incompatible with the declared schemas.
+        """
+        actual_tag_schema, actual_data_schema = stream.output_schema()
+        if self._tag_schema is not None:
+            _assert_schema_match("tag", self._tag_schema, actual_tag_schema, self._source_id)
+        if self._data_schema is not None:
+            _assert_schema_match("data", self._data_schema, actual_data_schema, self._source_id)
+
+    def _validate_combining_schemas(
+        self, existing: ArrowTableStream, new_stream: ArrowTableStream
+    ) -> None:
+        """Validate that *new_stream*'s schema is compatible with *existing*.
+
+        Checks that both streams have identical user-facing column sets and
+        that all shared column types match exactly.
+
+        Args:
+            existing: The currently accumulated stream.
+            new_stream: The newly fetched stream to be appended.
+
+        Raises:
+            InputValidationError: If column sets differ or any column type has
+                changed between batches.
+        """
+        old_tag_keys, old_data_keys = existing.keys()
+        new_tag_keys, new_data_keys = new_stream.keys()
+
+        old_cols = set(old_tag_keys) | set(old_data_keys)
+        new_cols = set(new_tag_keys) | set(new_data_keys)
+
+        if old_cols != new_cols:
+            added = sorted(new_cols - old_cols)
+            removed = sorted(old_cols - new_cols)
+            raise InputValidationError(
+                f"PollingSource {self._source_id!r}: schema mismatch between batches — "
+                f"added: {added!r}, removed: {removed!r}"
+            )
+
+        old_tag_schema, old_data_schema = existing.output_schema()
+        new_tag_schema, new_data_schema = new_stream.output_schema()
+        _assert_schema_match("tag", old_tag_schema, new_tag_schema, self._source_id)
+        _assert_schema_match("data", old_data_schema, new_data_schema, self._source_id)
 
     def _combine(
         self, existing: ArrowTableStream, new_stream: ArrowTableStream
     ) -> ArrowTableStream:
-        """Append *new_stream* rows to *existing*, warning on schema drift."""
+        """Validate schemas then append *new_stream* rows to *existing*.
+
+        Args:
+            existing: The currently accumulated stream.
+            new_stream: The newly fetched stream to be appended.
+
+        Returns:
+            A new ``ArrowTableStream`` containing rows from both streams.
+
+        Raises:
+            InputValidationError: If the schemas are incompatible (see
+                ``_validate_combining_schemas``).
+        """
         from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 
-        # Schema drift check (user-facing columns only)
-        old_tag_keys, old_data_keys = existing.keys()
-        new_tag_keys, new_data_keys = new_stream.keys()
-        old_cols = set(old_tag_keys) | set(old_data_keys)
-        new_cols = set(new_tag_keys) | set(new_data_keys)
-        if old_cols != new_cols:
-            logger.warning(
-                "PollingSource %r: schema drift detected — added: %r, removed: %r",
-                self._source_id,
-                sorted(new_cols - old_cols),
-                sorted(old_cols - new_cols),
-            )
+        self._validate_combining_schemas(existing, new_stream)
 
         combined = pa.concat_tables(
             [
@@ -402,12 +535,13 @@ class PollingSource(RootSource, Generic[T]):
 
         ``impl.close()`` is always awaited before returning.
         """
-        # Pre-seed from cache (yield first, count after — avoids double iteration)
-        if self._schema_stream is not None:
+        # Pre-seed from cache
+        if self._accumulated_stream is not None:
             pre_seed_count = 0
-            for item in self._schema_stream.iter_data():
+            for pre_seed_count, item in enumerate(
+                self._accumulated_stream.iter_data(), start=1
+            ):
                 yield item
-                pre_seed_count += 1
             logger.debug(
                 "PollingSource %r: pre-seeded %d row(s)", self._source_id, pre_seed_count
             )
@@ -447,10 +581,14 @@ class PollingSource(RootSource, Generic[T]):
                         self._cursor = new_cursor
                         self._update_last_modified_from_cursor(new_cursor)
                         if new_stream is not None:
-                            if self._schema_stream is None:
-                                self._schema_stream = new_stream
+                            if self._tag_schema is not None or self._data_schema is not None:
+                                self._validate_against_declared_schemas(new_stream)
+                            if self._accumulated_stream is None:
+                                self._accumulated_stream = new_stream
                             else:
-                                self._schema_stream = self._combine(self._schema_stream, new_stream)
+                                self._accumulated_stream = self._combine(
+                                    self._accumulated_stream, new_stream
+                                )
 
                             # Emit new rows from just this fetch
                             rows = list(new_stream.iter_data())
@@ -479,6 +617,10 @@ class PollingSource(RootSource, Generic[T]):
                         self._source_id,
                     )
                     return
+
+                except InputValidationError:
+                    # Schema mismatches are not transient — propagate immediately.
+                    raise
 
                 except Exception as e:
                     consecutive_errors += 1
