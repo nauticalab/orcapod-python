@@ -545,16 +545,15 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 upstream_nodes = tuple(
                     reconstructed[h] for h in up_hashes if h in reconstructed
                 )
-                # Attempt to reconstruct the operator from its saved config.
-                # Operators use a class_name + module_path + config dict pattern.
+                # Attempt to reconstruct the operator from its saved config via
+                # the centralised resolver so registry logic and error handling
+                # are consistent with all other deserialization paths.
                 operator = None
                 op_config = descriptor.get("operator_config")
                 if op_config:
                     try:
-                        import importlib
-                        op_mod = importlib.import_module(op_config["module_path"])
-                        op_cls = getattr(op_mod, op_config["class_name"])
-                        operator = op_cls.from_config(op_config)
+                        from orcapod.pipeline.serialization import resolve_operator_from_config
+                        operator = resolve_operator_from_config(op_config)
                     except Exception as exc:
                         logger.warning(
                             "Could not reconstruct operator %r from config — "

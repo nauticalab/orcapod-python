@@ -109,10 +109,10 @@ class TestSourceSpecValidate:
         spec.validate(source)
 
     def test_validate_raises_for_extra_tag_column(self):
-        """Source has extra tag column not in spec → SourceSpecMismatchError."""
+        """Spec requires an extra tag column not present in source → SourceSpecMismatchError."""
         source = _make_source("key", "value")
         tag_schema, data_schema = source.output_schema()
-        # Spec declares extra tag column not present in source
+        # Spec declares an extra tag column ("unexpected") that the source does not have
         extra_tag = Schema({"key": str, "unexpected": str})
         spec = SourceSpec(name="s", tag_schema=extra_tag, data_schema=data_schema)
         with pytest.raises(SourceSpecMismatchError):
