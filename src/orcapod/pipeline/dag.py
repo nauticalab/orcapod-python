@@ -220,17 +220,22 @@ class OrcaDAG(Generic[NodeT]):
             TypeError: If the node type does not support ``<`` comparison.
         """
         in_deg: dict[NodeT, int] = dict(self._in_degree)
-        frontier: list[NodeT] = [n for n, d in in_deg.items() if d == 0]
-        heapq.heapify(frontier)  # type: ignore[arg-type]
+        # heapq requires elements to support <. NodeT is unconstrained at the
+        # class level, so we use list[Any] for the heap; the ordering invariant
+        # (NodeT must be orderable) is a documented runtime precondition of
+        # this method, not something the type system can enforce here.
+        frontier: list[Any] = [n for n, d in in_deg.items() if d == 0]
+        heapq.heapify(frontier)
         ordered: list[NodeT] = []
 
         while frontier:
-            node: NodeT = heapq.heappop(frontier)  # type: ignore[misc]
+            node: NodeT = heapq.heappop(frontier)
             ordered.append(node)
-            for successor in sorted(self._successors[node]):  # type: ignore[type-var]
+            successors_sorted: list[Any] = sorted(self._successors[node])
+            for successor in successors_sorted:
                 in_deg[successor] -= 1
                 if in_deg[successor] == 0:
-                    heapq.heappush(frontier, successor)  # type: ignore[arg-type]
+                    heapq.heappush(frontier, successor)
 
         if len(ordered) != len(self._attrs):
             raise CycleError("Graph contains a cycle; topological sort is not possible.")
