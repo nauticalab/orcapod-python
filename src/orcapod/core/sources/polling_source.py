@@ -591,14 +591,15 @@ class PollingSource(RootSource, Generic[T]):
                                 )
 
                             # Emit new rows from just this fetch
-                            rows = list(new_stream.iter_data())
-                            logger.debug(
-                                "PollingSource %r: emitting %d row(s)",
-                                self._source_id,
-                                len(rows),
-                            )
-                            for item in rows:
+                            emitted = 0
+                            for item in new_stream.iter_data():
                                 yield item
+                                emitted += 1
+                            logger.debug(
+                                "PollingSource %r: emitted %d row(s)",
+                                self._source_id,
+                                emitted,
+                            )
                     else:
                         logger.debug(
                             "PollingSource %r: poll returned no new data",
