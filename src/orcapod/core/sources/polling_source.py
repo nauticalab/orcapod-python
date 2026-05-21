@@ -127,10 +127,16 @@ class PollingSource(RootSource, Generic[T]):
     """A root source that continuously emits data via a polling loop.
 
     Wraps a ``DynamicSourceProtocol`` implementation. Under async execution
-    (``async_iter_data``), the framework polls on a fixed interval and yields
-    new rows as they arrive. Under sync execution (``iter_data``), a single
-    poll+fetch cycle is performed on each access and results are served from
-    an accumulated in-memory cache.
+    (``async_iter_data``), the framework polls the impl on a fixed interval
+    and yields new rows as they arrive. Under sync execution (``iter_data``),
+    a single poll+fetch cycle is performed on each access and results are
+    served from an accumulated in-memory cache.
+
+    The default ``PollingConfig()`` polls every 1 second, runs indefinitely
+    (``duration=0`` means run until cancelled), allows up to 5 consecutive
+    missed intervals before terminating, retries up to 3 consecutive
+    ``poll()``/``fetch()`` errors with 1-second exponential backoff, and
+    resets error and miss counters on every clean tick.
 
     Args:
         impl: User-supplied ``DynamicSourceProtocol`` implementation that
@@ -139,12 +145,9 @@ class PollingSource(RootSource, Generic[T]):
         tag_columns: Column name(s) that form the tag (join key) for each
             row. All other columns become data columns.
         polling_config: Scheduling and error-handling configuration.
-            Defaults to ``PollingConfig()`` which polls every 1 second,
-            runs indefinitely (``duration=0``), tolerates up to 5
-            consecutive missed intervals, retries up to 3 consecutive
-            errors with 1-second exponential backoff base. All five fields
-            are validated at construction time — ``ValueError`` is raised
-            for out-of-range values.
+            See ``PollingConfig`` for field semantics and defaults.
+            All fields are validated at construction — ``ValueError`` is
+            raised for out-of-range values.
         tag_schema: Optional expected tag schema. When provided, ``output_schema``
             and ``keys`` can answer without triggering a fetch, and each fetched
             batch is validated against this schema — ``InputValidationError`` is
@@ -158,6 +161,36 @@ class PollingSource(RootSource, Generic[T]):
             conversion and hashing.
         config: Optional Orcapod framework config.
 
+    Example::
+
+        class MyDBSource:
+            def identity(self):
+                return ("MyDBSource", self._db_url)
+
+            def to_config(self):
+                return {"url": self._db_url}
+
+            @classmethod
+            def from_config(cls, config):
+                return cls(config["url"])
+
+            async def poll(self, cursor=None):
+                return await self._check_has_new_rows(since=cursor)
+
+            async def fetch(self, cursor=None):
+                rows, new_cursor = await self._fetch_rows(since=cursor)
+                return Cursor.now(new_cursor), rows
+
+            async def close(self):
+                await self._conn.close()
+
+        # Poll every 5 s, run for 60 s, raise after 3 consecutive errors
+        src = PollingSource(
+            MyDBSource("postgresql://..."),
+            tag_columns="row_id",
+            polling_config=PollingConfig(interval=5.0, duration=60.0),
+        )
+
     Note:
         Sync mode calls ``asyncio.run()`` (or a ``ThreadPoolExecutor``
         when called from within a running event loop). This can fail in
@@ -165,7 +198,7 @@ class PollingSource(RootSource, Generic[T]):
         such restriction.
 
     Note:
-        The accumulated in-memory cache is unbounded for true-delta
+        The accumulated in-memory cache grows unboundedly for true-delta
         implementations. No eviction policy is implemented.
     """
 
@@ -208,14 +241,10 @@ class PollingSource(RootSource, Generic[T]):
     def identity_structure(self) -> Any:
         """Identity derived from the impl's own identity and tag columns.
 
-        Delegates to ``impl.identity()`` so that the implementer controls
-        what makes two ``PollingSource`` instances distinct.
+        Delegates to ``impl.identity()`` so that the implementer fully
+        controls what makes two ``PollingSource`` instances distinct.
         """
-        return (
-            self.__class__.__name__,
-            self._impl.identity(),
-            self._tag_columns,
-        )
+        return (self._impl.identity(), self._tag_columns)
 
     # -------------------------------------------------------------------------
     # Sync stream delegation — all route through _get_latest_stream()
@@ -285,12 +314,13 @@ class PollingSource(RootSource, Generic[T]):
     def to_config(self, db_registry: Any = None) -> dict[str, Any]:
         """Serialize this source to a JSON-compatible config dict.
 
-        The config stores the impl class's module path and qualified name for
-        reconstruction, plus the output of ``impl.to_config()`` under the
-        ``"impl_config"`` key (``None`` if the impl does not support
-        serialization). ``PollingSource.from_config`` calls
-        ``impl_class.from_config(impl_config)`` when ``impl_config`` is
-        non-``None``, and falls back to a no-argument constructor otherwise.
+        Always stores ``impl_module`` and ``impl_class`` so that
+        ``from_config`` can import and reconstruct the impl class —
+        analogous to how ``DataFunction`` serializes its callable. The
+        ``impl_config`` key carries the result of ``impl.to_config()``:
+
+        - Non-``None``: ``from_config`` calls ``impl_class.from_config(impl_config)``.
+        - ``None``: ``from_config`` falls back to ``impl_class()`` (no-arg constructor).
 
         Args:
             db_registry: Unused; present for protocol compatibility.
