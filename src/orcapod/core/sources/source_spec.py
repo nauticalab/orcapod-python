@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 import orcapod.contexts as contexts
-from orcapod.core.base import ContentIdentifiableBase, LabelableMixin, PipelineElementBase
+from orcapod.core.base import TraceableBase
 from orcapod.errors import SourceSpecMismatchError, UnboundSourceError
 from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
 from orcapod.types import ColumnConfig, Schema
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from orcapod.protocols.core_protocols import StreamProtocol
 
 
-class SourceSpec(LabelableMixin, ContentIdentifiableBase, PipelineElementBase):
+class SourceSpec(TraceableBase):
     """A named schema declaration for a pipeline input slot.
 
     ``SourceSpec`` describes what a pipeline input looks like — its key schema
