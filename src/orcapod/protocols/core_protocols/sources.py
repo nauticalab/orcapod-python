@@ -179,7 +179,7 @@ class DynamicSourceProtocol(Protocol[T]):
 
     async def fetch(
         self, cursor: Cursor[T] | None = None
-    ) -> tuple[Cursor[T], "FrameInitTypes"]:
+    ) -> tuple[Cursor[T], FrameInitTypes]:
         """Fetch data from the given cursor position onward.
 
         Called only when ``poll()`` has returned ``True``. Returns both the
