@@ -22,8 +22,8 @@ three converging facts:
    `pyproject.toml` — a silent breakage risk on every `uv sync`.
 
 The full migration (wiring `OrcaDAG` into `graph.py`, the orchestrators, and the
-test suite) is scoped as a separate follow-on issue (see §7). This spike delivers
-the prototype and the recommendation that justifies it.
+test suite) is scoped as a separate follow-on issue (ENG-494, see §7). This spike
+delivers the prototype and the recommendation that justifies it.
 
 ---
 
@@ -152,7 +152,7 @@ policy, and scope.
 - Covered by orcapod's existing MIT license.
 
 The full migration (wiring `OrcaDAG` into the three call-site files and updating
-tests) is tracked as a follow-on issue (ENG-493, created as part of this spike).
+tests) is tracked as a follow-on issue (ENG-494, created as part of this spike).
 
 ---
 
@@ -245,7 +245,7 @@ this spike. It implements the full interface above and is covered by
 
 The prototype is **self-contained** — it does not yet replace networkx in
 `graph.py`, `sync_orchestrator.py`, or `async_orchestrator.py`. That wiring is
-left to the follow-on issue (ENG-493) to keep this spike's diff reviewable.
+left to the follow-on issue (ENG-494) to keep this spike's diff reviewable.
 
 ---
 
@@ -260,6 +260,8 @@ The full migration requires changes in exactly five places:
 | `src/orcapod/pipeline/async_orchestrator.py` | Same as sync_orchestrator |
 | `tests/test_pipeline/test_graph_rendering.py` | Remove `import networkx as nx`; update type annotations; update any direct `nx.DiGraph` construction in test fixtures |
 | `pyproject.toml` | Remove `"networkx"` from `dependencies` |
+
+See **ENG-494**: https://linear.app/enigma-metamorphic/issue/ENG-494
 
 Estimated call-site count: ~38 changes across these files (9 DiGraph
 instantiations, 7 add_edge, 4 add_node, 4 topological_sort, 4 nodes[], 1
