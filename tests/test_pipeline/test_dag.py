@@ -251,9 +251,7 @@ class TestInDegree:
 
 
 class TestTopologicalSort:
-    def _is_valid_topo_order(
-        self, dag: OrcaDAG[str], order: list[str]
-    ) -> bool:
+    def _is_valid_topo_order(self, dag: OrcaDAG[str], order: list[str]) -> bool:
         """Return True if *order* is a valid topological ordering of *dag*."""
         position = {node: idx for idx, node in enumerate(order)}
         for u, v in dag.edges():
@@ -305,9 +303,7 @@ class TestTopologicalSort:
 
 
 class TestTopologicalSortDeterministic:
-    def _is_valid_topo_order(
-        self, dag: OrcaDAG[str], order: list[str]
-    ) -> bool:
+    def _is_valid_topo_order(self, dag: OrcaDAG[str], order: list[str]) -> bool:
         position = {node: idx for idx, node in enumerate(order)}
         for u, v in dag.edges():
             if position[u] >= position[v]:
@@ -352,7 +348,9 @@ class TestTopologicalSortDeterministic:
         dag2.add_edge("b", "c")
         dag2.add_edge("a", "c")
 
-        assert dag1.topological_sort_deterministic() == dag2.topological_sort_deterministic()
+        assert dag1.topological_sort_deterministic() == (
+            dag2.topological_sort_deterministic()
+        )
 
     def test_raises_cycle_error(self) -> None:
         dag: OrcaDAG[str] = OrcaDAG()
