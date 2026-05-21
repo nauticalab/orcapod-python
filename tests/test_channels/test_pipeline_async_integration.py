@@ -109,7 +109,7 @@ class TestAsyncPipelineIntegration:
     def test_orchestrator_then_db_retrieval(self):
         """Run via orchestrator, then retrieve results from the persistent node."""
         job = _build_job()
-        exec_graph, _, exec_pipeline = job._build_execution_graph()
+        exec_graph, _, exec_pipeline = job.build_execution_graph()
         AsyncPipelineOrchestrator().run(exec_graph)
         job.store.at(*job._compiled_pipeline.name).flush()
         job.store.at(*job._compiled_pipeline.name).at("_result").flush()
@@ -122,7 +122,7 @@ class TestAsyncPipelineIntegration:
     def test_pipeline_run_with_async_executor(self):
         """Test async execution via AsyncPipelineOrchestrator directly."""
         job = _build_job()
-        exec_graph, _, exec_pipeline = job._build_execution_graph()
+        exec_graph, _, exec_pipeline = job.build_execution_graph()
         AsyncPipelineOrchestrator().run(exec_graph)
         job.store.at(*job._compiled_pipeline.name).flush()
         job.store.at(*job._compiled_pipeline.name).at("_result").flush()
@@ -136,7 +136,7 @@ class TestAsyncPipelineIntegration:
     async def test_orchestrator_run_async_from_event_loop(self):
         """run_async() works when an event loop is already running."""
         job = _build_job()
-        exec_graph, _, exec_pipeline = job._build_execution_graph()
+        exec_graph, _, exec_pipeline = job.build_execution_graph()
         orchestrator = AsyncPipelineOrchestrator()
         await orchestrator.run_async(exec_graph)
         job.store.at(*job._compiled_pipeline.name).flush()
@@ -168,7 +168,7 @@ class TestAsyncPipelineIntegration:
 
         # Async path
         async_job = _build_job()
-        exec_graph, _, async_exec_pipeline = async_job._build_execution_graph()
+        exec_graph, _, async_exec_pipeline = async_job.build_execution_graph()
         AsyncPipelineOrchestrator().run(exec_graph)
         async_job.store.at(*async_job._compiled_pipeline.name).flush()
         async_job.store.at(*async_job._compiled_pipeline.name).at("_result").flush()
@@ -206,7 +206,7 @@ class TestSyncAsyncSystemTagEquivalence:
         assert sync_records is not None
 
         async_job = _build_job()
-        exec_graph, _, async_exec_pipeline = async_job._build_execution_graph()
+        exec_graph, _, async_exec_pipeline = async_job.build_execution_graph()
         AsyncPipelineOrchestrator().run(exec_graph)
         async_job.store.at(*async_job._compiled_pipeline.name).flush()
         async_job.store.at(*async_job._compiled_pipeline.name).at("_result").flush()
@@ -230,7 +230,7 @@ class TestSyncAsyncSystemTagEquivalence:
         """System-tag columns should follow the name-extending convention."""
 
         job = _build_job()
-        exec_graph, _, exec_pipeline = job._build_execution_graph()
+        exec_graph, _, exec_pipeline = job.build_execution_graph()
         AsyncPipelineOrchestrator().run(exec_graph)
         job.store.at(*job._compiled_pipeline.name).flush()
         job.store.at(*job._compiled_pipeline.name).at("_result").flush()
@@ -263,7 +263,7 @@ class TestSyncAsyncSystemTagEquivalence:
         assert sync_records is not None
 
         async_job = _build_job()
-        exec_graph, _, async_exec_pipeline = async_job._build_execution_graph()
+        exec_graph, _, async_exec_pipeline = async_job.build_execution_graph()
         AsyncPipelineOrchestrator().run(exec_graph)
         async_job.store.at(*async_job._compiled_pipeline.name).flush()
         async_job.store.at(*async_job._compiled_pipeline.name).at("_result").flush()

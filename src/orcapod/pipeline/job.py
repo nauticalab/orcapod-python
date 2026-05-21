@@ -96,8 +96,6 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
 
     def _compile_from_recording(self) -> None:
         """Compile the recorded edges into a pure Pipeline."""
-        import networkx as nx
-
         from orcapod.pipeline.graph import Pipeline
 
         pipeline = Pipeline(name=self._pipeline_name, auto_compile=False)
@@ -428,8 +426,24 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         return list(self._unresolved_specs)
 
     # ------------------------------------------------------------------
-    # _build_execution_graph
+    # build_execution_graph (public) / _build_execution_graph (impl)
     # ------------------------------------------------------------------
+
+    def build_execution_graph(self) -> "tuple[Any, list[str], Pipeline]":  # Any = nx.DiGraph
+        """Public entry point for building a fresh execution-ready graph.
+
+        Builds a fresh execution graph with concrete sources substituted for
+        bound SourceSpecs. Suitable for orchestrator-driven execution patterns
+        where callers need direct access to the graph.
+
+        Returns:
+            Tuple of ``(exec_graph, unresolved_spec_names, exec_pipeline)``.
+
+        Raises:
+            ValueError: If ``self.store`` is ``None``.
+            RuntimeError: If no compiled pipeline is available.
+        """
+        return self._build_execution_graph()
 
     def _build_execution_graph(self) -> "tuple[Any, list[str], Pipeline]":  # Any = nx.DiGraph
         """Build a fresh execution-ready graph with concrete sources substituted.
@@ -578,7 +592,15 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         # running one job does not affect other jobs sharing the same blueprint.
         for node_hash, node in exec_node_map.items():
             label = None
-            if hasattr(node, "_label") and node._label:
+            if isinstance(node, SourceNode):
+                # Derive label from the stream: SourceSpec.label == SourceSpec.name;
+                # concrete RootSource also exposes .label. Fall back to content hash.
+                stream = getattr(node, "stream", None)
+                if stream is not None and hasattr(stream, "label") and stream.label:
+                    label = stream.label
+                elif stream is not None and hasattr(stream, "name") and stream.name:
+                    label = stream.name
+            elif hasattr(node, "_label") and node._label:
                 label = node._label
             elif node_hash in pipeline._node_lut:
                 template = pipeline._node_lut[node_hash]
@@ -628,13 +650,21 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
 
         effective_observer = observer or NoOpObserver()
 
-        # Compute snapshot hash for run URI
-        node_strs = sorted(
-            str(n.content_hash().to_string())
+        # Compute snapshot hash for run URI: include both nodes and topology so
+        # two graphs with the same node hashes but different wiring get distinct URIs.
+        node_hash_map: dict[int, str] = {
+            id(n): n.content_hash().to_string()
             for n in exec_graph.nodes()
             if hasattr(n, "content_hash")
+        }
+        node_strs = sorted(node_hash_map.values())
+        edge_strs = sorted(
+            f"{node_hash_map[id(u)]}->{node_hash_map[id(v)]}"
+            for u, v in exec_graph.edges()
+            if id(u) in node_hash_map and id(v) in node_hash_map
         )
-        snapshot_hash = hashlib.sha256("\n".join(node_strs).encode()).hexdigest()[:16]
+        snapshot_input = "\n".join(node_strs) + "\n---\n" + "\n".join(edge_strs)
+        snapshot_hash = hashlib.sha256(snapshot_input.encode()).hexdigest()[:16]
         pipeline_uri = "/".join(self._compiled_pipeline.name) + "@" + snapshot_hash
 
         SyncPipelineOrchestrator().run(

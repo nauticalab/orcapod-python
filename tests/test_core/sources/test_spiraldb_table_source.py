@@ -746,7 +746,7 @@ class TestPipelineIntegration:
         with job:
             pod(src, label="doubler")
 
-        exec_graph, _, _ = job._build_execution_graph()
+        exec_graph, _, _ = job.build_execution_graph()
         orch = SyncPipelineOrchestrator()
         result = orch.run(exec_graph)
 

@@ -395,7 +395,7 @@ class TestPipelineJobRun:
         assert job._has_run is False
 
     def test_run_does_not_mutate_blueprint_nodes(self, store):
-        """_build_execution_graph() must not mutate the original pipeline's _nodes.
+        """build_execution_graph() must not mutate the original pipeline's _nodes.
 
         The pipeline blueprint is a shared, reusable object. Running one job must
         not replace blueprint template nodes with live exec nodes — that would break

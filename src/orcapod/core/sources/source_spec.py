@@ -1,4 +1,4 @@
-"""SourceSpec — a named, immutable schema declaration for pipeline input slots."""
+"""SourceSpec — a named schema declaration for pipeline input slots."""
 
 from __future__ import annotations
 
@@ -18,11 +18,17 @@ if TYPE_CHECKING:
 
 
 class SourceSpec(ContentIdentifiableBase, PipelineElementBase):
-    """A named, immutable schema declaration for a pipeline input slot.
+    """A named schema declaration for a pipeline input slot.
 
     ``SourceSpec`` describes what a pipeline input looks like — its key schema
     and data schema — without referencing any concrete data source. It is used
     as the typed input slot concept for both ``Pipeline`` and ``PipelineJob``.
+
+    Note:
+        ``SourceSpec`` is designed to be treated as immutable — all attributes
+        are stored as private members and exposed only through read-only
+        properties. Immutability is a convention rather than a type-system
+        guarantee; external mutation of private attributes is unsupported.
 
     A ``SourceSpec`` can appear as an upstream in operator chains during a
     ``with Pipeline:`` or ``with PipelineJob:`` recording block. Calling data-
