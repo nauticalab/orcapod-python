@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 import orcapod.contexts as contexts
-from orcapod.core.base import ContentIdentifiableBase, PipelineElementBase
+from orcapod.core.base import ContentIdentifiableBase, LabelableMixin, PipelineElementBase
 from orcapod.errors import SourceSpecMismatchError, UnboundSourceError
 from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
 from orcapod.types import ColumnConfig, Schema
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from orcapod.protocols.core_protocols import StreamProtocol
 
 
-class SourceSpec(ContentIdentifiableBase, PipelineElementBase):
+class SourceSpec(LabelableMixin, ContentIdentifiableBase, PipelineElementBase):
     """A named schema declaration for a pipeline input slot.
 
     ``SourceSpec`` describes what a pipeline input looks like — its key schema
@@ -72,9 +72,17 @@ class SourceSpec(ContentIdentifiableBase, PipelineElementBase):
         """Human-readable name for this input slot."""
         return self._name
 
-    @property
-    def label(self) -> str:
-        """Alias for ``name`` — satisfies the stream label convention."""
+    def computed_label(self) -> str | None:
+        """Return the spec name as the computed label.
+
+        Implements the ``LabelableMixin.computed_label()`` hook so that
+        ``self.label`` resolves to the spec name without needing an explicit
+        label assignment.  An explicit ``label`` assignment (via the setter)
+        would still take priority, but is not expected for immutable specs.
+
+        Returns:
+            The spec name.
+        """
         return self._name
 
     @property
