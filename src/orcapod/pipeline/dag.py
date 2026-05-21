@@ -250,6 +250,17 @@ class OrcaDAG(Generic[NodeT]):
                     heapq.heappush(frontier, successor)
 
         if len(ordered) != len(self._attrs):
-            raise CycleError("Graph contains a cycle; topological sort is not possible.")
+            # Kahn's detected a cycle (unprocessed nodes remain). Delegate to
+            # TopologicalSorter so the raised CycleError has its .cycle
+            # attribute (args[1]) populated with the offending nodes — the
+            # same information callers get from topological_sort().
+            predecessor_dict: dict[NodeT, set[NodeT]] = {n: set() for n in self._attrs}
+            for u, vs in self._successors.items():
+                for v in vs:
+                    predecessor_dict[v].add(u)
+            list(
+                TopologicalSorter(predecessor_dict).static_order()
+            )  # raises CycleError
+            raise AssertionError("unreachable")  # pragma: no cover
 
         return ordered
