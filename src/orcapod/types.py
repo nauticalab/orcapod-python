@@ -608,6 +608,21 @@ class Cursor(Generic[T]):
     value: T
     modified_at: datetime | None = None
 
+    @classmethod
+    def now(cls, value: T) -> Cursor[T]:
+        """Create a cursor whose ``modified_at`` is the current UTC wall time.
+
+        Args:
+            value: The cursor position value.
+
+        Returns:
+            A new ``Cursor`` with ``modified_at`` set to
+            ``datetime.now(tz=timezone.utc)``.
+        """
+        from datetime import timezone
+
+        return cls(value=value, modified_at=datetime.now(tz=timezone.utc))
+
 
 @dataclass(frozen=True, slots=True)
 class PollingConfig:
