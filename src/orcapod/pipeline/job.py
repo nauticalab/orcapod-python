@@ -518,16 +518,19 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
                     continue
                 if isinstance(stream, SourceSpec):
                     if stream.name in self._sources:
-                        # Bound — use concrete source
-                        exec_node_map[node_hash] = SourceNode(
-                            stream=self._sources[stream.name]
-                        )
+                        # Bound — wrap concrete source in a SourceNode.
+                        # Label is not injected explicitly; SourceNode.computed_label()
+                        # delegates to stream.label (the concrete source's label).
+                        concrete = self._sources[stream.name]
+                        exec_node_map[node_hash] = SourceNode(stream=concrete)
                     else:
                         # Unbound — exclude this branch
                         excluded_hashes.add(node_hash)
                         if stream.name not in unresolved_specs:
                             unresolved_specs.append(stream.name)
                 else:
+                    # Raw (non-spec) stream: SourceNode.computed_label() delegates
+                    # to stream.label automatically — no explicit label needed.
                     exec_node_map[node_hash] = SourceNode(stream=stream)
             else:
                 template = pipeline._node_lut[node_hash]
@@ -590,21 +593,19 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         # Update exec_pipeline._nodes with fresh exec nodes (keyed by label).
         # The clone's _nodes is independent of the original pipeline, so
         # running one job does not affect other jobs sharing the same blueprint.
+        # Labels come from (in priority order):
+        #   1. node._label — explicit label set at node creation
+        #   2. template lookup — for FunctionNode/OperatorNode reconstructed from blueprint
+        #   3. node.computed_label() — for SourceNodes, delegates to stream.label
         for node_hash, node in exec_node_map.items():
-            label = None
-            if isinstance(node, SourceNode):
-                # Derive label from the stream: SourceSpec.label == SourceSpec.name;
-                # concrete RootSource also exposes .label. Fall back to content hash.
-                stream = getattr(node, "stream", None)
-                if stream is not None and hasattr(stream, "label") and stream.label:
-                    label = stream.label
-                elif stream is not None and hasattr(stream, "name") and stream.name:
-                    label = stream.name
-            elif hasattr(node, "_label") and node._label:
-                label = node._label
-            elif node_hash in pipeline._node_lut:
+            label = node._label if node._label else None
+            if label is None and node_hash in pipeline._node_lut:
                 template = pipeline._node_lut[node_hash]
                 label = node_to_label.get(id(template))
+            if label is None:
+                # SourceNodes (not in _node_lut) use computed_label() to delegate
+                # their label to the wrapped stream (SourceSpec name or concrete source label).
+                label = node.computed_label()
             if label:
                 exec_pipeline._nodes[label] = node
 
@@ -650,21 +651,16 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
 
         effective_observer = observer or NoOpObserver()
 
-        # Compute snapshot hash for run URI: include both nodes and topology so
-        # two graphs with the same node hashes but different wiring get distinct URIs.
-        node_hash_map: dict[int, str] = {
-            id(n): n.content_hash().to_string()
+        # Compute snapshot hash for run URI using only the leaf (sink) nodes.
+        # Each node's content_hash() is a Merkle chain that encodes its own identity
+        # and all of its transitive inputs, so the set of leaf-node hashes uniquely
+        # identifies the full graph topology without needing to enumerate edges.
+        leaf_hashes = sorted(
+            n.content_hash().to_string()
             for n in exec_graph.nodes()
-            if hasattr(n, "content_hash")
-        }
-        node_strs = sorted(node_hash_map.values())
-        edge_strs = sorted(
-            f"{node_hash_map[id(u)]}->{node_hash_map[id(v)]}"
-            for u, v in exec_graph.edges()
-            if id(u) in node_hash_map and id(v) in node_hash_map
+            if exec_graph.out_degree(n) == 0 and hasattr(n, "content_hash")
         )
-        snapshot_input = "\n".join(node_strs) + "\n---\n" + "\n".join(edge_strs)
-        snapshot_hash = hashlib.sha256(snapshot_input.encode()).hexdigest()[:16]
+        snapshot_hash = hashlib.sha256("\n".join(leaf_hashes).encode()).hexdigest()[:16]
         pipeline_uri = "/".join(self._compiled_pipeline.name) + "@" + snapshot_hash
 
         SyncPipelineOrchestrator().run(
