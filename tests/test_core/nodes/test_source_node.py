@@ -168,3 +168,43 @@ class TestSourceJobNode:
         src = DictSource(data=[{"id": 1, "value": 1.0}], tag_columns=["id"])
         job_node._concrete = src
         assert job_node._concrete is src
+
+    def test_concrete_mutation_clears_content_hash_cache(self, tag_schema, data_schema):
+        """Setting _concrete clears the content_hash cache so stale values are not returned."""
+        from orcapod.core.nodes.source_node import SourceJobNode, SourceNode
+        from orcapod.core.sources.dict_source import DictSource
+
+        job_node = SourceJobNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
+        schema_hash = job_node.content_hash()  # populates cache with schema-based hash
+
+        src = DictSource(data=[{"id": 1, "value": 1.0}], tag_columns=["id"])
+        job_node._concrete = src  # should clear the cache
+
+        assert job_node._content_hash_cache == {}  # cache cleared
+        bound_hash = job_node.content_hash()
+        assert bound_hash != schema_hash  # now returns concrete-based hash
+        assert bound_hash == src.content_hash()
+
+
+class TestSourceNodeAsTable:
+    def test_source_node_as_table_raises_unbound_error(self, tag_schema, data_schema):
+        """SourceNode.as_table() raises UnboundSourceError (no concrete data)."""
+        from orcapod.core.nodes.source_node import SourceNode
+
+        node = SourceNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
+        with pytest.raises(UnboundSourceError):
+            node.as_table()
+
+    def test_source_job_node_as_table_delegates_to_concrete(self, tag_schema, data_schema):
+        """Bound SourceJobNode.as_table() delegates to concrete and does not raise."""
+        import pyarrow as pa
+
+        from orcapod.core.nodes.source_node import SourceJobNode
+        from orcapod.core.sources.dict_source import DictSource
+
+        src = DictSource(data=[{"id": 1, "value": 1.0}], tag_columns=["id"])
+        job_node = SourceJobNode(
+            name="x", tag_schema=tag_schema, data_schema=data_schema, concrete=src
+        )
+        table = job_node.as_table()
+        assert isinstance(table, pa.Table)

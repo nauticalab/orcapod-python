@@ -254,6 +254,10 @@ class SourceNodeBase(TraceableBase, ABC):
     async def async_iter_data(self):
         """Asynchronous iterator over (tag, data) pairs.
 
+        Yields:
+            tuple[TagProtocol, DataProtocol]: A ``(tag, data)`` pair from the
+            concrete source.  Raises before yielding anything when unbound.
+
         Raises:
             UnboundSourceError: When no concrete data is available.
         """
@@ -404,7 +408,19 @@ class SourceJobNode(SourceNodeBase):
             data_schema=data_schema,
             data_context=data_context,
         )
-        self._concrete: "StreamProtocol | None" = concrete
+        # Use object.__setattr__ to bypass the property setter during __init__
+        # (the cache doesn't exist yet at this point).
+        object.__setattr__(self, "_concrete", concrete)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        """Clear ``_content_hash_cache`` whenever ``_concrete`` is mutated.
+
+        This prevents a stale schema-based hash from being returned by the
+        parent ``content_hash()`` cache after the concrete source is updated.
+        """
+        object.__setattr__(self, name, value)
+        if name == "_concrete" and hasattr(self, "_content_hash_cache"):
+            self._content_hash_cache.clear()
 
     def content_hash(self, hasher=None) -> ContentHash:
         """Return data-inclusive hash when bound; schema-based hash when unbound.

@@ -226,7 +226,7 @@ class TestPipelineJobBind:
 
 class TestPipelineJobCompleteness:
     def test_unbound_specs_lists_unbound(self, store):
-        """unbound_specs() lists SourceNode names not in job.sources."""
+        """unbound_source_nodes() lists SourceNode names not in job.sources."""
         src_a, src_b = _make_two_sources()
         tag_b, data_b = src_b.output_schema()
         node_b = SourceNode(name="spec_b", tag_schema=tag_b, data_schema=data_b)
@@ -235,7 +235,7 @@ class TestPipelineJobCompleteness:
         with job:
             Join()(src_a, node_b)
 
-        unbound = job.unbound_specs()
+        unbound = job.unbound_source_nodes()
         assert len(unbound) == 1
         assert unbound[0].name == "spec_b"
 
@@ -245,7 +245,7 @@ class TestPipelineJobCompleteness:
         with job:
             Join()(src_a, src_b)  # both auto-bound via content-hash-based spec names
 
-        assert job.unbound_specs() == []
+        assert job.unbound_source_nodes() == []
 
     def test_is_complete_true_when_all_bound_with_store(self, store):
         src_a, src_b = _make_two_sources()

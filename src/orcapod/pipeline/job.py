@@ -28,12 +28,12 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
     ``PipelineJob`` is the everyday working object. It is built incrementally:
     its ``with``-block records both the DAG structure and any concrete source
     bindings simultaneously. Concrete sources are automatically promoted to
-    ``SourceSpec`` declarations in the underlying ``Pipeline``, with their
+    ``SourceNode`` declarations in the underlying ``Pipeline``, with their
     concrete instances stored in ``job.sources``.
 
     After the ``with`` block, ``job.pipeline`` is a fully compiled, pure
-    ``Pipeline`` (SourceSpec-only leaves). ``job.run()`` executes the
-    resolvable subgraph — nodes whose upstream SourceSpecs are all bound.
+    ``Pipeline`` (SourceNode-only leaves). ``job.run()`` executes the
+    resolvable subgraph — nodes whose upstream SourceNodes are all bound.
 
     ``PipelineJob`` can also be created from a ``Pipeline`` via
     ``pipeline.bind(sources=..., store=...)`` for the "explicit blueprint"
@@ -245,7 +245,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
 
     @property
     def pipeline(self) -> "Pipeline":
-        """The compiled pure Pipeline (SourceSpec-only leaves).
+        """The compiled pure Pipeline (SourceNode-only leaves).
 
         Raises:
             RuntimeError: If the with-block has not been completed yet.
@@ -259,7 +259,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
 
     @property
     def sources(self) -> dict[str, cp.StreamProtocol]:
-        """Mapping of SourceSpec name to bound concrete source."""
+        """Mapping of SourceNode name to bound concrete source."""
         return dict(self._sources)
 
     @property
@@ -287,12 +287,12 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         Non-mutating — the original ``PipelineJob`` is unchanged. Existing
         bindings not mentioned in this call are carried forward.
 
-        ``SourceSpec.validate()`` is called for each source in *sources*;
+        ``SourceNode.validate()`` is called for each source in *sources*;
         ``SourceSpecMismatchError`` is raised on schema mismatch.
 
         Args:
-            sources: Mapping of SourceSpec name to concrete source. Each
-                source is validated against the matching SourceSpec.
+            sources: Mapping of SourceNode name to concrete source. Each
+                source is validated against the matching SourceNode.
             store: Replaces the current store.
             execution_context: Replaces the current execution context.
 
@@ -364,10 +364,6 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
                 unbound.append(node)
                 seen.add(node.name)
         return unbound
-
-    def unbound_specs(self) -> "list[SourceNode]":
-        """Deprecated — use unbound_source_nodes() instead."""
-        return self.unbound_source_nodes()
 
     def is_complete(self) -> bool:
         """Return ``True`` when all source nodes are bound and a store is set.
