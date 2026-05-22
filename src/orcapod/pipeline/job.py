@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
 from orcapod.protocols import core_protocols as cp
+from orcapod.types import CacheMode
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -461,6 +462,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         import networkx as nx
         from orcapod.core.nodes import FunctionNode, OperatorNode
         from orcapod.core.nodes.function_node import FunctionJobNode
+        from orcapod.core.nodes.operator_node import OperatorJobNode
         from orcapod.core.nodes.source_node import SourceJobNode, SourceNode
         from orcapod.core.executors.local import LocalPythonFunctionExecutor
 
@@ -569,14 +571,17 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
                             f"OperatorNode predecessor missing from exec_node_map: {missing}"
                         )
                     upstream_nodes = tuple(exec_node_map[p] for p in preds)
-                    new_op = OperatorNode(
+                    # blueprint OperatorNode has no _cache_mode; default is OFF
+                    op_cache_mode = getattr(template, "_cache_mode", None) or CacheMode.OFF
+                    new_op = OperatorJobNode(
                         operator=template._operator,
                         input_streams=upstream_nodes,
                         label=template._label,
+                        table_scope=template._table_scope,
                     )
                     new_op.attach_databases(
                         pipeline_database=pipeline_db,
-                        cache_mode=template._cache_mode,
+                        cache_mode=op_cache_mode,
                     )
                     exec_node_map[node_hash] = new_op
 

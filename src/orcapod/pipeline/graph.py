@@ -12,6 +12,7 @@ from orcapod.core.nodes import (
     OperatorNode,
     SourceNode,
 )
+from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
 from orcapod.protocols import core_protocols as cp
 from orcapod.protocols import database_protocols as dbp
@@ -564,7 +565,7 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                             op_config.get("class_name"),
                             exc,
                         )
-                node = OperatorNode.from_descriptor(
+                node = OperatorJobNode.from_descriptor(
                     descriptor, operator=operator, input_streams=upstream_nodes, databases={}
                 )
                 reconstructed[node_hash] = node

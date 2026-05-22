@@ -118,7 +118,7 @@ class TestFunctionNodeExecute:
 # OperatorNode.execute() tests
 # ------------------------------------------------------------------
 
-from orcapod.core.nodes import OperatorNode
+from orcapod.core.nodes.operator_node import OperatorJobNode as OperatorNode
 from orcapod.core.operators import SelectDataColumns
 from orcapod.types import CacheMode
 

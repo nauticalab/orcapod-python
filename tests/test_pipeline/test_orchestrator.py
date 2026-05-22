@@ -26,6 +26,7 @@ from orcapod.channels import Channel
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode, OperatorNode, SourceNode
 from orcapod.core.nodes.function_node import FunctionJobNode
+from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.nodes.source_node import SourceJobNode
 from orcapod.core.operators import SelectDataColumns
 from orcapod.core.operators.join import Join
@@ -116,7 +117,7 @@ class TestOperatorNodeAsyncExecute:
     async def test_delegates_to_operator(self):
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
         op = SelectDataColumns(columns=["value"])
-        op_node = OperatorNode(op, input_streams=[src])
+        op_node = OperatorJobNode(op, input_streams=[src])
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)

@@ -165,7 +165,7 @@ class TestFunctionNodeFromDescriptor:
         assert loaded.load_status in (LoadStatus.READ_ONLY, LoadStatus.UNAVAILABLE)
 
 
-from orcapod.core.nodes.operator_node import OperatorNode
+from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.operators import Join
 
 
@@ -191,7 +191,7 @@ class TestOperatorNodeFromDescriptor:
             "cache_mode": "OFF",
             "pipeline_path": ["test", "Join", "hash", "schema:fake_pipeline_hash", "instance:fake_content_hash"],
         }
-        loaded = OperatorNode.from_descriptor(
+        loaded = OperatorJobNode.from_descriptor(
             descriptor=descriptor,
             operator=None,
             input_streams=(),
@@ -206,7 +206,7 @@ class TestOperatorNodeFromDescriptor:
         source1 = DictSource(data=[{"a": 1, "b": 2}], tag_columns=["a"], source_id="s1")
         source2 = DictSource(data=[{"a": 1, "c": 3}], tag_columns=["a"], source_id="s2")
         op = Join()
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=op,
             input_streams=(source1, source2),
             pipeline_database=scoped_db,
@@ -226,7 +226,7 @@ class TestOperatorNodeFromDescriptor:
             "cache_mode": "OFF",
             "pipeline_path": list(node.node_identity_path),
         }
-        loaded = OperatorNode.from_descriptor(
+        loaded = OperatorJobNode.from_descriptor(
             descriptor=descriptor,
             operator=op,
             input_streams=(source1, source2),

@@ -25,6 +25,7 @@ from orcapod.core.nodes import (
     OperatorNode,
 )
 from orcapod.core.nodes.function_node import FunctionJobNode
+from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.operators import SelectDataColumns
 from orcapod.core.operators.join import Join
 from orcapod.core.operators.semijoin import SemiJoin
@@ -456,7 +457,7 @@ class TestOperatorNodeAsyncExecute:
     async def test_unary_op_delegation(self):
         stream = make_two_col_stream(3)
         op = SelectDataColumns(["x"])
-        node = OperatorNode(op, [stream])
+        node = OperatorJobNode(op, [stream])
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -483,7 +484,7 @@ class TestOperatorNodeAsyncExecute:
         right = ArrowTableStream(right_table, tag_columns=["id"])
 
         op = SemiJoin()
-        node = OperatorNode(op, [left, right])
+        node = OperatorJobNode(op, [left, right])
 
         left_ch = Channel(buffer_size=16)
         right_ch = Channel(buffer_size=16)
@@ -516,7 +517,7 @@ class TestOperatorNodeAsyncExecute:
         left = ArrowTableStream(left_table, tag_columns=["id"])
         right = ArrowTableStream(right_table, tag_columns=["id"])
         op = Join()
-        node = OperatorNode(op, [left, right])
+        node = OperatorJobNode(op, [left, right])
 
         left_ch = Channel(buffer_size=16)
         right_ch = Channel(buffer_size=16)
@@ -541,13 +542,13 @@ class TestOperatorNodeAsyncExecute:
         op = SelectDataColumns(["x"])
 
         # Sync
-        node_sync = OperatorNode(op, [stream])
+        node_sync = OperatorJobNode(op, [stream])
         node_sync.run()
         sync_table = node_sync.as_table()
         sync_x = sorted(sync_table.column("x").to_pylist())
 
         # Async
-        node_async = OperatorNode(op, [make_two_col_stream(4)])
+        node_async = OperatorJobNode(op, [make_two_col_stream(4)])
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
 
@@ -570,7 +571,7 @@ class TestOperatorNodeAsyncExecute:
         stream = make_two_col_stream(3)
         op = SelectDataColumns(["x"])
         db = InMemoryArrowDatabase()
-        node = OperatorNode(
+        node = OperatorJobNode(
             op, [stream], pipeline_database=db, cache_mode=CacheMode.OFF
         )
 
@@ -592,7 +593,7 @@ class TestOperatorNodeAsyncExecute:
         stream = make_two_col_stream(3)
         op = SelectDataColumns(["x"])
         db = InMemoryArrowDatabase()
-        node = OperatorNode(
+        node = OperatorJobNode(
             op, [stream], pipeline_database=db, cache_mode=CacheMode.LOG
         )
 
@@ -617,13 +618,13 @@ class TestOperatorNodeAsyncExecute:
         db = InMemoryArrowDatabase()
 
         # First: sync LOG to populate DB
-        node1 = OperatorNode(
+        node1 = OperatorJobNode(
             op, [stream], pipeline_database=db, cache_mode=CacheMode.LOG
         )
         node1.run()
 
         # Second: async REPLAY from DB
-        node2 = OperatorNode(
+        node2 = OperatorJobNode(
             op,
             [make_two_col_stream(3)],
             pipeline_database=db,
@@ -648,7 +649,7 @@ class TestOperatorNodeAsyncExecute:
         op = SelectDataColumns(["x"])
         db = InMemoryArrowDatabase()
 
-        node = OperatorNode(
+        node = OperatorJobNode(
             op,
             [stream],
             pipeline_database=db,
@@ -760,7 +761,7 @@ class TestEndToEnd:
         """Source → OperatorNode (SelectDataColumns) async pipeline."""
         stream = make_two_col_stream(3)
         op = SelectDataColumns(["x"])
-        node = OperatorNode(op, [stream])
+        node = OperatorJobNode(op, [stream])
 
         ch1 = Channel(buffer_size=16)
         ch2 = Channel(buffer_size=16)
@@ -852,7 +853,7 @@ class TestAsyncPipelineThenSyncRetrieval:
         op = SelectDataColumns(["x"])
         db = InMemoryArrowDatabase()
 
-        node = OperatorNode(
+        node = OperatorJobNode(
             op, [stream], pipeline_database=db, cache_mode=CacheMode.LOG
         )
 
@@ -883,7 +884,7 @@ class TestAsyncPipelineThenSyncRetrieval:
         assert "y" not in records.column_names
 
         # --- REPLAY from DB via a new node (no computation) ---
-        replay_node = OperatorNode(
+        replay_node = OperatorJobNode(
             op,
             [make_two_col_stream(4)],
             pipeline_database=db,
@@ -925,7 +926,7 @@ class TestAsyncPipelineThenSyncRetrieval:
         stage1_stream = ArrowTableStream(stage1_table, tag_columns=["id"])
         op = SelectDataColumns(["result"])
         op_db = InMemoryArrowDatabase()
-        op_node = OperatorNode(
+        op_node = OperatorJobNode(
             op, [stage1_stream], pipeline_database=op_db, cache_mode=CacheMode.LOG
         )
 

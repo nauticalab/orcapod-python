@@ -387,7 +387,7 @@ class TestFunctionNodeAsyncExecute:
 # OperatorNode.execute() with observer + cache check
 # ===========================================================================
 
-from orcapod.core.nodes import OperatorNode
+from orcapod.core.nodes.operator_node import OperatorJobNode as OperatorNode
 from orcapod.core.operators.join import Join
 
 

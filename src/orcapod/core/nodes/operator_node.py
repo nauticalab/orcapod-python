@@ -1,4 +1,19 @@
-"""OperatorNode — stream node for operator invocations with optional DB persistence."""
+"""OperatorNode hierarchy — pure blueprint + DB-backed execution node.
+
+Three classes:
+
+* ``OperatorNodeBase`` — shared base; no DB state.  Holds identity,
+  schema, and all non-DB properties.
+* ``OperatorNode`` — thin blueprint descriptor.  Raises
+  ``PipelineJobRequiredError`` on ``iter_data()``.  This is the node
+  recorded in a ``Pipeline`` and serialized to disk.
+* ``OperatorJobNode`` — DB-backed execution node; carries all DB logic
+  from the original ``OperatorNode``.  Created by ``PipelineJob`` at
+  run time.
+
+``OperatorNode`` and ``OperatorJobNode`` are *siblings*: both inherit
+directly from ``OperatorNodeBase``, neither from the other.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +29,7 @@ from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
+from orcapod.errors import PipelineJobRequiredError
 from orcapod.protocols.core_protocols import (
     DataProtocol,
     StreamProtocol,
@@ -38,30 +54,16 @@ else:
     pc = LazyModule("pyarrow.compute")
 
 
-class OperatorNode(StreamBase):
-    """Stream node representing an operator invocation with optional DB persistence.
+# ---------------------------------------------------------------------------
+# OperatorNodeBase — shared base (no DB)
+# ---------------------------------------------------------------------------
 
-    When constructed without database parameters, provides the core stream
-    interface (identity, schema, iteration) without any persistence.  When
-    databases are provided (either at construction or via ``attach_databases``),
-    adds pipeline record storage with per-row deduplication, ``get_all_records()``
-    for retrieving stored results, ``as_source()`` for creating a
-    ``DerivedSource`` from DB records, and three-tier cache mode
-    (OFF / LOG / REPLAY).
 
-    Node identity path structure::
+class OperatorNodeBase(StreamBase):
+    """Shared base for ``OperatorNode`` and ``OperatorJobNode``.
 
-        operator.uri / schema:{pipeline_hash} / instance:{content_hash}
-
-    Where ``pipeline_hash`` encodes the pipeline structure (operator +
-    upstream topology) and ``instance:{content_hash}`` is the
-    data-inclusive hash that encodes upstream source identities, ensuring
-    each unique source combination gets its own cache table.
-
-    Cache modes:
-        - **OFF** (default): compute, don't write to DB.
-        - **LOG**: compute AND write to DB (append-only historical record).
-        - **REPLAY**: skip computation, flow cached results downstream.
+    Carries all non-DB state: identity, schema, upstreams, and properties
+    shared by both the blueprint and the execution variant.
     """
 
     node_type = "operator"
@@ -74,9 +76,6 @@ class OperatorNode(StreamBase):
         tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
         config: Config | None = None,
-        # Optional DB params for persistent mode:
-        pipeline_database: ArrowDatabaseProtocol | None = None,
-        cache_mode: CacheMode = CacheMode.OFF,
         table_scope: Literal["pipeline_hash", "content_hash"] = "pipeline_hash",
     ):
         if tracker_manager is None:
@@ -91,14 +90,7 @@ class OperatorNode(StreamBase):
         # Validate inputs eagerly
         self._operator.validate_inputs(*self._input_streams)
 
-        # Stream-level caching state
-        self._cached_output_stream: StreamProtocol | None = None
-        self._cached_output_table: pa.Table | None = None
         self._set_modified_time(None)
-
-        # DB persistence state (initially None; set via __init__ params or attach_databases)
-        self._pipeline_database: ArrowDatabaseProtocol | None = None
-        self._cache_mode = CacheMode.OFF
 
         # Descriptor fields — populated by from_descriptor() for read-only/UNAVAILABLE
         # nodes. Initialized here so they are always present on the concrete class
@@ -111,6 +103,7 @@ class OperatorNode(StreamBase):
         self._stored_node_uri: tuple[str, ...] = ()
         self._stored_pipeline_path: tuple[str, ...] = ()
         self._descriptor: dict = {}
+
         if table_scope not in ("pipeline_hash", "content_hash"):
             raise ValueError(
                 f"Unknown table_scope {table_scope!r}. "
@@ -118,164 +111,6 @@ class OperatorNode(StreamBase):
             )
         self._table_scope = table_scope
         self._node_identity_path_cache: tuple[str, ...] | None = None
-
-        if pipeline_database is not None:
-            self.attach_databases(
-                pipeline_database=pipeline_database,
-                cache_mode=cache_mode,
-            )
-
-    # ------------------------------------------------------------------
-    # attach_databases
-    # ------------------------------------------------------------------
-
-    def attach_databases(
-        self,
-        pipeline_database: ArrowDatabaseProtocol,
-        cache_mode: CacheMode = CacheMode.OFF,
-    ) -> None:
-        """Attach a database for persistent caching and pipeline records.
-
-        Args:
-            pipeline_database: Database for pipeline records.
-            cache_mode: Caching behaviour (OFF, LOG, or REPLAY).
-        """
-        self._pipeline_database = pipeline_database
-        self._cache_mode = cache_mode
-
-        # Clear caches
-        self._node_identity_path_cache = None
-        self.clear_cache()
-        self._content_hash_cache.clear()
-        self._pipeline_hash_cache.clear()
-
-    # ------------------------------------------------------------------
-    # from_descriptor — reconstruct from a serialized pipeline descriptor
-    # ------------------------------------------------------------------
-
-    @classmethod
-    def from_descriptor(
-        cls,
-        descriptor: dict[str, Any],
-        operator: OperatorPodProtocol | None,
-        input_streams: tuple[StreamProtocol, ...] | list[StreamProtocol],
-        databases: dict[str, Any],
-    ) -> "OperatorNode":
-        """Construct an OperatorNode from a serialized descriptor.
-
-        When *operator* and *input_streams* are provided the node operates
-        in full mode — constructed normally via ``__init__``.  When
-        *operator* is ``None`` the node is created in read-only mode with
-        metadata from the descriptor; computation methods will raise
-        ``RuntimeError``.
-
-        Args:
-            descriptor: The serialized node descriptor dict.
-            operator: An optional live operator instance.  ``None`` for
-                read-only mode.
-            input_streams: Input streams for the operator.  Empty tuple
-                for read-only mode.
-            databases: Mapping of database role names (``"pipeline"``)
-                to database instances.
-
-        Returns:
-            A new ``OperatorNode`` instance.
-        """
-        from orcapod.pipeline.serialization import LoadStatus
-
-        if "table_scope" not in descriptor:
-            raise ValueError(
-                f"OperatorNode descriptor is missing required 'table_scope' field: "
-                f"{descriptor.get('label', '<unlabeled>')}"
-            )
-        raw_table_scope = descriptor["table_scope"]
-        if raw_table_scope not in ("pipeline_hash", "content_hash"):
-            raise ValueError(
-                f"OperatorNode descriptor has invalid 'table_scope' value "
-                f"{raw_table_scope!r} for {descriptor.get('label', '<unlabeled>')}; "
-                "expected one of ('pipeline_hash', 'content_hash')"
-            )
-        table_scope: Literal["pipeline_hash", "content_hash"] = raw_table_scope
-
-        pipeline_db = databases.get("pipeline")
-        cache_mode_str = descriptor.get("cache_mode", "off")
-        try:
-            cache_mode = CacheMode(cache_mode_str)
-        except ValueError:
-            cache_mode = CacheMode.OFF
-
-        if operator is not None and input_streams:
-            # Full mode: construct normally.
-            node = cls(
-                operator=operator,
-                input_streams=input_streams,
-                label=descriptor.get("label"),
-                table_scope=table_scope,
-            )
-            if pipeline_db is not None:
-                node.attach_databases(
-                    pipeline_database=pipeline_db,
-                    cache_mode=cache_mode,
-                )
-            node._descriptor = descriptor
-            node._load_status = LoadStatus.FULL
-            return node
-
-        # Read-only mode: bypass __init__, set minimum required state
-        node = cls.__new__(cls)
-
-        # From LabelableMixin
-        node._label = descriptor.get("label")
-
-        # From DataContextMixin
-        from orcapod.config import DEFAULT_CONFIG
-
-        node._data_context = contexts.resolve_context(
-            descriptor.get("data_context_key")
-        )
-        node._orcapod_config = DEFAULT_CONFIG
-
-        # From ContentIdentifiableBase
-        node._content_hash_cache = {}
-        node._cached_int_hash = None
-
-        # From PipelineElementBase
-        node._pipeline_hash_cache = {}
-
-        # From TemporalMixin
-        node._modified_time = None
-
-        # From OperatorNode
-        node._operator = None
-        node._input_streams = ()
-        node.tracker_manager = DEFAULT_TRACKER_MANAGER
-        node._cached_output_stream = None
-        node._cached_output_table = None
-
-        # DB persistence state
-        node._pipeline_database = pipeline_db
-        node._cache_mode = cache_mode
-
-        # Descriptor metadata for read-only access
-        node._descriptor = descriptor
-        node._stored_schema = descriptor.get("output_schema", {})
-        node._stored_content_hash = descriptor.get("content_hash")
-        node._stored_pipeline_hash = descriptor.get("pipeline_hash")
-        node._stored_pipeline_path = tuple(descriptor.get("pipeline_path", ()))
-        node._stored_node_uri = tuple(descriptor.get("node_uri") or [])
-        node._table_scope = table_scope
-        node._node_identity_path_cache = None
-
-        # Determine load status based on DB availability and cache mode.
-        # An uncached operator (cache_mode=OFF) never writes records to the
-        # database, so even when a pipeline_db exists there is nothing to
-        # read back.  Only operators that actively persist results
-        # (LOG or REPLAY mode) can legitimately serve data in read-only mode.
-        node._load_status = LoadStatus.UNAVAILABLE
-        if pipeline_db is not None and cache_mode != CacheMode.OFF:
-            node._load_status = LoadStatus.READ_ONLY
-
-        return node
 
     # ------------------------------------------------------------------
     # load_status
@@ -403,6 +238,348 @@ class OperatorNode(StreamBase):
         self._node_identity_path_cache = path
         return path
 
+    @property
+    def node_uri(self) -> tuple[str, ...]:
+        """Canonical URI tuple identifying this computation.
+
+        Identical to ``operator.uri`` at runtime.
+        Returns stored value in read-only (deserialized) mode.
+        """
+        if self._operator is None:
+            return self._stored_node_uri
+        return self._operator.uri
+
+    # ------------------------------------------------------------------
+    # Caching
+    # ------------------------------------------------------------------
+
+    def clear_cache(self) -> None:
+        """Clear the node identity path cache."""
+        self._node_identity_path_cache = None
+        self._update_modified_time()
+
+    def __repr__(self) -> str:
+        return (
+            f"{type(self).__name__}(operator={self._operator!r}, "
+            f"upstreams={self._input_streams!r})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# OperatorNode — thin blueprint (no DB)
+# ---------------------------------------------------------------------------
+
+
+class OperatorNode(OperatorNodeBase):
+    """Thin blueprint descriptor for an operator pod invocation.
+
+    Carries no database references.  Calling ``iter_data()`` raises
+    ``PipelineJobRequiredError`` — wrap the containing ``Pipeline`` in a
+    ``PipelineJob`` to obtain an executable ``OperatorJobNode``.
+
+    This is the node type recorded inside a ``Pipeline`` context manager
+    and serialized to disk via ``Pipeline.save()``.
+    """
+
+    def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+        """Raise ``PipelineJobRequiredError`` — blueprint nodes cannot produce data.
+
+        Raises:
+            PipelineJobRequiredError: Always.
+        """
+        raise PipelineJobRequiredError(
+            f"OperatorNode '{self.label}' is a blueprint — it carries no database "
+            "references and cannot produce data directly.  "
+            "Wrap the containing Pipeline in a PipelineJob to obtain an executable "
+            "OperatorJobNode."
+        )
+        # yield is needed to satisfy the Iterator return type annotation
+        return  # pragma: no cover
+        yield  # pragma: no cover
+
+    def as_table(
+        self,
+        *,
+        columns: ColumnConfig | dict[Any, Any] | None = None,
+        all_info: bool = False,
+    ) -> "pa.Table":
+        """Raise ``PipelineJobRequiredError`` — blueprint nodes cannot produce data.
+
+        Raises:
+            PipelineJobRequiredError: Always.
+        """
+        raise PipelineJobRequiredError(
+            f"OperatorNode '{self.label}' is a blueprint — it carries no database "
+            "references and cannot produce data directly.  "
+            "Wrap the containing Pipeline in a PipelineJob to obtain an executable "
+            "OperatorJobNode."
+        )
+
+    def as_node(self) -> "OperatorNode":
+        """Return ``self`` — already the lightweight blueprint form.
+
+        Returns:
+            This instance.
+        """
+        return self
+
+
+# ---------------------------------------------------------------------------
+# OperatorJobNode — DB-backed execution node
+# ---------------------------------------------------------------------------
+
+
+class OperatorJobNode(OperatorNodeBase):
+    """DB-backed execution node for operator pod invocations.
+
+    Stream node representing an operator invocation with optional DB persistence.
+
+    When constructed without database parameters, provides the core stream
+    interface (identity, schema, iteration) without any persistence.  When
+    databases are provided (either at construction or via ``attach_databases``),
+    adds pipeline record storage with per-row deduplication, ``get_all_records()``
+    for retrieving stored results, ``as_source()`` for creating a
+    ``DerivedSource`` from DB records, and three-tier cache mode
+    (OFF / LOG / REPLAY).
+
+    Node identity path structure::
+
+        operator.uri / schema:{pipeline_hash} / instance:{content_hash}
+
+    Where ``pipeline_hash`` encodes the pipeline structure (operator +
+    upstream topology) and ``instance:{content_hash}`` is the
+    data-inclusive hash that encodes upstream source identities, ensuring
+    each unique source combination gets its own cache table.
+
+    Cache modes:
+        - **OFF** (default): compute, don't write to DB.
+        - **LOG**: compute AND write to DB (append-only historical record).
+        - **REPLAY**: skip computation, flow cached results downstream.
+    """
+
+    def __init__(
+        self,
+        operator: OperatorPodProtocol,
+        input_streams: tuple[StreamProtocol, ...] | list[StreamProtocol],
+        tracker_manager: TrackerManagerProtocol | None = None,
+        label: str | None = None,
+        config: Config | None = None,
+        # Optional DB params for persistent mode:
+        pipeline_database: ArrowDatabaseProtocol | None = None,
+        cache_mode: CacheMode = CacheMode.OFF,
+        table_scope: Literal["pipeline_hash", "content_hash"] = "pipeline_hash",
+    ):
+        super().__init__(
+            operator=operator,
+            input_streams=input_streams,
+            tracker_manager=tracker_manager,
+            label=label,
+            config=config,
+            table_scope=table_scope,
+        )
+
+        # Stream-level caching state
+        self._cached_output_stream: StreamProtocol | None = None
+        self._cached_output_table: pa.Table | None = None
+
+        # DB persistence state (initially None; set via __init__ params or attach_databases)
+        self._pipeline_database: ArrowDatabaseProtocol | None = None
+        self._cache_mode = CacheMode.OFF
+
+        if pipeline_database is not None:
+            self.attach_databases(
+                pipeline_database=pipeline_database,
+                cache_mode=cache_mode,
+            )
+
+    # ------------------------------------------------------------------
+    # as_node — return the lightweight OperatorNode equivalent
+    # ------------------------------------------------------------------
+
+    def as_node(self) -> OperatorNode:
+        """Return the lightweight ``OperatorNode`` equivalent of this job node.
+
+        Returns:
+            A new ``OperatorNode`` with the same operator, input streams,
+            label, table scope, and tracker manager.  Its ``content_hash()`` /
+            ``pipeline_hash()`` are identical to those of this ``OperatorJobNode``.
+        """
+        return OperatorNode(
+            operator=self._operator,
+            input_streams=self._input_streams,
+            label=self._label,
+            table_scope=self._table_scope,
+            tracker_manager=self.tracker_manager,
+        )
+
+    # ------------------------------------------------------------------
+    # Override clear_cache to also clear output stream caches
+    # ------------------------------------------------------------------
+
+    def clear_cache(self) -> None:
+        """Clear output caches and node identity path cache."""
+        super().clear_cache()  # clears _node_identity_path_cache + _update_modified_time
+        self._cached_output_stream = None
+        self._cached_output_table = None
+
+    # ------------------------------------------------------------------
+    # attach_databases
+    # ------------------------------------------------------------------
+
+    def attach_databases(
+        self,
+        pipeline_database: ArrowDatabaseProtocol,
+        cache_mode: CacheMode = CacheMode.OFF,
+    ) -> None:
+        """Attach a database for persistent caching and pipeline records.
+
+        Args:
+            pipeline_database: Database for pipeline records.
+            cache_mode: Caching behaviour (OFF, LOG, or REPLAY).
+        """
+        self._pipeline_database = pipeline_database
+        self._cache_mode = cache_mode
+
+        # Clear caches
+        self._node_identity_path_cache = None
+        self.clear_cache()
+        self._content_hash_cache.clear()
+        self._pipeline_hash_cache.clear()
+
+    # ------------------------------------------------------------------
+    # from_descriptor — reconstruct from a serialized pipeline descriptor
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_descriptor(
+        cls,
+        descriptor: dict[str, Any],
+        operator: OperatorPodProtocol | None,
+        input_streams: tuple[StreamProtocol, ...] | list[StreamProtocol],
+        databases: dict[str, Any],
+    ) -> "OperatorJobNode":
+        """Construct an OperatorJobNode from a serialized descriptor.
+
+        When *operator* and *input_streams* are provided the node operates
+        in full mode — constructed normally via ``__init__``.  When
+        *operator* is ``None`` the node is created in read-only mode with
+        metadata from the descriptor; computation methods will raise
+        ``RuntimeError``.
+
+        Args:
+            descriptor: The serialized node descriptor dict.
+            operator: An optional live operator instance.  ``None`` for
+                read-only mode.
+            input_streams: Input streams for the operator.  Empty tuple
+                for read-only mode.
+            databases: Mapping of database role names (``"pipeline"``)
+                to database instances.
+
+        Returns:
+            A new ``OperatorJobNode`` instance.
+        """
+        from orcapod.pipeline.serialization import LoadStatus
+
+        if "table_scope" not in descriptor:
+            raise ValueError(
+                f"OperatorJobNode descriptor is missing required 'table_scope' field: "
+                f"{descriptor.get('label', '<unlabeled>')}"
+            )
+        raw_table_scope = descriptor["table_scope"]
+        if raw_table_scope not in ("pipeline_hash", "content_hash"):
+            raise ValueError(
+                f"OperatorJobNode descriptor has invalid 'table_scope' value "
+                f"{raw_table_scope!r} for {descriptor.get('label', '<unlabeled>')}; "
+                "expected one of ('pipeline_hash', 'content_hash')"
+            )
+        table_scope: Literal["pipeline_hash", "content_hash"] = raw_table_scope
+
+        pipeline_db = databases.get("pipeline")
+        cache_mode_str = descriptor.get("cache_mode", "off")
+        try:
+            cache_mode = CacheMode(cache_mode_str)
+        except ValueError:
+            cache_mode = CacheMode.OFF
+
+        if operator is not None and input_streams:
+            # Full mode: construct normally.
+            node = cls(
+                operator=operator,
+                input_streams=input_streams,
+                label=descriptor.get("label"),
+                table_scope=table_scope,
+            )
+            if pipeline_db is not None:
+                node.attach_databases(
+                    pipeline_database=pipeline_db,
+                    cache_mode=cache_mode,
+                )
+            node._descriptor = descriptor
+            node._load_status = LoadStatus.FULL
+            return node
+
+        # Read-only mode: bypass __init__, set minimum required state
+        node = cls.__new__(cls)
+
+        # From LabelableMixin
+        node._label = descriptor.get("label")
+
+        # From DataContextMixin
+        from orcapod.config import DEFAULT_CONFIG
+
+        node._data_context = contexts.resolve_context(
+            descriptor.get("data_context_key")
+        )
+        node._orcapod_config = DEFAULT_CONFIG
+
+        # From ContentIdentifiableBase
+        node._content_hash_cache = {}
+        node._cached_int_hash = None
+
+        # From PipelineElementBase
+        node._pipeline_hash_cache = {}
+
+        # From TemporalMixin
+        node._modified_time = None
+
+        # From OperatorNodeBase
+        node._operator = None
+        node._input_streams = ()
+        node.tracker_manager = DEFAULT_TRACKER_MANAGER
+
+        # From OperatorJobNode
+        node._cached_output_stream = None
+        node._cached_output_table = None
+
+        # DB persistence state
+        node._pipeline_database = pipeline_db
+        node._cache_mode = cache_mode
+
+        # Descriptor metadata for read-only access
+        node._descriptor = descriptor
+        node._stored_schema = descriptor.get("output_schema", {})
+        node._stored_content_hash = descriptor.get("content_hash")
+        node._stored_pipeline_hash = descriptor.get("pipeline_hash")
+        node._stored_pipeline_path = tuple(descriptor.get("pipeline_path", ()))
+        node._stored_node_uri = tuple(descriptor.get("node_uri") or [])
+        node._table_scope = table_scope
+        node._node_identity_path_cache = None
+
+        # Determine load status based on DB availability and cache mode.
+        # An uncached operator (cache_mode=OFF) never writes records to the
+        # database, so even when a pipeline_db exists there is nothing to
+        # read back.  Only operators that actively persist results
+        # (LOG or REPLAY mode) can legitimately serve data in read-only mode.
+        node._load_status = LoadStatus.UNAVAILABLE
+        if pipeline_db is not None and cache_mode != CacheMode.OFF:
+            node._load_status = LoadStatus.READ_ONLY
+
+        return node
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
     def _filter_by_content_hash(self, table: pa.Table) -> pa.Table:
         """Filter *table* to rows whose ``NODE_CONTENT_HASH_COL`` matches this node.
 
@@ -423,27 +600,9 @@ class OperatorNode(StreamBase):
         mask = pc.equal(table.column(col_name), own_hash)
         return table.filter(mask)
 
-    @property
-    def node_uri(self) -> tuple[str, ...]:
-        """Canonical URI tuple identifying this computation.
-
-        Identical to ``operator.uri`` at runtime.
-        Returns stored value in read-only (deserialized) mode.
-        """
-        if self._operator is None:
-            return self._stored_node_uri
-        return self._operator.uri
-
     # ------------------------------------------------------------------
     # Computation and caching
     # ------------------------------------------------------------------
-
-    def clear_cache(self) -> None:
-        """Discard all in-memory cached state."""
-        self._cached_output_stream = None
-        self._cached_output_table = None
-        self._node_identity_path_cache = None
-        self._update_modified_time()
 
     def _store_output_stream(self, stream: StreamProtocol) -> None:
         """Materialize stream and store in the pipeline database with per-row dedup."""
@@ -569,7 +728,7 @@ class OperatorNode(StreamBase):
     def execute(
         self,
         *input_streams: StreamProtocol,
-        observer: ExecutionObserverProtocol | None = None,
+        observer: "ExecutionObserverProtocol | None" = None,
     ) -> list[tuple[TagProtocol, DataProtocol]]:
         """Execute input streams: compute, persist, and cache.
 
@@ -738,7 +897,7 @@ class OperatorNode(StreamBase):
         self,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> pa.Table | None:
+    ) -> "pa.Table | None":
         """Retrieve all stored records from the pipeline database.
 
         Returns the stored output table with column filtering applied
@@ -817,7 +976,7 @@ class OperatorNode(StreamBase):
         inputs: Sequence[ReadableChannel[tuple[TagProtocol, DataProtocol]]],
         output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         *,
-        observer: ExecutionObserverProtocol | None = None,
+        observer: "ExecutionObserverProtocol | None" = None,
     ) -> None:
         """Async execution with cache mode handling when DB is attached.
 
@@ -895,9 +1054,3 @@ class OperatorNode(StreamBase):
             ctx_obs.on_node_end(node_label, node_hash)
         finally:
             await output.close()
-
-    def __repr__(self) -> str:
-        return (
-            f"{type(self).__name__}(operator={self._operator!r}, "
-            f"upstreams={self._input_streams!r})"
-        )

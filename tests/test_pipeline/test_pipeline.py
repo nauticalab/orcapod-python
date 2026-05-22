@@ -24,6 +24,7 @@ from orcapod.core.nodes import (
     SourceNode,
 )
 from orcapod.core.nodes.function_node import FunctionJobNode
+from orcapod.core.nodes.operator_node import OperatorJobNode, OperatorNodeBase
 from orcapod.core.nodes.source_node import SourceNode
 from orcapod.core.operators import Join
 from orcapod.core.data_function import PythonDataFunction
@@ -240,7 +241,7 @@ class TestCompileMutatesNodes:
         result = job.run()
 
         exec_node = result.pipeline.compiled_nodes["joiner"]
-        assert isinstance(exec_node, OperatorNode)
+        assert isinstance(exec_node, OperatorJobNode)
         assert exec_node._pipeline_database is not None
 
 

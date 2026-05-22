@@ -17,7 +17,7 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from orcapod.core.nodes import OperatorNode
+from orcapod.core.nodes.operator_node import OperatorJobNode, OperatorNode
 from orcapod.core.operators import (
     DropDataColumns,
     Join,
@@ -99,10 +99,10 @@ def _make_node(
     streams: tuple[ArrowTableStream, ...],
     db: InMemoryArrowDatabase | None = None,
     cache_mode: CacheMode = CacheMode.OFF,
-) -> OperatorNode:
+) -> OperatorJobNode:
     if db is None:
         db = InMemoryArrowDatabase()
-    return OperatorNode(
+    return OperatorJobNode(
         operator=operator,
         input_streams=streams,
         pipeline_database=db,
@@ -442,4 +442,4 @@ class TestOperatorNodeRepr:
         op = MapData({"x": "renamed_x"})
         node = _make_node(op, (simple_stream,))
         r = repr(node)
-        assert "OperatorNode" in r
+        assert "OperatorJobNode" in r

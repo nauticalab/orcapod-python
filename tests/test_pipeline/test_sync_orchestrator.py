@@ -354,9 +354,9 @@ class TestMaterializedStreamIdentity:
         """
         src_a = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
         src_b = _make_source("key", "score", {"key": ["a", "b"], "score": [100, 200]})
-        from orcapod.core.nodes import OperatorNode
+        from orcapod.core.nodes.operator_node import OperatorJobNode
 
-        op_node = OperatorNode(Join(), input_streams=[src_a, src_b])
+        op_node = OperatorJobNode(Join(), input_streams=[src_a, src_b])
         op_node.run()
         buf = list(op_node.iter_data())
 
@@ -368,10 +368,10 @@ class TestMaterializedStreamIdentity:
         src_a = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
         src_b = _make_source("key", "score", {"key": ["a", "b"], "score": [100, 200]})
         from orcapod.core.operators.join import Join
-        from orcapod.core.nodes import OperatorNode
+        from orcapod.core.nodes.operator_node import OperatorJobNode
 
         op = Join()
-        op_node = OperatorNode(op, input_streams=[src_a, src_b])
+        op_node = OperatorJobNode(op, input_streams=[src_a, src_b])
         op_node.run()
         buf = list(op_node.iter_data())
 
