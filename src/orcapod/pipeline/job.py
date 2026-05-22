@@ -37,7 +37,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
     resolvable subgraph — nodes whose upstream SourceNodes are all bound.
 
     ``PipelineJob`` can also be created from a ``Pipeline`` via
-    ``pipeline.bind(sources=..., store=...)`` for the "explicit blueprint"
+    ``PipelineJob.from_pipeline(pipeline, sources=..., store=...)`` for the "explicit blueprint"
     workflow.
 
     Args:
@@ -47,8 +47,8 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         store: Database for result caching and operator records.
         execution_context: Optional execution configuration.
         tracker_manager: Optional tracker manager override.
-        _pipeline: Internal — pre-built pipeline (used by Pipeline.bind()).
-        sources: Internal — pre-bound sources (used by Pipeline.bind() /
+        _pipeline: Internal — pre-built pipeline (used by PipelineJob.from_pipeline()).
+        sources: Internal — pre-bound sources (used by PipelineJob.from_pipeline() /
             bind()).
     """
 

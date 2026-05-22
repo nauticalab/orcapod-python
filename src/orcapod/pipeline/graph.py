@@ -42,8 +42,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
     - Function pod invocations → ``FunctionNode``
     - Operator invocations → ``OperatorNode``
 
-    All leaf inputs must be ``SourceSpec`` instances. To run a ``Pipeline``,
-    use ``Pipeline.bind(sources=..., store=...)`` to create a ``PipelineJob``.
+    All leaf inputs must be ``SourceNode`` instances. To run a ``Pipeline``,
+    use ``PipelineJob.from_pipeline(pipeline, sources=..., store=...)`` to create a ``PipelineJob``.
 
     Parameters:
         name: Pipeline name (string or tuple). Used as the path prefix for
@@ -418,8 +418,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         """Deserialize a pure pipeline blueprint from a JSON file.
 
         Reconstructs topology and SourceSpec declarations. The loaded
-        pipeline is topology-only — to run it, call
-        ``pipeline.bind(sources=..., store=...)`` first.
+        pipeline is topology-only — to run it, use
+        ``PipelineJob.from_pipeline(pipeline, sources=..., store=...)``.
 
         Args:
             path: Path to the JSON file produced by :meth:`save`.
