@@ -315,6 +315,110 @@ class OperatorNode(OperatorNodeBase):
             "OperatorJobNode."
         )
 
+    @classmethod
+    def from_descriptor(
+        cls,
+        descriptor: dict[str, Any],
+        operator: OperatorPodProtocol | None,
+        input_streams: tuple[StreamProtocol, ...] | list[StreamProtocol],
+        databases: dict[str, Any],
+    ) -> "OperatorNode":
+        """Construct an OperatorNode from a serialized descriptor.
+
+        When *operator* and *input_streams* are provided the node operates
+        in full mode — constructed normally via ``__init__``.  When
+        *operator* is ``None`` the node is created in read-only mode with
+        metadata from the descriptor; computation methods will raise
+        ``PipelineJobRequiredError``.
+
+        Args:
+            descriptor: The serialized node descriptor dict.
+            operator: An optional live operator instance.  ``None`` for
+                read-only mode.
+            input_streams: Input streams for the operator.  Empty tuple
+                for read-only mode.
+            databases: Unused — kept for API parity with
+                ``OperatorJobNode.from_descriptor``.
+
+        Returns:
+            A new ``OperatorNode`` instance.
+
+        Raises:
+            ValueError: If ``table_scope`` is missing or invalid.
+        """
+        from orcapod.pipeline.serialization import LoadStatus
+
+        if "table_scope" not in descriptor:
+            raise ValueError(
+                f"OperatorNode descriptor is missing required 'table_scope' field: "
+                f"{descriptor.get('label', '<unlabeled>')}"
+            )
+        raw_table_scope = descriptor["table_scope"]
+        if raw_table_scope not in ("pipeline_hash", "content_hash"):
+            raise ValueError(
+                f"OperatorNode descriptor has invalid 'table_scope' value "
+                f"{raw_table_scope!r} for {descriptor.get('label', '<unlabeled>')}; "
+                "expected one of ('pipeline_hash', 'content_hash')"
+            )
+        table_scope: Literal["pipeline_hash", "content_hash"] = raw_table_scope
+
+        if operator is not None and input_streams:
+            # Full mode: construct normally.
+            node = cls(
+                operator=operator,
+                input_streams=input_streams,
+                label=descriptor.get("label"),
+                table_scope=table_scope,
+            )
+            node._descriptor = descriptor
+            node._load_status = LoadStatus.FULL
+            return node
+
+        # Read-only mode: bypass __init__ (which calls validate_inputs) and
+        # manually set the minimum required state.
+        node = cls.__new__(cls)
+
+        # From LabelableMixin
+        node._label = descriptor.get("label")
+
+        # From DataContextMixin
+        from orcapod.config import DEFAULT_CONFIG
+
+        node._data_context = contexts.resolve_context(
+            descriptor.get("data_context_key")
+        )
+        node._orcapod_config = DEFAULT_CONFIG
+
+        # From ContentIdentifiableBase
+        node._content_hash_cache = {}
+        node._cached_int_hash = None
+
+        # From PipelineElementBase
+        node._pipeline_hash_cache = {}
+
+        # From TemporalMixin
+        node._modified_time = None
+
+        # From OperatorNodeBase
+        node._operator = None
+        node._input_streams = ()
+        node.tracker_manager = DEFAULT_TRACKER_MANAGER
+
+        # Descriptor metadata for read-only access
+        node._descriptor = descriptor
+        node._stored_schema = descriptor.get("output_schema", {})
+        node._stored_content_hash = descriptor.get("content_hash")
+        node._stored_pipeline_hash = descriptor.get("pipeline_hash")
+        node._stored_pipeline_path = tuple(descriptor.get("pipeline_path", ()))
+        node._stored_node_uri = tuple(descriptor.get("node_uri") or [])
+        node._table_scope = table_scope
+        node._node_identity_path_cache = None
+
+        # Blueprint nodes loaded read-only are always UNAVAILABLE (no DB)
+        node._load_status = LoadStatus.UNAVAILABLE
+
+        return node
+
     def as_node(self) -> "OperatorNode":
         """Return ``self`` — already the lightweight blueprint form.
 

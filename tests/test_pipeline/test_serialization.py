@@ -8,7 +8,6 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.nodes import SourceNode
-from orcapod.core.nodes.source_node import SourceNode
 from orcapod.core.operators import Join
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases.in_memory_databases import InMemoryArrowDatabase

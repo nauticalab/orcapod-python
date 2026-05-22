@@ -12,7 +12,6 @@ from orcapod.core.nodes import (
     OperatorNode,
     SourceNode,
 )
-from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
 from orcapod.pipeline.base import AbstractPipelineBase
 from orcapod.protocols import core_protocols as cp
@@ -83,7 +82,7 @@ class Pipeline(AbstractPipelineBase):
         input_stream: cp.StreamProtocol,
         label: str | None = None,
     ) -> None:
-        """Record a function pod invocation and return its stream.
+        """Record a function pod invocation.
 
         Called by ``FunctionPod.__call__`` when used inside a ``with pipeline:``
         block. Creates a lightweight ``FunctionNode`` blueprint.
@@ -92,9 +91,6 @@ class Pipeline(AbstractPipelineBase):
             pod: The function pod being invoked.
             input_stream: The upstream stream.
             label: Optional display label for the resulting node.
-
-        Returns:
-            The ``FunctionNode`` representing this invocation.
         """
         input_stream_hash = input_stream.content_hash().to_string()
         function_node = FunctionNode(
@@ -116,7 +112,7 @@ class Pipeline(AbstractPipelineBase):
         upstreams: tuple[cp.StreamProtocol, ...] = (),
         label: str | None = None,
     ) -> None:
-        """Record an operator pod invocation and return its stream.
+        """Record an operator pod invocation.
 
         Called by operator pods when used inside a ``with pipeline:``
         block. Creates a lightweight ``OperatorNode`` blueprint.
@@ -125,9 +121,6 @@ class Pipeline(AbstractPipelineBase):
             pod: The operator pod being invoked.
             upstreams: Upstream streams for this operator.
             label: Optional display label for the resulting node.
-
-        Returns:
-            The ``OperatorNode`` representing this invocation.
         """
         operator_node = OperatorNode(
             operator=pod,
@@ -491,6 +484,7 @@ class Pipeline(AbstractPipelineBase):
                         name=node_name,
                         tag_schema=tag_schema,
                         data_schema=data_schema,
+                        data_context=descriptor.get("data_context_key"),
                     )
                     # Restore label from descriptor if set explicitly
                     stored_label = descriptor.get("label")
@@ -531,7 +525,7 @@ class Pipeline(AbstractPipelineBase):
                             op_config.get("class_name"),
                             exc,
                         )
-                node = OperatorJobNode.from_descriptor(
+                node = OperatorNode.from_descriptor(
                     descriptor, operator=operator, input_streams=upstream_nodes, databases={}
                 )
                 reconstructed[node_hash] = node

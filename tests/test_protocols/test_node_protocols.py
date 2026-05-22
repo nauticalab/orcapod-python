@@ -12,8 +12,6 @@ from orcapod.protocols.node_protocols import (
     is_operator_node,
     is_source_node,
 )
-from orcapod.types import Schema
-
 
 @pytest.fixture
 def _sample_source():
