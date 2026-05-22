@@ -50,3 +50,12 @@ class SourceSpecMismatchError(ValueError):
     Contains the spec name and a description of the incompatible field(s).
     Raised at ``bind()`` time — schema mismatches are rejected before execution.
     """
+
+
+class PipelineJobRequiredError(RuntimeError):
+    """Raised when a lightweight blueprint node is asked to produce data.
+
+    Blueprint nodes (``FunctionNode``, ``OperatorNode``) carry no database
+    references.  Wrap the containing ``Pipeline`` in a ``PipelineJob`` to
+    obtain executable ``FunctionJobNode`` / ``OperatorJobNode`` variants.
+    """

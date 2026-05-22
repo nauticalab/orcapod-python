@@ -216,17 +216,17 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 continue
 
             if node_hash not in self._node_lut:
-                # -- Leaf stream: must be a SourceSpec in the new design --
-                from orcapod.core.sources.source_spec import SourceSpec
+                # -- Leaf stream: must be a SourceNode in the new design --
+                from orcapod.core.nodes.source_node import SourceNode as SourceNodeClass
                 stream = self._upstreams[node_hash]
-                if not isinstance(stream, SourceSpec):
+                if not isinstance(stream, SourceNodeClass):
                     raise ValueError(
-                        f"Pipeline: all leaf inputs must be SourceSpec instances, "
+                        f"Pipeline: all leaf inputs must be SourceNode instances, "
                         f"but found {type(stream).__name__!r}. "
                         "Use 'with PipelineJob:' to record a pipeline with concrete sources, "
-                        "or replace concrete sources with SourceSpec declarations."
+                        "or replace concrete sources with SourceNode declarations."
                     )
-                node = SourceNode(stream=stream)
+                node = stream  # SourceNode IS the leaf — no wrapping needed
                 persistent_node_map[node_hash] = node
             else:
                 node = self._node_lut[node_hash]
@@ -383,8 +383,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             PIPELINE_FORMAT_VERSION,
             serialize_schema,
         )
-        from orcapod.core.sources.source_spec import SourceSpec
         from orcapod.core.nodes import OperatorNode, FunctionNode
+        from orcapod.core.nodes.source_node import SourceNode as SourceNodeClass
 
         nodes: dict[str, Any] = {}
         for content_hash_str, node in self._persistent_node_map.items():
@@ -416,16 +416,12 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 "data_context_key": data_context_key,
             }
 
-            if isinstance(node, SourceNode):
-                if isinstance(node.stream, SourceSpec):
-                    descriptor["source_config"] = {
-                        "source_type": "spec",
-                        "spec_name": node.stream.name,
-                    }
-                    descriptor["reconstructable"] = True
-                else:
-                    descriptor["source_config"] = None
-                    descriptor["reconstructable"] = False
+            if isinstance(node, SourceNodeClass):
+                descriptor["source_config"] = {
+                    "source_type": "node",
+                    "node_name": node.name,
+                }
+                descriptor["reconstructable"] = True
 
             elif isinstance(node, FunctionNode):
                 if node._function_pod is not None:
@@ -473,8 +469,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             SUPPORTED_FORMAT_VERSIONS,
             deserialize_schema,
         )
-        from orcapod.core.sources.source_spec import SourceSpec
         from orcapod.core.nodes import FunctionNode, OperatorNode
+        from orcapod.core.nodes.source_node import SourceNode as SourceNodeClass
         from orcapod.types import Schema
 
         path = Path(path)
@@ -517,19 +513,26 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             source_config = descriptor.get("source_config") or {}
 
             if node_type == "source":
-                if source_config.get("source_type") == "spec":
-                    spec_name = source_config["spec_name"]
-                    tag_schema = Schema(deserialize_schema(descriptor["output_schema"]["tag"]))
-                    data_schema = Schema(deserialize_schema(descriptor["output_schema"]["data"]))
-                    stream = SourceSpec(
-                        name=spec_name,
-                        tag_schema=tag_schema,
-                        data_schema=data_schema,
-                    )
+                tag_schema = Schema(deserialize_schema(descriptor["output_schema"]["tag"]))
+                data_schema = Schema(deserialize_schema(descriptor["output_schema"]["data"]))
+                # Support both old "spec" format and new "node" format
+                if source_config.get("source_type") == "node":
+                    node_name = source_config["node_name"]
+                elif source_config.get("source_type") == "spec":
+                    # Legacy format compatibility: spec_name becomes node name
+                    node_name = source_config["spec_name"]
                 else:
-                    stream = None  # non-spec source — schema known but not rebuildable
-
-                node = SourceNode.from_descriptor(descriptor, stream=stream, databases={})
+                    # Fall back to stored label
+                    node_name = descriptor.get("label") or "unknown"
+                node = SourceNodeClass(
+                    name=node_name,
+                    tag_schema=tag_schema,
+                    data_schema=data_schema,
+                )
+                # Restore label from descriptor if set explicitly
+                stored_label = descriptor.get("label")
+                if stored_label and stored_label != node_name:
+                    node._label = stored_label
                 reconstructed[node_hash] = node
 
             elif node_type == "function":
@@ -610,12 +613,14 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         pipeline._node_lut = {
             h: n
             for h, n in reconstructed.items()
-            if not isinstance(n, SourceNode)
+            if not isinstance(n, SourceNodeClass)
         }
+        # SourceNode IS the upstream — store it directly so _build_execution_graph()
+        # can find it by hash and substitute a concrete source at run time.
         pipeline._upstreams = {
-            h: n.stream
+            h: n
             for h, n in reconstructed.items()
-            if isinstance(n, SourceNode) and n.stream is not None
+            if isinstance(n, SourceNodeClass)
         }
 
         pipeline._compiled = True

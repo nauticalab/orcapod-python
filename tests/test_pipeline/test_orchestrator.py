@@ -25,6 +25,7 @@ import pytest
 from orcapod.channels import Channel
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode, OperatorNode, SourceNode
+from orcapod.core.nodes.source_node import SourceJobNode
 from orcapod.core.operators import SelectDataColumns
 from orcapod.core.operators.join import Join
 from orcapod.core.operators.mappers import MapData
@@ -72,10 +73,19 @@ def add_values(value: int, score: int) -> int:
 
 
 class TestSourceNodeAsyncExecute:
+    def _make_job_node(self, src):
+        tag_schema, data_schema = src.output_schema()
+        return SourceJobNode(
+            name="test_src",
+            tag_schema=tag_schema,
+            data_schema=data_schema,
+            concrete=src,
+        )
+
     @pytest.mark.asyncio
     async def test_pushes_all_rows_to_output(self):
         src = _make_source("key", "value", {"key": ["a", "b", "c"], "value": [1, 2, 3]})
-        node = SourceNode(src)
+        node = self._make_job_node(src)
 
         output_ch = Channel(buffer_size=16)
         await node.async_execute(output_ch.writer)
@@ -86,7 +96,7 @@ class TestSourceNodeAsyncExecute:
     @pytest.mark.asyncio
     async def test_closes_channel_on_completion(self):
         src = _make_source("key", "value", {"key": ["a"], "value": [1]})
-        node = SourceNode(src)
+        node = self._make_job_node(src)
 
         output_ch = Channel(buffer_size=4)
         await node.async_execute(output_ch.writer)
@@ -419,7 +429,13 @@ class TestAsyncOrchestratorTerminalNode:
         import networkx as nx
 
         src = _make_source("key", "value", {"key": ["a"], "value": [1]})
-        node = SourceNode(src)
+        tag_schema, data_schema = src.output_schema()
+        node = SourceJobNode(
+            name="test_src",
+            tag_schema=tag_schema,
+            data_schema=data_schema,
+            concrete=src,
+        )
         G = nx.DiGraph()
         G.add_node(node)
 

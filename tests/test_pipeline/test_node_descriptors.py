@@ -5,114 +5,92 @@ import pytest
 from orcapod.core.nodes.source_node import SourceNode
 from orcapod.core.sources.dict_source import DictSource
 from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
+from orcapod.errors import UnboundSourceError
 from orcapod.pipeline.serialization import LoadStatus
+from orcapod.types import Schema
 
 
 class TestSourceNodeFromDescriptor:
-    def _make_source_and_descriptor(self):
+    """Tests for SourceNode construction — the new schema-only design.
+
+    SourceNode no longer wraps a stream; instead it stores name + schemas
+    and raises UnboundSourceError on data access.
+    """
+
+    def _make_source_node(self):
+        tag_schema = Schema({"a": int})
+        data_schema = Schema({"b": int})
+        node = SourceNode(name="my_source", tag_schema=tag_schema, data_schema=data_schema)
+        return node
+
+    def test_from_descriptor_with_stream(self):
+        """SourceNode can be constructed with name and schemas (new API)."""
+        node = self._make_source_node()
+        assert node.label == "my_source"
+        assert node.name == "my_source"
+
+    def test_from_descriptor_without_stream_read_only(self):
+        """Unbound SourceNode has no concrete data."""
+        node = self._make_source_node()
+        with pytest.raises(UnboundSourceError):
+            list(node.iter_data())
+
+    def test_from_descriptor_output_schema_from_metadata(self):
+        """SourceNode output_schema returns the declared tag and data schemas."""
+        tag_schema = Schema({"a": int})
+        data_schema = Schema({"b": int})
+        node = SourceNode(name="test_node", tag_schema=tag_schema, data_schema=data_schema)
+        t, d = node.output_schema()
+        assert set(t.keys()) == {"a"}
+        assert set(d.keys()) == {"b"}
+
+    def test_from_descriptor_full_mode_delegates_to_stream(self):
+        """SourceNode with bound concrete (via SourceJobNode) delegates iter_data."""
+        from orcapod.core.nodes.source_node import SourceJobNode
+        tag_schema = Schema({"a": int})
+        data_schema = Schema({"b": int})
         source = DictSource(
             data=[{"a": 1, "b": 2}, {"a": 3, "b": 4}],
             tag_columns=["a"],
             source_id="test",
         )
-        node = SourceNode(stream=source, label="my_source")
-        tag_schema, data_schema = node.output_schema()
-        descriptor = {
-            "node_type": "source",
-            "label": "my_source",
-            "content_hash": node.content_hash().to_string(),
-            "pipeline_hash": node.pipeline_hash().to_string(),
-            "data_context_key": node.data_context_key,
-            "output_schema": {
-                "tag": {k: str(v) for k, v in tag_schema.items()},
-                "data": {k: str(v) for k, v in data_schema.items()},
-            },
-            "stream_type": "dict",
-            "source_id": "test",
-            "reconstructable": False,
-        }
-        return source, node, descriptor
-
-    def test_from_descriptor_with_stream(self):
-        source, original, descriptor = self._make_source_and_descriptor()
-        loaded = SourceNode.from_descriptor(
-            descriptor=descriptor,
-            stream=source,
-            databases={},
+        job_node = SourceJobNode(
+            name="my_source",
+            tag_schema=tag_schema,
+            data_schema=data_schema,
+            concrete=source,
         )
-        assert loaded.load_status == LoadStatus.FULL
-        assert loaded.label == "my_source"
-
-    def test_from_descriptor_without_stream_read_only(self):
-        _, original, descriptor = self._make_source_and_descriptor()
-        db = InMemoryArrowDatabase()
-        loaded = SourceNode.from_descriptor(
-            descriptor=descriptor,
-            stream=None,
-            databases={"pipeline": db},
-        )
-        assert loaded.load_status in (LoadStatus.READ_ONLY, LoadStatus.UNAVAILABLE)
-
-    def test_from_descriptor_output_schema_from_metadata(self):
-        _, original, descriptor = self._make_source_and_descriptor()
-        loaded = SourceNode.from_descriptor(
-            descriptor=descriptor,
-            stream=None,
-            databases={},
-        )
-        tag_schema, data_schema = loaded.output_schema()
-        assert set(tag_schema.keys()) == set(descriptor["output_schema"]["tag"].keys())
-        assert set(data_schema.keys()) == set(
-            descriptor["output_schema"]["data"].keys()
-        )
-
-    def test_from_descriptor_full_mode_delegates_to_stream(self):
-        """Full-mode node should delegate output_schema, iter_data, as_table to stream."""
-        source, _, descriptor = self._make_source_and_descriptor()
-        loaded = SourceNode.from_descriptor(
-            descriptor=descriptor,
-            stream=source,
-            databases={},
-        )
-        tag_schema, data_schema = loaded.output_schema()
-        assert "a" in tag_schema
-        assert "b" in data_schema
-        # iter_data should work
-        data = list(loaded.iter_data())
+        t, d = job_node.output_schema()
+        assert "a" in t
+        assert "b" in d
+        data = list(job_node.iter_data())
         assert len(data) == 2
 
     def test_from_descriptor_read_only_iter_data_raises(self):
-        """Read-only node should raise when iter_data is called."""
-        _, _, descriptor = self._make_source_and_descriptor()
-        loaded = SourceNode.from_descriptor(
-            descriptor=descriptor,
-            stream=None,
-            databases={},
-        )
-        with pytest.raises(RuntimeError, match="read-only mode"):
-            list(loaded.iter_data())
+        """Unbound SourceNode should raise UnboundSourceError on iter_data."""
+        node = self._make_source_node()
+        with pytest.raises(UnboundSourceError):
+            list(node.iter_data())
 
     def test_from_descriptor_read_only_as_table_raises(self):
-        """Read-only node should raise when as_table is called."""
-        _, _, descriptor = self._make_source_and_descriptor()
-        loaded = SourceNode.from_descriptor(
-            descriptor=descriptor,
-            stream=None,
-            databases={},
-        )
-        with pytest.raises(RuntimeError, match="read-only mode"):
-            loaded.as_table()
+        """Unbound SourceNode should raise UnboundSourceError on as_table."""
+        node = self._make_source_node()
+        with pytest.raises(UnboundSourceError):
+            node.as_table()
 
     def test_from_descriptor_stored_hashes(self):
-        """Read-only node should return stored content_hash and pipeline_hash."""
-        _, original, descriptor = self._make_source_and_descriptor()
-        loaded = SourceNode.from_descriptor(
-            descriptor=descriptor,
-            stream=None,
-            databases={},
+        """SourceNode produces stable hashes based on name and schemas."""
+        node = self._make_source_node()
+        ch = node.content_hash()
+        ph = node.pipeline_hash()
+        # Same args → same hashes
+        node2 = SourceNode(
+            name="my_source",
+            tag_schema=Schema({"a": int}),
+            data_schema=Schema({"b": int}),
         )
-        assert loaded.content_hash().to_string() == descriptor["content_hash"]
-        assert loaded.pipeline_hash().to_string() == descriptor["pipeline_hash"]
+        assert node2.content_hash() == ch
+        assert node2.pipeline_hash() == ph
 
 
 from orcapod.core.nodes.function_node import FunctionNode

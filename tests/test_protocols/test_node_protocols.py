@@ -6,11 +6,13 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.nodes import FunctionNode, OperatorNode, SourceNode
+from orcapod.core.nodes.source_node import SourceJobNode
 from orcapod.protocols.node_protocols import (
     is_function_node,
     is_operator_node,
     is_source_node,
 )
+from orcapod.types import Schema
 
 
 @pytest.fixture
@@ -28,7 +30,13 @@ def _sample_source():
 
 @pytest.fixture
 def source_node(_sample_source):
-    return SourceNode(_sample_source)
+    tag_schema, data_schema = _sample_source.output_schema()
+    return SourceJobNode(
+        name="test_source",
+        tag_schema=tag_schema,
+        data_schema=data_schema,
+        concrete=_sample_source,
+    )
 
 
 @pytest.fixture

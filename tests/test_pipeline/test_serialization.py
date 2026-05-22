@@ -8,9 +8,9 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.nodes import SourceNode
+from orcapod.core.nodes.source_node import SourceNode
 from orcapod.core.operators import Join
 from orcapod.core.sources import ArrowTableSource
-from orcapod.core.sources.source_spec import SourceSpec
 from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
 from orcapod.pipeline import Pipeline
 from orcapod.pipeline.serialization import PIPELINE_FORMAT_VERSION
@@ -18,7 +18,7 @@ from orcapod.pipeline.serialization import PIPELINE_FORMAT_VERSION
 
 @pytest.fixture
 def spec_pipeline(tmp_path):
-    """A compiled Pipeline using SourceSpec leaves."""
+    """A compiled Pipeline using SourceNode leaves."""
     def _src(tag, data):
         tbl = pa.table({tag: pa.array(["a"], type=pa.large_string()), data: pa.array([1], type=pa.int64())})
         return ArrowTableSource(tbl, tag_columns=[tag], infer_nullable=True)
@@ -28,12 +28,12 @@ def spec_pipeline(tmp_path):
     tag_a, data_a = src_a.output_schema()
     tag_b, data_b = src_b.output_schema()
 
-    spec_a = SourceSpec("source_a", tag_schema=tag_a, data_schema=data_a)
-    spec_b = SourceSpec("source_b", tag_schema=tag_b, data_schema=data_b)
+    node_a = SourceNode(name="source_a", tag_schema=tag_a, data_schema=data_a)
+    node_b = SourceNode(name="source_b", tag_schema=tag_b, data_schema=data_b)
 
     pipeline = Pipeline(name="spec_pipe")
     with pipeline:
-        Join()(spec_a, spec_b, label="joiner")
+        Join()(node_a, node_b, label="joiner")
 
     return pipeline, tmp_path
 
@@ -61,17 +61,17 @@ class TestPipelineBlueprintSave:
         assert "databases" not in data
 
     def test_save_source_spec_nodes(self, spec_pipeline):
-        """SourceSpec nodes must serialize with source_type='spec'."""
+        """SourceNode nodes must serialize with source_type='node'."""
         pipeline, tmp_path = spec_pipeline
         path = tmp_path / "pipeline.json"
         pipeline.save(str(path))
         data = json.loads(path.read_text())
-        spec_nodes = [
+        source_nodes = [
             n for n in data["nodes"].values()
             if n.get("node_type") == "source"
-            and n.get("source_config", {}).get("source_type") == "spec"
+            and n.get("source_config", {}).get("source_type") == "node"
         ]
-        assert len(spec_nodes) == 2
+        assert len(source_nodes) == 2
 
     def test_save_load_roundtrip_preserves_topology(self, spec_pipeline):
         """load() reconstructs the same number of nodes and edges."""
@@ -83,17 +83,17 @@ class TestPipelineBlueprintSave:
         assert len(list(loaded._node_graph.edges())) == len(list(pipeline._node_graph.edges()))
 
     def test_save_load_restores_spec_names(self, spec_pipeline):
-        """SourceSpec names must survive save/load."""
+        """SourceNode names must survive save/load."""
         pipeline, tmp_path = spec_pipeline
         path = tmp_path / "pipeline.json"
         pipeline.save(str(path))
         loaded = Pipeline.load(str(path))
-        spec_names = {
-            node.stream.name
+        node_names = {
+            node.name
             for node in loaded._persistent_node_map.values()
-            if isinstance(node, SourceNode) and isinstance(node.stream, SourceSpec)
+            if isinstance(node, SourceNode)
         }
-        assert spec_names == {"source_a", "source_b"}
+        assert node_names == {"source_a", "source_b"}
 
 
 class TestPipelineBlueprintLoad:

@@ -23,10 +23,10 @@ from orcapod.core.nodes import (
     OperatorNode,
     SourceNode,
 )
+from orcapod.core.nodes.source_node import SourceNode
 from orcapod.core.operators import Join
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource, CachedSource
-from orcapod.core.sources.source_spec import SourceSpec
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import Pipeline
 from orcapod.pipeline.job import PipelineJob
@@ -85,16 +85,16 @@ class TestPipelineSourceSpecEnforcement:
         assert pipeline._compiled
 
     def test_pipeline_with_spec_leaves_compiles(self):
-        """Pipeline with SourceSpec leaves compiles without error."""
+        """Pipeline with SourceNode leaves compiles without error."""
         src_a, src_b = _make_two_sources()
         tag_a, data_a = src_a.output_schema()
         tag_b, data_b = src_b.output_schema()
-        spec_a = SourceSpec("input_a", tag_schema=tag_a, data_schema=data_a)
-        spec_b = SourceSpec("input_b", tag_schema=tag_b, data_schema=data_b)
+        node_a = SourceNode(name="input_a", tag_schema=tag_a, data_schema=data_a)
+        node_b = SourceNode(name="input_b", tag_schema=tag_b, data_schema=data_b)
 
         pipeline = Pipeline(name="spec_pipe")
         with pipeline:
-            Join()(spec_a, spec_b)
+            Join()(node_a, node_b)
 
         assert pipeline._compiled
         source_nodes = [
@@ -103,11 +103,11 @@ class TestPipelineSourceSpecEnforcement:
         assert len(source_nodes) == 2
 
     def test_pipeline_with_concrete_leaf_raises(self):
-        """Pipeline.compile() raises ValueError if any leaf is not a SourceSpec."""
+        """Pipeline.compile() raises ValueError if any leaf is not a SourceNode."""
         src_a, src_b = _make_two_sources()
 
         pipeline = Pipeline(name="bad_pipe")
-        with pytest.raises(ValueError, match="SourceSpec"):
+        with pytest.raises(ValueError, match="SourceNode"):
             with pipeline:
                 Join()(src_a, src_b)
 
@@ -116,12 +116,12 @@ class TestPipelineSourceSpecEnforcement:
         src_a, src_b = _make_two_sources()
         tag_a, data_a = src_a.output_schema()
         tag_b, data_b = src_b.output_schema()
-        spec_a = SourceSpec("a", tag_schema=tag_a, data_schema=data_a)
-        spec_b = SourceSpec("b", tag_schema=tag_b, data_schema=data_b)
+        node_a = SourceNode(name="a", tag_schema=tag_a, data_schema=data_a)
+        node_b = SourceNode(name="b", tag_schema=tag_b, data_schema=data_b)
 
         pipeline = Pipeline(name="p")
         with pipeline:
-            Join()(spec_a, spec_b)
+            Join()(node_a, node_b)
 
         db = InMemoryArrowDatabase()
         job = pipeline.bind(sources={"a": src_a, "b": src_b}, store=db)
