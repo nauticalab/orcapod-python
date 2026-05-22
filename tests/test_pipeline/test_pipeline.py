@@ -113,8 +113,8 @@ class TestPipelineSourceSpecEnforcement:
             with pipeline:
                 Join()(src_a, src_b)
 
-    def test_pipeline_bind_returns_pipeline_job(self):
-        """Pipeline.bind() returns a PipelineJob without modifying the pipeline."""
+    def test_pipeline_from_pipeline_returns_pipeline_job(self):
+        """PipelineJob.from_pipeline() returns a PipelineJob without modifying the pipeline."""
         src_a, src_b = _make_two_sources()
         tag_a, data_a = src_a.output_schema()
         tag_b, data_b = src_b.output_schema()
@@ -126,10 +126,10 @@ class TestPipelineSourceSpecEnforcement:
             Join()(node_a, node_b)
 
         db = InMemoryArrowDatabase()
-        job = pipeline.bind(sources={"a": src_a, "b": src_b}, store=db)
+        job = PipelineJob.from_pipeline(pipeline, sources={"a": src_a, "b": src_b}, store=db)
 
         assert isinstance(job, PipelineJob)
-        assert job.pipeline is pipeline
+        assert job._compiled_pipeline is pipeline
         assert job.store is db
 
 

@@ -121,8 +121,8 @@ class TestPipelineJobRecording:
 
 
 class TestPipelineJobBind:
-    def test_bind_sources_returns_new_job(self, store):
-        """bind(sources=...) returns a new PipelineJob; original is unchanged."""
+    def test_bind_sources_mutates_job(self, store):
+        """bind(sources=...) mutates the job in place and returns None."""
         src_a, src_b = _make_two_sources()
         tag_a, data_a = src_a.output_schema()
         tag_b, data_b = src_b.output_schema()
@@ -133,21 +133,21 @@ class TestPipelineJobBind:
         with job:
             Join()(node_a, node_b)
 
-        job2 = job.bind(sources={"a": src_a, "b": src_b})
-        assert job2 is not job
-        assert job.sources == {}  # original unchanged
-        assert "a" in job2.sources and "b" in job2.sources
+        result = job.bind(sources={"a": src_a, "b": src_b})
+        assert result is None  # bind() is now mutating and returns None
+        assert "a" in job.sources and "b" in job.sources
 
-    def test_bind_store_returns_new_job(self, store):
+    def test_bind_store_mutates_job(self, store):
+        """bind(store=...) updates the store in place and returns None."""
         src_a, src_b = _make_two_sources()
         job = PipelineJob()
         with job:
             Join()(src_a, src_b)
 
         new_store = InMemoryArrowDatabase()
-        job2 = job.bind(store=new_store)
-        assert job2.store is new_store
-        assert job.store is None  # original unchanged
+        result = job.bind(store=new_store)
+        assert result is None  # bind() returns None
+        assert job.store is new_store
 
     def test_bind_preserves_existing_sources(self, store):
         """bind(sources=...) merges new sources with existing ones."""
@@ -161,11 +161,11 @@ class TestPipelineJobBind:
         with job:
             Join()(node_a, node_b)
 
-        job2 = job.bind(sources={"a": src_a})
-        job3 = job2.bind(sources={"b": src_b})
+        job.bind(sources={"a": src_a})
+        job.bind(sources={"b": src_b})
 
-        assert "a" in job3.sources
-        assert "b" in job3.sources
+        assert "a" in job.sources
+        assert "b" in job.sources
 
     def test_bind_validates_schema_at_bind_time(self, store):
         """bind() raises SourceSpecMismatchError for incompatible sources."""
@@ -181,8 +181,8 @@ class TestPipelineJobBind:
         with pytest.raises(SourceSpecMismatchError):
             job.bind(sources={"a": src_a})
 
-    def test_pipeline_bind_wraps_in_job(self, store):
-        """Pipeline.bind() returns a PipelineJob holding that pipeline."""
+    def test_from_pipeline_wraps_in_job(self, store):
+        """PipelineJob.from_pipeline() returns a PipelineJob holding that pipeline."""
         from orcapod.pipeline.graph import Pipeline
 
         src_a, src_b = _make_two_sources()
@@ -195,12 +195,12 @@ class TestPipelineJobBind:
         with pipeline:
             Join()(node_a, node_b)
 
-        job = pipeline.bind(sources={"a": src_a, "b": src_b}, store=store)
+        job = PipelineJob.from_pipeline(pipeline, sources={"a": src_a, "b": src_b}, store=store)
         assert isinstance(job, PipelineJob)
-        assert job.pipeline is pipeline
+        assert job._compiled_pipeline is pipeline
 
-    def test_pipeline_bind_propagates_name(self, store):
-        """Pipeline.bind() must propagate the pipeline's name to the job."""
+    def test_from_pipeline_propagates_name(self, store):
+        """PipelineJob.from_pipeline() must propagate the pipeline's name to the job."""
         from orcapod.pipeline.graph import Pipeline
 
         src_a, src_b = _make_two_sources()
@@ -213,9 +213,9 @@ class TestPipelineJobBind:
         with pipeline:
             Join()(node_a, node_b)
 
-        job = pipeline.bind(sources={"a": src_a, "b": src_b}, store=store)
+        job = PipelineJob.from_pipeline(pipeline, sources={"a": src_a, "b": src_b}, store=store)
         assert job._pipeline_name == ("my_pipeline",), (
-            "PipelineJob._pipeline_name should match Pipeline.name after bind()"
+            "PipelineJob._pipeline_name should match Pipeline.name after from_pipeline()"
         )
 
 
@@ -400,7 +400,8 @@ class TestPipelineJobRun:
 
         The pipeline blueprint is a shared, reusable object. Running one job must
         not replace blueprint template nodes with live exec nodes — that would break
-        subsequent jobs (and ``Pipeline.bind()`` callers) that share the same pipeline.
+        subsequent jobs (and ``PipelineJob.from_pipeline()`` callers) that share the
+        same pipeline.
         """
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
@@ -482,8 +483,8 @@ class TestPipelineJobEndToEnd:
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]
 
-    def test_bind_then_run(self, store):
-        """Pipeline.bind() + job.run() produces correct results."""
+    def test_from_pipeline_then_run(self, store):
+        """PipelineJob.from_pipeline() + job.run() produces correct results."""
         from orcapod.pipeline.graph import Pipeline
 
         src_a, src_b = _make_two_sources()
@@ -499,7 +500,8 @@ class TestPipelineJobEndToEnd:
             joined = Join()(node_a, node_b)
             pod(joined, label="adder")
 
-        job = pipeline.bind(
+        job = PipelineJob.from_pipeline(
+            pipeline,
             sources={"src_a": src_a, "src_b": src_b},
             store=store,
         )
@@ -657,3 +659,115 @@ class TestPipelineJobSerialization:
         result.save(str(path))
         loaded = PipelineJob.load(str(path), store=store)
         assert "unbound_b" in loaded.unresolved_specs
+
+
+# ---------------------------------------------------------------------------
+# Tests: PipelineJob.from_pipeline()
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def compiled_pipeline():
+    """A compiled Pipeline with SourceNode leaves (no concrete sources)."""
+    from orcapod.pipeline.graph import Pipeline
+
+    src_a, src_b = _make_two_sources()
+    tag_a, data_a = src_a.output_schema()
+    tag_b, data_b = src_b.output_schema()
+    node_a = SourceNode(name="slot_a", tag_schema=tag_a, data_schema=data_a)
+    node_b = SourceNode(name="slot_b", tag_schema=tag_b, data_schema=data_b)
+
+    pipeline = Pipeline(name="test_pipeline")
+    with pipeline:
+        Join()(node_a, node_b, label="joiner")
+    return pipeline
+
+
+@pytest.fixture
+def db():
+    """An in-memory database."""
+    return InMemoryArrowDatabase()
+
+
+@pytest.fixture
+def source_a():
+    """Concrete source matching slot_a schema (key tag, value data)."""
+    return _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
+
+
+@pytest.fixture
+def source_b():
+    """Concrete source matching slot_b schema (key tag, score data)."""
+    return _make_source("key", "score", {"key": ["a", "b"], "score": [100, 200]})
+
+
+@pytest.fixture
+def pipeline_job(compiled_pipeline):
+    """A PipelineJob with a compiled pipeline but not fully bound."""
+    return PipelineJob.from_pipeline(compiled_pipeline)
+
+
+@pytest.fixture
+def pipeline_job_complete(compiled_pipeline, db, source_a, source_b):
+    """A PipelineJob with store and all sources bound."""
+    return PipelineJob.from_pipeline(
+        compiled_pipeline,
+        store=db,
+        sources={"slot_a": source_a, "slot_b": source_b},
+    )
+
+
+class TestFromPipeline:
+    """PipelineJob.from_pipeline() creates a runnable job from a compiled Pipeline."""
+
+    def test_from_pipeline_creates_pipeline_job(self, compiled_pipeline, db):
+        """from_pipeline returns a PipelineJob with the same topology."""
+        job = PipelineJob.from_pipeline(compiled_pipeline, store=db)
+        assert isinstance(job, PipelineJob)
+
+    def test_from_pipeline_with_sources_binds_them(self, compiled_pipeline, db, source_a):
+        """Sources passed to from_pipeline are immediately bound."""
+        job = PipelineJob.from_pipeline(
+            compiled_pipeline, store=db, sources={"slot_a": source_a}
+        )
+        assert "slot_a" in job._sources
+
+    def test_pipeline_bind_removed(self, compiled_pipeline):
+        """Pipeline.bind() no longer exists."""
+        assert not hasattr(compiled_pipeline, "bind"), (
+            "Pipeline.bind() must be removed — use PipelineJob.from_pipeline() instead"
+        )
+
+
+class TestMutatingBind:
+    """PipelineJob.bind() mutates in place and returns None."""
+
+    def test_bind_returns_none(self, pipeline_job, source_a):
+        result = pipeline_job.bind(sources={"slot_a": source_a})
+        assert result is None
+
+    def test_bind_mutates_sources(self, pipeline_job, source_a):
+        pipeline_job.bind(sources={"slot_a": source_a})
+        assert "slot_a" in pipeline_job._sources
+
+    def test_bind_mutates_store(self, pipeline_job, db):
+        pipeline_job.bind(store=db)
+        assert pipeline_job._store is db
+
+
+class TestAsPipeline:
+    """PipelineJob.as_pipeline() returns a lightweight Pipeline."""
+
+    def test_as_pipeline_returns_pipeline(self, pipeline_job_complete):
+        from orcapod.pipeline.graph import Pipeline
+
+        pipeline = pipeline_job_complete.as_pipeline()
+        assert isinstance(pipeline, Pipeline)
+
+    def test_as_pipeline_node_hashes_match(self, pipeline_job_complete):
+        """as_pipeline() blueprint nodes have matching hashes to job nodes."""
+        job = pipeline_job_complete
+        pipeline = job.as_pipeline()
+
+        for node_hash in job._persistent_node_map:
+            assert node_hash in pipeline._persistent_node_map

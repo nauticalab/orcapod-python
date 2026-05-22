@@ -13,6 +13,7 @@ from orcapod.core.operators import Join
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
 from orcapod.pipeline import Pipeline
+from orcapod.pipeline.job import PipelineJob
 from orcapod.pipeline.serialization import PIPELINE_FORMAT_VERSION
 
 
@@ -133,7 +134,7 @@ class TestPipelineBlueprintLoad:
             Pipeline.load(str(path))
 
     def test_load_bindable_and_runnable(self, spec_pipeline):
-        """Loaded pipeline can be bound to concrete sources and run."""
+        """Loaded pipeline can be used to create a runnable PipelineJob and run."""
         pipeline, tmp_path = spec_pipeline
         path = tmp_path / "pipeline.json"
         pipeline.save(str(path))
@@ -157,7 +158,7 @@ class TestPipelineBlueprintLoad:
             infer_nullable=True,
         )
         store = InMemoryArrowDatabase()
-        job = loaded.bind(sources={"source_a": src_a, "source_b": src_b}, store=store)
+        job = PipelineJob.from_pipeline(loaded, sources={"source_a": src_a, "source_b": src_b}, store=store)
         completed = job.run()
         assert completed._has_run is True
         # Verify all source specs were resolved (no unresolved specs)

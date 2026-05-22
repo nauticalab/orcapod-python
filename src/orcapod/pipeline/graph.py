@@ -15,13 +15,11 @@ from orcapod.core.nodes import (
 from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
 from orcapod.protocols import core_protocols as cp
-from orcapod.protocols import database_protocols as dbp
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import networkx as nx
     from orcapod.pipeline.execution_context import ExecutionContext
-    from orcapod.pipeline.job import PipelineJob
 else:
     nx = LazyModule("networkx")
 
@@ -306,39 +304,6 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 self._nodes[label] = nodes[0]
 
         self._compiled = True
-
-    # ------------------------------------------------------------------
-    # Bind
-    # ------------------------------------------------------------------
-
-    def bind(
-        self,
-        sources: "dict[str, cp.StreamProtocol] | None" = None,
-        store: "dbp.ArrowDatabaseProtocol | None" = None,
-        execution_context: "ExecutionContext | None" = None,
-    ) -> "PipelineJob":
-        """Wrap this pipeline in a ``PipelineJob`` with the given bindings.
-
-        Non-mutating — returns a fresh ``PipelineJob``; this ``Pipeline``
-        is unchanged.
-
-        Args:
-            sources: Mapping of SourceSpec name to concrete source.
-            store: Database for result caching and operator records.
-            execution_context: Optional execution configuration.
-
-        Returns:
-            A new ``PipelineJob`` with this pipeline and the given bindings.
-        """
-        from orcapod.pipeline.job import PipelineJob
-
-        return PipelineJob(
-            name=self._name,
-            _pipeline=self,
-            sources=sources or {},
-            store=store,
-            execution_context=execution_context,
-        )
 
     # ------------------------------------------------------------------
     # Graph display
