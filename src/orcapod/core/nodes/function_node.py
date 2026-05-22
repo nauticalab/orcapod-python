@@ -726,12 +726,11 @@ class FunctionJobNode(FunctionNodeBase):
     # ------------------------------------------------------------------
 
     def clear_cache(self) -> None:
-        """Clear in-memory output caches and the node identity path cache."""
+        """Clear in-memory output caches, content hash cache, and node identity path cache."""
+        super().clear_cache()
         self._cached_output_datas.clear()
         self._cached_output_table = None
         self._cached_content_hash_column = None
-        self._node_identity_path_cache = None
-        self._update_modified_time()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -783,14 +782,15 @@ class FunctionJobNode(FunctionNodeBase):
 
         Returns:
             A new ``FunctionNode`` with the same function pod, input stream,
-            label, and table scope.  Its ``content_hash()`` / ``pipeline_hash()``
-            are identical to those of this ``FunctionJobNode``.
+            label, table scope, and tracker manager.  Its ``content_hash()`` /
+            ``pipeline_hash()`` are identical to those of this ``FunctionJobNode``.
         """
         return FunctionNode(
             function_pod=self._function_pod,
             input_stream=self._input_stream,
             label=self._label,
             table_scope=self._table_scope,
+            tracker_manager=self.tracker_manager,
         )
 
     # ------------------------------------------------------------------
