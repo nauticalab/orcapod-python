@@ -24,6 +24,7 @@ from orcapod.core.nodes import (
     FunctionNode,
     OperatorNode,
 )
+from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.operators import SelectDataColumns
 from orcapod.core.operators.join import Join
 from orcapod.core.operators.semijoin import SemiJoin
@@ -178,19 +179,22 @@ class TestCachedDataFunctionAsync:
 # ---------------------------------------------------------------------------
 
 
-class TestFunctionNodeAsyncExecute:
+class TestFunctionJobNodeAsyncExecuteSimple:
+    """Test FunctionJobNode.async_execute without a DB (simple non-cached path)."""
+
     @pytest.mark.asyncio
     async def test_basic_streaming_matches_sync(self):
         _, pod = make_double_pod()
         stream = make_stream(5)
 
-        # Sync results
-        node_sync = FunctionNode(pod, stream)
+        # Sync results via sync run
+        node_sync = FunctionJobNode(pod, stream)
+        node_sync.execute(stream)
         sync_results = list(node_sync.iter_data())
         sync_values = sorted(pkt.as_dict()["result"] for _, pkt in sync_results)
 
         # Async results
-        node_async = FunctionNode(pod, make_stream(5))
+        node_async = FunctionJobNode(pod, make_stream(5))
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
 
@@ -204,7 +208,7 @@ class TestFunctionNodeAsyncExecute:
     @pytest.mark.asyncio
     async def test_empty_input_closes_cleanly(self):
         _, pod = make_double_pod()
-        node = FunctionNode(pod, make_stream(1))
+        node = FunctionJobNode(pod, make_stream(1))
 
         input_ch = Channel(buffer_size=4)
         output_ch = Channel(buffer_size=4)
@@ -219,7 +223,7 @@ class TestFunctionNodeAsyncExecute:
     async def test_tags_preserved(self):
         """Tags should pass through unchanged."""
         _, pod = make_double_pod()
-        node = FunctionNode(pod, make_stream(3))
+        node = FunctionJobNode(pod, make_stream(3))
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -233,7 +237,7 @@ class TestFunctionNodeAsyncExecute:
 
 
 # ---------------------------------------------------------------------------
-# 4. FunctionNode.async_execute
+# 4. FunctionJobNode.async_execute (DB path)
 # ---------------------------------------------------------------------------
 
 
@@ -244,7 +248,7 @@ class TestFunctionNodeAsyncExecute:
         pf, pod = make_double_pod()
         db = InMemoryArrowDatabase()
         stream = make_stream(3)
-        node = FunctionNode(pod, stream, pipeline_database=db)
+        node = FunctionJobNode(pod, stream, pipeline_database=db)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -265,12 +269,12 @@ class TestFunctionNodeAsyncExecute:
         stream = make_stream(3)
 
         # Sync run to populate DB
-        node1 = FunctionNode(pod, stream, pipeline_database=db)
+        node1 = FunctionJobNode(pod, stream, pipeline_database=db)
         node1.run()
 
         # New node with same DB — send same data, expect cached hits
         input_stream = make_stream(3)
-        node2 = FunctionNode(pod, input_stream, pipeline_database=db)
+        node2 = FunctionJobNode(pod, input_stream, pipeline_database=db)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -295,11 +299,11 @@ class TestFunctionNodeAsyncExecute:
 
         # Sync run with 3 items to populate DB
         stream = make_stream(3)
-        node1 = FunctionNode(pod, stream, pipeline_database=db)
+        node1 = FunctionJobNode(pod, stream, pipeline_database=db)
         node1.run()
 
         # Now run async with 5 items (3 cached + 2 new)
-        node2 = FunctionNode(pod, make_stream(5), pipeline_database=db)
+        node2 = FunctionJobNode(pod, make_stream(5), pipeline_database=db)
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
 
@@ -332,7 +336,7 @@ class TestFunctionNodeAsyncExecute:
         pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=5))
         db = InMemoryArrowDatabase()
         stream = make_stream(5)
-        node = FunctionNode(pod, stream, pipeline_database=db)
+        node = FunctionJobNode(pod, stream, pipeline_database=db)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -369,7 +373,7 @@ class TestFunctionNodeAsyncExecute:
         pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=1))
         db = InMemoryArrowDatabase()
         stream = make_stream(5)
-        node = FunctionNode(pod, stream, pipeline_database=db)
+        node = FunctionJobNode(pod, stream, pipeline_database=db)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -405,7 +409,7 @@ class TestFunctionNodeAsyncExecute:
         pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=5))
         stream = make_stream(5)
         # No pipeline_database — exercises the simple (non-DB) path
-        node = FunctionNode(pod, stream)
+        node = FunctionJobNode(pod, stream)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -427,7 +431,7 @@ class TestFunctionNodeAsyncExecute:
         pf, pod = make_double_pod()
         db = InMemoryArrowDatabase()
         stream = make_stream(3)
-        node = FunctionNode(pod, stream, pipeline_database=db)
+        node = FunctionJobNode(pod, stream, pipeline_database=db)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -668,12 +672,12 @@ class TestOperatorNodeAsyncExecute:
 
 class TestExecuteDataRouting:
     def test_function_node_sequential_uses_execute_data(self):
-        """Verify FunctionNode routes through execute_data (not raw pf.call)."""
+        """Verify FunctionJobNode routes through execute_data (not raw pf.call)."""
         call_log = []
 
         _, pod = make_double_pod()
         stream = make_stream(3)
-        node = FunctionNode(pod, stream)
+        node = FunctionJobNode(pod, stream)
 
         # Monkey-patch to verify routing through internal path
         original = node._process_data_internal
@@ -691,12 +695,12 @@ class TestExecuteDataRouting:
 
     @pytest.mark.asyncio
     async def test_function_node_async_uses_async_process_data_internal(self):
-        """Verify FunctionNode.async_execute routes through _async_process_data_internal."""
+        """Verify FunctionJobNode.async_execute routes through _async_process_data_internal."""
         call_log = []
 
         _, pod = make_double_pod()
         stream = make_stream(3)
-        node = FunctionNode(pod, stream)
+        node = FunctionJobNode(pod, stream)
 
         original = node._async_process_data_internal
 
@@ -724,7 +728,7 @@ class TestExecuteDataRouting:
 class TestEndToEnd:
     @pytest.mark.asyncio
     async def test_source_to_function_node_pipeline(self):
-        """Source → FunctionNode async pipeline."""
+        """Source → FunctionJobNode async pipeline."""
 
         def triple(x: int) -> int:
             return x * 3
@@ -732,7 +736,7 @@ class TestEndToEnd:
         pf = PythonDataFunction(triple, output_keys="result")
         pod = FunctionPod(pf)
         stream = make_stream(4)
-        node = FunctionNode(pod, stream)
+        node = FunctionJobNode(pod, stream)
 
         ch1 = Channel(buffer_size=16)
         ch2 = Channel(buffer_size=16)
@@ -805,7 +809,7 @@ class TestAsyncPipelineThenSyncRetrieval:
         db = InMemoryArrowDatabase()
         stream = make_stream(5)  # ids 0..4, x values 0..4
 
-        node = FunctionNode(pod, stream, pipeline_database=db)
+        node = FunctionJobNode(pod, stream, pipeline_database=db)
 
         # --- Async pipeline execution ---
         input_ch = Channel(buffer_size=16)
@@ -834,7 +838,7 @@ class TestAsyncPipelineThenSyncRetrieval:
         assert sorted(result_col) == [0, 2, 4, 6, 8]
 
         # A *new* node sharing the same DB can also read these records
-        node2 = FunctionNode(pod, make_stream(5), pipeline_database=db)
+        node2 = FunctionJobNode(pod, make_stream(5), pipeline_database=db)
         records2 = node2.get_all_records()
         assert records2 is not None
         assert records2.num_rows == 5
@@ -907,7 +911,7 @@ class TestAsyncPipelineThenSyncRetrieval:
         fn_db = InMemoryArrowDatabase()
         stream = make_stream(3)  # ids 0..2, x 0..2
 
-        fn_node = FunctionNode(pod, stream, pipeline_database=fn_db)
+        fn_node = FunctionJobNode(pod, stream, pipeline_database=fn_db)
 
         # --- Setup stage 2: select only "result" column ---
         # Build a placeholder stream for schema purposes (OperatorNode needs

@@ -20,6 +20,7 @@ import pytest
 from orcapod.core.datagrams import Data, Tag
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
+from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
@@ -41,7 +42,7 @@ def _make_node(
 ) -> FunctionNode:
     if db is None:
         db = InMemoryArrowDatabase()
-    return FunctionNode(
+    return FunctionJobNode(
         function_pod=FunctionPod(data_function=pf),
         input_stream=make_int_stream(n=n),
         pipeline_database=db,
@@ -72,7 +73,7 @@ def _make_node_with_system_tags(
         schema=schema,
     )
     stream = ArrowTableStream(table, tag_columns=["id"], system_tag_columns=["run"])
-    return FunctionNode(
+    return FunctionJobNode(
         function_pod=FunctionPod(data_function=pf),
         input_stream=stream,
         pipeline_database=db,
@@ -94,7 +95,7 @@ class TestFunctionNodeConstruction:
     def node(self, double_pf) -> FunctionNode:
         db = InMemoryArrowDatabase()
         stream = make_int_stream(n=3)
-        return FunctionNode(
+        return FunctionJobNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=stream,
             pipeline_database=db,
@@ -158,7 +159,7 @@ class TestFunctionNodeConstruction:
             tag_columns=["id"],
         )
         with pytest.raises(ValueError):
-            FunctionNode(
+            FunctionJobNode(
                 function_pod=FunctionPod(data_function=double_pf),
                 input_stream=bad_stream,
                 pipeline_database=db,
@@ -166,7 +167,7 @@ class TestFunctionNodeConstruction:
 
     def test_result_database_defaults_to_pipeline_database(self, double_pf):
         db = InMemoryArrowDatabase()
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
@@ -176,7 +177,7 @@ class TestFunctionNodeConstruction:
     def test_separate_result_database_accepted(self, double_pf):
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=2),
             pipeline_database=pipeline_db,
@@ -194,7 +195,7 @@ class TestFunctionNodeOutputSchema:
     @pytest.fixture
     def node(self, double_pf) -> FunctionNode:
         db = InMemoryArrowDatabase()
-        return FunctionNode(
+        return FunctionJobNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
@@ -230,7 +231,7 @@ class TestFunctionNodeExecuteData:
     @pytest.fixture
     def node(self, double_pf) -> FunctionNode:
         db = InMemoryArrowDatabase()
-        return FunctionNode(
+        return FunctionJobNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
@@ -302,7 +303,7 @@ class TestFunctionNodeStreamInterface:
     @pytest.fixture
     def node(self, double_pf) -> FunctionNode:
         db = InMemoryArrowDatabase()
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
@@ -334,12 +335,12 @@ class TestFunctionNodeStreamInterface:
 class TestFunctionNodePipelineIdentity:
     def test_pipeline_hash_same_schema_same_hash(self, double_pf):
         db = InMemoryArrowDatabase()
-        node1 = FunctionNode(
+        node1 = FunctionJobNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
-        node2 = FunctionNode(
+        node2 = FunctionJobNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=5),  # different data, same schema
             pipeline_database=db,
@@ -362,12 +363,12 @@ class TestFunctionNodePipelineIdentity:
             ),
             tag_columns=["id"],
         )
-        node_a = FunctionNode(
+        node_a = FunctionJobNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=stream_a,
             pipeline_database=db,
         )
-        node_b = FunctionNode(
+        node_b = FunctionJobNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=stream_b,
             pipeline_database=db,
@@ -386,12 +387,12 @@ class TestFunctionNodePipelineIdentity:
         Two nodes with same schema share the same full path; per-run isolation
         is achieved via the _node_content_hash row column."""
         db = InMemoryArrowDatabase()
-        node1 = FunctionNode(
+        node1 = FunctionJobNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
         )
-        node2 = FunctionNode(
+        node2 = FunctionJobNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=99),  # different data
             pipeline_database=db,
@@ -653,7 +654,7 @@ class TestGetAllRecordsAllInfo:
 class TestFunctionNodeIdentityPath:
     def test_node_identity_path_starts_with_pf_uri(self, double_pf):
         db = InMemoryArrowDatabase()
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=2),
             pipeline_database=db,
@@ -676,7 +677,7 @@ class TestFunctionNodeResultPath:
         since the database is pre-scoped at compile time (ENG-340/ENG-349)."""
         db = InMemoryArrowDatabase()
         pod = FunctionPod(data_function=double_pf)
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=pod,
             input_stream=make_int_stream(n=2),
             pipeline_database=db,

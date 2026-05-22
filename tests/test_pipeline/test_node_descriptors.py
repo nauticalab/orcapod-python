@@ -3,6 +3,7 @@
 import pytest
 
 from orcapod.core.nodes.source_node import SourceNode
+from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.sources.dict_source import DictSource
 from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
 from orcapod.errors import UnboundSourceError
@@ -113,7 +114,7 @@ class TestFunctionNodeFromDescriptor:
         pod = FunctionPod(data_function=pf)
         db = InMemoryArrowDatabase()
         scoped_db = db.at("test_pipeline")
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=pod,
             input_stream=source,
             pipeline_database=scoped_db,

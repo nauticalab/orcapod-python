@@ -460,6 +460,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         """
         import networkx as nx
         from orcapod.core.nodes import FunctionNode, OperatorNode
+        from orcapod.core.nodes.function_node import FunctionJobNode
         from orcapod.core.nodes.source_node import SourceJobNode, SourceNode
         from orcapod.core.executors.local import LocalPythonFunctionExecutor
 
@@ -543,7 +544,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
                         excluded_hashes.add(node_hash)
                         continue
                     input_node = exec_node_map[preds[0]]
-                    new_fn = FunctionNode(
+                    new_fn = FunctionJobNode(
                         function_pod=template._function_pod,
                         input_stream=input_node,
                         label=template._label,

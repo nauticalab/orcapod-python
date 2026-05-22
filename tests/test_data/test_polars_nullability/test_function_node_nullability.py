@@ -8,7 +8,7 @@ joins and cached-record retrieval.
 import pyarrow as pa
 
 import orcapod as op
-from orcapod.core.nodes.function_node import FunctionNode
+from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import PipelineJob
 from orcapod.pipeline.graph import Pipeline
@@ -19,9 +19,9 @@ from orcapod.pipeline.graph import Pipeline
 # ---------------------------------------------------------------------------
 
 
-def _get_function_nodes(pipeline: Pipeline) -> list[FunctionNode]:
-    """Return all FunctionNode instances from compiled pipeline nodes."""
-    return [n for n in pipeline.compiled_nodes.values() if isinstance(n, FunctionNode)]
+def _get_function_nodes(pipeline: Pipeline) -> list[FunctionJobNode]:
+    """Return all FunctionJobNode instances from compiled pipeline nodes."""
+    return [n for n in pipeline.compiled_nodes.values() if isinstance(n, FunctionJobNode)]
 
 
 # ---------------------------------------------------------------------------

@@ -24,6 +24,7 @@ from orcapod.channels import Channel
 from orcapod.core.datagrams import Data
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
+from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
@@ -85,7 +86,7 @@ class TestDeterministicConcurrencyTracking:
         pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=5))
         db = InMemoryArrowDatabase()
         stream = make_stream(5)
-        node = FunctionNode(pod, stream, pipeline_database=db)
+        node = FunctionJobNode(pod, stream, pipeline_database=db)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -276,7 +277,7 @@ class TestSemaphoreZeroDeadlock:
         pf = PythonDataFunction(double, output_keys="result")
         pod = FunctionPod(pf, node_config=NodeConfig(max_concurrency=0))
         stream = make_stream(1)
-        node = FunctionNode(pod, stream)
+        node = FunctionJobNode(pod, stream)
 
         input_ch = Channel(buffer_size=4)
         output_ch = Channel(buffer_size=4)

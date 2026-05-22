@@ -23,6 +23,7 @@ from orcapod.core.nodes import (
     OperatorNode,
     SourceNode,
 )
+from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.nodes.source_node import SourceNode
 from orcapod.core.operators import Join
 from orcapod.core.data_function import PythonDataFunction
@@ -227,7 +228,7 @@ class TestCompileMutatesNodes:
 
         # After run, compiled_nodes["adder"] is the exec node in the returned result
         exec_node = result.pipeline.compiled_nodes["adder"]
-        assert isinstance(exec_node, FunctionNode)
+        assert isinstance(exec_node, FunctionJobNode)
         assert exec_node._pipeline_database is not None
 
     def test_exec_operator_nodes_have_pipeline_database_after_run(self, pipeline_db):
@@ -261,7 +262,7 @@ class TestFunctionDatabaseHandling:
         result = job.run()
 
         exec_node = result.pipeline.compiled_nodes["adder"]
-        assert isinstance(exec_node, FunctionNode)
+        assert isinstance(exec_node, FunctionJobNode)
         # Verify the exec node has databases attached
         assert exec_node._pipeline_database is not None
         # The result DB is scoped as pipeline_name/_result internally.
@@ -592,8 +593,10 @@ class TestCompileDoesNotTriggerExecution:
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
-        # After compile but before run, adder node has no records
-        assert job.pipeline.compiled_nodes["adder"].get_all_records() is None
+        # After compile but before run, adder node is a blueprint FunctionNode with no DB
+        pre_run_node = job.pipeline.compiled_nodes["adder"]
+        assert isinstance(pre_run_node, FunctionNode)
+        assert not isinstance(pre_run_node, FunctionJobNode)
         # Running should work correctly
         result = job.run()
         table = result.pipeline.compiled_nodes["adder"].as_table()

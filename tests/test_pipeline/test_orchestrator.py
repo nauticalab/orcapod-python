@@ -25,6 +25,7 @@ import pytest
 from orcapod.channels import Channel
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode, OperatorNode, SourceNode
+from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.nodes.source_node import SourceJobNode
 from orcapod.core.operators import SelectDataColumns
 from orcapod.core.operators.join import Join
@@ -141,7 +142,7 @@ class TestFunctionNodeAsyncExecute:
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
-        node = FunctionNode(pod, src)
+        node = FunctionJobNode(pod, src)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)

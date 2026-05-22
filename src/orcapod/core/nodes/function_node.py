@@ -1,4 +1,19 @@
-"""FunctionNode — stream node for data function invocations with optional DB persistence."""
+"""FunctionNode hierarchy — pure blueprint + DB-backed execution node.
+
+Three classes:
+
+* ``FunctionNodeBase`` — shared base; no DB state.  Holds identity,
+  schema, and all non-DB properties.
+* ``FunctionNode`` — thin blueprint descriptor.  Raises
+  ``PipelineJobRequiredError`` on ``iter_data()``.  This is the node
+  recorded in a ``Pipeline`` and serialized to disk.
+* ``FunctionJobNode`` — DB-backed execution node; carries all DB logic
+  from the original ``FunctionNode``.  Created by ``PipelineJob`` at
+  run time.
+
+``FunctionNode`` and ``FunctionJobNode`` are *siblings*: both inherit
+directly from ``FunctionNodeBase``, neither from the other.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +29,7 @@ from orcapod.core.cached_function_pod import CachedFunctionPod
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
 from orcapod.core.tracker import DEFAULT_TRACKER_MANAGER
+from orcapod.errors import PipelineJobRequiredError
 from orcapod.protocols.core_protocols import (
     FunctionPodProtocol,
     DataFunctionExecutorProtocol,
@@ -61,14 +77,16 @@ def _executor_supports_concurrent(
     return executor is not None and executor.supports_concurrent_execution
 
 
-class FunctionNode(StreamBase):
-    """Stream node representing a data function invocation with optional DB persistence.
+# ---------------------------------------------------------------------------
+# FunctionNodeBase — shared base (no DB)
+# ---------------------------------------------------------------------------
 
-    When constructed without database parameters, provides the core stream
-    interface (identity, schema, iteration) without any persistence.  When
-    databases are provided (either at construction or via ``attach_databases``),
-    adds result caching via ``CachedFunctionPod``, pipeline record storage,
-    and two-phase iteration (cached first, then compute missing).
+
+class FunctionNodeBase(StreamBase):
+    """Shared base for ``FunctionNode`` and ``FunctionJobNode``.
+
+    Carries all non-DB state: identity, schema, upstreams, and properties
+    shared by both the blueprint and the execution variant.
     """
 
     node_type = "function"
@@ -80,9 +98,6 @@ class FunctionNode(StreamBase):
         tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
         config: Config | None = None,
-        # Optional DB params for persistent mode:
-        pipeline_database: ArrowDatabaseProtocol | None = None,
-        result_database: ArrowDatabaseProtocol | None = None,
         table_scope: Literal["pipeline_hash", "content_hash"] = "pipeline_hash",
     ):
         if tracker_manager is None:
@@ -90,7 +105,7 @@ class FunctionNode(StreamBase):
         self.tracker_manager = tracker_manager
         self._data_function = function_pod.data_function
 
-        # FunctionPod used for the `producer` property and pipeline identity
+        # FunctionPod used for the ``producer`` property and pipeline identity
         self._function_pod = function_pod
         super().__init__(label=label, config=config)
 
@@ -117,20 +132,8 @@ class FunctionNode(StreamBase):
 
         self._input_stream = input_stream
 
-        # stream-level caching state
-        self._cached_output_datas: dict[
-            str, tuple[TagProtocol, DataProtocol | None]
-        ] = {}
-        self._cached_output_table: pa.Table | None = None
-        self._cached_content_hash_column: pa.Array | None = None
-
-        # DB persistence state (initially None; set via __init__ params or attach_databases)
-        self._pipeline_database: ArrowDatabaseProtocol | None = None
-        self._cached_function_pod: CachedFunctionPod | None = None
-        self._output_schema_hash: str | None = None
-
         # Descriptor fields — populated by from_descriptor() for read-only/UNAVAILABLE
-        # nodes. Initialized here so they are always present on the concrete class
+        # nodes.  Initialized here so they are always present on the concrete class
         # (avoids getattr access for possibly-absent attributes).
         from orcapod.pipeline.serialization import LoadStatus
         self._load_status: LoadStatus = LoadStatus.FULL
@@ -141,6 +144,7 @@ class FunctionNode(StreamBase):
         self._stored_pipeline_path: tuple[str, ...] = ()
         self._stored_result_record_path: tuple[str, ...] = ()
         self._descriptor: dict = {}
+
         if table_scope not in ("pipeline_hash", "content_hash"):
             raise ValueError(
                 f"Unknown table_scope {table_scope!r}. "
@@ -148,237 +152,6 @@ class FunctionNode(StreamBase):
             )
         self._table_scope = table_scope
         self._node_identity_path_cache: tuple[str, ...] | None = None
-
-        if pipeline_database is not None:
-            self.attach_databases(
-                pipeline_database=pipeline_database,
-                result_database=result_database,
-            )
-
-    # ------------------------------------------------------------------
-    # attach_databases
-    # ------------------------------------------------------------------
-
-    def attach_databases(
-        self,
-        pipeline_database: ArrowDatabaseProtocol,
-        result_database: ArrowDatabaseProtocol | None = None,
-    ) -> None:
-        """Attach databases for persistent caching and pipeline records.
-
-        Creates a ``CachedFunctionPod`` wrapping the original function pod
-        for result caching.  The pipeline database is used separately for
-        pipeline-level provenance records (tag + data hash).
-
-        The databases are expected to be pre-scoped by the pipeline (via
-        ``db.at(*pipeline_name).at("_result")`` etc.) so no additional path
-        prefix is needed here.
-
-        Args:
-            pipeline_database: Database for pipeline records.
-            result_database: Database for cached results. Defaults to
-                pipeline_database.
-        """
-        if result_database is None:
-            # Default result database is pipeline_database scoped to "_result"
-            # so that results are stored separately from pipeline-level records.
-            result_database = pipeline_database.at("_result")
-
-        # Always wrap the original function_pod (not a previous cached wrapper)
-        self._cached_function_pod = CachedFunctionPod(
-            self._function_pod,
-            result_database=result_database,
-        )
-
-        self._pipeline_database = pipeline_database
-
-        # Clear all caches
-        self._node_identity_path_cache = None
-        self.clear_cache()
-        self._content_hash_cache.clear()
-        self._pipeline_hash_cache.clear()
-
-        # Compute output schema hash
-        self._output_schema_hash = self.data_context.semantic_hasher.hash_object(
-            self._data_function.output_data_schema
-        ).to_string()
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    def _require_pipeline_database(self) -> None:
-        """Raise a clear RuntimeError if no pipeline database is attached.
-
-        Called at the top of methods that unconditionally access
-        ``self._pipeline_database``.  Provides an actionable error message
-        instead of an opaque ``AttributeError: 'NoneType' object has no
-        attribute ...`` when a definition-level pipeline is executed without
-        supplying a database.
-        """
-        if self._pipeline_database is None:
-            raise RuntimeError(
-                f"FunctionNode '{self.label}' has no pipeline database attached. "
-                "Either construct the pipeline with a pipeline_database argument, "
-                "or supply one via Pipeline.load(..., pipeline_database=<db>)."
-            )
-
-    def _filter_by_content_hash(self, table: pa.Table) -> pa.Table:
-        """Filter *table* to rows whose ``NODE_CONTENT_HASH_COL`` matches this node.
-
-        Only applied when ``table_scope="pipeline_hash"`` because in that mode
-        multiple runs share the same DB table and must be disambiguated at read
-        time.  In ``"content_hash"`` mode every run has its own table so no
-        filtering is needed.
-        """
-        if self._table_scope != "pipeline_hash":
-            return table
-        col_name = constants.NODE_CONTENT_HASH_COL
-        if col_name not in table.column_names:
-            raise ValueError(
-                f"Cannot isolate records for table_scope='pipeline_hash': "
-                f"required column {col_name!r} is missing from the stored table. "
-                "This may indicate records written by an older version of the code."
-            )
-        own_hash = self.content_hash().to_string()
-        mask = pc.equal(table.column(col_name), own_hash)
-        return table.filter(mask)
-
-    # ------------------------------------------------------------------
-    # from_descriptor — reconstruct from a serialized pipeline descriptor
-    # ------------------------------------------------------------------
-
-    @classmethod
-    def from_descriptor(
-        cls,
-        descriptor: dict[str, Any],
-        function_pod: FunctionPodProtocol | None,
-        input_stream: StreamProtocol | None,
-        databases: dict[str, Any],
-    ) -> "FunctionNode":
-        """Construct a FunctionNode from a serialized descriptor.
-
-        When *function_pod* and *input_stream* are both provided the node
-        operates in full mode -- constructed normally via ``__init__``.
-        When *function_pod* is ``None`` the node is created in read-only
-        mode with metadata from the descriptor; computation methods will
-        raise ``RuntimeError``.
-
-        Args:
-            descriptor: The serialized node descriptor dict.
-            function_pod: An optional live function pod.  ``None`` for
-                read-only mode.
-            input_stream: An optional live input stream.  ``None`` for
-                read-only mode.
-            databases: Mapping of database role names (``"pipeline"``,
-                ``"result"``) to database instances.
-
-        Returns:
-            A new ``FunctionNode`` instance.
-        """
-        from orcapod.pipeline.serialization import LoadStatus
-
-        pipeline_db = databases.get("pipeline")
-        result_db = databases.get("result")  # pre-scoped; None if not provided
-
-        if "table_scope" not in descriptor:
-            raise ValueError(
-                f"FunctionNode descriptor is missing required 'table_scope' field: "
-                f"{descriptor.get('label', '<unlabeled>')}"
-            )
-        raw_table_scope = descriptor["table_scope"]
-        if raw_table_scope not in ("pipeline_hash", "content_hash"):
-            raise ValueError(
-                f"FunctionNode descriptor has invalid 'table_scope' value "
-                f"{raw_table_scope!r} for {descriptor.get('label', '<unlabeled>')}; "
-                f"expected one of ('pipeline_hash', 'content_hash')"
-            )
-        table_scope = cast(Literal["pipeline_hash", "content_hash"], raw_table_scope)
-
-        if function_pod is not None and input_stream is not None:
-            # Full / READ_ONLY / CACHE_ONLY mode: construct normally via __init__.
-            node = cls(
-                function_pod=function_pod,
-                input_stream=input_stream,
-                pipeline_database=pipeline_db,
-                result_database=result_db,
-                label=descriptor.get("label"),
-                table_scope=table_scope,
-            )
-            node._descriptor = descriptor
-
-            # Determine mode based on upstream availability and function type.
-            from orcapod.core.data_function_proxy import DataFunctionProxy
-
-            input_unavailable = (
-                hasattr(input_stream, "load_status")
-                and input_stream.load_status == LoadStatus.UNAVAILABLE
-            )
-            if input_unavailable:
-                node._load_status = LoadStatus.CACHE_ONLY
-            elif isinstance(function_pod.data_function, DataFunctionProxy):
-                node._load_status = LoadStatus.READ_ONLY
-            else:
-                node._load_status = LoadStatus.FULL
-            return node
-
-        # Read-only mode: bypass __init__, set minimum required state
-        node = cls.__new__(cls)
-
-        # From LabelableMixin
-        node._label = descriptor.get("label")
-
-        # From DataContextMixin
-        node._data_context = contexts.resolve_context(
-            descriptor.get("data_context_key")
-        )
-        from orcapod.config import DEFAULT_CONFIG
-
-        node._orcapod_config = DEFAULT_CONFIG
-
-        # From ContentIdentifiableBase
-        node._content_hash_cache = {}
-        node._cached_int_hash = None
-
-        # From PipelineElementBase
-        node._pipeline_hash_cache = {}
-
-        # From TemporalMixin
-        node._modified_time = None
-
-        # From FunctionNode
-        node._function_pod = None
-        node._data_function = None
-        node._input_stream = None
-        node.tracker_manager = DEFAULT_TRACKER_MANAGER
-        node._cached_output_datas = {}
-        node._cached_output_table = None
-        node._cached_content_hash_column = None
-
-        # DB persistence state
-        node._pipeline_database = pipeline_db
-        node._cached_function_pod = None
-        node._output_schema_hash = None
-
-        # Descriptor metadata for read-only access
-        node._descriptor = descriptor
-        node._stored_schema = descriptor.get("output_schema", {})
-        node._stored_content_hash = descriptor.get("content_hash")
-        node._stored_pipeline_hash = descriptor.get("pipeline_hash")
-        node._stored_pipeline_path = tuple(descriptor.get("pipeline_path", ()))
-        node._stored_node_uri = tuple(descriptor.get("node_uri") or [])
-        node._stored_result_record_path = tuple(
-            descriptor.get("result_record_path", ())
-        )
-        node._table_scope = table_scope
-        node._node_identity_path_cache = None
-
-        # Determine load status based on DB availability
-        node._load_status = LoadStatus.UNAVAILABLE
-        if pipeline_db is not None:
-            node._load_status = LoadStatus.READ_ONLY
-
-        return node
 
     # ------------------------------------------------------------------
     # load_status
@@ -528,11 +301,497 @@ class FunctionNode(StreamBase):
     # ------------------------------------------------------------------
 
     def clear_cache(self) -> None:
+        """Clear the node identity path cache."""
+        self._node_identity_path_cache = None
+        self._update_modified_time()
+
+    # ------------------------------------------------------------------
+    # as_table
+    # ------------------------------------------------------------------
+
+    def as_table(
+        self,
+        *,
+        columns: ColumnConfig | dict[str, Any] | None = None,
+        all_info: bool = False,
+    ) -> "pa.Table":
+        if self._cached_output_table is None:
+            all_tags = []
+            all_data = []
+            tag_schema, data_schema = None, None
+            for tag, data in self.iter_data():
+                if tag_schema is None:
+                    tag_schema = tag.arrow_schema(all_info=True)
+                if data_schema is None:
+                    data_schema = data.arrow_schema(all_info=True)
+                all_tags.append(tag.as_dict(all_info=True))
+                all_data.append(data.as_dict(all_info=True))
+
+            if not all_tags:
+                self._cached_output_table = pa.table({})
+
+            converter = self.data_context.type_converter
+
+            # Derive the Python schema from the Arrow schema when available,
+            # rather than re-inferring from dict values. This preserves precise
+            # types for empty containers (e.g. {} infers as dict[Any, Any] but
+            # the Arrow schema knows it's dict[str, str]).
+            data_python_schema = (
+                converter.arrow_schema_to_python_schema(data_schema)
+                if data_schema is not None
+                else None
+            )
+            struct_data = converter.python_dicts_to_struct_dicts(
+                all_data, python_schema=data_python_schema
+            )
+            all_tags_as_tables: pa.Table = pa.Table.from_pylist(
+                all_tags, schema=tag_schema
+            )
+            if constants.CONTEXT_KEY in all_tags_as_tables.column_names:
+                all_tags_as_tables = all_tags_as_tables.drop([constants.CONTEXT_KEY])
+            all_data_as_tables: pa.Table = pa.Table.from_pylist(
+                struct_data, schema=data_schema
+            )
+
+            self._cached_output_table = arrow_utils.hstack_tables(
+                all_tags_as_tables, all_data_as_tables
+            )
+        if self._cached_output_table is None:
+            self._cached_output_table = pa.table({})
+
+        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+
+        drop_columns = []
+        if not column_config.system_tags:
+            drop_columns.extend(
+                [
+                    c
+                    for c in self._cached_output_table.column_names
+                    if c.startswith(constants.SYSTEM_TAG_PREFIX)
+                ]
+            )
+        if not column_config.source:
+            drop_columns.extend(f"{constants.SOURCE_PREFIX}{c}" for c in self.keys()[1])
+        if not column_config.context:
+            drop_columns.append(constants.CONTEXT_KEY)
+        if not column_config.meta:
+            drop_columns.extend(
+                c
+                for c in self._cached_output_table.column_names
+                if c.startswith(constants.META_PREFIX)
+            )
+        elif not isinstance(column_config.meta, bool):
+            # Collection[str]: keep only meta columns matching the specified prefixes
+            drop_columns.extend(
+                c
+                for c in self._cached_output_table.column_names
+                if c.startswith(constants.META_PREFIX)
+                and not any(c.startswith(p) for p in column_config.meta)
+            )
+        output_table = self._cached_output_table.drop(
+            [c for c in drop_columns if c in self._cached_output_table.column_names]
+        )
+
+        if column_config.content_hash:
+            if self._cached_content_hash_column is None:
+                content_hashes = []
+                for tag, data in self.iter_data():
+                    content_hashes.append(data.content_hash().to_string())
+                self._cached_content_hash_column = pa.array(
+                    content_hashes, type=pa.large_string()
+                )
+            assert self._cached_content_hash_column is not None, (
+                "_cached_content_hash_column should not be None here."
+            )
+            hash_column_name = (
+                "_content_hash"
+                if column_config.content_hash is True
+                else column_config.content_hash
+            )
+            output_table = output_table.append_column(
+                hash_column_name, self._cached_content_hash_column
+            )
+
+        if column_config.sort_by_tags:
+            output_table_schema = output_table.schema
+            output_table = (
+                pl.DataFrame(output_table)
+                .sort(by=self.keys()[0], descending=False)
+                .to_arrow()
+            )
+            output_table = arrow_utils.restore_schema_nullability(output_table, output_table_schema)
+        return output_table
+
+    def __repr__(self) -> str:
+        return (
+            f"{type(self).__name__}(data_function={self._data_function!r}, "
+            f"input_stream={self._input_stream!r})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# FunctionNode — thin blueprint (no DB)
+# ---------------------------------------------------------------------------
+
+
+class FunctionNode(FunctionNodeBase):
+    """Thin blueprint descriptor for a function pod invocation.
+
+    Carries no database references.  Calling ``iter_data()`` raises
+    ``PipelineJobRequiredError`` — wrap the containing ``Pipeline`` in a
+    ``PipelineJob`` to obtain an executable ``FunctionJobNode``.
+
+    This is the node type recorded inside a ``Pipeline`` context manager
+    and serialized to disk via ``Pipeline.save()``.
+    """
+
+    def __init__(
+        self,
+        function_pod: FunctionPodProtocol,
+        input_stream: StreamProtocol,
+        tracker_manager: TrackerManagerProtocol | None = None,
+        label: str | None = None,
+        config: Config | None = None,
+        table_scope: Literal["pipeline_hash", "content_hash"] = "pipeline_hash",
+    ):
+        super().__init__(
+            function_pod=function_pod,
+            input_stream=input_stream,
+            tracker_manager=tracker_manager,
+            label=label,
+            config=config,
+            table_scope=table_scope,
+        )
+        # Blueprint nodes have no in-memory output table cache
+        self._cached_output_table: "pa.Table | None" = None
+        self._cached_content_hash_column: "pa.Array | None" = None
+
+    # ------------------------------------------------------------------
+    # from_descriptor — reconstruct from a serialized pipeline descriptor
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_descriptor(
+        cls,
+        descriptor: dict[str, Any],
+        function_pod: FunctionPodProtocol | None,
+        input_stream: StreamProtocol | None,
+        databases: dict[str, Any],
+    ) -> "FunctionNode":
+        """Construct a FunctionNode from a serialized descriptor.
+
+        When *function_pod* and *input_stream* are both provided the node
+        operates in full mode -- constructed normally via ``__init__``.
+        When *function_pod* is ``None`` the node is created in read-only
+        mode with metadata from the descriptor; computation methods will
+        raise ``PipelineJobRequiredError``.
+
+        Args:
+            descriptor: The serialized node descriptor dict.
+            function_pod: An optional live function pod.  ``None`` for
+                read-only mode.
+            input_stream: An optional live input stream.  ``None`` for
+                read-only mode.
+            databases: Mapping of database role names (``"pipeline"``,
+                ``"result"``) to database instances.
+
+        Returns:
+            A new ``FunctionNode`` instance.
+        """
+        from orcapod.pipeline.serialization import LoadStatus
+
+        if "table_scope" not in descriptor:
+            raise ValueError(
+                f"FunctionNode descriptor is missing required 'table_scope' field: "
+                f"{descriptor.get('label', '<unlabeled>')}"
+            )
+        raw_table_scope = descriptor["table_scope"]
+        if raw_table_scope not in ("pipeline_hash", "content_hash"):
+            raise ValueError(
+                f"FunctionNode descriptor has invalid 'table_scope' value "
+                f"{raw_table_scope!r} for {descriptor.get('label', '<unlabeled>')}; "
+                f"expected one of ('pipeline_hash', 'content_hash')"
+            )
+        table_scope = cast(Literal["pipeline_hash", "content_hash"], raw_table_scope)
+
+        if function_pod is not None and input_stream is not None:
+            # Full / READ_ONLY / CACHE_ONLY mode: construct normally via __init__.
+            node = cls(
+                function_pod=function_pod,
+                input_stream=input_stream,
+                label=descriptor.get("label"),
+                table_scope=table_scope,
+            )
+            node._descriptor = descriptor
+
+            # Determine mode based on upstream availability and function type.
+            from orcapod.core.data_function_proxy import DataFunctionProxy
+
+            input_unavailable = (
+                hasattr(input_stream, "load_status")
+                and input_stream.load_status == LoadStatus.UNAVAILABLE
+            )
+            if input_unavailable:
+                node._load_status = LoadStatus.CACHE_ONLY
+            elif isinstance(function_pod.data_function, DataFunctionProxy):
+                node._load_status = LoadStatus.READ_ONLY
+            else:
+                node._load_status = LoadStatus.FULL
+            return node
+
+        # Read-only mode: bypass __init__, set minimum required state
+        node = cls.__new__(cls)
+
+        # From LabelableMixin
+        node._label = descriptor.get("label")
+
+        # From DataContextMixin
+        node._data_context = contexts.resolve_context(
+            descriptor.get("data_context_key")
+        )
+        from orcapod.config import DEFAULT_CONFIG
+
+        node._orcapod_config = DEFAULT_CONFIG
+
+        # From ContentIdentifiableBase
+        node._content_hash_cache = {}
+        node._cached_int_hash = None
+
+        # From PipelineElementBase
+        node._pipeline_hash_cache = {}
+
+        # From TemporalMixin
+        node._modified_time = None
+
+        # From FunctionNodeBase
+        node._function_pod = None
+        node._data_function = None
+        node._input_stream = None
+        node.tracker_manager = DEFAULT_TRACKER_MANAGER
+
+        # Blueprint-level table caches
+        node._cached_output_table = None
+        node._cached_content_hash_column = None
+
+        # Descriptor metadata for read-only access
+        node._descriptor = descriptor
+        node._stored_schema = descriptor.get("output_schema", {})
+        node._stored_content_hash = descriptor.get("content_hash")
+        node._stored_pipeline_hash = descriptor.get("pipeline_hash")
+        node._stored_pipeline_path = tuple(descriptor.get("pipeline_path", ()))
+        node._stored_node_uri = tuple(descriptor.get("node_uri") or [])
+        node._stored_result_record_path = tuple(
+            descriptor.get("result_record_path", ())
+        )
+        node._table_scope = table_scope
+        node._node_identity_path_cache = None
+
+        # FunctionNode loaded read-only is always UNAVAILABLE (no DB)
+        node._load_status = LoadStatus.UNAVAILABLE
+
+        return node
+
+    # ------------------------------------------------------------------
+    # iter_data — raises PipelineJobRequiredError
+    # ------------------------------------------------------------------
+
+    def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
+        """Raise ``PipelineJobRequiredError`` — blueprint nodes cannot produce data.
+
+        Raises:
+            PipelineJobRequiredError: Always.
+        """
+        raise PipelineJobRequiredError(
+            f"FunctionNode '{self.label}' is a blueprint — it carries no database "
+            "references and cannot produce data directly.  "
+            "Wrap the containing Pipeline in a PipelineJob to obtain an executable "
+            "FunctionJobNode."
+        )
+        # yield is needed to satisfy the Iterator return type annotation
+        return  # pragma: no cover
+        yield  # pragma: no cover
+
+    def as_node(self) -> "FunctionNode":
+        """Return ``self`` — already the lightweight blueprint form.
+
+        Returns:
+            This instance.
+        """
+        return self
+
+
+# ---------------------------------------------------------------------------
+# FunctionJobNode — DB-backed execution node
+# ---------------------------------------------------------------------------
+
+
+class FunctionJobNode(FunctionNodeBase):
+    """DB-backed execution node for function pod invocations.
+
+    Created by ``PipelineJob`` at run time; never recorded inside a plain
+    ``Pipeline``.  Carries all persistence logic: ``CachedFunctionPod``
+    wrapping, pipeline records, and two-phase ``iter_data()`` / async
+    execution.
+    """
+
+    def __init__(
+        self,
+        function_pod: FunctionPodProtocol,
+        input_stream: StreamProtocol,
+        tracker_manager: TrackerManagerProtocol | None = None,
+        label: str | None = None,
+        config: Config | None = None,
+        # Optional DB params for persistent mode:
+        pipeline_database: ArrowDatabaseProtocol | None = None,
+        result_database: ArrowDatabaseProtocol | None = None,
+        table_scope: Literal["pipeline_hash", "content_hash"] = "pipeline_hash",
+    ):
+        super().__init__(
+            function_pod=function_pod,
+            input_stream=input_stream,
+            tracker_manager=tracker_manager,
+            label=label,
+            config=config,
+            table_scope=table_scope,
+        )
+
+        # stream-level caching state
+        self._cached_output_datas: dict[
+            str, tuple[TagProtocol, DataProtocol | None]
+        ] = {}
+        self._cached_output_table: "pa.Table | None" = None
+        self._cached_content_hash_column: "pa.Array | None" = None
+
+        # DB persistence state (initially None; set via __init__ params or attach_databases)
+        self._pipeline_database: ArrowDatabaseProtocol | None = None
+        self._cached_function_pod: CachedFunctionPod | None = None
+        self._output_schema_hash: str | None = None
+
+        if pipeline_database is not None:
+            self.attach_databases(
+                pipeline_database=pipeline_database,
+                result_database=result_database,
+            )
+
+    # ------------------------------------------------------------------
+    # attach_databases
+    # ------------------------------------------------------------------
+
+    def attach_databases(
+        self,
+        pipeline_database: ArrowDatabaseProtocol,
+        result_database: ArrowDatabaseProtocol | None = None,
+    ) -> None:
+        """Attach databases for persistent caching and pipeline records.
+
+        Creates a ``CachedFunctionPod`` wrapping the original function pod
+        for result caching.  The pipeline database is used separately for
+        pipeline-level provenance records (tag + data hash).
+
+        The databases are expected to be pre-scoped by the pipeline (via
+        ``db.at(*pipeline_name).at("_result")`` etc.) so no additional path
+        prefix is needed here.
+
+        Args:
+            pipeline_database: Database for pipeline records.
+            result_database: Database for cached results. Defaults to
+                pipeline_database.
+        """
+        if result_database is None:
+            # Default result database is pipeline_database scoped to "_result"
+            # so that results are stored separately from pipeline-level records.
+            result_database = pipeline_database.at("_result")
+
+        # Always wrap the original function_pod (not a previous cached wrapper)
+        self._cached_function_pod = CachedFunctionPod(
+            self._function_pod,
+            result_database=result_database,
+        )
+
+        self._pipeline_database = pipeline_database
+
+        # Clear all caches
+        self._node_identity_path_cache = None
+        self.clear_cache()
+        self._content_hash_cache.clear()
+        self._pipeline_hash_cache.clear()
+
+        # Compute output schema hash
+        self._output_schema_hash = self.data_context.semantic_hasher.hash_object(
+            self._data_function.output_data_schema
+        ).to_string()
+
+    # ------------------------------------------------------------------
+    # Override clear_cache to also clear DB caches
+    # ------------------------------------------------------------------
+
+    def clear_cache(self) -> None:
+        """Clear in-memory output caches and the node identity path cache."""
         self._cached_output_datas.clear()
         self._cached_output_table = None
         self._cached_content_hash_column = None
         self._node_identity_path_cache = None
         self._update_modified_time()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _require_pipeline_database(self) -> None:
+        """Raise a clear RuntimeError if no pipeline database is attached.
+
+        Called at the top of methods that unconditionally access
+        ``self._pipeline_database``.  Provides an actionable error message
+        instead of an opaque ``AttributeError: 'NoneType' object has no
+        attribute ...`` when a definition-level pipeline is executed without
+        supplying a database.
+        """
+        if self._pipeline_database is None:
+            raise RuntimeError(
+                f"FunctionJobNode '{self.label}' has no pipeline database attached. "
+                "Either construct the pipeline with a pipeline_database argument, "
+                "or supply one via Pipeline.load(..., pipeline_database=<db>)."
+            )
+
+    def _filter_by_content_hash(self, table: "pa.Table") -> "pa.Table":
+        """Filter *table* to rows whose ``NODE_CONTENT_HASH_COL`` matches this node.
+
+        Only applied when ``table_scope="pipeline_hash"`` because in that mode
+        multiple runs share the same DB table and must be disambiguated at read
+        time.  In ``"content_hash"`` mode every run has its own table so no
+        filtering is needed.
+        """
+        if self._table_scope != "pipeline_hash":
+            return table
+        col_name = constants.NODE_CONTENT_HASH_COL
+        if col_name not in table.column_names:
+            raise ValueError(
+                f"Cannot isolate records for table_scope='pipeline_hash': "
+                f"required column {col_name!r} is missing from the stored table. "
+                "This may indicate records written by an older version of the code."
+            )
+        own_hash = self.content_hash().to_string()
+        mask = pc.equal(table.column(col_name), own_hash)
+        return table.filter(mask)
+
+    # ------------------------------------------------------------------
+    # as_node — return the lightweight FunctionNode equivalent
+    # ------------------------------------------------------------------
+
+    def as_node(self) -> FunctionNode:
+        """Return the lightweight ``FunctionNode`` equivalent of this job node.
+
+        Returns:
+            A new ``FunctionNode`` with the same function pod, input stream,
+            label, and table scope.  Its ``content_hash()`` / ``pipeline_hash()``
+            are identical to those of this ``FunctionJobNode``.
+        """
+        return FunctionNode(
+            function_pod=self._function_pod,
+            input_stream=self._input_stream,
+            label=self._label,
+            table_scope=self._table_scope,
+        )
 
     # ------------------------------------------------------------------
     # Data processing
@@ -891,7 +1150,7 @@ class FunctionNode(StreamBase):
         self,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> pa.Table | None:
+    ) -> "pa.Table | None":
         """Return all computed results joined with their pipeline tag records.
 
         Args:
@@ -1117,7 +1376,7 @@ class FunctionNode(StreamBase):
         status = self.load_status
         if status == LoadStatus.UNAVAILABLE:
             raise RuntimeError(
-                f"FunctionNode {self.label!r} is unavailable: "
+                f"FunctionJobNode {self.label!r} is unavailable: "
                 "no function pod and no database attached."
             )
 
@@ -1165,7 +1424,7 @@ class FunctionNode(StreamBase):
 
         if self._load_status == LoadStatus.UNAVAILABLE:
             raise RuntimeError(
-                f"FunctionNode {self.label!r} is unavailable: "
+                f"FunctionJobNode {self.label!r} is unavailable: "
                 "no function pod and no database attached."
             )
         if self._load_status in (LoadStatus.CACHE_ONLY, LoadStatus.READ_ONLY):
@@ -1180,134 +1439,17 @@ class FunctionNode(StreamBase):
         self.execute(self._input_stream)
 
     # ------------------------------------------------------------------
-    # as_table
-    # ------------------------------------------------------------------
-
-    def as_table(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> pa.Table:
-        if self._cached_output_table is None:
-            all_tags = []
-            all_data = []
-            tag_schema, data_schema = None, None
-            for tag, data in self.iter_data():
-                if tag_schema is None:
-                    tag_schema = tag.arrow_schema(all_info=True)
-                if data_schema is None:
-                    data_schema = data.arrow_schema(all_info=True)
-                all_tags.append(tag.as_dict(all_info=True))
-                all_data.append(data.as_dict(all_info=True))
-
-            if not all_tags:
-                self._cached_output_table = pa.table({})
-
-            converter = self.data_context.type_converter
-
-            # Derive the Python schema from the Arrow schema when available,
-            # rather than re-inferring from dict values. This preserves precise
-            # types for empty containers (e.g. {} infers as dict[Any, Any] but
-            # the Arrow schema knows it's dict[str, str]).
-            data_python_schema = (
-                converter.arrow_schema_to_python_schema(data_schema)
-                if data_schema is not None
-                else None
-            )
-            struct_data = converter.python_dicts_to_struct_dicts(
-                all_data, python_schema=data_python_schema
-            )
-            all_tags_as_tables: pa.Table = pa.Table.from_pylist(
-                all_tags, schema=tag_schema
-            )
-            if constants.CONTEXT_KEY in all_tags_as_tables.column_names:
-                all_tags_as_tables = all_tags_as_tables.drop([constants.CONTEXT_KEY])
-            all_data_as_tables: pa.Table = pa.Table.from_pylist(
-                struct_data, schema=data_schema
-            )
-
-            self._cached_output_table = arrow_utils.hstack_tables(
-                all_tags_as_tables, all_data_as_tables
-            )
-        if self._cached_output_table is None:
-            self._cached_output_table = pa.table({})
-
-        column_config = ColumnConfig.handle_config(columns, all_info=all_info)
-
-        drop_columns = []
-        if not column_config.system_tags:
-            drop_columns.extend(
-                [
-                    c
-                    for c in self._cached_output_table.column_names
-                    if c.startswith(constants.SYSTEM_TAG_PREFIX)
-                ]
-            )
-        if not column_config.source:
-            drop_columns.extend(f"{constants.SOURCE_PREFIX}{c}" for c in self.keys()[1])
-        if not column_config.context:
-            drop_columns.append(constants.CONTEXT_KEY)
-        if not column_config.meta:
-            drop_columns.extend(
-                c
-                for c in self._cached_output_table.column_names
-                if c.startswith(constants.META_PREFIX)
-            )
-        elif not isinstance(column_config.meta, bool):
-            # Collection[str]: keep only meta columns matching the specified prefixes
-            drop_columns.extend(
-                c
-                for c in self._cached_output_table.column_names
-                if c.startswith(constants.META_PREFIX)
-                and not any(c.startswith(p) for p in column_config.meta)
-            )
-        output_table = self._cached_output_table.drop(
-            [c for c in drop_columns if c in self._cached_output_table.column_names]
-        )
-
-        if column_config.content_hash:
-            if self._cached_content_hash_column is None:
-                content_hashes = []
-                for tag, data in self.iter_data():
-                    content_hashes.append(data.content_hash().to_string())
-                self._cached_content_hash_column = pa.array(
-                    content_hashes, type=pa.large_string()
-                )
-            assert self._cached_content_hash_column is not None, (
-                "_cached_content_hash_column should not be None here."
-            )
-            hash_column_name = (
-                "_content_hash"
-                if column_config.content_hash is True
-                else column_config.content_hash
-            )
-            output_table = output_table.append_column(
-                hash_column_name, self._cached_content_hash_column
-            )
-
-        if column_config.sort_by_tags:
-            output_table_schema = output_table.schema
-            output_table = (
-                pl.DataFrame(output_table)
-                .sort(by=self.keys()[0], descending=False)
-                .to_arrow()
-            )
-            output_table = arrow_utils.restore_schema_nullability(output_table, output_table_schema)
-        return output_table
-
-    # ------------------------------------------------------------------
     # Async channel execution
     # ------------------------------------------------------------------
 
     async def async_execute(
         self,
-        input_channel: ReadableChannel[tuple[TagProtocol, DataProtocol]],
-        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+        input_channel: "ReadableChannel[tuple[TagProtocol, DataProtocol]]",
+        output: "WritableChannel[tuple[TagProtocol, DataProtocol]]",
         *,
         observer: ExecutionObserverProtocol | None = None,
     ) -> None:
-        """Streaming async execution for FunctionNode.
+        """Streaming async execution for FunctionJobNode.
 
         When a database is attached, uses two-phase execution: replay cached
         results first, then compute missing data concurrently.  Otherwise,
@@ -1332,7 +1474,7 @@ class FunctionNode(StreamBase):
         if status == LoadStatus.UNAVAILABLE:
             await output.close()
             raise RuntimeError(
-                f"FunctionNode {self.label!r} is unavailable: "
+                f"FunctionJobNode {self.label!r} is unavailable: "
                 "no function pod and no database attached."
             )
 
@@ -1432,7 +1574,7 @@ class FunctionNode(StreamBase):
         self,
         tag: TagProtocol,
         data: DataProtocol,
-        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
+        output: "WritableChannel[tuple[TagProtocol, DataProtocol]]",
         *,
         observer: ExecutionObserverProtocol,
         node_label: str,
@@ -1458,9 +1600,3 @@ class FunctionNode(StreamBase):
             )
             if result_data is not None:
                 await output.send((tag_out, result_data))
-
-    def __repr__(self) -> str:
-        return (
-            f"{type(self).__name__}(data_function={self._data_function!r}, "
-            f"input_stream={self._input_stream!r})"
-        )

@@ -21,6 +21,7 @@ from collections.abc import Mapping
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
+from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
@@ -40,7 +41,7 @@ def _make_node(
 ) -> FunctionNode:
     if db is None:
         db = InMemoryArrowDatabase()
-    return FunctionNode(
+    return FunctionJobNode(
         function_pod=FunctionPod(data_function=pf),
         input_stream=make_int_stream(n=n),
         pipeline_database=db,
@@ -61,7 +62,7 @@ class TestFunctionNodeStreamBasic:
     @pytest.fixture
     def node(self, double_pf) -> FunctionNode:
         db = InMemoryArrowDatabase()
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
@@ -136,7 +137,7 @@ class TestFunctionNodeColumnConfig:
             ),
         )
         input_stream = ArrowTableStream(reversed_table, tag_columns=["id"])
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=input_stream,
             pipeline_database=db,
@@ -379,7 +380,7 @@ class TestFunctionNodeStaleness:
 
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=input_stream,
             pipeline_database=db,
@@ -396,7 +397,7 @@ class TestFunctionNodeStaleness:
 
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=input_stream,
             pipeline_database=db,
@@ -440,7 +441,7 @@ class TestFunctionNodeStaleness:
 
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=input_stream,
             pipeline_database=db,
@@ -460,7 +461,7 @@ class TestFunctionNodeStaleness:
 
         db = InMemoryArrowDatabase()
         input_stream = make_int_stream(n=3)
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=FunctionPod(data_function=double_pf),
             input_stream=input_stream,
             pipeline_database=db,

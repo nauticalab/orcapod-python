@@ -254,6 +254,7 @@ class TestSourceNodeAsyncExecuteProtocol:
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.nodes import FunctionNode
+from orcapod.core.nodes.function_node import FunctionJobNode
 
 
 def double_value(value: int) -> int:
@@ -269,7 +270,7 @@ class TestFunctionNodeExecute:
         src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
-        return FunctionNode(pod, src)
+        return FunctionJobNode(pod, src)
 
     def test_execute_with_observer(self):
         node = self._make_function_node()
@@ -326,7 +327,7 @@ class TestFunctionNodeAsyncExecute:
         src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
-        node = FunctionNode(pod, src)
+        node = FunctionJobNode(pod, src)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -350,7 +351,7 @@ class TestFunctionNodeAsyncExecute:
         src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
-        node = FunctionNode(pod, src)
+        node = FunctionJobNode(pod, src)
 
         events = []
 

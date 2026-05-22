@@ -28,6 +28,7 @@ import pytest
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
+from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.sources import DerivedSource, RootSource
 from orcapod.core.streams import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
@@ -41,13 +42,13 @@ from ..conftest import double, make_int_stream
 # ---------------------------------------------------------------------------
 
 
-def _make_node(n: int = 3, db: InMemoryArrowDatabase | None = None) -> FunctionNode:
+def _make_node(n: int = 3, db: InMemoryArrowDatabase | None = None) -> FunctionJobNode:
     from orcapod.core.data_function import PythonDataFunction
 
     if db is None:
         db = InMemoryArrowDatabase()
     pf = PythonDataFunction(double, output_keys="result")
-    return FunctionNode(
+    return FunctionJobNode(
         function_pod=FunctionPod(data_function=pf),
         input_stream=make_int_stream(n=n),
         pipeline_database=db,
@@ -226,7 +227,7 @@ class TestDerivedSourceRoundTrip:
         result_stream = ArrowTableStream(result_table, tag_columns=["id"])
 
         double_result = PythonDataFunction(double, output_keys="result")
-        node2 = FunctionNode(
+        node2 = FunctionJobNode(
             function_pod=FunctionPod(data_function=double_result),
             input_stream=result_stream,
             pipeline_database=InMemoryArrowDatabase(),  # fresh DB
@@ -358,7 +359,7 @@ class TestDerivedSourceIdentity:
         node_double.run()
         src_double = node_double.as_source()
 
-        node_triple = FunctionNode(
+        node_triple = FunctionJobNode(
             function_pod=FunctionPod(data_function=triple_pf),
             input_stream=make_int_stream(n=3),
             pipeline_database=db,
@@ -379,12 +380,12 @@ class TestDerivedSourceIdentity:
         pf = PythonDataFunction(double, output_keys="result")
         stream = make_int_stream(n=3)
 
-        node_a = FunctionNode(
+        node_a = FunctionJobNode(
             function_pod=FunctionPod(data_function=pf),
             input_stream=stream,
             pipeline_database=InMemoryArrowDatabase(),
         )
-        node_b = FunctionNode(
+        node_b = FunctionJobNode(
             function_pod=FunctionPod(data_function=pf),
             input_stream=stream,
             pipeline_database=InMemoryArrowDatabase(),

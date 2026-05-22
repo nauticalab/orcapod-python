@@ -18,6 +18,7 @@ from orcapod.core.cached_function_pod import CachedFunctionPod
 from orcapod.core.datagrams import Data, Tag
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
+from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
@@ -70,7 +71,7 @@ def _make_node(stream, db=None):
     pod = _make_pod()
     if db is None:
         db = InMemoryArrowDatabase()
-    return FunctionNode(
+    return FunctionJobNode(
         function_pod=pod,
         input_stream=stream,
         pipeline_database=db,
