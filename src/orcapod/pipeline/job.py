@@ -101,14 +101,34 @@ class PipelineJob(AbstractPipelineBase):
         self._compile_from_recording()
 
     def _compile_from_recording(self) -> None:
-        """Compile the recorded edges into a pure Pipeline."""
+        """Compile the recorded edges into a pure Pipeline and build the job node map.
+
+        ``_rec_node_lut`` now contains ``FunctionJobNode`` / ``OperatorJobNode`` objects
+        (set by ``record_function_pod_invocation`` / ``record_operator_pod_invocation``).
+        This method:
+
+        1. Converts each recorded job node to its lightweight blueprint counterpart via
+           ``.as_node()`` and injects the result into ``pipeline._node_lut`` so that
+           ``Pipeline.compile()`` sees only ``FunctionNode`` / ``OperatorNode`` objects.
+        2. After compiling the blueprint pipeline, walks it topologically to build
+           ``self._persistent_node_map`` using ``SourceJobNode`` for leaf nodes
+           (concrete sources are taken from ``self._sources``) and fresh
+           ``FunctionJobNode`` / ``OperatorJobNode`` objects rewired to upstream job nodes
+           for non-leaf nodes.
+        """
+        import networkx as _nx
         from orcapod.pipeline.graph import Pipeline
+        from orcapod.core.nodes.source_node import SourceJobNode, SourceNodeBase
+        from orcapod.core.nodes.function_node import FunctionJobNode, FunctionNodeBase
+        from orcapod.core.nodes.operator_node import OperatorJobNode, OperatorNodeBase
 
         pipeline = Pipeline(name=self._name, auto_compile=False)
-        # Inject the recording state into the pipeline
+        # Inject the recording state into the pipeline, converting job nodes → blueprint nodes
         pipeline._graph_edges = list(self._rec_graph_edges)
         pipeline._upstreams = dict(self._rec_upstreams)
-        pipeline._node_lut = dict(self._rec_node_lut)
+        pipeline._node_lut = {
+            h: node.as_node() for h, node in self._rec_node_lut.items()
+        }
         # Rebuild hash graph from edges
         for edge in self._rec_graph_edges:
             pipeline._hash_graph.add_edge(*edge)
@@ -128,6 +148,71 @@ class PipelineJob(AbstractPipelineBase):
 
         pipeline.compile()
         self._compiled_pipeline = pipeline
+
+        # Build PipelineJob's own job node map walking compiled pipeline topologically.
+        # Leaf nodes (SourceNode) become SourceJobNode with concrete binding from _sources.
+        # Non-leaf nodes are fresh FunctionJobNode/OperatorJobNode rewired to upstream job nodes.
+        G = pipeline._hash_graph
+        job_node_map: dict[str, object] = {}
+
+        for node_hash in _nx.topological_sort(G):
+            if node_hash not in pipeline._persistent_node_map:
+                continue
+
+            bp_node = pipeline._persistent_node_map[node_hash]
+
+            if isinstance(bp_node, SourceNodeBase):
+                concrete = self._sources.get(bp_node.name)
+                job_node: object = SourceJobNode(
+                    name=bp_node.name,
+                    tag_schema=bp_node.tag_schema,
+                    data_schema=bp_node.data_schema,
+                    concrete=concrete,
+                )
+            elif isinstance(bp_node, FunctionNodeBase):
+                # Create fresh FunctionJobNode rewired to the upstream job node.
+                rec_node = self._rec_node_lut[node_hash]
+                original_input_hash = bp_node._input_stream.content_hash().to_string()
+                upstream_job_node = job_node_map[original_input_hash]
+                job_node = FunctionJobNode(
+                    function_pod=rec_node._function_pod,
+                    input_stream=upstream_job_node,
+                    label=rec_node._label,
+                    table_scope=rec_node._table_scope,
+                    tracker_manager=rec_node.tracker_manager,
+                )
+            elif isinstance(bp_node, OperatorNodeBase):
+                rec_node = self._rec_node_lut[node_hash]
+                upstream_job_nodes = tuple(
+                    job_node_map[s.content_hash().to_string()]
+                    for s in bp_node._input_streams
+                )
+                job_node = OperatorJobNode(
+                    operator=rec_node._operator,
+                    input_streams=upstream_job_nodes,
+                    label=rec_node._label,
+                    table_scope=rec_node._table_scope,
+                    tracker_manager=rec_node.tracker_manager,
+                )
+            else:
+                raise TypeError(
+                    f"Unknown blueprint node type in compiled pipeline: {type(bp_node)}"
+                )
+
+            job_node_map[node_hash] = job_node
+
+        self._persistent_node_map = job_node_map
+
+        # Build label → job node map from pipeline._nodes
+        self._nodes = {
+            label: job_node_map[node.content_hash().to_string()]
+            for label, node in pipeline._nodes.items()
+            if node.content_hash().to_string() in job_node_map
+        }
+
+        # Wire databases if store is already set
+        if self._store is not None:
+            self._distribute_databases()
 
     def _ensure_source_node(self, source: cp.StreamProtocol) -> "SourceNode":
         """Promote *source* to a SourceNode, storing the concrete binding.
@@ -207,12 +292,12 @@ class PipelineJob(AbstractPipelineBase):
             input_stream: The upstream stream (concrete source or spec).
             label: Optional label for the resulting node.
         """
-        from orcapod.core.nodes import FunctionNode
+        from orcapod.core.nodes.function_node import FunctionJobNode
 
         input_stream = self._to_node_stream(input_stream)
 
         input_hash = input_stream.content_hash().to_string()
-        function_node = FunctionNode(function_pod=pod, input_stream=input_stream, label=label)
+        function_node = FunctionJobNode(function_pod=pod, input_stream=input_stream, label=label)
         fn_hash = function_node.content_hash().to_string()
 
         self._rec_node_lut[fn_hash] = function_node
@@ -232,11 +317,11 @@ class PipelineJob(AbstractPipelineBase):
             upstreams: Upstream streams (concrete sources or specs).
             label: Optional label for the resulting node.
         """
-        from orcapod.core.nodes import OperatorNode
+        from orcapod.core.nodes.operator_node import OperatorJobNode
 
         processed = tuple(self._to_node_stream(s) for s in upstreams)
 
-        operator_node = OperatorNode(operator=pod, input_streams=processed, label=label)
+        operator_node = OperatorJobNode(operator=pod, input_streams=processed, label=label)
         op_hash = operator_node.content_hash().to_string()
 
         self._rec_node_lut[op_hash] = operator_node

@@ -717,6 +717,80 @@ def pipeline_job_complete(compiled_pipeline, db, source_a, source_b):
     )
 
 
+@pytest.fixture
+def pipeline_job_with_sources(store):
+    """A PipelineJob created via with-block using concrete sources + a FunctionPod."""
+    src_a, src_b = _make_two_sources()
+    pf = PythonDataFunction(add_values, output_keys="total")
+    pod = FunctionPod(data_function=pf)
+
+    job = PipelineJob(store=store)
+    with job:
+        joined = Join()(src_a, src_b, label="joiner")
+        pod(joined, label="adder")
+    return job
+
+
+class TestPipelineJobUsesJobNodes:
+    """PipelineJob._persistent_node_map must contain only JobNode variants after recording."""
+
+    def test_persistent_map_has_source_job_nodes(self, pipeline_job_with_sources):
+        """Source entries in PipelineJob._persistent_node_map must be SourceJobNode."""
+        from orcapod.core.nodes.source_node import SourceJobNode, SourceNodeBase
+
+        assert pipeline_job_with_sources._persistent_node_map is not None, (
+            "_persistent_node_map must be set after with-block"
+        )
+        for node in pipeline_job_with_sources._persistent_node_map.values():
+            if isinstance(node, SourceNodeBase):
+                assert isinstance(node, SourceJobNode), (
+                    f"Expected SourceJobNode but got {type(node).__name__}"
+                )
+
+    def test_persistent_map_has_function_job_nodes(self, pipeline_job_with_sources):
+        """Function entries in PipelineJob._persistent_node_map must be FunctionJobNode."""
+        from orcapod.core.nodes.function_node import FunctionJobNode, FunctionNodeBase
+
+        assert pipeline_job_with_sources._persistent_node_map is not None
+        fn_nodes = [
+            n for n in pipeline_job_with_sources._persistent_node_map.values()
+            if isinstance(n, FunctionNodeBase)
+        ]
+        assert len(fn_nodes) >= 1, "Expected at least one FunctionJobNode"
+        for node in fn_nodes:
+            assert isinstance(node, FunctionJobNode), (
+                f"Expected FunctionJobNode but got {type(node).__name__}"
+            )
+
+    def test_persistent_map_has_operator_job_nodes(self, pipeline_job_with_sources):
+        """Operator entries in PipelineJob._persistent_node_map must be OperatorJobNode."""
+        from orcapod.core.nodes.operator_node import OperatorJobNode, OperatorNodeBase
+
+        assert pipeline_job_with_sources._persistent_node_map is not None
+        op_nodes = [
+            n for n in pipeline_job_with_sources._persistent_node_map.values()
+            if isinstance(n, OperatorNodeBase)
+        ]
+        assert len(op_nodes) >= 1, "Expected at least one OperatorJobNode"
+        for node in op_nodes:
+            assert isinstance(node, OperatorJobNode), (
+                f"Expected OperatorJobNode but got {type(node).__name__}"
+            )
+
+    def test_blueprint_pipeline_still_has_lightweight_nodes(self, pipeline_job_with_sources):
+        """The compiled pipeline's _persistent_node_map still has lightweight nodes."""
+        from orcapod.core.nodes.function_node import FunctionJobNode
+        from orcapod.core.nodes.operator_node import OperatorJobNode
+
+        for node in pipeline_job_with_sources.pipeline._persistent_node_map.values():
+            assert not isinstance(node, FunctionJobNode), (
+                "Blueprint pipeline must not contain FunctionJobNode"
+            )
+            assert not isinstance(node, OperatorJobNode), (
+                "Blueprint pipeline must not contain OperatorJobNode"
+            )
+
+
 class TestFromPipeline:
     """PipelineJob.from_pipeline() creates a runnable job from a compiled Pipeline."""
 
