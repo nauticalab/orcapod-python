@@ -35,6 +35,14 @@ class AbstractPipelineBase(AutoRegisteringContextBasedTracker, ABC):
         name: str | tuple[str, ...] = "pipeline",
         tracker_manager: "cp.TrackerManagerProtocol | None" = None,
     ) -> None:
+        """Initialize shared pipeline state.
+
+        Args:
+            name: Pipeline name (string or tuple). Used to scope database paths.
+                Stored internally as a tuple.
+            tracker_manager: Optional tracker manager override. Uses the default
+                tracker manager if ``None``.
+        """
         super().__init__(tracker_manager=tracker_manager)
         self._name: tuple[str, ...] = (name,) if isinstance(name, str) else tuple(name)
         self._node_lut: dict[str, Any] = {}
@@ -110,7 +118,13 @@ class AbstractPipelineBase(AutoRegisteringContextBasedTracker, ABC):
         input_stream: "cp.StreamProtocol",
         label: str | None = None,
     ) -> None:
-        """Record a function pod invocation into the graph."""
+        """Record a function pod invocation into the graph.
+
+        Args:
+            pod: The function pod being invoked.
+            input_stream: The upstream stream.
+            label: Optional display label for the resulting node.
+        """
         ...
 
     @abstractmethod
@@ -120,10 +134,21 @@ class AbstractPipelineBase(AutoRegisteringContextBasedTracker, ABC):
         upstreams: "tuple[cp.StreamProtocol, ...]" = (),
         label: str | None = None,
     ) -> None:
-        """Record an operator pod invocation into the graph."""
+        """Record an operator pod invocation into the graph.
+
+        Args:
+            pod: The operator pod being invoked.
+            upstreams: Upstream streams for this operator.
+            label: Optional display label for the resulting node.
+        """
         ...
 
     @abstractmethod
     def compile(self) -> None:
-        """Compile recorded invocations into a frozen DAG."""
+        """Compile recorded invocations into a frozen DAG.
+
+        Transforms accumulated ``_node_lut``, ``_upstreams``, and
+        ``_graph_edges`` into ``_persistent_node_map`` and ``_nodes``.
+        Sets ``_compiled = True`` on completion.
+        """
         ...

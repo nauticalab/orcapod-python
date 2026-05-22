@@ -83,6 +83,19 @@ class Pipeline(AbstractPipelineBase):
         input_stream: cp.StreamProtocol,
         label: str | None = None,
     ) -> None:
+        """Record a function pod invocation and return its stream.
+
+        Called by ``FunctionPod.__call__`` when used inside a ``with pipeline:``
+        block. Creates a lightweight ``FunctionNode`` blueprint.
+
+        Args:
+            pod: The function pod being invoked.
+            input_stream: The upstream stream.
+            label: Optional display label for the resulting node.
+
+        Returns:
+            The ``FunctionNode`` representing this invocation.
+        """
         input_stream_hash = input_stream.content_hash().to_string()
         function_node = FunctionNode(
             function_pod=pod,
@@ -103,6 +116,19 @@ class Pipeline(AbstractPipelineBase):
         upstreams: tuple[cp.StreamProtocol, ...] = (),
         label: str | None = None,
     ) -> None:
+        """Record an operator pod invocation and return its stream.
+
+        Called by operator pods when used inside a ``with pipeline:``
+        block. Creates a lightweight ``OperatorNode`` blueprint.
+
+        Args:
+            pod: The operator pod being invoked.
+            upstreams: Upstream streams for this operator.
+            label: Optional display label for the resulting node.
+
+        Returns:
+            The ``OperatorNode`` representing this invocation.
+        """
         operator_node = OperatorNode(
             operator=pod,
             input_streams=upstreams,
