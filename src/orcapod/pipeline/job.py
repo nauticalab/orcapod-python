@@ -409,6 +409,23 @@ class PipelineJob(AbstractPipelineBase):
 
         bound_sources: dict[str, cp.StreamProtocol] = dict(sources or {})
 
+        # Validate sources against SourceNode schemas (mirrors bind() validation).
+        if bound_sources:
+            spec_names = {
+                node.name
+                for node in pipeline._persistent_node_map.values()
+                if isinstance(node, SourceNodeBase)
+            }
+            unknown = set(bound_sources.keys()) - spec_names
+            if unknown:
+                raise ValueError(
+                    f"from_pipeline() received source keys with no matching SourceNode: "
+                    f"{sorted(unknown)}. Known names: {sorted(spec_names)}"
+                )
+            for node in pipeline._persistent_node_map.values():
+                if isinstance(node, SourceNodeBase) and node.name in bound_sources:
+                    node.validate(bound_sources[node.name])
+
         G = pipeline._hash_graph
         job_node_map: dict[str, object] = {}
 
@@ -607,20 +624,24 @@ class PipelineJob(AbstractPipelineBase):
     def as_pipeline(self) -> "Pipeline":
         """Return the lightweight ``Pipeline`` blueprint for this job.
 
-        Walks ``_persistent_node_map`` and calls ``.as_node()`` on each
-        ``JobNode`` to obtain the corresponding lightweight node. The returned
-        ``Pipeline`` has identical ``_persistent_node_map`` keys (content hashes)
-        as this job, but with lightweight blueprint nodes instead of job nodes.
+        Walks ``_persistent_node_map`` topologically and rewires each job node
+        to a fresh blueprint node whose upstreams point at the already-built
+        blueprint nodes in ``node_map`` (not at job nodes). This ensures that
+        the content_hash of every node in the returned ``Pipeline`` matches its
+        key in ``_persistent_node_map``.
 
         Returns:
             A compiled ``Pipeline`` whose ``_persistent_node_map`` contains
             only lightweight ``SourceNode`` / ``FunctionNode`` / ``OperatorNode``
-            objects.
+            objects with blueprint (non-job) upstream references.
 
         Raises:
             RuntimeError: If this job has no compiled pipeline.
         """
         import networkx as _nx
+        from orcapod.core.nodes.function_node import FunctionJobNode, FunctionNode
+        from orcapod.core.nodes.operator_node import OperatorJobNode, OperatorNode
+        from orcapod.core.nodes.source_node import SourceJobNode
         from orcapod.pipeline.graph import Pipeline
 
         if self._compiled_pipeline is None:
@@ -631,13 +652,55 @@ class PipelineJob(AbstractPipelineBase):
             )
 
         G = self._compiled_pipeline._hash_graph
+        persistent = self._persistent_node_map or {}
         node_map: dict[str, object] = {}
 
+        # Build a reverse lookup from Python object identity to blueprint hash so
+        # that FunctionJobNode._input_stream and OperatorJobNode._input_streams
+        # (which are themselves job nodes) can be mapped to their blueprint-hash keys.
+        job_id_to_bp_hash: dict[int, str] = {
+            id(job_node): bp_hash for bp_hash, job_node in persistent.items()
+        }
+
         for node_hash in _nx.topological_sort(G):
-            if node_hash not in (self._persistent_node_map or {}):
+            if node_hash not in persistent:
                 continue
-            job_node = self._persistent_node_map[node_hash]
-            node_map[node_hash] = job_node.as_node()
+            job_node = persistent[node_hash]
+
+            if isinstance(job_node, SourceJobNode):
+                # SourceNode has no upstream — as_node() is safe as-is.
+                node_map[node_hash] = job_node.as_node()
+
+            elif isinstance(job_node, FunctionJobNode):
+                # Wire _input_stream to the already-built blueprint upstream so
+                # the resulting FunctionNode.content_hash() == node_hash.
+                upstream_bp_hash = job_id_to_bp_hash[id(job_node._input_stream)]
+                node_map[node_hash] = FunctionNode(
+                    function_pod=job_node._function_pod,
+                    input_stream=node_map[upstream_bp_hash],
+                    label=job_node._label,
+                    table_scope=job_node._table_scope,
+                    tracker_manager=job_node.tracker_manager,
+                )
+
+            elif isinstance(job_node, OperatorJobNode):
+                # Preserve original _input_streams order (important for non-commutative
+                # operators such as SemiJoin) via the object-identity reverse lookup.
+                blueprint_upstreams = tuple(
+                    node_map[job_id_to_bp_hash[id(s)]]
+                    for s in job_node._input_streams
+                )
+                node_map[node_hash] = OperatorNode(
+                    operator=job_node._operator,
+                    input_streams=blueprint_upstreams,
+                    label=job_node._label,
+                    table_scope=job_node._table_scope,
+                    tracker_manager=job_node.tracker_manager,
+                )
+
+            else:
+                # Fallback for any future node types — may not rewire upstreams.
+                node_map[node_hash] = job_node.as_node()
 
         pipeline = Pipeline(name=self._name, auto_compile=False)
         pipeline._graph_edges = list(self._compiled_pipeline._graph_edges)

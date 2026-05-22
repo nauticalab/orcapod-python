@@ -723,31 +723,25 @@ def test_source_proxy_from_config_backward_compat():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 def test_function_node_has_node_uri():
-    import pyarrow as pa
-
     from orcapod.core.function_pod import FunctionPod
-    from orcapod.core.nodes import FunctionNode
+    from orcapod.core.nodes import FunctionNode, SourceNode
     from orcapod.core.data_function import PythonDataFunction
-    from orcapod.core.sources import ArrowTableSource
     from orcapod.pipeline import Pipeline
-
-    db = InMemoryArrowDatabase()
+    from orcapod.types import Schema
 
     def add_one(x: int) -> int:
         return x + 1
 
-    table = pa.table({"id": pa.array(["a", "b"], type=pa.large_string()), "x": pa.array([1, 2], type=pa.int64())})
-    source = ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
+    source = SourceNode("source", tag_schema=Schema({"id": str}), data_schema=Schema({"x": int}))
     pf = PythonDataFunction(add_one, output_keys="result")
     pod = FunctionPod(data_function=pf)
 
-    pipeline = Pipeline(name="test", pipeline_database=db)
+    pipeline = Pipeline(name="test")
     with pipeline:
         pod(source, label="fn")
 
-    fn_node = pipeline.compiled_nodes["fn"]
+    fn_node = pipeline._nodes["fn"]
     assert isinstance(fn_node, FunctionNode)
     assert hasattr(fn_node, "node_uri")
     uri = fn_node.node_uri
@@ -773,28 +767,20 @@ def test_function_node_stored_node_uri_from_descriptor():
     assert node.node_uri == ("add_one", "v0", "python.function.v0", "schema_repr")
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 def test_operator_node_has_node_uri():
-    import pyarrow as pa
-
-    from orcapod.core.nodes import OperatorNode
+    from orcapod.core.nodes import OperatorNode, SourceNode
     from orcapod.core.operators import Join
-    from orcapod.core.sources import ArrowTableSource
     from orcapod.pipeline import Pipeline
+    from orcapod.types import Schema
 
-    db = InMemoryArrowDatabase()
-    table_a = pa.table({"key": pa.array(["a"], type=pa.large_string()), "val_a": pa.array([10], type=pa.int64())})
-    table_b = pa.table(
-        {"key": pa.array(["a"], type=pa.large_string()), "val_b": pa.array([1], type=pa.int64())}
-    )
-    src_a = ArrowTableSource(table_a, tag_columns=["key"], infer_nullable=True)
-    src_b = ArrowTableSource(table_b, tag_columns=["key"], infer_nullable=True)
+    src_a = SourceNode("src_a", tag_schema=Schema({"key": str}), data_schema=Schema({"val_a": int}))
+    src_b = SourceNode("src_b", tag_schema=Schema({"key": str}), data_schema=Schema({"val_b": int}))
 
-    pipeline = Pipeline(name="test", pipeline_database=db)
+    pipeline = Pipeline(name="test")
     with pipeline:
         Join()(src_a, src_b, label="joined")
 
-    op_node = pipeline.compiled_nodes["joined"]
+    op_node = pipeline._nodes["joined"]
     assert isinstance(op_node, OperatorNode)
     assert hasattr(op_node, "node_uri")
     uri = op_node.node_uri
