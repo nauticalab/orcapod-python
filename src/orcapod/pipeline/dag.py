@@ -39,7 +39,12 @@ class Comparable(Hashable, Protocol):
     def __lt__(self, other: Any) -> bool: ...
 
 
-NodeT = TypeVar("NodeT", bound=Comparable)
+# Class-level TypeVar: only requires hashability (usable as a dict key).
+NodeT = TypeVar("NodeT", bound=Hashable)
+
+# Method-level TypeVar for topological_sort_deterministic: additionally
+# requires ordering so heapq operations are type-safe.
+ComparableNodeT = TypeVar("ComparableNodeT", bound=Comparable)
 
 
 class OrcaDAG(Generic[NodeT]):
@@ -50,9 +55,9 @@ class OrcaDAG(Generic[NodeT]):
     dependencies; backed entirely by plain dicts and stdlib `graphlib`.
 
     Args:
-        NodeT: The node type.  Must satisfy `Comparable` — i.e. be hashable
-            and support `<` comparison (e.g. `str`, `int`, or a custom
-            type that implements `__hash__` and `__lt__`).
+        NodeT: The node type.  Must be hashable (used as a dict key).
+            To call `topological_sort_deterministic`, NodeT must additionally
+            satisfy `Comparable` (support `<` ordering).
     """
 
     def __init__(self) -> None:
@@ -188,6 +193,25 @@ class OrcaDAG(Generic[NodeT]):
         return self._in_degree[node]
 
     # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _build_predecessor_dict(self) -> dict[NodeT, set[NodeT]]:
+        """Build the predecessor mapping required by TopologicalSorter.
+
+        Inverts the internal successor representation into the predecessor
+        form that `graphlib.TopologicalSorter` expects.
+
+        Returns:
+            Mapping of each node to the set of nodes that precede it.
+        """
+        pred: dict[NodeT, set[NodeT]] = {node: set() for node in self._attrs}
+        for u, vs in self._successors.items():
+            for v in vs:
+                pred[v].add(u)
+        return pred
+
+    # ------------------------------------------------------------------
     # Ordering
     # ------------------------------------------------------------------
 
@@ -206,25 +230,21 @@ class OrcaDAG(Generic[NodeT]):
         Raises:
             graphlib.CycleError: If the graph contains a cycle.
         """
-        # TopologicalSorter takes predecessors, but we store successors.
-        # Rebuild as predecessor dict.
-        predecessor_dict: dict[NodeT, set[NodeT]] = {
-            node: set() for node in self._attrs
-        }
-        for u, vs in self._successors.items():
-            for v in vs:
-                predecessor_dict[v].add(u)
-
-        ts: TopologicalSorter[NodeT] = TopologicalSorter(predecessor_dict)
+        ts: TopologicalSorter[NodeT] = TopologicalSorter(self._build_predecessor_dict())
         return list(ts.static_order())
 
-    def topological_sort_deterministic(self) -> list[NodeT]:
+    def topological_sort_deterministic(
+        self: "OrcaDAG[ComparableNodeT]",
+    ) -> list[ComparableNodeT]:
         """Return nodes in a deterministic topological order.
 
         Implements Kahn's algorithm with a min-heap frontier so that the
-        output ordering is stable across runs and Python versions.  Because
-        `NodeT` is bounded to `Comparable`, `heapq` operations and
-        `sorted()` are fully type-safe with no suppression needed.
+        output ordering is stable across runs and Python versions.
+
+        This method is type-gated: it is only callable on an `OrcaDAG`
+        whose node type satisfies `Comparable` (supports `<`).  Graphs
+        whose nodes are only `Hashable` — e.g. `OrcaDAG[GraphNode]` —
+        must use `topological_sort` instead.
 
         This is a direct port of the existing Kahn's implementation already
         present in `graph.py` (`_compute_pipeline_snapshot_hash`), moved
@@ -236,13 +256,13 @@ class OrcaDAG(Generic[NodeT]):
         Raises:
             graphlib.CycleError: If the graph contains a cycle.
         """
-        in_deg: dict[NodeT, int] = dict(self._in_degree)
-        frontier: list[NodeT] = [n for n, d in in_deg.items() if d == 0]
+        in_deg: dict[ComparableNodeT, int] = dict(self._in_degree)
+        frontier: list[ComparableNodeT] = [n for n, d in in_deg.items() if d == 0]
         heapq.heapify(frontier)
-        ordered: list[NodeT] = []
+        ordered: list[ComparableNodeT] = []
 
         while frontier:
-            node: NodeT = heapq.heappop(frontier)
+            node: ComparableNodeT = heapq.heappop(frontier)
             ordered.append(node)
             for successor in sorted(self._successors[node]):
                 in_deg[successor] -= 1
@@ -254,12 +274,8 @@ class OrcaDAG(Generic[NodeT]):
             # TopologicalSorter so the raised CycleError has its .cycle
             # attribute (args[1]) populated with the offending nodes — the
             # same information callers get from topological_sort().
-            predecessor_dict: dict[NodeT, set[NodeT]] = {n: set() for n in self._attrs}
-            for u, vs in self._successors.items():
-                for v in vs:
-                    predecessor_dict[v].add(u)
             list(
-                TopologicalSorter(predecessor_dict).static_order()
+                TopologicalSorter(self._build_predecessor_dict()).static_order()
             )  # raises CycleError
             raise AssertionError("unreachable")  # pragma: no cover
 
