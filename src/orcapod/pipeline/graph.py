@@ -14,6 +14,7 @@ from orcapod.core.nodes import (
 )
 from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
+from orcapod.pipeline.base import AbstractPipelineBase
 from orcapod.protocols import core_protocols as cp
 from orcapod.utils.lazy_module import LazyModule
 
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class Pipeline(AutoRegisteringContextBasedTracker):
+class Pipeline(AbstractPipelineBase):
     """A pure computational blueprint recording operator and function pod invocations.
 
     During the ``with`` block, operator and function pod invocations are
@@ -69,17 +70,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             auto_compile: If ``True`` (default), ``compile()`` is called
                 automatically when the context manager exits.
         """
-        super().__init__(tracker_manager=tracker_manager)
-        self._node_lut: dict[str, GraphNode] = {}
-        self._upstreams: dict[str, cp.StreamProtocol] = {}
-        self._graph_edges: list[tuple[str, str]] = []
-        self._hash_graph: "nx.DiGraph" = nx.DiGraph()
-        self._name = (name,) if isinstance(name, str) else tuple(name)
-        self._nodes: dict[str, GraphNode] = {}
-        self._persistent_node_map: dict[str, GraphNode] = {}
-        self._node_graph: "nx.DiGraph | None" = None
+        super().__init__(name=name, tracker_manager=tracker_manager)
         self._auto_compile = auto_compile
-        self._compiled = False
 
     # ------------------------------------------------------------------
     # Recording (TrackerProtocol)
@@ -131,48 +123,15 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         """Return the list of recorded (non-persistent) nodes."""
         return list(self._node_lut.values())
 
-    @property
-    def graph(self) -> "nx.DiGraph":
-        """Directed graph of content-hash strings representing the accumulated
-        pipeline structure.  Vertices are ``content_hash`` strings; node
-        attributes include ``node_type`` ("source" / "function" / "operator")
-        and, after ``compile()``, ``label`` and ``pipeline_hash``.
-
-        The graph accumulates across multiple ``with`` blocks and is never
-        cleared by ``reset()``.
-        """
-        return self._hash_graph
-
-    def reset(self) -> None:
-        """Clear session-scoped recorded state (node LUT, upstreams, edge list).
-
-        Note: ``_hash_graph`` is intentionally *not* cleared -- it accumulates
-        the pipeline structure across ``with`` blocks.
-        """
-        self._node_lut.clear()
-        self._upstreams.clear()
-        self._graph_edges.clear()
-
-    # ------------------------------------------------------------------
-    # Properties
-    # ------------------------------------------------------------------
-
-    @property
-    def name(self) -> tuple[str, ...]:
-        return self._name
-
-    @property
-    def compiled_nodes(self) -> dict[str, GraphNode]:
-        """Return a copy of the compiled nodes dict."""
-        return self._nodes.copy()
-
     # ------------------------------------------------------------------
     # Context manager
     # ------------------------------------------------------------------
 
     def __exit__(self, exc_type=None, exc_value=None, traceback=None):
-        super().__exit__(exc_type, exc_value, traceback)
-        if self._auto_compile:
+        # Call AutoRegisteringContextBasedTracker.__exit__ directly (deactivates the tracker)
+        # but NOT AbstractPipelineBase.__exit__ (which calls compile() unconditionally).
+        AutoRegisteringContextBasedTracker.__exit__(self, exc_type, exc_value, traceback)
+        if exc_type is None and self._auto_compile:
             self.compile()
 
     # ------------------------------------------------------------------
@@ -624,17 +583,6 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         # Mutable per-execution state — own copy so runs don't interfere
         clone._nodes = dict(self._nodes)
         return clone
-
-    # ------------------------------------------------------------------
-    # Node access by label
-    # ------------------------------------------------------------------
-
-    def __getattr__(self, item: str) -> Any:
-        # Use __dict__ to avoid recursion during __init__
-        nodes = self.__dict__.get("_nodes", {})
-        if item in nodes:
-            return nodes[item]
-        raise AttributeError(f"Pipeline has no attribute '{item}'")
 
     def __dir__(self) -> list[str]:
         return list(super().__dir__()) + list(self._nodes.keys())

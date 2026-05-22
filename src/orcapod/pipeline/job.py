@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
+from orcapod.pipeline.base import AbstractPipelineBase
 from orcapod.protocols import core_protocols as cp
 from orcapod.types import CacheMode
 from orcapod.utils.lazy_module import LazyModule
@@ -23,7 +24,7 @@ else:
 logger = logging.getLogger(__name__)
 
 
-class PipelineJob(AutoRegisteringContextBasedTracker):
+class PipelineJob(AbstractPipelineBase):
     """Pipeline + source bindings + execution context.
 
     ``PipelineJob`` is the everyday working object. It is built incrementally:
@@ -62,7 +63,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         _pipeline: "Pipeline | None" = None,
         sources: "dict[str, cp.StreamProtocol] | None" = None,
     ) -> None:
-        super().__init__(tracker_manager=tracker_manager)
+        super().__init__(name=name, tracker_manager=tracker_manager)
         self._store = store
         self._execution_context = execution_context
         self._compiled_pipeline: "Pipeline | None" = _pipeline
@@ -73,12 +74,13 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         self._rec_upstreams: dict[str, cp.StreamProtocol] = {}
         self._rec_node_lut: dict[str, "GraphNode"] = {}
         self._spec_by_name: dict[str, "SourceNode"] = {}
-        self._pipeline_name: tuple[str, ...] = (name,) if isinstance(name, str) else tuple(name)
         self._unresolved_specs: list[str] = []
         self._has_run: bool = False
         self._run_id: str | None = None
 
         # Job-node map (populated by from_pipeline(); None for with-block-created jobs)
+        # Note: _persistent_node_map and _nodes are initialized by AbstractPipelineBase.__init__
+        # but overridden here for PipelineJob-specific types.
         self._persistent_node_map: "dict[str, Any] | None" = None
         self._nodes: "dict[str, Any]" = {}
 
@@ -94,16 +96,15 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         self._spec_by_name = {}
         return super().__enter__()  # type: ignore[return-value]
 
-    def __exit__(self, exc_type=None, exc_value=None, traceback=None) -> None:
-        super().__exit__(exc_type, exc_value, traceback)
-        if exc_type is None:
-            self._compile_from_recording()
+    def compile(self) -> None:
+        """Compile recorded invocations into a Pipeline (implements AbstractPipelineBase.compile)."""
+        self._compile_from_recording()
 
     def _compile_from_recording(self) -> None:
         """Compile the recorded edges into a pure Pipeline."""
         from orcapod.pipeline.graph import Pipeline
 
-        pipeline = Pipeline(name=self._pipeline_name, auto_compile=False)
+        pipeline = Pipeline(name=self._name, auto_compile=False)
         # Inject the recording state into the pipeline
         pipeline._graph_edges = list(self._rec_graph_edges)
         pipeline._upstreams = dict(self._rec_upstreams)
@@ -381,7 +382,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
         job._store = store
         job._execution_context = execution_context
         job._sources = bound_sources
-        job._pipeline_name = pipeline._name
+        job._name = pipeline._name
         job._has_run = False
         job._run_id = None
         job._unresolved_specs = []
@@ -497,7 +498,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
             )
 
         pipeline = self._compiled_pipeline
-        pipeline_name = pipeline.name if pipeline is not None else self._pipeline_name
+        pipeline_name = pipeline.name if pipeline is not None else self._name
         pipeline_db = self._store.at(*pipeline_name)
         result_db = pipeline_db.at("_result")
 
@@ -553,7 +554,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
             job_node = self._persistent_node_map[node_hash]
             node_map[node_hash] = job_node.as_node()
 
-        pipeline = Pipeline(name=self._pipeline_name, auto_compile=False)
+        pipeline = Pipeline(name=self._name, auto_compile=False)
         pipeline._graph_edges = list(self._compiled_pipeline._graph_edges)
         pipeline._upstreams = dict(self._compiled_pipeline._upstreams)
         pipeline._node_lut = dict(self._compiled_pipeline._node_lut)
@@ -913,7 +914,7 @@ class PipelineJob(AutoRegisteringContextBasedTracker):
 
         # Return new job (different object); uses exec_pipeline (clone with exec nodes)
         result = PipelineJob(
-            name=self._pipeline_name,
+            name=self._name,
             store=self._store,
             execution_context=self._execution_context,
             _pipeline=exec_pipeline,        # exec_pipeline (clone), not self._compiled_pipeline

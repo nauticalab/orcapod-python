@@ -321,7 +321,7 @@ class TestLabelAccess:
         with job:
             pass  # empty pipeline
 
-        with pytest.raises(AttributeError, match="Pipeline has no attribute"):
+        with pytest.raises(AttributeError, match="has no attribute"):
             _ = job.pipeline.nonexistent
 
     def test_dir_includes_node_labels(self, pipeline_db):

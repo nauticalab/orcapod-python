@@ -214,8 +214,8 @@ class TestPipelineJobBind:
             Join()(node_a, node_b)
 
         job = PipelineJob.from_pipeline(pipeline, sources={"a": src_a, "b": src_b}, store=store)
-        assert job._pipeline_name == ("my_pipeline",), (
-            "PipelineJob._pipeline_name should match Pipeline.name after from_pipeline()"
+        assert job._name == ("my_pipeline",), (
+            "PipelineJob._name should match Pipeline.name after from_pipeline()"
         )
 
 
@@ -624,7 +624,7 @@ class TestPipelineJobSerialization:
         assert loaded._has_run is True
 
     def test_load_restores_pipeline_name(self, store, tmp_path):
-        """PipelineJob.load() must restore _pipeline_name from the blueprint."""
+        """PipelineJob.load() must restore _name from the blueprint."""
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
@@ -638,8 +638,8 @@ class TestPipelineJobSerialization:
         job.save(str(path))
         loaded = PipelineJob.load(str(path), store=store)
 
-        assert loaded._pipeline_name == ("named_pipeline",), (
-            "PipelineJob.load() should restore _pipeline_name from the saved pipeline name"
+        assert loaded._name == ("named_pipeline",), (
+            "PipelineJob.load() should restore _name from the saved pipeline name"
         )
 
     def test_load_after_partial_run_restores_unresolved_specs(self, store, tmp_path):
