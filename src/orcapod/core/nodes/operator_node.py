@@ -76,7 +76,24 @@ class OperatorNodeBase(StreamBase):
         label: str | None = None,
         config: Config | None = None,
         table_scope: Literal["pipeline_hash", "content_hash"] = "pipeline_hash",
-    ):
+    ) -> None:
+        """Initialize the shared operator-node state.
+
+        Args:
+            operator: The operator pod that defines the transformation logic
+                and output schema.
+            input_streams: One or more upstream streams consumed by this
+                operator.  Passed through as a tuple.
+            tracker_manager: Optional tracker manager override.  Defaults to
+                ``DEFAULT_TRACKER_MANAGER``.
+            label: Optional display label for this node.
+            config: Optional config override; defaults to the global config.
+            table_scope: Determines how the database table path is scoped.
+                ``"pipeline_hash"`` (default) shares a table across all runs
+                with the same topology and schemas regardless of which concrete
+                data is bound.  ``"content_hash"`` creates a separate table per
+                unique data combination.
+        """
         if tracker_manager is None:
             tracker_manager = DEFAULT_TRACKER_MANAGER
         self.tracker_manager = tracker_manager
