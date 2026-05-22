@@ -20,9 +20,17 @@ from __future__ import annotations
 import heapq
 from collections.abc import Hashable
 from graphlib import CycleError, TopologicalSorter
-from typing import Any, Generic, Iterable, Iterator, Protocol, TypeVar
+from typing import (
+    Any,
+    Generic,
+    Iterable,
+    Iterator,
+    Protocol,
+    TypeVar,
+    runtime_checkable,
+)
 
-__all__ = ["Comparable", "OrcaDAG", "CycleError"]
+__all__ = ["Comparable", "GraphBackend", "OrcaDAG", "CycleError"]
 
 
 class Comparable(Hashable, Protocol):
@@ -47,12 +55,53 @@ NodeT = TypeVar("NodeT", bound=Hashable)
 ComparableNodeT = TypeVar("ComparableNodeT", bound=Comparable)
 
 
+@runtime_checkable
+class GraphBackend(Protocol[NodeT]):
+    """Structural protocol for DAG backend implementations.
+
+    Both `OrcaDAG` and `NetworkxBackend` satisfy this protocol, enabling
+    callers to switch graph implementations via a config flag (ENG-494).
+
+    NodeT must be `Hashable`.  The `topological_sort_deterministic` method
+    is not part of this protocol because it additionally requires NodeT to
+    satisfy `Comparable`; callers that need deterministic ordering should
+    use `OrcaDAG` or `NetworkxBackend` directly with a comparable node type
+    (e.g. `OrcaDAG[str]`).
+    """
+
+    def add_node(self, node: NodeT, **attrs: Any) -> None: ...
+
+    def add_edge(self, u: NodeT, v: NodeT) -> None: ...
+
+    def node_attrs(self, node: NodeT) -> dict[str, Any]: ...
+
+    def __contains__(self, node: object) -> bool: ...
+
+    def __len__(self) -> int: ...
+
+    def __iter__(self) -> Iterator[NodeT]: ...
+
+    def nodes(self) -> Iterable[NodeT]: ...
+
+    def edges(self) -> Iterable[tuple[NodeT, NodeT]]: ...
+
+    def successors(self, node: NodeT) -> frozenset[NodeT]: ...
+
+    def predecessors(self, node: NodeT) -> frozenset[NodeT]: ...
+
+    def in_degree(self, node: NodeT) -> int: ...
+
+    def topological_sort(self) -> list[NodeT]: ...
+
+
 class OrcaDAG(Generic[NodeT]):
     """Minimal directed acyclic graph for Orcapod pipeline topology.
 
     Covers exactly the operations Orcapod needs — DAG construction, node
     attribute storage, basic traversal, and topological sort.  No external
     dependencies; backed entirely by plain dicts and stdlib `graphlib`.
+
+    Satisfies `GraphBackend[NodeT]` for any hashable NodeT.
 
     Args:
         NodeT: The node type.  Must be hashable (used as a dict key).
@@ -65,7 +114,9 @@ class OrcaDAG(Generic[NodeT]):
         self._attrs: dict[NodeT, dict[str, Any]] = {}
         # node → set of immediate successors (outgoing edges)
         self._successors: dict[NodeT, set[NodeT]] = {}
-        # node → number of incoming edges
+        # node → set of immediate predecessors (incoming edges)
+        self._predecessors: dict[NodeT, set[NodeT]] = {}
+        # node → number of incoming edges (kept in sync with _predecessors)
         self._in_degree: dict[NodeT, int] = {}
 
     # ------------------------------------------------------------------
@@ -85,6 +136,7 @@ class OrcaDAG(Generic[NodeT]):
         if node not in self._attrs:
             self._attrs[node] = {}
             self._successors[node] = set()
+            self._predecessors[node] = set()
             self._in_degree[node] = 0
         if attrs:
             self._attrs[node].update(attrs)
@@ -103,6 +155,7 @@ class OrcaDAG(Generic[NodeT]):
         self.add_node(v)
         if v not in self._successors[u]:
             self._successors[u].add(v)
+            self._predecessors[v].add(u)
             self._in_degree[v] += 1
 
     # ------------------------------------------------------------------
@@ -178,6 +231,23 @@ class OrcaDAG(Generic[NodeT]):
         """
         return frozenset(self._successors[node])
 
+    def predecessors(self, node: NodeT) -> frozenset[NodeT]:
+        """Return the immediate predecessors (incoming neighbours) of *node*.
+
+        Returns a snapshot `frozenset` so callers cannot mutate internal
+        graph state through the returned value.
+
+        Args:
+            node: The target node.
+
+        Returns:
+            Frozen set of nodes that have a directed edge to *node*.
+
+        Raises:
+            KeyError: If *node* is not in the graph.
+        """
+        return frozenset(self._predecessors[node])
+
     def in_degree(self, node: NodeT) -> int:
         """Return the number of incoming edges for *node*.
 
@@ -199,17 +269,13 @@ class OrcaDAG(Generic[NodeT]):
     def _build_predecessor_dict(self) -> dict[NodeT, set[NodeT]]:
         """Build the predecessor mapping required by TopologicalSorter.
 
-        Inverts the internal successor representation into the predecessor
-        form that `graphlib.TopologicalSorter` expects.
+        Returns a copy of the internal predecessor sets — safe for mutation
+        by `graphlib.TopologicalSorter`.
 
         Returns:
-            Mapping of each node to the set of nodes that precede it.
+            Mapping of each node to a fresh copy of its predecessor set.
         """
-        pred: dict[NodeT, set[NodeT]] = {node: set() for node in self._attrs}
-        for u, vs in self._successors.items():
-            for v in vs:
-                pred[v].add(u)
-        return pred
+        return {node: set(preds) for node, preds in self._predecessors.items()}
 
     # ------------------------------------------------------------------
     # Ordering
