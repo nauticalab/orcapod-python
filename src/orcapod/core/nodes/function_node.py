@@ -7,9 +7,8 @@ Three classes:
 * ``FunctionNode`` — thin blueprint descriptor.  Raises
   ``PipelineJobRequiredError`` on ``iter_data()``.  This is the node
   recorded in a ``Pipeline`` and serialized to disk.
-* ``FunctionJobNode`` — DB-backed execution node; carries all DB logic
-  from the original ``FunctionNode``.  Created by ``PipelineJob`` at
-  run time.
+* ``FunctionJobNode`` — DB-backed execution node with full persistence
+  logic.  Created by ``PipelineJob`` at run time.
 
 ``FunctionNode`` and ``FunctionJobNode`` are *siblings*: both inherit
 directly from ``FunctionNodeBase``, neither from the other.
@@ -178,7 +177,7 @@ class FunctionNodeBase(StreamBase):
 
     @property
     def data_context(self) -> contexts.DataContext:
-        return contexts.resolve_context(self._function_pod.data_context_key)
+        return contexts.resolve_context(self.data_context_key)
 
     @property
     def data_context_key(self) -> str:
@@ -611,13 +610,29 @@ class FunctionNode(FunctionNodeBase):
         return  # pragma: no cover
         yield  # pragma: no cover
 
-    def as_node(self) -> "FunctionNode":
-        """Return ``self`` — already the lightweight blueprint form.
+    def as_node(self) -> FunctionNode:
+        """Return the lightweight blueprint equivalent of this node.
+
+        For UNAVAILABLE read-only stubs (loaded with no live function pod),
+        returns ``self`` — there is nothing to clone.  For normal instances,
+        returns a fresh ``FunctionNode`` with the same function pod, input
+        stream, label, table scope, and tracker manager.  Its
+        ``content_hash()`` / ``pipeline_hash()`` are identical to those of
+        this node.
 
         Returns:
-            This instance.
+            This instance (if unavailable) or a new equivalent ``FunctionNode``.
         """
-        return self
+        if self._function_pod is None:
+            # UNAVAILABLE stub — no live function pod, cannot meaningfully clone
+            return self
+        return FunctionNode(
+            function_pod=self._function_pod,
+            input_stream=self._input_stream,
+            label=self._label,
+            table_scope=self._table_scope,
+            tracker_manager=self.tracker_manager,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -665,7 +680,6 @@ class FunctionJobNode(FunctionNodeBase):
         # DB persistence state (initially None; set via __init__ params or attach_databases)
         self._pipeline_database: ArrowDatabaseProtocol | None = None
         self._cached_function_pod: CachedFunctionPod | None = None
-        self._output_schema_hash: str | None = None
 
         if pipeline_database is not None:
             self.attach_databases(
@@ -713,13 +727,8 @@ class FunctionJobNode(FunctionNodeBase):
         # Clear all caches
         self._node_identity_path_cache = None
         self.clear_cache()
-        self._content_hash_cache.clear()
-        self._pipeline_hash_cache.clear()
-
-        # Compute output schema hash
-        self._output_schema_hash = self.data_context.semantic_hasher.hash_object(
-            self._data_function.output_data_schema
-        ).to_string()
+        self._invalidate_content_hash_cache()
+        self._invalidate_pipeline_hash_cache()
 
     # ------------------------------------------------------------------
     # Override clear_cache to also clear DB caches
@@ -1150,7 +1159,7 @@ class FunctionJobNode(FunctionNodeBase):
         self,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> "pa.Table | None":
+    ) -> pa.Table | None:
         """Return all computed results joined with their pipeline tag records.
 
         Args:
@@ -1444,8 +1453,8 @@ class FunctionJobNode(FunctionNodeBase):
 
     async def async_execute(
         self,
-        input_channel: "ReadableChannel[tuple[TagProtocol, DataProtocol]]",
-        output: "WritableChannel[tuple[TagProtocol, DataProtocol]]",
+        input_channel: ReadableChannel[tuple[TagProtocol, DataProtocol]],
+        output: WritableChannel[tuple[TagProtocol, DataProtocol]],
         *,
         observer: ExecutionObserverProtocol | None = None,
     ) -> None:

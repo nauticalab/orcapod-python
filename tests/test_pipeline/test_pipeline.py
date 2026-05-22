@@ -1,7 +1,7 @@
 """Tests for the Pipeline and PipelineJob classes.
 
 Verifies that Pipeline correctly wraps all nodes during compile():
-- Leaf streams → SourceNode (SourceSpec-only; concrete sources raise ValueError)
+- Leaf streams → SourceNode (auto-wrapped via SourceNode.from_stream())
 - Function pod invocations → FunctionNode
 - Operator invocations → OperatorNode
 
@@ -103,14 +103,17 @@ class TestPipelineSourceSpecEnforcement:
         ]
         assert len(source_nodes) == 2
 
-    def test_pipeline_with_concrete_leaf_raises(self):
-        """Pipeline.compile() raises ValueError if any leaf is not a SourceNode."""
+    def test_pipeline_with_concrete_leaf_auto_wraps_as_source_node(self):
+        """Pipeline.compile() auto-wraps concrete leaf streams as SourceNode."""
         src_a, src_b = _make_two_sources()
 
-        pipeline = Pipeline(name="bad_pipe")
-        with pytest.raises(ValueError, match="SourceNode"):
-            with pipeline:
-                Join()(src_a, src_b)
+        pipeline = Pipeline(name="auto_wrap_pipe")
+        with pipeline:
+            Join()(src_a, src_b)
+
+        # Concrete streams at the leaves are automatically wrapped as SourceNode
+        source_nodes = [n for n in pipeline._node_graph.nodes() if isinstance(n, SourceNode)]
+        assert len(source_nodes) == 2
 
     def test_pipeline_from_pipeline_returns_pipeline_job(self):
         """PipelineJob.from_pipeline() returns a PipelineJob without modifying the pipeline."""

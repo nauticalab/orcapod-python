@@ -1,15 +1,8 @@
 """Source node hierarchy for Pipeline and PipelineJob.
 
-SourceNode — schema-only input-slot declaration (replaces SourceSpec).
+SourceNode — schema-only input-slot declaration.
 SourceJobNode — execution variant that wraps a concrete StreamProtocol.
-Both share SourceNodeBase which provides hash-stable identity.
-
-Hash-stability guarantee:
-    SourceNode(name=n, tag_schema=t, data_schema=d).content_hash()
-    == SourceSpec(name=n, tag_schema=t, data_schema=d).content_hash()
-
-This is achieved by using identical identity_structure():
-    ("SourceSpec", name, tag_schema, data_schema)
+Both share SourceNodeBase which provides schema-based identity.
 """
 from __future__ import annotations
 
@@ -19,10 +12,11 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 from orcapod import contexts
+from orcapod.config import Config
 from orcapod.core.base import TraceableBase
 from orcapod.errors import SourceSpecMismatchError, UnboundSourceError
 from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
-from orcapod.types import ColumnConfig, ContentHash, Schema
+from orcapod.types import ColumnConfig, Schema
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -48,6 +42,8 @@ class SourceNodeBase(TraceableBase, ABC):
         tag_schema: Mapping of tag column names to Python types.
         data_schema: Mapping of data column names to Python types.
         data_context: Optional data context override.
+        label: Optional display label override.
+        config: Optional config override.
     """
 
     node_type = "source"
@@ -58,31 +54,27 @@ class SourceNodeBase(TraceableBase, ABC):
         tag_schema: Schema,
         data_schema: Schema,
         data_context: str | contexts.DataContext | None = None,
+        label: str | None = None,
+        config: Config | None = None,
     ) -> None:
-        super().__init__(data_context=data_context)
+        super().__init__(label=label, data_context=data_context, config=config)
         self._name = name
         self._tag_schema = tag_schema
         self._data_schema = data_schema
 
     # ------------------------------------------------------------------
-    # Identity — hash-stable against old SourceSpec
+    # Identity
     # ------------------------------------------------------------------
 
     def identity_structure(self) -> Any:
-        """Return the content identity: ``("SourceSpec", name, tag_schema, data_schema)``.
-
-        Deliberately matches ``SourceSpec.identity_structure()`` so that a
-        ``SourceNode`` constructed with the same arguments as a ``SourceSpec``
-        produces an identical ``content_hash()``.  This preserves all DB paths
-        computed from pre-refactor pipelines.
-        """
-        return ("SourceSpec", self._name, self._tag_schema, self._data_schema)
+        """Return the content identity: ``("source_node", name, tag_schema, data_schema)``."""
+        return ("source_node", self._name, self._tag_schema, self._data_schema)
 
     def pipeline_identity_structure(self) -> Any:
         """Return the pipeline identity: ``(tag_schema, data_schema)`` (name-independent).
 
-        Matches ``RootSource.pipeline_identity_structure()`` so that sources
-        with identical schemas share the same DB table paths regardless of name.
+        Sources with identical schemas share the same DB table paths regardless
+        of name.
         """
         return (self._tag_schema, self._data_schema)
 
@@ -104,7 +96,7 @@ class SourceNodeBase(TraceableBase, ABC):
         Returns:
             The slot name.
         """
-        return self._name
+        return self.name
 
     @property
     def tag_schema(self) -> Schema:
@@ -230,7 +222,7 @@ class SourceNodeBase(TraceableBase, ABC):
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> "pa.Table":
+    ) -> pa.Table:
         """Materialize stream as a PyArrow Table.
 
         Delegates to the concrete source (SourceJobNode), or raises for
@@ -276,7 +268,7 @@ class SourceNodeBase(TraceableBase, ABC):
     def execute(
         self,
         *,
-        observer: "ExecutionObserverProtocol | None" = None,
+        observer: ExecutionObserverProtocol | None = None,
     ) -> list[tuple[TagProtocol, DataProtocol]]:
         """Execute this source node: materialize and return data.
 
@@ -302,7 +294,7 @@ class SourceNodeBase(TraceableBase, ABC):
         self,
         output: "WritableChannel[tuple[TagProtocol, DataProtocol]]",
         *,
-        observer: "ExecutionObserverProtocol | None" = None,
+        observer: ExecutionObserverProtocol | None = None,
     ) -> None:
         """Push all (tag, data) pairs to the output channel.
 
@@ -366,6 +358,35 @@ class SourceNode(SourceNodeBase):
             "or job.bind(sources={'<name>': source}) to attach data."
         )
 
+    @classmethod
+    def from_stream(
+        cls,
+        stream: StreamProtocol,
+        name: str | None = None,
+    ) -> SourceNode:
+        """Wrap *stream* in a ``SourceNode``, or return it unchanged if already one.
+
+        Derives tag and data schemas from ``stream.output_schema()``.  The
+        slot name defaults to ``stream.label`` — no fallback is applied.
+
+        Args:
+            stream: The upstream stream to wrap.
+            name: Optional explicit slot name.  Defaults to ``stream.label``.
+
+        Returns:
+            The original *stream* if it is already a ``SourceNode``; otherwise
+            a new ``SourceNode`` with schemas derived from *stream*.
+        """
+        if isinstance(stream, SourceNode):
+            return stream
+        tag_schema, data_schema = stream.output_schema()
+        slot_name = name if name is not None else stream.label
+        return cls(
+            name=slot_name,
+            tag_schema=tag_schema,
+            data_schema=data_schema,
+        )
+
 
 class SourceJobNode(SourceNodeBase):
     """Execution-ready source node wrapping an optional concrete stream.
@@ -378,9 +399,9 @@ class SourceJobNode(SourceNodeBase):
 
     Hash behaviour:
 
-    * ``content_hash()`` — delegates to ``_concrete.content_hash()`` when
-      bound; falls back to schema-based ``SourceNodeBase.content_hash()`` (==
-      ``SourceNode.content_hash()``) when unbound.
+    * ``content_hash()`` — delegates to the bound source's
+      ``identity_structure()`` when bound (via ``identity_structure()``
+      override); falls back to schema-based identity when unbound.
     * ``pipeline_hash()`` — always schema-based (inherited); never
       data-inclusive.  This invariant keeps DB paths stable across different
       data sources bound to the same slot.
@@ -389,8 +410,8 @@ class SourceJobNode(SourceNodeBase):
         name: Slot name.
         tag_schema: Tag schema.
         data_schema: Data schema.
-        concrete: Optional concrete stream.  Can be set or replaced later via
-            ``job_node._concrete = source``.
+        bound_source: Optional concrete stream.  Can be set or replaced later
+            via ``job_node.bound_source = source``.
         data_context: Optional data context override.
     """
 
@@ -399,7 +420,7 @@ class SourceJobNode(SourceNodeBase):
         name: str,
         tag_schema: Schema,
         data_schema: Schema,
-        concrete: "StreamProtocol | None" = None,
+        bound_source: StreamProtocol | None = None,
         data_context: str | contexts.DataContext | None = None,
     ) -> None:
         super().__init__(
@@ -408,35 +429,44 @@ class SourceJobNode(SourceNodeBase):
             data_schema=data_schema,
             data_context=data_context,
         )
-        # Use object.__setattr__ to bypass the property setter during __init__
-        # (the cache doesn't exist yet at this point).
-        object.__setattr__(self, "_concrete", concrete)
+        # Direct assignment to the backing attribute — super().__init__() has
+        # already initialised _content_hash_cache, so the property setter is
+        # safe to use here; we bypass it only to make the init path explicit.
+        self._bound_source: StreamProtocol | None = bound_source
 
-    def __setattr__(self, name: str, value: object) -> None:
-        """Clear ``_content_hash_cache`` whenever ``_concrete`` is mutated.
+    # ------------------------------------------------------------------
+    # bound_source property — explicit binding with cache invalidation
+    # ------------------------------------------------------------------
 
-        This prevents a stale schema-based hash from being returned by the
-        parent ``content_hash()`` cache after the concrete source is updated.
-        """
-        object.__setattr__(self, name, value)
-        if name == "_concrete" and hasattr(self, "_content_hash_cache"):
-            self._content_hash_cache.clear()
+    @property
+    def bound_source(self) -> StreamProtocol | None:
+        """The concrete stream currently bound to this slot, or ``None``."""
+        return self._bound_source
 
-    def content_hash(self, hasher=None) -> ContentHash:
-        """Return data-inclusive hash when bound; schema-based hash when unbound.
+    @bound_source.setter
+    def bound_source(self, value: StreamProtocol | None) -> None:
+        """Bind *value* as the concrete source and invalidate the content hash cache."""
+        self._bound_source = value
+        self._invalidate_content_hash_cache()
 
-        Args:
-            hasher: Optional semantic hasher.
+    # ------------------------------------------------------------------
+    # Identity — delegate to bound source when set
+    # ------------------------------------------------------------------
+
+    def identity_structure(self) -> Any:
+        """Delegate to ``bound_source.identity_structure()`` when bound.
+
+        This is the correct extension point: content_hash() flows from
+        identity_structure(), so overriding here avoids bypassing the
+        caching and resolver logic in ContentIdentifiableBase.content_hash().
 
         Returns:
-            ``_concrete.content_hash(hasher)`` when bound, otherwise
-            ``SourceNodeBase.content_hash(hasher)``.
+            Bound source's identity structure when bound; schema-based
+            identity (inherited from SourceNodeBase) when unbound.
         """
-        if self._concrete is not None:
-            if hasher is None:
-                hasher = self.data_context.semantic_hasher
-            return self._concrete.content_hash(hasher)
-        return super().content_hash(hasher)
+        if self._bound_source is not None:
+            return self._bound_source.identity_structure()
+        return super().identity_structure()
 
     def iter_data(self) -> Iterator[tuple[TagProtocol, DataProtocol]]:
         """Delegate to concrete source, or raise if unbound.
@@ -444,19 +474,19 @@ class SourceJobNode(SourceNodeBase):
         Raises:
             UnboundSourceError: When no concrete source is attached.
         """
-        if self._concrete is None:
+        if self._bound_source is None:
             raise UnboundSourceError(
                 f"SourceJobNode '{self._name}' has no concrete source bound. "
                 "Call job.bind(sources={'<name>': source}) before running."
             )
-        return self._concrete.iter_data()
+        return self._bound_source.iter_data()
 
     def as_table(
         self,
         *,
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
-    ) -> "pa.Table":
+    ) -> pa.Table:
         """Materialize the concrete source as a PyArrow Table.
 
         Args:
@@ -466,12 +496,12 @@ class SourceJobNode(SourceNodeBase):
         Raises:
             UnboundSourceError: When no concrete source is attached.
         """
-        if self._concrete is None:
+        if self._bound_source is None:
             raise UnboundSourceError(
                 f"SourceJobNode '{self._name}' has no concrete source bound. "
                 "Call job.bind(sources={'<name>': source}) before calling as_table()."
             )
-        return self._concrete.as_table(columns=columns, all_info=all_info)
+        return self._bound_source.as_table(columns=columns, all_info=all_info)
 
     def as_node(self) -> SourceNode:
         """Return the lightweight ``SourceNode`` equivalent of this job node.

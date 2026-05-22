@@ -196,7 +196,7 @@ class TestResolveOperatorFromConfig:
 class TestPipelineFormatVersion:
     def test_version_is_string(self):
         assert isinstance(PIPELINE_FORMAT_VERSION, str)
-        assert PIPELINE_FORMAT_VERSION == "0.3"
+        assert PIPELINE_FORMAT_VERSION == "0.1.0"
 
 
 # ---------------------------------------------------------------------------

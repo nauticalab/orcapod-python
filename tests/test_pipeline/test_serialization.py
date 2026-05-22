@@ -204,7 +204,7 @@ def compiled_pipeline():
 
 
 class TestNewSerializationFormat:
-    """v0.3 serialization format tests."""
+    """v0.1.0 serialization format tests."""
 
     def test_save_load_roundtrip_with_source_node(self, tmp_path, compiled_pipeline):
         """Pipeline.save/load round-trip preserves SourceNode slots."""
@@ -234,43 +234,30 @@ class TestNewSerializationFormat:
                     f"Expected source_type='node', got {node_data.get('source_config')}"
                 )
 
-    def test_format_version_is_0_3(self, tmp_path, compiled_pipeline):
-        """Saved format version is 0.3."""
+    def test_format_version_is_0_1_0(self, tmp_path, compiled_pipeline):
+        """Saved format version is 0.1.0."""
         save_path = tmp_path / "test_pipeline.json"
         compiled_pipeline.save(save_path)
 
         with open(save_path) as f:
             data = json.load(f)
 
-        assert data.get("orcapod_pipeline_version") == "0.3", (
-            f"Expected version '0.3', got {data.get('orcapod_pipeline_version')!r}"
+        assert data.get("orcapod_pipeline_version") == "0.1.0", (
+            f"Expected version '0.1.0', got {data.get('orcapod_pipeline_version')!r}"
         )
 
-    def test_backward_compat_load_v0_2_spec_format(self, tmp_path, compiled_pipeline):
-        """Loading a v0.2 pipeline with source_type='spec' produces SourceNode."""
-        # Save, then hack the JSON to simulate v0.2 format
-        save_path = tmp_path / "old_pipeline.json"
+    def test_unsupported_version_raises(self, tmp_path, compiled_pipeline):
+        """Loading a pipeline with an unsupported version string raises ValueError."""
+        save_path = tmp_path / "pipeline.json"
         compiled_pipeline.save(save_path)
 
         with open(save_path) as f:
             data = json.load(f)
 
-        # Downgrade to v0.2 format
         data["orcapod_pipeline_version"] = "0.2"
-        for node_data in data.get("nodes", {}).values():
-            if node_data.get("node_type") == "source":
-                if "source_config" in node_data:
-                    node_data["source_config"]["source_type"] = "spec"
-
         old_path = tmp_path / "old_format.json"
         with open(old_path, "w") as f:
             json.dump(data, f)
 
-        # Load should work and produce SourceNode
-        loaded = Pipeline.load(old_path)
-
-        for node in loaded._persistent_node_map.values():
-            if node.node_type == "source":
-                assert isinstance(node, SourceNode), (
-                    f"Expected SourceNode from v0.2 load, got {type(node).__name__}"
-                )
+        with pytest.raises(ValueError, match="version"):
+            Pipeline.load(old_path)

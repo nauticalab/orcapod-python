@@ -337,7 +337,7 @@ class TestMaterializedStreamIdentity:
             name="test_src",
             tag_schema=tag_schema,
             data_schema=data_schema,
-            concrete=src,
+            bound_source=src,
         )
         buf = list(node.iter_data())
 

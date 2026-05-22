@@ -33,7 +33,7 @@ def source_node(_sample_source):
         name="test_source",
         tag_schema=tag_schema,
         data_schema=data_schema,
-        concrete=_sample_source,
+        bound_source=_sample_source,
     )
 
 

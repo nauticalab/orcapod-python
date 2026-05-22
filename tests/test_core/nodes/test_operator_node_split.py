@@ -49,14 +49,18 @@ class TestThinOperatorNode:
             "OperatorNode must not accept pipeline_database — use OperatorJobNode instead"
         )
 
-    def test_as_node_returns_self(self, source_pair):
+    def test_as_node_returns_clone(self, source_pair):
         from orcapod.core.nodes.operator_node import OperatorNode
         from orcapod.core.operators.join import Join
 
         op = Join()
         node_a, node_b = source_pair
         op_node = OperatorNode(operator=op, input_streams=(node_a, node_b))
-        assert op_node.as_node() is op_node
+        cloned = op_node.as_node()
+        assert isinstance(cloned, OperatorNode)
+        assert cloned is not op_node
+        assert cloned.content_hash() == op_node.content_hash()
+        assert cloned.pipeline_hash() == op_node.pipeline_hash()
 
 
 class TestOperatorJobNodeHashParity:

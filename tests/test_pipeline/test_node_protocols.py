@@ -155,7 +155,7 @@ def _make_source_job_node(table, tag_col="key"):
         name="test_source",
         tag_schema=tag_schema,
         data_schema=data_schema,
-        concrete=src,
+        bound_source=src,
     )
 
 

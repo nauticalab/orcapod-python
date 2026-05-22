@@ -97,10 +97,6 @@ class PipelineJob(AbstractPipelineBase):
         return super().__enter__()  # type: ignore[return-value]
 
     def compile(self) -> None:
-        """Compile recorded invocations into a Pipeline (implements AbstractPipelineBase.compile)."""
-        self._compile_from_recording()
-
-    def _compile_from_recording(self) -> None:
         """Compile the recorded edges into a pure Pipeline and build the job node map.
 
         ``_rec_node_lut`` now contains ``FunctionJobNode`` / ``OperatorJobNode`` objects
@@ -167,7 +163,7 @@ class PipelineJob(AbstractPipelineBase):
                     name=bp_node.name,
                     tag_schema=bp_node.tag_schema,
                     data_schema=bp_node.data_schema,
-                    concrete=concrete,
+                    bound_source=concrete,
                 )
             elif isinstance(bp_node, FunctionNodeBase):
                 # Create fresh FunctionJobNode rewired to the upstream job node.
@@ -252,7 +248,7 @@ class PipelineJob(AbstractPipelineBase):
     # TrackerProtocol — recording with source interception
     # ------------------------------------------------------------------
 
-    def _to_node_stream(self, stream: cp.StreamProtocol) -> cp.StreamProtocol:
+    def _to_node_stream(self, stream: cp.StreamProtocol) -> SourceNode | cp.StreamProtocol:
         """Convert *stream* to a node-based equivalent for consistent hash recording.
 
         Concrete ``RootSource`` instances are promoted to ``SourceNode`` via
@@ -380,7 +376,7 @@ class PipelineJob(AbstractPipelineBase):
         Walks the pipeline's ``_persistent_node_map`` topologically and
         creates corresponding ``JobNode`` variants:
 
-        * ``SourceNode`` → ``SourceJobNode(name, schemas, concrete=sources.get(name))``
+        * ``SourceNode`` → ``SourceJobNode(name, schemas, bound_source=sources.get(name))``
         * ``FunctionNode`` → ``FunctionJobNode(function_pod, upstream_job_node, label)``
         * ``OperatorNode`` → ``OperatorJobNode(operator, upstream_job_nodes, label)``
 
@@ -442,7 +438,7 @@ class PipelineJob(AbstractPipelineBase):
                     name=node.name,
                     tag_schema=node.tag_schema,
                     data_schema=node.data_schema,
-                    concrete=concrete,
+                    bound_source=concrete,
                 )
 
             elif isinstance(node, FunctionNodeBase):
@@ -524,7 +520,7 @@ class PipelineJob(AbstractPipelineBase):
 
         When *sources* is provided, each concrete source is validated against
         its matching ``SourceNode`` slot schema, then the corresponding
-        ``SourceJobNode._concrete`` is updated in-place.
+        ``SourceJobNode.bound_source`` is updated in-place.
 
         When *store* is provided and differs from the current store,
         ``_distribute_databases()`` is called so that all job nodes receive
@@ -566,7 +562,7 @@ class PipelineJob(AbstractPipelineBase):
 
             for job_node in (self._persistent_node_map or {}).values():
                 if isinstance(job_node, SourceJobNode) and job_node.name in sources:
-                    job_node._concrete = sources[job_node.name]
+                    job_node.bound_source = sources[job_node.name]
 
             self._sources.update(sources)
 
@@ -900,7 +896,7 @@ class PipelineJob(AbstractPipelineBase):
                             name=upstream.name,
                             tag_schema=upstream.tag_schema,
                             data_schema=upstream.data_schema,
-                            concrete=concrete,
+                            bound_source=concrete,
                         )
                         exec_node_map[node_hash] = exec_job_node
                     else:

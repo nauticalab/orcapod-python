@@ -201,6 +201,17 @@ class ContentIdentifiableBase(DataContextMixin, ABC):
 
         return self.identity_structure() == other.identity_structure()
 
+    def _invalidate_content_hash_cache(self) -> None:
+        """Invalidate the cached content hash.
+
+        Call this after any mutation that changes the object's semantic
+        content so that the next call to ``content_hash()`` recomputes
+        from scratch.  Subclasses must use this method rather than
+        accessing ``_content_hash_cache`` directly.
+        """
+        self._content_hash_cache.clear()
+        self._cached_int_hash = None
+
 
 class PipelineElementBase(DataContextMixin, ABC):
     """
@@ -269,6 +280,15 @@ class PipelineElementBase(DataContextMixin, ABC):
                 self.pipeline_identity_structure(), resolver=pipeline_resolver
             )
         return self._pipeline_hash_cache[cache_key]
+
+    def _invalidate_pipeline_hash_cache(self) -> None:
+        """Invalidate the cached pipeline hash.
+
+        Call this after any structural mutation (e.g. attaching a database)
+        that changes this element's pipeline identity.  Subclasses must use
+        this method rather than accessing ``_pipeline_hash_cache`` directly.
+        """
+        self._pipeline_hash_cache.clear()
 
 
 class TemporalMixin:

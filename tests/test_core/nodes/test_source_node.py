@@ -40,7 +40,10 @@ class TestSourceNodeHashStability:
     def test_content_hash_stable_value(self, tag_schema, data_schema):
         """content_hash must match the value anchored at migration time.
 
-        Digest (hex): df0cba56fd880f86584ef89b35ef850bd813c95c114ac3bc84818e195b2175cb
+        Digest (hex): b2779d890c22b601f0ed71eb2817138205cc509581b9d7e23186c2f0ec815695
+
+        Note: hash changed in ENG-493 when identity_structure() prefix was updated
+        from ``"SourceSpec"`` to ``"source_node"`` to better reflect the node type.
         """
         from orcapod.core.nodes.source_node import SourceNode
         from orcapod.types import ContentHash
@@ -49,7 +52,7 @@ class TestSourceNodeHashStability:
         expected = ContentHash(
             method="semantic_v0.1",
             digest=bytes.fromhex(
-                "df0cba56fd880f86584ef89b35ef850bd813c95c114ac3bc84818e195b2175cb"
+                "b2779d890c22b601f0ed71eb2817138205cc509581b9d7e23186c2f0ec815695"
             ),
         )
         assert node.content_hash() == expected
@@ -176,7 +179,7 @@ class TestSourceJobNode:
 
         src = DictSource(data=[{"id": 1, "value": 1.0}], tag_columns=["id"])
         job_node = SourceJobNode(
-            name="x", tag_schema=tag_schema, data_schema=data_schema, concrete=src
+            name="x", tag_schema=tag_schema, data_schema=data_schema, bound_source=src
         )
         assert job_node.content_hash() == src.content_hash()
 
@@ -188,7 +191,7 @@ class TestSourceJobNode:
         src = DictSource(data=[{"id": 1, "value": 1.0}], tag_columns=["id"])
         node = SourceNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
         job_node = SourceJobNode(
-            name="x", tag_schema=tag_schema, data_schema=data_schema, concrete=src
+            name="x", tag_schema=tag_schema, data_schema=data_schema, bound_source=src
         )
         assert job_node.pipeline_hash() == node.pipeline_hash()
 
@@ -200,29 +203,28 @@ class TestSourceJobNode:
         assert isinstance(node, SourceNode)
         assert node.content_hash() == job_node.content_hash()
 
-    def test_mutable_concrete_updates_in_place(self, tag_schema, data_schema):
-        """Binding concrete mutates _concrete in-place."""
+    def test_bound_source_property_updates_in_place(self, tag_schema, data_schema):
+        """Setting bound_source mutates the node in-place."""
         from orcapod.core.nodes.source_node import SourceJobNode
         from orcapod.core.sources.dict_source import DictSource
 
         job_node = SourceJobNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
-        assert job_node._concrete is None
+        assert job_node.bound_source is None
         src = DictSource(data=[{"id": 1, "value": 1.0}], tag_columns=["id"])
-        job_node._concrete = src
-        assert job_node._concrete is src
+        job_node.bound_source = src
+        assert job_node.bound_source is src
 
-    def test_concrete_mutation_clears_content_hash_cache(self, tag_schema, data_schema):
-        """Setting _concrete clears the content_hash cache so stale values are not returned."""
-        from orcapod.core.nodes.source_node import SourceJobNode, SourceNode
+    def test_bound_source_setter_clears_content_hash_cache(self, tag_schema, data_schema):
+        """Setting bound_source clears the content_hash cache so stale values are not returned."""
+        from orcapod.core.nodes.source_node import SourceJobNode
         from orcapod.core.sources.dict_source import DictSource
 
         job_node = SourceJobNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
         schema_hash = job_node.content_hash()  # populates cache with schema-based hash
 
         src = DictSource(data=[{"id": 1, "value": 1.0}], tag_columns=["id"])
-        job_node._concrete = src  # should clear the cache
+        job_node.bound_source = src  # should clear the cache
 
-        assert job_node._content_hash_cache == {}  # cache cleared
         bound_hash = job_node.content_hash()
         assert bound_hash != schema_hash  # now returns concrete-based hash
         assert bound_hash == src.content_hash()
@@ -246,7 +248,7 @@ class TestSourceNodeAsTable:
 
         src = DictSource(data=[{"id": 1, "value": 1.0}], tag_columns=["id"])
         job_node = SourceJobNode(
-            name="x", tag_schema=tag_schema, data_schema=data_schema, concrete=src
+            name="x", tag_schema=tag_schema, data_schema=data_schema, bound_source=src
         )
         table = job_node.as_table()
         assert isinstance(table, pa.Table)

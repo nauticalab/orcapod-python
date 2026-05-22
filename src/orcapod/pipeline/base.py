@@ -33,7 +33,7 @@ class AbstractPipelineBase(AutoRegisteringContextBasedTracker, ABC):
     def __init__(
         self,
         name: str | tuple[str, ...] = "pipeline",
-        tracker_manager: "cp.TrackerManagerProtocol | None" = None,
+        tracker_manager: cp.TrackerManagerProtocol | None = None,
     ) -> None:
         """Initialize shared pipeline state.
 

@@ -149,13 +149,13 @@ class TestSourceNode:
             name=name,
             tag_schema=tag_schema,
             data_schema=data_schema,
-            concrete=stream,
+            bound_source=stream,
         )
 
     def test_construction(self):
         stream = _make_stream()
         node = self._make_job_node(stream)
-        assert node._concrete is stream
+        assert node.bound_source is stream
         assert node.node_type == "source"
         assert node.producer is None
         assert node.upstreams == ()
@@ -258,7 +258,7 @@ class TestNodeContextDelegation:
             name="test",
             tag_schema=Schema({"id": int}),
             data_schema=Schema({"x": int}),
-            concrete=stream,
+            bound_source=stream,
         )
         # SourceJobNode has its own data context (not delegated to concrete)
         assert node.data_context_key is not None
@@ -285,7 +285,7 @@ class TestNodeContextDelegation:
             name="test",
             tag_schema=Schema({"id": int}),
             data_schema=Schema({"x": int}),
-            concrete=stream,
+            bound_source=stream,
         )
         # SourceJobNode delegates content_hash() to concrete when bound
         assert node.content_hash() == stream.content_hash()

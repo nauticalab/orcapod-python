@@ -185,25 +185,25 @@ class Pipeline(AbstractPipelineBase):
 
         for node_hash in nx.topological_sort(G):
             if node_hash in persistent_node_map:
-                # Already compiled — reuse, but track for label assignment
+                # Already compiled — reuse, but verify type consistency across
+                # incremental compiles (a hash must never change node type).
                 existing_node = persistent_node_map[node_hash]
+                new_node = self._node_lut.get(node_hash)
+                if new_node is not None:
+                    assert existing_node.node_type == new_node.node_type, (
+                        f"Node type changed for hash {node_hash!r}: "
+                        f"was {existing_node.node_type!r}, now {new_node.node_type!r}"
+                    )
                 name_candidates.setdefault(existing_node.label, []).append(
                     existing_node
                 )
                 continue
 
             if node_hash not in self._node_lut:
-                # -- Leaf stream: must be a SourceNode in the new design --
+                # Leaf stream — wrap in SourceNode if not already one.
                 from orcapod.core.nodes.source_node import SourceNode as SourceNodeClass
                 stream = self._upstreams[node_hash]
-                if not isinstance(stream, SourceNodeClass):
-                    raise ValueError(
-                        f"Pipeline: all leaf inputs must be SourceNode instances, "
-                        f"but found {type(stream).__name__!r}. "
-                        "Use 'with PipelineJob:' to record a pipeline with concrete sources, "
-                        "or replace concrete sources with SourceNode declarations."
-                    )
-                node = stream  # SourceNode IS the leaf — no wrapping needed
+                node = SourceNodeClass.from_stream(stream)
                 persistent_node_map[node_hash] = node
             else:
                 node = self._node_lut[node_hash]
@@ -307,8 +307,10 @@ class Pipeline(AbstractPipelineBase):
     def save(self, path: str | Path) -> None:
         """Serialize the pure pipeline blueprint to a JSON file.
 
-        Saves topology and SourceNode declarations only — no databases,
-        no execution context, no run metadata.
+        Saves the full pipeline topology: SourceNode declarations, function
+        and operator pod configurations, and all edge connections.  Runtime
+        state — databases, execution context, and run metadata — is not
+        persisted.
 
         Args:
             path: File path to write JSON output to.
@@ -360,24 +362,25 @@ class Pipeline(AbstractPipelineBase):
                 "data_context_key": data_context_key,
             }
 
-            if isinstance(node, SourceNodeClass):
-                descriptor["source_config"] = {
-                    "source_type": "node",
-                    "name": node.name,
-                    "tag_schema": serialize_schema(node.tag_schema, type_converter),
-                    "data_schema": serialize_schema(node.data_schema, type_converter),
-                }
-                descriptor["reconstructable"] = True
+            match node:
+                case SourceNodeClass():
+                    descriptor["source_config"] = {
+                        "source_type": "node",
+                        "name": node.name,
+                        "tag_schema": serialize_schema(node.tag_schema, type_converter),
+                        "data_schema": serialize_schema(node.data_schema, type_converter),
+                    }
+                    descriptor["reconstructable"] = True
 
-            elif isinstance(node, FunctionNode):
-                if node._function_pod is not None:
-                    descriptor["function_config"] = node._function_pod.to_config()
-                descriptor["table_scope"] = node._table_scope
+                case FunctionNode():
+                    if node._function_pod is not None:
+                        descriptor["function_config"] = node._function_pod.to_config()
+                    descriptor["table_scope"] = node._table_scope
 
-            elif isinstance(node, OperatorNode):
-                if node._operator is not None:
-                    descriptor["operator_config"] = node._operator.to_config()
-                descriptor["table_scope"] = node._table_scope
+                case OperatorNode():
+                    if node._operator is not None:
+                        descriptor["operator_config"] = node._operator.to_config()
+                    descriptor["table_scope"] = node._table_scope
 
             nodes[content_hash_str] = descriptor
 
@@ -460,20 +463,10 @@ class Pipeline(AbstractPipelineBase):
 
             if node_type == "source":
                 source_type = source_config.get("source_type")
-                if source_type in ("node", "spec"):
-                    # "node" is the v0.3 format; "spec" is the v0.2 backward-compat format.
-                    # Both reconstruct as SourceNode — hashes are preserved because
-                    # SourceNode.identity_structure() matches old SourceSpec.identity_structure().
-                    if source_type == "node":
-                        # v0.3 format uses "name"; v0.1.0 used "node_name" — support both
-                        node_name = source_config.get("name") or source_config.get("node_name")
-                    else:
-                        # v0.2 backward-compat: spec_name becomes node name
-                        node_name = source_config.get("spec_name")
+                if source_type == "node":
+                    node_name = source_config.get("name") or source_config.get("node_name")
                     if not node_name:
                         node_name = descriptor.get("label") or "unknown"
-                    # Prefer tag/data schemas from source_config when present (v0.3+);
-                    # fall back to output_schema for older formats.
                     if "tag_schema" in source_config and "data_schema" in source_config:
                         tag_schema = Schema(deserialize_schema(source_config["tag_schema"]))
                         data_schema = Schema(deserialize_schema(source_config["data_schema"]))
@@ -574,14 +567,14 @@ class Pipeline(AbstractPipelineBase):
         pipeline._node_lut = {
             h: n
             for h, n in reconstructed.items()
-            if not isinstance(n, SourceNodeClass)
+            if n.node_type != "source"
         }
         # SourceNode IS the upstream — store it directly so _build_execution_graph()
         # can find it by hash and substitute a concrete source at run time.
         pipeline._upstreams = {
             h: n
             for h, n in reconstructed.items()
-            if isinstance(n, SourceNodeClass)
+            if n.node_type == "source"
         }
 
         pipeline._compiled = True

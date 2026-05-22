@@ -7,9 +7,8 @@ Three classes:
 * ``OperatorNode`` — thin blueprint descriptor.  Raises
   ``PipelineJobRequiredError`` on ``iter_data()``.  This is the node
   recorded in a ``Pipeline`` and serialized to disk.
-* ``OperatorJobNode`` — DB-backed execution node; carries all DB logic
-  from the original ``OperatorNode``.  Created by ``PipelineJob`` at
-  run time.
+* ``OperatorJobNode`` — DB-backed execution node with full persistence
+  logic.  Created by ``PipelineJob`` at run time.
 
 ``OperatorNode`` and ``OperatorJobNode`` are *siblings*: both inherit
 directly from ``OperatorNodeBase``, neither from the other.
@@ -19,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Iterator, Sequence
+from collections.abc import Collection, Iterator, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
 from orcapod import contexts
@@ -72,7 +71,7 @@ class OperatorNodeBase(StreamBase):
     def __init__(
         self,
         operator: OperatorPodProtocol,
-        input_streams: tuple[StreamProtocol, ...] | list[StreamProtocol],
+        input_streams: Collection[StreamProtocol],
         tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
         config: Config | None = None,
@@ -132,7 +131,7 @@ class OperatorNodeBase(StreamBase):
     # ------------------------------------------------------------------
 
     def identity_structure(self) -> Any:
-        return (self._operator, self._operator.argument_symmetry(self._input_streams))
+        return self.pipeline_identity_structure()
 
     def pipeline_identity_structure(self) -> Any:
         return (self._operator, self._operator.argument_symmetry(self._input_streams))
@@ -163,7 +162,7 @@ class OperatorNodeBase(StreamBase):
 
     @property
     def data_context(self) -> contexts.DataContext:
-        return contexts.resolve_context(self._operator.data_context_key)
+        return contexts.resolve_context(self.data_context_key)
 
     @property
     def data_context_key(self) -> str:
@@ -232,7 +231,7 @@ class OperatorNodeBase(StreamBase):
             return self._stored_pipeline_path
         if self._node_identity_path_cache is not None:
             return self._node_identity_path_cache
-        path = self._operator.uri + (f"schema:{self.pipeline_hash().to_string()}",)
+        path = self.node_uri + (f"schema:{self.pipeline_hash().to_string()}",)
         if self._table_scope != "pipeline_hash":
             path += (f"instance:{self.content_hash().to_string()}",)
         self._node_identity_path_cache = path
@@ -293,7 +292,19 @@ class OperatorNode(OperatorNodeBase):
             "Wrap the containing Pipeline in a PipelineJob to obtain an executable "
             "OperatorJobNode."
         )
-        # yield is needed to satisfy the Iterator return type annotation
+        # Python classifies a function as a generator (returning an Iterator
+        # lazily) based purely on the *syntactic* presence of a ``yield``
+        # statement anywhere in the function body — this is determined at
+        # compile time, not at runtime.  Without ``yield``, this would be a
+        # plain function: calling it would execute the body immediately and
+        # raise ``PipelineJobRequiredError`` before the caller ever gets an
+        # iterator object.  With ``yield`` present (even though it is
+        # unreachable due to the ``return`` above), Python compiles the
+        # function as a generator function.  Calling it therefore returns a
+        # generator object instantly without executing any body code; the
+        # ``raise`` is deferred until the caller first calls ``next()`` on
+        # the iterator (i.e., when iteration actually begins).  This matches
+        # the expected ``Iterator`` return-type contract.
         return  # pragma: no cover
         yield  # pragma: no cover
 
@@ -302,7 +313,7 @@ class OperatorNode(OperatorNodeBase):
         *,
         columns: ColumnConfig | dict[Any, Any] | None = None,
         all_info: bool = False,
-    ) -> "pa.Table":
+    ) -> pa.Table:
         """Raise ``PipelineJobRequiredError`` — blueprint nodes cannot produce data.
 
         Raises:
@@ -419,13 +430,29 @@ class OperatorNode(OperatorNodeBase):
 
         return node
 
-    def as_node(self) -> "OperatorNode":
-        """Return ``self`` — already the lightweight blueprint form.
+    def as_node(self) -> OperatorNode:
+        """Return the lightweight blueprint equivalent of this node.
+
+        For UNAVAILABLE read-only stubs (loaded with no live operator),
+        returns ``self`` — there is nothing to clone.  For normal instances,
+        returns a fresh ``OperatorNode`` with the same operator, input
+        streams, label, table scope, and tracker manager.  Its
+        ``content_hash()`` / ``pipeline_hash()`` are identical to those of
+        this node.
 
         Returns:
-            This instance.
+            This instance (if unavailable) or a new equivalent ``OperatorNode``.
         """
-        return self
+        if self._operator is None:
+            # UNAVAILABLE stub — no live operator, cannot meaningfully clone
+            return self
+        return OperatorNode(
+            operator=self._operator,
+            input_streams=self._input_streams,
+            label=self._label,
+            table_scope=self._table_scope,
+            tracker_manager=self.tracker_manager,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -547,8 +574,8 @@ class OperatorJobNode(OperatorNodeBase):
         # Clear caches
         self._node_identity_path_cache = None
         self.clear_cache()
-        self._content_hash_cache.clear()
-        self._pipeline_hash_cache.clear()
+        self._invalidate_content_hash_cache()
+        self._invalidate_pipeline_hash_cache()
 
     # ------------------------------------------------------------------
     # from_descriptor — reconstruct from a serialized pipeline descriptor
@@ -561,7 +588,7 @@ class OperatorJobNode(OperatorNodeBase):
         operator: OperatorPodProtocol | None,
         input_streams: tuple[StreamProtocol, ...] | list[StreamProtocol],
         databases: dict[str, Any],
-    ) -> "OperatorJobNode":
+    ) -> OperatorJobNode:
         """Construct an OperatorJobNode from a serialized descriptor.
 
         When *operator* and *input_streams* are provided the node operates
@@ -832,7 +859,7 @@ class OperatorJobNode(OperatorNodeBase):
     def execute(
         self,
         *input_streams: StreamProtocol,
-        observer: "ExecutionObserverProtocol | None" = None,
+        observer: ExecutionObserverProtocol | None = None,
     ) -> list[tuple[TagProtocol, DataProtocol]]:
         """Execute input streams: compute, persist, and cache.
 

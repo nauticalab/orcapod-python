@@ -59,7 +59,7 @@ class TestSourceNodeFromDescriptor:
             name="my_source",
             tag_schema=tag_schema,
             data_schema=data_schema,
-            concrete=source,
+            bound_source=source,
         )
         t, d = job_node.output_schema()
         assert "a" in t

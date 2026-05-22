@@ -81,7 +81,7 @@ class TestSourceNodeAsyncExecute:
             name="test_src",
             tag_schema=tag_schema,
             data_schema=data_schema,
-            concrete=src,
+            bound_source=src,
         )
 
     @pytest.mark.asyncio
@@ -436,7 +436,7 @@ class TestAsyncOrchestratorTerminalNode:
             name="test_src",
             tag_schema=tag_schema,
             data_schema=data_schema,
-            concrete=src,
+            bound_source=src,
         )
         G = nx.DiGraph()
         G.add_node(node)
