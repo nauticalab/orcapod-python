@@ -728,8 +728,8 @@ class TestPollingSourceErrorHandling:
         assert fake.close_called
 
     @pytest.mark.asyncio
-    async def test_cursor_invalidated_error_terminates_without_retry(self):
-        """CursorInvalidatedError terminates the source cleanly; no retry."""
+    async def test_cursor_invalidated_error_propagates_to_caller(self):
+        """CursorInvalidatedError is re-raised to the caller; no retry, close() called."""
         fake = FakeDynamicSource(
             batches=[],
             poll_raises=CursorInvalidatedError("state lost"),
@@ -740,9 +740,9 @@ class TestPollingSourceErrorHandling:
             polling_config=PollingConfig(interval=0.01),
         )
 
-        items = []
-        async for tag, data in src.async_iter_data():
-            items.append((tag, data))
+        with pytest.raises(CursorInvalidatedError, match="state lost"):
+            async for _ in src.async_iter_data():
+                pass
 
         # Only one poll attempt — no retry for invalidation
         assert len(fake.poll_cursors) == 1

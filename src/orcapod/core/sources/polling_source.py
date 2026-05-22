@@ -565,10 +565,13 @@ class PollingSource(RootSource, Generic[T]):
 
         Pre-seeds from the cached stream (if any) before entering the polling
         loop. The loop runs until: the configured duration elapses, the maximum
-        consecutive error or overrun threshold is exceeded,
-        ``CursorInvalidatedError`` is raised, or the task is cancelled.
+        consecutive error or overrun threshold is exceeded, or the task is
+        cancelled. ``CursorInvalidatedError`` is re-raised to the caller after
+        logging — the caller will see it as an exception rather than a clean
+        end-of-stream. ``SchemaInconsistencyError`` is also propagated
+        immediately.
 
-        ``impl.close()`` is always awaited before returning.
+        ``impl.close()`` is always awaited before returning or raising.
         """
         # Pre-seed from cache
         if self._accumulated_stream is not None:
@@ -652,7 +655,7 @@ class PollingSource(RootSource, Generic[T]):
                         "be reconciled with already-emitted rows. Terminating source.",
                         self._source_id,
                     )
-                    return
+                    raise
 
                 except InputValidationError:
                     # Schema mismatches are not transient — propagate immediately.
