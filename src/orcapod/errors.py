@@ -5,6 +5,21 @@ class InputValidationError(Exception):
     """
 
 
+class SchemaInconsistencyError(InputValidationError):
+    """Raised when a data batch has a schema that is incompatible with the expected schema.
+
+    This can happen in two situations:
+
+    - A fetched batch is missing a field declared in ``tag_schema`` or ``data_schema``,
+      or one of those fields has a different type than declared.
+    - Consecutive batches from a ``PollingSource`` have different column sets or
+      column types (schema drift between polls).
+
+    ``SchemaInconsistencyError`` is a subclass of ``InputValidationError`` so existing
+    ``except InputValidationError`` handlers continue to work.
+    """
+
+
 class DuplicateTagError(ValueError):
     """Raised when duplicate tag values are found and skip_duplicates=False"""
 
