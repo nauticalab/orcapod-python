@@ -774,8 +774,8 @@ class TestPollingSourceErrorHandling:
 
     @pytest.mark.asyncio
     async def test_schema_mismatch_raises_on_column_change(self):
-        """A second fetch with a different column set raises InputValidationError."""
-        from orcapod.errors import InputValidationError
+        """A second fetch with a different column set raises SchemaInconsistencyError."""
+        from orcapod.errors import SchemaInconsistencyError
 
         class DriftingImpl:
             _call = 0
@@ -811,7 +811,7 @@ class TestPollingSourceErrorHandling:
             polling_config=PollingConfig(interval=0.05, duration=0.5, max_missed_intervals=50),
         )
 
-        with pytest.raises(InputValidationError, match="schema mismatch"):
+        with pytest.raises(SchemaInconsistencyError, match="schema mismatch"):
             async for _ in src.async_iter_data():
                 pass
 
@@ -907,8 +907,8 @@ class TestPollingSourceSchemaValidation:
         assert len(rows) == 1
 
     def test_declared_tag_schema_mismatch_raises(self):
-        """Missing declared tag field in fetched data raises InputValidationError."""
-        from orcapod.errors import InputValidationError
+        """Missing declared tag field in fetched data raises SchemaInconsistencyError."""
+        from orcapod.errors import SchemaInconsistencyError
         from orcapod.types import Schema
 
         # Declare a tag field "missing_col" that won't appear in the fetched data
@@ -920,12 +920,12 @@ class TestPollingSourceSchemaValidation:
             tag_schema=Schema({"id": int, "missing_col": str}),
         )
 
-        with pytest.raises(InputValidationError, match="tag schema incompatible"):
+        with pytest.raises(SchemaInconsistencyError, match="tag schema incompatible"):
             list(src.iter_data())
 
     def test_declared_data_schema_type_mismatch_raises(self):
-        """A type conflict between declared and actual data schema raises InputValidationError."""
-        from orcapod.errors import InputValidationError
+        """A type conflict between declared and actual data schema raises SchemaInconsistencyError."""
+        from orcapod.errors import SchemaInconsistencyError
         from orcapod.types import Schema
 
         # Declare val as str, but fetched data has val as int
@@ -937,7 +937,7 @@ class TestPollingSourceSchemaValidation:
             data_schema=Schema({"val": str}),  # wrong type
         )
 
-        with pytest.raises(InputValidationError, match="data schema incompatible"):
+        with pytest.raises(SchemaInconsistencyError, match="data schema incompatible"):
             list(src.iter_data())
 
     # -----------------------------------------------------------------------
@@ -946,8 +946,8 @@ class TestPollingSourceSchemaValidation:
 
     @pytest.mark.asyncio
     async def test_combining_type_mismatch_raises(self):
-        """A type change between batches raises InputValidationError on combine."""
-        from orcapod.errors import InputValidationError
+        """A type change between batches raises SchemaInconsistencyError on combine."""
+        from orcapod.errors import SchemaInconsistencyError
 
         class TypeDriftImpl:
             _call = 0
@@ -980,14 +980,14 @@ class TestPollingSourceSchemaValidation:
             polling_config=PollingConfig(interval=0.05, duration=0.5, max_missed_intervals=50),
         )
 
-        with pytest.raises(InputValidationError, match="schema"):
+        with pytest.raises(SchemaInconsistencyError, match="schema"):
             async for _ in src.async_iter_data():
                 pass
 
     @pytest.mark.asyncio
     async def test_combining_column_set_mismatch_raises(self):
-        """Column set changes between batches raise InputValidationError."""
-        from orcapod.errors import InputValidationError
+        """Column set changes between batches raise SchemaInconsistencyError."""
+        from orcapod.errors import SchemaInconsistencyError
 
         class ColumnDriftImpl:
             _call = 0
@@ -1020,7 +1020,7 @@ class TestPollingSourceSchemaValidation:
             polling_config=PollingConfig(interval=0.05, duration=0.5, max_missed_intervals=50),
         )
 
-        with pytest.raises(InputValidationError, match="schema mismatch"):
+        with pytest.raises(SchemaInconsistencyError, match="schema mismatch"):
             async for _ in src.async_iter_data():
                 pass
 

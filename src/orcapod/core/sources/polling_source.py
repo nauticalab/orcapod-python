@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
-from orcapod.errors import CursorInvalidatedError, InputValidationError
+from orcapod.errors import CursorInvalidatedError, InputValidationError, SchemaInconsistencyError
 from orcapod.types import ColumnConfig, Cursor, PollingConfig
 from orcapod.utils import arrow_utils, polars_data_utils
 from orcapod.utils.lazy_module import LazyModule
@@ -86,7 +86,7 @@ def _assert_schema_match(
     actual: Schema,
     source_id: str | None,
 ) -> None:
-    """Raise ``InputValidationError`` when *actual* is incompatible with *declared*.
+    """Raise ``SchemaInconsistencyError`` when *actual* is incompatible with *declared*.
 
     Checks that every field in *declared* is present in *actual* with the same
     type. Extra fields in *actual* are allowed.
@@ -100,7 +100,7 @@ def _assert_schema_match(
         source_id: Source identifier for error messages.
 
     Raises:
-        InputValidationError: If any declared field is absent from *actual* or
+        SchemaInconsistencyError: If any declared field is absent from *actual* or
             has a mismatched type.
     """
     mismatches: list[str] = []
@@ -112,7 +112,7 @@ def _assert_schema_match(
                 f"{field!r}: declared {expected_type!r}, got {actual[field]!r}"
             )
     if mismatches:
-        raise InputValidationError(
+        raise SchemaInconsistencyError(
             f"PollingSource {source_id!r}: {schema_kind} schema incompatible — "
             + "; ".join(mismatches)
         )
@@ -134,9 +134,11 @@ class PollingSource(RootSource, Generic[T]):
 
     The default ``PollingConfig()`` polls every 1 second, runs indefinitely
     (``duration=0`` means run until cancelled), allows up to 5 consecutive
-    missed intervals before terminating, retries up to 3 consecutive
+    overrun intervals before terminating (an overrun interval is one that was
+    consumed while the previous poll iteration was still executing — i.e. the
+    loop fell behind its scheduled tick), retries up to 3 consecutive
     ``poll()``/``fetch()`` errors with 1-second exponential backoff, and
-    resets error and miss counters on every clean tick.
+    resets error and overrun counters on every clean tick.
 
     Args:
         impl: User-supplied ``DynamicSourceProtocol`` implementation that
@@ -150,7 +152,7 @@ class PollingSource(RootSource, Generic[T]):
             raised for out-of-range values.
         tag_schema: Optional expected tag schema. When provided, ``output_schema``
             and ``keys`` can answer without triggering a fetch, and each fetched
-            batch is validated against this schema — ``InputValidationError`` is
+            batch is validated against this schema — ``SchemaInconsistencyError`` is
             raised on any mismatch.
         data_schema: Optional expected data schema. Same behaviour as
             *tag_schema* above.
@@ -474,7 +476,7 @@ class PollingSource(RootSource, Generic[T]):
             stream: The newly built stream whose schema is to be validated.
 
         Raises:
-            InputValidationError: If the stream's tag or data schema is
+            SchemaInconsistencyError: If the stream's tag or data schema is
                 incompatible with the declared schemas.
         """
         actual_tag_schema, actual_data_schema = stream.output_schema()
@@ -496,7 +498,7 @@ class PollingSource(RootSource, Generic[T]):
             new_stream: The newly fetched stream to be appended.
 
         Raises:
-            InputValidationError: If column sets differ or any column type has
+            SchemaInconsistencyError: If column sets differ or any column type has
                 changed between batches.
         """
         old_tag_keys, old_data_keys = existing.keys()
@@ -508,7 +510,7 @@ class PollingSource(RootSource, Generic[T]):
         if old_cols != new_cols:
             added = sorted(new_cols - old_cols)
             removed = sorted(old_cols - new_cols)
-            raise InputValidationError(
+            raise SchemaInconsistencyError(
                 f"PollingSource {self._source_id!r}: schema mismatch between batches — "
                 f"added: {added!r}, removed: {removed!r}"
             )
@@ -531,7 +533,7 @@ class PollingSource(RootSource, Generic[T]):
             A new ``ArrowTableStream`` containing rows from both streams.
 
         Raises:
-            InputValidationError: If the schemas are incompatible (see
+            SchemaInconsistencyError: If the schemas are incompatible (see
                 ``_validate_combining_schemas``).
         """
         from orcapod.core.streams.arrow_table_stream import ArrowTableStream
