@@ -53,6 +53,12 @@ class TestAddNode:
         assert dag.node_attrs("a")["label"] == "original"
         assert dag.node_attrs("a")["node_type"] == "source"
 
+    def test_subsequent_add_node_overwrites_same_key(self) -> None:
+        dag: OrcaDAG[str] = OrcaDAG()
+        dag.add_node("a", label="original")
+        dag.add_node("a", label="updated")  # same key, different value
+        assert dag.node_attrs("a")["label"] == "updated"
+
 
 class TestAddEdge:
     def test_adds_both_nodes_implicitly(self) -> None:
@@ -391,7 +397,7 @@ class TestGenericNodeTypes:
         dag.add_edge(a, b)
         assert a in dag
         assert b in dag
-        assert set(dag.successors(a)) == {b}
+        assert dag.successors(a) == {b}
 
     def test_integer_nodes(self) -> None:
         dag: OrcaDAG[int] = OrcaDAG()
