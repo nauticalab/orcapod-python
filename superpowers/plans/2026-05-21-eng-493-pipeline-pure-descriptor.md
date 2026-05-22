@@ -898,7 +898,37 @@ git commit -m "refactor(nodes): replace SourceSpec with schema-only SourceNode +
 - Modify: `src/orcapod/core/nodes/__init__.py`
 - Create: `tests/test_core/nodes/test_function_node_split.py`
 
-**Strategy:** `FunctionJobNode` is essentially the current `FunctionNode` renamed. The new thin `FunctionNode` just raises `PipelineJobRequiredError` on `iter_data()`. `FunctionNodeBase` holds the shared constructor, properties, and `from_descriptor` logic.
+**Class hierarchy (both siblings inherit from the same base — neither inherits from the other):**
+
+```
+FunctionNodeBase(StreamBase)
+│   __init__(function_pod, input_stream, label, tracker_manager, config, table_scope)
+│   Shared: load_status, producer, data_context, data_context_key, executor,
+│           upstreams property/setter, content_hash() override (read-only mode),
+│           pipeline_hash() override (read-only mode), output_schema(), keys(),
+│           node_identity_path, node_uri, clear_cache() (identity cache only)
+│
+├── FunctionNode(FunctionNodeBase)
+│       __init__: same params as base, no DB params
+│       iter_data(): raises PipelineJobRequiredError
+│       as_node(): returns self
+│
+└── FunctionJobNode(FunctionNodeBase)
+        __init__: adds pipeline_database, result_database params
+        Additional state: _pipeline_database, _cached_function_pod, _output_schema_hash,
+                          _cached_output_datas, _cached_output_table, _cached_content_hash_column
+        attach_databases(), _require_pipeline_database(), _filter_by_content_hash()
+        from_descriptor() classmethod
+        clear_cache() override: clears DB cache state too
+        execute(), execute_data(), iter_data() (two-phase), async methods,
+        get_cached_results(), as_source()
+        as_node(): returns FunctionNode(function_pod, input_stream, label, table_scope)
+```
+
+**Split strategy for the 1466-line current `FunctionNode`:**
+- `FunctionNodeBase` gets everything from the current `__init__` that is *not* DB state, plus all shared properties (lines ~76–534 of current file minus DB fields).
+- `FunctionNode` is a new thin class with no extra state.
+- `FunctionJobNode` gets the remaining DB state + all execution methods (lines ~530–1466 plus DB fields from `__init__`).
 
 - [ ] **Step 2.1: Write failing tests**
 
@@ -1034,70 +1064,121 @@ uv run pytest tests/test_core/nodes/test_function_node_split.py -v 2>&1 | tail -
 
 Expected: `ImportError: cannot import name 'FunctionJobNode'`
 
-- [ ] **Step 2.3: Refactor function_node.py**
+- [ ] **Step 2.3: Rewrite function_node.py with proper base class**
 
-The current `FunctionNode` class (1466 lines) becomes the new `FunctionJobNode`. The new thin `FunctionNode` only raises on `iter_data()`. Both share `FunctionNodeBase` which holds the constructor, identity, properties, and `from_descriptor` logic.
+Restructure `src/orcapod/core/nodes/function_node.py` into three classes. Keep all existing
+logic intact — just redistribute it. The file will still be long; the important thing is
+clean ownership of state and methods.
 
-At the top of `src/orcapod/core/nodes/function_node.py`, after the existing imports, add:
+**a) `FunctionNodeBase(StreamBase)` — new class, replaces the top of the current `FunctionNode`**
 
-```python
-from orcapod.errors import PipelineJobRequiredError
-```
-
-Then restructure the class hierarchy as follows (keeping all existing logic intact):
-
-**a) Rename the current `FunctionNode` class to `FunctionJobNode`** by adding a `FunctionJobNode` alias at the bottom of the file **first**, then creating the new thin `FunctionNode`:
-
-At the **bottom** of `function_node.py`, after the existing `FunctionNode` class, add:
+Carries everything that does not touch a database. Its `__init__` is the current
+`FunctionNode.__init__` with the DB parameters and DB-state initialisation removed:
 
 ```python
-# FunctionJobNode is the DB-backed execution variant of FunctionNode.
-# It is the existing FunctionNode class renamed.
-FunctionJobNode = FunctionNode
+class FunctionNodeBase(StreamBase):
+    """Shared identity, properties, and schema logic for FunctionNode and FunctionJobNode.
 
-
-class FunctionNode(FunctionJobNode):  # type: ignore[no-redef]
-    """Lightweight blueprint node for ``Pipeline`` recording.
-
-    Carries no database references.  Calling ``iter_data()`` raises
-    ``PipelineJobRequiredError`` — wrap the containing ``Pipeline`` in a
-    ``PipelineJob`` to obtain an executable ``FunctionJobNode``.
-
-    All identity methods (``content_hash``, ``pipeline_hash``,
-    ``output_schema``) are inherited from ``FunctionJobNode`` and produce
-    values identical to those of the corresponding ``FunctionJobNode``
-    constructed with the same arguments.
-
-    Args:
-        function_pod: The wrapped function pod.
-        input_stream: The upstream stream (must be a ``SourceNode`` or
-            another blueprint node).
-        label: Optional display label.
+    Neither subtype is a subtype of the other — both inherit directly from this base.
+    This class carries no database references.
     """
+
+    node_type = "function"
 
     def __init__(
         self,
-        function_pod: "FunctionPodProtocol",
-        input_stream: "StreamProtocol",
-        tracker_manager: "TrackerManagerProtocol | None" = None,
+        function_pod: FunctionPodProtocol,
+        input_stream: StreamProtocol,
+        tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
-        config: "Config | None" = None,
+        config: Config | None = None,
+        table_scope: Literal["pipeline_hash", "content_hash"] = "pipeline_hash",
     ) -> None:
-        # Construct without any DB parameters
-        super().__init__(
-            function_pod=function_pod,
-            input_stream=input_stream,
-            tracker_manager=tracker_manager,
-            label=label,
-            config=config,
+        if tracker_manager is None:
+            tracker_manager = DEFAULT_TRACKER_MANAGER
+        self.tracker_manager = tracker_manager
+        self._data_function = function_pod.data_function
+        self._function_pod = function_pod
+        super().__init__(label=label, config=config)
+
+        # Schema validation (skip for UNAVAILABLE streams)
+        from orcapod.pipeline.serialization import LoadStatus
+        _stream_unavailable = (
+            hasattr(input_stream, "load_status")
+            and input_stream.load_status == LoadStatus.UNAVAILABLE
         )
+        if not _stream_unavailable:
+            _, incoming_data_types = input_stream.output_schema()
+            expected_data_schema = self._data_function.input_data_schema
+            if not schema_utils.check_schema_compatibility(
+                incoming_data_types, expected_data_schema
+            ):
+                raise ValueError(
+                    f"Incoming data type {incoming_data_types} from {input_stream} "
+                    f"is not compatible with expected input schema {expected_data_schema}"
+                )
+
+        self._input_stream = input_stream
+
+        if table_scope not in ("pipeline_hash", "content_hash"):
+            raise ValueError(
+                f"Unknown table_scope {table_scope!r}. "
+                "Expected one of: 'pipeline_hash', 'content_hash'."
+            )
+        self._table_scope = table_scope
+        self._node_identity_path_cache: tuple[str, ...] | None = None
+
+        # Descriptor fields for read-only / UNAVAILABLE deserialized nodes
+        from orcapod.pipeline.serialization import LoadStatus
+        self._load_status: LoadStatus = LoadStatus.FULL
+        self._stored_content_hash: str | None = None
+        self._stored_pipeline_hash: str | None = None
+        self._stored_schema: dict = {}
+        self._stored_node_uri: tuple[str, ...] = ()
+        self._stored_pipeline_path: tuple[str, ...] = ()
+        self._stored_result_record_path: tuple[str, ...] = ()
+        self._descriptor: dict = {}
+
+    # Copy these shared properties verbatim from the current FunctionNode:
+    #   load_status, producer, data_context, data_context_key, executor (+ setter),
+    #   upstreams (+ setter), content_hash() override, pipeline_hash() override,
+    #   output_schema(), keys(), node_identity_path, node_uri
+    #
+    # clear_cache() in base clears only the identity path cache:
+
+    def clear_cache(self) -> None:
+        self._node_identity_path_cache = None
+        self._update_modified_time()
+```
+
+**b) `FunctionNode(FunctionNodeBase)` — thin blueprint node**
+
+```python
+class FunctionNode(FunctionNodeBase):
+    """Lightweight blueprint node for ``Pipeline`` recording.
+
+    Carries no database references.  ``iter_data()`` raises
+    ``PipelineJobRequiredError``.  Use ``PipelineJob.from_pipeline()`` to
+    obtain an executable ``FunctionJobNode``.
+
+    Args:
+        function_pod: The wrapped function pod.
+        input_stream: Upstream stream (``SourceNode`` or another blueprint node).
+        tracker_manager: Optional tracker manager override.
+        label: Optional display label.
+        config: Optional node config.
+        table_scope: DB table scoping strategy (preserved for hash stability when
+            later converted to a ``FunctionJobNode``).
+    """
 
     def iter_data(self):
-        """Raise PipelineJobRequiredError — blueprint node cannot produce data.
+        """Raise PipelineJobRequiredError — blueprint nodes cannot produce data.
 
         Raises:
             PipelineJobRequiredError: Always.
         """
+        from orcapod.errors import PipelineJobRequiredError
+
         raise PipelineJobRequiredError(
             f"FunctionNode '{self.label}' is a blueprint node and cannot produce data. "
             "Wrap the containing Pipeline in a PipelineJob to execute:\n"
@@ -1106,32 +1187,99 @@ class FunctionNode(FunctionJobNode):  # type: ignore[no-redef]
         )
 
     def as_node(self) -> "FunctionNode":
-        """Return self — already a lightweight node.
-
-        Returns:
-            ``self``
-        """
+        """Return self — already a lightweight blueprint node."""
         return self
-
-
-# Patch FunctionJobNode.as_node() to return the lightweight FunctionNode variant
-def _function_job_node_as_node(self) -> "FunctionNode":
-    """Return a lightweight ``FunctionNode`` with the same identity.
-
-    Returns:
-        A new ``FunctionNode`` with the same function_pod, input_stream, and label.
-    """
-    return FunctionNode(
-        function_pod=self._function_pod,
-        input_stream=self._input_stream,
-        label=self._label,
-    )
-
-
-FunctionJobNode.as_node = _function_job_node_as_node  # type: ignore[method-assign]
 ```
 
-> **Note on architecture:** This "alias + subclass" approach avoids duplicating 1400 lines of code. `FunctionJobNode` = the existing class unchanged. `FunctionNode` = thin subclass that overrides only `__init__` and `iter_data`. Both have identical `content_hash()` / `pipeline_hash()` because `__init__` sets identical state.
+**c) `FunctionJobNode(FunctionNodeBase)` — DB-backed execution node**
+
+```python
+class FunctionJobNode(FunctionNodeBase):
+    """DB-backed execution node for ``PipelineJob`` graphs.
+
+    Adds database references and all execution logic on top of
+    ``FunctionNodeBase``.  ``FunctionNode`` and ``FunctionJobNode``
+    are siblings — neither inherits from the other.
+
+    Args:
+        function_pod: The wrapped function pod.
+        input_stream: Upstream stream (``SourceJobNode`` or another job node).
+        tracker_manager: Optional tracker manager override.
+        label: Optional display label.
+        config: Optional node config.
+        table_scope: DB table scoping strategy.
+        pipeline_database: Optional database for pipeline records.
+        result_database: Optional database for cached results.
+    """
+
+    def __init__(
+        self,
+        function_pod: FunctionPodProtocol,
+        input_stream: StreamProtocol,
+        tracker_manager: TrackerManagerProtocol | None = None,
+        label: str | None = None,
+        config: Config | None = None,
+        table_scope: Literal["pipeline_hash", "content_hash"] = "pipeline_hash",
+        pipeline_database: ArrowDatabaseProtocol | None = None,
+        result_database: ArrowDatabaseProtocol | None = None,
+    ) -> None:
+        super().__init__(
+            function_pod=function_pod,
+            input_stream=input_stream,
+            tracker_manager=tracker_manager,
+            label=label,
+            config=config,
+            table_scope=table_scope,
+        )
+        # DB-specific state
+        self._cached_output_datas: dict[str, tuple[TagProtocol, DataProtocol | None]] = {}
+        self._cached_output_table: pa.Table | None = None
+        self._cached_content_hash_column: pa.Array | None = None
+        self._pipeline_database: ArrowDatabaseProtocol | None = None
+        self._cached_function_pod: CachedFunctionPod | None = None
+        self._output_schema_hash: str | None = None
+
+        if pipeline_database is not None:
+            self.attach_databases(
+                pipeline_database=pipeline_database,
+                result_database=result_database,
+            )
+
+    def clear_cache(self) -> None:
+        """Clear all caches including DB-backed output cache."""
+        self._cached_output_datas.clear()
+        self._cached_output_table = None
+        self._cached_content_hash_column = None
+        self._node_identity_path_cache = None
+        self._update_modified_time()
+
+    def as_node(self) -> FunctionNode:
+        """Return a lightweight ``FunctionNode`` with the same identity.
+
+        Returns:
+            A new ``FunctionNode`` carrying the same function_pod, input_stream,
+            label, and table_scope — and therefore identical content_hash() and
+            pipeline_hash() values.
+        """
+        return FunctionNode(
+            function_pod=self._function_pod,
+            input_stream=self._input_stream,
+            label=self._label,
+            table_scope=self._table_scope,
+        )
+
+    # Move these verbatim from the current FunctionNode (they already exist there):
+    #   attach_databases(), _require_pipeline_database(), _filter_by_content_hash(),
+    #   from_descriptor() classmethod, execute_data(), execute(), iter_data() (two-phase),
+    #   _process_data_internal(), get_cached_results(), as_source(), async methods.
+```
+
+> **Implementation note:** The bulk of `FunctionJobNode` is a verbatim move of the current
+> `FunctionNode`'s DB methods. No logic changes are needed — only re-homing the code into
+> the new class and adjusting the `__init__` to call `super().__init__()` without DB params.
+> Any place that currently says `isinstance(node, FunctionNode)` in execution-path code
+> should be updated to `isinstance(node, FunctionJobNode)` where the intent is "DB-capable
+> node"; use `isinstance(node, FunctionNodeBase)` where the intent is "any function node".
 
 - [ ] **Step 2.4: Run new tests**
 
@@ -1141,12 +1289,33 @@ uv run pytest tests/test_core/nodes/test_function_node_split.py -v
 
 Expected: All 7 tests pass.
 
-- [ ] **Step 2.5: Update nodes/__init__.py**
+- [ ] **Step 2.5: Verify isinstance hierarchy is correct**
+
+```bash
+uv run python -c "
+from orcapod.core.nodes.function_node import FunctionNode, FunctionJobNode, FunctionNodeBase
+from orcapod.core.streams.base import StreamBase
+
+# Neither should be a subtype of the other
+assert not issubclass(FunctionNode, FunctionJobNode), 'FunctionNode must NOT inherit from FunctionJobNode'
+assert not issubclass(FunctionJobNode, FunctionNode), 'FunctionJobNode must NOT inherit from FunctionNode'
+
+# Both should share the base
+assert issubclass(FunctionNode, FunctionNodeBase)
+assert issubclass(FunctionJobNode, FunctionNodeBase)
+assert issubclass(FunctionNodeBase, StreamBase)
+print('isinstance hierarchy: CORRECT')
+"
+```
+
+Expected: `isinstance hierarchy: CORRECT`
+
+- [ ] **Step 2.6: Update nodes/__init__.py**
 
 ```python
 from typing import TypeAlias
 
-from .function_node import FunctionJobNode, FunctionNode
+from .function_node import FunctionJobNode, FunctionNode, FunctionNodeBase
 from .operator_node import OperatorNode
 from .source_node import SourceJobNode, SourceNode, SourceNodeBase
 
@@ -1156,6 +1325,7 @@ JobNode: TypeAlias = SourceJobNode | FunctionJobNode
 __all__ = [
     "FunctionJobNode",
     "FunctionNode",
+    "FunctionNodeBase",
     "GraphNode",
     "JobNode",
     "OperatorNode",
@@ -1165,21 +1335,23 @@ __all__ = [
 ]
 ```
 
-- [ ] **Step 2.6: Run full pipeline test suite**
+- [ ] **Step 2.7: Run full pipeline test suite**
 
 ```bash
 uv run pytest tests/test_pipeline/ tests/test_core/ -v --tb=short 2>&1 | tail -40
 ```
 
-Expected: All tests pass. If any tests create `FunctionNode(..., pipeline_database=...)` directly, those still work because `FunctionNode` subclasses `FunctionJobNode` and passes kwargs up.
+Any test that instantiated `FunctionNode(..., pipeline_database=...)` directly will now
+fail because `FunctionNode` no longer accepts DB params. Update those call sites to use
+`FunctionJobNode` instead.
 
-- [ ] **Step 2.7: Commit**
+- [ ] **Step 2.8: Commit**
 
 ```bash
 git add src/orcapod/core/nodes/function_node.py \
         src/orcapod/core/nodes/__init__.py \
         tests/test_core/nodes/test_function_node_split.py
-git commit -m "refactor(nodes): split FunctionNode into thin FunctionNode + FunctionJobNode"
+git commit -m "refactor(nodes): split FunctionNode → FunctionNodeBase + FunctionNode + FunctionJobNode"
 ```
 
 ---
@@ -1191,7 +1363,34 @@ git commit -m "refactor(nodes): split FunctionNode into thin FunctionNode + Func
 - Modify: `src/orcapod/core/nodes/__init__.py`
 - Create: `tests/test_core/nodes/test_operator_node_split.py`
 
-Same pattern as Task 2: `OperatorJobNode` = existing `OperatorNode` renamed. Thin `OperatorNode` overrides `iter_data()` to raise `PipelineJobRequiredError`.
+**Class hierarchy (same sibling pattern as Task 2 — neither inherits from the other):**
+
+```
+OperatorNodeBase(StreamBase)
+│   __init__(operator, input_streams, label, tracker_manager, config, table_scope)
+│   Shared: load_status, identity_structure(), pipeline_identity_structure(),
+│           content_hash() override, pipeline_hash() override, producer,
+│           data_context, data_context_key, upstreams property/setter,
+│           keys(), output_schema(), node_identity_path, node_uri
+│
+├── OperatorNode(OperatorNodeBase)
+│       iter_data(): raises PipelineJobRequiredError
+│       as_node(): returns self
+│
+└── OperatorJobNode(OperatorNodeBase)
+        __init__: adds pipeline_database, cache_mode params
+        Additional state: _pipeline_database, _cache_mode,
+                          _cached_output_stream, _cached_output_table
+        attach_databases(), from_descriptor() classmethod,
+        execute(), run(), iter_data() (cache-mode aware),
+        as_table(), get_all_records(), as_source(), async methods
+        as_node(): returns OperatorNode(operator, input_streams, label, table_scope)
+```
+
+**Split strategy for the current 903-line `OperatorNode`:**
+- `OperatorNodeBase` gets everything from `__init__` that is not DB state, plus all shared properties/identity methods.
+- `OperatorNode` is a thin class with no extra state.
+- `OperatorJobNode` gets the DB state + all execution methods.
 
 - [ ] **Step 3.1: Write failing tests**
 
@@ -1281,49 +1480,82 @@ uv run pytest tests/test_core/nodes/test_operator_node_split.py -v 2>&1 | tail -
 
 Expected: `ImportError: cannot import name 'OperatorJobNode'`
 
-- [ ] **Step 3.3: Refactor operator_node.py**
+- [ ] **Step 3.3: Rewrite operator_node.py with proper base class**
 
-At the bottom of `src/orcapod/core/nodes/operator_node.py`, add:
+Restructure `src/orcapod/core/nodes/operator_node.py` into three classes following the
+same pattern as Task 2.
+
+**a) `OperatorNodeBase(StreamBase)` — new class**
 
 ```python
-# OperatorJobNode is the DB-backed execution variant of OperatorNode.
-# It is the existing OperatorNode class renamed.
-OperatorJobNode = OperatorNode
+class OperatorNodeBase(StreamBase):
+    """Shared identity, properties, and schema logic for OperatorNode and OperatorJobNode.
 
-
-class OperatorNode(OperatorJobNode):  # type: ignore[no-redef]
-    """Lightweight blueprint node for ``Pipeline`` recording.
-
-    Carries no database references.  Calling ``iter_data()`` raises
-    ``PipelineJobRequiredError``.  All identity methods are inherited from
-    ``OperatorJobNode`` and produce identical hashes.
-
-    Args:
-        operator: The wrapped operator pod.
-        input_streams: Upstream streams (``SourceNode`` instances or other
-            blueprint nodes).
-        label: Optional display label.
+    Neither subtype is a subtype of the other — both inherit directly from this base.
+    This class carries no database references.
     """
+
+    node_type = "operator"
+    HASH_COLUMN_NAME = "_record_hash"
 
     def __init__(
         self,
-        operator: "OperatorPodProtocol",
-        input_streams: "tuple[StreamProtocol, ...] | list[StreamProtocol]",
-        tracker_manager: "TrackerManagerProtocol | None" = None,
+        operator: OperatorPodProtocol,
+        input_streams: tuple[StreamProtocol, ...] | list[StreamProtocol],
+        tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
-        config: "Config | None" = None,
+        config: Config | None = None,
+        table_scope: Literal["pipeline_hash", "content_hash"] = "pipeline_hash",
     ) -> None:
-        # Construct without any DB parameters
-        super().__init__(
-            operator=operator,
-            input_streams=input_streams,
-            tracker_manager=tracker_manager,
-            label=label,
-            config=config,
-        )
+        if tracker_manager is None:
+            tracker_manager = DEFAULT_TRACKER_MANAGER
+        self.tracker_manager = tracker_manager
+        self._operator = operator
+        self._input_streams = tuple(input_streams)
+        super().__init__(label=label, config=config)
+
+        # Eager input validation
+        self._operator.validate_inputs(*self._input_streams)
+
+        if table_scope not in ("pipeline_hash", "content_hash"):
+            raise ValueError(
+                f"Unknown table_scope {table_scope!r}. "
+                "Expected one of: 'pipeline_hash', 'content_hash'."
+            )
+        self._table_scope = table_scope
+        self._node_identity_path_cache: tuple[str, ...] | None = None
+        self._set_modified_time(None)
+
+        # Descriptor fields for read-only / UNAVAILABLE deserialized nodes
+        from orcapod.pipeline.serialization import LoadStatus
+        self._load_status: LoadStatus = LoadStatus.FULL
+        self._stored_content_hash: str | None = None
+        self._stored_pipeline_hash: str | None = None
+        self._stored_schema: dict = {}
+        self._stored_node_uri: tuple[str, ...] = ()
+        self._stored_pipeline_path: tuple[str, ...] = ()
+        self._descriptor: dict = {}
+
+    # Copy these verbatim from the current OperatorNode (they already exist there):
+    #   load_status property, identity_structure(), pipeline_identity_structure(),
+    #   content_hash() override, pipeline_hash() override,
+    #   producer, data_context, data_context_key, upstreams property/setter,
+    #   keys(), output_schema(), node_identity_path, node_uri
+```
+
+**b) `OperatorNode(OperatorNodeBase)` — thin blueprint node**
+
+```python
+class OperatorNode(OperatorNodeBase):
+    """Lightweight blueprint node for ``Pipeline`` recording.
+
+    Carries no database references.  ``iter_data()`` raises
+    ``PipelineJobRequiredError``.  Use ``PipelineJob.from_pipeline()`` to
+    obtain an executable ``OperatorJobNode``.
+    """
 
     def iter_data(self):
-        """Raise PipelineJobRequiredError — blueprint node cannot produce data.
+        """Raise PipelineJobRequiredError — blueprint nodes cannot produce data.
 
         Raises:
             PipelineJobRequiredError: Always.
@@ -1338,36 +1570,113 @@ class OperatorNode(OperatorJobNode):  # type: ignore[no-redef]
         )
 
     def as_node(self) -> "OperatorNode":
-        """Return self — already a lightweight node."""
+        """Return self — already a lightweight blueprint node."""
         return self
-
-
-# Patch OperatorJobNode.as_node() to return the lightweight OperatorNode variant
-def _operator_job_node_as_node(self) -> "OperatorNode":
-    """Return a lightweight ``OperatorNode`` with the same identity."""
-    return OperatorNode(
-        operator=self._operator,
-        input_streams=self._input_streams,
-        label=self._label,
-    )
-
-
-OperatorJobNode.as_node = _operator_job_node_as_node  # type: ignore[method-assign]
 ```
 
-Also add this import at the top of the file (with the other imports):
+**c) `OperatorJobNode(OperatorNodeBase)` — DB-backed execution node**
 
 ```python
-# (PipelineJobRequiredError is imported lazily inside iter_data to avoid circular import)
+class OperatorJobNode(OperatorNodeBase):
+    """DB-backed execution node for ``PipelineJob`` graphs.
+
+    ``OperatorNode`` and ``OperatorJobNode`` are siblings — neither inherits
+    from the other.
+
+    Args:
+        operator: The wrapped operator pod.
+        input_streams: Upstream job nodes.
+        tracker_manager: Optional tracker manager override.
+        label: Optional display label.
+        config: Optional node config.
+        table_scope: DB table scoping strategy.
+        pipeline_database: Optional database for pipeline records.
+        cache_mode: Caching behaviour (OFF / LOG / REPLAY).
+    """
+
+    def __init__(
+        self,
+        operator: OperatorPodProtocol,
+        input_streams: tuple[StreamProtocol, ...] | list[StreamProtocol],
+        tracker_manager: TrackerManagerProtocol | None = None,
+        label: str | None = None,
+        config: Config | None = None,
+        table_scope: Literal["pipeline_hash", "content_hash"] = "pipeline_hash",
+        pipeline_database: ArrowDatabaseProtocol | None = None,
+        cache_mode: CacheMode = CacheMode.OFF,
+    ) -> None:
+        super().__init__(
+            operator=operator,
+            input_streams=input_streams,
+            tracker_manager=tracker_manager,
+            label=label,
+            config=config,
+            table_scope=table_scope,
+        )
+        # DB-specific state
+        self._cached_output_stream: StreamProtocol | None = None
+        self._cached_output_table: pa.Table | None = None
+        self._pipeline_database: ArrowDatabaseProtocol | None = None
+        self._cache_mode = CacheMode.OFF
+
+        if pipeline_database is not None:
+            self.attach_databases(
+                pipeline_database=pipeline_database,
+                cache_mode=cache_mode,
+            )
+
+    def as_node(self) -> OperatorNode:
+        """Return a lightweight ``OperatorNode`` with the same identity.
+
+        Returns:
+            A new ``OperatorNode`` carrying the same operator, input_streams,
+            label, and table_scope — with identical content_hash() and
+            pipeline_hash() values.
+        """
+        return OperatorNode(
+            operator=self._operator,
+            input_streams=self._input_streams,
+            label=self._label,
+            table_scope=self._table_scope,
+        )
+
+    # Move these verbatim from the current OperatorNode (they already exist there):
+    #   attach_databases(), from_descriptor() classmethod,
+    #   execute(), run(), iter_data() (cache-mode aware),
+    #   as_table(), get_all_records(), as_source(), async methods.
 ```
 
-- [ ] **Step 3.4: Update nodes/__init__.py to export OperatorJobNode**
+> **Implementation note:** Same approach as Task 2. The bulk of `OperatorJobNode` is a
+> verbatim move of the current `OperatorNode`'s DB methods. Update any `isinstance(node,
+> OperatorNode)` in execution-path code to `isinstance(node, OperatorJobNode)` where the
+> intent is "DB-capable node"; use `isinstance(node, OperatorNodeBase)` where the intent
+> is "any operator node".
+
+- [ ] **Step 3.4: Verify isinstance hierarchy is correct**
+
+```bash
+uv run python -c "
+from orcapod.core.nodes.operator_node import OperatorNode, OperatorJobNode, OperatorNodeBase
+from orcapod.core.streams.base import StreamBase
+
+assert not issubclass(OperatorNode, OperatorJobNode), 'OperatorNode must NOT inherit from OperatorJobNode'
+assert not issubclass(OperatorJobNode, OperatorNode), 'OperatorJobNode must NOT inherit from OperatorNode'
+assert issubclass(OperatorNode, OperatorNodeBase)
+assert issubclass(OperatorJobNode, OperatorNodeBase)
+assert issubclass(OperatorNodeBase, StreamBase)
+print('isinstance hierarchy: CORRECT')
+"
+```
+
+Expected: `isinstance hierarchy: CORRECT`
+
+- [ ] **Step 3.5: Update nodes/__init__.py to export all new types**
 
 ```python
 from typing import TypeAlias
 
-from .function_node import FunctionJobNode, FunctionNode
-from .operator_node import OperatorJobNode, OperatorNode
+from .function_node import FunctionJobNode, FunctionNode, FunctionNodeBase
+from .operator_node import OperatorJobNode, OperatorNode, OperatorNodeBase
 from .source_node import SourceJobNode, SourceNode, SourceNodeBase
 
 GraphNode: TypeAlias = SourceNode | FunctionNode | OperatorNode
@@ -1376,31 +1685,34 @@ JobNode: TypeAlias = SourceJobNode | FunctionJobNode | OperatorJobNode
 __all__ = [
     "FunctionJobNode",
     "FunctionNode",
+    "FunctionNodeBase",
     "GraphNode",
     "JobNode",
     "OperatorJobNode",
     "OperatorNode",
+    "OperatorNodeBase",
     "SourceJobNode",
     "SourceNode",
     "SourceNodeBase",
 ]
 ```
 
-- [ ] **Step 3.5: Run new and existing tests**
+- [ ] **Step 3.6: Run new and existing tests**
 
 ```bash
 uv run pytest tests/test_core/nodes/test_operator_node_split.py tests/test_pipeline/ -v --tb=short 2>&1 | tail -40
 ```
 
-Expected: All pass.
+Any test that instantiated `OperatorNode(..., pipeline_database=...)` directly will now
+fail — update those to `OperatorJobNode` instead.
 
-- [ ] **Step 3.6: Commit**
+- [ ] **Step 3.7: Commit**
 
 ```bash
 git add src/orcapod/core/nodes/operator_node.py \
         src/orcapod/core/nodes/__init__.py \
         tests/test_core/nodes/test_operator_node_split.py
-git commit -m "refactor(nodes): split OperatorNode into thin OperatorNode + OperatorJobNode"
+git commit -m "refactor(nodes): split OperatorNode → OperatorNodeBase + OperatorNode + OperatorJobNode"
 ```
 
 ---
