@@ -1,8 +1,8 @@
-"""Lean directed acyclic graph for OrcaPod pipeline topology.
+"""Lean directed acyclic graph for Orcapod pipeline topology.
 
-Replaces ``networkx.DiGraph`` with a minimal, zero-dependency implementation
-covering exactly the nine API shapes OrcaPod requires. Backed by plain dicts
-and ``graphlib.TopologicalSorter`` from the Python standard library.
+Replaces `networkx.DiGraph` with a minimal, zero-dependency implementation
+covering exactly the nine API shapes Orcapod requires. Backed by plain dicts
+and `graphlib.TopologicalSorter` from the Python standard library.
 
 See superpowers/specs/2026-05-21-networkx-replacement-design.md for the full
 rationale and migration map.
@@ -28,11 +28,11 @@ __all__ = ["Comparable", "OrcaDAG", "CycleError"]
 class Comparable(Hashable, Protocol):
     """Protocol for node types that support both hashing and ordering.
 
-    Nodes must be hashable to serve as dict keys and must support ``<``
-    for deterministic topological sort via ``heapq``.
+    Nodes must be hashable to serve as dict keys and must support `<`
+    for deterministic topological sort via `heapq`.
 
-    Any type that implements ``__hash__`` (or inherits it from ``object``)
-    and ``__lt__`` satisfies this protocol — e.g. ``str``, ``int``, or a
+    Any type that implements `__hash__` (or inherits it from `object`)
+    and `__lt__` satisfies this protocol — e.g. `str`, `int`, or a
     custom dataclass with those methods defined.
     """
 
@@ -43,16 +43,16 @@ NodeT = TypeVar("NodeT", bound=Comparable)
 
 
 class OrcaDAG(Generic[NodeT]):
-    """Minimal directed acyclic graph for OrcaPod pipeline topology.
+    """Minimal directed acyclic graph for Orcapod pipeline topology.
 
-    Covers exactly the operations OrcaPod needs — DAG construction, node
+    Covers exactly the operations Orcapod needs — DAG construction, node
     attribute storage, basic traversal, and topological sort.  No external
-    dependencies; backed entirely by plain dicts and stdlib ``graphlib``.
+    dependencies; backed entirely by plain dicts and stdlib `graphlib`.
 
     Args:
-        NodeT: The node type.  Must satisfy ``Comparable`` — i.e. be hashable
-            and support ``<`` comparison (e.g. ``str``, ``int``, or a custom
-            type that implements ``__hash__`` and ``__lt__``).
+        NodeT: The node type.  Must satisfy `Comparable` — i.e. be hashable
+            and support `<` comparison (e.g. `str`, `int`, or a custom
+            type that implements `__hash__` and `__lt__`).
     """
 
     def __init__(self) -> None:
@@ -159,7 +159,7 @@ class OrcaDAG(Generic[NodeT]):
     def successors(self, node: NodeT) -> frozenset[NodeT]:
         """Return the immediate successors (outgoing neighbours) of *node*.
 
-        Returns a snapshot ``frozenset`` so callers cannot mutate internal
+        Returns a snapshot `frozenset` so callers cannot mutate internal
         graph state through the returned value.
 
         Args:
@@ -194,10 +194,10 @@ class OrcaDAG(Generic[NodeT]):
     def topological_sort(self) -> list[NodeT]:
         """Return nodes in a valid topological order.
 
-        Uses ``graphlib.TopologicalSorter`` (Python stdlib).  The order is
-        stable within a single run but is **not** guaranteed to be
+        Uses `graphlib.TopologicalSorter` (Python stdlib).  The order is
+        stable within a single run but is not guaranteed to be
         deterministic across Python versions or between runs.  Use
-        :meth:`topological_sort_deterministic` when a stable, reproducible
+        `topological_sort_deterministic` when a stable, reproducible
         order is required (e.g. for content hashing).
 
         Returns:
@@ -223,11 +223,11 @@ class OrcaDAG(Generic[NodeT]):
 
         Implements Kahn's algorithm with a min-heap frontier so that the
         output ordering is stable across runs and Python versions.  Because
-        ``NodeT`` is bounded to ``Comparable``, ``heapq`` operations and
-        ``sorted()`` are fully type-safe with no suppression needed.
+        `NodeT` is bounded to `Comparable`, `heapq` operations and
+        `sorted()` are fully type-safe with no suppression needed.
 
         This is a direct port of the existing Kahn's implementation already
-        present in ``graph.py`` (``_compute_pipeline_snapshot_hash``), moved
+        present in `graph.py` (`_compute_pipeline_snapshot_hash`), moved
         here so it lives alongside the graph abstraction it operates on.
 
         Returns:
