@@ -433,6 +433,8 @@ class SourceJobNode(SourceNodeBase):
             ``SourceNodeBase.content_hash(hasher)``.
         """
         if self._concrete is not None:
+            if hasher is None:
+                hasher = self.data_context.semantic_hasher
             return self._concrete.content_hash(hasher)
         return super().content_hash(hasher)
 
