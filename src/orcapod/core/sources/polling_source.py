@@ -164,6 +164,9 @@ class PollingSource(RootSource, Generic[T]):
     Example::
 
         class MyDBSource:
+            def __init__(self, db_url):
+                self._db_url = db_url
+
             def identity(self):
                 return ("MyDBSource", self._db_url)
 
