@@ -228,6 +228,31 @@ class TestSuccessors:
             list(dag.successors("nonexistent"))
 
 
+class TestPredecessors:
+    def test_returns_direct_predecessors(self) -> None:
+        dag: OrcaDAG[str] = OrcaDAG()
+        dag.add_edge("a", "c")
+        dag.add_edge("b", "c")
+        assert dag.predecessors("c") == {"a", "b"}
+
+    def test_root_node_has_no_predecessors(self) -> None:
+        dag: OrcaDAG[str] = OrcaDAG()
+        dag.add_edge("a", "b")
+        assert dag.predecessors("a") == frozenset()
+
+    def test_returns_frozenset_snapshot(self) -> None:
+        """Returned frozenset must not expose internal state to mutation."""
+        dag: OrcaDAG[str] = OrcaDAG()
+        dag.add_edge("a", "b")
+        snap = dag.predecessors("b")
+        assert isinstance(snap, frozenset)
+
+    def test_raises_key_error_for_missing_node(self) -> None:
+        dag: OrcaDAG[str] = OrcaDAG()
+        with pytest.raises(KeyError):
+            dag.predecessors("nonexistent")
+
+
 class TestInDegree:
     def test_source_node_has_in_degree_zero(self) -> None:
         dag: OrcaDAG[str] = OrcaDAG()
