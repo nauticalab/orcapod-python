@@ -290,7 +290,7 @@ class SourceNodeBase(TraceableBase, ABC):
             UnboundSourceError: When no concrete data is available.
         """
         node_label = self.label
-        node_hash = ""
+        node_hash = self.content_hash().to_string()
         if observer is not None:
             observer.on_node_start(node_label, node_hash)
         result = list(self.iter_data())
@@ -314,7 +314,7 @@ class SourceNodeBase(TraceableBase, ABC):
             UnboundSourceError: When no concrete data is available.
         """
         node_label = self.label
-        node_hash = ""
+        node_hash = self.content_hash().to_string()
         try:
             if observer is not None:
                 observer.on_node_start(node_label, node_hash)
@@ -433,8 +433,6 @@ class SourceJobNode(SourceNodeBase):
             ``SourceNodeBase.content_hash(hasher)``.
         """
         if self._concrete is not None:
-            if hasher is None:
-                hasher = self.data_context.semantic_hasher
             return self._concrete.content_hash(hasher)
         return super().content_hash(hasher)
 

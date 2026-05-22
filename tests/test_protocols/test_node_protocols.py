@@ -5,7 +5,7 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from orcapod.core.nodes import FunctionNode, OperatorNode, SourceNode
+from orcapod.core.nodes import FunctionNode, OperatorNode
 from orcapod.core.nodes.source_node import SourceJobNode
 from orcapod.protocols.node_protocols import (
     is_function_node,

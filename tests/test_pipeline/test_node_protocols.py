@@ -145,7 +145,6 @@ class TestTypeGuardDispatch:
 import pyarrow as pa
 from orcapod.core.sources import ArrowTableSource
 from orcapod.core.nodes.source_node import SourceJobNode
-from orcapod.types import Schema
 
 
 def _make_source_job_node(table, tag_col="key"):

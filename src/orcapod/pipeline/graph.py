@@ -38,7 +38,7 @@ class Pipeline(AbstractPipelineBase):
     recorded into an internal graph. On context exit, ``compile()`` rewires
     the graph into a frozen DAG:
 
-    - Leaf ``SourceSpec`` declarations → ``SourceNode`` (schema-only placeholders)
+    - Leaf ``SourceNode`` declarations (schema-only placeholders)
     - Function pod invocations → ``FunctionNode``
     - Operator invocations → ``OperatorNode``
 
@@ -162,8 +162,8 @@ class Pipeline(AbstractPipelineBase):
 
         Walks the graph in topological order and:
 
-        - Verifies leaf streams are ``SourceSpec`` instances (raises ``ValueError`` otherwise)
-        - Wraps ``SourceSpec`` leaves in ``SourceNode``
+        - Verifies leaf streams are ``SourceNode`` instances (raises ``ValueError`` otherwise)
+        - Leaves ``SourceNode`` leaves as-is (no wrapping needed)
         - Rewires upstream references on recorded ``FunctionNode`` /
           ``OperatorNode`` to point at persistent (compiled) nodes
 
@@ -307,7 +307,7 @@ class Pipeline(AbstractPipelineBase):
     def save(self, path: str | Path) -> None:
         """Serialize the pure pipeline blueprint to a JSON file.
 
-        Saves topology and SourceSpec declarations only — no databases,
+        Saves topology and SourceNode declarations only — no databases,
         no execution context, no run metadata.
 
         Args:
@@ -397,7 +397,7 @@ class Pipeline(AbstractPipelineBase):
     def load(cls, path: str | Path) -> "Pipeline":
         """Deserialize a pure pipeline blueprint from a JSON file.
 
-        Reconstructs topology and SourceSpec declarations. The loaded
+        Reconstructs topology and SourceNode declarations. The loaded
         pipeline is topology-only — to run it, use
         ``PipelineJob.from_pipeline(pipeline, sources=..., store=...)``.
 
@@ -405,7 +405,7 @@ class Pipeline(AbstractPipelineBase):
             path: Path to the JSON file produced by :meth:`save`.
 
         Returns:
-            A compiled ``Pipeline`` instance with SourceSpec leaf nodes.
+            A compiled ``Pipeline`` instance with SourceNode leaf nodes.
 
         Raises:
             ValueError: If the file's format version is unsupported.
