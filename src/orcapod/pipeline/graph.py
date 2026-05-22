@@ -370,7 +370,9 @@ class Pipeline(AbstractPipelineBase):
             if isinstance(node, SourceNodeClass):
                 descriptor["source_config"] = {
                     "source_type": "node",
-                    "node_name": node.name,
+                    "name": node.name,
+                    "tag_schema": serialize_schema(node.tag_schema, type_converter),
+                    "data_schema": serialize_schema(node.data_schema, type_converter),
                 }
                 descriptor["reconstructable"] = True
 
@@ -464,26 +466,40 @@ class Pipeline(AbstractPipelineBase):
             source_config = descriptor.get("source_config") or {}
 
             if node_type == "source":
-                tag_schema = Schema(deserialize_schema(descriptor["output_schema"]["tag"]))
-                data_schema = Schema(deserialize_schema(descriptor["output_schema"]["data"]))
-                # Support both old "spec" format and new "node" format
-                if source_config.get("source_type") == "node":
-                    node_name = source_config["node_name"]
-                elif source_config.get("source_type") == "spec":
-                    # Legacy format compatibility: spec_name becomes node name
-                    node_name = source_config["spec_name"]
+                source_type = source_config.get("source_type")
+                if source_type in ("node", "spec"):
+                    # "node" is the v0.3 format; "spec" is the v0.2 backward-compat format.
+                    # Both reconstruct as SourceNode — hashes are preserved because
+                    # SourceNode.identity_structure() matches old SourceSpec.identity_structure().
+                    if source_type == "node":
+                        # v0.3 format uses "name"; v0.1.0 used "node_name" — support both
+                        node_name = source_config.get("name") or source_config.get("node_name")
+                    else:
+                        # v0.2 backward-compat: spec_name becomes node name
+                        node_name = source_config.get("spec_name")
+                    if not node_name:
+                        node_name = descriptor.get("label") or "unknown"
+                    # Prefer tag/data schemas from source_config when present (v0.3+);
+                    # fall back to output_schema for older formats.
+                    if "tag_schema" in source_config and "data_schema" in source_config:
+                        tag_schema = Schema(deserialize_schema(source_config["tag_schema"]))
+                        data_schema = Schema(deserialize_schema(source_config["data_schema"]))
+                    else:
+                        tag_schema = Schema(deserialize_schema(descriptor["output_schema"]["tag"]))
+                        data_schema = Schema(deserialize_schema(descriptor["output_schema"]["data"]))
+                    node = SourceNodeClass(
+                        name=node_name,
+                        tag_schema=tag_schema,
+                        data_schema=data_schema,
+                    )
+                    # Restore label from descriptor if set explicitly
+                    stored_label = descriptor.get("label")
+                    if stored_label and stored_label != node_name:
+                        node._label = stored_label
                 else:
-                    # Fall back to stored label
-                    node_name = descriptor.get("label") or "unknown"
-                node = SourceNodeClass(
-                    name=node_name,
-                    tag_schema=tag_schema,
-                    data_schema=data_schema,
-                )
-                # Restore label from descriptor if set explicitly
-                stored_label = descriptor.get("label")
-                if stored_label and stored_label != node_name:
-                    node._label = stored_label
+                    raise ValueError(
+                        f"Unknown source_type {source_type!r} in pipeline descriptor."
+                    )
                 reconstructed[node_hash] = node
 
             elif node_type == "function":

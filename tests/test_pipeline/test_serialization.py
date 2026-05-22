@@ -178,3 +178,100 @@ class TestPipelineBlueprintLoad:
             assert "node_type" in attrs, (
                 f"Node {node_hash} missing node_type in _hash_graph"
             )
+
+
+@pytest.fixture
+def compiled_pipeline():
+    """A compiled Pipeline using SourceNode leaves (no tmp_path coupling)."""
+    def _src(tag, data):
+        tbl = pa.table({tag: pa.array(["a"], type=pa.large_string()), data: pa.array([1], type=pa.int64())})
+        return ArrowTableSource(tbl, tag_columns=[tag], infer_nullable=True)
+
+    from orcapod.core.operators import Join
+
+    src_a = _src("key", "value")
+    src_b = _src("key", "score")
+    tag_a, data_a = src_a.output_schema()
+    tag_b, data_b = src_b.output_schema()
+
+    node_a = SourceNode(name="source_a", tag_schema=tag_a, data_schema=data_a)
+    node_b = SourceNode(name="source_b", tag_schema=tag_b, data_schema=data_b)
+
+    pipeline = Pipeline(name="test_pipe")
+    with pipeline:
+        Join()(node_a, node_b, label="joiner")
+
+    return pipeline
+
+
+class TestNewSerializationFormat:
+    """v0.3 serialization format tests."""
+
+    def test_save_load_roundtrip_with_source_node(self, tmp_path, compiled_pipeline):
+        """Pipeline.save/load round-trip preserves SourceNode slots."""
+        save_path = tmp_path / "test_pipeline.json"
+        compiled_pipeline.save(save_path)
+
+        loaded = Pipeline.load(save_path)
+        assert loaded._compiled
+
+        for node in loaded._persistent_node_map.values():
+            if node.node_type == "source":
+                assert isinstance(node, SourceNode), (
+                    f"Expected SourceNode after load, got {type(node).__name__}"
+                )
+
+    def test_saved_format_has_source_node_type(self, tmp_path, compiled_pipeline):
+        """Saved format uses source_type='node'."""
+        save_path = tmp_path / "test_pipeline.json"
+        compiled_pipeline.save(save_path)
+
+        with open(save_path) as f:
+            data = json.load(f)
+
+        for node_data in data.get("nodes", {}).values():
+            if node_data.get("node_type") == "source":
+                assert node_data.get("source_config", {}).get("source_type") == "node", (
+                    f"Expected source_type='node', got {node_data.get('source_config')}"
+                )
+
+    def test_format_version_is_0_3(self, tmp_path, compiled_pipeline):
+        """Saved format version is 0.3."""
+        save_path = tmp_path / "test_pipeline.json"
+        compiled_pipeline.save(save_path)
+
+        with open(save_path) as f:
+            data = json.load(f)
+
+        assert data.get("orcapod_pipeline_version") == "0.3", (
+            f"Expected version '0.3', got {data.get('orcapod_pipeline_version')!r}"
+        )
+
+    def test_backward_compat_load_v0_2_spec_format(self, tmp_path, compiled_pipeline):
+        """Loading a v0.2 pipeline with source_type='spec' produces SourceNode."""
+        # Save, then hack the JSON to simulate v0.2 format
+        save_path = tmp_path / "old_pipeline.json"
+        compiled_pipeline.save(save_path)
+
+        with open(save_path) as f:
+            data = json.load(f)
+
+        # Downgrade to v0.2 format
+        data["orcapod_pipeline_version"] = "0.2"
+        for node_data in data.get("nodes", {}).values():
+            if node_data.get("node_type") == "source":
+                if "source_config" in node_data:
+                    node_data["source_config"]["source_type"] = "spec"
+
+        old_path = tmp_path / "old_format.json"
+        with open(old_path, "w") as f:
+            json.dump(data, f)
+
+        # Load should work and produce SourceNode
+        loaded = Pipeline.load(old_path)
+
+        for node in loaded._persistent_node_map.values():
+            if node.node_type == "source":
+                assert isinstance(node, SourceNode), (
+                    f"Expected SourceNode from v0.2 load, got {type(node).__name__}"
+                )

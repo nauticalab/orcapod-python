@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 # Format version
 # ---------------------------------------------------------------------------
 
-PIPELINE_FORMAT_VERSION = "0.1.0"
-SUPPORTED_FORMAT_VERSIONS = frozenset({"0.1.0"})
+PIPELINE_FORMAT_VERSION = "0.3"
+SUPPORTED_FORMAT_VERSIONS = frozenset({"0.1.0", "0.2", "0.3"})
 
 # ---------------------------------------------------------------------------
 # LoadStatus
