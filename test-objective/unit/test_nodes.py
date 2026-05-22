@@ -18,6 +18,8 @@ from orcapod.core.nodes import (
     FunctionNode,
     OperatorNode,
 )
+from orcapod.core.nodes.function_node import FunctionJobNode
+from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.operators import Join
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource, DerivedSource
@@ -75,7 +77,9 @@ class TestFunctionNode:
         pf = PythonDataFunction(_double, output_keys="result")
         pod = FunctionPod(data_function=pf)
         stream = _make_stream(3)
-        node = FunctionNode(function_pod=pod, input_stream=stream)
+        # FunctionNode is a blueprint; FunctionJobNode is the executable variant
+        node = FunctionJobNode(function_pod=pod, input_stream=stream)
+        node.run()
         data = list(node.iter_data())
         assert len(data) == 3
         for tag, data in data:
@@ -85,10 +89,11 @@ class TestFunctionNode:
         pf = PythonDataFunction(_double, output_keys="result")
         pod = FunctionPod(data_function=pf)
         stream = _make_stream()
-        node = FunctionNode(function_pod=pod, input_stream=stream)
+        # FunctionJobNode.execute_data() is the per-item processing method
+        node = FunctionJobNode(function_pod=pod, input_stream=stream)
         # Get first tag/data from input
         tag, data = next(iter(stream.iter_data()))
-        out_tag, out_data = node.process_data(tag, data)
+        out_tag, out_data = node.execute_data(tag, data)
         assert out_data is not None
         assert "result" in out_data.keys()
 
@@ -110,10 +115,12 @@ class TestFunctionNode:
         pf = PythonDataFunction(_double, output_keys="result")
         pod = FunctionPod(data_function=pf)
         stream = _make_stream()
-        node = FunctionNode(function_pod=pod, input_stream=stream)
-        list(node.iter_data())
+        # FunctionJobNode is the executable variant that supports clear_cache + re-run
+        node = FunctionJobNode(function_pod=pod, input_stream=stream)
+        node.run()
         node.clear_cache()
-        # Should be able to iterate again after clearing
+        # Should be able to run and iterate again after clearing
+        node.run()
         data = list(node.iter_data())
         assert len(data) == 3
 
@@ -123,7 +130,7 @@ class TestFunctionNode:
 # ===================================================================
 
 
-class TestFunctionNode:
+class TestFunctionJobNode:
     """Per design: two-phase iteration — Phase 1 returns cached records,
     Phase 2 computes missing. Uses pipeline_hash for DB path scoping."""
 
@@ -133,7 +140,7 @@ class TestFunctionNode:
         stream = _make_stream(3)
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=pod,
             input_stream=stream,
             pipeline_database=pipeline_db,
@@ -150,7 +157,7 @@ class TestFunctionNode:
         stream = _make_stream(3)
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=pod,
             input_stream=stream,
             pipeline_database=pipeline_db,
@@ -168,7 +175,7 @@ class TestFunctionNode:
         stream = _make_stream(3)
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=pod,
             input_stream=stream,
             pipeline_database=pipeline_db,
@@ -184,7 +191,7 @@ class TestFunctionNode:
         stream = _make_stream()
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=pod,
             input_stream=stream,
             pipeline_database=pipeline_db,
@@ -206,7 +213,8 @@ class TestOperatorNode:
     def test_delegates_to_operator(self):
         join = Join()
         s1, s2 = _make_joinable_streams()
-        node = OperatorNode(operator=join, input_streams=[s1, s2])
+        # OperatorNode is a blueprint; OperatorJobNode is the executable variant
+        node = OperatorJobNode(operator=join, input_streams=[s1, s2])
         node.run()
         table = node.as_table()
         assert table.num_rows == 2  # Inner join on id=2, id=3
@@ -214,7 +222,8 @@ class TestOperatorNode:
     def test_clear_cache(self):
         join = Join()
         s1, s2 = _make_joinable_streams()
-        node = OperatorNode(operator=join, input_streams=[s1, s2])
+        # OperatorJobNode is the executable variant that supports clear_cache + re-run
+        node = OperatorJobNode(operator=join, input_streams=[s1, s2])
         node.run()
         node.clear_cache()
         # Should be able to run again
@@ -228,7 +237,7 @@ class TestOperatorNode:
 # ===================================================================
 
 
-class TestOperatorNode:
+class TestOperatorJobNode:
     """Per design, supports CacheMode: OFF (always compute), LOG (compute+store),
     REPLAY (load from DB)."""
 
@@ -236,7 +245,7 @@ class TestOperatorNode:
         join = Join()
         s1, s2 = _make_joinable_streams()
         db = InMemoryArrowDatabase()
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=join,
             input_streams=[s1, s2],
             pipeline_database=db,
@@ -250,7 +259,7 @@ class TestOperatorNode:
         join = Join()
         s1, s2 = _make_joinable_streams()
         db = InMemoryArrowDatabase()
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=join,
             input_streams=[s1, s2],
             pipeline_database=db,
@@ -268,7 +277,7 @@ class TestOperatorNode:
         db = InMemoryArrowDatabase()
 
         # First: LOG to populate DB
-        node1 = OperatorNode(
+        node1 = OperatorJobNode(
             operator=join,
             input_streams=[s1, s2],
             pipeline_database=db,
@@ -277,7 +286,7 @@ class TestOperatorNode:
         node1.run()
 
         # Second: REPLAY to load from DB
-        node2 = OperatorNode(
+        node2 = OperatorJobNode(
             operator=join,
             input_streams=[s1, s2],
             pipeline_database=db,
@@ -291,7 +300,7 @@ class TestOperatorNode:
         join = Join()
         s1, s2 = _make_joinable_streams()
         db = InMemoryArrowDatabase()
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=join,
             input_streams=[s1, s2],
             pipeline_database=db,
