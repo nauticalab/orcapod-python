@@ -73,8 +73,9 @@ class CursorInvalidatedError(Exception):
 
     This is a terminal condition for ``PollingSource``. Rows already emitted
     downstream cannot be retracted, so continuing would leave downstream
-    operators with a corrupted view. ``PollingSource`` catches this, logs a
-    clear error, closes its output channel cleanly, and calls ``close()``.
+    operators with a corrupted view. ``PollingSource`` logs the error, calls
+    ``impl.close()``, and re-raises so the caller receives the exception rather
+    than a silent end-of-stream.
 
     If full-reset semantics are required, use a static source re-run instead
     of ``PollingSource``.
