@@ -1,4 +1,4 @@
-# OrcaPod — networkx Replacement Design
+# Orcapod — networkx Replacement Design
 
 **Issue:** ENG-492
 **Date:** 2026-05-21
@@ -9,12 +9,12 @@
 
 ## Executive Summary
 
-OrcaPod should replace `networkx` with a lean, in-house `OrcaDAG` class
+Orcapod should replace `networkx` with a lean, in-house `OrcaDAG` class
 (`src/orcapod/pipeline/dag.py`, ~255 lines including full docstrings and type
 annotations; core logic is under 80 lines). The case rests on
 three converging facts:
 
-1. OrcaPod's networkx API surface is minimal — nine call shapes covering basic
+1. Orcapod's networkx API surface is minimal — nine call shapes covering basic
    DAG construction, traversal, and topological sort.
 2. Python's standard library (`graphlib.TopologicalSorter`, Python ≥ 3.9) already
    provides the only non-trivial algorithm needed; the rest is a thin dict wrapper.
@@ -35,12 +35,12 @@ requires precision**. The evidence:
 
 ### What changed across major versions
 
-| Migration | Key breaking changes | Relevant to OrcaPod? |
+| Migration | Key breaking changes | Relevant to Orcapod? |
 |---|---|---|
 | 1.x → 2.0 | `G.nodes()` changed from list to `NodeView`; `G.node` removed in favour of `G.nodes[n]`; `set_node_attributes` parameter order changed; several methods moved to main namespace | **Potentially** — `G.nodes[key]` is the new pattern, which orcapod already uses. Any code written against 1.x would break. |
 | 2.x → 3.0 | `read_gpickle`, `write_gpickle`, `read_yaml`, `write_yaml` removed; `decorator` library dep removed | **No** — orcapod uses none of these. |
 
-### OrcaPod's specific API surface vs. breakage history
+### Orcapod's specific API surface vs. breakage history
 
 The nine API shapes orcapod uses (`DiGraph()`, `add_edge`, `add_node`,
 `topological_sort`, `nodes[]`, `in_degree`, `successors`, `nodes()`, `edges()`)
@@ -75,7 +75,7 @@ patching it with a version pin.
 
 ### What orcapod actually exercises
 
-OrcaPod uses **nine distinct API shapes** from networkx:
+Orcapod uses **nine distinct API shapes** from networkx:
 
 | API | Call sites | Purpose |
 |---|---|---|
@@ -112,7 +112,7 @@ Four candidates were evaluated:
 
 `rustworkx` is an excellent library and would be the right call if orcapod's graph
 operations were performance-sensitive or algorithmically complex. They are not.
-OrcaPod pipeline graphs have tens of nodes at most. At that scale, a pure-Python
+Orcapod pipeline graphs have tens of nodes at most. At that scale, a pure-Python
 `dict` is faster than any FFI boundary. Adding a Rust wheel also introduces per-
 platform CI complexity (manylinux, macOS x86_64/arm64, Windows) that has zero
 payoff at orcapod's graph sizes.
@@ -126,7 +126,7 @@ backed by dicts does not qualify:
 
 - The only non-trivial algorithm — topological sort — is already in the Python
   standard library (`graphlib.TopologicalSorter`).
-- OrcaPod already **reimplemented the most complex variant** (deterministic
+- Orcapod already **reimplemented the most complex variant** (deterministic
   topological sort via Kahn's + min-heap) in `graph.py` lines 559–571. The team
   has already proven it can own this code.
 - The replacement is ~120 lines including type annotations and docstrings. This
@@ -173,9 +173,9 @@ class Comparable(Hashable, Protocol):
 NodeT = TypeVar("NodeT", bound=Comparable)
 
 class OrcaDAG(Generic[NodeT]):
-    """Minimal directed acyclic graph for OrcaPod pipeline topology.
+    """Minimal directed acyclic graph for Orcapod pipeline topology.
 
-    Covers exactly the nine API shapes OrcaPod needs; nothing more.
+    Covers exactly the nine API shapes Orcapod needs; nothing more.
     Backed by plain dicts and stdlib graphlib. Zero external dependencies.
     """
 
@@ -302,4 +302,4 @@ cleanups).
 - [networkx 2.x → 3.0 migration guide](https://networkx.org/documentation/stable/release/migration_guide_from_2.x_to_3.0.html)
 - [networkx PyPI page](https://pypi.org/project/networkx/) (3.6.1: 2.1 MB wheel)
 - [Python stdlib graphlib](https://docs.python.org/3/library/graphlib.html)
-- OrcaPod networkx call sites: `src/orcapod/pipeline/graph.py`, `sync_orchestrator.py`, `async_orchestrator.py`
+- Orcapod networkx call sites: `src/orcapod/pipeline/graph.py`, `sync_orchestrator.py`, `async_orchestrator.py`

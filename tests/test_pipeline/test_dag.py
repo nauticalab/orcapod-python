@@ -1,6 +1,6 @@
 """Tests for OrcaDAG — the lean in-house DAG replacing networkx.DiGraph.
 
-Covers all nine API shapes used by OrcaPod:
+Covers all nine API shapes used by Orcapod:
 - add_node / add_edge (construction)
 - node_attrs (attribute dict access)
 - nodes() / edges() (traversal)
