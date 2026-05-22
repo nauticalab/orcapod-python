@@ -18,23 +18,65 @@ def data_schema():
 
 
 class TestSourceNodeHashStability:
-    """SourceNode must produce bit-identical hashes to SourceSpec with the same args."""
+    """SourceNode must produce stable, deterministic hashes.
 
-    def test_content_hash_matches_source_spec(self, tag_schema, data_schema):
+    Hash values below were verified to be bit-identical to SourceSpec
+    with the same arguments during the SourceSpec→SourceNode migration (ENG-493).
+    SourceSpec has since been deleted; these values serve as the stability anchor.
+
+    For tag_schema=Schema({"id": int}), data_schema=Schema({"value": float}),
+    name="slot_a":
+      content_hash  = semantic_v0.1:df0cba56fd880f86584ef89b35ef850bd813c95c114ac3bc84818e195b2175cb
+      pipeline_hash = semantic_v0.1:3e32b07447e313318744ce498086c21ad136a40596f833c05162088e840ad16e
+    """
+
+    def test_content_hash_is_deterministic(self, tag_schema, data_schema):
         from orcapod.core.nodes.source_node import SourceNode
-        from orcapod.core.sources.source_spec import SourceSpec
 
-        spec = SourceSpec(name="slot_a", tag_schema=tag_schema, data_schema=data_schema)
-        node = SourceNode(name="slot_a", tag_schema=tag_schema, data_schema=data_schema)
-        assert node.content_hash() == spec.content_hash()
+        node_a = SourceNode(name="slot_a", tag_schema=tag_schema, data_schema=data_schema)
+        node_b = SourceNode(name="slot_a", tag_schema=tag_schema, data_schema=data_schema)
+        assert node_a.content_hash() == node_b.content_hash()
 
-    def test_pipeline_hash_matches_source_spec(self, tag_schema, data_schema):
+    def test_content_hash_stable_value(self, tag_schema, data_schema):
+        """content_hash must match the value anchored at migration time.
+
+        Digest (hex): df0cba56fd880f86584ef89b35ef850bd813c95c114ac3bc84818e195b2175cb
+        """
         from orcapod.core.nodes.source_node import SourceNode
-        from orcapod.core.sources.source_spec import SourceSpec
+        from orcapod.types import ContentHash
 
-        spec = SourceSpec(name="slot_a", tag_schema=tag_schema, data_schema=data_schema)
         node = SourceNode(name="slot_a", tag_schema=tag_schema, data_schema=data_schema)
-        assert node.pipeline_hash() == spec.pipeline_hash()
+        expected = ContentHash(
+            method="semantic_v0.1",
+            digest=bytes.fromhex(
+                "df0cba56fd880f86584ef89b35ef850bd813c95c114ac3bc84818e195b2175cb"
+            ),
+        )
+        assert node.content_hash() == expected
+
+    def test_pipeline_hash_is_deterministic(self, tag_schema, data_schema):
+        from orcapod.core.nodes.source_node import SourceNode
+
+        node_a = SourceNode(name="slot_a", tag_schema=tag_schema, data_schema=data_schema)
+        node_b = SourceNode(name="slot_a", tag_schema=tag_schema, data_schema=data_schema)
+        assert node_a.pipeline_hash() == node_b.pipeline_hash()
+
+    def test_pipeline_hash_stable_value(self, tag_schema, data_schema):
+        """pipeline_hash must match the value anchored at migration time.
+
+        Digest (hex): 3e32b07447e313318744ce498086c21ad136a40596f833c05162088e840ad16e
+        """
+        from orcapod.core.nodes.source_node import SourceNode
+        from orcapod.types import ContentHash
+
+        node = SourceNode(name="slot_a", tag_schema=tag_schema, data_schema=data_schema)
+        expected = ContentHash(
+            method="semantic_v0.1",
+            digest=bytes.fromhex(
+                "3e32b07447e313318744ce498086c21ad136a40596f833c05162088e840ad16e"
+            ),
+        )
+        assert node.pipeline_hash() == expected
 
     def test_different_names_different_content_hash(self, tag_schema, data_schema):
         from orcapod.core.nodes.source_node import SourceNode
