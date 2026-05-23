@@ -30,28 +30,48 @@ class PipelineJob(AbstractPipelineBase):
     ``PipelineJob`` is the everyday working object. It is built incrementally:
     its ``with``-block records both the DAG structure and any concrete source
     bindings simultaneously. Concrete sources are automatically promoted to
-    ``SourceNode`` declarations in the underlying ``Pipeline``, with their
+    ``SourceJobNode`` declarations in the underlying graph, with their
     concrete instances stored in ``job.sources``.
 
-    After the ``with`` block, ``job.pipeline`` is a fully compiled, pure
-    ``Pipeline`` (SourceNode-only leaves). ``job.run()`` executes the
-    resolvable subgraph — nodes whose upstream SourceNodes are all bound.
+    After the ``with`` block, ``job.pipeline`` returns a lightweight
+    ``Pipeline`` blueprint (SourceNode-only leaves). ``job.run()`` executes
+    the resolvable subgraph — nodes whose upstream SourceNodes are all bound.
 
     ``PipelineJob`` can also be created from a ``Pipeline`` via
-    ``PipelineJob.from_pipeline(pipeline, sources=..., store=...)`` for the "explicit blueprint"
-    workflow.
+    ``PipelineJob.from_pipeline(pipeline, sources=..., store=...)`` for the
+    "explicit blueprint" workflow.
 
     Args:
         name: Pipeline name (string or tuple). Used as the path prefix for
-            all cache/pipeline paths when the pipeline is run. Defaults to
-            ``"pipeline"``.
+            all cache/pipeline paths when the pipeline is run.
         store: Database for result caching and operator records.
         execution_context: Optional execution configuration.
         tracker_manager: Optional tracker manager override.
-        _pipeline: Internal — pre-built pipeline (used by PipelineJob.from_pipeline()).
-        sources: Internal — pre-bound sources (used by PipelineJob.from_pipeline() /
-            bind()).
+        auto_compile: If ``True`` (default), ``compile()`` is called
+            automatically when the context manager exits.
     """
+
+    # ------------------------------------------------------------------
+    # Node-factory class properties (used by AbstractPipelineBase.compile())
+    # ------------------------------------------------------------------
+
+    @property
+    def source_node_class(self) -> type:
+        """SourceJobNode — execution-ready source node class for PipelineJob."""
+        from orcapod.core.nodes.source_node import SourceJobNode
+        return SourceJobNode
+
+    @property
+    def function_node_class(self) -> type:
+        """FunctionJobNode — execution-ready function node class for PipelineJob."""
+        from orcapod.core.nodes.function_node import FunctionJobNode
+        return FunctionJobNode
+
+    @property
+    def operator_node_class(self) -> type:
+        """OperatorJobNode — execution-ready operator node class for PipelineJob."""
+        from orcapod.core.nodes.operator_node import OperatorJobNode
+        return OperatorJobNode
 
     def __init__(
         self,
@@ -59,275 +79,106 @@ class PipelineJob(AbstractPipelineBase):
         store: "ArrowDatabaseProtocol | None" = None,
         execution_context: "ExecutionContext | None" = None,
         tracker_manager: cp.TrackerManagerProtocol | None = None,
-        *,
-        _pipeline: "Pipeline | None" = None,
-        sources: "dict[str, cp.StreamProtocol] | None" = None,
+        auto_compile: bool = True,
     ) -> None:
         super().__init__(name=name, tracker_manager=tracker_manager)
         self._store = store
         self._execution_context = execution_context
-        self._compiled_pipeline: "Pipeline | None" = _pipeline
-        self._sources: dict[str, cp.StreamProtocol] = dict(sources or {})
-
-        # Recording state (populated during with-block)
-        self._rec_graph_edges: list[tuple[str, str]] = []
-        self._rec_upstreams: dict[str, cp.StreamProtocol] = {}
-        self._rec_node_lut: dict[str, "GraphNode"] = {}
-        self._spec_by_name: dict[str, "SourceNode"] = {}
+        self._auto_compile = auto_compile
+        self._sources: dict[str, cp.StreamProtocol] = {}
+        # Hash-keyed lookup for _build_execution_graph() — same key as
+        # _persistent_node_map.  Avoids name collisions when multiple concrete
+        # sources share the same class name (e.g. two ArrowTableSource objects).
+        self._sources_by_hash: dict[str, cp.StreamProtocol] = {}
         self._unresolved_specs: list[str] = []
         self._has_run: bool = False
         self._run_id: str | None = None
 
-        # Job-node map (populated by from_pipeline(); None for with-block-created jobs)
-        # Note: _persistent_node_map and _nodes are initialized by AbstractPipelineBase.__init__
-        # but overridden here for PipelineJob-specific types.
-        self._persistent_node_map: "dict[str, Any] | None" = None
-        self._nodes: "dict[str, Any]" = {}
+        # Lazy cache for the corresponding Pipeline blueprint.
+        # Set to None after compile() to force recomputation on next access.
+        # Pre-set by from_pipeline() / run() via _set_compiled_pipeline().
+        self._compiled_pipeline: "Pipeline | None" = None
 
     # ------------------------------------------------------------------
-    # Context manager — recording
+    # Context manager — respects auto_compile flag
     # ------------------------------------------------------------------
 
-    def __enter__(self) -> "PipelineJob":
-        # Reset recording state
-        self._rec_graph_edges = []
-        self._rec_upstreams = {}
-        self._rec_node_lut = {}
-        self._spec_by_name = {}
-        return super().__enter__()  # type: ignore[return-value]
+    def __exit__(self, exc_type=None, exc_value=None, traceback=None) -> None:
+        """Exit the recording context, compiling if no exception occurred."""
+        AutoRegisteringContextBasedTracker.__exit__(self, exc_type, exc_value, traceback)
+        if exc_type is None and self._auto_compile:
+            self.compile()
 
     def compile(self) -> None:
-        """Compile the recorded edges into a pure Pipeline and build the job node map.
+        """Compile recorded invocations into a frozen DAG of job nodes.
 
-        ``_rec_node_lut`` now contains ``FunctionJobNode`` / ``OperatorJobNode`` objects
-        (set by ``record_function_pod_invocation`` / ``record_operator_pod_invocation``).
-        This method:
+        Delegates to ``AbstractPipelineBase.compile()`` which uses
+        ``source_node_class``, ``function_node_class``, and
+        ``operator_node_class`` to create job node instances.
 
-        1. Converts each recorded job node to its lightweight blueprint counterpart via
-           ``.as_node()`` and injects the result into ``pipeline._node_lut`` so that
-           ``Pipeline.compile()`` sees only ``FunctionNode`` / ``OperatorNode`` objects.
-        2. After compiling the blueprint pipeline, walks it topologically to build
-           ``self._persistent_node_map`` using ``SourceJobNode`` for leaf nodes
-           (concrete sources are taken from ``self._sources``) and fresh
-           ``FunctionJobNode`` / ``OperatorJobNode`` objects rewired to upstream job nodes
-           for non-leaf nodes.
+        Concrete source bindings already in ``_sources`` are preserved.
+        Any ``SourceJobNode`` in ``_persistent_node_map`` that has a bound
+        source also contributes to ``_sources`` (covers both the
+        direct-recording path and the ``bind()``-before-compile path).
+
+        The lazy ``compiled_pipeline`` cache is invalidated.
+
+        If ``_store`` is set, distributes databases to all function and
+        operator job nodes.
         """
-        import networkx as _nx
-        from orcapod.pipeline.graph import Pipeline
-        from orcapod.core.nodes.source_node import SourceJobNode, SourceNodeBase
-        from orcapod.core.nodes.function_node import FunctionJobNode, FunctionNodeBase
-        from orcapod.core.nodes.operator_node import OperatorJobNode, OperatorNodeBase
+        # Preserve any sources already bound (e.g. from a prior bind() call).
+        pre_sources = dict(self._sources)
+        pre_sources_by_hash = dict(self._sources_by_hash)
 
-        pipeline = Pipeline(name=self._name, auto_compile=False)
-        # Inject the recording state into the pipeline, converting job nodes → blueprint nodes
-        pipeline._graph_edges = list(self._rec_graph_edges)
-        pipeline._upstreams = dict(self._rec_upstreams)
-        pipeline._node_lut = {
-            h: node.as_node() for h, node in self._rec_node_lut.items()
-        }
-        # Rebuild hash graph from edges
-        for edge in self._rec_graph_edges:
-            pipeline._hash_graph.add_edge(*edge)
+        super().compile()
 
-        # Annotate node_type on each recorded node (function/operator).
-        for node_hash, node in self._rec_node_lut.items():
-            if node_hash in pipeline._hash_graph.nodes:
-                pipeline._hash_graph.nodes[node_hash]["node_type"] = node.node_type
-                if node.label:
-                    pipeline._hash_graph.nodes[node_hash]["label"] = node.label
+        # Collect bound SourceJobNodes created during compilation.
+        # _sources is name-keyed (user-facing API via job.sources).
+        # _sources_by_hash is hash-keyed (internal use by _build_execution_graph()).
+        # Two concrete sources of the same class (e.g. two ArrowTableSource objects)
+        # would collide on name but have distinct hash keys.
+        from orcapod.core.nodes.source_node import SourceJobNode
+        compiled_by_name: dict[str, Any] = {}
+        compiled_by_hash: dict[str, Any] = {}
+        for h, n in self._persistent_node_map.items():
+            if isinstance(n, SourceJobNode) and n.bound_source is not None:
+                compiled_by_name[n.name] = n.bound_source
+                compiled_by_hash[h] = n.bound_source
+                # Also index by schema-based hash (matches blueprint pipeline keys).
+                schema_hash = n.as_node().content_hash().to_string()
+                compiled_by_hash[schema_hash] = n.bound_source
+        # pre_sources / pre_sources_by_hash win over compiled (explicit bind() takes priority).
+        self._sources = {**compiled_by_name, **pre_sources}
+        self._sources_by_hash = {**compiled_by_hash, **pre_sources_by_hash}
 
-        # Annotate upstream (source) nodes that are not in _rec_node_lut.
-        for node_hash, stream in self._rec_upstreams.items():
-            if node_hash in pipeline._hash_graph.nodes:
-                if not pipeline._hash_graph.nodes[node_hash].get("node_type"):
-                    pipeline._hash_graph.nodes[node_hash]["node_type"] = "source"
+        # Invalidate the lazy compiled_pipeline cache.
+        self._compiled_pipeline = None
 
-        pipeline.compile()
-        self._compiled_pipeline = pipeline
-
-        # Build PipelineJob's own job node map walking compiled pipeline topologically.
-        # Leaf nodes (SourceNode) become SourceJobNode with concrete binding from _sources.
-        # Non-leaf nodes are fresh FunctionJobNode/OperatorJobNode rewired to upstream job nodes.
-        G = pipeline._hash_graph
-        job_node_map: dict[str, object] = {}
-
-        for node_hash in _nx.topological_sort(G):
-            if node_hash not in pipeline._persistent_node_map:
-                continue
-
-            bp_node = pipeline._persistent_node_map[node_hash]
-
-            if isinstance(bp_node, SourceNodeBase):
-                concrete = self._sources.get(bp_node.name)
-                job_node: object = SourceJobNode(
-                    name=bp_node.name,
-                    tag_schema=bp_node.tag_schema,
-                    data_schema=bp_node.data_schema,
-                    bound_source=concrete,
-                )
-            elif isinstance(bp_node, FunctionNodeBase):
-                # Create fresh FunctionJobNode rewired to the upstream job node.
-                rec_node = self._rec_node_lut[node_hash]
-                original_input_hash = bp_node._input_stream.content_hash().to_string()
-                upstream_job_node = job_node_map[original_input_hash]
-                job_node = FunctionJobNode(
-                    function_pod=rec_node._function_pod,
-                    input_stream=upstream_job_node,
-                    label=rec_node._label,
-                    table_scope=rec_node._table_scope,
-                    tracker_manager=rec_node.tracker_manager,
-                )
-            elif isinstance(bp_node, OperatorNodeBase):
-                rec_node = self._rec_node_lut[node_hash]
-                upstream_job_nodes = tuple(
-                    job_node_map[s.content_hash().to_string()]
-                    for s in bp_node._input_streams
-                )
-                job_node = OperatorJobNode(
-                    operator=rec_node._operator,
-                    input_streams=upstream_job_nodes,
-                    label=rec_node._label,
-                    table_scope=rec_node._table_scope,
-                    tracker_manager=rec_node.tracker_manager,
-                )
-            else:
-                raise TypeError(
-                    f"Unknown blueprint node type in compiled pipeline: {type(bp_node)}"
-                )
-
-            job_node_map[node_hash] = job_node
-
-        self._persistent_node_map = job_node_map
-
-        # Build label → job node map from pipeline._nodes
-        self._nodes = {
-            label: job_node_map[node.content_hash().to_string()]
-            for label, node in pipeline._nodes.items()
-            if node.content_hash().to_string() in job_node_map
-        }
-
-        # Wire databases if store is already set
+        # Wire databases if a store is already set.
         if self._store is not None:
             self._distribute_databases()
 
-    def _ensure_source_node(self, source: cp.StreamProtocol) -> "SourceNode":
-        """Promote *source* to a SourceNode, storing the concrete binding.
-
-        If the node already exists (same label/hash key), returns the cached node.
-
-        When a source has an explicitly assigned label, that label is used as the
-        SourceNode name. When no label is assigned (the source falls back to its
-        class name), the source's content hash is used to ensure uniqueness.
-        """
-        from orcapod.core.nodes.source_node import SourceNode
-
-        # Use explicit label when set; otherwise fall back to content hash
-        # to avoid two unlabeled sources getting the same node name.
-        has_label = source.has_assigned_label
-        if has_label:
-            name = source.label  # type: ignore[attr-defined]
-        else:
-            name = source.content_hash().to_string()
-
-        if name not in self._spec_by_name:
-            tag_schema, data_schema = source.output_schema()
-            node = SourceNode(name=name, tag_schema=tag_schema, data_schema=data_schema)
-            self._spec_by_name[name] = node
-            self._sources[name] = source
-        return self._spec_by_name[name]
-
-    @staticmethod
-    def _is_concrete_source(stream: cp.StreamProtocol) -> bool:
-        """True if *stream* is a concrete RootSource (not a SourceNode)."""
-        from orcapod.core.sources.base import RootSource
-        from orcapod.core.nodes.source_node import SourceNode
-
-        return isinstance(stream, RootSource) and not isinstance(stream, SourceNode)
-
     # ------------------------------------------------------------------
-    # TrackerProtocol — recording with source interception
+    # compiled_pipeline — lazy cache
     # ------------------------------------------------------------------
 
-    def _to_node_stream(self, stream: cp.StreamProtocol) -> SourceNode | cp.StreamProtocol:
-        """Convert *stream* to a node-based equivalent for consistent hash recording.
+    @property
+    def compiled_pipeline(self) -> "Pipeline":
+        """The lightweight ``Pipeline`` blueprint for this job (lazy cache).
 
-        Concrete ``RootSource`` instances are promoted to ``SourceNode`` via
-        ``_ensure_source_node``. ``DynamicPodStream`` instances have their upstreams
-        recursively converted so that their content hash matches the
-        ``OperatorNode`` recorded in ``_rec_node_lut``.
+        Computed on first access by calling ``as_pipeline()``.  Invalidated
+        by ``compile()`` and ``bind()`` (when sources change).
 
-        Args:
-            stream: The upstream stream to convert.
-
-        Returns:
-            A node-based stream with a stable hash for recording.
+        Raises:
+            RuntimeError: If the job has not been compiled yet.
         """
-        from orcapod.core.operators.static_output_pod import DynamicPodStream
-
-        if self._is_concrete_source(stream):
-            return self._ensure_source_node(stream)
-        if isinstance(stream, DynamicPodStream):
-            node_upstreams = tuple(self._to_node_stream(s) for s in stream.upstreams)
-            return DynamicPodStream(
-                pod=stream._pod,
-                upstreams=node_upstreams,
-                label=stream._label,
-            )
-        return stream
-
-    def record_function_pod_invocation(
-        self,
-        pod: cp.FunctionPodProtocol,
-        input_stream: cp.StreamProtocol,
-        label: str | None = None,
-    ) -> None:
-        """Record a function pod invocation, promoting concrete sources to specs.
-
-        Args:
-            pod: The function pod being invoked.
-            input_stream: The upstream stream (concrete source or spec).
-            label: Optional label for the resulting node.
-        """
-        from orcapod.core.nodes.function_node import FunctionJobNode
-
-        # TODO(ENG-512): _to_node_stream recurses into upstreams on every recording call;
-        # for deep graphs this can be O(depth²). Consider memoizing or doing a single
-        # topological pass at job-creation time.
-        input_stream = self._to_node_stream(input_stream)
-
-        input_hash = input_stream.content_hash().to_string()
-        function_node = FunctionJobNode(function_pod=pod, input_stream=input_stream, label=label)
-        fn_hash = function_node.content_hash().to_string()
-
-        self._rec_node_lut[fn_hash] = function_node
-        self._rec_upstreams[input_hash] = input_stream
-        self._rec_graph_edges.append((input_hash, fn_hash))
-
-    def record_operator_pod_invocation(
-        self,
-        pod: cp.OperatorPodProtocol,
-        upstreams: tuple[cp.StreamProtocol, ...] = (),
-        label: str | None = None,
-    ) -> None:
-        """Record an operator pod invocation, promoting concrete sources to specs.
-
-        Args:
-            pod: The operator pod being invoked.
-            upstreams: Upstream streams (concrete sources or specs).
-            label: Optional label for the resulting node.
-        """
-        from orcapod.core.nodes.operator_node import OperatorJobNode
-
-        processed = tuple(self._to_node_stream(s) for s in upstreams)
-
-        operator_node = OperatorJobNode(operator=pod, input_streams=processed, label=label)
-        op_hash = operator_node.content_hash().to_string()
-
-        self._rec_node_lut[op_hash] = operator_node
-        for upstream in processed:
-            up_hash = upstream.content_hash().to_string()
-            self._rec_upstreams[up_hash] = upstream
-            self._rec_graph_edges.append((up_hash, op_hash))
+        if self._compiled_pipeline is None:
+            if not self._compiled:
+                raise RuntimeError(
+                    "No compiled pipeline — use 'with job:' to record a DAG first."
+                )
+            self._compiled_pipeline = self.as_pipeline()
+        return self._compiled_pipeline
 
     # ------------------------------------------------------------------
     # Properties
@@ -340,12 +191,7 @@ class PipelineJob(AbstractPipelineBase):
         Raises:
             RuntimeError: If the with-block has not been completed yet.
         """
-        if self._compiled_pipeline is None:
-            raise RuntimeError(
-                "PipelineJob has no compiled pipeline yet. "
-                "Use 'with job:' to record a DAG first."
-            )
-        return self._compiled_pipeline
+        return self.compiled_pipeline
 
     @property
     def sources(self) -> dict[str, cp.StreamProtocol]:
@@ -376,15 +222,15 @@ class PipelineJob(AbstractPipelineBase):
     ) -> "PipelineJob":
         """Create a runnable ``PipelineJob`` from a compiled ``Pipeline``.
 
-        Walks the pipeline's ``_persistent_node_map`` topologically and
-        creates corresponding ``JobNode`` variants:
-
-        * ``SourceNode`` → ``SourceJobNode(name, schemas, bound_source=sources.get(name))``
-        * ``FunctionNode`` → ``FunctionJobNode(function_pod, upstream_job_node, label)``
-        * ``OperatorNode`` → ``OperatorJobNode(operator, upstream_job_nodes, label)``
+        Converts the Pipeline blueprint to an ``InvocationGraph`` via
+        ``pipeline.to_invocations()``, then reconstructs a PipelineJob
+        using ``from_invocations()`` (which calls ``SourceJobNode.from_stream``
+        for each source, creating unbound job nodes).  If *sources* are
+        provided, validates and binds them.
 
         Args:
-            pipeline: A compiled ``Pipeline`` (``pipeline._compiled`` must be ``True``).
+            pipeline: A compiled ``Pipeline`` (``pipeline._compiled`` must
+                be ``True``).
             store: Database for result caching and operator records.
             sources: Mapping of ``SourceNode.name`` → concrete source.
             execution_context: Optional execution configuration.
@@ -395,10 +241,7 @@ class PipelineJob(AbstractPipelineBase):
         Raises:
             ValueError: If *pipeline* has not been compiled.
         """
-        import networkx as _nx
-        from orcapod.core.nodes.function_node import FunctionJobNode, FunctionNode, FunctionNodeBase
-        from orcapod.core.nodes.operator_node import OperatorJobNode, OperatorNode, OperatorNodeBase
-        from orcapod.core.nodes.source_node import SourceJobNode, SourceNode, SourceNodeBase
+        from orcapod.core.nodes.source_node import SourceNodeBase
 
         if not pipeline._compiled:
             raise ValueError(
@@ -408,7 +251,7 @@ class PipelineJob(AbstractPipelineBase):
 
         bound_sources: dict[str, cp.StreamProtocol] = dict(sources or {})
 
-        # Validate sources against SourceNode schemas (mirrors bind() validation).
+        # Validate sources against SourceNode schemas.
         if bound_sources:
             spec_names = {
                 node.name
@@ -425,82 +268,17 @@ class PipelineJob(AbstractPipelineBase):
                 if isinstance(node, SourceNodeBase) and node.name in bound_sources:
                     node.validate(bound_sources[node.name])
 
-        G = pipeline._hash_graph
-        job_node_map: dict[str, object] = {}
-
-        for node_hash in _nx.topological_sort(G):
-            if node_hash not in pipeline._persistent_node_map:
-                continue
-
-            node = pipeline._persistent_node_map[node_hash]
-
-            if isinstance(node, SourceNodeBase):
-                # Handles both SourceNode (blueprint) and SourceJobNode (loaded pipeline)
-                concrete = bound_sources.get(node.name)
-                job_node = SourceJobNode(
-                    name=node.name,
-                    tag_schema=node.tag_schema,
-                    data_schema=node.data_schema,
-                    bound_source=concrete,
-                )
-
-            elif isinstance(node, FunctionNodeBase):
-                # Handles both FunctionNode (blueprint) and FunctionJobNode (loaded pipeline)
-                original_input_hash = node._input_stream.content_hash().to_string()
-                upstream_job_node = job_node_map[original_input_hash]
-                job_node = FunctionJobNode(
-                    function_pod=node._function_pod,
-                    input_stream=upstream_job_node,
-                    label=node._label,
-                    table_scope=node._table_scope,
-                    tracker_manager=node.tracker_manager,
-                )
-
-            elif isinstance(node, OperatorNodeBase):
-                # Handles both OperatorNode (blueprint) and OperatorJobNode (loaded pipeline)
-                upstream_job_nodes = tuple(
-                    job_node_map[s.content_hash().to_string()]
-                    for s in node._input_streams
-                )
-                job_node = OperatorJobNode(
-                    operator=node._operator,
-                    input_streams=upstream_job_nodes,
-                    label=node._label,
-                    table_scope=node._table_scope,
-                    tracker_manager=node.tracker_manager,
-                )
-
-            else:
-                raise TypeError(
-                    f"Unknown node type in pipeline._persistent_node_map: {type(node)}"
-                )
-
-            job_node_map[node_hash] = job_node
-
-        # Construct the PipelineJob using __new__ to bypass __init__
-        job = cls.__new__(cls)
-        super(PipelineJob, job).__init__()
+        # Reconstruct via InvocationGraph (creates unbound SourceJobNodes).
+        job = cls.from_invocations(pipeline.to_invocations(), name=pipeline._name)
         job._store = store
         job._execution_context = execution_context
-        job._sources = bound_sources
-        job._name = pipeline._name
-        job._has_run = False
-        job._run_id = None
-        job._unresolved_specs = []
-        job._rec_graph_edges = []
-        job._rec_upstreams = {}
-        job._rec_node_lut = {}
-        job._spec_by_name = {}
-
+        # Pre-set the compiled_pipeline cache to the original pipeline so that
+        # _build_execution_graph() uses the caller-provided pipeline directly.
         job._compiled_pipeline = pipeline
-        job._persistent_node_map = job_node_map
-        job._nodes = {}
 
-        for label, node in pipeline._nodes.items():
-            node_hash = node.content_hash().to_string()
-            if node_hash in job_node_map:
-                job._nodes[label] = job_node_map[node_hash]
-
+        # Bind concrete sources and distribute databases.
+        if bound_sources:
+            job.bind(sources=bound_sources)
         if store is not None:
             job._distribute_databases()
 
@@ -522,7 +300,7 @@ class PipelineJob(AbstractPipelineBase):
         in this call are preserved.
 
         When *sources* is provided, each concrete source is validated against
-        its matching ``SourceNode`` slot schema, then the corresponding
+        its matching ``SourceJobNode`` slot schema, then the corresponding
         ``SourceJobNode.bound_source`` is updated in-place.
 
         When *store* is provided and differs from the current store,
@@ -536,9 +314,9 @@ class PipelineJob(AbstractPipelineBase):
 
         Raises:
             SourceSpecMismatchError: If any source's schema is incompatible.
-            ValueError: If a source key has no matching ``SourceNode`` slot.
+            ValueError: If a source key has no matching ``SourceJobNode`` slot.
         """
-        from orcapod.core.nodes.source_node import SourceJobNode, SourceNode
+        from orcapod.core.nodes.source_node import SourceJobNode, SourceNodeBase
 
         store_changed = store is not None and store is not self._store
 
@@ -546,27 +324,29 @@ class PipelineJob(AbstractPipelineBase):
             self._store = store
 
         if sources is not None:
-            pipeline = self._compiled_pipeline
-            if pipeline is not None:
-                spec_names = {
-                    node.name
-                    for node in pipeline._persistent_node_map.values()
-                    if isinstance(node, SourceNode)
-                }
-                unknown = set(sources.keys()) - spec_names
-                if unknown:
-                    raise ValueError(
-                        f"bind() received source keys with no matching SourceNode: "
-                        f"{sorted(unknown)}. Known names: {sorted(spec_names)}"
-                    )
-                for node in pipeline._persistent_node_map.values():
-                    if isinstance(node, SourceNode) and node.name in sources:
-                        node.validate(sources[node.name])
+            spec_names = {
+                node.name
+                for node in (self._persistent_node_map or {}).values()
+                if isinstance(node, SourceNodeBase)
+            }
+            unknown = set(sources.keys()) - spec_names
+            if unknown:
+                raise ValueError(
+                    f"bind() received source keys with no matching SourceNode: "
+                    f"{sorted(unknown)}. Known names: {sorted(spec_names)}"
+                )
+            for node in (self._persistent_node_map or {}).values():
+                if isinstance(node, SourceNodeBase) and node.name in sources:
+                    node.validate(sources[node.name])
 
-            for job_node in (self._persistent_node_map or {}).values():
+            # Update bound_source on SourceJobNodes and maintain both dicts.
+            for h, job_node in (self._persistent_node_map or {}).items():
                 if isinstance(job_node, SourceJobNode) and job_node.name in sources:
                     job_node.bound_source = sources[job_node.name]
-
+                    self._sources_by_hash[h] = sources[job_node.name]
+                    # Also index by schema-based hash (matches blueprint pipeline keys).
+                    schema_hash = job_node.as_node().content_hash().to_string()
+                    self._sources_by_hash[schema_hash] = sources[job_node.name]
             self._sources.update(sources)
 
         if execution_context is not None:
@@ -582,8 +362,8 @@ class PipelineJob(AbstractPipelineBase):
     def _distribute_databases(self) -> None:
         """Wire live DB references to all FunctionJobNode and OperatorJobNode objects.
 
-        Called by ``bind()`` when *store* is changed and by ``from_pipeline()``
-        when *store* is provided at construction time.
+        Called by ``compile()`` when a store is already set, and by ``bind()``
+        when *store* is changed.
 
         Raises:
             RuntimeError: If ``_store`` is not set.
@@ -598,9 +378,7 @@ class PipelineJob(AbstractPipelineBase):
                 "Call bind(store=...) or from_pipeline(..., store=...) first."
             )
 
-        pipeline = self._compiled_pipeline
-        pipeline_name = pipeline.name if pipeline is not None else self._name
-        pipeline_db = self._store.at(*pipeline_name)
+        pipeline_db = self._store.at(*self._name)
         result_db = pipeline_db.at("_result")
 
         for node in (self._persistent_node_map or {}).values():
@@ -623,19 +401,21 @@ class PipelineJob(AbstractPipelineBase):
     def as_pipeline(self) -> "Pipeline":
         """Return the lightweight ``Pipeline`` blueprint for this job.
 
-        Walks ``_persistent_node_map`` topologically and rewires each job node
-        to a fresh blueprint node whose upstreams point at the already-built
-        blueprint nodes in ``node_map`` (not at job nodes). This ensures that
-        the content_hash of every node in the returned ``Pipeline`` matches its
-        key in ``_persistent_node_map``.
+        Walks ``_persistent_node_map`` topologically and rewires each job
+        node to a fresh blueprint node whose upstreams point at the
+        already-built blueprint nodes in ``node_map`` (not at job nodes).
+        This ensures that the content_hash of every node in the returned
+        ``Pipeline`` is consistent with the hash keys in
+        ``_persistent_node_map``.
 
         Returns:
             A compiled ``Pipeline`` whose ``_persistent_node_map`` contains
             only lightweight ``SourceNode`` / ``FunctionNode`` / ``OperatorNode``
-            objects with blueprint (non-job) upstream references.
+            objects with blueprint (non-job) upstream references.  Keys in
+            ``_persistent_node_map`` match those in ``self._persistent_node_map``.
 
         Raises:
-            RuntimeError: If this job has no compiled pipeline.
+            RuntimeError: If this job has not been compiled.
         """
         import networkx as _nx
         from orcapod.core.nodes.function_node import FunctionJobNode, FunctionNode
@@ -643,36 +423,34 @@ class PipelineJob(AbstractPipelineBase):
         from orcapod.core.nodes.source_node import SourceJobNode
         from orcapod.pipeline.graph import Pipeline
 
-        if self._compiled_pipeline is None:
+        if not self._compiled:
             raise RuntimeError(
                 "PipelineJob has no compiled pipeline. "
                 "Either use 'with job:' to record a DAG, "
                 "or create the job via PipelineJob.from_pipeline()."
             )
 
-        G = self._compiled_pipeline._hash_graph
-        persistent = self._persistent_node_map or {}
-        node_map: dict[str, object] = {}
+        persistent = self._persistent_node_map
 
-        # Build a reverse lookup from Python object identity to blueprint hash so
-        # that FunctionJobNode._input_stream and OperatorJobNode._input_streams
-        # (which are themselves job nodes) can be mapped to their blueprint-hash keys.
+        # Reverse lookup: job node Python id → its key in _persistent_node_map.
+        # Required to wire blueprint upstreams to the correct hash key even when
+        # job node identity (content_hash) differs from the map key.
         job_id_to_bp_hash: dict[int, str] = {
-            id(job_node): bp_hash for bp_hash, job_node in persistent.items()
+            id(job_node): bp_hash
+            for bp_hash, job_node in persistent.items()
         }
 
-        for node_hash in _nx.topological_sort(G):
+        node_map: dict[str, object] = {}
+
+        for node_hash in _nx.topological_sort(self._hash_graph):
             if node_hash not in persistent:
                 continue
             job_node = persistent[node_hash]
 
             if isinstance(job_node, SourceJobNode):
-                # SourceNode has no upstream — as_node() is safe as-is.
                 node_map[node_hash] = job_node.as_node()
 
             elif isinstance(job_node, FunctionJobNode):
-                # Wire _input_stream to the already-built blueprint upstream so
-                # the resulting FunctionNode.content_hash() == node_hash.
                 upstream_bp_hash = job_id_to_bp_hash[id(job_node._input_stream)]
                 node_map[node_hash] = FunctionNode(
                     function_pod=job_node._function_pod,
@@ -683,8 +461,6 @@ class PipelineJob(AbstractPipelineBase):
                 )
 
             elif isinstance(job_node, OperatorJobNode):
-                # Preserve original _input_streams order (important for non-commutative
-                # operators such as SemiJoin) via the object-identity reverse lookup.
                 blueprint_upstreams = tuple(
                     node_map[job_id_to_bp_hash[id(s)]]
                     for s in job_node._input_streams
@@ -698,46 +474,114 @@ class PipelineJob(AbstractPipelineBase):
                 )
 
             else:
-                # Fallback for any future node types — may not rewire upstreams.
                 node_map[node_hash] = job_node.as_node()
 
-        pipeline = Pipeline(name=self._name, auto_compile=False)
-        pipeline._graph_edges = list(self._compiled_pipeline._graph_edges)
-        pipeline._upstreams = dict(self._compiled_pipeline._upstreams)
-        pipeline._node_lut = dict(self._compiled_pipeline._node_lut)
-        pipeline._hash_graph = self._compiled_pipeline._hash_graph
-        pipeline._persistent_node_map = node_map
-        pipeline._nodes = {
-            label: node_map[node.content_hash().to_string()]
-            for label, node in self._compiled_pipeline._nodes.items()
-            if node.content_hash().to_string() in node_map
+        # Translate old (concrete) hash keys → new (schema-based) node content hashes.
+        # Blueprint nodes use schema-based content_hash() (SourceNode is schema-only,
+        # so FunctionNode/OperatorNode upstreaming SourceNodes are also schema-based).
+        old_to_new: dict[str, str] = {
+            h: bp_node.content_hash().to_string()
+            for h, bp_node in node_map.items()
         }
+        # Re-key node_map with schema-based hashes.
+        new_node_map: dict[str, object] = {
+            new_h: node_map[h]
+            for h, new_h in old_to_new.items()
+        }
+
+        # Rebuild hash graph with schema-based keys.
+        # Carry over node attributes (node_type, label, pipeline_hash) from the
+        # job's hash graph — these are structural/type attributes that remain
+        # valid for the blueprint nodes.
+        bp_hash_graph = _nx.DiGraph()
+        for old_h, new_h in old_to_new.items():
+            old_attrs = dict(self._hash_graph.nodes[old_h]) if old_h in self._hash_graph else {}
+            bp_hash_graph.add_node(new_h, **old_attrs)
+        for up_h, down_h in self._hash_graph.edges():
+            new_up = old_to_new.get(up_h)
+            new_down = old_to_new.get(down_h)
+            if new_up is not None and new_down is not None:
+                bp_hash_graph.add_edge(new_up, new_down)
+
+        new_graph_edges = [
+            (old_to_new[u], old_to_new[v])
+            for u, v in self._graph_edges
+            if u in old_to_new and v in old_to_new
+        ]
+
+        pipeline = Pipeline(name=self._name, auto_compile=False)
+        pipeline._hash_graph = bp_hash_graph
+        pipeline._graph_edges = new_graph_edges
+        pipeline._persistent_node_map = new_node_map
+        pipeline._upstreams = {
+            old_to_new[h]: node_map[h]
+            for h in self._upstreams
+            if h in old_to_new
+        }
+        pipeline._node_lut = {
+            old_to_new[h]: node_map[h]
+            for h in self._node_lut
+            if h in old_to_new
+        }
+        pipeline._nodes = {
+            label: node_map[job_id_to_bp_hash[id(job_node)]]
+            for label, job_node in self._nodes.items()
+            if id(job_node) in job_id_to_bp_hash
+            and job_id_to_bp_hash[id(job_node)] in node_map
+        }
+
+        # Build _node_graph (DiGraph with node objects as vertices).
+        # Mirrors AbstractPipelineBase.compile() step 5.
+        pipeline._node_graph = _nx.DiGraph()
+        for up_h, down_h in self._hash_graph.edges():
+            up_node = node_map.get(up_h)
+            down_node = node_map.get(down_h)
+            if up_node is not None and down_node is not None:
+                pipeline._node_graph.add_edge(up_node, down_node)
+        for node in node_map.values():
+            if node not in pipeline._node_graph:
+                pipeline._node_graph.add_node(node)
+
         pipeline._compiled = True
 
         return pipeline
+
+    def to_invocations(self):  # type: ignore[override]
+        """Extract an ``InvocationGraph`` from the schema-based blueprint.
+
+        Delegates to ``as_pipeline().to_invocations()`` so that the
+        produced invocations always use schema-based (not data-based)
+        hashes, regardless of whether sources are currently bound.
+
+        This ensures stable serialization across bind/rebind cycles.
+
+        Raises:
+            RuntimeError: If this job has not been compiled.
+        """
+        return self.as_pipeline().to_invocations()
 
     # ------------------------------------------------------------------
     # Completeness introspection
     # ------------------------------------------------------------------
 
-    def unbound_source_nodes(self) -> "list[SourceNode]":
-        """Return all SourceNode slots not yet bound in this job.
+    def unbound_source_nodes(self) -> "list[Any]":
+        """Return all SourceJobNode slots not yet bound in this job.
 
         Returns:
-            List of unbound ``SourceNode`` instances, in order of appearance
-            in the pipeline graph.
+            List of unbound ``SourceJobNode`` instances, in order of
+            appearance in the pipeline graph.
         """
-        from orcapod.core.nodes.source_node import SourceNode
+        from orcapod.core.nodes.source_node import SourceJobNode
 
-        if self._compiled_pipeline is None:
+        if not self._compiled:
             return []
 
-        unbound: list[SourceNode] = []
+        unbound: list[Any] = []
         seen: set[str] = set()
-        for node in self._compiled_pipeline._persistent_node_map.values():
+        for node in (self._persistent_node_map or {}).values():
             if (
-                isinstance(node, SourceNode)
-                and node.name not in self._sources
+                isinstance(node, SourceJobNode)
+                and node.bound_source is None
                 and node.name not in seen
             ):
                 unbound.append(node)
@@ -761,26 +605,19 @@ class PipelineJob(AbstractPipelineBase):
         Returns:
             ``True`` if the node can be executed with current bindings.
         """
-        from orcapod.core.nodes.source_node import SourceNode
+        from orcapod.core.nodes.source_node import SourceJobNode
 
-        pipeline = self._compiled_pipeline
-        if pipeline is None:
+        if not self._compiled or self._node_graph is None:
             return False
 
-        target = pipeline._nodes.get(node_label)
+        target = self._nodes.get(node_label)
         if target is None:
-            return False
-
-        if pipeline._node_graph is None:
             return False
 
         import networkx as nx
 
-        for node in nx.ancestors(pipeline._node_graph, target) | {target}:
-            if (
-                isinstance(node, SourceNode)
-                and node.name not in self._sources
-            ):
+        for node in nx.ancestors(self._node_graph, target) | {target}:
+            if isinstance(node, SourceJobNode) and node.bound_source is None:
                 return False
         return True
 
@@ -828,7 +665,7 @@ class PipelineJob(AbstractPipelineBase):
             Updates the cloned ``exec_pipeline._nodes`` with the fresh exec nodes
             (keyed by label) so that the returned pipeline's ``compiled_nodes``
             returns execution-ready nodes after a run. The original
-            ``self._compiled_pipeline`` is never mutated.
+            ``self.compiled_pipeline`` is never mutated.
 
         Returns:
             Tuple of (exec_graph, unresolved_spec_names, exec_pipeline).
@@ -844,9 +681,7 @@ class PipelineJob(AbstractPipelineBase):
         from orcapod.core.nodes.source_node import SourceJobNode, SourceNode
         from orcapod.core.executors.local import LocalPythonFunctionExecutor
 
-        pipeline = self._compiled_pipeline
-        if pipeline is None:
-            raise RuntimeError("No compiled pipeline — use 'with job:' first.")
+        pipeline = self.compiled_pipeline  # raises RuntimeError("No compiled pipeline...") if not compiled
 
         store = self._store
         if store is None:
@@ -871,9 +706,6 @@ class PipelineJob(AbstractPipelineBase):
                 G.add_node(node_hash)
 
         # Build reverse lookup: node object id → label in pipeline._nodes
-        # compile() stores nodes by their computed label (node.label) even when
-        # _label is None, so we need this reverse map to propagate labels to
-        # freshly-created exec nodes.
         node_to_label: dict[int, str] = {
             id(node): label for label, node in pipeline._nodes.items()
         }
@@ -892,9 +724,11 @@ class PipelineJob(AbstractPipelineBase):
                 if upstream is None:
                     continue
                 if isinstance(upstream, SourceNode):
-                    if upstream.name in self._sources:
+                    # _sources_by_hash is keyed by the _persistent_node_map hash,
+                    # which is always unique even when multiple sources share a name.
+                    if node_hash in self._sources_by_hash:
                         # Bound — create a SourceJobNode with the concrete source.
-                        concrete = self._sources[upstream.name]
+                        concrete = self._sources_by_hash[node_hash]
                         exec_job_node = SourceJobNode(
                             name=upstream.name,
                             tag_schema=upstream.tag_schema,
@@ -940,16 +774,12 @@ class PipelineJob(AbstractPipelineBase):
                     exec_node_map[node_hash] = new_fn
 
                 elif isinstance(template, OperatorNode):
-                    # All predecessors that are not excluded must be in exec_node_map.
-                    # The excluded_hashes guard above (via `continue`) ensures any
-                    # excluded predecessor causes this node to be skipped already.
                     missing = [p for p in preds if p not in exec_node_map]
                     if missing:
                         raise RuntimeError(
                             f"OperatorNode predecessor missing from exec_node_map: {missing}"
                         )
                     upstream_nodes = tuple(exec_node_map[p] for p in preds)
-                    # blueprint OperatorNode has no _cache_mode; default is OFF
                     op_cache_mode = getattr(template, "_cache_mode", None) or CacheMode.OFF
                     new_op = OperatorJobNode(
                         operator=template._operator,
@@ -973,20 +803,12 @@ class PipelineJob(AbstractPipelineBase):
                 exec_graph.add_node(node)
 
         # Update exec_pipeline._nodes with fresh exec nodes (keyed by label).
-        # The clone's _nodes is independent of the original pipeline, so
-        # running one job does not affect other jobs sharing the same blueprint.
-        # Labels come from (in priority order):
-        #   1. node._label — explicit label set at node creation
-        #   2. template lookup — for FunctionNode/OperatorNode reconstructed from blueprint
-        #   3. node.computed_label() — for SourceNodes, delegates to stream.label
         for node_hash, node in exec_node_map.items():
             label = node._label if node._label else None
             if label is None and node_hash in pipeline._node_lut:
                 template = pipeline._node_lut[node_hash]
                 label = node_to_label.get(id(template))
             if label is None:
-                # SourceNodes (not in _node_lut) use computed_label() to delegate
-                # their label to the wrapped stream (SourceSpec name or concrete source label).
                 label = node.computed_label()
             if label:
                 exec_pipeline._nodes[label] = node
@@ -1034,16 +856,13 @@ class PipelineJob(AbstractPipelineBase):
         effective_observer = observer or NoOpObserver()
 
         # Compute snapshot hash for run URI using only the leaf (sink) nodes.
-        # Each node's content_hash() is a Merkle chain that encodes its own identity
-        # and all of its transitive inputs, so the set of leaf-node hashes uniquely
-        # identifies the full graph topology without needing to enumerate edges.
         leaf_hashes = sorted(
             n.content_hash().to_string()
             for n in exec_graph.nodes()
             if exec_graph.out_degree(n) == 0 and hasattr(n, "content_hash")
         )
         snapshot_hash = hashlib.sha256("\n".join(leaf_hashes).encode()).hexdigest()[:16]
-        pipeline_uri = "/".join(self._compiled_pipeline.name) + "@" + snapshot_hash
+        pipeline_uri = "/".join(self._name) + "@" + snapshot_hash
 
         SyncPipelineOrchestrator().run(
             exec_graph,
@@ -1054,19 +873,20 @@ class PipelineJob(AbstractPipelineBase):
         # Flush databases
         store = self._store
         if store is not None:
-            pipeline_db = store.at(*self._compiled_pipeline.name)
+            pipeline_db = store.at(*self._name)
             result_db = pipeline_db.at("_result")
             pipeline_db.flush()
             result_db.flush()
 
-        # Return new job (different object); uses exec_pipeline (clone with exec nodes)
+        # Return new job with exec_pipeline (contains exec nodes with databases).
         result = PipelineJob(
             name=self._name,
             store=self._store,
             execution_context=self._execution_context,
-            _pipeline=exec_pipeline,        # exec_pipeline (clone), not self._compiled_pipeline
-            sources=dict(self._sources),
         )
+        result._compiled_pipeline = exec_pipeline
+        result._sources = dict(self._sources)
+        result._sources_by_hash = dict(self._sources_by_hash)
         result._unresolved_specs = unresolved_specs
         result._has_run = True
         result._run_id = run_id
@@ -1075,10 +895,10 @@ class PipelineJob(AbstractPipelineBase):
     def __repr__(self) -> str:
         n_sources = len(self._sources)
         has_store = self._store is not None
-        has_pipeline = self._compiled_pipeline is not None
+        is_compiled = self._compiled
         return (
             f"PipelineJob(sources={n_sources}, store={has_store}, "
-            f"pipeline={'compiled' if has_pipeline else 'unrecorded'})"
+            f"compiled={is_compiled})"
         )
 
     # ------------------------------------------------------------------
@@ -1105,9 +925,13 @@ class PipelineJob(AbstractPipelineBase):
 
         from orcapod.pipeline.serialization import PIPELINE_JOB_FORMAT_VERSION
 
-        pipeline = self._compiled_pipeline
-        if pipeline is None:
+        # Allow save when either compile() was called or _compiled_pipeline is
+        # pre-set (e.g. result of run() which has no invocation_lut but does
+        # have a compiled_pipeline from exec graph construction).
+        if not self._compiled and self._compiled_pipeline is None:
             raise ValueError("No compiled pipeline to save.")
+
+        pipeline = self.compiled_pipeline
 
         path = _Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1237,12 +1061,34 @@ class PipelineJob(AbstractPipelineBase):
                 except Exception:
                     logger.warning("Could not reconstruct store from config — skipping.")
 
-        job = cls(
-            name=pipeline.name,
-            store=effective_store,
-            _pipeline=pipeline,
-            sources=sources,
-        )
+        # Reconstruct the job directly without going through to_invocations().
+        # The loaded pipeline may have stub nodes (function_pod=None, operator=None)
+        # that cannot compute content hashes, so the to_invocations() → from_invocations()
+        # path used by from_pipeline() would fail.  Instead, attach the loaded
+        # pipeline directly as the compiled blueprint and set up source bindings.
+        job = cls(name=pipeline._name, store=effective_store)
+        job._compiled_pipeline = pipeline
+        # Mark compiled so save() / compiled_pipeline can be accessed.
+        # _persistent_node_map etc. remain empty (job was not recorded in a
+        # with-block), but all public API goes through _compiled_pipeline.
+        job._compiled = True
+        job._nodes = dict(pipeline._nodes)
+
+        # Populate _upstreams / _node_lut / _graph_edges / _hash_graph from pipeline.
+        job._upstreams = dict(pipeline._upstreams)
+        job._node_lut = dict(pipeline._node_lut)
+        job._graph_edges = list(pipeline._graph_edges)
+        job._hash_graph = pipeline._hash_graph.copy()
+
+        # Build _sources and _sources_by_hash from reconstructed sources.
+        from orcapod.core.nodes.source_node import SourceNode as _SourceNode
+        job._sources = dict(sources)
+        for h, source_node in pipeline._upstreams.items():
+            if isinstance(source_node, _SourceNode) and source_node.name in sources:
+                job._sources_by_hash[h] = sources[source_node.name]
+
+        if effective_store is not None:
+            job._distribute_databases()
 
         # Restore run metadata
         run_block = data.get("run", {})

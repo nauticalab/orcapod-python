@@ -403,7 +403,8 @@ class TestPipelineRecording:
         with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_function_pod_invocation(pod, stream, label="dbl")
 
-        # Should have one FunctionNode in node_lut
+        # compile() populates _node_lut from the recorded _invocation_lut
+        tracker.compile()
         assert len(tracker._node_lut) == 1
         fn_node = list(tracker._node_lut.values())[0]
         assert isinstance(fn_node, FunctionNode)
@@ -418,6 +419,8 @@ class TestPipelineRecording:
         with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_function_pod_invocation(pod, stream)
 
+        # _graph_edges is populated by compile()
+        tracker.compile()
         assert len(tracker._graph_edges) == 1
         upstream_hash, node_hash = tracker._graph_edges[0]
         assert upstream_hash == stream.content_hash().to_string()
@@ -432,9 +435,16 @@ class TestPipelineRecording:
         with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_function_pod_invocation(pod, stream)
 
+        # Raw stream is preserved in _source_streams during/after recording
         stream_hash = stream.content_hash().to_string()
+        assert stream_hash in tracker._source_streams
+        assert tracker._source_streams[stream_hash] is stream
+
+        # After compile(), _upstreams holds a SourceNode wrapper (schema-only)
+        tracker.compile()
+        from orcapod.core.nodes.source_node import SourceNode
         assert stream_hash in tracker._upstreams
-        assert tracker._upstreams[stream_hash] is stream
+        assert isinstance(tracker._upstreams[stream_hash], SourceNode)
 
     def test_record_operator_pod_creates_operator_node(self):
         stream = _make_stream()
@@ -444,6 +454,8 @@ class TestPipelineRecording:
         with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_operator_pod_invocation(op, upstreams=(stream,))
 
+        # compile() populates _node_lut
+        tracker.compile()
         assert len(tracker._node_lut) == 1
         op_node = list(tracker._node_lut.values())[0]
         assert isinstance(op_node, OperatorNode)
@@ -458,6 +470,8 @@ class TestPipelineRecording:
         with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_operator_pod_invocation(op, upstreams=(stream_a, stream_b))
 
+        # _graph_edges is populated by compile()
+        tracker.compile()
         assert len(tracker._graph_edges) == 2
 
     def test_nodes_returns_copy(self):
@@ -467,12 +481,16 @@ class TestPipelineRecording:
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_function_pod_invocation(pod, _make_stream())
-            nodes = tracker.nodes
-            nodes.clear()
-            # Original unaffected
-            assert len(tracker.nodes) == 1
 
-    def test_reset_clears_all(self):
+        # compile() populates _node_lut; .nodes returns a copy
+        tracker.compile()
+        nodes = tracker.nodes
+        nodes.clear()
+        # Original unaffected by mutating the copy
+        assert len(tracker.nodes) == 1
+
+    def test_reset_is_noop_recording_is_additive(self):
+        """reset() is a no-op — recording state is additive across with-blocks."""
         pf = PythonDataFunction(_double, output_keys="result")
         pod = FunctionPod(data_function=pf)
         stream = _make_stream()
@@ -480,12 +498,21 @@ class TestPipelineRecording:
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_function_pod_invocation(pod, stream)
-            assert len(tracker.nodes) == 1
+            # Recording is stored in _invocation_lut and _source_streams
+            assert len(tracker._invocation_lut) == 1
+            assert len(tracker._source_streams) == 1
 
+            # reset() is intentionally a no-op — additive recording persists
             tracker.reset()
-            assert len(tracker.nodes) == 0
-            assert len(tracker._upstreams) == 0
-            assert len(tracker._graph_edges) == 0
+            assert len(tracker._invocation_lut) == 1
+            assert len(tracker._source_streams) == 1
+
+        # After with-block exits (auto_compile=False, so compile() not called),
+        # manually compile and verify the recorded invocation is preserved
+        tracker.compile()
+        assert len(tracker.nodes) == 1
+        assert len(tracker._upstreams) == 1
+        assert len(tracker._graph_edges) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -863,6 +890,9 @@ class TestManagerBroadcast:
         with tracker1, tracker2:
             mgr.record_function_pod_invocation(pod, stream)
 
+        # compile() is required to populate _node_lut (auto_compile=False)
+        tracker1.compile()
+        tracker2.compile()
         assert len(tracker1.nodes) == 1
         assert len(tracker2.nodes) == 1
 

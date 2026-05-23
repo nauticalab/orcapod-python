@@ -174,15 +174,17 @@ class TestCrossWithBlockReconnection:
         pod2 = FunctionPod(PythonDataFunction(double2, output_keys="result"))
         concrete = _src("key", "value")
 
-        job = PipelineJob(name="test", auto_compile=False)
+        job = PipelineJob(name="test")
         with job:
-            out1 = pod1(concrete, label="step1")
+            pod1(concrete, label="step1")
+        # After first with-block, _persistent_node_map is populated via compile().
         source_hash_first = list(
             h for h, n in job._persistent_node_map.items()
             if isinstance(n, SourceJobNode)
         )[0]
         with job:
             pod2(concrete, label="step2")
+        # After second with-block, compile() re-runs; same concrete → same source hash.
         source_hash_second = list(
             h for h, n in job._persistent_node_map.items()
             if isinstance(n, SourceJobNode)
