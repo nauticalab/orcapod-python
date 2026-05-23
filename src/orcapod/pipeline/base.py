@@ -268,33 +268,24 @@ class AbstractPipelineBase(AutoRegisteringContextBasedTracker, ABC):
             if h in self._source_streams
         }
 
-        # 2a. Disambiguate source-node slot names.
-        # Multiple unlabelled sources of the same type share the same label
-        # (e.g. two ArrowTableSource inputs → both default to "ArrowTableSource").
-        # All members of a collision group get a unique "_N" suffix.  The suffix
-        # counter starts at 1 and keeps incrementing until a free name is found,
-        # so a pre-existing "ArrowTableSource_1" causes the group to be assigned
-        # "ArrowTableSource_2", "ArrowTableSource_3", … (never "ArrowTableSource_1_1").
-        # The counter does NOT reset between members of the same group — this
-        # guarantees sequential, gap-free numbering when no external conflicts exist.
-        # Nodes are brand-new here (no hash calls yet), so mutating _name is safe.
-        all_source_names: set[str] = {node._name for node in node_map.values()}
+        # 2a. Validate source-node name uniqueness.
+        # Source node names are identity-forming (used as bind() keys and
+        # included in content_hash()).  Two distinct source nodes with the
+        # same name but different schemas indicate that the caller has
+        # assigned the same source_id to conceptually different sources —
+        # raise an error rather than silently renaming one of them.
         name_to_hashes: dict[str, list[str]] = {}
         for h, node in node_map.items():
             name_to_hashes.setdefault(node._name, []).append(h)
-        for base_name, hashes in name_to_hashes.items():
-            if len(hashes) <= 1:
-                continue
-            # None of the group members keep the bare base_name.
-            all_source_names.discard(base_name)
-            suffix = 1
-            for h in sorted(hashes):
-                while f"{base_name}_{suffix}" in all_source_names:
-                    suffix += 1
-                new_name = f"{base_name}_{suffix}"
-                node_map[h]._name = new_name
-                all_source_names.add(new_name)
-                suffix += 1
+        for node_name, hashes in name_to_hashes.items():
+            if len(hashes) > 1:
+                from orcapod.errors import InconsistentSourceError
+                raise InconsistentSourceError(
+                    f"Pipeline '{'.'.join(self._name)}' has {len(hashes)} source "
+                    f"nodes all named {node_name!r} but with different schemas. "
+                    f"Assign distinct source_id values to the conflicting sources "
+                    f"so each slot has a unique, stable identity."
+                )
 
         # 3. Topological pass — create function / operator nodes.
         for key in _nx.topological_sort(self._hash_graph):

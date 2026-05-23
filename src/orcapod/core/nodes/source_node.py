@@ -370,12 +370,19 @@ class SourceNode(SourceNodeBase):
     ) -> SourceNode:
         """Wrap *stream* in a ``SourceNode``, or return it unchanged if already one.
 
-        Derives tag and data schemas from ``stream.output_schema()``.  The
-        slot name defaults to ``stream.label`` — no fallback is applied.
+        Derives tag and data schemas from ``stream.output_schema()``.  The slot
+        name is resolved in priority order:
+
+        1. *name* parameter (explicit override — highest priority).
+        2. ``stream.source_id`` when *stream* is a ``RootSource`` — the canonical
+           source identity, stable across pipeline serialisation / deserialisation.
+        3. ``"{stream.label}:{hash_prefix}"`` for any other concrete stream type,
+           combining the cosmetic label with a short content-hash suffix to ensure
+           uniqueness.
 
         Args:
             stream: The upstream stream to wrap.
-            name: Optional explicit slot name.  Defaults to ``stream.label``.
+            name: Optional explicit slot name.
 
         Returns:
             The original *stream* if it is already a ``SourceNode``; otherwise
@@ -384,7 +391,16 @@ class SourceNode(SourceNodeBase):
         if isinstance(stream, SourceNode):
             return stream
         tag_schema, data_schema = stream.output_schema()
-        slot_name = name if name is not None else stream.label
+        if name is not None:
+            slot_name = name
+        else:
+            # Local import avoids a module-level circular dependency between
+            # core.nodes and core.sources.
+            from orcapod.core.sources.base import RootSource
+            if isinstance(stream, RootSource):
+                slot_name = stream.source_id
+            else:
+                slot_name = f"{stream.label}:{stream.content_hash().to_string(hexdigits=8)}"
         return cls(
             name=slot_name,
             tag_schema=tag_schema,
@@ -534,10 +550,11 @@ class SourceJobNode(SourceNodeBase):
             name: Optional explicit slot name. In all three cases, when *name*
                 is provided it takes precedence over the stream's own name.
                 For concrete streams (Case 3), when *name* is ``None`` the slot
-                name defaults to ``stream.label``. If multiple concrete sources
-                share the same label, ``compile()`` appends ``_1``, ``_2``, …
-                (sorted by content hash for determinism) so every slot name in a
-                compiled pipeline is unique.
+                name is resolved as: ``stream.source_id`` for ``RootSource``
+                instances, or ``"{stream.label}:{hash_prefix}"`` for any other
+                concrete stream type.  Source node names must be unique within a
+                compiled pipeline; ``compile()`` raises ``InconsistentSourceError``
+                if two source nodes share a name but differ in schema.
 
         Returns:
             A ``SourceJobNode`` configured according to the case above.
@@ -559,8 +576,21 @@ class SourceJobNode(SourceNodeBase):
                 bound_source=None,
             )
         # Case 3: concrete stream — bound SJN.
+        # Slot name priority:
+        #   1. explicit *name* parameter
+        #   2. stream.source_id for RootSource (canonical, stable identity)
+        #   3. label + short hash prefix for any other concrete stream type
         tag_schema, data_schema = stream.output_schema()
-        slot_name = name if name is not None else stream.label
+        if name is not None:
+            slot_name = name
+        else:
+            # Local import avoids a module-level circular dependency between
+            # core.nodes and core.sources.
+            from orcapod.core.sources.base import RootSource
+            if isinstance(stream, RootSource):
+                slot_name = stream.source_id
+            else:
+                slot_name = f"{stream.label}:{stream.content_hash().to_string(hexdigits=8)}"
         return cls(
             name=slot_name,
             tag_schema=tag_schema,
