@@ -269,12 +269,15 @@ class PipelineJob(AbstractPipelineBase):
                     node.validate(bound_sources[node.name])
 
         # Reconstruct via InvocationGraph (creates unbound SourceJobNodes).
+        # _compiled_pipeline is intentionally left as None here so the lazy
+        # property computes a schema-normalized blueprint via as_pipeline().
+        # Setting it to the original pipeline would cause hash-key mismatches in
+        # _build_execution_graph(): the original pipeline may carry concrete
+        # (data-inclusive) hash keys in _upstreams, while _sources_by_hash is
+        # keyed by schema-based hashes derived from the unbound SourceJobNodes.
         job = cls.from_invocations(pipeline.to_invocations(), name=pipeline._name)
         job._store = store
         job._execution_context = execution_context
-        # Pre-set the compiled_pipeline cache to the original pipeline so that
-        # _build_execution_graph() uses the caller-provided pipeline directly.
-        job._compiled_pipeline = pipeline
 
         # Bind concrete sources and distribute databases.
         if bound_sources:
@@ -332,8 +335,9 @@ class PipelineJob(AbstractPipelineBase):
             unknown = set(sources.keys()) - spec_names
             if unknown:
                 raise ValueError(
-                    f"bind() received source keys with no matching SourceNode: "
-                    f"{sorted(unknown)}. Known names: {sorted(spec_names)}"
+                    f"bind() received source keys with no matching source slot "
+                    f"(SourceJobNode): {sorted(unknown)}. "
+                    f"Known slot names: {sorted(spec_names)}"
                 )
             for node in (self._persistent_node_map or {}).values():
                 if isinstance(node, SourceNodeBase) and node.name in sources:

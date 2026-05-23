@@ -131,7 +131,10 @@ class TestPipelineSourceSpecEnforcement:
         job = PipelineJob.from_pipeline(pipeline, sources={"a": src_a, "b": src_b}, store=db)
 
         assert isinstance(job, PipelineJob)
-        assert job._compiled_pipeline is pipeline
+        # compiled_pipeline is computed lazily (schema-normalised) — not the
+        # original object, but it must be a fully compiled Pipeline.
+        assert job.compiled_pipeline is not None
+        assert job.compiled_pipeline._compiled
         assert job.store is db
 
 
