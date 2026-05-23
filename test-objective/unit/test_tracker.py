@@ -83,10 +83,19 @@ class TestPipelineTracker:
 
         pf = PythonDataFunction(_double, output_keys="result")
         pod = FunctionPod(data_function=pf)
-        stream = _make_stream()
+        # compile() requires SourceNode leaves, not raw concrete streams
+        spec = SourceNode(
+            name="test_spec",
+            tag_schema=Schema({"id": int}),
+            data_schema=Schema({"x": int}),
+        )
 
         # Explicitly record the invocation
-        tracker.record_function_pod_invocation(pod, stream)
+        tracker.record_function_pod_invocation(pod, spec)
+
+        # compile() is required to populate the nodes list (recording is additive,
+        # nodes are only materialised when compile() is called)
+        tracker.compile()
 
         # The tracker should have recorded at least one node
         assert len(tracker.nodes) >= 1
