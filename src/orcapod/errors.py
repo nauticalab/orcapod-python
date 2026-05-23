@@ -5,6 +5,21 @@ class InputValidationError(Exception):
     """
 
 
+class SchemaInconsistencyError(InputValidationError):
+    """Raised when a data batch has a schema that is incompatible with the expected schema.
+
+    This can happen in two situations:
+
+    - A fetched batch is missing a field declared in ``tag_schema`` or ``data_schema``,
+      or one of those fields has a different type than declared.
+    - Consecutive batches from a ``PollingSource`` have different column sets or
+      column types (schema drift between polls).
+
+    ``SchemaInconsistencyError`` is a subclass of ``InputValidationError`` so existing
+    ``except InputValidationError`` handlers continue to work.
+    """
+
+
 class DuplicateTagError(ValueError):
     """Raised when duplicate tag values are found and skip_duplicates=False"""
 
@@ -52,6 +67,21 @@ class SourceSpecMismatchError(ValueError):
 
     Contains the slot name and a description of the incompatible field(s).
     Raised at ``bind()`` time — schema mismatches are rejected before execution.
+    """
+
+
+class CursorInvalidatedError(Exception):
+    """Raised by a ``DynamicSourceProtocol`` implementation when the previous
+    cursor is no longer valid and the source state must be rebuilt from scratch.
+
+    This is a terminal condition for ``PollingSource``. Rows already emitted
+    downstream cannot be retracted, so continuing would leave downstream
+    operators with a corrupted view. ``PollingSource`` logs the error, calls
+    ``impl.close()``, and re-raises so the caller receives the exception rather
+    than a silent end-of-stream.
+
+    If full-reset semantics are required, use a static source re-run instead
+    of ``PollingSource``.
     """
 
 

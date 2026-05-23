@@ -298,6 +298,10 @@ class SourceNodeBase(TraceableBase, ABC):
     ) -> None:
         """Push all (tag, data) pairs to the output channel.
 
+        Delegates to ``async_iter_data`` so that dynamic sources
+        (e.g. ``PollingSource``) stream continuously without modification
+        to this node.
+
         Args:
             output: Channel to write results to.
             observer: Optional execution observer.
@@ -310,7 +314,7 @@ class SourceNodeBase(TraceableBase, ABC):
         try:
             if observer is not None:
                 observer.on_node_start(node_label, node_hash)
-            for tag, data in self.iter_data():
+            async for tag, data in self.async_iter_data():
                 await output.send((tag, data))
             if observer is not None:
                 observer.on_node_end(node_label, node_hash)

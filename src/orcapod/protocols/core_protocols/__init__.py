@@ -7,7 +7,7 @@ from .function_pod import FunctionPodProtocol
 from .operator_pod import OperatorPodProtocol
 from .data_function import DataFunctionProtocol
 from .pod import ArgumentGroup, PodProtocol
-from .sources import SourceProtocol
+from .sources import DynamicSourceProtocol, SourceProtocol
 from .streams import StreamProtocol
 from .trackers import TrackerProtocol, TrackerManagerProtocol
 
@@ -16,6 +16,7 @@ __all__ = [
     "DatagramProtocol",
     "TagProtocol",
     "DataProtocol",
+    "DynamicSourceProtocol",
     "SourceProtocol",
     "StreamProtocol",
     "PodProtocol",

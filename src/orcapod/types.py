@@ -16,9 +16,10 @@ import os
 import uuid
 from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from types import UnionType
-from typing import TYPE_CHECKING, Any, Self, TypeAlias
+from typing import TYPE_CHECKING, Any, Generic, Self, TypeAlias, TypeVar
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -70,6 +71,8 @@ as a lightweight, protocol-free representation of a data."""
 SchemaLike: TypeAlias = Mapping[str, DataType]
 """A dict-like structure mapping field names to ``DataType`` entries.
 Accepted wherever a ``Schema`` is expected so callers can pass plain dicts."""
+
+_T = TypeVar("_T")
 
 
 class Schema(Mapping[str, DataType]):
@@ -584,3 +587,87 @@ class ContentHash:
             A string like ``"arrow_v2.1:1a2b3c4d"``.
         """
         return f"{self.method}:{self.to_hex(length)}"
+
+
+@dataclass
+class Cursor(Generic[_T]):
+    """Marks the current position in a DynamicSource's data stream.
+
+    Args:
+        value: Implementation-defined cursor value. May be a datetime
+            timestamp, integer offset, string pagination token, or any
+            other type meaningful to the implementation.
+        modified_at: Optional wall-clock time when the source content at
+            this cursor position was last modified. When provided,
+            ``PollingSource`` uses this to update its ``last_modified``
+            timestamp for downstream staleness detection. When ``None``,
+            the framework falls back to its own wall clock.
+    """
+
+    value: _T
+    modified_at: datetime | None = None
+
+    @classmethod
+    def now(cls, value: _T) -> Cursor[_T]:
+        """Create a cursor whose ``modified_at`` is the current UTC wall time.
+
+        Args:
+            value: The cursor position value.
+
+        Returns:
+            A new ``Cursor`` with ``modified_at`` set to
+            ``datetime.now(tz=timezone.utc)``.
+        """
+        from datetime import timezone
+
+        return cls(value=value, modified_at=datetime.now(tz=timezone.utc))
+
+
+@dataclass(frozen=True, slots=True)
+class PollingConfig:
+    """Configuration for a ``PollingSource``.
+
+    Args:
+        interval: Seconds between ``poll()`` calls, measured start-to-start.
+        duration: Total seconds to run. ``0`` means indefinite (run until
+            cancelled).
+        max_missed_intervals: Maximum consecutive tick windows consumed by a
+            single poll+fetch cycle before the source terminates.
+            Resets to zero on any clean tick.
+        max_consecutive_errors: Maximum consecutive ``poll()``/``fetch()``
+            failures before the source closes its channel cleanly.
+        error_backoff_base: Base wait in seconds for exponential backoff on
+            errors. Wait after the nth error is
+            ``error_backoff_base * 2 ** (n - 1)``.
+    """
+
+    interval: float = 1.0
+    duration: float = 0.0
+    max_missed_intervals: int = 5
+    max_consecutive_errors: int = 3
+    error_backoff_base: float = 1.0
+
+    def __post_init__(self) -> None:
+        if self.interval <= 0:
+            raise ValueError(
+                f"PollingConfig.interval must be > 0, got {self.interval}"
+            )
+        if self.duration < 0:
+            raise ValueError(
+                f"PollingConfig.duration must be >= 0, got {self.duration}"
+            )
+        if self.max_missed_intervals < 1:
+            raise ValueError(
+                f"PollingConfig.max_missed_intervals must be >= 1, "
+                f"got {self.max_missed_intervals}"
+            )
+        if self.max_consecutive_errors < 1:
+            raise ValueError(
+                f"PollingConfig.max_consecutive_errors must be >= 1, "
+                f"got {self.max_consecutive_errors}"
+            )
+        if self.error_backoff_base <= 0:
+            raise ValueError(
+                f"PollingConfig.error_backoff_base must be > 0, "
+                f"got {self.error_backoff_base}"
+            )
