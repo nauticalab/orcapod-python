@@ -1,3 +1,4 @@
+from .config import OrcapodConfig
 from .core.function_pod import (
     FunctionPod,
     function_pod,
@@ -14,6 +15,7 @@ from . import streams  # noqa: F401
 from . import types  # noqa: F401
 
 __all__ = [
+    "OrcapodConfig",
     "FunctionPod",
     "function_pod",
     "Pipeline",
