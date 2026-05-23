@@ -197,7 +197,10 @@ class TestPipelineJobBind:
 
         job = PipelineJob.from_pipeline(pipeline, sources={"a": src_a, "b": src_b}, store=store)
         assert isinstance(job, PipelineJob)
-        assert job._compiled_pipeline is pipeline
+        # compiled_pipeline is computed lazily (schema-normalised) — not the
+        # original object, but it must be a fully compiled Pipeline.
+        assert job.compiled_pipeline is not None
+        assert job.compiled_pipeline._compiled
 
     def test_from_pipeline_propagates_name(self, store):
         """PipelineJob.from_pipeline() must propagate the pipeline's name to the job."""

@@ -531,9 +531,13 @@ class SourceJobNode(SourceNodeBase):
 
         Args:
             stream: The stream to wrap.
-            name: Optional explicit slot name. Defaults to ``stream.label`` for
-                concrete streams; for ``SourceNode`` / ``SourceJobNode`` the
-                existing ``name`` attribute is preserved.
+            name: Optional explicit slot name. In all three cases, when *name*
+                is provided it takes precedence over the stream's own name.
+                For concrete streams (Case 3), when *name* is ``None`` the slot
+                name falls back to ``stream.label`` only if the label was
+                explicitly assigned (``stream.has_assigned_label``); otherwise
+                ``stream.content_hash().to_string()`` is used to guarantee
+                uniqueness across multiple unnamed sources of the same type.
 
         Returns:
             A ``SourceJobNode`` configured according to the case above.
@@ -541,7 +545,7 @@ class SourceJobNode(SourceNodeBase):
         if isinstance(stream, SourceJobNode):
             # Case 1: copy — preserve bound_source, do NOT wrap the SJN itself.
             return cls(
-                name=stream.name,
+                name=name if name is not None else stream.name,
                 tag_schema=stream.tag_schema,
                 data_schema=stream.data_schema,
                 bound_source=stream.bound_source,
@@ -549,14 +553,23 @@ class SourceJobNode(SourceNodeBase):
         if isinstance(stream, SourceNode):
             # Case 2: unbound — schema placeholder; SJN hash = SourceNode hash.
             return cls(
-                name=stream.name,
+                name=name if name is not None else stream.name,
                 tag_schema=stream.tag_schema,
                 data_schema=stream.data_schema,
                 bound_source=None,
             )
         # Case 3: concrete stream — bound SJN.
+        # Use an explicit name if given; otherwise only use stream.label when
+        # the label was explicitly assigned to avoid collisions between multiple
+        # unlabelled sources of the same type (e.g. two ArrowTableSource inputs
+        # both defaulting to "ArrowTableSource").
         tag_schema, data_schema = stream.output_schema()
-        slot_name = name if name is not None else stream.label
+        if name is not None:
+            slot_name = name
+        elif getattr(stream, "has_assigned_label", False):
+            slot_name = stream.label
+        else:
+            slot_name = stream.content_hash().to_string()
         return cls(
             name=slot_name,
             tag_schema=tag_schema,
