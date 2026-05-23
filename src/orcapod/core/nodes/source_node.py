@@ -508,6 +508,62 @@ class SourceJobNode(SourceNodeBase):
             )
         return self._bound_source.as_table(columns=columns, all_info=all_info)
 
+    @classmethod
+    def from_stream(
+        cls,
+        stream: StreamProtocol,
+        name: str | None = None,
+    ) -> "SourceJobNode":
+        """Create a ``SourceJobNode`` from *stream* using three-way logic.
+
+        The three cases are:
+
+        1. *stream* is already a ``SourceJobNode`` — copy it, preserving the
+           existing ``bound_source`` (the SJN itself is **not** used as the
+           bound source).
+        2. *stream* is a ``SourceNode`` (schema-only, no data) — create an
+           **unbound** ``SourceJobNode`` with the same name and schemas. The
+           resulting SJN has ``bound_source=None`` and the same
+           ``content_hash()`` as *stream* (schema-based).
+        3. Any other concrete stream (``ArrowTableSource``, etc.) — create a
+           **bound** ``SourceJobNode`` whose ``content_hash()`` delegates to
+           the concrete stream.
+
+        Args:
+            stream: The stream to wrap.
+            name: Optional explicit slot name. Defaults to ``stream.label`` for
+                concrete streams; for ``SourceNode`` / ``SourceJobNode`` the
+                existing ``name`` attribute is preserved.
+
+        Returns:
+            A ``SourceJobNode`` configured according to the case above.
+        """
+        if isinstance(stream, SourceJobNode):
+            # Case 1: copy — preserve bound_source, do NOT wrap the SJN itself.
+            return cls(
+                name=stream.name,
+                tag_schema=stream.tag_schema,
+                data_schema=stream.data_schema,
+                bound_source=stream.bound_source,
+            )
+        if isinstance(stream, SourceNode):
+            # Case 2: unbound — schema placeholder; SJN hash = SourceNode hash.
+            return cls(
+                name=stream.name,
+                tag_schema=stream.tag_schema,
+                data_schema=stream.data_schema,
+                bound_source=None,
+            )
+        # Case 3: concrete stream — bound SJN.
+        tag_schema, data_schema = stream.output_schema()
+        slot_name = name if name is not None else stream.label
+        return cls(
+            name=slot_name,
+            tag_schema=tag_schema,
+            data_schema=data_schema,
+            bound_source=stream,
+        )
+
     def as_node(self) -> SourceNode:
         """Return the lightweight ``SourceNode`` equivalent of this job node.
 

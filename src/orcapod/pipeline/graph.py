@@ -35,23 +35,47 @@ class Pipeline(AbstractPipelineBase):
     """A pure computational blueprint recording operator and function pod invocations.
 
     During the ``with`` block, operator and function pod invocations are
-    recorded into an internal graph. On context exit, ``compile()`` rewires
-    the graph into a frozen DAG:
+    recorded into an internal graph via the unified ``_record_invocation()``
+    path inherited from ``AbstractPipelineBase``. On context exit,
+    ``compile()`` (also inherited) rewires the graph into a frozen DAG:
 
-    - Leaf ``SourceNode`` declarations (schema-only placeholders)
+    - Leaf streams not registered as invocations → ``SourceNode`` declarations
     - Function pod invocations → ``FunctionNode``
     - Operator invocations → ``OperatorNode``
 
-    All leaf inputs must be ``SourceNode`` instances. To run a ``Pipeline``,
-    use ``PipelineJob.from_pipeline(pipeline, sources=..., store=...)`` to create a ``PipelineJob``.
+    To run a ``Pipeline``, use
+    ``PipelineJob.from_pipeline(pipeline, sources=..., store=...)`` to create
+    a ``PipelineJob``.
 
-    Parameters:
+    Args:
         name: Pipeline name (string or tuple). Used as the path prefix for
             all cache/pipeline paths when the pipeline is run via a
             ``PipelineJob``.
         auto_compile: If ``True`` (default), ``compile()`` is called
             automatically when the context manager exits.
     """
+
+    # ------------------------------------------------------------------
+    # Node-factory class attributes (used by AbstractPipelineBase.compile())
+    # ------------------------------------------------------------------
+
+    @property
+    def source_node_class(self) -> type:
+        """SourceNode — schema-only leaf node class for Pipeline."""
+        from orcapod.core.nodes.source_node import SourceNode
+        return SourceNode
+
+    @property
+    def function_node_class(self) -> type:
+        """FunctionNode — blueprint function node class for Pipeline."""
+        from orcapod.core.nodes.function_node import FunctionNode
+        return FunctionNode
+
+    @property
+    def operator_node_class(self) -> type:
+        """OperatorNode — blueprint operator node class for Pipeline."""
+        from orcapod.core.nodes.operator_node import OperatorNode
+        return OperatorNode
 
     def __init__(
         self,
@@ -72,78 +96,13 @@ class Pipeline(AbstractPipelineBase):
         super().__init__(name=name, tracker_manager=tracker_manager)
         self._auto_compile = auto_compile
 
-    # ------------------------------------------------------------------
-    # Recording (TrackerProtocol)
-    # ------------------------------------------------------------------
-
-    def record_function_pod_invocation(
-        self,
-        pod: cp.FunctionPodProtocol,
-        input_stream: cp.StreamProtocol,
-        label: str | None = None,
-    ) -> None:
-        """Record a function pod invocation.
-
-        Called by ``FunctionPod.__call__`` when used inside a ``with pipeline:``
-        block. Creates a lightweight ``FunctionNode`` blueprint.
-
-        Args:
-            pod: The function pod being invoked.
-            input_stream: The upstream stream.
-            label: Optional display label for the resulting node.
-        """
-        input_stream_hash = input_stream.content_hash().to_string()
-        function_node = FunctionNode(
-            function_pod=pod,
-            input_stream=input_stream,
-            label=label,
-        )
-        function_node_hash = function_node.content_hash().to_string()
-        self._node_lut[function_node_hash] = function_node
-        self._upstreams[input_stream_hash] = input_stream
-        self._graph_edges.append((input_stream_hash, function_node_hash))
-        self._hash_graph.add_edge(input_stream_hash, function_node_hash)
-        if not self._hash_graph.nodes[function_node_hash].get("node_type"):
-            self._hash_graph.nodes[function_node_hash]["node_type"] = "function"
-
-    def record_operator_pod_invocation(
-        self,
-        pod: cp.OperatorPodProtocol,
-        upstreams: tuple[cp.StreamProtocol, ...] = (),
-        label: str | None = None,
-    ) -> None:
-        """Record an operator pod invocation.
-
-        Called by operator pods when used inside a ``with pipeline:``
-        block. Creates a lightweight ``OperatorNode`` blueprint.
-
-        Args:
-            pod: The operator pod being invoked.
-            upstreams: Upstream streams for this operator.
-            label: Optional display label for the resulting node.
-        """
-        operator_node = OperatorNode(
-            operator=pod,
-            input_streams=upstreams,
-            label=label,
-        )
-        operator_node_hash = operator_node.content_hash().to_string()
-        self._node_lut[operator_node_hash] = operator_node
-        upstream_hashes = [stream.content_hash().to_string() for stream in upstreams]
-        for upstream_hash, upstream in zip(upstream_hashes, upstreams):
-            self._upstreams[upstream_hash] = upstream
-            self._graph_edges.append((upstream_hash, operator_node_hash))
-            self._hash_graph.add_edge(upstream_hash, operator_node_hash)
-        if not self._hash_graph.nodes[operator_node_hash].get("node_type"):
-            self._hash_graph.nodes[operator_node_hash]["node_type"] = "operator"
-
     @property
     def nodes(self) -> list[GraphNode]:
-        """Return the list of recorded (non-persistent) nodes."""
+        """Return the list of compiled non-source nodes."""
         return list(self._node_lut.values())
 
     # ------------------------------------------------------------------
-    # Context manager
+    # Context manager — respects auto_compile flag
     # ------------------------------------------------------------------
 
     def __exit__(self, exc_type=None, exc_value=None, traceback=None):
@@ -152,136 +111,6 @@ class Pipeline(AbstractPipelineBase):
         AutoRegisteringContextBasedTracker.__exit__(self, exc_type, exc_value, traceback)
         if exc_type is None and self._auto_compile:
             self.compile()
-
-    # ------------------------------------------------------------------
-    # Compile
-    # ------------------------------------------------------------------
-
-    def compile(self) -> None:
-        """Compile recorded invocations into a frozen DAG.
-
-        Walks the graph in topological order and:
-
-        - Verifies leaf streams are ``SourceNode`` instances (raises ``ValueError`` otherwise)
-        - Leaves ``SourceNode`` leaves as-is (no wrapping needed)
-        - Rewires upstream references on recorded ``FunctionNode`` /
-          ``OperatorNode`` to point at persistent (compiled) nodes
-
-        After compile, nodes are accessible by label as attributes on the
-        pipeline instance.
-        """
-        from orcapod.core.nodes import (
-            FunctionNode,
-            OperatorNode,
-        )
-
-        G = nx.DiGraph()
-        for edge in self._graph_edges:
-            G.add_edge(*edge)
-
-        # Seed from existing persistent nodes (incremental compile)
-        persistent_node_map: dict[str, GraphNode] = dict(self._persistent_node_map)
-        name_candidates: dict[str, list[GraphNode]] = {}
-
-        for node_hash in nx.topological_sort(G):
-            if node_hash in persistent_node_map:
-                # Already compiled — reuse, but verify type consistency across
-                # incremental compiles (a hash must never change node type).
-                existing_node = persistent_node_map[node_hash]
-                new_node = self._node_lut.get(node_hash)
-                if new_node is not None:
-                    assert existing_node.node_type == new_node.node_type, (
-                        f"Node type changed for hash {node_hash!r}: "
-                        f"was {existing_node.node_type!r}, now {new_node.node_type!r}"
-                    )
-                name_candidates.setdefault(existing_node.label, []).append(
-                    existing_node
-                )
-                continue
-
-            if node_hash not in self._node_lut:
-                # Leaf stream — wrap in SourceNode if not already one.
-                from orcapod.core.nodes.source_node import SourceNode as SourceNodeClass
-                stream = self._upstreams[node_hash]
-                node = SourceNodeClass.from_stream(stream)
-                persistent_node_map[node_hash] = node
-            else:
-                node = self._node_lut[node_hash]
-
-                if isinstance(node, FunctionNode):
-                    # Rewire input stream to persistent upstream
-                    input_hash = node._input_stream.content_hash().to_string()
-                    rewired_input = persistent_node_map[input_hash]
-                    node.upstreams = (rewired_input,)
-
-                elif isinstance(node, OperatorNode):
-                    # Rewire all input streams to persistent upstreams
-                    rewired_inputs = tuple(
-                        persistent_node_map[s.content_hash().to_string()]
-                        for s in node.upstreams
-                    )
-                    node.upstreams = rewired_inputs
-
-                else:
-                    raise TypeError(
-                        f"Unknown node type in pipeline graph: {type(node)}"
-                    )
-
-                persistent_node_map[node_hash] = node
-
-            # Track all nodes for label assignment
-            name_candidates.setdefault(node.label, []).append(node)
-
-        # Save persistent node map for incremental re-compile
-        self._persistent_node_map = persistent_node_map
-
-        # Build node graph for show_graph() and PipelineJob execution
-        self._node_graph = nx.DiGraph()
-        for upstream_hash, downstream_hash in self._graph_edges:
-            upstream_node = persistent_node_map.get(upstream_hash)
-            downstream_node = persistent_node_map.get(downstream_hash)
-            if upstream_node is not None and downstream_node is not None:
-                self._node_graph.add_edge(upstream_node, downstream_node)
-        # Add isolated nodes (sources with no downstream in edges)
-        for node in persistent_node_map.values():
-            if node not in self._node_graph:
-                self._node_graph.add_node(node)
-
-        # Enrich hash graph with compiled node metadata (label, pipeline_hash, node_type)
-        for node_hash, node in persistent_node_map.items():
-            if node_hash not in self._hash_graph:
-                continue
-            attrs = self._hash_graph.nodes[node_hash]
-            if not attrs.get("node_type"):
-                if isinstance(node, SourceNode):
-                    attrs["node_type"] = "source"
-                elif isinstance(node, FunctionNode):
-                    attrs["node_type"] = "function"
-                elif isinstance(node, OperatorNode):
-                    attrs["node_type"] = "operator"
-            if not attrs.get("label"):
-                computed = node.label or (
-                    node.computed_label() if hasattr(node, "computed_label") else None
-                )
-                if computed:
-                    attrs["label"] = computed
-            if not attrs.get("pipeline_hash"):
-                attrs["pipeline_hash"] = node.pipeline_hash().to_string()
-
-        # Assign labels, disambiguating collisions by content hash
-        self._nodes.clear()
-        for label, nodes in name_candidates.items():
-            if len(nodes) > 1:
-                # Sort by content hash for deterministic disambiguation
-                sorted_nodes = sorted(nodes, key=lambda n: n.content_hash().to_string())
-                for i, node in enumerate(sorted_nodes, start=1):
-                    key = f"{label}_{i}"
-                    self._nodes[key] = node
-                    node._label = key
-            else:
-                self._nodes[label] = nodes[0]
-
-        self._compiled = True
 
     # ------------------------------------------------------------------
     # Graph display
@@ -599,8 +428,10 @@ class Pipeline(AbstractPipelineBase):
         # Base class state — clone is inactive and never registered
         clone._tracker_manager = self._tracker_manager
         clone._active = False
-        # Shared read-only structural state
+        # Shared read-only structural state (recording + compiled)
         clone._name = self._name
+        clone._invocation_lut = self._invocation_lut
+        clone._source_streams = self._source_streams
         clone._node_lut = self._node_lut
         clone._upstreams = self._upstreams
         clone._graph_edges = self._graph_edges
