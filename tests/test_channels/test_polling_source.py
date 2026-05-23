@@ -10,7 +10,7 @@ import pyarrow as pa
 import pytest
 
 from orcapod.channels import Channel
-from orcapod.core.nodes.source_node import SourceNode
+from orcapod.core.nodes.source_node import SourceJobNode
 from orcapod.core.sources.polling_source import PollingSource
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.errors import CursorInvalidatedError
@@ -197,9 +197,16 @@ class TestAsyncIterDataDefault:
 
     @pytest.mark.asyncio
     async def test_source_node_async_execute_uses_async_iter(self):
-        """SourceNode.async_execute routes through async_iter_data — no regression."""
+        """SourceJobNode.async_execute routes through async_iter_data — no regression."""
+        from orcapod.types import Schema
+
         stream = _make_arrow_stream(2)
-        node = SourceNode(stream)
+        node = SourceJobNode(
+            name="test",
+            tag_schema=Schema({"id": int}),
+            data_schema=Schema({"val": int}),
+            bound_source=stream,
+        )
 
         ch = Channel(buffer_size=8)
         await node.async_execute(ch.writer)
@@ -209,8 +216,15 @@ class TestAsyncIterDataDefault:
 
     @pytest.mark.asyncio
     async def test_source_node_closes_channel_after_exhaustion(self):
+        from orcapod.types import Schema
+
         stream = _make_arrow_stream(1)
-        node = SourceNode(stream)
+        node = SourceJobNode(
+            name="test",
+            tag_schema=Schema({"id": int}),
+            data_schema=Schema({"val": int}),
+            bound_source=stream,
+        )
 
         ch = Channel(buffer_size=4)
         await node.async_execute(ch.writer)
