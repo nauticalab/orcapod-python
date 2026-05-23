@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from orcapod import contexts
 from orcapod.channels import Channel, ReadableChannel, WritableChannel
-from orcapod.config import Config
+from orcapod.config import OrcapodConfig
 from orcapod.core.operators.static_output_pod import StaticOutputOperatorPod
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
@@ -74,7 +74,7 @@ class OperatorNodeBase(StreamBase):
         input_streams: Collection[StreamProtocol],
         tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
-        config: Config | None = None,
+        config: OrcapodConfig | None = None,
         table_scope: Literal["pipeline_hash", "content_hash"] = "pipeline_hash",
     ) -> None:
         """Initialize the shared operator-node state.
@@ -517,7 +517,7 @@ class OperatorJobNode(OperatorNodeBase):
         input_streams: tuple[StreamProtocol, ...] | list[StreamProtocol],
         tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
-        config: Config | None = None,
+        config: OrcapodConfig | None = None,
         # Optional DB params for persistent mode:
         pipeline_database: ArrowDatabaseProtocol | None = None,
         cache_mode: CacheMode = CacheMode.OFF,

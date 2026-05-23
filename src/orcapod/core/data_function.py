@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generic, Literal, TypeVar
 
 from uuid_utils import uuid7
 
-from orcapod.config import Config
+from orcapod.config import OrcapodConfig
 from orcapod.contexts import DataContext
 from orcapod.core.base import TraceableBase
 from orcapod.core.datagrams import Datagram, Data
@@ -135,7 +135,7 @@ class DataFunctionBase(TraceableBase, Generic[E]):
         version: str = "v0.0",
         label: str | None = None,
         data_context: str | DataContext | None = None,
-        config: Config | None = None,
+        config: OrcapodConfig | None = None,
         executor: DataFunctionExecutorProtocol | None = None,
     ):
         super().__init__(label=label, data_context=data_context, config=config)
@@ -374,7 +374,7 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
         output_schema: SchemaLike | Sequence[type] | None = None,
         label: str | None = None,
         data_context: str | DataContext | None = None,
-        config: Config | None = None,
+        config: OrcapodConfig | None = None,
         executor: PythonFunctionExecutorProtocol | None = None,
     ) -> None:
 

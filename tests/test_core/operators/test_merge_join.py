@@ -641,10 +641,10 @@ class TestMergeJoinSystemTags:
     def test_system_tag_canonical_positions(self, left_source, right_source):
         """System tag columns should carry canonical position indices
         matching stable sort by pipeline_hash."""
-        from orcapod.config import Config
+        from orcapod.config import OrcapodConfig
         from orcapod.system_constants import constants
 
-        n_char = Config().system_tag_hash_n_char
+        n_char = OrcapodConfig().system_tag_hash_n_char
 
         op = MergeJoin()
         result = op.static_process(left_source, right_source)

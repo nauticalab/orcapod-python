@@ -42,7 +42,7 @@ from orcapod.databases.spiraldb_connector import SpiralDBConnector
 
 if TYPE_CHECKING:
     from orcapod import contexts
-    from orcapod.config import Config
+    from orcapod.config import OrcapodConfig
 
 
 class SpiralDBTableSource(DBTableSource):
@@ -98,7 +98,7 @@ class SpiralDBTableSource(DBTableSource):
         source_id: str | None = None,
         label: str | None = None,
         data_context: "str | contexts.DataContext | None" = None,
-        config: "Config | None" = None,
+        config: "OrcapodConfig | None" = None,
         overrides: dict[str, str] | None = None,
     ) -> None:
         self._project_id = project_id

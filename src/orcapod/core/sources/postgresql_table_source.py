@@ -19,7 +19,7 @@ from orcapod.databases.postgresql_connector import PostgreSQLConnector
 
 if TYPE_CHECKING:
     from orcapod import contexts
-    from orcapod.config import Config
+    from orcapod.config import OrcapodConfig
 
 
 class PostgreSQLTableSource(DBTableSource):
@@ -69,7 +69,7 @@ class PostgreSQLTableSource(DBTableSource):
         source_id: str | None = None,
         label: str | None = None,
         data_context: str | contexts.DataContext | None = None,
-        config: Config | None = None,
+        config: OrcapodConfig | None = None,
     ) -> None:
         self._dsn = dsn  # store before try — needed by to_config even if super() raises
         connector = PostgreSQLConnector(dsn)  # outside try — if this raises, finally never runs

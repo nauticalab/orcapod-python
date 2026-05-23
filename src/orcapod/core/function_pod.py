@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from orcapod import contexts
 from orcapod.channels import ReadableChannel, WritableChannel
-from orcapod.config import Config
+from orcapod.config import OrcapodConfig
 from orcapod.core.base import TraceableBase
 from orcapod.core.data_function import CachedDataFunction, PythonDataFunction
 from orcapod.core.streams.base import StreamBase
@@ -65,7 +65,7 @@ class _FunctionPodBase(TraceableBase):
         tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
         data_context: str | contexts.DataContext | None = None,
-        config: Config | None = None,
+        config: OrcapodConfig | None = None,
     ) -> None:
         super().__init__(
             label=label,

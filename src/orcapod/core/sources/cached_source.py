@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 from orcapod import contexts
-from orcapod.config import Config
+from orcapod.config import OrcapodConfig
 from orcapod.core.sources.base import RootSource
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.protocols.core_protocols import DataProtocol, SourceProtocol, TagProtocol
@@ -59,7 +59,7 @@ class CachedSource(RootSource):
         source_id: str | None = None,
         label: str | None = None,
         data_context: str | contexts.DataContext | None = None,
-        config: Config | None = None,
+        config: OrcapodConfig | None = None,
     ) -> None:
         if data_context is None:
             data_context = source.data_context_key

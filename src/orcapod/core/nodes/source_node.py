@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 from orcapod import contexts
-from orcapod.config import Config
+from orcapod.config import OrcapodConfig
 from orcapod.core.base import TraceableBase
 from orcapod.errors import SourceSpecMismatchError, UnboundSourceError
 from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
@@ -55,7 +55,7 @@ class SourceNodeBase(TraceableBase, ABC):
         data_schema: Schema,
         data_context: str | contexts.DataContext | None = None,
         label: str | None = None,
-        config: Config | None = None,
+        config: OrcapodConfig | None = None,
     ) -> None:
         super().__init__(label=label, data_context=data_context, config=config)
         self._name = name

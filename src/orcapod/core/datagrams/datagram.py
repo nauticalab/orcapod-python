@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any, Self, cast
 from uuid_utils import uuid7
 
 from orcapod import contexts
-from orcapod.config import Config
+from orcapod.config import OrcapodConfig
 from orcapod.core.base import ContentIdentifiableBase
 from orcapod.protocols.semantic_types_protocols import TypeConverterProtocol
 from orcapod.semantic_types import infer_python_schema_from_pylist_data
@@ -68,7 +68,7 @@ class Datagram(ContentIdentifiableBase):
         meta_info: Mapping[str, DataValue] | None = None,
         record_id: str | None = None,
         data_context: str | contexts.DataContext | None = None,
-        config: Config | None = None,
+        config: OrcapodConfig | None = None,
     ) -> None:
         if isinstance(data, pa.RecordBatch):
             data = pa.Table.from_batches([data])
