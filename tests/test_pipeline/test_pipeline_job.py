@@ -76,10 +76,25 @@ class TestPipelineJobRecording:
         assert all(isinstance(n, SourceNode) for n in source_nodes)
 
     def test_concrete_source_stored_in_sources(self, store):
-        """Concrete sources from with-block are stored by label in job.sources."""
-        src_a, src_b = _make_two_sources()
-        src_a.label = "source_a"
-        src_b.label = "source_b"
+        """Concrete sources from with-block are stored by source_id in job.sources."""
+        src_a = ArrowTableSource(
+            pa.table({
+                "key": pa.array(["a", "b"], type=pa.large_string()),
+                "value": pa.array([10, 20], type=pa.int64()),
+            }),
+            tag_columns=["key"],
+            source_id="source_a",
+            infer_nullable=True,
+        )
+        src_b = ArrowTableSource(
+            pa.table({
+                "key": pa.array(["a", "b"], type=pa.large_string()),
+                "score": pa.array([100, 200], type=pa.int64()),
+            }),
+            tag_columns=["key"],
+            source_id="source_b",
+            infer_nullable=True,
+        )
 
         job = PipelineJob(store=store)
         with job:

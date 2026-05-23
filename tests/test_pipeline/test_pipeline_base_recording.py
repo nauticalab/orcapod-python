@@ -94,22 +94,49 @@ class TestRecordFunctionPodInvocation:
         assert isinstance(pipeline._persistent_node_map[source_hash], SourceNode)
 
 
-class TestSourceNodeDisambiguation:
-    """Source-node slot names must be unique after compile().
+class TestSourceNodeNaming:
+    """Source node names are derived from ``RootSource.source_id``, not the label.
 
-    When multiple concrete sources share the same label (e.g. two unlabelled
-    ArrowTableSource inputs both default to "ArrowTableSource"), compile()
-    renames them "ArrowTableSource_1", "ArrowTableSource_2", …  The suffix
-    counter skips any numbers already taken by explicitly-named nodes, so the
-    result is never "ArrowTableSource_1_1".
+    The ``source_id`` is the canonical identity of a source: file-backed sources
+    use the file path or table name; in-memory sources use a hash of their data.
+    This guarantees uniqueness by construction — no disambiguation loop is needed.
+
+    Two nodes that share a name but have different schemas indicate a caller
+    error (same ``source_id`` assigned to conceptually different inputs) and
+    cause ``compile()`` to raise ``InconsistentSourceError``.
     """
 
-    def test_two_unnamed_sources_get_distinct_suffixed_names(self):
-        """Two unlabelled concrete sources of the same type are disambiguated."""
+    def test_root_source_name_derived_from_source_id(self):
+        """A RootSource with an explicit source_id produces a SN with that name."""
         from orcapod.core.nodes.source_node import SourceNode
 
-        s1 = _src("key", "value")   # label → "ArrowTableSource"
-        s2 = _src("key", "score")   # label → "ArrowTableSource"
+        source = ArrowTableSource(
+            pa.table({
+                "key": pa.array(["a", "b"], type=pa.large_string()),
+                "value": pa.array([1, 2], type=pa.int64()),
+            }),
+            tag_columns=["key"],
+            source_id="my_dataset",
+            infer_nullable=True,
+        )
+        pod = _fn()
+        pipeline = Pipeline(name="test")
+        with pipeline:
+            pod(source, label="out")
+
+        source_nodes = [
+            n for n in pipeline._persistent_node_map.values()
+            if isinstance(n, SourceNode)
+        ]
+        assert len(source_nodes) == 1
+        assert source_nodes[0].name == "my_dataset"
+
+    def test_two_different_sources_get_distinct_source_id_names(self):
+        """Two ArrowTableSources with different data get distinct hash-based names."""
+        from orcapod.core.nodes.source_node import SourceNode
+
+        s1 = _src("key", "value")   # different data column → different source_id
+        s2 = _src("key", "score")
         join = Join()
         pipeline = Pipeline(name="test")
         with pipeline:
@@ -119,54 +146,76 @@ class TestSourceNodeDisambiguation:
             n for n in pipeline._persistent_node_map.values()
             if isinstance(n, SourceNode)
         ]
-        names = sorted(n.name for n in source_nodes)
-        assert names == ["ArrowTableSource_1", "ArrowTableSource_2"]
+        names = [n.name for n in source_nodes]
+        assert len(names) == 2
+        # Names are distinct (each is the source's own source_id hash)
+        assert names[0] != names[1]
+        # Names are not the fallback class name
+        assert all("ArrowTableSource" not in nm for nm in names)
 
-    def test_three_unnamed_sources_get_sequential_suffixes(self):
-        """Three unnamed sources of the same type receive _1, _2, _3."""
+    def test_explicit_source_id_overrides_hash_name(self):
+        """An ArrowTableSource with an explicit source_id uses that as the SN name."""
         from orcapod.core.nodes.source_node import SourceNode
-        from orcapod.core.operators import Join
 
-        s1 = _src("key", "v1")
-        s2 = _src("key", "v2")
-        s3 = _src("key", "v3")
+        s1 = ArrowTableSource(
+            pa.table({
+                "key": pa.array(["a"], type=pa.large_string()),
+                "v1": pa.array([1], type=pa.int64()),
+            }),
+            tag_columns=["key"],
+            source_id="left_input",
+            infer_nullable=True,
+        )
+        s2 = ArrowTableSource(
+            pa.table({
+                "key": pa.array(["a"], type=pa.large_string()),
+                "v2": pa.array([2], type=pa.int64()),
+            }),
+            tag_columns=["key"],
+            source_id="right_input",
+            infer_nullable=True,
+        )
         join = Join()
         pipeline = Pipeline(name="test")
         with pipeline:
-            join(s1, s2, s3, label="joined")
+            join(s1, s2, label="joined")
 
         names = sorted(
             n.name
             for n in pipeline._persistent_node_map.values()
             if isinstance(n, SourceNode)
         )
-        assert names == ["ArrowTableSource_1", "ArrowTableSource_2", "ArrowTableSource_3"]
+        assert names == ["left_input", "right_input"]
 
-    def test_suffix_skips_already_taken_numbers(self):
-        """If ArrowTableSource_1 is already a slot name, colliding sources start at _2."""
-        from orcapod.core.nodes.source_node import SourceNode
+    def test_same_source_id_different_schema_raises_inconsistent_source_error(self):
+        """Two sources with the same source_id but different schemas raise an error."""
+        from orcapod.errors import InconsistentSourceError
 
-        # One explicitly-named source occupies "ArrowTableSource_1".
-        s_named = _src("key", "named_val")
-        s_named.label = "ArrowTableSource_1"   # explicit label
-
-        # Two unlabelled sources would normally want _1 and _2.
-        s1 = _src("key", "v1")   # label → "ArrowTableSource"
-        s2 = _src("key", "v2")   # label → "ArrowTableSource"
-        join = Join()
-        pipeline = Pipeline(name="test")
-        with pipeline:
-            join(s_named, s1, s2, label="joined")
-
-        names = sorted(
-            n.name
-            for n in pipeline._persistent_node_map.values()
-            if isinstance(n, SourceNode)
+        s1 = ArrowTableSource(
+            pa.table({
+                "key": pa.array(["a"], type=pa.large_string()),
+                "value": pa.array([1], type=pa.int64()),
+            }),
+            tag_columns=["key"],
+            source_id="shared_id",
+            infer_nullable=True,
         )
-        # s_named keeps "ArrowTableSource_1"; the two unnamed ones get _2 and _3.
-        assert "ArrowTableSource_1" in names
-        assert "ArrowTableSource_2" in names
-        assert "ArrowTableSource_3" in names
+        s2 = ArrowTableSource(
+            pa.table({
+                "key": pa.array(["a"], type=pa.large_string()),
+                "score": pa.array([1.0], type=pa.float64()),  # different data column
+            }),
+            tag_columns=["key"],
+            source_id="shared_id",
+            infer_nullable=True,
+        )
+        join = Join()
+        pipeline = Pipeline(name="test", auto_compile=False)
+        with pipeline:
+            join(s1, s2, label="joined")
+
+        with pytest.raises(InconsistentSourceError, match="shared_id"):
+            pipeline.compile()
 
 
 class TestRecordOperatorPodInvocation:

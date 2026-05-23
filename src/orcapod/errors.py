@@ -70,6 +70,21 @@ class SourceSpecMismatchError(ValueError):
     """
 
 
+class InconsistentSourceError(ValueError):
+    """Raised when two source nodes in the same pipeline share a name but differ in schema.
+
+    Source node names are identity-forming: the same name in a given pipeline
+    must always refer to the same input slot (same schema).  If ``compile()``
+    finds two source nodes with identical names but different schemas — which
+    can happen when two ``RootSource`` objects share the same ``source_id`` but
+    produce different column sets — it raises this error rather than silently
+    renaming one of them.
+
+    Resolution: assign distinct ``source_id`` values to the conflicting sources
+    so each slot has a unique, stable identity.
+    """
+
+
 class CursorInvalidatedError(Exception):
     """Raised by a ``DynamicSourceProtocol`` implementation when the previous
     cursor is no longer valid and the source state must be rebuilt from scratch.

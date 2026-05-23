@@ -625,14 +625,15 @@ class TestSourceNodesInPipeline:
         ]
         assert len(source_nodes) > 0
 
-    def test_source_node_accessible_by_label(self, pipeline_db):
+    def test_source_node_accessible_by_source_id(self, pipeline_db):
+        """SourceNode is accessible in compiled_nodes via its source_id (the identity key)."""
         src = ArrowTableSource(
             table=pa.table({
                 "key": pa.array(["a"], type=pa.large_string()),
                 "value": pa.array([10], type=pa.int64()),
             }),
             tag_columns=["key"],
-            label="my_source",
+            source_id="my_source",
             infer_nullable=True,
         )
         pf = PythonDataFunction(double_value, output_keys="result")
