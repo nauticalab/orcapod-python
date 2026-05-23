@@ -10,15 +10,15 @@ import pytest
 from orcapod.core.nodes import SourceNode
 from orcapod.core.operators import Join
 from orcapod.core.sources import ArrowTableSource
-from orcapod.core.sources.source_spec import SourceSpec
 from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
 from orcapod.pipeline import Pipeline
+from orcapod.pipeline.job import PipelineJob
 from orcapod.pipeline.serialization import PIPELINE_FORMAT_VERSION
 
 
 @pytest.fixture
 def spec_pipeline(tmp_path):
-    """A compiled Pipeline using SourceSpec leaves."""
+    """A compiled Pipeline using SourceNode leaves."""
     def _src(tag, data):
         tbl = pa.table({tag: pa.array(["a"], type=pa.large_string()), data: pa.array([1], type=pa.int64())})
         return ArrowTableSource(tbl, tag_columns=[tag], infer_nullable=True)
@@ -28,12 +28,12 @@ def spec_pipeline(tmp_path):
     tag_a, data_a = src_a.output_schema()
     tag_b, data_b = src_b.output_schema()
 
-    spec_a = SourceSpec("source_a", tag_schema=tag_a, data_schema=data_a)
-    spec_b = SourceSpec("source_b", tag_schema=tag_b, data_schema=data_b)
+    node_a = SourceNode(name="source_a", tag_schema=tag_a, data_schema=data_a)
+    node_b = SourceNode(name="source_b", tag_schema=tag_b, data_schema=data_b)
 
     pipeline = Pipeline(name="spec_pipe")
     with pipeline:
-        Join()(spec_a, spec_b, label="joiner")
+        Join()(node_a, node_b, label="joiner")
 
     return pipeline, tmp_path
 
@@ -61,17 +61,17 @@ class TestPipelineBlueprintSave:
         assert "databases" not in data
 
     def test_save_source_spec_nodes(self, spec_pipeline):
-        """SourceSpec nodes must serialize with source_type='spec'."""
+        """SourceNode nodes must serialize with source_type='node'."""
         pipeline, tmp_path = spec_pipeline
         path = tmp_path / "pipeline.json"
         pipeline.save(str(path))
         data = json.loads(path.read_text())
-        spec_nodes = [
+        source_nodes = [
             n for n in data["nodes"].values()
             if n.get("node_type") == "source"
-            and n.get("source_config", {}).get("source_type") == "spec"
+            and n.get("source_config", {}).get("source_type") == "node"
         ]
-        assert len(spec_nodes) == 2
+        assert len(source_nodes) == 2
 
     def test_save_load_roundtrip_preserves_topology(self, spec_pipeline):
         """load() reconstructs the same number of nodes and edges."""
@@ -83,17 +83,17 @@ class TestPipelineBlueprintSave:
         assert len(list(loaded._node_graph.edges())) == len(list(pipeline._node_graph.edges()))
 
     def test_save_load_restores_spec_names(self, spec_pipeline):
-        """SourceSpec names must survive save/load."""
+        """SourceNode names must survive save/load."""
         pipeline, tmp_path = spec_pipeline
         path = tmp_path / "pipeline.json"
         pipeline.save(str(path))
         loaded = Pipeline.load(str(path))
-        spec_names = {
-            node.stream.name
+        node_names = {
+            node.name
             for node in loaded._persistent_node_map.values()
-            if isinstance(node, SourceNode) and isinstance(node.stream, SourceSpec)
+            if isinstance(node, SourceNode)
         }
-        assert spec_names == {"source_a", "source_b"}
+        assert node_names == {"source_a", "source_b"}
 
 
 class TestPipelineBlueprintLoad:
@@ -133,7 +133,7 @@ class TestPipelineBlueprintLoad:
             Pipeline.load(str(path))
 
     def test_load_bindable_and_runnable(self, spec_pipeline):
-        """Loaded pipeline can be bound to concrete sources and run."""
+        """Loaded pipeline can be used to create a runnable PipelineJob and run."""
         pipeline, tmp_path = spec_pipeline
         path = tmp_path / "pipeline.json"
         pipeline.save(str(path))
@@ -157,7 +157,7 @@ class TestPipelineBlueprintLoad:
             infer_nullable=True,
         )
         store = InMemoryArrowDatabase()
-        job = loaded.bind(sources={"source_a": src_a, "source_b": src_b}, store=store)
+        job = PipelineJob.from_pipeline(loaded, sources={"source_a": src_a, "source_b": src_b}, store=store)
         completed = job.run()
         assert completed._has_run is True
         # Verify all source specs were resolved (no unresolved specs)
@@ -177,3 +177,87 @@ class TestPipelineBlueprintLoad:
             assert "node_type" in attrs, (
                 f"Node {node_hash} missing node_type in _hash_graph"
             )
+
+
+@pytest.fixture
+def compiled_pipeline():
+    """A compiled Pipeline using SourceNode leaves (no tmp_path coupling)."""
+    def _src(tag, data):
+        tbl = pa.table({tag: pa.array(["a"], type=pa.large_string()), data: pa.array([1], type=pa.int64())})
+        return ArrowTableSource(tbl, tag_columns=[tag], infer_nullable=True)
+
+    from orcapod.core.operators import Join
+
+    src_a = _src("key", "value")
+    src_b = _src("key", "score")
+    tag_a, data_a = src_a.output_schema()
+    tag_b, data_b = src_b.output_schema()
+
+    node_a = SourceNode(name="source_a", tag_schema=tag_a, data_schema=data_a)
+    node_b = SourceNode(name="source_b", tag_schema=tag_b, data_schema=data_b)
+
+    pipeline = Pipeline(name="test_pipe")
+    with pipeline:
+        Join()(node_a, node_b, label="joiner")
+
+    return pipeline
+
+
+class TestNewSerializationFormat:
+    """v0.1.0 serialization format tests."""
+
+    def test_save_load_roundtrip_with_source_node(self, tmp_path, compiled_pipeline):
+        """Pipeline.save/load round-trip preserves SourceNode slots."""
+        save_path = tmp_path / "test_pipeline.json"
+        compiled_pipeline.save(save_path)
+
+        loaded = Pipeline.load(save_path)
+        assert loaded._compiled
+
+        for node in loaded._persistent_node_map.values():
+            if node.node_type == "source":
+                assert isinstance(node, SourceNode), (
+                    f"Expected SourceNode after load, got {type(node).__name__}"
+                )
+
+    def test_saved_format_has_source_node_type(self, tmp_path, compiled_pipeline):
+        """Saved format uses source_type='node'."""
+        save_path = tmp_path / "test_pipeline.json"
+        compiled_pipeline.save(save_path)
+
+        with open(save_path) as f:
+            data = json.load(f)
+
+        for node_data in data.get("nodes", {}).values():
+            if node_data.get("node_type") == "source":
+                assert node_data.get("source_config", {}).get("source_type") == "node", (
+                    f"Expected source_type='node', got {node_data.get('source_config')}"
+                )
+
+    def test_format_version_is_0_1_0(self, tmp_path, compiled_pipeline):
+        """Saved format version is 0.1.0."""
+        save_path = tmp_path / "test_pipeline.json"
+        compiled_pipeline.save(save_path)
+
+        with open(save_path) as f:
+            data = json.load(f)
+
+        assert data.get("orcapod_pipeline_version") == "0.1.0", (
+            f"Expected version '0.1.0', got {data.get('orcapod_pipeline_version')!r}"
+        )
+
+    def test_unsupported_version_raises(self, tmp_path, compiled_pipeline):
+        """Loading a pipeline with an unsupported version string raises ValueError."""
+        save_path = tmp_path / "pipeline.json"
+        compiled_pipeline.save(save_path)
+
+        with open(save_path) as f:
+            data = json.load(f)
+
+        data["orcapod_pipeline_version"] = "0.2"
+        old_path = tmp_path / "old_format.json"
+        with open(old_path, "w") as f:
+            json.dump(data, f)
+
+        with pytest.raises(ValueError, match="version"):
+            Pipeline.load(old_path)

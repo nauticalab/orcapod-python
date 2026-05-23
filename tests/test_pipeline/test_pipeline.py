@@ -1,7 +1,7 @@
 """Tests for the Pipeline and PipelineJob classes.
 
 Verifies that Pipeline correctly wraps all nodes during compile():
-- Leaf streams → SourceNode (SourceSpec-only; concrete sources raise ValueError)
+- Leaf streams → SourceNode (auto-wrapped via SourceNode.from_stream())
 - Function pod invocations → FunctionNode
 - Operator invocations → OperatorNode
 
@@ -23,10 +23,11 @@ from orcapod.core.nodes import (
     OperatorNode,
     SourceNode,
 )
+from orcapod.core.nodes.function_node import FunctionJobNode
+from orcapod.core.nodes.operator_node import OperatorJobNode, OperatorNodeBase
 from orcapod.core.operators import Join
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource, CachedSource
-from orcapod.core.sources.source_spec import SourceSpec
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import Pipeline
 from orcapod.pipeline.job import PipelineJob
@@ -85,16 +86,16 @@ class TestPipelineSourceSpecEnforcement:
         assert pipeline._compiled
 
     def test_pipeline_with_spec_leaves_compiles(self):
-        """Pipeline with SourceSpec leaves compiles without error."""
+        """Pipeline with SourceNode leaves compiles without error."""
         src_a, src_b = _make_two_sources()
         tag_a, data_a = src_a.output_schema()
         tag_b, data_b = src_b.output_schema()
-        spec_a = SourceSpec("input_a", tag_schema=tag_a, data_schema=data_a)
-        spec_b = SourceSpec("input_b", tag_schema=tag_b, data_schema=data_b)
+        node_a = SourceNode(name="input_a", tag_schema=tag_a, data_schema=data_a)
+        node_b = SourceNode(name="input_b", tag_schema=tag_b, data_schema=data_b)
 
         pipeline = Pipeline(name="spec_pipe")
         with pipeline:
-            Join()(spec_a, spec_b)
+            Join()(node_a, node_b)
 
         assert pipeline._compiled
         source_nodes = [
@@ -102,32 +103,35 @@ class TestPipelineSourceSpecEnforcement:
         ]
         assert len(source_nodes) == 2
 
-    def test_pipeline_with_concrete_leaf_raises(self):
-        """Pipeline.compile() raises ValueError if any leaf is not a SourceSpec."""
+    def test_pipeline_with_concrete_leaf_auto_wraps_as_source_node(self):
+        """Pipeline.compile() auto-wraps concrete leaf streams as SourceNode."""
         src_a, src_b = _make_two_sources()
 
-        pipeline = Pipeline(name="bad_pipe")
-        with pytest.raises(ValueError, match="SourceSpec"):
-            with pipeline:
-                Join()(src_a, src_b)
+        pipeline = Pipeline(name="auto_wrap_pipe")
+        with pipeline:
+            Join()(src_a, src_b)
 
-    def test_pipeline_bind_returns_pipeline_job(self):
-        """Pipeline.bind() returns a PipelineJob without modifying the pipeline."""
+        # Concrete streams at the leaves are automatically wrapped as SourceNode
+        source_nodes = [n for n in pipeline._node_graph.nodes() if isinstance(n, SourceNode)]
+        assert len(source_nodes) == 2
+
+    def test_pipeline_from_pipeline_returns_pipeline_job(self):
+        """PipelineJob.from_pipeline() returns a PipelineJob without modifying the pipeline."""
         src_a, src_b = _make_two_sources()
         tag_a, data_a = src_a.output_schema()
         tag_b, data_b = src_b.output_schema()
-        spec_a = SourceSpec("a", tag_schema=tag_a, data_schema=data_a)
-        spec_b = SourceSpec("b", tag_schema=tag_b, data_schema=data_b)
+        node_a = SourceNode(name="a", tag_schema=tag_a, data_schema=data_a)
+        node_b = SourceNode(name="b", tag_schema=tag_b, data_schema=data_b)
 
         pipeline = Pipeline(name="p")
         with pipeline:
-            Join()(spec_a, spec_b)
+            Join()(node_a, node_b)
 
         db = InMemoryArrowDatabase()
-        job = pipeline.bind(sources={"a": src_a, "b": src_b}, store=db)
+        job = PipelineJob.from_pipeline(pipeline, sources={"a": src_a, "b": src_b}, store=db)
 
         assert isinstance(job, PipelineJob)
-        assert job.pipeline is pipeline
+        assert job._compiled_pipeline is pipeline
         assert job.store is db
 
 
@@ -227,7 +231,7 @@ class TestCompileMutatesNodes:
 
         # After run, compiled_nodes["adder"] is the exec node in the returned result
         exec_node = result.pipeline.compiled_nodes["adder"]
-        assert isinstance(exec_node, FunctionNode)
+        assert isinstance(exec_node, FunctionJobNode)
         assert exec_node._pipeline_database is not None
 
     def test_exec_operator_nodes_have_pipeline_database_after_run(self, pipeline_db):
@@ -239,7 +243,7 @@ class TestCompileMutatesNodes:
         result = job.run()
 
         exec_node = result.pipeline.compiled_nodes["joiner"]
-        assert isinstance(exec_node, OperatorNode)
+        assert isinstance(exec_node, OperatorJobNode)
         assert exec_node._pipeline_database is not None
 
 
@@ -261,7 +265,7 @@ class TestFunctionDatabaseHandling:
         result = job.run()
 
         exec_node = result.pipeline.compiled_nodes["adder"]
-        assert isinstance(exec_node, FunctionNode)
+        assert isinstance(exec_node, FunctionJobNode)
         # Verify the exec node has databases attached
         assert exec_node._pipeline_database is not None
         # The result DB is scoped as pipeline_name/_result internally.
@@ -319,7 +323,7 @@ class TestLabelAccess:
         with job:
             pass  # empty pipeline
 
-        with pytest.raises(AttributeError, match="Pipeline has no attribute"):
+        with pytest.raises(AttributeError, match="has no attribute"):
             _ = job.pipeline.nonexistent
 
     def test_dir_includes_node_labels(self, pipeline_db):
@@ -592,8 +596,10 @@ class TestCompileDoesNotTriggerExecution:
         with job:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
-        # After compile but before run, adder node has no records
-        assert job.pipeline.compiled_nodes["adder"].get_all_records() is None
+        # After compile but before run, adder node is a blueprint FunctionNode with no DB
+        pre_run_node = job.pipeline.compiled_nodes["adder"]
+        assert isinstance(pre_run_node, FunctionNode)
+        assert not isinstance(pre_run_node, FunctionJobNode)
         # Running should work correctly
         result = job.run()
         table = result.pipeline.compiled_nodes["adder"].as_table()

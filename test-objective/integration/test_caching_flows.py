@@ -14,6 +14,8 @@ from orcapod.core.nodes import (
     FunctionNode,
     OperatorNode,
 )
+from orcapod.core.nodes.function_node import FunctionJobNode
+from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.operators import Join
 from orcapod.core.data_function import CachedDataFunction, PythonDataFunction
 from orcapod.core.sources import ArrowTableSource, DerivedSource
@@ -55,7 +57,7 @@ class TestFunctionNodeCaching:
         source = _make_source(3)
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=pod,
             input_stream=source,
             pipeline_database=pipeline_db,
@@ -74,7 +76,7 @@ class TestFunctionNodeCaching:
         result_db = InMemoryArrowDatabase()
 
         # First run
-        node1 = FunctionNode(
+        node1 = FunctionJobNode(
             function_pod=pod,
             input_stream=source,
             pipeline_database=pipeline_db,
@@ -83,7 +85,7 @@ class TestFunctionNodeCaching:
         node1.run()
 
         # Second run with same inputs — should use cached results
-        node2 = FunctionNode(
+        node2 = FunctionJobNode(
             function_pod=pod,
             input_stream=source,
             pipeline_database=pipeline_db,
@@ -103,7 +105,7 @@ class TestDerivedSourceReingestion:
         pipeline_db = InMemoryArrowDatabase()
         result_db = InMemoryArrowDatabase()
 
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=pod,
             input_stream=source,
             pipeline_database=pipeline_db,
@@ -151,7 +153,7 @@ class TestOperatorNodeCaching:
         )
         join = Join()
         db = InMemoryArrowDatabase()
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=join,
             input_streams=[source_a, source_b],
             pipeline_database=db,
@@ -187,7 +189,7 @@ class TestOperatorNodeCaching:
         db = InMemoryArrowDatabase()
 
         # First: LOG
-        node1 = OperatorNode(
+        node1 = OperatorJobNode(
             operator=join,
             input_streams=[source_a, source_b],
             pipeline_database=db,
@@ -196,7 +198,7 @@ class TestOperatorNodeCaching:
         node1.run()
 
         # Second: REPLAY
-        node2 = OperatorNode(
+        node2 = OperatorJobNode(
             operator=join,
             input_streams=[source_a, source_b],
             pipeline_database=db,

@@ -13,6 +13,7 @@ import pytest
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
+from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
@@ -35,14 +36,14 @@ def _make_source(n: int = 3) -> ArrowTableSource:
     return ArrowTableSource(table, tag_columns=["id"])
 
 
-def _make_node(n: int = 3, db: InMemoryArrowDatabase | None = None) -> FunctionNode:
+def _make_node(n: int = 3, db: InMemoryArrowDatabase | None = None) -> FunctionJobNode:
     def double(x: int) -> int:
         return x * 2
 
     pf = PythonDataFunction(double, output_keys="result")
     pod = FunctionPod(pf)
     pipeline_db = db if db is not None else InMemoryArrowDatabase()
-    return FunctionNode(pod, _make_source(n=n), pipeline_database=pipeline_db)
+    return FunctionJobNode(pod, _make_source(n=n), pipeline_database=pipeline_db)
 
 
 class TestIterDatasReadOnly:
@@ -149,7 +150,7 @@ class TestIterDatasReadOnly:
         pf.executor = LocalPythonFunctionExecutor()  # supports_concurrent_execution is False
         pod = FunctionPod(pf)
         db = InMemoryArrowDatabase()
-        node = FunctionNode(pod, _make_source(n=3), pipeline_database=db)
+        node = FunctionJobNode(pod, _make_source(n=3), pipeline_database=db)
 
         from orcapod.pipeline.observer import NoOpObserver
 

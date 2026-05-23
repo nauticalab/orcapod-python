@@ -21,10 +21,10 @@ import pytest
 
 from orcapod.core.function_pod import FunctionPod, function_pod
 from orcapod.core.nodes import FunctionNode, OperatorNode, SourceNode
+from orcapod.core.nodes.source_node import SourceJobNode
 from orcapod.core.operators import Join, SelectTagColumns
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
-from orcapod.core.sources.source_spec import SourceSpec
 from orcapod.core.streams import ArrowTableStream
 from orcapod.core.tracker import BasicTrackerManager
 from orcapod.pipeline import Pipeline
@@ -54,27 +54,33 @@ def _make_pipeline(
     )
 
 
-def _make_spec(name: str = "test_spec") -> SourceSpec:
-    """SourceSpec matching the schema of _make_stream()."""
-    return SourceSpec(
+def _make_source_node(name: str = "test_spec") -> SourceNode:
+    """SourceNode matching the schema of _make_stream()."""
+    return SourceNode(
         name=name,
         tag_schema=Schema({"id": int}),
         data_schema=Schema({"x": int}),
     )
 
 
-def _make_two_col_spec(name: str = "test_two_col_spec") -> SourceSpec:
-    """SourceSpec matching the schema of _make_two_col_stream()."""
-    return SourceSpec(
+# Keep backward-compat alias used throughout tests
+def _make_spec(name: str = "test_spec") -> SourceNode:
+    """SourceNode matching the schema of _make_stream()."""
+    return _make_source_node(name)
+
+
+def _make_two_col_spec(name: str = "test_two_col_spec") -> SourceNode:
+    """SourceNode matching the schema of _make_two_col_stream()."""
+    return SourceNode(
         name=name,
         tag_schema=Schema({"id": int}),
         data_schema=Schema({"a": int, "b": int}),
     )
 
 
-def _make_y_spec(name: str = "test_y_spec") -> SourceSpec:
-    """SourceSpec matching the schema of _make_y_stream()."""
-    return SourceSpec(
+def _make_y_spec(name: str = "test_y_spec") -> SourceNode:
+    """SourceNode matching the schema of _make_y_stream()."""
+    return SourceNode(
         name=name,
         tag_schema=Schema({"id": int}),
         data_schema=Schema({"y": int}),
@@ -131,97 +137,111 @@ def _make_y_stream(n: int = 3) -> ArrowTableStream:
 
 
 class TestSourceNode:
+    """Tests for the new SourceNode (schema-only) and SourceJobNode (concrete-bound) APIs."""
+
+    def _make_job_node(self, stream=None, name="test_source"):
+        """Create a SourceJobNode wrapping an optional concrete stream."""
+        if stream is None:
+            stream = _make_stream()
+        tag_schema = Schema({"id": int})
+        data_schema = Schema({"x": int})
+        return SourceJobNode(
+            name=name,
+            tag_schema=tag_schema,
+            data_schema=data_schema,
+            bound_source=stream,
+        )
+
     def test_construction(self):
         stream = _make_stream()
-        node = SourceNode(stream=stream)
-        assert node.stream is stream
+        node = self._make_job_node(stream)
+        assert node.bound_source is stream
         assert node.node_type == "source"
         assert node.producer is None
         assert node.upstreams == ()
 
     def test_label_from_argument(self):
         stream = _make_stream()
-        node = SourceNode(stream=stream, label="my_source")
+        node = self._make_job_node(stream, name="my_source")
+        # label resolves to the name via computed_label()
         assert node.label == "my_source"
 
-    def test_label_from_stream(self):
+    def test_label_set_explicitly(self):
         stream = _make_stream()
-        stream._label = "stream_label"
-        node = SourceNode(stream=stream)
-        # computed_label defers to wrapped stream's label
-        assert node.label == "stream_label"
-
-    def test_label_defaults_to_stream_label(self):
-        stream = _make_stream()
-        node = SourceNode(stream=stream)
-        # No explicit label → computed_label defers to stream.label
-        assert node.label == stream.label
-
-    def test_label_argument_overrides_stream(self):
-        stream = _make_stream()
-        stream._label = "stream_label"
-        node = SourceNode(stream=stream, label="explicit")
+        node = self._make_job_node(stream, name="my_source")
+        node._label = "explicit"
         assert node.label == "explicit"
+
+    def test_label_defaults_to_name(self):
+        stream = _make_stream()
+        node = self._make_job_node(stream, name="my_source")
+        # No explicit label → computed_label() returns the slot name
+        assert node.label == "my_source"
 
     def test_repr(self):
         stream = _make_stream()
-        node = SourceNode(stream=stream, label="test")
+        node = self._make_job_node(stream, name="test")
         r = repr(node)
-        assert "SourceNode" in r
+        assert "SourceJobNode" in r
         assert "test" in r
 
-    def test_content_hash_matches_stream(self):
+    def test_content_hash_delegates_to_concrete(self):
         stream = _make_stream()
-        node = SourceNode(stream=stream)
+        node = self._make_job_node(stream)
+        # SourceJobNode with concrete delegates content_hash to the concrete source
         assert node.content_hash() == stream.content_hash()
 
     def test_upstreams_setter_rejects_nonempty(self):
-        stream = _make_stream()
-        node = SourceNode(stream=stream)
+        node = self._make_job_node()
         with pytest.raises(ValueError, match="empty"):
             node.upstreams = (_make_stream(),)
 
-    def test_delegates_output_schema(self):
+    def test_output_schema(self):
         stream = _make_stream()
-        node = SourceNode(stream=stream)
-        assert node.output_schema() == stream.output_schema()
+        node = self._make_job_node(stream)
+        tag_s, data_s = node.output_schema()
+        assert set(tag_s.keys()) == {"id"}
+        assert set(data_s.keys()) == {"x"}
 
-    def test_delegates_keys(self):
+    def test_keys(self):
         stream = _make_stream()
-        node = SourceNode(stream=stream)
-        assert node.keys() == stream.keys()
+        node = self._make_job_node(stream)
+        tag_keys, data_keys = node.keys()
+        assert set(tag_keys) == {"id"}
+        assert set(data_keys) == {"x"}
 
     def test_delegates_as_table(self):
         stream = _make_stream()
-        node = SourceNode(stream=stream)
+        node = self._make_job_node(stream)
         node_table = node.as_table()
         stream_table = stream.as_table()
         assert node_table.equals(stream_table)
 
     def test_delegates_iter_data(self):
         stream = _make_stream()
-        node = SourceNode(stream=stream)
+        node = self._make_job_node(stream)
         node_data = list(node.iter_data())
         stream_data = list(stream.iter_data())
         assert len(node_data) == len(stream_data)
 
-    def test_run_is_noop(self):
+    def test_run_equivalent(self):
+        """execute() on SourceJobNode returns all data rows."""
         stream = _make_stream()
-        node = SourceNode(stream=stream)
-        # run() should succeed without side effects
-        node.run()
-        # Data is still accessible after run()
-        assert node.as_table().num_rows == stream.as_table().num_rows
+        node = self._make_job_node(stream)
+        result = node.execute()
+        assert len(result) == stream.as_table().num_rows
 
-    def test_delegates_data_context_key(self):
+    def test_data_context_key(self):
         stream = _make_stream()
-        node = SourceNode(stream=stream)
-        assert node.data_context_key == stream.data_context_key
+        node = self._make_job_node(stream)
+        # SourceJobNode uses its own data context (not the concrete stream's)
+        assert node.data_context_key is not None
 
-    def test_delegates_data_context(self):
+    def test_data_context(self):
         stream = _make_stream()
-        node = SourceNode(stream=stream)
-        assert node.data_context.context_key == stream.data_context_key
+        node = self._make_job_node(stream)
+        assert node.data_context is not None
+        assert node.data_context.context_key is not None
 
 
 # ---------------------------------------------------------------------------
@@ -234,9 +254,15 @@ class TestNodeContextDelegation:
 
     def test_source_node_context_matches_stream(self):
         stream = _make_stream()
-        node = SourceNode(stream=stream)
-        assert node.data_context_key == stream.data_context_key
-        assert node.data_context.context_key == stream.data_context_key
+        node = SourceJobNode(
+            name="test",
+            tag_schema=Schema({"id": int}),
+            data_schema=Schema({"x": int}),
+            bound_source=stream,
+        )
+        # SourceJobNode has its own data context (not delegated to concrete)
+        assert node.data_context_key is not None
+        assert node.data_context is not None
 
     def test_function_node_context_matches_pod(self):
         stream = _make_stream()
@@ -255,10 +281,16 @@ class TestNodeContextDelegation:
 
     def test_source_node_hash_consistent_with_stream(self):
         stream = _make_stream()
-        node = SourceNode(stream=stream)
-        # Both should use the same hasher (from the same data context)
+        node = SourceJobNode(
+            name="test",
+            tag_schema=Schema({"id": int}),
+            data_schema=Schema({"x": int}),
+            bound_source=stream,
+        )
+        # SourceJobNode delegates content_hash() to concrete when bound
         assert node.content_hash() == stream.content_hash()
-        assert node.pipeline_hash() == stream.pipeline_hash()
+        # pipeline_hash() is schema-based (stable across different data)
+        assert node.pipeline_hash() is not None
 
     def test_function_node_hash_uses_pod_context(self):
         stream = _make_stream()
@@ -471,14 +503,14 @@ class TestPipelineCompile:
         return list(pipeline._persistent_node_map.values())
 
     def test_compile_single_function_pod(self):
-        """Source stream -> FunctionNode: compile creates SourceNode and wires upstream."""
+        """Source node -> FunctionNode: compile wires SourceNode as upstream."""
         pf = PythonDataFunction(_double, output_keys="result")
         pod = FunctionPod(data_function=pf)
-        spec = _make_spec()
+        source_node = _make_spec()  # returns SourceNode
         mgr = BasicTrackerManager()
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
-            tracker.record_function_pod_invocation(pod, spec)
+            tracker.record_function_pod_invocation(pod, source_node)
             tracker.compile()
 
         # After compile: 1 SourceNode + 1 FunctionNode in persistent map
@@ -489,21 +521,20 @@ class TestPipelineCompile:
         assert len(source_nodes) == 1
         assert len(fn_nodes) == 1
 
-        # SourceNode wraps the original spec
-        assert source_nodes[0].stream is spec
+        # SourceNode IS the leaf — no stream wrapping
         assert source_nodes[0].upstreams == ()
 
         # FunctionNode's upstream is now the SourceNode
         assert fn_nodes[0].upstreams == (source_nodes[0],)
 
     def test_compile_single_operator(self):
-        """Source stream -> Operator: compile creates SourceNode and wires upstream."""
-        spec = _make_spec()
+        """Source node -> Operator: compile wires SourceNode as upstream."""
+        source_node = _make_spec()
         op = SelectTagColumns(columns=["id"])
         mgr = BasicTrackerManager()
 
         with _make_pipeline(tracker_manager=mgr) as tracker:
-            tracker.record_operator_pod_invocation(op, upstreams=(spec,))
+            tracker.record_operator_pod_invocation(op, upstreams=(source_node,))
             tracker.compile()
 
         all_nodes = self._persistent_nodes(tracker)
@@ -515,7 +546,7 @@ class TestPipelineCompile:
         assert op_nodes[0].upstreams == (source_nodes[0],)
 
     def test_compile_operator_with_two_inputs(self):
-        """Two source streams -> Join: compile creates 2 SourceNodes."""
+        """Two source nodes -> Join: compile creates 2 SourceNodes."""
         spec_a = _make_spec("spec_a")
         spec_b = _make_y_spec("spec_b")
         op = Join()
@@ -928,12 +959,12 @@ class TestBMIPipelineEndToEnd:
 
     def test_compiled_graph_structure(self):
         """After compile(), the graph has the expected node types and count."""
-        heights_spec = SourceSpec(
+        heights_spec = SourceNode(
             name="heights",
             tag_schema=Schema({"person_id": int}),
             data_schema=Schema({"height_cm": int}),
         )
-        weights_spec = SourceSpec(
+        weights_spec = SourceNode(
             name="weights",
             tag_schema=Schema({"person_id": int}),
             data_schema=Schema({"weight_kg": int}),
@@ -958,12 +989,12 @@ class TestBMIPipelineEndToEnd:
 
     def test_compiled_graph_all_upstreams_are_nodes(self):
         """Every upstream reference is a graph node after compile()."""
-        heights_spec = SourceSpec(
+        heights_spec = SourceNode(
             name="heights",
             tag_schema=Schema({"person_id": int}),
             data_schema=Schema({"height_cm": int}),
         )
-        weights_spec = SourceSpec(
+        weights_spec = SourceNode(
             name="weights",
             tag_schema=Schema({"person_id": int}),
             data_schema=Schema({"weight_kg": int}),
@@ -986,12 +1017,12 @@ class TestBMIPipelineEndToEnd:
 
     def test_compiled_graph_wiring(self):
         """Verify specific upstream wiring: cm_to_m<-source, join<-(cm_to_m, source), bmi<-join."""
-        heights_spec = SourceSpec(
+        heights_spec = SourceNode(
             name="heights",
             tag_schema=Schema({"person_id": int}),
             data_schema=Schema({"height_cm": int}),
         )
-        weights_spec = SourceSpec(
+        weights_spec = SourceNode(
             name="weights",
             tag_schema=Schema({"person_id": int}),
             data_schema=Schema({"weight_kg": int}),

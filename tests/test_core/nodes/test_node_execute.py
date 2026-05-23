@@ -11,6 +11,7 @@ import pytest
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
+from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
@@ -33,7 +34,7 @@ def function_node_with_db():
     pod = FunctionPod(pf)
     pipeline_db = InMemoryArrowDatabase()
     result_db = InMemoryArrowDatabase()
-    node = FunctionNode(
+    node = FunctionJobNode(
         pod,
         src,
         pipeline_database=pipeline_db,
@@ -53,7 +54,7 @@ def function_node_no_db():
     src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
     pf = PythonDataFunction(double_value, output_keys="result")
     pod = FunctionPod(pf)
-    return FunctionNode(pod, src)
+    return FunctionJobNode(pod, src)
 
 
 class TestFunctionNodeExecuteData:
@@ -117,7 +118,7 @@ class TestFunctionNodeExecute:
 # OperatorNode.execute() tests
 # ------------------------------------------------------------------
 
-from orcapod.core.nodes import OperatorNode
+from orcapod.core.nodes.operator_node import OperatorJobNode as OperatorNode
 from orcapod.core.operators import SelectDataColumns
 from orcapod.types import CacheMode
 

@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pyarrow as pa
 import pytest
 
-from orcapod.core.nodes import OperatorNode
+from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.operators import MapData
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
@@ -40,11 +40,11 @@ def map_op() -> MapData:
 
 
 def _node(operator, streams, *, db=None, cache_mode=CacheMode.OFF):
-    """Build an OperatorNode, attaching DB only when provided."""
+    """Build an OperatorJobNode, attaching DB only when provided."""
     kwargs: dict = dict(operator=operator, input_streams=streams, cache_mode=cache_mode)
     if db is not None:
         kwargs["pipeline_database"] = db
-    return OperatorNode(**kwargs)
+    return OperatorJobNode(**kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +147,7 @@ class TestCascadeIsolation:
 class TestCacheModeNonActive:
     def test_iter_data_no_db_no_run_returns_empty(self, simple_source, map_op):
         """No DB, no run() → empty (step 3 fallback)."""
-        node = OperatorNode(operator=map_op, input_streams=(simple_source,))
+        node = OperatorJobNode(operator=map_op, input_streams=(simple_source,))
         assert list(node.iter_data()) == []
 
     def test_iter_data_replay_mode_no_records_returns_empty(

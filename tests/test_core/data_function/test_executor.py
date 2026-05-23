@@ -479,14 +479,14 @@ class TestFunctionNodeExecutorAccess:
 
     def test_node_iter_uses_executor(self):
         from orcapod.core.function_pod import FunctionPod
-        from orcapod.core.nodes import FunctionNode
+        from orcapod.core.nodes.function_node import FunctionJobNode
 
         spy = SpyExecutor()
         pf = PythonDataFunction(add, output_keys="result")
         pf.executor = spy
         pod = FunctionPod(pf)
 
-        node = FunctionNode(pod, _make_add_stream())
+        node = FunctionJobNode(pod, _make_add_stream())
 
         node.run()
         results = list(node.iter_data())
@@ -634,18 +634,18 @@ class TestConcurrentIteration:
         assert len(spy.sync_calls) == 0
 
     def test_function_node_uses_sync_path_via_run(self):
-        """FunctionNode.run() delegates to execute(), which is always sequential
+        """FunctionJobNode.run() delegates to execute(), which is always sequential
         (synchronous). The async path is only used through async_execute() in the
         async pipeline orchestrator. Even with a ConcurrentSpyExecutor attached,
         run() → execute() → sync executor path."""
         from orcapod.core.function_pod import FunctionPod
-        from orcapod.core.nodes import FunctionNode
+        from orcapod.core.nodes.function_node import FunctionJobNode
 
         spy = ConcurrentSpyExecutor()
         pf = PythonDataFunction(add, output_keys="result", executor=spy)
         pod = FunctionPod(pf)
 
-        node = FunctionNode(pod, _make_add_stream())
+        node = FunctionJobNode(pod, _make_add_stream())
         node.run()
         results = list(node.iter_data())
 
@@ -659,13 +659,13 @@ class TestConcurrentIteration:
     def test_non_concurrent_executor_uses_sync_path(self):
         """SpyExecutor has supports_concurrent_execution=False (default)."""
         from orcapod.core.function_pod import FunctionPod
-        from orcapod.core.nodes import FunctionNode
+        from orcapod.core.nodes.function_node import FunctionJobNode
 
         spy = SpyExecutor()
         pf = PythonDataFunction(add, output_keys="result", executor=spy)
         pod = FunctionPod(pf)
 
-        node = FunctionNode(pod, _make_add_stream())
+        node = FunctionJobNode(pod, _make_add_stream())
         node.run()
         results = list(node.iter_data())
 
@@ -675,12 +675,12 @@ class TestConcurrentIteration:
 
     def test_no_executor_uses_sync_path(self):
         from orcapod.core.function_pod import FunctionPod
-        from orcapod.core.nodes import FunctionNode
+        from orcapod.core.nodes.function_node import FunctionJobNode
 
         pf = PythonDataFunction(add, output_keys="result")
         pod = FunctionPod(pf)
 
-        node = FunctionNode(pod, _make_add_stream())
+        node = FunctionJobNode(pod, _make_add_stream())
         node.run()
         results = list(node.iter_data())
 

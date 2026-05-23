@@ -1,11 +1,11 @@
-"""Tests for OperatorNode with optional database backing."""
+"""Tests for OperatorJobNode with optional database backing."""
 
 from __future__ import annotations
 
 import pyarrow as pa
 import pytest
 
-from orcapod.core.nodes import OperatorNode
+from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.operators.join import Join
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
@@ -23,32 +23,32 @@ def _make_stream(name="x", n=3):
     )
 
 
-class TestOperatorNodeWithoutDatabase:
+class TestOperatorJobNodeWithoutDatabase:
     def test_construction_without_database(self):
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=Join(),
             input_streams=(_make_stream("a"), _make_stream("b")),
         )
         assert node._pipeline_database is None
 
     def test_iter_data_without_database(self):
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=Join(),
             input_streams=(_make_stream("a"), _make_stream("b")),
         )
-        node.run()                          # <-- add this line
+        node.run()
         results = list(node.iter_data())
         assert len(results) == 3
 
     def test_get_all_records_without_database_returns_none(self):
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=Join(),
             input_streams=(_make_stream("a"), _make_stream("b")),
         )
         assert node.get_all_records() is None
 
     def test_as_source_without_database_raises(self):
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=Join(),
             input_streams=(_make_stream("a"), _make_stream("b")),
         )
@@ -56,9 +56,9 @@ class TestOperatorNodeWithoutDatabase:
             node.as_source()
 
 
-class TestOperatorNodeAttachDatabases:
+class TestOperatorJobNodeAttachDatabases:
     def test_attach_databases_sets_pipeline_db(self):
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=Join(),
             input_streams=(_make_stream("a"), _make_stream("b")),
         )
@@ -67,7 +67,7 @@ class TestOperatorNodeAttachDatabases:
         assert node._pipeline_database is db
 
     def test_attach_databases_computes_node_identity_path(self):
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=Join(),
             input_streams=(_make_stream("a"), _make_stream("b")),
         )
@@ -77,7 +77,7 @@ class TestOperatorNodeAttachDatabases:
         assert len(node.node_identity_path) > 0
 
     def test_attach_databases_clears_caches(self):
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=Join(),
             input_streams=(_make_stream("a"), _make_stream("b")),
         )
@@ -88,10 +88,10 @@ class TestOperatorNodeAttachDatabases:
         assert node._cached_output_stream is None
 
 
-class TestOperatorNodeWithDatabase:
+class TestOperatorJobNodeWithDatabase:
     def test_construction_with_database(self):
         db = InMemoryArrowDatabase()
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=Join(),
             input_streams=(_make_stream("a"), _make_stream("b")),
             pipeline_database=db,
@@ -100,11 +100,11 @@ class TestOperatorNodeWithDatabase:
 
     def test_iter_data_with_database(self):
         db = InMemoryArrowDatabase()
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=Join(),
             input_streams=(_make_stream("a"), _make_stream("b")),
             pipeline_database=db,
         )
-        node.run()                          # <-- add this line
+        node.run()
         results = list(node.iter_data())
         assert len(results) == 3

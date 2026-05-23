@@ -7,6 +7,7 @@ import pytest
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
+from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.databases import InMemoryArrowDatabase
@@ -40,29 +41,29 @@ def _make_stream(n=3):
 
 class TestFunctionNodeWithoutDatabase:
     def test_construction_without_database(self):
-        node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream())
+        node = FunctionJobNode(function_pod=_make_pod(), input_stream=_make_stream())
         assert node._pipeline_database is None
 
     def test_iter_data_without_database(self):
-        node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream(n=3))
+        node = FunctionJobNode(function_pod=_make_pod(), input_stream=_make_stream(n=3))
         node.run()
         results = list(node.iter_data())
         assert len(results) == 3
         assert results[0][1]["result"] == 0
 
     def test_get_all_records_without_database_returns_none(self):
-        node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream())
+        node = FunctionJobNode(function_pod=_make_pod(), input_stream=_make_stream())
         assert node.get_all_records() is None
 
     def test_as_source_without_database_raises(self):
-        node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream())
+        node = FunctionJobNode(function_pod=_make_pod(), input_stream=_make_stream())
         with pytest.raises(RuntimeError):
             node.as_source()
 
 
 class TestFunctionNodeAttachDatabases:
     def test_attach_databases_sets_pipeline_db(self):
-        node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream())
+        node = FunctionJobNode(function_pod=_make_pod(), input_stream=_make_stream())
         db = InMemoryArrowDatabase()
         node.attach_databases(pipeline_database=db, result_database=db)
         assert node._pipeline_database is db
@@ -70,13 +71,13 @@ class TestFunctionNodeAttachDatabases:
     def test_attach_databases_creates_cached_function_pod(self):
         from orcapod.core.cached_function_pod import CachedFunctionPod
 
-        node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream())
+        node = FunctionJobNode(function_pod=_make_pod(), input_stream=_make_stream())
         db = InMemoryArrowDatabase()
         node.attach_databases(pipeline_database=db, result_database=db)
         assert isinstance(node._cached_function_pod, CachedFunctionPod)
 
     def test_attach_databases_clears_caches(self):
-        node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream())
+        node = FunctionJobNode(function_pod=_make_pod(), input_stream=_make_stream())
         node.run()  # populate cache
         assert len(node._cached_output_datas) > 0
         db = InMemoryArrowDatabase()
@@ -84,7 +85,7 @@ class TestFunctionNodeAttachDatabases:
         assert len(node._cached_output_datas) == 0
 
     def test_attach_databases_computes_node_identity_path(self):
-        node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream())
+        node = FunctionJobNode(function_pod=_make_pod(), input_stream=_make_stream())
         db = InMemoryArrowDatabase()
         node.attach_databases(pipeline_database=db, result_database=db)
         assert node.node_identity_path is not None
@@ -93,7 +94,7 @@ class TestFunctionNodeAttachDatabases:
     def test_double_attach_does_not_double_wrap(self):
         from orcapod.core.cached_function_pod import CachedFunctionPod
 
-        node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream())
+        node = FunctionJobNode(function_pod=_make_pod(), input_stream=_make_stream())
         db = InMemoryArrowDatabase()
         node.attach_databases(pipeline_database=db, result_database=db)
         assert isinstance(node._cached_function_pod, CachedFunctionPod)
@@ -105,7 +106,7 @@ class TestFunctionNodeAttachDatabases:
         )
 
     def test_iter_data_after_attach_works(self):
-        node = FunctionNode(function_pod=_make_pod(), input_stream=_make_stream(n=2))
+        node = FunctionJobNode(function_pod=_make_pod(), input_stream=_make_stream(n=2))
         db = InMemoryArrowDatabase()
         node.attach_databases(pipeline_database=db, result_database=db)
         node.run()
@@ -116,7 +117,7 @@ class TestFunctionNodeAttachDatabases:
 class TestFunctionNodeWithDatabase:
     def test_construction_with_database(self):
         db = InMemoryArrowDatabase()
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=_make_pod(),
             input_stream=_make_stream(),
             pipeline_database=db,
@@ -126,7 +127,7 @@ class TestFunctionNodeWithDatabase:
 
     def test_node_identity_path_with_database(self):
         db = InMemoryArrowDatabase()
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=_make_pod(),
             input_stream=_make_stream(),
             pipeline_database=db,
@@ -136,7 +137,7 @@ class TestFunctionNodeWithDatabase:
 
     def test_iter_data_with_database(self):
         db = InMemoryArrowDatabase()
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=_make_pod(),
             input_stream=_make_stream(n=3),
             pipeline_database=db,

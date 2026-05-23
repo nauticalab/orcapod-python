@@ -2,7 +2,7 @@ from .core.function_pod import (
     FunctionPod,
     function_pod,
 )
-from .core.sources.source_spec import SourceSpec
+from .core.nodes.source_node import SourceNode
 from .pipeline import Pipeline, PipelineJob
 
 # Subpackage re-exports for clean public API
@@ -18,7 +18,7 @@ __all__ = [
     "function_pod",
     "Pipeline",
     "PipelineJob",
-    "SourceSpec",
+    "SourceNode",
     "databases",
     "nodes",
     "operators",

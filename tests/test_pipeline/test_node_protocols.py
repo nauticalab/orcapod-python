@@ -144,7 +144,25 @@ class TestTypeGuardDispatch:
 
 import pyarrow as pa
 from orcapod.core.sources import ArrowTableSource
-from orcapod.core.nodes import SourceNode
+from orcapod.core.nodes.source_node import SourceJobNode
+
+
+def _make_source_job_node(table, tag_col="key"):
+    """Helper: create a SourceJobNode wrapping a concrete source.
+
+    Note: schemas are passed explicitly here because SourceJobNode currently
+    requires them even when bound_source is provided. ENG-513 tracks adding
+    schema inference so that `SourceJobNode(name=..., bound_source=src)` works
+    without explicit tag_schema/data_schema.
+    """
+    src = ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
+    tag_schema, data_schema = src.output_schema()
+    return SourceJobNode(
+        name="test_source",
+        tag_schema=tag_schema,
+        data_schema=data_schema,
+        bound_source=src,
+    )
 
 
 class TestSourceNodeExecute:
@@ -153,8 +171,7 @@ class TestSourceNodeExecute:
             "key": pa.array(["a", "b", "c"], type=pa.large_string()),
             "value": pa.array([1, 2, 3], type=pa.int64()),
         })
-        src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
-        return SourceNode(src)
+        return _make_source_job_node(table)
 
     def test_execute_returns_list(self):
         node = self._make_source_node()
@@ -163,10 +180,10 @@ class TestSourceNodeExecute:
         assert len(result) == 3
 
     def test_execute_populates_cached_results(self):
+        """execute() on SourceJobNode returns correct data (no caching field)."""
         node = self._make_source_node()
-        node.execute()
-        assert node._cached_results is not None
-        assert len(node._cached_results) == 3
+        result = node.execute()
+        assert len(result) == 3
 
     def test_execute_with_observer(self):
         node = self._make_source_node()
@@ -204,8 +221,7 @@ class TestSourceNodeAsyncExecuteProtocol:
             "key": pa.array(["a", "b"], type=pa.large_string()),
             "value": pa.array([1, 2], type=pa.int64()),
         })
-        src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
-        node = SourceNode(src)
+        node = _make_source_job_node(table)
 
         output_ch = Channel(buffer_size=16)
         await node.async_execute(output_ch.writer, observer=None)
@@ -218,8 +234,7 @@ class TestSourceNodeAsyncExecuteProtocol:
             "key": pa.array(["a"], type=pa.large_string()),
             "value": pa.array([1], type=pa.int64()),
         })
-        src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
-        node = SourceNode(src)
+        node = _make_source_job_node(table)
         events = []
 
         class Obs:
@@ -244,6 +259,7 @@ class TestSourceNodeAsyncExecuteProtocol:
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.nodes import FunctionNode
+from orcapod.core.nodes.function_node import FunctionJobNode
 
 
 def double_value(value: int) -> int:
@@ -259,7 +275,7 @@ class TestFunctionNodeExecute:
         src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
-        return FunctionNode(pod, src)
+        return FunctionJobNode(pod, src)
 
     def test_execute_with_observer(self):
         node = self._make_function_node()
@@ -316,7 +332,7 @@ class TestFunctionNodeAsyncExecute:
         src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
-        node = FunctionNode(pod, src)
+        node = FunctionJobNode(pod, src)
 
         input_ch = Channel(buffer_size=16)
         output_ch = Channel(buffer_size=16)
@@ -340,7 +356,7 @@ class TestFunctionNodeAsyncExecute:
         src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
-        node = FunctionNode(pod, src)
+        node = FunctionJobNode(pod, src)
 
         events = []
 
@@ -376,7 +392,7 @@ class TestFunctionNodeAsyncExecute:
 # OperatorNode.execute() with observer + cache check
 # ===========================================================================
 
-from orcapod.core.nodes import OperatorNode
+from orcapod.core.nodes.operator_node import OperatorJobNode as OperatorNode
 from orcapod.core.operators.join import Join
 
 

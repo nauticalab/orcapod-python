@@ -13,14 +13,13 @@ from orcapod.core.nodes import (
     SourceNode,
 )
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
+from orcapod.pipeline.base import AbstractPipelineBase
 from orcapod.protocols import core_protocols as cp
-from orcapod.protocols import database_protocols as dbp
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import networkx as nx
     from orcapod.pipeline.execution_context import ExecutionContext
-    from orcapod.pipeline.job import PipelineJob
 else:
     nx = LazyModule("networkx")
 
@@ -32,19 +31,19 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class Pipeline(AutoRegisteringContextBasedTracker):
+class Pipeline(AbstractPipelineBase):
     """A pure computational blueprint recording operator and function pod invocations.
 
     During the ``with`` block, operator and function pod invocations are
     recorded into an internal graph. On context exit, ``compile()`` rewires
     the graph into a frozen DAG:
 
-    - Leaf ``SourceSpec`` declarations → ``SourceNode`` (schema-only placeholders)
+    - Leaf ``SourceNode`` declarations (schema-only placeholders)
     - Function pod invocations → ``FunctionNode``
     - Operator invocations → ``OperatorNode``
 
-    All leaf inputs must be ``SourceSpec`` instances. To run a ``Pipeline``,
-    use ``Pipeline.bind(sources=..., store=...)`` to create a ``PipelineJob``.
+    All leaf inputs must be ``SourceNode`` instances. To run a ``Pipeline``,
+    use ``PipelineJob.from_pipeline(pipeline, sources=..., store=...)`` to create a ``PipelineJob``.
 
     Parameters:
         name: Pipeline name (string or tuple). Used as the path prefix for
@@ -70,17 +69,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             auto_compile: If ``True`` (default), ``compile()`` is called
                 automatically when the context manager exits.
         """
-        super().__init__(tracker_manager=tracker_manager)
-        self._node_lut: dict[str, GraphNode] = {}
-        self._upstreams: dict[str, cp.StreamProtocol] = {}
-        self._graph_edges: list[tuple[str, str]] = []
-        self._hash_graph: "nx.DiGraph" = nx.DiGraph()
-        self._name = (name,) if isinstance(name, str) else tuple(name)
-        self._nodes: dict[str, GraphNode] = {}
-        self._persistent_node_map: dict[str, GraphNode] = {}
-        self._node_graph: "nx.DiGraph | None" = None
+        super().__init__(name=name, tracker_manager=tracker_manager)
         self._auto_compile = auto_compile
-        self._compiled = False
 
     # ------------------------------------------------------------------
     # Recording (TrackerProtocol)
@@ -92,6 +82,16 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         input_stream: cp.StreamProtocol,
         label: str | None = None,
     ) -> None:
+        """Record a function pod invocation.
+
+        Called by ``FunctionPod.__call__`` when used inside a ``with pipeline:``
+        block. Creates a lightweight ``FunctionNode`` blueprint.
+
+        Args:
+            pod: The function pod being invoked.
+            input_stream: The upstream stream.
+            label: Optional display label for the resulting node.
+        """
         input_stream_hash = input_stream.content_hash().to_string()
         function_node = FunctionNode(
             function_pod=pod,
@@ -112,6 +112,16 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         upstreams: tuple[cp.StreamProtocol, ...] = (),
         label: str | None = None,
     ) -> None:
+        """Record an operator pod invocation.
+
+        Called by operator pods when used inside a ``with pipeline:``
+        block. Creates a lightweight ``OperatorNode`` blueprint.
+
+        Args:
+            pod: The operator pod being invoked.
+            upstreams: Upstream streams for this operator.
+            label: Optional display label for the resulting node.
+        """
         operator_node = OperatorNode(
             operator=pod,
             input_streams=upstreams,
@@ -132,48 +142,15 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         """Return the list of recorded (non-persistent) nodes."""
         return list(self._node_lut.values())
 
-    @property
-    def graph(self) -> "nx.DiGraph":
-        """Directed graph of content-hash strings representing the accumulated
-        pipeline structure.  Vertices are ``content_hash`` strings; node
-        attributes include ``node_type`` ("source" / "function" / "operator")
-        and, after ``compile()``, ``label`` and ``pipeline_hash``.
-
-        The graph accumulates across multiple ``with`` blocks and is never
-        cleared by ``reset()``.
-        """
-        return self._hash_graph
-
-    def reset(self) -> None:
-        """Clear session-scoped recorded state (node LUT, upstreams, edge list).
-
-        Note: ``_hash_graph`` is intentionally *not* cleared -- it accumulates
-        the pipeline structure across ``with`` blocks.
-        """
-        self._node_lut.clear()
-        self._upstreams.clear()
-        self._graph_edges.clear()
-
-    # ------------------------------------------------------------------
-    # Properties
-    # ------------------------------------------------------------------
-
-    @property
-    def name(self) -> tuple[str, ...]:
-        return self._name
-
-    @property
-    def compiled_nodes(self) -> dict[str, GraphNode]:
-        """Return a copy of the compiled nodes dict."""
-        return self._nodes.copy()
-
     # ------------------------------------------------------------------
     # Context manager
     # ------------------------------------------------------------------
 
     def __exit__(self, exc_type=None, exc_value=None, traceback=None):
-        super().__exit__(exc_type, exc_value, traceback)
-        if self._auto_compile:
+        # Call AutoRegisteringContextBasedTracker.__exit__ directly (deactivates the tracker)
+        # but NOT AbstractPipelineBase.__exit__ (which calls compile() unconditionally).
+        AutoRegisteringContextBasedTracker.__exit__(self, exc_type, exc_value, traceback)
+        if exc_type is None and self._auto_compile:
             self.compile()
 
     # ------------------------------------------------------------------
@@ -185,8 +162,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
 
         Walks the graph in topological order and:
 
-        - Verifies leaf streams are ``SourceSpec`` instances (raises ``ValueError`` otherwise)
-        - Wraps ``SourceSpec`` leaves in ``SourceNode``
+        - Verifies leaf streams are ``SourceNode`` instances (raises ``ValueError`` otherwise)
+        - Leaves ``SourceNode`` leaves as-is (no wrapping needed)
         - Rewires upstream references on recorded ``FunctionNode`` /
           ``OperatorNode`` to point at persistent (compiled) nodes
 
@@ -208,25 +185,25 @@ class Pipeline(AutoRegisteringContextBasedTracker):
 
         for node_hash in nx.topological_sort(G):
             if node_hash in persistent_node_map:
-                # Already compiled — reuse, but track for label assignment
+                # Already compiled — reuse, but verify type consistency across
+                # incremental compiles (a hash must never change node type).
                 existing_node = persistent_node_map[node_hash]
+                new_node = self._node_lut.get(node_hash)
+                if new_node is not None:
+                    assert existing_node.node_type == new_node.node_type, (
+                        f"Node type changed for hash {node_hash!r}: "
+                        f"was {existing_node.node_type!r}, now {new_node.node_type!r}"
+                    )
                 name_candidates.setdefault(existing_node.label, []).append(
                     existing_node
                 )
                 continue
 
             if node_hash not in self._node_lut:
-                # -- Leaf stream: must be a SourceSpec in the new design --
-                from orcapod.core.sources.source_spec import SourceSpec
+                # Leaf stream — wrap in SourceNode if not already one.
+                from orcapod.core.nodes.source_node import SourceNode as SourceNodeClass
                 stream = self._upstreams[node_hash]
-                if not isinstance(stream, SourceSpec):
-                    raise ValueError(
-                        f"Pipeline: all leaf inputs must be SourceSpec instances, "
-                        f"but found {type(stream).__name__!r}. "
-                        "Use 'with PipelineJob:' to record a pipeline with concrete sources, "
-                        "or replace concrete sources with SourceSpec declarations."
-                    )
-                node = SourceNode(stream=stream)
+                node = SourceNodeClass.from_stream(stream)
                 persistent_node_map[node_hash] = node
             else:
                 node = self._node_lut[node_hash]
@@ -307,39 +284,6 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         self._compiled = True
 
     # ------------------------------------------------------------------
-    # Bind
-    # ------------------------------------------------------------------
-
-    def bind(
-        self,
-        sources: "dict[str, cp.StreamProtocol] | None" = None,
-        store: "dbp.ArrowDatabaseProtocol | None" = None,
-        execution_context: "ExecutionContext | None" = None,
-    ) -> "PipelineJob":
-        """Wrap this pipeline in a ``PipelineJob`` with the given bindings.
-
-        Non-mutating — returns a fresh ``PipelineJob``; this ``Pipeline``
-        is unchanged.
-
-        Args:
-            sources: Mapping of SourceSpec name to concrete source.
-            store: Database for result caching and operator records.
-            execution_context: Optional execution configuration.
-
-        Returns:
-            A new ``PipelineJob`` with this pipeline and the given bindings.
-        """
-        from orcapod.pipeline.job import PipelineJob
-
-        return PipelineJob(
-            name=self._name,
-            _pipeline=self,
-            sources=sources or {},
-            store=store,
-            execution_context=execution_context,
-        )
-
-    # ------------------------------------------------------------------
     # Graph display
     # ------------------------------------------------------------------
 
@@ -363,8 +307,10 @@ class Pipeline(AutoRegisteringContextBasedTracker):
     def save(self, path: str | Path) -> None:
         """Serialize the pure pipeline blueprint to a JSON file.
 
-        Saves topology and SourceSpec declarations only — no databases,
-        no execution context, no run metadata.
+        Saves the full pipeline topology: SourceNode declarations, function
+        and operator pod configurations, and all edge connections.  Runtime
+        state — databases, execution context, and run metadata — is not
+        persisted.
 
         Args:
             path: File path to write JSON output to.
@@ -383,8 +329,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             PIPELINE_FORMAT_VERSION,
             serialize_schema,
         )
-        from orcapod.core.sources.source_spec import SourceSpec
         from orcapod.core.nodes import OperatorNode, FunctionNode
+        from orcapod.core.nodes.source_node import SourceNode as SourceNodeClass
 
         nodes: dict[str, Any] = {}
         for content_hash_str, node in self._persistent_node_map.items():
@@ -416,26 +362,25 @@ class Pipeline(AutoRegisteringContextBasedTracker):
                 "data_context_key": data_context_key,
             }
 
-            if isinstance(node, SourceNode):
-                if isinstance(node.stream, SourceSpec):
+            match node:
+                case SourceNodeClass():
                     descriptor["source_config"] = {
-                        "source_type": "spec",
-                        "spec_name": node.stream.name,
+                        "source_type": "node",
+                        "name": node.name,
+                        "tag_schema": serialize_schema(node.tag_schema, type_converter),
+                        "data_schema": serialize_schema(node.data_schema, type_converter),
                     }
                     descriptor["reconstructable"] = True
-                else:
-                    descriptor["source_config"] = None
-                    descriptor["reconstructable"] = False
 
-            elif isinstance(node, FunctionNode):
-                if node._function_pod is not None:
-                    descriptor["function_config"] = node._function_pod.to_config()
-                descriptor["table_scope"] = node._table_scope
+                case FunctionNode():
+                    if node._function_pod is not None:
+                        descriptor["function_config"] = node._function_pod.to_config()
+                    descriptor["table_scope"] = node._table_scope
 
-            elif isinstance(node, OperatorNode):
-                if node._operator is not None:
-                    descriptor["operator_config"] = node._operator.to_config()
-                descriptor["table_scope"] = node._table_scope
+                case OperatorNode():
+                    if node._operator is not None:
+                        descriptor["operator_config"] = node._operator.to_config()
+                    descriptor["table_scope"] = node._table_scope
 
             nodes[content_hash_str] = descriptor
 
@@ -455,15 +400,15 @@ class Pipeline(AutoRegisteringContextBasedTracker):
     def load(cls, path: str | Path) -> "Pipeline":
         """Deserialize a pure pipeline blueprint from a JSON file.
 
-        Reconstructs topology and SourceSpec declarations. The loaded
-        pipeline is topology-only — to run it, call
-        ``pipeline.bind(sources=..., store=...)`` first.
+        Reconstructs topology and SourceNode declarations. The loaded
+        pipeline is topology-only — to run it, use
+        ``PipelineJob.from_pipeline(pipeline, sources=..., store=...)``.
 
         Args:
             path: Path to the JSON file produced by :meth:`save`.
 
         Returns:
-            A compiled ``Pipeline`` instance with SourceSpec leaf nodes.
+            A compiled ``Pipeline`` instance with SourceNode leaf nodes.
 
         Raises:
             ValueError: If the file's format version is unsupported.
@@ -473,8 +418,8 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             SUPPORTED_FORMAT_VERSIONS,
             deserialize_schema,
         )
-        from orcapod.core.sources.source_spec import SourceSpec
         from orcapod.core.nodes import FunctionNode, OperatorNode
+        from orcapod.core.nodes.source_node import SourceNode as SourceNodeClass
         from orcapod.types import Schema
 
         path = Path(path)
@@ -517,19 +462,31 @@ class Pipeline(AutoRegisteringContextBasedTracker):
             source_config = descriptor.get("source_config") or {}
 
             if node_type == "source":
-                if source_config.get("source_type") == "spec":
-                    spec_name = source_config["spec_name"]
-                    tag_schema = Schema(deserialize_schema(descriptor["output_schema"]["tag"]))
-                    data_schema = Schema(deserialize_schema(descriptor["output_schema"]["data"]))
-                    stream = SourceSpec(
-                        name=spec_name,
+                source_type = source_config.get("source_type")
+                if source_type == "node":
+                    node_name = source_config.get("name") or source_config.get("node_name")
+                    if not node_name:
+                        node_name = descriptor.get("label") or "unknown"
+                    if "tag_schema" in source_config and "data_schema" in source_config:
+                        tag_schema = Schema(deserialize_schema(source_config["tag_schema"]))
+                        data_schema = Schema(deserialize_schema(source_config["data_schema"]))
+                    else:
+                        tag_schema = Schema(deserialize_schema(descriptor["output_schema"]["tag"]))
+                        data_schema = Schema(deserialize_schema(descriptor["output_schema"]["data"]))
+                    node = SourceNodeClass(
+                        name=node_name,
                         tag_schema=tag_schema,
                         data_schema=data_schema,
+                        data_context=descriptor.get("data_context_key"),
                     )
+                    # Restore label from descriptor if set explicitly
+                    stored_label = descriptor.get("label")
+                    if stored_label and stored_label != node_name:
+                        node._label = stored_label
                 else:
-                    stream = None  # non-spec source — schema known but not rebuildable
-
-                node = SourceNode.from_descriptor(descriptor, stream=stream, databases={})
+                    raise ValueError(
+                        f"Unknown source_type {source_type!r} in pipeline descriptor."
+                    )
                 reconstructed[node_hash] = node
 
             elif node_type == "function":
@@ -610,12 +567,14 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         pipeline._node_lut = {
             h: n
             for h, n in reconstructed.items()
-            if not isinstance(n, SourceNode)
+            if n.node_type != "source"
         }
+        # SourceNode IS the upstream — store it directly so _build_execution_graph()
+        # can find it by hash and substitute a concrete source at run time.
         pipeline._upstreams = {
-            h: n.stream
+            h: n
             for h, n in reconstructed.items()
-            if isinstance(n, SourceNode) and n.stream is not None
+            if n.node_type == "source"
         }
 
         pipeline._compiled = True
@@ -653,17 +612,6 @@ class Pipeline(AutoRegisteringContextBasedTracker):
         # Mutable per-execution state — own copy so runs don't interfere
         clone._nodes = dict(self._nodes)
         return clone
-
-    # ------------------------------------------------------------------
-    # Node access by label
-    # ------------------------------------------------------------------
-
-    def __getattr__(self, item: str) -> Any:
-        # Use __dict__ to avoid recursion during __init__
-        nodes = self.__dict__.get("_nodes", {})
-        if item in nodes:
-            return nodes[item]
-        raise AttributeError(f"Pipeline has no attribute '{item}'")
 
     def __dir__(self) -> list[str]:
         return list(super().__dir__()) + list(self._nodes.keys())

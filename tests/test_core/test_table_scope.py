@@ -14,6 +14,8 @@ import pytest
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode, OperatorNode
+from orcapod.core.nodes.function_node import FunctionJobNode
+from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.operators import Join
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource, DictSource
@@ -83,14 +85,14 @@ class TestFunctionNodePipelineHashScope:
         db = InMemoryArrowDatabase()
         pod = _make_pod()
         src = _make_source([{"x": 1, "y": 2}])
-        node = FunctionNode(function_pod=pod, input_stream=src, pipeline_database=db)
+        node = FunctionJobNode(function_pod=pod, input_stream=src, pipeline_database=db)
         assert node._table_scope == "pipeline_hash"
 
     def test_node_identity_path_ends_with_schema_only(self):
         db = InMemoryArrowDatabase()
         pod = _make_pod()
         src = _make_source([{"x": 1, "y": 2}])
-        node = FunctionNode(function_pod=pod, input_stream=src, pipeline_database=db)
+        node = FunctionJobNode(function_pod=pod, input_stream=src, pipeline_database=db)
         path = node.node_identity_path
         assert path[-1].startswith("schema:"), f"Expected schema:... got {path[-1]!r}"
         assert not any(seg.startswith("instance:") for seg in path)
@@ -102,8 +104,8 @@ class TestFunctionNodePipelineHashScope:
         # Both use same source_id → same schema structure → same pipeline_hash
         src_a = _make_source([{"x": 1, "y": 10}], source_id="src")
         src_b = _make_source([{"x": 2, "y": 20}], source_id="src")
-        node_a = FunctionNode(function_pod=pod, input_stream=src_a, pipeline_database=db)
-        node_b = FunctionNode(function_pod=pod, input_stream=src_b, pipeline_database=db)
+        node_a = FunctionJobNode(function_pod=pod, input_stream=src_a, pipeline_database=db)
+        node_b = FunctionJobNode(function_pod=pod, input_stream=src_b, pipeline_database=db)
 
         assert node_a.node_identity_path == node_b.node_identity_path
         assert node_a.pipeline_hash() == node_b.pipeline_hash()
@@ -113,7 +115,7 @@ class TestFunctionNodePipelineHashScope:
         db = InMemoryArrowDatabase()
         pod = _make_pod()
         src = _make_source([{"x": 1, "y": 2}])
-        node = FunctionNode(function_pod=pod, input_stream=src, pipeline_database=db)
+        node = FunctionJobNode(function_pod=pod, input_stream=src, pipeline_database=db)
         node.run()
 
         col_name = SystemConstant().NODE_CONTENT_HASH_COL
@@ -126,7 +128,7 @@ class TestFunctionNodePipelineHashScope:
         db = InMemoryArrowDatabase()
         pod = _make_pod()
         src = _make_source([{"x": 1, "y": 2}])
-        node = FunctionNode(function_pod=pod, input_stream=src, pipeline_database=db)
+        node = FunctionJobNode(function_pod=pod, input_stream=src, pipeline_database=db)
         node.run()
 
         records = node.get_all_records()
@@ -140,8 +142,8 @@ class TestFunctionNodePipelineHashScope:
         # Different source_ids → different content_hash → different _node_content_hash rows
         src_a = _make_source([{"x": 1, "y": 10}], source_id="source_a")
         src_b = _make_source([{"x": 2, "y": 20}], source_id="source_b")
-        node_a = FunctionNode(function_pod=pod, input_stream=src_a, pipeline_database=db)
-        node_b = FunctionNode(function_pod=pod, input_stream=src_b, pipeline_database=db)
+        node_a = FunctionJobNode(function_pod=pod, input_stream=src_a, pipeline_database=db)
+        node_b = FunctionJobNode(function_pod=pod, input_stream=src_b, pipeline_database=db)
 
         node_a.run()
         node_b.run()
@@ -170,7 +172,7 @@ class TestFunctionNodeContentHashScope:
         db = InMemoryArrowDatabase()
         pod = _make_pod()
         src = _make_source([{"x": 1, "y": 2}])
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=pod, input_stream=src, pipeline_database=db, table_scope="content_hash"
         )
         assert node._table_scope == "content_hash"
@@ -179,7 +181,7 @@ class TestFunctionNodeContentHashScope:
         db = InMemoryArrowDatabase()
         pod = _make_pod()
         src = _make_source([{"x": 1, "y": 2}])
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=pod, input_stream=src, pipeline_database=db, table_scope="content_hash"
         )
         path = node.node_identity_path
@@ -194,10 +196,10 @@ class TestFunctionNodeContentHashScope:
         pod = _make_pod()
         src_a = _make_source([{"x": 1, "y": 10}], source_id="source_a")
         src_b = _make_source([{"x": 2, "y": 20}], source_id="source_b")
-        node_a = FunctionNode(
+        node_a = FunctionJobNode(
             function_pod=pod, input_stream=src_a, pipeline_database=db, table_scope="content_hash"
         )
-        node_b = FunctionNode(
+        node_b = FunctionJobNode(
             function_pod=pod, input_stream=src_b, pipeline_database=db, table_scope="content_hash"
         )
         assert node_a.content_hash() != node_b.content_hash()
@@ -210,10 +212,10 @@ class TestFunctionNodeContentHashScope:
         # Same source_id → same pipeline_hash
         src_a = _make_source([{"x": 1, "y": 10}], source_id="src")
         src_b = _make_source([{"x": 2, "y": 20}], source_id="src")
-        node_a = FunctionNode(
+        node_a = FunctionJobNode(
             function_pod=pod, input_stream=src_a, pipeline_database=db, table_scope="content_hash"
         )
-        node_b = FunctionNode(
+        node_b = FunctionJobNode(
             function_pod=pod, input_stream=src_b, pipeline_database=db, table_scope="content_hash"
         )
         # pipeline_hash same → same schema: segment
@@ -232,7 +234,7 @@ class TestFunctionNodeDescriptorTableScope:
         pod = _make_pod()
         src = _make_source([{"x": 1, "y": 2}])
         db = InMemoryArrowDatabase()
-        node = FunctionNode(function_pod=pod, input_stream=src, pipeline_database=db)
+        node = FunctionJobNode(function_pod=pod, input_stream=src, pipeline_database=db)
         tag_schema, data_schema = node.output_schema()
         descriptor = {
             "node_type": "function",
@@ -258,7 +260,7 @@ class TestFunctionNodeDescriptorTableScope:
         pod = _make_pod()
         src = _make_source([{"x": 1, "y": 2}])
         db = InMemoryArrowDatabase()
-        node = FunctionNode(function_pod=pod, input_stream=src, pipeline_database=db)
+        node = FunctionJobNode(function_pod=pod, input_stream=src, pipeline_database=db)
         tag_schema, data_schema = node.output_schema()
         descriptor = {
             "node_type": "function",
@@ -284,7 +286,7 @@ class TestFunctionNodeDescriptorTableScope:
         pod = _make_pod()
         src = _make_source([{"x": 1, "y": 2}])
         db = InMemoryArrowDatabase()
-        node = FunctionNode(
+        node = FunctionJobNode(
             function_pod=pod, input_stream=src, pipeline_database=db, table_scope="content_hash"
         )
         tag_schema, data_schema = node.output_schema()
@@ -318,7 +320,7 @@ class TestOperatorNodePipelineHashScope:
     def test_default_scope_is_pipeline_hash(self):
         db = InMemoryArrowDatabase()
         src_a, src_b = _make_join_streams([1, 2], "x")
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=Join(),
             input_streams=(src_a, src_b),
             pipeline_database=db,
@@ -328,7 +330,7 @@ class TestOperatorNodePipelineHashScope:
     def test_node_identity_path_ends_with_schema_only(self):
         db = InMemoryArrowDatabase()
         src_a, src_b = _make_join_streams([1, 2], "x")
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=Join(),
             input_streams=(src_a, src_b),
             pipeline_database=db,
@@ -343,12 +345,12 @@ class TestOperatorNodePipelineHashScope:
         # Same source_id_suffix → same source_id → same pipeline_hash
         src_a1, src_b1 = _make_join_streams([1, 2], "x")
         src_a2, src_b2 = _make_join_streams([3, 4], "x")
-        node1 = OperatorNode(
+        node1 = OperatorJobNode(
             operator=Join(),
             input_streams=(src_a1, src_b1),
             pipeline_database=db,
         )
-        node2 = OperatorNode(
+        node2 = OperatorJobNode(
             operator=Join(),
             input_streams=(src_a2, src_b2),
             pipeline_database=db,
@@ -357,16 +359,16 @@ class TestOperatorNodePipelineHashScope:
         assert node1.pipeline_hash() == node2.pipeline_hash()
 
     def test_two_nodes_different_source_ids_have_different_content_hash(self):
-        """Different source_ids → different content_hash for OperatorNode."""
+        """Different source_ids → different content_hash for OperatorJobNode."""
         db = InMemoryArrowDatabase()
         src_a1, src_b1 = _make_join_streams([1, 2], "run1")
         src_a2, src_b2 = _make_join_streams([1, 2], "run2")
-        node1 = OperatorNode(
+        node1 = OperatorJobNode(
             operator=Join(),
             input_streams=(src_a1, src_b1),
             pipeline_database=db,
         )
-        node2 = OperatorNode(
+        node2 = OperatorJobNode(
             operator=Join(),
             input_streams=(src_a2, src_b2),
             pipeline_database=db,
@@ -374,17 +376,17 @@ class TestOperatorNodePipelineHashScope:
         assert node1.content_hash() != node2.content_hash()
 
     def test_isolation_two_nodes_share_table_see_only_own_records(self):
-        """Two OperatorNodes sharing a DB path each see only their own records."""
+        """Two OperatorJobNodes sharing a DB path each see only their own records."""
         db = InMemoryArrowDatabase()
         src_a1, src_b1 = _make_join_streams([1, 2], "run1")
         src_a2, src_b2 = _make_join_streams([3, 4], "run2")
-        node1 = OperatorNode(
+        node1 = OperatorJobNode(
             operator=Join(),
             input_streams=(src_a1, src_b1),
             pipeline_database=db,
             cache_mode=CacheMode.LOG,
         )
-        node2 = OperatorNode(
+        node2 = OperatorJobNode(
             operator=Join(),
             input_streams=(src_a2, src_b2),
             pipeline_database=db,
@@ -420,7 +422,7 @@ class TestOperatorNodeContentHashScope:
     def test_node_identity_path_ends_with_schema_and_instance(self):
         db = InMemoryArrowDatabase()
         src_a, src_b = _make_join_streams([1, 2], "x")
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=Join(),
             input_streams=(src_a, src_b),
             pipeline_database=db,
@@ -436,13 +438,13 @@ class TestOperatorNodeContentHashScope:
         db = InMemoryArrowDatabase()
         src_a1, src_b1 = _make_join_streams([1, 2], "run1")
         src_a2, src_b2 = _make_join_streams([1, 2], "run2")
-        node1 = OperatorNode(
+        node1 = OperatorJobNode(
             operator=Join(),
             input_streams=(src_a1, src_b1),
             pipeline_database=db,
             table_scope="content_hash",
         )
-        node2 = OperatorNode(
+        node2 = OperatorJobNode(
             operator=Join(),
             input_streams=(src_a2, src_b2),
             pipeline_database=db,
@@ -458,13 +460,13 @@ class TestOperatorNodeContentHashScope:
         # (ArrowTableSource hashes by schema/source_id, not raw data values)
         src_a1, src_b1 = _make_join_streams([1, 2], "x")
         src_a2, src_b2 = _make_join_streams([3, 4], "x")
-        node1 = OperatorNode(
+        node1 = OperatorJobNode(
             operator=Join(),
             input_streams=(src_a1, src_b1),
             pipeline_database=db,
             table_scope="content_hash",
         )
-        node2 = OperatorNode(
+        node2 = OperatorJobNode(
             operator=Join(),
             input_streams=(src_a2, src_b2),
             pipeline_database=db,
@@ -482,7 +484,7 @@ class TestOperatorNodeContentHashScope:
 
 class TestOperatorNodeDescriptorTableScope:
     def test_from_descriptor_missing_table_scope_raises(self):
-        from orcapod.core.nodes.operator_node import OperatorNode as ON
+        from orcapod.core.nodes.operator_node import OperatorJobNode as OJN
 
         db = InMemoryArrowDatabase()
         descriptor = {
@@ -501,7 +503,7 @@ class TestOperatorNodeDescriptorTableScope:
             "cache_mode": "OFF",
         }
         with pytest.raises(ValueError, match="table_scope"):
-            ON.from_descriptor(
+            OJN.from_descriptor(
                 descriptor=descriptor,
                 operator=None,
                 input_streams=(),
@@ -509,7 +511,7 @@ class TestOperatorNodeDescriptorTableScope:
             )
 
     def test_from_descriptor_preserves_pipeline_hash_scope(self):
-        from orcapod.core.nodes.operator_node import OperatorNode as ON
+        from orcapod.core.nodes.operator_node import OperatorJobNode as OJN
 
         db = InMemoryArrowDatabase()
         descriptor = {
@@ -527,7 +529,7 @@ class TestOperatorNodeDescriptorTableScope:
             },
             "cache_mode": "OFF",
         }
-        loaded = ON.from_descriptor(
+        loaded = OJN.from_descriptor(
             descriptor=descriptor,
             operator=None,
             input_streams=(),
@@ -536,7 +538,7 @@ class TestOperatorNodeDescriptorTableScope:
         assert loaded._table_scope == "pipeline_hash"
 
     def test_from_descriptor_preserves_content_hash_scope(self):
-        from orcapod.core.nodes.operator_node import OperatorNode as ON
+        from orcapod.core.nodes.operator_node import OperatorJobNode as OJN
 
         db = InMemoryArrowDatabase()
         descriptor = {
@@ -554,7 +556,7 @@ class TestOperatorNodeDescriptorTableScope:
             },
             "cache_mode": "OFF",
         }
-        loaded = ON.from_descriptor(
+        loaded = OJN.from_descriptor(
             descriptor=descriptor,
             operator=None,
             input_streams=(),
@@ -573,7 +575,7 @@ class TestNodeIdentityPathCacheInvalidation:
         db = InMemoryArrowDatabase()
         pod = _make_pod()
         src = _make_source([{"x": 1, "y": 2}])
-        node = FunctionNode(function_pod=pod, input_stream=src, pipeline_database=db)
+        node = FunctionJobNode(function_pod=pod, input_stream=src, pipeline_database=db)
         _ = node.node_identity_path  # populate cache
         assert node._node_identity_path_cache is not None
         node.clear_cache()
@@ -582,7 +584,7 @@ class TestNodeIdentityPathCacheInvalidation:
     def test_operator_node_cache_cleared_on_clear_cache(self):
         db = InMemoryArrowDatabase()
         src_a, src_b = _make_join_streams([1], "x")
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=Join(),
             input_streams=(src_a, src_b),
             pipeline_database=db,

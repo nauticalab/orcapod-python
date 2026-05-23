@@ -13,7 +13,7 @@ from orcapod.core.function_pod import FunctionPod
 from orcapod.core.operators import Join
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
-from orcapod.core.sources.source_spec import SourceSpec
+from orcapod.core.nodes.source_node import SourceNode
 from orcapod.core.tracker import BasicTrackerManager
 from orcapod.pipeline import Pipeline
 from orcapod.types import Schema
@@ -111,8 +111,8 @@ class TestPipelineTracker:
 
         pf = PythonDataFunction(_double, output_keys="result")
         pod = FunctionPod(data_function=pf)
-        # compile() enforces SourceSpec-only leaves — use SourceSpec instead of raw stream
-        spec = SourceSpec(
+        # compile() enforces SourceNode-only leaves — use SourceNode instead of raw stream
+        spec = SourceNode(
             name="test_spec",
             tag_schema=Schema({"id": int}),
             data_schema=Schema({"x": int}),

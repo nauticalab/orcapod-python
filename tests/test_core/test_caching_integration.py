@@ -22,6 +22,8 @@ from deltalake import write_deltalake
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode, OperatorNode
+from orcapod.core.nodes.function_node import FunctionJobNode
+from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.operators import Join
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource, DeltaTableSource, CachedSource
@@ -294,7 +296,7 @@ class TestFunctionPodCaching:
         )
         joined = Join()(patients, labs)
 
-        fn_node = FunctionNode(
+        fn_node = FunctionJobNode(
             function_pod=pod,
             input_stream=joined,
             pipeline_database=pipeline_db,
@@ -324,7 +326,7 @@ class TestFunctionPodCaching:
             DeltaTableSource(labs_a, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
-        fn_a = FunctionNode(
+        fn_a = FunctionJobNode(
             function_pod=pod,
             input_stream=Join()(pa_src, la_src),
             pipeline_database=pipeline_db,
@@ -340,7 +342,7 @@ class TestFunctionPodCaching:
             DeltaTableSource(labs_b, tag_columns=["patient_id"]),
             cache_database=source_db,
         )
-        fn_b = FunctionNode(
+        fn_b = FunctionJobNode(
             function_pod=pod,
             input_stream=Join()(pb_src, lb_src),
             pipeline_database=pipeline_db,
@@ -362,7 +364,7 @@ class TestFunctionPodCaching:
         patients_b, labs_b = clinic_b
 
         # Pipeline A: 3 patients
-        fn_a = FunctionNode(
+        fn_a = FunctionJobNode(
             function_pod=pod,
             input_stream=Join()(
                 CachedSource(
@@ -381,7 +383,7 @@ class TestFunctionPodCaching:
         assert fn_a.get_all_records().num_rows == 3
 
         # Pipeline B: 2 patients, different source identity, same schema
-        fn_b = FunctionNode(
+        fn_b = FunctionJobNode(
             function_pod=pod,
             input_stream=Join()(
                 CachedSource(
@@ -421,7 +423,7 @@ class TestOperatorPodCaching:
 
     def test_off_computes_without_db_writes(self, clinic_a, source_db, operator_db):
         patients, labs = self._make_joined_streams(clinic_a, source_db)
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=Join(),
             input_streams=[patients, labs],
             pipeline_database=operator_db,
@@ -433,7 +435,7 @@ class TestOperatorPodCaching:
 
     def test_log_computes_and_writes(self, clinic_a, source_db, operator_db):
         patients, labs = self._make_joined_streams(clinic_a, source_db)
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=Join(),
             input_streams=[patients, labs],
             pipeline_database=operator_db,
@@ -449,7 +451,7 @@ class TestOperatorPodCaching:
         patients, labs = self._make_joined_streams(clinic_a, source_db)
 
         # First LOG to populate
-        log_node = OperatorNode(
+        log_node = OperatorJobNode(
             operator=Join(),
             input_streams=[patients, labs],
             pipeline_database=operator_db,
@@ -458,7 +460,7 @@ class TestOperatorPodCaching:
         log_node.run()
 
         # Then REPLAY from cache
-        replay_node = OperatorNode(
+        replay_node = OperatorJobNode(
             operator=Join(),
             input_streams=[patients, labs],
             pipeline_database=operator_db,
@@ -469,7 +471,7 @@ class TestOperatorPodCaching:
 
     def test_replay_empty_cache_returns_empty_stream(self, clinic_a, source_db):
         patients, labs = self._make_joined_streams(clinic_a, source_db)
-        node = OperatorNode(
+        node = OperatorJobNode(
             operator=Join(),
             input_streams=[patients, labs],
             pipeline_database=InMemoryArrowDatabase(),
@@ -508,13 +510,13 @@ class TestOperatorPodCaching:
             cache_database=source_db,
         )
 
-        node_a = OperatorNode(
+        node_a = OperatorJobNode(
             operator=Join(),
             input_streams=[pa_src, la_src],
             pipeline_database=operator_db,
             cache_mode=CacheMode.LOG,
         )
-        node_b = OperatorNode(
+        node_b = OperatorJobNode(
             operator=Join(),
             input_streams=[pb_src, lb_src],
             pipeline_database=operator_db,
@@ -553,7 +555,7 @@ class TestEndToEndPipeline:
 
         # Step 2: Join + FunctionNode
         joined = Join()(patients, labs)
-        fn_node = FunctionNode(
+        fn_node = FunctionJobNode(
             function_pod=pod,
             input_stream=joined,
             pipeline_database=pipeline_db,
@@ -562,9 +564,9 @@ class TestEndToEndPipeline:
         fn_node.run()
         assert fn_node.get_all_records().num_rows == 3
 
-        # Step 3: OperatorNode (LOG)
+        # Step 3: OperatorJobNode (LOG)
         # Use fn_node output as input to an operator
-        op_node = OperatorNode(
+        op_node = OperatorJobNode(
             operator=Join(),
             input_streams=[patients, labs],
             pipeline_database=operator_db,
@@ -574,7 +576,7 @@ class TestEndToEndPipeline:
         assert operator_db.get_all_records(op_node.node_identity_path).num_rows == 3
 
         # Step 4: REPLAY from operator cache
-        op_replay = OperatorNode(
+        op_replay = OperatorJobNode(
             operator=Join(),
             input_streams=[patients, labs],
             pipeline_database=operator_db,
@@ -585,7 +587,7 @@ class TestEndToEndPipeline:
 
         # Step 5: Second clinic uses same function but different data → own pipeline_path
         patients_b, labs_b = clinic_b
-        fn_node_b = FunctionNode(
+        fn_node_b = FunctionJobNode(
             function_pod=pod,
             input_stream=Join()(
                 CachedSource(

@@ -330,9 +330,15 @@ class TestMaterializedStreamIdentity:
     def test_materialized_stream_has_same_pipeline_hash(self):
         """Stream reconstructed from buffer should have same pipeline_hash as original."""
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
-        from orcapod.core.nodes import SourceNode
+        from orcapod.core.nodes.source_node import SourceJobNode
 
-        node = SourceNode(src)
+        tag_schema, data_schema = src.output_schema()
+        node = SourceJobNode(
+            name="test_src",
+            tag_schema=tag_schema,
+            data_schema=data_schema,
+            bound_source=src,
+        )
         buf = list(node.iter_data())
 
         stream = SyncPipelineOrchestrator._materialize_as_stream(buf, node)
@@ -348,9 +354,9 @@ class TestMaterializedStreamIdentity:
         """
         src_a = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
         src_b = _make_source("key", "score", {"key": ["a", "b"], "score": [100, 200]})
-        from orcapod.core.nodes import OperatorNode
+        from orcapod.core.nodes.operator_node import OperatorJobNode
 
-        op_node = OperatorNode(Join(), input_streams=[src_a, src_b])
+        op_node = OperatorJobNode(Join(), input_streams=[src_a, src_b])
         op_node.run()
         buf = list(op_node.iter_data())
 
@@ -362,10 +368,10 @@ class TestMaterializedStreamIdentity:
         src_a = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
         src_b = _make_source("key", "score", {"key": ["a", "b"], "score": [100, 200]})
         from orcapod.core.operators.join import Join
-        from orcapod.core.nodes import OperatorNode
+        from orcapod.core.nodes.operator_node import OperatorJobNode
 
         op = Join()
-        op_node = OperatorNode(op, input_streams=[src_a, src_b])
+        op_node = OperatorJobNode(op, input_streams=[src_a, src_b])
         op_node.run()
         buf = list(op_node.iter_data())
 

@@ -7,6 +7,7 @@ import pytest
 
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.nodes import FunctionNode
+from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
@@ -29,7 +30,7 @@ def function_node_with_db():
     pod = FunctionPod(pf)
     pipeline_db = InMemoryArrowDatabase()
     result_db = InMemoryArrowDatabase()
-    node = FunctionNode(
+    node = FunctionJobNode(
         pod,
         src,
         pipeline_database=pipeline_db,
@@ -49,7 +50,7 @@ class TestGetCachedResults:
         src = ArrowTableSource(table, tag_columns=["key"], infer_nullable=True)
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
-        node = FunctionNode(pod, src)
+        node = FunctionJobNode(pod, src)
         assert node.get_cached_results([]) == {}
 
     def test_returns_empty_dict_when_db_empty(self, function_node_with_db):
