@@ -449,9 +449,10 @@ class SourceJobNode(SourceNodeBase):
 
     @bound_source.setter
     def bound_source(self, value: StreamProtocol | None) -> None:
-        """Bind *value* as the concrete source and invalidate the content hash cache."""
+        """Bind *value* as the concrete source and invalidate both hash caches."""
         self._bound_source = value
         self._invalidate_content_hash_cache()
+        self._invalidate_pipeline_hash_cache()
 
     # ------------------------------------------------------------------
     # Identity — delegate to bound source when set

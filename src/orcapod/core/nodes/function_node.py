@@ -613,19 +613,28 @@ class FunctionNode(FunctionNodeBase):
     def as_node(self) -> FunctionNode:
         """Return the lightweight blueprint equivalent of this node.
 
-        For UNAVAILABLE read-only stubs (loaded with no live function pod),
-        returns ``self`` — there is nothing to clone.  For normal instances,
-        returns a fresh ``FunctionNode`` with the same function pod, input
+        Returns a fresh ``FunctionNode`` with the same function pod, input
         stream, label, table scope, and tracker manager.  Its
         ``content_hash()`` / ``pipeline_hash()`` are identical to those of
         this node.
 
         Returns:
-            This instance (if unavailable) or a new equivalent ``FunctionNode``.
+            A new equivalent ``FunctionNode``.
+
+        Raises:
+            RuntimeError: If this node is in UNAVAILABLE state (no live
+                function pod).  UNAVAILABLE nodes cannot be cloned into a
+                usable blueprint — callers must handle this status before
+                invoking ``as_node()``.
         """
         if self._function_pod is None:
-            # UNAVAILABLE stub — no live function pod, cannot meaningfully clone
-            return self
+            from orcapod.pipeline.serialization import LoadStatus
+
+            raise RuntimeError(
+                f"Cannot clone FunctionNode {self._label!r} into a blueprint: "
+                "the node is UNAVAILABLE (no live function pod was provided when "
+                "it was loaded). Only FULL or READ_ONLY nodes support as_node()."
+            )
         return FunctionNode(
             function_pod=self._function_pod,
             input_stream=self._input_stream,

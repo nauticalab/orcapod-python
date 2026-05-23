@@ -450,19 +450,25 @@ class OperatorNode(OperatorNodeBase):
     def as_node(self) -> OperatorNode:
         """Return the lightweight blueprint equivalent of this node.
 
-        For UNAVAILABLE read-only stubs (loaded with no live operator),
-        returns ``self`` — there is nothing to clone.  For normal instances,
-        returns a fresh ``OperatorNode`` with the same operator, input
-        streams, label, table scope, and tracker manager.  Its
-        ``content_hash()`` / ``pipeline_hash()`` are identical to those of
-        this node.
+        Returns a fresh ``OperatorNode`` with the same operator, input streams,
+        label, table scope, and tracker manager.  Its ``content_hash()`` /
+        ``pipeline_hash()`` are identical to those of this node.
 
         Returns:
-            This instance (if unavailable) or a new equivalent ``OperatorNode``.
+            A new equivalent ``OperatorNode``.
+
+        Raises:
+            RuntimeError: If this node is in UNAVAILABLE state (no live
+                operator).  UNAVAILABLE nodes cannot be cloned into a usable
+                blueprint — callers must handle this status before invoking
+                ``as_node()``.
         """
         if self._operator is None:
-            # UNAVAILABLE stub — no live operator, cannot meaningfully clone
-            return self
+            raise RuntimeError(
+                f"Cannot clone OperatorNode {self._label!r} into a blueprint: "
+                "the node is UNAVAILABLE (no live operator was provided when "
+                "it was loaded). Only FULL or READ_ONLY nodes support as_node()."
+            )
         return OperatorNode(
             operator=self._operator,
             input_streams=self._input_streams,

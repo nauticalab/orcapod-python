@@ -148,7 +148,13 @@ from orcapod.core.nodes.source_node import SourceJobNode
 
 
 def _make_source_job_node(table, tag_col="key"):
-    """Helper: create a SourceJobNode wrapping a concrete source."""
+    """Helper: create a SourceJobNode wrapping a concrete source.
+
+    Note: schemas are passed explicitly here because SourceJobNode currently
+    requires them even when bound_source is provided. ENG-513 tracks adding
+    schema inference so that `SourceJobNode(name=..., bound_source=src)` works
+    without explicit tag_schema/data_schema.
+    """
     src = ArrowTableSource(table, tag_columns=[tag_col], infer_nullable=True)
     tag_schema, data_schema = src.output_schema()
     return SourceJobNode(

@@ -290,6 +290,9 @@ class PipelineJob(AbstractPipelineBase):
         """
         from orcapod.core.nodes.function_node import FunctionJobNode
 
+        # TODO(ENG-512): _to_node_stream recurses into upstreams on every recording call;
+        # for deep graphs this can be O(depth²). Consider memoizing or doing a single
+        # topological pass at job-creation time.
         input_stream = self._to_node_stream(input_stream)
 
         input_hash = input_stream.content_hash().to_string()
