@@ -1313,11 +1313,11 @@ class TestJoinSystemTagCanonicalOrdering:
         - schema_hash matching the original source's schema_hash
         - stream_hash matching the input stream's pipeline_hash
         - canonical index matching the position"""
-        from orcapod.config import Config
+        from orcapod.config import OrcapodConfig
         from orcapod.system_constants import constants
 
         src_a, src_b, src_c = three_sources
-        n_char = Config().system_tag_hash_n_char
+        n_char = OrcapodConfig().system_tag_hash_n_char
 
         # Independently determine expected position → source mapping
         sources = [src_a, src_b, src_c]
@@ -1408,11 +1408,11 @@ class TestJoinSystemTagCanonicalOrdering:
         With an intermediate MapData, stream_hash comes from the
         DynamicPodStream which has a different pipeline_hash than the
         original source."""
-        from orcapod.config import Config
+        from orcapod.config import OrcapodConfig
         from orcapod.core.sources.arrow_table_source import ArrowTableSource
         from orcapod.system_constants import constants
 
-        n_char = Config().system_tag_hash_n_char
+        n_char = OrcapodConfig().system_tag_hash_n_char
 
         src_a = ArrowTableSource(
             pa.table(

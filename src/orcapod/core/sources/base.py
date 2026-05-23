@@ -5,7 +5,7 @@ from collections.abc import Collection, Iterator
 from typing import TYPE_CHECKING, Any
 
 from orcapod import contexts
-from orcapod.config import Config
+from orcapod.config import OrcapodConfig
 from orcapod.core.streams.base import StreamBase
 from orcapod.protocols.core_protocols import StreamProtocol
 from orcapod.types import ColumnConfig, Schema
@@ -60,7 +60,7 @@ class RootSource(StreamBase):
         source_id: str | None = None,
         label: str | None = None,
         data_context: str | contexts.DataContext | None = None,
-        config: Config | None = None,
+        config: OrcapodConfig | None = None,
     ) -> None:
         super().__init__(
             label=label,

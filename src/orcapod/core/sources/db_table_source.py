@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     import pyarrow as pa
 
     from orcapod import contexts
-    from orcapod.config import Config
+    from orcapod.config import OrcapodConfig
     from orcapod.protocols.db_connector_protocol import DBConnectorProtocol
 else:
     pa = LazyModule("pyarrow")
@@ -69,7 +69,7 @@ class DBTableSource(RootSource):
         source_id: str | None = None,
         label: str | None = None,
         data_context: str | contexts.DataContext | None = None,
-        config: Config | None = None,
+        config: OrcapodConfig | None = None,
         *,
         _query: str | None = None,
     ) -> None:

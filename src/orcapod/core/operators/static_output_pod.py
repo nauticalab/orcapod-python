@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, cast
 
 from orcapod.channels import ReadableChannel, WritableChannel
-from orcapod.config import Config
+from orcapod.config import OrcapodConfig
 from orcapod.contexts import DataContext
 from orcapod.core.base import TraceableBase
 from orcapod.core.streams.base import StreamBase
@@ -269,7 +269,7 @@ class DynamicPodStream(StreamBase):
         upstreams: tuple[StreamProtocol, ...] = (),
         label: str | None = None,
         data_context: DataContext | None = None,
-        config: Config | None = None,
+        config: OrcapodConfig | None = None,
     ) -> None:
         self._pod = pod
         self._upstreams = upstreams

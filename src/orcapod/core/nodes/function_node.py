@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from orcapod import contexts
 from orcapod.channels import ReadableChannel, WritableChannel
-from orcapod.config import Config
+from orcapod.config import OrcapodConfig
 from orcapod.core.cached_function_pod import CachedFunctionPod
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.core.streams.base import StreamBase
@@ -96,7 +96,7 @@ class FunctionNodeBase(StreamBase):
         input_stream: StreamProtocol,
         tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
-        config: Config | None = None,
+        config: OrcapodConfig | None = None,
         table_scope: Literal["pipeline_hash", "content_hash"] = "pipeline_hash",
     ):
         if tracker_manager is None:
@@ -450,7 +450,7 @@ class FunctionNode(FunctionNodeBase):
         input_stream: StreamProtocol,
         tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
-        config: Config | None = None,
+        config: OrcapodConfig | None = None,
         table_scope: Literal["pipeline_hash", "content_hash"] = "pipeline_hash",
     ):
         super().__init__(
@@ -664,7 +664,7 @@ class FunctionJobNode(FunctionNodeBase):
         input_stream: StreamProtocol,
         tracker_manager: TrackerManagerProtocol | None = None,
         label: str | None = None,
-        config: Config | None = None,
+        config: OrcapodConfig | None = None,
         # Optional DB params for persistent mode:
         pipeline_database: ArrowDatabaseProtocol | None = None,
         result_database: ArrowDatabaseProtocol | None = None,

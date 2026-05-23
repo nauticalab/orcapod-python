@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import orcapod.contexts as contexts
-from orcapod.config import DEFAULT_CONFIG, Config
+from orcapod.config import DEFAULT_CONFIG, OrcapodConfig
 from orcapod.types import ContentHash
 
 logger = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ class DataContextMixin:
     def __init__(
         self,
         data_context: str | contexts.DataContext | None = None,
-        config: Config | None = None,
+        config: OrcapodConfig | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -85,7 +85,7 @@ class DataContextMixin:
         self._orcapod_config = config
 
     @property
-    def orcapod_config(self) -> Config:
+    def orcapod_config(self) -> OrcapodConfig:
         return self._orcapod_config
 
     @property
@@ -117,7 +117,7 @@ class ContentIdentifiableBase(DataContextMixin, ABC):
     def __init__(
         self,
         data_context: str | contexts.DataContext | None = None,
-        config: Config | None = None,
+        config: OrcapodConfig | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -360,7 +360,7 @@ class TraceableBase(
         self,
         label: str | None = None,
         data_context: str | contexts.DataContext | None = None,
-        config: Config | None = None,
+        config: OrcapodConfig | None = None,
     ):
         # Init provided here for explicit listing of parmeters
         super().__init__(label=label, data_context=data_context, config=config)

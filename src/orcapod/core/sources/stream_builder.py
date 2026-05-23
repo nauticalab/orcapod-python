@@ -21,7 +21,7 @@ from orcapod.utils.lazy_module import LazyModule
 if TYPE_CHECKING:
     import pyarrow as pa
 
-    from orcapod.config import Config
+    from orcapod.config import OrcapodConfig
     from orcapod.contexts import DataContext
 else:
     pa = LazyModule("pyarrow")
@@ -59,7 +59,7 @@ class SourceStreamBuilder:
         config: Orcapod config (controls hash character counts).
     """
 
-    def __init__(self, data_context: DataContext, config: Config) -> None:
+    def __init__(self, data_context: DataContext, config: OrcapodConfig) -> None:
         self._data_context = data_context
         self._config = config
 
