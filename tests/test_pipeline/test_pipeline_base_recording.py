@@ -94,6 +94,81 @@ class TestRecordFunctionPodInvocation:
         assert isinstance(pipeline._persistent_node_map[source_hash], SourceNode)
 
 
+class TestSourceNodeDisambiguation:
+    """Source-node slot names must be unique after compile().
+
+    When multiple concrete sources share the same label (e.g. two unlabelled
+    ArrowTableSource inputs both default to "ArrowTableSource"), compile()
+    renames them "ArrowTableSource_1", "ArrowTableSource_2", …  The suffix
+    counter skips any numbers already taken by explicitly-named nodes, so the
+    result is never "ArrowTableSource_1_1".
+    """
+
+    def test_two_unnamed_sources_get_distinct_suffixed_names(self):
+        """Two unlabelled concrete sources of the same type are disambiguated."""
+        from orcapod.core.nodes.source_node import SourceNode
+
+        s1 = _src("key", "value")   # label → "ArrowTableSource"
+        s2 = _src("key", "score")   # label → "ArrowTableSource"
+        join = Join()
+        pipeline = Pipeline(name="test")
+        with pipeline:
+            join(s1, s2, label="joined")
+
+        source_nodes = [
+            n for n in pipeline._persistent_node_map.values()
+            if isinstance(n, SourceNode)
+        ]
+        names = sorted(n.name for n in source_nodes)
+        assert names == ["ArrowTableSource_1", "ArrowTableSource_2"]
+
+    def test_three_unnamed_sources_get_sequential_suffixes(self):
+        """Three unnamed sources of the same type receive _1, _2, _3."""
+        from orcapod.core.nodes.source_node import SourceNode
+        from orcapod.core.operators import Join
+
+        s1 = _src("key", "v1")
+        s2 = _src("key", "v2")
+        s3 = _src("key", "v3")
+        join = Join()
+        pipeline = Pipeline(name="test")
+        with pipeline:
+            join(s1, s2, s3, label="joined")
+
+        names = sorted(
+            n.name
+            for n in pipeline._persistent_node_map.values()
+            if isinstance(n, SourceNode)
+        )
+        assert names == ["ArrowTableSource_1", "ArrowTableSource_2", "ArrowTableSource_3"]
+
+    def test_suffix_skips_already_taken_numbers(self):
+        """If ArrowTableSource_1 is already a slot name, colliding sources start at _2."""
+        from orcapod.core.nodes.source_node import SourceNode
+
+        # One explicitly-named source occupies "ArrowTableSource_1".
+        s_named = _src("key", "named_val")
+        s_named.label = "ArrowTableSource_1"   # explicit label
+
+        # Two unlabelled sources would normally want _1 and _2.
+        s1 = _src("key", "v1")   # label → "ArrowTableSource"
+        s2 = _src("key", "v2")   # label → "ArrowTableSource"
+        join = Join()
+        pipeline = Pipeline(name="test")
+        with pipeline:
+            join(s_named, s1, s2, label="joined")
+
+        names = sorted(
+            n.name
+            for n in pipeline._persistent_node_map.values()
+            if isinstance(n, SourceNode)
+        )
+        # s_named keeps "ArrowTableSource_1"; the two unnamed ones get _2 and _3.
+        assert "ArrowTableSource_1" in names
+        assert "ArrowTableSource_2" in names
+        assert "ArrowTableSource_3" in names
+
+
 class TestRecordOperatorPodInvocation:
     def test_record_operator_pod_adds_to_invocation_lut(self):
         """After recording an operator, _invocation_lut must contain the invocation."""
