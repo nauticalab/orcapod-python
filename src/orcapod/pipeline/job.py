@@ -167,7 +167,12 @@ class PipelineJob(AbstractPipelineBase):
         """The lightweight ``Pipeline`` blueprint for this job (lazy cache).
 
         Computed on first access by calling ``as_pipeline()``.  Invalidated
-        by ``compile()`` and ``bind()`` (when sources change).
+        by ``compile()``, which sets ``_compiled_pipeline`` to ``None`` so the
+        next access recomputes a fresh schema-normalised blueprint.
+
+        ``bind()`` does **not** invalidate this cache: the blueprint contains
+        only ``SourceNode`` schema-slot declarations with no concrete data, so
+        it is unaffected by changes to concrete source bindings.
 
         Raises:
             RuntimeError: If the job has not been compiled yet.
