@@ -179,9 +179,21 @@ class AbstractPipelineBase(AutoRegisteringContextBasedTracker, ABC):
     def _record_invocation(self, invocation: PodInvocation) -> None:
         """Store *invocation* and update the topology graph.
 
-        The content hash of a ``PodInvocation`` equals the content hash of the
-        corresponding compiled node (``FunctionNode`` / ``OperatorNode``), so the
-        same hash key works in both ``_invocation_lut`` and ``_persistent_node_map``.
+        Non-source nodes in ``_persistent_node_map`` are keyed by the
+        corresponding ``PodInvocation.content_hash()`` string.  For
+        ``PipelineJob`` (where ``source_node_class`` is ``SourceJobNode``),
+        a bound ``SourceJobNode`` delegates its ``content_hash()`` to the
+        underlying concrete source, so invocation and compiled-node hashes
+        agree throughout the graph.
+
+        For ``Pipeline`` (where ``source_node_class`` is ``SourceNode``), a
+        concrete ``RootSource`` upstream is promoted to a ``SourceNode`` whose
+        identity is ``("source_node", name, tag_schema, data_schema)`` — a
+        different structure from the raw source.  As a result the compiled
+        ``FunctionNode`` / ``OperatorNode``'s own ``content_hash()`` may
+        diverge from the invocation hash used as its key.  This is intentional:
+        the hash-graph topology is always built from raw stream hashes, and
+        ``_persistent_node_map`` uses those same keys for consistent lookup.
 
         Args:
             invocation: The pod invocation to record.
@@ -271,14 +283,27 @@ class AbstractPipelineBase(AutoRegisteringContextBasedTracker, ABC):
         # 2a. Validate source-node name uniqueness.
         # Source node names are identity-forming (used as bind() keys and
         # included in content_hash()).  Two distinct source nodes with the
-        # same name but different schemas indicate that the caller has
-        # assigned the same source_id to conceptually different sources —
-        # raise an error rather than silently renaming one of them.
+        # same name indicate a source_id collision.  If their schemas also
+        # differ the caller has assigned the same source_id to conceptually
+        # different sources — raise an error.  If the schemas happen to match
+        # the nodes are functionally identical (same name + same schema would
+        # normally produce the same content_hash and be deduplicated at
+        # recording time, so this branch is only reached in unusual edge cases
+        # such as non-RootSource concrete streams with colliding label:hash
+        # names), and we leave them as-is.
         name_to_hashes: dict[str, list[str]] = {}
         for h, node in node_map.items():
             name_to_hashes.setdefault(node._name, []).append(h)
         for node_name, hashes in name_to_hashes.items():
-            if len(hashes) > 1:
+            if len(hashes) <= 1:
+                continue
+            nodes = [node_map[h] for h in hashes]
+            first = nodes[0]
+            schemas_differ = any(
+                n._tag_schema != first._tag_schema or n._data_schema != first._data_schema
+                for n in nodes[1:]
+            )
+            if schemas_differ:
                 from orcapod.errors import InconsistentSourceError
                 raise InconsistentSourceError(
                     f"Pipeline '{'.'.join(self._name)}' has {len(hashes)} source "
