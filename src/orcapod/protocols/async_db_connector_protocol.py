@@ -1,14 +1,6 @@
 """AsyncDBConnectorProtocol — async counterpart to DBConnectorProtocol.
 
-Standalone protocol (does not inherit from DBConnectorProtocol). A class
-satisfies both protocols by implementing all their methods.
-
-Intended use::
-
-    async with PostgreSQLConnector(dsn) as connector:
-        tables = await connector.async_get_table_names()
-        async for batch in connector.async_iter_batches('SELECT * FROM "t"'):
-            process(batch)
+Standalone protocol; a class satisfies both by implementing all their methods.
 """
 from __future__ import annotations
 
@@ -49,11 +41,15 @@ class AsyncDBConnectorProtocol(Protocol):
         ...
 
     async def __aexit__(self, *args: Any) -> None:
-        """Close all resources by calling ``async_close()``."""
+        """Close all resources. Implementations must delegate to ``async_close()``."""
         ...
 
     async def async_close(self) -> None:
-        """Release all async and sync database resources. Idempotent."""
+        """Release all async and sync database resources.
+
+        Implementations must be idempotent — calling this multiple times must
+        not raise.
+        """
         ...
 
     # ── Schema introspection ──────────────────────────────────────────────────
@@ -75,7 +71,7 @@ class AsyncDBConnectorProtocol(Protocol):
 
     # ── Read ──────────────────────────────────────────────────────────────────
 
-    async def async_iter_batches(
+    def async_iter_batches(
         self,
         query: str,
         params: Any = None,
@@ -85,7 +81,8 @@ class AsyncDBConnectorProtocol(Protocol):
 
         Args:
             query: SQL query string. Table names should be double-quoted
-                (``SELECT * FROM "my_table"``).
+                (``SELECT * FROM "my_table"``); all connectors must support
+                ANSI-standard double-quoted identifiers.
             params: Optional query parameters (connector-specific format).
             batch_size: Maximum rows per yielded batch.
         """
