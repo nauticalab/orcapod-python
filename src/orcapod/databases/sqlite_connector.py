@@ -393,19 +393,34 @@ class SQLiteConnector:
     # ── Async schema introspection ────────────────────────────────────────────
 
     async def async_get_table_names(self) -> list[str]:
-        """Return all user table names asynchronously."""
+        """Return all user table names in this database (excludes views and SQLite internals).
+
+        Returns:
+            Sorted list of table name strings.
+        """
         return await asyncio.to_thread(self.get_table_names)
 
     async def async_get_pk_columns(self, table_name: str) -> list[str]:
-        """Return primary-key column names asynchronously.
+        """Return primary-key column names in key-sequence order.
+
+        Args:
+            table_name: Name of the table to introspect.
 
         Returns:
-            List of PK column names; empty list if the table has no primary key.
+            List of PK column names; empty list if the table has no primary key
+            or the table doesn't exist.
         """
         return await asyncio.to_thread(self.get_pk_columns, table_name)
 
     async def async_get_column_info(self, table_name: str) -> list[ColumnInfo]:
-        """Return column metadata asynchronously."""
+        """Return column metadata with Arrow-mapped types.
+
+        Args:
+            table_name: Name of the table to introspect.
+
+        Returns:
+            List of ColumnInfo objects; empty list if table doesn't exist.
+        """
         return await asyncio.to_thread(self.get_column_info, table_name)
 
     # ── Async read ────────────────────────────────────────────────────────────
@@ -419,7 +434,10 @@ class SQLiteConnector:
         """Execute a query and yield results as Arrow RecordBatches.
 
         Runs the full synchronous iteration in a thread-pool worker (so blocking
-        I/O does not stall the event loop), then yields each collected batch.
+        I/O does not stall the event loop), collects all batches into a list,
+        then yields each batch from the event loop. The entire result set is
+        materialised before the first yield — ``batch_size`` controls individual
+        batch shape but not peak memory usage.
 
         Args:
             query: SQL query string. Table names should be double-quoted

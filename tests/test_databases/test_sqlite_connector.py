@@ -508,7 +508,6 @@ class TestAsyncMethods:
 
     @pytest.mark.asyncio
     async def test_async_iter_batches_matches_sync_data(self) -> None:
-        import pyarrow as pa
         connector = self._setup()
 
         sync_table = pa.Table.from_batches(
