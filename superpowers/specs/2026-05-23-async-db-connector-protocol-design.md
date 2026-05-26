@@ -72,7 +72,7 @@ Python's structural typing handles this naturally. Callers that need both can ch
 `async_iter_batches` signature mirrors `iter_batches` exactly:
 
 ```python
-async def async_iter_batches(
+def async_iter_batches(
     self,
     query: str,
     params: Any = None,

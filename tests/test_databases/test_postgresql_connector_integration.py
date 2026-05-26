@@ -483,9 +483,9 @@ class TestAsyncSchemaIntrospection:
             cur.execute('CREATE TABLE "t1" (id INTEGER PRIMARY KEY)')
             cur.execute('CREATE TABLE "t2" (id INTEGER PRIMARY KEY)')
         connector._conn.commit()
+        sync_result = connector.get_table_names()
         async with connector:
             async_result = await connector.async_get_table_names()
-        sync_result = connector.get_table_names()
         assert async_result == sync_result
 
     @pytest.mark.asyncio
@@ -495,9 +495,9 @@ class TestAsyncSchemaIntrospection:
         with connector._conn.cursor() as cur:
             cur.execute('CREATE TABLE "t" (id TEXT PRIMARY KEY, val REAL)')
         connector._conn.commit()
+        sync_result = connector.get_pk_columns("t")
         async with connector:
             async_result = await connector.async_get_pk_columns("t")
-        sync_result = connector.get_pk_columns("t")
         assert async_result == sync_result
 
     @pytest.mark.asyncio
@@ -507,9 +507,9 @@ class TestAsyncSchemaIntrospection:
         with connector._conn.cursor() as cur:
             cur.execute('CREATE TABLE "t" (id TEXT NOT NULL, val REAL)')
         connector._conn.commit()
+        sync_result = connector.get_column_info("t")
         async with connector:
             async_result = await connector.async_get_column_info("t")
-        sync_result = connector.get_column_info("t")
         assert async_result == sync_result
 
 
