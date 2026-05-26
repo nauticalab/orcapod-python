@@ -82,11 +82,6 @@ class Pipeline(AbstractPipelineBase):
         super().__init__(name=name, tracker_manager=tracker_manager)
         self._auto_compile = auto_compile
 
-    @property
-    def nodes(self) -> list[GraphNode]:
-        """Return the list of compiled non-source nodes."""
-        return list(self._node_lut.values())
-
     # ------------------------------------------------------------------
     # Context manager — respects auto_compile flag
     # ------------------------------------------------------------------

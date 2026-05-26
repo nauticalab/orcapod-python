@@ -406,7 +406,7 @@ class TestMaterializedStreamIdentity:
         join_node.run()
 
         # Compare system tag schemas — should match
-        orch_join = orch_pipeline.compiled_nodes["join"]
+        orch_join = orch_pipeline.nodes["join"]
         orch_tag_schema = orch_join.output_schema(columns={"system_tags": True})[0]
         pull_tag_schema = join_node.output_schema(columns={"system_tags": True})[0]
         assert orch_tag_schema == pull_tag_schema

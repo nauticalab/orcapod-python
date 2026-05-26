@@ -119,7 +119,7 @@ class TestPipelineBlueprintLoad:
         path = tmp_path / "pipeline.json"
         pipeline.save(str(path))
         loaded = Pipeline.load(str(path))
-        assert "joiner" in loaded.compiled_nodes
+        assert "joiner" in loaded.nodes
 
     def test_load_version_mismatch_raises(self, spec_pipeline, tmp_path):
         """Loading a file with an unsupported version raises ValueError."""
@@ -163,7 +163,7 @@ class TestPipelineBlueprintLoad:
         # Verify all source specs were resolved (no unresolved specs)
         assert completed.unresolved_specs == []
         # Verify the join node is present in the compiled pipeline
-        joiner_node = completed.pipeline.compiled_nodes.get("joiner")
+        joiner_node = completed.pipeline.nodes.get("joiner")
         assert joiner_node is not None
 
     def test_load_hash_graph_has_node_types(self, spec_pipeline):

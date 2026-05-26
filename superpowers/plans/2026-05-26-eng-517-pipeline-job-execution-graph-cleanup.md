@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use sensei:subagent-driven-development (recommended) or sensei:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Remove the copy-on-run pattern from `PipelineJob.run()`, wire `GraphProtocol`/`OrcaDAG` into the orchestrator boundary, and consolidate the `unbound_sources` API.
+**Goal:** Remove the copy-on-run pattern from `PipelineJob.run()`, wire `GraphProtocol`/`OrcaDAG` into the orchestrator boundary, consolidate the `unbound_sources` API, and rename `compiled_nodes` → `nodes`.
 
-**Architecture:** `run()` builds a filtered `OrcaDAG[JobNode]` directly from `_persistent_node_map` (no node cloning), hands it to the orchestrator, then mutates `self._has_run`/`_run_id` in place and returns `self`. Orchestrators are updated to accept `GraphProtocol[JobNode]` instead of `nx.DiGraph`. `unbound_source_nodes()` and `_unresolved_specs`/`unresolved_specs` are removed; a single live-computed `unbound_sources` property replaces both.
+**Architecture:** `run()` builds a filtered `OrcaDAG[JobNode]` directly from `_persistent_node_map` (no node cloning), hands it to the orchestrator, then mutates `self._has_run`/`_run_id` in place and returns `self`. Orchestrators are updated to accept `GraphProtocol[JobNode]` instead of `nx.DiGraph`. `unbound_source_nodes()` and `_unresolved_specs`/`unresolved_specs` are removed; a single live-computed `unbound_sources` property replaces both. `compiled_nodes` is renamed `nodes` on `AbstractPipelineBase` — the `compiled` qualifier is redundant post-ENG-515 since nodes are always compiled before use.
 
 **Tech Stack:** Python 3.11+, `uv run pytest` for all test runs, `graphlib.TopologicalSorter` (stdlib) inside `OrcaDAG`.
 
@@ -16,13 +16,20 @@
 |---|---|
 | `src/orcapod/pipeline/dag.py` | Rename `GraphBackend` → `GraphProtocol`; add `ancestors()` to protocol + `OrcaDAG` |
 | `src/orcapod/pipeline/networkx_backend.py` | Update docstring reference; add `ancestors()` |
+| `src/orcapod/pipeline/base.py` | Rename `compiled_nodes` property → `nodes` |
 | `src/orcapod/pipeline/job.py` | Add `unbound_sources`; remove `unbound_source_nodes`, `_unresolved_specs`, `unresolved_specs`; rename `spec_names`→`source_names`; update `save`/`load`; rewrite `run()`; delete `_build_execution_graph()` / `build_execution_graph()` |
 | `src/orcapod/pipeline/sync_orchestrator.py` | Accept `GraphProtocol`, drop `nx.topological_sort` |
 | `src/orcapod/pipeline/async_orchestrator.py` | Accept `GraphProtocol`, drop `nx.topological_sort` |
 | `tests/test_pipeline/test_dag.py` | Add `ancestors()` tests |
 | `tests/test_pipeline/test_networkx_backend.py` | Update `GraphBackend` → `GraphProtocol`; add `ancestors()` test |
-| `tests/test_pipeline/test_pipeline_job.py` | Migrate `unbound_source_nodes` → `unbound_sources`; `unresolved_specs` → `unbound_sources`; `result.pipeline.compiled_nodes` → `result.compiled_nodes`; rewrite `test_run_is_non_mutating` |
-| `tests/test_pipeline/test_serialization.py` | `unresolved_specs` → `unbound_sources` |
+| `tests/test_pipeline/test_pipeline_job.py` | Migrate `unbound_source_nodes` → `unbound_sources`; `unresolved_specs` → `unbound_sources`; `compiled_nodes` → `nodes`; rewrite `test_run_is_non_mutating` |
+| `tests/test_pipeline/test_pipeline.py` | `compiled_nodes` → `nodes` throughout |
+| `tests/test_pipeline/test_serialization.py` | `compiled_nodes` → `nodes`; `unresolved_specs` → `unbound_sources` |
+| `tests/test_channels/test_pipeline_async_integration.py` | `compiled_nodes` → `nodes` throughout |
+| `tests/test_pipeline/test_integration_smoke.py` | `compiled_nodes` → `nodes` |
+| `tests/test_pipeline/test_orchestrator_executor_matrix.py` | `compiled_nodes` → `nodes` |
+| `tests/test_pipeline/test_sync_orchestrator.py` | `compiled_nodes` → `nodes` |
+| `tests/test_data/test_polars_nullability/test_function_node_nullability.py` | `compiled_nodes` → `nodes` |
 
 ---
 
@@ -42,7 +49,109 @@ Expected output: `eywalker/eng-517-review-cleanup-of-pipelinejob-execution-graph
 
 ---
 
-## Task 2: Rename `GraphBackend` → `GraphProtocol` and add `ancestors()` to `OrcaDAG`
+## Task 2: Rename `compiled_nodes` → `nodes` on `AbstractPipelineBase`
+
+**Files:**
+- Modify: `src/orcapod/pipeline/base.py`
+- Modify: `tests/test_pipeline/test_pipeline_job.py`
+- Modify: `tests/test_pipeline/test_pipeline.py`
+- Modify: `tests/test_pipeline/test_serialization.py`
+- Modify: `tests/test_channels/test_pipeline_async_integration.py`
+- Modify: `tests/test_pipeline/test_integration_smoke.py`
+- Modify: `tests/test_pipeline/test_orchestrator_executor_matrix.py`
+- Modify: `tests/test_pipeline/test_sync_orchestrator.py`
+- Modify: `tests/test_data/test_polars_nullability/test_function_node_nullability.py`
+
+- [ ] **Step 1: Rename the property in `base.py` (line 115)**
+
+In `src/orcapod/pipeline/base.py`, replace:
+
+```python
+    @property
+    def compiled_nodes(self) -> dict[str, Any]:
+        """Copy of the compiled nodes dict (label → node)."""
+        return self._nodes.copy()
+```
+
+With:
+
+```python
+    @property
+    def nodes(self) -> dict[str, Any]:
+        """Copy of the compiled nodes dict (label → node)."""
+        return self._nodes.copy()
+```
+
+- [ ] **Step 2: Bulk-rename all call sites**
+
+Run this sed command to replace every occurrence across the codebase (source + tests):
+
+```bash
+cd /home/kurouto/kurouto-jobs/71dc4f00-85e9-4767-a435-8d1f5e163103/orcapod-python
+grep -rn "compiled_nodes" --include="*.py" -l
+```
+
+Then for each file listed, replace `compiled_nodes` with `nodes`. Use the project's grep/sed tooling or do it file-by-file. The full list from the codebase:
+
+- `tests/test_channels/test_pipeline_async_integration.py` — 11 occurrences
+- `tests/test_pipeline/test_pipeline.py` — ~35 occurrences
+- `tests/test_pipeline/test_pipeline_job.py` — ~12 occurrences
+- `tests/test_pipeline/test_serialization.py` — 2 occurrences
+- `tests/test_pipeline/test_integration_smoke.py` — 2 occurrences
+- `tests/test_pipeline/test_orchestrator_executor_matrix.py` — 1 occurrence
+- `tests/test_pipeline/test_sync_orchestrator.py` — 1 occurrence
+- `tests/test_data/test_polars_nullability/test_function_node_nullability.py` — 1 occurrence
+- `src/orcapod/pipeline/job.py` — docstrings only (2 occurrences)
+
+Apply the rename with:
+
+```bash
+find . -name "*.py" | xargs sed -i 's/compiled_nodes/nodes/g'
+```
+
+- [ ] **Step 3: Also rename test methods that mention `compiled_nodes` in their names**
+
+In `tests/test_pipeline/test_pipeline.py`:
+- `test_source_nodes_in_compiled_nodes` → `test_source_nodes_in_nodes`
+- Any other method name containing `compiled_nodes`
+
+In `tests/test_pipeline/test_integration_smoke.py`:
+- `test_smoke_compiled_nodes_accessible_after_run` → `test_smoke_nodes_accessible_after_run`
+
+Search for them:
+```bash
+grep -rn "def test.*compiled_nodes" --include="*.py"
+```
+
+Rename each found method.
+
+- [ ] **Step 4: Verify no `compiled_nodes` remains except in git history**
+
+```bash
+grep -rn "compiled_nodes" --include="*.py" .
+```
+
+Expected: zero results.
+
+- [ ] **Step 5: Run tests to confirm rename is clean**
+
+```bash
+uv run pytest tests/ -v 2>&1 | tail -20
+```
+
+Expected: all pass.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -u
+git commit -m "refactor(pipeline): rename compiled_nodes → nodes on AbstractPipelineBase"
+```
+
+---
+
+## Task 3: Rename `GraphBackend` → `GraphProtocol` and add `ancestors()` to `OrcaDAG`
+
 
 **Files:**
 - Modify: `src/orcapod/pipeline/dag.py` (lines 33, 59–95, 348)
@@ -197,7 +306,7 @@ git commit -m "refactor(pipeline): rename GraphBackend → GraphProtocol; add an
 
 ---
 
-## Task 3: Add `ancestors()` to `NetworkxBackend`
+## Task 4: Add `ancestors()` to `NetworkxBackend`
 
 **Files:**
 - Modify: `src/orcapod/pipeline/networkx_backend.py` (docstring line ~46, after last method ~line 282)
@@ -269,7 +378,7 @@ git commit -m "refactor(pipeline): add ancestors() to NetworkxBackend; update Gr
 
 ---
 
-## Task 4: Add `unbound_sources` property to `PipelineJob`
+## Task 5: Add `unbound_sources` property to `PipelineJob`
 
 **Files:**
 - Modify: `src/orcapod/pipeline/job.py` (after `is_complete()` at line ~597)
@@ -380,7 +489,7 @@ git commit -m "feat(pipeline): add unbound_sources live-computed property to Pip
 
 ---
 
-## Task 5: Remove old API, update `is_complete()`, `save()`, `load()`, `bind()`
+## Task 6: Remove old API, update `is_complete()`, `save()`, `load()`, `bind()`
 
 **Files:**
 - Modify: `src/orcapod/pipeline/job.py`
@@ -553,7 +662,7 @@ git commit -m "refactor(pipeline): remove unbound_source_nodes/unresolved_specs;
 
 ---
 
-## Task 6: Migrate all tests to new API
+## Task 7: Migrate all tests to new API
 
 **Files:**
 - Modify: `tests/test_pipeline/test_pipeline_job.py`
@@ -726,7 +835,7 @@ git commit -m "test(pipeline): migrate tests to unbound_sources; update run() re
 
 ---
 
-## Task 7: Update orchestrators to accept `GraphProtocol`
+## Task 8: Update orchestrators to accept `GraphProtocol`
 
 **Files:**
 - Modify: `src/orcapod/pipeline/sync_orchestrator.py`
@@ -849,7 +958,7 @@ git commit -m "refactor(pipeline): orchestrators accept GraphProtocol instead of
 
 ---
 
-## Task 8: Rewrite `run()`, remove `_build_execution_graph()` and `build_execution_graph()`
+## Task 9: Rewrite `run()`, remove `_build_execution_graph()` and `build_execution_graph()`
 
 **Files:**
 - Modify: `src/orcapod/pipeline/job.py`
@@ -1025,7 +1134,7 @@ git commit -m "refactor(pipeline): remove copy-on-run; inline exec graph in run(
 
 ---
 
-## Task 9: Final verification and push
+## Task 10: Final verification and push
 
 - [ ] **Step 1: Full clean test run**
 

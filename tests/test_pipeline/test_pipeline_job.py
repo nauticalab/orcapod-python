@@ -360,7 +360,7 @@ class TestPipelineJobRun:
 
         result = job.run()
 
-        node = result.pipeline.compiled_nodes["adder"]
+        node = result.pipeline.nodes["adder"]
         records = node.get_all_records()
         assert records is not None
         assert records.num_rows == 2
@@ -377,7 +377,7 @@ class TestPipelineJobRun:
 
         result = job.run()
 
-        table = result.pipeline.compiled_nodes["adder"].as_table()
+        table = result.pipeline.nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]  # a: 10+100, b: 20+200
 
@@ -471,7 +471,7 @@ class TestPipelineJobRun:
         job.run()
         result = job.run()  # second run should not raise
 
-        table = result.pipeline.compiled_nodes["adder"].as_table()
+        table = result.pipeline.nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]
 
@@ -488,16 +488,16 @@ class TestPipelineJobEndToEnd:
             joined = Join()(src_a, src_b, label="joiner")
             pod(joined, label="adder")
 
-        assert isinstance(job.pipeline.compiled_nodes["joiner"], OperatorNode)
-        assert isinstance(job.pipeline.compiled_nodes["adder"], FunctionNode)
+        assert isinstance(job.pipeline.nodes["joiner"], OperatorNode)
+        assert isinstance(job.pipeline.nodes["adder"], FunctionNode)
 
         result = job.run()
 
-        fn_records = result.pipeline.compiled_nodes["adder"].get_all_records()
+        fn_records = result.pipeline.nodes["adder"].get_all_records()
         assert fn_records is not None
         assert fn_records.num_rows == 2
 
-        table = result.pipeline.compiled_nodes["adder"].as_table()
+        table = result.pipeline.nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]
 
@@ -525,7 +525,7 @@ class TestPipelineJobEndToEnd:
         )
         result = job.run()
 
-        table = result.pipeline.compiled_nodes["adder"].as_table()
+        table = result.pipeline.nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]
 
@@ -576,7 +576,7 @@ class TestPipelineJobSerialization:
         job.save(str(path))
         loaded = PipelineJob.load(str(path))
 
-        assert "joiner" in loaded.pipeline.compiled_nodes
+        assert "joiner" in loaded.pipeline.nodes
 
     def test_load_roundtrip_after_run(self, store, tmp_path):
         """Save after run() → load → pipeline topology and run status preserved."""
@@ -599,7 +599,7 @@ class TestPipelineJobSerialization:
 
         # Load and verify topology
         loaded = PipelineJob.load(str(path))
-        assert "adder" in loaded.pipeline.compiled_nodes
+        assert "adder" in loaded.pipeline.nodes
 
     def test_load_version_mismatch_raises(self, store, tmp_path):
         """PipelineJob.load() raises ValueError for an unsupported format version."""

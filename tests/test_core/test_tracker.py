@@ -482,12 +482,12 @@ class TestPipelineRecording:
         with _make_pipeline(tracker_manager=mgr) as tracker:
             tracker.record_function_pod_invocation(pod, _make_stream())
 
-        # compile() populates _node_lut; .nodes returns a copy
+        # compile() populates _nodes; .nodes returns a dict copy
         tracker.compile()
         nodes = tracker.nodes
         nodes.clear()
-        # Original unaffected by mutating the copy
-        assert len(tracker.nodes) == 1
+        # Original unaffected by mutating the copy (1 source + 1 function node)
+        assert len(tracker.nodes) == 2
 
     def test_reset_is_noop_recording_is_additive(self):
         """reset() is a no-op — recording state is additive across with-blocks."""
@@ -510,7 +510,7 @@ class TestPipelineRecording:
         # After with-block exits (auto_compile=False, so compile() not called),
         # manually compile and verify the recorded invocation is preserved
         tracker.compile()
-        assert len(tracker.nodes) == 1
+        assert len(tracker.nodes) == 2  # 1 source + 1 function node
         assert len(tracker._upstreams) == 1
         assert len(tracker._graph_edges) == 1
 
@@ -890,11 +890,11 @@ class TestManagerBroadcast:
         with tracker1, tracker2:
             mgr.record_function_pod_invocation(pod, stream)
 
-        # compile() is required to populate _node_lut (auto_compile=False)
+        # compile() is required to populate _nodes (auto_compile=False)
         tracker1.compile()
         tracker2.compile()
-        assert len(tracker1.nodes) == 1
-        assert len(tracker2.nodes) == 1
+        assert len(tracker1.nodes) == 2  # 1 source + 1 function node
+        assert len(tracker2.nodes) == 2  # 1 source + 1 function node
 
     def test_no_tracking_suppresses_recording(self):
         """no_tracking context suppresses recording."""
