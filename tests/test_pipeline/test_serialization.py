@@ -161,7 +161,7 @@ class TestPipelineBlueprintLoad:
         completed = job.run()
         assert completed._has_run is True
         # Verify all source specs were resolved (no unresolved specs)
-        assert completed.unresolved_specs == []
+        assert completed.unbound_sources == []
         # Verify the join node is present in the compiled pipeline
         joiner_node = completed.pipeline.nodes.get("joiner")
         assert joiner_node is not None
