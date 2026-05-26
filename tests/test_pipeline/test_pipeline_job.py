@@ -294,6 +294,53 @@ class TestPipelineJobCompleteness:
 
 
 # ---------------------------------------------------------------------------
+# Tests: unbound_sources
+# ---------------------------------------------------------------------------
+
+
+class TestUnboundSources:
+    def test_unbound_sources_returns_names_of_unbound_source_nodes(self, store):
+        """unbound_sources lists the name of each unbound SourceJobNode slot."""
+        src_a, src_b = _make_two_sources()
+        tag_b, data_b = src_b.output_schema()
+        node_b = SourceNode(name="spec_b", tag_schema=tag_b, data_schema=data_b)
+
+        job = PipelineJob(store=store)
+        with job:
+            Join()(src_a, node_b)
+
+        assert job.unbound_sources == ["spec_b"]
+
+    def test_unbound_sources_empty_when_all_bound(self, store):
+        """unbound_sources is empty when all sources are bound."""
+        src_a, src_b = _make_two_sources()
+        job = PipelineJob(store=store)
+        with job:
+            Join()(src_a, src_b)
+
+        assert job.unbound_sources == []
+
+    def test_unbound_sources_empty_before_compile(self):
+        """unbound_sources returns [] when job is not yet compiled."""
+        job = PipelineJob()
+        assert job.unbound_sources == []
+
+    def test_unbound_sources_reflects_bind_call(self, store):
+        """After binding a source, it no longer appears in unbound_sources."""
+        src_a, src_b = _make_two_sources()
+        tag_b, data_b = src_b.output_schema()
+        node_b = SourceNode(name="spec_b", tag_schema=tag_b, data_schema=data_b)
+
+        job = PipelineJob(store=store)
+        with job:
+            Join()(src_a, node_b)
+
+        assert "spec_b" in job.unbound_sources
+        job.bind(sources={"spec_b": src_b})
+        assert job.unbound_sources == []
+
+
+# ---------------------------------------------------------------------------
 # Tests: is_runnable and __repr__
 # ---------------------------------------------------------------------------
 
