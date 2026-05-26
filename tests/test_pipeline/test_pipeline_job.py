@@ -244,7 +244,7 @@ class TestPipelineJobBind:
 
 class TestPipelineJobCompleteness:
     def test_unbound_specs_lists_unbound(self, store):
-        """unbound_source_nodes() lists SourceNode names not in job.sources."""
+        """unbound_sources lists names of unbound SourceJobNode slots."""
         src_a, src_b = _make_two_sources()
         tag_b, data_b = src_b.output_schema()
         node_b = SourceNode(name="spec_b", tag_schema=tag_b, data_schema=data_b)
@@ -253,9 +253,7 @@ class TestPipelineJobCompleteness:
         with job:
             Join()(src_a, node_b)
 
-        unbound = job.unbound_source_nodes()
-        assert len(unbound) == 1
-        assert unbound[0].name == "spec_b"
+        assert job.unbound_sources == ["spec_b"]
 
     def test_unbound_specs_empty_when_all_bound(self, store):
         src_a, src_b = _make_two_sources()
@@ -263,7 +261,7 @@ class TestPipelineJobCompleteness:
         with job:
             Join()(src_a, src_b)  # both auto-bound via content-hash-based spec names
 
-        assert job.unbound_source_nodes() == []
+        assert job.unbound_sources == []
 
     def test_is_complete_true_when_all_bound_with_store(self, store):
         src_a, src_b = _make_two_sources()
@@ -407,7 +405,7 @@ class TestPipelineJobRun:
 
         result = job.run()
 
-        node = result.pipeline.nodes["adder"]
+        node = result.nodes["adder"]
         records = node.get_all_records()
         assert records is not None
         assert records.num_rows == 2
@@ -424,7 +422,7 @@ class TestPipelineJobRun:
 
         result = job.run()
 
-        table = result.pipeline.nodes["adder"].as_table()
+        table = result.nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]  # a: 10+100, b: 20+200
 
@@ -442,11 +440,11 @@ class TestPipelineJobRun:
             pod(joined, label="adder")
 
         result = job.run()
-        # Unresolved specs should be reported
-        assert "spec_b" in result.unresolved_specs
+        # Unbound sources should be reported
+        assert "spec_b" in result.unbound_sources
 
-    def test_run_is_non_mutating(self, store):
-        """run() returns a new PipelineJob; original job object is not the same."""
+    def test_run_returns_self_and_mutates_in_place(self, store):
+        """run() returns self and sets _has_run / _run_id in place."""
         src_a, src_b = _make_two_sources()
 
         job = PipelineJob(store=store)
@@ -454,9 +452,9 @@ class TestPipelineJobRun:
             Join()(src_a, src_b, label="joiner")
 
         result = job.run()
-        assert result is not job
-        # The returned job uses an exec pipeline clone; original pipeline unchanged
-        assert result.pipeline is not job.pipeline
+        assert result is job
+        assert job._has_run is True
+        assert job._run_id is not None
         # The original job's pipeline remains unmodified (no exec nodes injected)
         assert job._has_run is False
 
@@ -518,7 +516,7 @@ class TestPipelineJobRun:
         job.run()
         result = job.run()  # second run should not raise
 
-        table = result.pipeline.nodes["adder"].as_table()
+        table = result.nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]
 
@@ -540,11 +538,11 @@ class TestPipelineJobEndToEnd:
 
         result = job.run()
 
-        fn_records = result.pipeline.nodes["adder"].get_all_records()
+        fn_records = result.nodes["adder"].get_all_records()
         assert fn_records is not None
         assert fn_records.num_rows == 2
 
-        table = result.pipeline.nodes["adder"].as_table()
+        table = result.nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]
 
@@ -572,7 +570,7 @@ class TestPipelineJobEndToEnd:
         )
         result = job.run()
 
-        table = result.pipeline.nodes["adder"].as_table()
+        table = result.nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]
 
@@ -646,7 +644,7 @@ class TestPipelineJobSerialization:
 
         # Load and verify topology
         loaded = PipelineJob.load(str(path))
-        assert "adder" in loaded.pipeline.nodes
+        assert "adder" in loaded.pipeline.nodes  # pipeline blueprint has node
 
     def test_load_version_mismatch_raises(self, store, tmp_path):
         """PipelineJob.load() raises ValueError for an unsupported format version."""
@@ -707,8 +705,8 @@ class TestPipelineJobSerialization:
             "PipelineJob.load() should restore _name from the saved pipeline name"
         )
 
-    def test_load_after_partial_run_restores_unresolved_specs(self, store, tmp_path):
-        """Loaded job preserves unresolved_specs from a partial run."""
+    def test_load_after_partial_run_preserves_unbound_sources(self, store, tmp_path):
+        """Loaded job reports unbound sources for slots not yet bound."""
         src_a, src_b = _make_two_sources()
         tag_b, data_b = src_b.output_schema()
         node_b = SourceNode(name="unbound_b", tag_schema=tag_b, data_schema=data_b)
@@ -719,11 +717,11 @@ class TestPipelineJobSerialization:
             joined = Join()(src_a, node_b)
             pod(joined, label="adder")
         result = job.run()
-        assert "unbound_b" in result.unresolved_specs
+        assert "unbound_b" in result.unbound_sources
         path = tmp_path / "partial.json"
         result.save(str(path))
         loaded = PipelineJob.load(str(path), store=store)
-        assert "unbound_b" in loaded.unresolved_specs
+        assert "unbound_b" in loaded.unbound_sources
 
     def test_load_bind_works_after_load(self, store, tmp_path):
         """bind() must work on a loaded job — _persistent_node_map is populated."""

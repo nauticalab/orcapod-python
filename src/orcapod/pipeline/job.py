@@ -81,7 +81,6 @@ class PipelineJob(AbstractPipelineBase):
         # lookup by content hash; avoids name collisions when multiple concrete
         # sources share the same class name (e.g. two ArrowTableSource objects).
         self._sources_by_hash: dict[str, cp.StreamProtocol] = {}
-        self._unresolved_specs: list[str] = []
         self._has_run: bool = False
         self._run_id: str | None = None
 
@@ -249,16 +248,16 @@ class PipelineJob(AbstractPipelineBase):
 
         # Validate sources against SourceNode schemas.
         if bound_sources:
-            spec_names = {
+            source_names = {
                 node.name
                 for node in pipeline._persistent_node_map.values()
                 if isinstance(node, SourceNodeBase)
             }
-            unknown = set(bound_sources.keys()) - spec_names
+            unknown = set(bound_sources.keys()) - source_names
             if unknown:
                 raise ValueError(
                     f"from_pipeline() received source keys with no matching SourceNode: "
-                    f"{sorted(unknown)}. Known names: {sorted(spec_names)}"
+                    f"{sorted(unknown)}. Known names: {sorted(source_names)}"
                 )
             for node in pipeline._persistent_node_map.values():
                 if isinstance(node, SourceNodeBase) and node.name in bound_sources:
@@ -323,17 +322,17 @@ class PipelineJob(AbstractPipelineBase):
             self._store = store
 
         if sources is not None:
-            spec_names = {
+            source_names = {
                 node.name
                 for node in (self._persistent_node_map or {}).values()
                 if isinstance(node, SourceNodeBase)
             }
-            unknown = set(sources.keys()) - spec_names
+            unknown = set(sources.keys()) - source_names
             if unknown:
                 raise ValueError(
                     f"bind() received source keys with no matching source slot "
                     f"(SourceJobNode): {sorted(unknown)}. "
-                    f"Known slot names: {sorted(spec_names)}"
+                    f"Known slot names: {sorted(source_names)}"
                 )
             for node in (self._persistent_node_map or {}).values():
                 if isinstance(node, SourceNodeBase) and node.name in sources:
@@ -564,30 +563,6 @@ class PipelineJob(AbstractPipelineBase):
     # Completeness introspection
     # ------------------------------------------------------------------
 
-    def unbound_source_nodes(self) -> "list[Any]":
-        """Return all SourceJobNode slots not yet bound in this job.
-
-        Returns:
-            List of unbound ``SourceJobNode`` instances, in order of
-            appearance in the pipeline graph.
-        """
-        from orcapod.core.nodes.source_node import SourceJobNode
-
-        if not self._compiled:
-            return []
-
-        unbound: list[Any] = []
-        seen: set[str] = set()
-        for node in (self._persistent_node_map or {}).values():
-            if (
-                isinstance(node, SourceJobNode)
-                and node.bound_source is None
-                and node.name not in seen
-            ):
-                unbound.append(node)
-                seen.add(node.name)
-        return unbound
-
     @property
     def unbound_sources(self) -> list[str]:
         """Names of source slots not yet bound in this job.
@@ -670,20 +645,6 @@ class PipelineJob(AbstractPipelineBase):
             if isinstance(node, SourceJobNode) and node.bound_source is None:
                 return False
         return True
-
-    # ------------------------------------------------------------------
-    # unresolved_specs property
-    # ------------------------------------------------------------------
-
-    @property
-    def unresolved_specs(self) -> list[str]:
-        """Spec names that were unbound at run time (excluded from execution).
-
-        Returns:
-            List of unbound SourceSpec names from the most recent run.
-            Empty list if run() has not been called or all specs were bound.
-        """
-        return list(self._unresolved_specs)
 
     # ------------------------------------------------------------------
     # build_execution_graph (public) / _build_execution_graph (impl)
@@ -1011,7 +972,7 @@ class PipelineJob(AbstractPipelineBase):
 
         if not self._has_run:
             status = "pending"
-        elif self._unresolved_specs:
+        elif self.unbound_sources:
             status = "partial"
         else:
             status = "complete"
@@ -1021,7 +982,7 @@ class PipelineJob(AbstractPipelineBase):
             "run": {
                 "run_id": self._run_id,
                 "status": status,
-                "unresolved_specs": list(self._unresolved_specs),
+                "unbound_sources": list(self.unbound_sources),
             },
             "pipeline": pipeline_data,
             "bindings": {
@@ -1173,7 +1134,6 @@ class PipelineJob(AbstractPipelineBase):
         status = run_block.get("status", "pending")
         if status in ("complete", "partial"):
             job._has_run = True
-            job._unresolved_specs = run_block.get("unresolved_specs", [])
         if run_id := run_block.get("run_id"):
             job._run_id = run_id
 
