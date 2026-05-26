@@ -315,7 +315,7 @@ class AbstractPipelineBase(AutoRegisteringContextBasedTracker, ABC):
         # 3. Topological pass — create function / operator nodes.
         for key in _nx.topological_sort(self._hash_graph):
             if key in node_map:
-                continue  # already a source node
+                continue  # already added as a source node in step 2
             if key not in self._invocation_lut:
                 continue  # vertex with no invocation (e.g. pure source hash)
             inv = self._invocation_lut[key]

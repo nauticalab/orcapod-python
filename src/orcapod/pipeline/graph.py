@@ -59,23 +59,9 @@ class Pipeline(AbstractPipelineBase):
     # Node-factory class attributes (used by AbstractPipelineBase.compile())
     # ------------------------------------------------------------------
 
-    @property
-    def source_node_class(self) -> type:
-        """SourceNode — schema-only leaf node class for Pipeline."""
-        from orcapod.core.nodes.source_node import SourceNode
-        return SourceNode
-
-    @property
-    def function_node_class(self) -> type:
-        """FunctionNode — blueprint function node class for Pipeline."""
-        from orcapod.core.nodes.function_node import FunctionNode
-        return FunctionNode
-
-    @property
-    def operator_node_class(self) -> type:
-        """OperatorNode — blueprint operator node class for Pipeline."""
-        from orcapod.core.nodes.operator_node import OperatorNode
-        return OperatorNode
+    source_node_class = SourceNode
+    function_node_class = FunctionNode
+    operator_node_class = OperatorNode
 
     def __init__(
         self,

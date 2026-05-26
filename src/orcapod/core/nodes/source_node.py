@@ -428,21 +428,40 @@ class SourceJobNode(SourceNodeBase):
 
     Args:
         name: Slot name.
-        tag_schema: Tag schema.
-        data_schema: Data schema.
+        tag_schema: Tag schema.  Optional when *bound_source* is provided;
+            inferred from ``bound_source.output_schema()`` when omitted.
+            Stored for future rebind validation.
+        data_schema: Data schema.  Optional when *bound_source* is provided;
+            inferred from ``bound_source.output_schema()`` when omitted.
+            Stored for future rebind validation.
         bound_source: Optional concrete stream.  Can be set or replaced later
             via ``job_node.bound_source = source``.
         data_context: Optional data context override.
+
+    Raises:
+        ValueError: If both *tag_schema* and *data_schema* are omitted and
+            *bound_source* is ``None``.
     """
 
     def __init__(
         self,
         name: str,
-        tag_schema: Schema,
-        data_schema: Schema,
+        tag_schema: Schema | None = None,
+        data_schema: Schema | None = None,
         bound_source: StreamProtocol | None = None,
         data_context: str | contexts.DataContext | None = None,
     ) -> None:
+        if tag_schema is None or data_schema is None:
+            if bound_source is None:
+                raise ValueError(
+                    "SourceJobNode requires either explicit tag_schema/data_schema "
+                    "or a bound_source to derive schemas from."
+                )
+            derived_tag, derived_data = bound_source.output_schema()
+            if tag_schema is None:
+                tag_schema = derived_tag
+            if data_schema is None:
+                data_schema = derived_data
         super().__init__(
             name=name,
             tag_schema=tag_schema,
@@ -552,51 +571,51 @@ class SourceJobNode(SourceNodeBase):
                 For concrete streams (Case 3), when *name* is ``None`` the slot
                 name is resolved as: ``stream.source_id`` for ``RootSource``
                 instances, or ``"{stream.label}:{hash_prefix}"`` for any other
-                concrete stream type.  Source node names must be unique within a
-                compiled pipeline; ``compile()`` raises ``InconsistentSourceError``
-                if two source nodes share a name but differ in schema.
+                concrete stream type.
 
         Returns:
             A ``SourceJobNode`` configured according to the case above.
         """
-        if isinstance(stream, SourceJobNode):
-            # Case 1: copy — preserve bound_source, do NOT wrap the SJN itself.
-            return cls(
-                name=name if name is not None else stream.name,
-                tag_schema=stream.tag_schema,
-                data_schema=stream.data_schema,
-                bound_source=stream.bound_source,
-            )
-        if isinstance(stream, SourceNode):
-            # Case 2: unbound — schema placeholder; SJN hash = SourceNode hash.
-            return cls(
-                name=name if name is not None else stream.name,
-                tag_schema=stream.tag_schema,
-                data_schema=stream.data_schema,
-                bound_source=None,
-            )
-        # Case 3: concrete stream — bound SJN.
-        # Slot name priority:
-        #   1. explicit *name* parameter
-        #   2. stream.source_id for RootSource (canonical, stable identity)
-        #   3. label + short hash prefix for any other concrete stream type
-        tag_schema, data_schema = stream.output_schema()
-        if name is not None:
-            slot_name = name
-        else:
-            # Local import avoids a module-level circular dependency between
-            # core.nodes and core.sources.
-            from orcapod.core.sources.base import RootSource
-            if isinstance(stream, RootSource):
-                slot_name = stream.source_id
-            else:
-                slot_name = f"{stream.label}:{stream.content_hash().to_string(hexdigits=8)}"
-        return cls(
-            name=slot_name,
-            tag_schema=tag_schema,
-            data_schema=data_schema,
-            bound_source=stream,
-        )
+        match stream:
+            case SourceJobNode():
+                # Case 1: copy — preserve bound_source, do NOT wrap the SJN itself.
+                return cls(
+                    name=name if name is not None else stream.name,
+                    tag_schema=stream.tag_schema,
+                    data_schema=stream.data_schema,
+                    bound_source=stream.bound_source,
+                )
+            case SourceNode():
+                # Case 2: unbound — schema placeholder; SJN hash = SourceNode hash.
+                return cls(
+                    name=name if name is not None else stream.name,
+                    tag_schema=stream.tag_schema,
+                    data_schema=stream.data_schema,
+                    bound_source=None,
+                )
+            case _:
+                # Case 3: concrete stream — bound SJN.
+                # Slot name priority:
+                #   1. explicit *name* parameter
+                #   2. stream.source_id for RootSource (canonical, stable identity)
+                #   3. label + short hash prefix for any other concrete stream type
+                tag_schema, data_schema = stream.output_schema()
+                if name is not None:
+                    slot_name = name
+                else:
+                    # Local import avoids a module-level circular dependency between
+                    # core.nodes and core.sources.
+                    from orcapod.core.sources.base import RootSource
+                    if isinstance(stream, RootSource):
+                        slot_name = stream.source_id
+                    else:
+                        slot_name = f"{stream.label}:{stream.content_hash().to_string(hexdigits=8)}"
+                return cls(
+                    name=slot_name,
+                    tag_schema=tag_schema,
+                    data_schema=data_schema,
+                    bound_source=stream,
+                )
 
     def as_node(self) -> SourceNode:
         """Return the lightweight ``SourceNode`` equivalent of this job node.

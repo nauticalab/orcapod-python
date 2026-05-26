@@ -5,6 +5,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from orcapod.core.nodes.function_node import FunctionJobNode
+from orcapod.core.nodes.operator_node import OperatorJobNode
+from orcapod.core.nodes.source_node import SourceJobNode
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
 from orcapod.pipeline.base import AbstractPipelineBase
 from orcapod.protocols import core_protocols as cp
@@ -52,26 +55,12 @@ class PipelineJob(AbstractPipelineBase):
     """
 
     # ------------------------------------------------------------------
-    # Node-factory class properties (used by AbstractPipelineBase.compile())
+    # Node-factory class attributes (used by AbstractPipelineBase.compile())
     # ------------------------------------------------------------------
 
-    @property
-    def source_node_class(self) -> type:
-        """SourceJobNode — execution-ready source node class for PipelineJob."""
-        from orcapod.core.nodes.source_node import SourceJobNode
-        return SourceJobNode
-
-    @property
-    def function_node_class(self) -> type:
-        """FunctionJobNode — execution-ready function node class for PipelineJob."""
-        from orcapod.core.nodes.function_node import FunctionJobNode
-        return FunctionJobNode
-
-    @property
-    def operator_node_class(self) -> type:
-        """OperatorJobNode — execution-ready operator node class for PipelineJob."""
-        from orcapod.core.nodes.operator_node import OperatorJobNode
-        return OperatorJobNode
+    source_node_class = SourceJobNode
+    function_node_class = FunctionJobNode
+    operator_node_class = OperatorJobNode
 
     def __init__(
         self,
@@ -85,9 +74,11 @@ class PipelineJob(AbstractPipelineBase):
         self._store = store
         self._execution_context = execution_context
         self._auto_compile = auto_compile
+        # name → bound concrete source (user-facing API: job.sources).
         self._sources: dict[str, cp.StreamProtocol] = {}
-        # Hash-keyed lookup for _build_execution_graph() — same key as
-        # _persistent_node_map.  Avoids name collisions when multiple concrete
+        # hash → bound concrete source, keyed by the same hash as
+        # _persistent_node_map.  Used by _build_execution_graph() for O(1)
+        # lookup by content hash; avoids name collisions when multiple concrete
         # sources share the same class name (e.g. two ArrowTableSource objects).
         self._sources_by_hash: dict[str, cp.StreamProtocol] = {}
         self._unresolved_specs: list[str] = []
@@ -97,7 +88,7 @@ class PipelineJob(AbstractPipelineBase):
         # Lazy cache for the corresponding Pipeline blueprint.
         # Set to None after compile() to force recomputation on next access.
         # Pre-set by from_pipeline() / run() via _set_compiled_pipeline().
-        self._compiled_pipeline: "Pipeline | None" = None
+        self._compiled_pipeline: Pipeline | None = None
 
     # ------------------------------------------------------------------
     # Context manager — respects auto_compile flag
