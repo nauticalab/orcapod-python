@@ -633,9 +633,9 @@ class PostgreSQLConnector:
 
     # ── Async read ────────────────────────────────────────────────────────────
 
-    # Note: declared as plain `def` (not `async def`) but the generator body uses
-    # `yield`, making it an async generator. The Protocol declares this as `def`
-    # returning `AsyncIterator` — see async_db_connector_protocol.py for rationale.
+    # The Protocol declares this as plain `def` returning `AsyncIterator` (see
+    # async_db_connector_protocol.py). Here, `async def` + `yield` makes it an
+    # async generator, which correctly satisfies that declared return type.
     async def async_iter_batches(
         self,
         query: str,
