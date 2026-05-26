@@ -766,6 +766,56 @@ class TestPipelineJobSerialization:
         # After binding all sources, is_runnable() should return True.
         assert loaded.is_runnable("adder") is True
 
+    def test_load_nodes_are_job_nodes(self, store, tmp_path):
+        """job.nodes on a loaded job returns FunctionJobNode, not blueprint FunctionNode."""
+        from orcapod.core.nodes.function_node import FunctionJobNode
+        src_a, src_b = _make_two_sources()
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
+        job = PipelineJob(store=store)
+        with job:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+        job.save(str(tmp_path / "job.json"))
+
+        loaded = PipelineJob.load(str(tmp_path / "job.json"), store=store)
+        adder = loaded.nodes.get("adder")
+        assert adder is not None, "Expected 'adder' in loaded job nodes"
+        assert isinstance(adder, FunctionJobNode), (
+            f"Expected FunctionJobNode after load(), got {type(adder).__name__}"
+        )
+
+    def test_load_get_all_records_returns_results(self, store, tmp_path):
+        """After run() + save() + load(), get_all_records() returns the computed results."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
+        job = PipelineJob(store=store)
+        with job:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        completed = job.run()
+        original_records = completed.nodes["adder"].get_all_records()
+        assert original_records is not None, "run() produced no records"
+
+        path = tmp_path / "completed.json"
+        completed.save(str(path))
+
+        loaded = PipelineJob.load(str(path), store=store)
+        loaded_records = loaded.nodes["adder"].get_all_records()
+        assert loaded_records is not None, (
+            "get_all_records() returned None on a loaded job; "
+            "FunctionJobNode stubs may not be wired to the database."
+        )
+        assert loaded_records.num_rows == original_records.num_rows, (
+            f"Expected {original_records.num_rows} rows, got {loaded_records.num_rows}"
+        )
+        # Verify the computed values are intact
+        assert sorted(loaded_records.column("total").to_pylist()) == sorted(
+            original_records.column("total").to_pylist()
+        )
+
 
 # ---------------------------------------------------------------------------
 # Tests: PipelineJob.from_pipeline()

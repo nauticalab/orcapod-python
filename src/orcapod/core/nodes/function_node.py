@@ -645,6 +645,35 @@ class FunctionNode(FunctionNodeBase):
 
 
 # ---------------------------------------------------------------------------
+# _ResultDatabaseReader — minimal result accessor for read-only stubs
+# ---------------------------------------------------------------------------
+
+
+class _ResultDatabaseReader:
+    """Minimal result-database accessor for read-only ``FunctionJobNode`` stubs.
+
+    Used by ``FunctionJobNode.attach_databases()`` when ``_function_pod`` is
+    ``None`` (i.e., nodes loaded from a saved job without a live function pod).
+    Provides the ``_result_database`` and ``record_path`` attributes that
+    ``get_all_records()`` and ``_load_cached_entries()`` require, without
+    needing a ``CachedFunctionPod``.
+    """
+
+    def __init__(
+        self,
+        result_database: ArrowDatabaseProtocol,
+        record_path: tuple[str, ...],
+    ) -> None:
+        self._result_database = result_database
+        self._record_path = record_path
+
+    @property
+    def record_path(self) -> tuple[str, ...]:
+        """Path to cached records in the result store."""
+        return self._record_path
+
+
+# ---------------------------------------------------------------------------
 # FunctionJobNode — DB-backed execution node
 # ---------------------------------------------------------------------------
 
@@ -707,9 +736,12 @@ class FunctionJobNode(FunctionNodeBase):
     ) -> None:
         """Attach databases for persistent caching and pipeline records.
 
-        Creates a ``CachedFunctionPod`` wrapping the original function pod
-        for result caching.  The pipeline database is used separately for
-        pipeline-level provenance records (tag + data hash).
+        For live nodes (``_function_pod`` is set), creates a
+        ``CachedFunctionPod`` wrapping the original function pod for result
+        caching.  For read-only stubs (``_function_pod`` is ``None``, e.g.
+        nodes loaded from a saved job), creates a ``_ResultDatabaseReader``
+        using the record path stored in the descriptor so that
+        ``get_all_records()`` and ``_load_cached_entries()`` still work.
 
         The databases are expected to be pre-scoped by the pipeline (via
         ``db.at(*pipeline_name).at("_result")`` etc.) so no additional path
@@ -718,18 +750,27 @@ class FunctionJobNode(FunctionNodeBase):
         Args:
             pipeline_database: Database for pipeline records.
             result_database: Database for cached results. Defaults to
-                pipeline_database.
+                ``pipeline_database.at("_result")``.
         """
         if result_database is None:
             # Default result database is pipeline_database scoped to "_result"
             # so that results are stored separately from pipeline-level records.
             result_database = pipeline_database.at("_result")
 
-        # Always wrap the original function_pod (not a previous cached wrapper)
-        self._cached_function_pod = CachedFunctionPod(
-            self._function_pod,
-            result_database=result_database,
-        )
+        if self._function_pod is not None:
+            # Normal path: wrap in CachedFunctionPod for compute + cache.
+            self._cached_function_pod = CachedFunctionPod(
+                self._function_pod,
+                result_database=result_database,
+            )
+        else:
+            # Read-only stub path (loaded job without a live function pod).
+            # Use the record path stored from the descriptor so that
+            # get_all_records() / _load_cached_entries() can query the DB.
+            self._cached_function_pod = _ResultDatabaseReader(  # type: ignore[assignment]
+                result_database=result_database,
+                record_path=self._stored_result_record_path,
+            )
 
         self._pipeline_database = pipeline_database
 
@@ -738,6 +779,143 @@ class FunctionJobNode(FunctionNodeBase):
         self.clear_cache()
         self._invalidate_content_hash_cache()
         self._invalidate_pipeline_hash_cache()
+
+    # ------------------------------------------------------------------
+    # from_descriptor — read-only stub for loaded jobs
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_descriptor(
+        cls,
+        descriptor: dict[str, Any],
+        input_stream: StreamProtocol | None = None,
+        databases: dict[str, Any] | None = None,
+        job_content_hash: str | None = None,
+    ) -> "FunctionJobNode":
+        """Create a read-only ``FunctionJobNode`` stub from a serialized descriptor.
+
+        Used by ``PipelineJob.load()`` to populate ``_persistent_node_map``
+        with database-backed stubs for function nodes.  The stubs support
+        ``get_all_records()`` and ``_load_cached_entries()`` on previously
+        computed results without needing a live ``function_pod``.
+
+        Computation-path methods (``execute()``, ``iter_data()``) will
+        fail for stub nodes because ``_function_pod`` is ``None``.
+
+        Args:
+            descriptor: Serialized node descriptor dict (as produced by
+                ``Pipeline.save()``).
+            input_stream: Optional upstream stream.  May be ``None`` for
+                read-only stubs where execution is not needed.
+            databases: Optional mapping ``{"pipeline": db, "result": db}``.
+                When ``"pipeline"`` is present, ``attach_databases()`` is
+                called immediately so the stub is ready for DB queries.
+            job_content_hash: Optional live (data-inclusive) content hash
+                from the run that produced the records being loaded.  When
+                provided, overrides the blueprint hash stored in *descriptor*
+                so that ``content_hash()`` matches the ``_node_content_hash``
+                column written to the DB at execution time.  Required for
+                ``get_all_records()`` to correctly filter DB rows when
+                ``table_scope="pipeline_hash"`` (the default).
+
+        Returns:
+            A ``FunctionJobNode`` in read-only stub mode
+            (``load_status=UNAVAILABLE``).
+        """
+        from orcapod.config import DEFAULT_CONFIG
+        from orcapod.pipeline.serialization import LoadStatus
+
+        if "table_scope" not in descriptor:
+            raise ValueError(
+                f"FunctionJobNode descriptor missing required 'table_scope' field: "
+                f"{descriptor.get('label', '<unlabeled>')}"
+            )
+        raw_table_scope = descriptor["table_scope"]
+        if raw_table_scope not in ("pipeline_hash", "content_hash"):
+            raise ValueError(
+                f"FunctionJobNode descriptor has invalid 'table_scope' value "
+                f"{raw_table_scope!r} for {descriptor.get('label', '<unlabeled>')}; "
+                "expected one of ('pipeline_hash', 'content_hash')"
+            )
+
+        node: FunctionJobNode = cls.__new__(cls)
+
+        # From LabelableMixin
+        node._label = descriptor.get("label")
+
+        # From DataContextMixin
+        node._data_context = contexts.resolve_context(
+            descriptor.get("data_context_key")
+        )
+        node._orcapod_config = DEFAULT_CONFIG
+
+        # From ContentIdentifiableBase
+        node._content_hash_cache = {}
+        node._cached_int_hash = None
+
+        # From PipelineElementBase
+        node._pipeline_hash_cache = {}
+
+        # From TemporalMixin
+        node._modified_time = None
+
+        # From FunctionNodeBase
+        node._function_pod = None
+        node._data_function = None
+        node._input_stream = input_stream
+        node.tracker_manager = DEFAULT_TRACKER_MANAGER
+
+        # FunctionNodeBase descriptor fields (normally set by __init__)
+        node._load_status = LoadStatus.UNAVAILABLE
+        # Use the live (data-inclusive) content hash when available — it must
+        # match the _node_content_hash column written to the DB at run time.
+        # The blueprint hash stored in descriptor["content_hash"] is computed
+        # from schema-only upstreams and differs from the live hash, causing
+        # _filter_by_content_hash() to return zero rows in get_all_records().
+        node._stored_content_hash = (
+            job_content_hash if job_content_hash is not None
+            else descriptor.get("content_hash")
+        )
+        node._stored_pipeline_hash = descriptor.get("pipeline_hash")
+        node._stored_schema = descriptor.get("output_schema", {})
+        node._stored_node_uri = tuple(descriptor.get("node_uri") or ())
+        node._stored_result_record_path = tuple(descriptor.get("node_uri") or ())
+        node._descriptor = descriptor
+        node._table_scope = raw_table_scope
+        node._node_identity_path_cache = None
+
+        # Compute _stored_pipeline_path from node_uri + pipeline_hash so that
+        # node_identity_path (used by get_all_records and _load_cached_entries)
+        # resolves to the correct DB path.  This mirrors the live computation:
+        #   path = function_pod.uri + (f"schema:{pipeline_hash}",)
+        # Since node_uri == function_pod.uri (same fields), we reconstruct it here.
+        pipeline_hash_str = descriptor.get("pipeline_hash", "")
+        node._stored_pipeline_path = node._stored_node_uri + (
+            f"schema:{pipeline_hash_str}",
+        )
+        if raw_table_scope != "pipeline_hash":
+            content_hash_str = descriptor.get("content_hash", "")
+            node._stored_pipeline_path += (f"instance:{content_hash_str}",)
+
+        # FunctionJobNode — stream-level caching state
+        node._cached_output_datas = {}
+        node._cached_output_table = None
+        node._cached_content_hash_column = None
+
+        # FunctionJobNode — DB persistence state (wired by attach_databases)
+        node._pipeline_database = None
+        node._cached_function_pod = None
+
+        # Wire databases if provided
+        pipeline_db = (databases or {}).get("pipeline")
+        result_db = (databases or {}).get("result")
+        if pipeline_db is not None:
+            node.attach_databases(
+                pipeline_database=pipeline_db,
+                result_database=result_db,
+            )
+
+        return node
 
     # ------------------------------------------------------------------
     # Override clear_cache to also clear DB caches
