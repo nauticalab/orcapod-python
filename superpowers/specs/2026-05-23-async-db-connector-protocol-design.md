@@ -234,7 +234,9 @@ async def async_get_column_info(self, table_name: str) -> list[ColumnInfo]:
 ### `async_iter_batches`
 
 The entire sync iteration runs in the thread pool (blocking I/O stays off the event loop),
-then batches are yielded lazily from the async generator:
+collecting all batches into a list before returning to the event loop. The full result set
+is materialised before the first yield — ``batch_size`` controls individual batch sizes
+but does not enable true streaming:
 
 ```python
 async def async_iter_batches(self, query, params=None, batch_size=1000):
