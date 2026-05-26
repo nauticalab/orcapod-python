@@ -5,8 +5,10 @@ from .noop_database import NoOpArrowDatabase
 from .spiraldb_connector import SpiralDBConnector
 from .sqlite_connector import SQLiteConnector
 from .postgresql_connector import PostgreSQLConnector
+from orcapod.protocols.async_db_connector_protocol import AsyncDBConnectorProtocol
 
 __all__ = [
+    "AsyncDBConnectorProtocol",
     "ConnectorArrowDatabase",
     "DeltaTableDatabase",
     "InMemoryArrowDatabase",
@@ -24,6 +26,12 @@ __all__ = [
 #   SQLiteConnector      -- PLT-1076 (stdlib sqlite3, zero extra deps)  ✓
 #   PostgreSQLConnector  -- PLT-1075 (psycopg3)                          ✓
 #   SpiralDBConnector    -- PLT-1074
+#
+# Connectors that also implement AsyncDBConnectorProtocol:
+#
+#   PostgreSQLConnector  -- native psycopg3 async (PLT-1453)              ✓
+#   SQLiteConnector      -- asyncio.to_thread() wrappers (PLT-1453)       ✓
+#   SpiralDBConnector    -- deferred to PLT-1456
 #
 # ArrowDatabaseProtocol backends (existing, not connector-based):
 #
