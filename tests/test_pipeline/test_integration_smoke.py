@@ -61,5 +61,5 @@ def test_smoke_run_raises_without_pipeline():
     job = PipelineJob(name="empty", store=db)
     # Don't enter context — no pipeline recorded
     # run() should raise RuntimeError("No compiled pipeline")
-    with pytest.raises(RuntimeError, match="No compiled pipeline"):
+    with pytest.raises(RuntimeError, match="no compiled pipeline"):
         job.run()

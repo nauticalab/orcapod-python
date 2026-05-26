@@ -428,7 +428,7 @@ class TestAsyncOrchestratorTerminalNode:
 
     def test_single_terminal_source(self):
         """A pipeline with just a source (terminal) should work."""
-        import networkx as nx
+        from orcapod.pipeline.dag import OrcaDAG
 
         src = _make_source("key", "value", {"key": ["a"], "value": [1]})
         tag_schema, data_schema = src.output_schema()
@@ -438,7 +438,7 @@ class TestAsyncOrchestratorTerminalNode:
             data_schema=data_schema,
             bound_source=src,
         )
-        G = nx.DiGraph()
+        G: OrcaDAG = OrcaDAG()
         G.add_node(node)
 
         orch = AsyncPipelineOrchestrator()

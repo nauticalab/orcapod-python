@@ -233,7 +233,7 @@ class TestCompileMutatesNodes:
         result = job.run()
 
         # After run, nodes["adder"] is the exec node in the returned result
-        exec_node = result.pipeline.nodes["adder"]
+        exec_node = result.nodes["adder"]
         assert isinstance(exec_node, FunctionJobNode)
         assert exec_node._pipeline_database is not None
 
@@ -245,7 +245,7 @@ class TestCompileMutatesNodes:
             Join()(src_a, src_b, label="joiner")
         result = job.run()
 
-        exec_node = result.pipeline.nodes["joiner"]
+        exec_node = result.nodes["joiner"]
         assert isinstance(exec_node, OperatorJobNode)
         assert exec_node._pipeline_database is not None
 
@@ -267,7 +267,7 @@ class TestFunctionDatabaseHandling:
             pod(joined, label="adder")
         result = job.run()
 
-        exec_node = result.pipeline.nodes["adder"]
+        exec_node = result.nodes["adder"]
         assert isinstance(exec_node, FunctionJobNode)
         # Verify the exec node has databases attached
         assert exec_node._pipeline_database is not None
@@ -368,7 +368,7 @@ class TestAutoCompileAndRun:
         result = job.run()
 
         # After run, function node should have records (in the returned result job)
-        node = result.pipeline.nodes["adder"]
+        node = result.nodes["adder"]
         records = node.get_all_records()
         assert records is not None
         assert records.num_rows == 2  # two input rows (a, b)
@@ -415,11 +415,11 @@ class TestEndToEnd:
 
         result = job.run()
 
-        fn_records = result.pipeline.nodes["adder"].get_all_records()
+        fn_records = result.nodes["adder"].get_all_records()
         assert fn_records is not None
         assert fn_records.num_rows == 2
 
-        table = result.pipeline.nodes["adder"].as_table()
+        table = result.nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]
 
@@ -442,7 +442,7 @@ class TestHashChainDetaching:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
         result = job.run()
-        fn_node = result.pipeline.nodes["adder"]
+        fn_node = result.nodes["adder"]
         derived = fn_node.as_source()
         # DerivedSource uses RootSource hash (schema-only), not topology hash
         assert derived.pipeline_hash() != fn_node.pipeline_hash()
@@ -457,7 +457,7 @@ class TestHashChainDetaching:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
         result = job.run()
-        fn_node = result.pipeline.nodes["adder"]
+        fn_node = result.nodes["adder"]
         derived = fn_node.as_source()
         assert derived.content_hash() != fn_node.content_hash()
 
@@ -471,7 +471,7 @@ class TestHashChainDetaching:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
         result = job.run()
-        fn_node = result.pipeline.nodes["adder"]
+        fn_node = result.nodes["adder"]
         derived1 = fn_node.as_source()
         derived2 = fn_node.as_source()
         assert derived1.pipeline_hash() == derived2.pipeline_hash()
@@ -605,7 +605,7 @@ class TestCompileDoesNotTriggerExecution:
         assert not isinstance(pre_run_node, FunctionJobNode)
         # Running should work correctly
         result = job.run()
-        table = result.pipeline.nodes["adder"].as_table()
+        table = result.nodes["adder"].as_table()
         assert table.num_rows == 2
 
 
@@ -671,7 +671,7 @@ class TestSourceNodeNoCaching:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
         result = job.run()
-        records = result.pipeline.nodes["adder"].get_all_records()
+        records = result.nodes["adder"].get_all_records()
         assert records is not None
         assert records.num_rows == 2
         source_nodes = [
@@ -694,7 +694,7 @@ class TestSourceNodeNoCaching:
             joined = Join()(cached_a, cached_b)
             pod(joined, label="adder")
         result = job.run()
-        records = result.pipeline.nodes["adder"].get_all_records()
+        records = result.nodes["adder"].get_all_records()
         assert records is not None
         assert records.num_rows == 2
 

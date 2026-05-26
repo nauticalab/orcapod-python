@@ -51,7 +51,7 @@ class TestFunctionNodeGetAllRecordsNullability:
 
         result_job = job.run()
 
-        fn_nodes = _get_function_nodes(result_job.pipeline)
+        fn_nodes = _get_function_nodes(result_job)
         assert len(fn_nodes) == 1, "Expected exactly one FunctionNode"
         fn_node = fn_nodes[0]
 
@@ -86,7 +86,7 @@ class TestFunctionNodeGetAllRecordsNullability:
 
         result_job = job.run()
 
-        fn_nodes = _get_function_nodes(result_job.pipeline)
+        fn_nodes = _get_function_nodes(result_job)
         fn_node = fn_nodes[0]
 
         table = fn_node.get_all_records()
@@ -128,7 +128,7 @@ class TestFunctionNodeIterDatasNullability:
 
         result_job = job.run()
 
-        fn_nodes = _get_function_nodes(result_job.pipeline)
+        fn_nodes = _get_function_nodes(result_job)
         fn_node = fn_nodes[0]
 
         # Force a DB-backed iteration by going through _load_cached_entries

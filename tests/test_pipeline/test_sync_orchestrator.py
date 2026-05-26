@@ -168,12 +168,12 @@ class TestSyncOrchestratorUnknownNodeType:
     """Unknown node types raise TypeError."""
 
     def test_raises_on_unknown_node_type(self):
-        import networkx as nx
+        from orcapod.pipeline.dag import OrcaDAG
 
         class FakeNode:
             node_type = "unknown"
 
-        G = nx.DiGraph()
+        G: OrcaDAG = OrcaDAG()
         G.add_node(FakeNode())
 
         orch = SyncPipelineOrchestrator()

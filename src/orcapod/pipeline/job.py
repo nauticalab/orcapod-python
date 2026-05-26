@@ -10,9 +10,9 @@ from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.nodes.source_node import SourceJobNode
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
 from orcapod.pipeline.base import AbstractPipelineBase
+from orcapod.pipeline.dag import OrcaDAG
 from orcapod.protocols import core_protocols as cp
 from orcapod.types import CacheMode
-from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     from orcapod.core.nodes import FunctionNode, GraphNode, OperatorNode
@@ -21,8 +21,6 @@ if TYPE_CHECKING:
     from orcapod.pipeline.graph import Pipeline
     from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
     from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
-else:
-    nx = LazyModule("networkx")
 
 logger = logging.getLogger(__name__)
 
@@ -647,186 +645,6 @@ class PipelineJob(AbstractPipelineBase):
         return True
 
     # ------------------------------------------------------------------
-    # build_execution_graph (public) / _build_execution_graph (impl)
-    # ------------------------------------------------------------------
-
-    def build_execution_graph(self) -> "tuple[Any, list[str], Pipeline]":  # Any = nx.DiGraph
-        """Public entry point for building a fresh execution-ready graph.
-
-        Builds a fresh execution graph with concrete sources substituted for
-        bound SourceSpecs. Suitable for orchestrator-driven execution patterns
-        where callers need direct access to the graph.
-
-        Returns:
-            Tuple of ``(exec_graph, unresolved_spec_names, exec_pipeline)``.
-
-        Raises:
-            ValueError: If ``self.store`` is ``None``.
-            RuntimeError: If no compiled pipeline is available.
-        """
-        return self._build_execution_graph()
-
-    def _build_execution_graph(self) -> "tuple[Any, list[str], Pipeline]":  # Any = nx.DiGraph
-        """Build a fresh execution-ready graph with concrete sources substituted.
-
-        Creates new SourceNode/FunctionNode/OperatorNode objects — does NOT
-        mutate the existing node objects in ``pipeline._persistent_node_map``.
-
-        Note:
-            Updates the cloned ``exec_pipeline._nodes`` with the fresh exec nodes
-            (keyed by label) so that the returned pipeline's ``nodes``
-            returns execution-ready nodes after a run. The original
-            ``self.compiled_pipeline`` is never mutated.
-
-        Returns:
-            Tuple of (exec_graph, unresolved_spec_names, exec_pipeline).
-
-        Raises:
-            ValueError: If ``self.store`` is ``None``.
-            RuntimeError: If no compiled pipeline is available.
-        """
-        import networkx as nx
-        from orcapod.core.nodes import FunctionNode, OperatorNode
-        from orcapod.core.nodes.function_node import FunctionJobNode
-        from orcapod.core.nodes.operator_node import OperatorJobNode
-        from orcapod.core.nodes.source_node import SourceJobNode, SourceNode
-        from orcapod.core.executors.local import LocalPythonFunctionExecutor
-
-        pipeline = self.compiled_pipeline  # raises RuntimeError("No compiled pipeline...") if not compiled
-
-        store = self._store
-        if store is None:
-            raise ValueError(
-                "PipelineJob.run() requires a store. "
-                "Call job.bind(store=db) before run()."
-            )
-
-        # Clone pipeline so exec-node label mutations don't affect the original
-        exec_pipeline = pipeline._clone_for_execution()
-
-        pipeline_db = store.at(*pipeline.name)
-        result_db = pipeline_db.at("_result")
-
-        # Build topological graph from hash-based edges
-        G: "nx.DiGraph" = nx.DiGraph()
-        for edge in pipeline._graph_edges:
-            G.add_edge(*edge)
-        # Also add isolated nodes that might not appear in edges
-        for node_hash in list(pipeline._node_lut.keys()) + list(pipeline._upstreams.keys()):
-            if node_hash not in G:
-                G.add_node(node_hash)
-
-        # Build reverse lookup: node object id → label in pipeline._nodes
-        node_to_label: dict[int, str] = {
-            id(node): label for label, node in pipeline._nodes.items()
-        }
-
-        exec_node_map: dict[str, "Any"] = {}
-        excluded_hashes: set[str] = set()
-        unresolved_specs: list[str] = []
-
-        for node_hash in nx.topological_sort(G):
-            if node_hash in excluded_hashes:
-                continue
-
-            if node_hash not in pipeline._node_lut:
-                # Leaf stream — must be in _upstreams
-                upstream = pipeline._upstreams.get(node_hash)
-                if upstream is None:
-                    continue
-                if isinstance(upstream, SourceNode):
-                    # _sources_by_hash is keyed by the _persistent_node_map hash,
-                    # which is always unique even when multiple sources share a name.
-                    if node_hash in self._sources_by_hash:
-                        # Bound — create a SourceJobNode with the concrete source.
-                        concrete = self._sources_by_hash[node_hash]
-                        exec_job_node = SourceJobNode(
-                            name=upstream.name,
-                            tag_schema=upstream.tag_schema,
-                            data_schema=upstream.data_schema,
-                            bound_source=concrete,
-                        )
-                        exec_node_map[node_hash] = exec_job_node
-                    else:
-                        # Unbound — exclude this branch
-                        excluded_hashes.add(node_hash)
-                        if upstream.name not in unresolved_specs:
-                            unresolved_specs.append(upstream.name)
-                else:
-                    # Raw non-SourceNode stream (shouldn't happen in new design,
-                    # but handle gracefully for robustness).
-                    exec_node_map[node_hash] = upstream
-            else:
-                template = pipeline._node_lut[node_hash]
-                preds = list(G.predecessors(node_hash))
-
-                if any(p in excluded_hashes for p in preds):
-                    excluded_hashes.add(node_hash)
-                    continue
-
-                if isinstance(template, FunctionNode):
-                    if not preds:
-                        excluded_hashes.add(node_hash)
-                        continue
-                    input_node = exec_node_map[preds[0]]
-                    new_fn = FunctionJobNode(
-                        function_pod=template._function_pod,
-                        input_stream=input_node,
-                        label=template._label,
-                    )
-                    new_fn.attach_databases(
-                        pipeline_database=pipeline_db,
-                        result_database=result_db,
-                    )
-                    if template.executor is not None:
-                        new_fn.executor = template.executor
-                    else:
-                        new_fn.executor = LocalPythonFunctionExecutor()
-                    exec_node_map[node_hash] = new_fn
-
-                elif isinstance(template, OperatorNode):
-                    missing = [p for p in preds if p not in exec_node_map]
-                    if missing:
-                        raise RuntimeError(
-                            f"OperatorNode predecessor missing from exec_node_map: {missing}"
-                        )
-                    upstream_nodes = tuple(exec_node_map[p] for p in preds)
-                    op_cache_mode = getattr(template, "_cache_mode", None) or CacheMode.OFF
-                    new_op = OperatorJobNode(
-                        operator=template._operator,
-                        input_streams=upstream_nodes,
-                        label=template._label,
-                        table_scope=template._table_scope,
-                    )
-                    new_op.attach_databases(
-                        pipeline_database=pipeline_db,
-                        cache_mode=op_cache_mode,
-                    )
-                    exec_node_map[node_hash] = new_op
-
-        # Build execution DiGraph with node objects as vertices
-        exec_graph: "nx.DiGraph" = nx.DiGraph()
-        for up_hash, down_hash in pipeline._graph_edges:
-            if up_hash in exec_node_map and down_hash in exec_node_map:
-                exec_graph.add_edge(exec_node_map[up_hash], exec_node_map[down_hash])
-        for node in exec_node_map.values():
-            if node not in exec_graph:
-                exec_graph.add_node(node)
-
-        # Update exec_pipeline._nodes with fresh exec nodes (keyed by label).
-        for node_hash, node in exec_node_map.items():
-            label = node._label if node._label else None
-            if label is None and node_hash in pipeline._node_lut:
-                template = pipeline._node_lut[node_hash]
-                label = node_to_label.get(id(template))
-            if label is None:
-                label = node.computed_label()
-            if label:
-                exec_pipeline._nodes[label] = node
-
-        return exec_graph, unresolved_specs, exec_pipeline
-
-    # ------------------------------------------------------------------
     # run()
     # ------------------------------------------------------------------
 
@@ -834,74 +652,111 @@ class PipelineJob(AbstractPipelineBase):
         self,
         observer: "ExecutionObserverProtocol | None" = None,
     ) -> "PipelineJob":
-        """Execute the resolvable subgraph.
+        """Execute the resolvable subgraph of this job in place.
 
-        Nodes whose upstream includes an unbound SourceSpec (and all their
+        Nodes whose upstream includes an unbound source (and all their
         dependents) are excluded from execution. Partial execution is a
-        first-class outcome — excluded spec names are recorded in the
-        returned job's ``unresolved_specs``.
+        first-class outcome — ``unbound_sources`` reports which source
+        slots were excluded.
 
-        After a successful run, ``job.pipeline.nodes`` returns the
-        execution-ready nodes with databases attached.
+        After a successful run, ``job.nodes`` returns the execution-ready
+        nodes with populated database caches.
 
         Args:
             observer: Optional execution observer.
 
         Returns:
-            A new ``PipelineJob`` with run metadata populated.
+            ``self`` — the same ``PipelineJob`` instance, with
+            ``_has_run`` and ``_run_id`` set.
 
         Raises:
             ValueError: If no store is set.
-            RuntimeError: If no pipeline has been recorded.
+            RuntimeError: If no pipeline has been compiled.
         """
         import hashlib
         import uuid
 
+        from orcapod.core.nodes.source_node import SourceJobNode
         from orcapod.pipeline.observer import NoOpObserver
         from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
 
+        if not self._compiled:
+            raise RuntimeError(
+                "PipelineJob has no compiled pipeline. "
+                "Record invocations inside a 'with job:' block first."
+            )
+        if self._store is None:
+            raise ValueError(
+                "PipelineJob.run() requires a store. "
+                "Call job.bind(store=db) before run()."
+            )
+
+        # --- Build hash-keyed OrcaDAG for topological ordering + exclusion ---
+        hash_dag: OrcaDAG[str] = OrcaDAG()
+        for u, v in self._graph_edges:
+            hash_dag.add_edge(u, v)
+        for node_hash in self._persistent_node_map:
+            if node_hash not in hash_dag:
+                hash_dag.add_node(node_hash)
+
+        # Walk topologically; exclude unbound sources and all their dependents.
+        excluded_hashes: set[str] = set()
+        for node_hash in hash_dag.topological_sort():
+            if node_hash not in self._persistent_node_map:
+                continue
+            node = self._persistent_node_map[node_hash]
+            if isinstance(node, SourceJobNode) and node.bound_source is None:
+                excluded_hashes.add(node_hash)
+            elif any(p in excluded_hashes for p in hash_dag.predecessors(node_hash)):
+                excluded_hashes.add(node_hash)
+
+        # --- Build execution OrcaDAG from existing node objects (no cloning) ---
+        exec_dag: OrcaDAG = OrcaDAG()
+        for node_hash, node in self._persistent_node_map.items():
+            if node_hash not in excluded_hashes:
+                exec_dag.add_node(node)
+        for u_hash, v_hash in self._graph_edges:
+            if (
+                u_hash not in excluded_hashes
+                and v_hash not in excluded_hashes
+                and u_hash in self._persistent_node_map
+                and v_hash in self._persistent_node_map
+            ):
+                exec_dag.add_edge(
+                    self._persistent_node_map[u_hash],
+                    self._persistent_node_map[v_hash],
+                )
+
+        # --- Execute ---
+        effective_observer = observer or NoOpObserver()
         run_id = uuid.uuid4().hex[:16]
 
-        exec_graph, unresolved_specs, exec_pipeline = self._build_execution_graph()
-
-        effective_observer = observer or NoOpObserver()
-
-        # Compute snapshot hash for run URI using only the leaf (sink) nodes.
+        # Snapshot hash: SHA-256 of sink-node content hashes for the run URI.
         leaf_hashes = sorted(
-            n.content_hash().to_string()
-            for n in exec_graph.nodes()
-            if exec_graph.out_degree(n) == 0 and hasattr(n, "content_hash")
+            node.content_hash().to_string()
+            for node in exec_dag.nodes()
+            if not exec_dag.successors(node) and hasattr(node, "content_hash")
         )
         snapshot_hash = hashlib.sha256("\n".join(leaf_hashes).encode()).hexdigest()[:16]
         pipeline_uri = "/".join(self._name) + "@" + snapshot_hash
 
         SyncPipelineOrchestrator().run(
-            exec_graph,
+            exec_dag,
             observer=effective_observer,
             pipeline_uri=pipeline_uri,
         )
 
-        # Flush databases
-        store = self._store
-        if store is not None:
-            pipeline_db = store.at(*self._name)
-            result_db = pipeline_db.at("_result")
-            pipeline_db.flush()
-            result_db.flush()
+        # Flush databases.
+        pipeline_db = self._store.at(*self._name)
+        result_db = pipeline_db.at("_result")
+        pipeline_db.flush()
+        result_db.flush()
 
-        # Return new job with exec_pipeline (contains exec nodes with databases).
-        result = PipelineJob(
-            name=self._name,
-            store=self._store,
-            execution_context=self._execution_context,
-        )
-        result._compiled_pipeline = exec_pipeline
-        result._sources = dict(self._sources)
-        result._sources_by_hash = dict(self._sources_by_hash)
-        result._unresolved_specs = unresolved_specs
-        result._has_run = True
-        result._run_id = run_id
-        return result
+        # Mutate self in place.
+        self._has_run = True
+        self._run_id = run_id
+
+        return self
 
     def __repr__(self) -> str:
         n_sources = len(self._sources)

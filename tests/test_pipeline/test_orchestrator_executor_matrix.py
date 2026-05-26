@@ -594,7 +594,7 @@ class TestSyncOrchestratorSyncFunctionPipelineJob:
         completed = job.run()
         assert completed._has_run is True
 
-        fn_node = completed.pipeline.nodes.get("node")
+        fn_node = completed.nodes.get("node")
         assert fn_node is not None
         records = fn_node.get_all_records()
         assert records is not None
