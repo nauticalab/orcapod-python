@@ -206,6 +206,55 @@ def _resolve_column_type_lookup(
     return {ci.name: ci.arrow_type for ci in connector.get_column_info(table_name)}
 
 
+async def _async_resolve_column_type_lookup(
+    query: str,
+    connector: "PostgreSQLConnector",
+) -> dict[str, pa.DataType]:
+    """Async version of ``_resolve_column_type_lookup``.
+
+    Parses the FROM clause of query to find the source table, then returns a
+    column-name → Arrow-type dict by calling ``async_get_column_info``.
+
+    Returns an empty dict if no single unambiguous table can be identified,
+    causing ``async_iter_batches`` to fall back to ``pa.large_string()`` for
+    all columns.
+
+    Args:
+        query: SQL query string.
+        connector: The connector to call ``async_get_column_info`` on.
+
+    Returns:
+        Dict mapping column name to Arrow DataType.
+    """
+    if re.search(r"\bJOIN\b", query, re.IGNORECASE):
+        return {}
+
+    from_pattern = re.compile(
+        r'\bFROM\b\s+(?:"([^"]+)"|(\w+))',
+        re.IGNORECASE,
+    )
+    from_matches = list(from_pattern.finditer(query))
+    if len(from_matches) != 1:
+        return {}
+
+    match = from_matches[0]
+    table_name = match.group(1) or match.group(2)
+
+    from_tail = query[match.end():]
+    clause_boundary = re.search(
+        r"\b(WHERE|GROUP\s+BY|ORDER\s+BY|LIMIT|OFFSET|HAVING|UNION|EXCEPT|INTERSECT)\b",
+        from_tail,
+        re.IGNORECASE,
+    )
+    if clause_boundary:
+        from_tail = from_tail[: clause_boundary.start()]
+
+    if "," in from_tail:
+        return {}
+
+    return {ci.name: ci.arrow_type for ci in await connector.async_get_column_info(table_name)}
+
+
 # ---------------------------------------------------------------------------
 # PostgreSQLConnector
 # ---------------------------------------------------------------------------
@@ -584,11 +633,10 @@ class PostgreSQLConnector:
 
     # ── Async read ────────────────────────────────────────────────────────────
 
-    # Note: declared as plain `def` (not `async def`) because the concrete
-    # implementation will be an async generator function (`async def … yield`).
-    # A Protocol method declared as `def` allows both async generators and
-    # coroutines returning AsyncIterator to satisfy the contract structurally.
-    def async_iter_batches(
+    # Note: declared as plain `def` (not `async def`) but the generator body uses
+    # `yield`, making it an async generator. The Protocol declares this as `def`
+    # returning `AsyncIterator` — see async_db_connector_protocol.py for rationale.
+    async def async_iter_batches(
         self,
         query: str,
         params: Any = None,
@@ -596,13 +644,59 @@ class PostgreSQLConnector:
     ) -> AsyncIterator[pa.RecordBatch]:
         """Execute a query and yield results as Arrow RecordBatches.
 
+        Opens a dedicated ``AsyncConnection`` per call so that the server-side
+        cursor portal is isolated from operations on the shared ``_async_conn``.
+        The dedicated connection is closed in the finally block regardless of
+        how the generator is consumed or abandoned.
+
         Args:
             query: SQL query string. Table names should be double-quoted
-                (``SELECT * FROM "my_table"``).
+                (``SELECT * FROM "my_table"``); all connectors must support
+                ANSI-standard double-quoted identifiers.
             params: Optional query parameters.
             batch_size: Maximum rows per yielded batch.
+
+        Raises:
+            RuntimeError: If the async context manager has not been entered.
         """
-        raise NotImplementedError("async_iter_batches not yet implemented")
+        import pyarrow as _pa
+
+        self._require_async_open()  # guard: raise if context manager not entered
+
+        with self._lock:
+            self._require_open()  # guard: raise if sync connector is closed
+            dsn = self._dsn
+
+        read_conn = await psycopg.AsyncConnection.connect(dsn, autocommit=False)
+        cursor_name = f"orcapod_{next(self._cursor_seq)}"
+        cur = read_conn.cursor(name=cursor_name)
+
+        try:
+            await cur.execute(query, params)
+            if cur.description is None:
+                return
+            col_names = [d.name for d in cur.description]
+            type_lookup = await _async_resolve_column_type_lookup(query, self)
+            arrow_types = [type_lookup.get(n, _pa.large_string()) for n in col_names]
+            schema = _pa.schema(
+                [_pa.field(n, t) for n, t in zip(col_names, arrow_types)]
+            )
+            rows = await cur.fetchmany(batch_size)
+
+            while rows:
+                arrays = [
+                    _pa.array([r[i] for r in rows], type=t)
+                    for i, t in enumerate(arrow_types)
+                ]
+                yield _pa.RecordBatch.from_arrays(arrays, schema=schema)
+                rows = await cur.fetchmany(batch_size)
+        finally:
+            await cur.close()
+            try:
+                await read_conn.rollback()
+            except Exception:
+                pass
+            await read_conn.close()
 
     # ── Serialization ─────────────────────────────────────────────────────────
 
