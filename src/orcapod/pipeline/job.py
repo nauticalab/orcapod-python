@@ -608,6 +608,12 @@ class PipelineJob(AbstractPipelineBase):
     def is_runnable(self, node_label: str) -> bool:
         """Return ``True`` if all upstream inputs of *node_label* are resolved.
 
+        Uses hash-based traversal of ``_hash_graph`` combined with
+        ``_persistent_node_map`` to check whether every upstream source slot
+        is bound.  This avoids relying on the object-identity graph
+        (``_node_graph``), which breaks after ``bind()`` because
+        ``SourceJobNode.__hash__()`` changes when ``bound_source`` is mutated.
+
         Args:
             node_label: Label of the node to check.
 
@@ -616,16 +622,33 @@ class PipelineJob(AbstractPipelineBase):
         """
         from orcapod.core.nodes.source_node import SourceJobNode
 
-        if not self._compiled or self._node_graph is None:
+        if not self._compiled:
             return False
 
         target = self._nodes.get(node_label)
         if target is None:
             return False
 
+        # Build a reverse lookup: node object id → hash key.
+        # _persistent_node_map covers SourceJobNode slots (all compiled paths)
+        # and all node types for directly-compiled jobs.
+        # _node_lut covers non-source nodes for loaded jobs, where
+        # _persistent_node_map only holds SourceJobNodes.
+        node_id_to_hash: dict[int, str] = {}
+        for h, node in self._node_lut.items():
+            node_id_to_hash[id(node)] = h
+        for h, node in self._persistent_node_map.items():
+            # _persistent_node_map wins on collision (it contains live job nodes)
+            node_id_to_hash[id(node)] = h
+
+        target_hash = node_id_to_hash.get(id(target))
+        if target_hash is None:
+            return False
+
         import networkx as nx
 
-        for node in nx.ancestors(self._node_graph, target) | {target}:
+        for h in nx.ancestors(self._hash_graph, target_hash) | {target_hash}:
+            node = self._persistent_node_map.get(h)
             if isinstance(node, SourceJobNode) and node.bound_source is None:
                 return False
         return True
@@ -1089,12 +1112,40 @@ class PipelineJob(AbstractPipelineBase):
         job._graph_edges = list(pipeline._graph_edges)
         job._hash_graph = pipeline._hash_graph.copy()
 
-        # Build _sources and _sources_by_hash from reconstructed sources.
-        from orcapod.core.nodes.source_node import SourceNode as _SourceNode
+        # Populate _persistent_node_map, _sources, and _sources_by_hash from the
+        # blueprint pipeline.
+        #
+        # _persistent_node_map must contain SourceJobNode objects (keyed by the
+        # same hash keys used in pipeline._upstreams) so that bind() can locate
+        # source slots and update them in-place.  Without this, bind() sees an
+        # empty _persistent_node_map and raises "no matching source slot" for
+        # every key.
+        #
+        # is_runnable() uses hash-based traversal via _hash_graph +
+        # _persistent_node_map rather than _node_graph, so it is robust to the
+        # mutable content_hash() of SourceJobNode after bind() and does not
+        # require SourceJobNode objects to appear in _node_graph.  We copy
+        # pipeline._node_graph directly here so graph-introspection callers
+        # (e.g. renderers) still have a valid node-object graph.
+        from orcapod.core.nodes.source_node import SourceJobNode, SourceNode as _SourceNode
+
         job._sources = dict(sources)
         for h, source_node in pipeline._upstreams.items():
-            if isinstance(source_node, _SourceNode) and source_node.name in sources:
-                job._sources_by_hash[h] = sources[source_node.name]
+            if isinstance(source_node, _SourceNode):
+                sjn = SourceJobNode(
+                    name=source_node.name,
+                    tag_schema=source_node.tag_schema,
+                    data_schema=source_node.data_schema,
+                    bound_source=sources.get(source_node.name),
+                )
+                job._persistent_node_map[h] = sjn
+                if source_node.name in sources:
+                    job._sources_by_hash[h] = sources[source_node.name]
+
+        # Copy pipeline._node_graph for graph-introspection use (renderers, etc.).
+        # Nodes here are SourceNode / FunctionNode / OperatorNode from the blueprint;
+        # is_runnable() does not use this graph and is unaffected.
+        job._node_graph = pipeline._node_graph
 
         if effective_store is not None:
             job._distribute_databases()

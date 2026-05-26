@@ -678,6 +678,51 @@ class TestPipelineJobSerialization:
         loaded = PipelineJob.load(str(path), store=store)
         assert "unbound_b" in loaded.unresolved_specs
 
+    def test_load_bind_works_after_load(self, store, tmp_path):
+        """bind() must work on a loaded job — _persistent_node_map is populated."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
+        job = PipelineJob(store=store)
+        with job:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        path = tmp_path / "job.json"
+        job.save(str(path))
+
+        # Load without sources so bind() is needed.
+        loaded = PipelineJob.load(str(path))
+
+        # bind() must not raise "no matching source slot".
+        loaded.bind(sources={src_a.source_id: src_a, src_b.source_id: src_b}, store=store)
+
+        assert loaded._sources[src_a.source_id] is src_a
+        assert loaded._sources[src_b.source_id] is src_b
+
+    def test_load_is_runnable_after_bind(self, store, tmp_path):
+        """is_runnable() returns True after load() + bind() populates all slots."""
+        src_a, src_b = _make_two_sources()
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
+        job = PipelineJob(store=store)
+        with job:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        path = tmp_path / "job.json"
+        job.save(str(path))
+
+        loaded = PipelineJob.load(str(path))
+
+        # Before binding, is_runnable() should return False.
+        assert loaded.is_runnable("adder") is False
+
+        loaded.bind(sources={src_a.source_id: src_a, src_b.source_id: src_b}, store=store)
+
+        # After binding all sources, is_runnable() should return True.
+        assert loaded.is_runnable("adder") is True
+
 
 # ---------------------------------------------------------------------------
 # Tests: PipelineJob.from_pipeline()
@@ -816,6 +861,28 @@ class TestFromPipeline:
         """from_pipeline returns a PipelineJob with the same topology."""
         job = PipelineJob.from_pipeline(compiled_pipeline, store=db)
         assert isinstance(job, PipelineJob)
+
+    def test_from_pipeline_raises_for_stub_nodes(self, db, tmp_path):
+        """from_pipeline() raises RuntimeError if the pipeline has stub nodes (loaded without live pods)."""
+        from orcapod.pipeline.graph import Pipeline
+
+        src_a, src_b = _make_two_sources()
+        pf = PythonDataFunction(add_values, output_keys="total")
+        pod = FunctionPod(data_function=pf)
+
+        pipeline = Pipeline(name="stub_test")
+        with pipeline:
+            joined = Join()(src_a, src_b)
+            pod(joined, label="adder")
+
+        path = tmp_path / "pipeline.json"
+        pipeline.save(str(path))
+
+        # Load the pipeline without live pods — FunctionNode._function_pod will be None.
+        loaded_pipeline = Pipeline.load(str(path))
+
+        with pytest.raises(RuntimeError, match="function_pod is None"):
+            PipelineJob.from_pipeline(loaded_pipeline, store=db)
 
     def test_from_pipeline_with_sources_binds_them(self, compiled_pipeline, db, source_a):
         """Sources passed to from_pipeline are immediately bound."""
