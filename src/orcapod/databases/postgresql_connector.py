@@ -16,7 +16,7 @@ import itertools
 import logging
 import re
 import threading
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from typing import TYPE_CHECKING, Any
 
 from orcapod.types import ColumnInfo
@@ -231,6 +231,7 @@ class PostgreSQLConnector:
         self._conn: Any = psycopg.connect(dsn, autocommit=False)
         self._lock = threading.RLock()  # RLock required: iter_batches → _resolve_column_type_lookup → get_column_info re-enters the lock
         self._cursor_seq = itertools.count()
+        self._async_conn: Any = None  # psycopg.AsyncConnection; set by __aenter__
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -239,6 +240,19 @@ class PostgreSQLConnector:
         if self._conn is None:
             raise RuntimeError("PostgreSQLConnector is closed")
         return self._conn
+
+    def _require_async_open(self) -> Any:
+        """Return the open async connection or raise RuntimeError if not entered.
+
+        Raises:
+            RuntimeError: If ``__aenter__`` has not been called.
+        """
+        if self._async_conn is None:
+            raise RuntimeError(
+                "PostgreSQLConnector: enter the async context manager before "
+                "calling async methods"
+            )
+        return self._async_conn
 
     @staticmethod
     def _validate_table_name(table_name: str) -> None:
@@ -467,6 +481,76 @@ class PostgreSQLConnector:
 
     def __exit__(self, *args: Any) -> None:
         self.close()
+
+    # ── Async lifecycle ───────────────────────────────────────────────────────
+
+    async def __aenter__(self) -> PostgreSQLConnector:
+        """Open an async psycopg3 connection and return self.
+
+        The async connection is used by ``async_get_table_names``,
+        ``async_get_pk_columns``, and ``async_get_column_info``.
+        ``async_iter_batches`` opens its own dedicated connection per call.
+        """
+        self._async_conn = await psycopg.AsyncConnection.connect(
+            self._dsn, autocommit=False
+        )
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        await self.async_close()
+
+    async def async_close(self) -> None:
+        """Close async and sync connections.
+
+        Implementations must be idempotent — calling this multiple times must
+        not raise.
+        """
+        if self._async_conn is not None:
+            await self._async_conn.close()
+            self._async_conn = None
+        self.close()
+
+    # ── Async schema introspection ────────────────────────────────────────────
+
+    async def async_get_table_names(self) -> list[str]:
+        """Return all user table names in this database (sorted, excludes views).
+
+        Requires the async context manager to have been entered.
+        """
+        raise NotImplementedError("async_get_table_names not yet implemented")
+
+    async def async_get_pk_columns(self, table_name: str) -> list[str]:
+        """Return primary-key column names for a table, in key-sequence order.
+
+        Requires the async context manager to have been entered.
+        Returns an empty list if the table has no primary key.
+        """
+        raise NotImplementedError("async_get_pk_columns not yet implemented")
+
+    async def async_get_column_info(self, table_name: str) -> list[ColumnInfo]:
+        """Return column metadata for a table, with types mapped to Arrow.
+
+        Requires the async context manager to have been entered.
+        """
+        raise NotImplementedError("async_get_column_info not yet implemented")
+
+    # ── Async read ────────────────────────────────────────────────────────────
+
+    def async_iter_batches(
+        self,
+        query: str,
+        params: Any = None,
+        batch_size: int = 1000,
+    ) -> AsyncIterator[pa.RecordBatch]:
+        """Execute a query and yield results as Arrow RecordBatches.
+
+        Args:
+            query: SQL query string. Table names should be double-quoted
+                (``SELECT * FROM "my_table"``).
+            params: Optional query parameters.
+            batch_size: Maximum rows per yielded batch.
+        """
+        raise NotImplementedError("async_iter_batches not yet implemented")
 
     # ── Serialization ─────────────────────────────────────────────────────────
 

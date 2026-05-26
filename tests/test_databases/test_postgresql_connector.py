@@ -2,7 +2,7 @@
 """Unit tests for PostgreSQLConnector — no live database required."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pyarrow as pa
 import pytest
@@ -12,6 +12,7 @@ from orcapod.databases.postgresql_connector import (
     _arrow_type_to_pg_sql,
     _pg_type_to_arrow,
 )
+from orcapod.protocols.async_db_connector_protocol import AsyncDBConnectorProtocol
 from orcapod.protocols.db_connector_protocol import DBConnectorProtocol
 
 
@@ -258,4 +259,62 @@ class TestSchemaIntrospectionUnit:
         connector._conn.cursor.return_value = mock_cursor
         result = connector.get_pk_columns("my_table")
         assert result == []
+        connector._conn = None
+
+
+class TestAsyncLifecycle:
+    """Unit tests for PostgreSQLConnector async lifecycle methods."""
+
+    def _make_connector(self) -> PostgreSQLConnector:
+        with patch("psycopg.connect") as mock_connect:
+            mock_connect.return_value = MagicMock()
+            return PostgreSQLConnector("postgresql://localhost/test")
+
+    def test_isinstance_async_protocol(self) -> None:
+        connector = self._make_connector()
+        assert isinstance(connector, AsyncDBConnectorProtocol)
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_aenter_sets_async_conn(self) -> None:
+        connector = self._make_connector()
+        mock_async_conn = AsyncMock()
+        with patch("psycopg.AsyncConnection.connect", new_callable=AsyncMock,
+                   return_value=mock_async_conn):
+            result = await connector.__aenter__()
+        assert result is connector
+        assert connector._async_conn is mock_async_conn
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_aexit_closes_async_and_sync(self) -> None:
+        connector = self._make_connector()
+        mock_async_conn = AsyncMock()
+        connector._async_conn = mock_async_conn
+        await connector.__aexit__(None, None, None)
+        mock_async_conn.close.assert_called_once()
+        assert connector._async_conn is None
+        assert connector._conn is None  # sync also closed
+
+    @pytest.mark.asyncio
+    async def test_async_close_idempotent(self) -> None:
+        connector = self._make_connector()
+        mock_async_conn = AsyncMock()
+        connector._async_conn = mock_async_conn
+        await connector.async_close()
+        await connector.async_close()  # must not raise
+        mock_async_conn.close.assert_called_once()
+
+    def test_require_async_open_raises_before_aenter(self) -> None:
+        connector = self._make_connector()
+        with pytest.raises(RuntimeError, match="async context manager"):
+            connector._require_async_open()
+        connector._conn = None
+
+    def test_require_async_open_returns_conn_after_aenter(self) -> None:
+        connector = self._make_connector()
+        mock_async_conn = MagicMock()
+        connector._async_conn = mock_async_conn
+        result = connector._require_async_open()
+        assert result is mock_async_conn
         connector._conn = None
