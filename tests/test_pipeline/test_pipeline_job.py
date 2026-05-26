@@ -455,8 +455,6 @@ class TestPipelineJobRun:
         assert result is job
         assert job._has_run is True
         assert job._run_id is not None
-        # The original job's pipeline remains unmodified (no exec nodes injected)
-        assert job._has_run is False
 
     def test_run_does_not_mutate_blueprint_nodes(self, store):
         """build_execution_graph() must not mutate the original pipeline's _nodes.
