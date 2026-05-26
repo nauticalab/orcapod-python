@@ -318,3 +318,93 @@ class TestAsyncLifecycle:
         result = connector._require_async_open()
         assert result is mock_async_conn
         connector._conn = None
+
+
+class TestAsyncSchemaIntrospectionUnit:
+    """Unit tests for async schema introspection — mocked cursor."""
+
+    def _make_connector_with_async_conn(self) -> PostgreSQLConnector:
+        with patch("psycopg.connect") as mock_connect:
+            mock_connect.return_value = MagicMock()
+            connector = PostgreSQLConnector("postgresql://localhost/test")
+        connector._async_conn = AsyncMock()
+        return connector
+
+    def _mock_cursor_returning(self, connector: PostgreSQLConnector,
+                               rows: list) -> AsyncMock:
+        """Wire up connector._async_conn.cursor() to return rows from fetchall."""
+        mock_cursor = AsyncMock()
+        mock_cursor.fetchall.return_value = rows
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_cursor)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+        # cursor() must be a sync call returning an async context manager;
+        # override the AsyncMock attribute with a plain MagicMock so that
+        # conn.cursor() returns mock_cm directly (not a coroutine).
+        connector._async_conn.cursor = MagicMock(return_value=mock_cm)
+        return mock_cursor
+
+    @pytest.mark.asyncio
+    async def test_async_get_table_names(self) -> None:
+        connector = self._make_connector_with_async_conn()
+        self._mock_cursor_returning(connector, [("alpha",), ("beta",)])
+        result = await connector.async_get_table_names()
+        assert result == ["alpha", "beta"]
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_async_get_pk_columns_single(self) -> None:
+        connector = self._make_connector_with_async_conn()
+        self._mock_cursor_returning(connector, [("id",)])
+        result = await connector.async_get_pk_columns("my_table")
+        assert result == ["id"]
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_async_get_pk_columns_empty(self) -> None:
+        connector = self._make_connector_with_async_conn()
+        self._mock_cursor_returning(connector, [])
+        result = await connector.async_get_pk_columns("my_table")
+        assert result == []
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_async_get_pk_columns_raises_on_bad_name(self) -> None:
+        connector = self._make_connector_with_async_conn()
+        with pytest.raises(ValueError, match="double-quote"):
+            await connector.async_get_pk_columns('bad"name')
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_async_get_column_info(self) -> None:
+        connector = self._make_connector_with_async_conn()
+        self._mock_cursor_returning(connector, [
+            ("id", "text", "text", "NO"),
+            ("val", "double precision", "float8", "YES"),
+        ])
+        result = await connector.async_get_column_info("my_table")
+        assert len(result) == 2
+        assert result[0].name == "id"
+        assert result[0].arrow_type == pa.large_string()
+        assert result[0].nullable is False
+        assert result[1].name == "val"
+        assert result[1].arrow_type == pa.float64()
+        assert result[1].nullable is True
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_async_get_column_info_raises_on_bad_name(self) -> None:
+        connector = self._make_connector_with_async_conn()
+        with pytest.raises(ValueError, match="double-quote"):
+            await connector.async_get_column_info('bad"name')
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_schema_methods_raise_without_aenter(self) -> None:
+        with patch("psycopg.connect") as mock_connect:
+            mock_connect.return_value = MagicMock()
+            connector = PostgreSQLConnector("postgresql://localhost/test")
+        # _async_conn is None — all methods should raise
+        with pytest.raises(RuntimeError, match="async context manager"):
+            await connector.async_get_table_names()
+        connector._conn = None
