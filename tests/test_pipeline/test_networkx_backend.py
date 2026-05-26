@@ -1,8 +1,8 @@
 """Tests for NetworkxBackend — the thin networkx.DiGraph adapter.
 
 Verifies that `NetworkxBackend` is behaviourally equivalent to `OrcaDAG` for
-the full `GraphBackend` protocol surface, and that both classes satisfy the
-`GraphBackend` protocol at runtime (via `isinstance` with the
+the full `GraphProtocol` surface, and that both classes satisfy the
+`GraphProtocol` protocol at runtime (via `isinstance` with the
 `@runtime_checkable` decorator).
 """
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from graphlib import CycleError
 
-from orcapod.pipeline.dag import GraphBackend, OrcaDAG
+from orcapod.pipeline.dag import GraphProtocol, OrcaDAG
 from orcapod.pipeline.networkx_backend import NetworkxBackend
 
 
@@ -20,19 +20,19 @@ from orcapod.pipeline.networkx_backend import NetworkxBackend
 # ---------------------------------------------------------------------------
 
 
-class TestGraphBackendProtocol:
+class TestGraphProtocol:
     def test_orca_dag_satisfies_protocol(self) -> None:
         dag: OrcaDAG[str] = OrcaDAG()
-        assert isinstance(dag, GraphBackend)
+        assert isinstance(dag, GraphProtocol)
 
     def test_networkx_backend_satisfies_protocol(self) -> None:
         backend: NetworkxBackend[str] = NetworkxBackend()
-        assert isinstance(backend, GraphBackend)
+        assert isinstance(backend, GraphProtocol)
 
     def test_both_accept_same_call_sites(self) -> None:
-        """Verify both backends can be used interchangeably via GraphBackend."""
+        """Verify both backends can be used interchangeably via GraphProtocol."""
 
-        def populate(g: GraphBackend[str]) -> None:  # type: ignore[type-arg]
+        def populate(g: GraphProtocol[str]) -> None:  # type: ignore[type-arg]
             g.add_edge("a", "b")
             g.add_edge("b", "c")
 
@@ -313,3 +313,26 @@ class TestTopologicalSortDeterministic:
     def test_empty_graph(self) -> None:
         b: NetworkxBackend[str] = NetworkxBackend()
         assert b.topological_sort_deterministic() == []
+
+
+# ---------------------------------------------------------------------------
+# ancestors()
+# ---------------------------------------------------------------------------
+
+
+class TestNetworkxBackendAncestors:
+    def test_ancestors_returns_transitive_predecessors(self):
+        backend = NetworkxBackend()
+        backend.add_edge("a", "b")
+        backend.add_edge("b", "c")
+        assert backend.ancestors("c") == frozenset({"a", "b"})
+        assert backend.ancestors("b") == frozenset({"a"})
+        assert backend.ancestors("a") == frozenset()
+
+    def test_ancestors_handles_diamond(self):
+        backend = NetworkxBackend()
+        backend.add_edge("a", "b")
+        backend.add_edge("a", "c")
+        backend.add_edge("b", "d")
+        backend.add_edge("c", "d")
+        assert backend.ancestors("d") == frozenset({"a", "b", "c"})
