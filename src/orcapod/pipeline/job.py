@@ -588,13 +588,40 @@ class PipelineJob(AbstractPipelineBase):
                 seen.add(node.name)
         return unbound
 
+    @property
+    def unbound_sources(self) -> list[str]:
+        """Names of source slots not yet bound in this job.
+
+        Computed live from ``_persistent_node_map`` — reflects the current
+        binding state at all times (before and after run).
+
+        Returns:
+            List of unbound source slot names, in order of appearance in
+            the pipeline graph. Empty list if the job is not yet compiled.
+        """
+        from orcapod.core.nodes.source_node import SourceJobNode
+
+        if not self._compiled:
+            return []
+        seen: set[str] = set()
+        result: list[str] = []
+        for node in (self._persistent_node_map or {}).values():
+            if (
+                isinstance(node, SourceJobNode)
+                and node.bound_source is None
+                and node.name not in seen
+            ):
+                result.append(node.name)
+                seen.add(node.name)
+        return result
+
     def is_complete(self) -> bool:
         """Return ``True`` when all source nodes are bound and a store is set.
 
         Returns:
             ``True`` if all SourceNode slots are bound and a store is set.
         """
-        return self._store is not None and len(self.unbound_source_nodes()) == 0
+        return self._store is not None and not self.unbound_sources
 
     def is_runnable(self, node_label: str) -> bool:
         """Return ``True`` if all upstream inputs of *node_label* are resolved.
