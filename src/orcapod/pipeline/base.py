@@ -433,12 +433,30 @@ class AbstractPipelineBase(AutoRegisteringContextBasedTracker, ABC):
             if isinstance(node, source_node_cls):
                 source_streams[node.content_hash().to_string()] = node
             elif isinstance(node, fn_node_cls):
+                if node._function_pod is None:
+                    raise RuntimeError(
+                        f"to_invocations() cannot serialise FunctionNode {node_hash!r}: "
+                        "node._function_pod is None. This node was loaded without a live "
+                        "function pod (read-only / stub mode). "
+                        "Use PipelineJob.load() to work with loaded pipelines, or "
+                        "ensure the function pod is available before calling "
+                        "to_invocations() / from_pipeline()."
+                    )
                 inv_by_node_hash[node_hash] = FunctionInvocation(
                     pod=node._function_pod,
                     input_streams=(node.upstreams[0],),
                     label=node._label,
                 )
             else:
+                if node._operator is None:
+                    raise RuntimeError(
+                        f"to_invocations() cannot serialise OperatorNode {node_hash!r}: "
+                        "node._operator is None. This node was loaded without a live "
+                        "operator (read-only / stub mode). "
+                        "Use PipelineJob.load() to work with loaded pipelines, or "
+                        "ensure the operator is available before calling "
+                        "to_invocations() / from_pipeline()."
+                    )
                 inv_by_node_hash[node_hash] = OperatorInvocation(
                     pod=node._operator,
                     input_streams=tuple(node.upstreams),
