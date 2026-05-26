@@ -12,6 +12,7 @@ Example::
 """
 from __future__ import annotations
 
+import asyncio
 import itertools
 import logging
 import re
@@ -562,7 +563,7 @@ class PostgreSQLConnector:
         if self._async_conn is not None:
             await self._async_conn.close()
             self._async_conn = None
-        self.close()
+        await asyncio.to_thread(self.close)
 
     # ── Async schema introspection ────────────────────────────────────────────
 
@@ -662,10 +663,8 @@ class PostgreSQLConnector:
         import pyarrow as _pa
 
         self._require_async_open()  # guard: raise if context manager not entered
-
-        with self._lock:
-            self._require_open()  # guard: raise if sync connector is closed
-            dsn = self._dsn
+        self._require_open()  # guard: raise if sync connector is closed
+        dsn = self._dsn  # immutable after __init__; no lock needed
 
         read_conn = await psycopg.AsyncConnection.connect(dsn, autocommit=False)
         cursor_name = f"orcapod_{next(self._cursor_seq)}"
