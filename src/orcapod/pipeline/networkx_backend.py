@@ -1,4 +1,4 @@
-"""Thin networkx adapter satisfying the GraphBackend protocol.
+"""Thin networkx adapter satisfying the GraphProtocol protocol.
 
 `NetworkxBackend` wraps `networkx.DiGraph` and exposes the same interface as
 `OrcaDAG`, allowing callers to swap implementations via a config flag without
@@ -43,17 +43,17 @@ NodeT = TypeVar("NodeT", bound=Hashable)
 
 
 class NetworkxBackend(Generic[NodeT]):
-    """Thin `networkx.DiGraph` adapter satisfying the `GraphBackend` protocol.
+    """Thin `networkx.DiGraph` adapter satisfying the ``GraphProtocol`` protocol.
 
-    Wraps an internal `nx.DiGraph` and provides the same twelve-method surface
-    as `OrcaDAG`.  Intended for use as a drop-in during migration (ENG-494) and
-    as a debugging aid when you want to inspect the graph with networkx tools
-    (visualisation, path queries, etc.) without changing call sites.
+    Wraps an internal `nx.DiGraph` and provides the same surface as `OrcaDAG`.
+    Intended for use as a drop-in during migration (ENG-494) and as a debugging
+    aid when you want to inspect the graph with networkx tools (visualisation,
+    path queries, etc.) without changing call sites.
 
     All mutation methods (`add_node`, `add_edge`) delegate directly to the
     wrapped `DiGraph`.  Query methods (`successors`, `predecessors`, `in_degree`,
     `node_attrs`) translate between networkx's attribute-dict style and the
-    `GraphBackend` interface.
+    ``GraphProtocol`` interface.
 
     Args:
         NodeT: The node type.  Must be hashable (same constraint as `DiGraph`).
@@ -280,3 +280,17 @@ class NetworkxBackend(Generic[NodeT]):
             raise AssertionError("unreachable")  # pragma: no cover
 
         return ordered
+
+    def ancestors(self, node: NodeT) -> frozenset[NodeT]:
+        """Return all transitive predecessors of *node*.
+
+        Args:
+            node: The node whose ancestors to find.
+
+        Returns:
+            Frozen set of all nodes from which there is a directed path to
+            *node*. Empty if *node* is a source (no incoming edges).
+        """
+        import networkx as nx
+
+        return frozenset(nx.ancestors(self._graph, node))

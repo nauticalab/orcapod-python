@@ -430,3 +430,44 @@ class TestGenericNodeTypes:
         dag.add_edge(2, 3)
         order = dag.topological_sort()
         assert set(order) == {1, 2, 3}
+
+
+# ---------------------------------------------------------------------------
+# ancestors()
+# ---------------------------------------------------------------------------
+
+
+class TestOrcaDAGAncestors:
+    def test_ancestors_of_source_node_is_empty(self):
+        """A source node (no predecessors) has no ancestors."""
+        dag = OrcaDAG()
+        dag.add_node("a")
+        assert dag.ancestors("a") == frozenset()
+
+    def test_ancestors_returns_direct_predecessor(self):
+        dag = OrcaDAG()
+        dag.add_edge("a", "b")
+        assert dag.ancestors("b") == frozenset({"a"})
+
+    def test_ancestors_returns_transitive_predecessors(self):
+        """ancestors() walks all the way back to source nodes."""
+        dag = OrcaDAG()
+        dag.add_edge("a", "b")
+        dag.add_edge("b", "c")
+        assert dag.ancestors("c") == frozenset({"a", "b"})
+        assert dag.ancestors("b") == frozenset({"a"})
+
+    def test_ancestors_handles_diamond(self):
+        """Two paths to same ancestor — no duplicates."""
+        dag = OrcaDAG()
+        dag.add_edge("a", "b")
+        dag.add_edge("a", "c")
+        dag.add_edge("b", "d")
+        dag.add_edge("c", "d")
+        assert dag.ancestors("d") == frozenset({"a", "b", "c"})
+
+    def test_ancestors_raises_for_unknown_node(self):
+        dag = OrcaDAG()
+        dag.add_node("a")
+        with pytest.raises(KeyError):
+            dag.ancestors("z")

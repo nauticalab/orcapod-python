@@ -30,7 +30,7 @@ from typing import (
     runtime_checkable,
 )
 
-__all__ = ["Comparable", "GraphBackend", "OrcaDAG", "CycleError"]
+__all__ = ["Comparable", "GraphProtocol", "OrcaDAG", "CycleError"]
 
 
 class Comparable(Hashable, Protocol):
@@ -56,17 +56,17 @@ ComparableNodeT = TypeVar("ComparableNodeT", bound=Comparable)
 
 
 @runtime_checkable
-class GraphBackend(Protocol[NodeT]):
+class GraphProtocol(Protocol[NodeT]):
     """Structural protocol for DAG backend implementations.
 
-    Both `OrcaDAG` and `NetworkxBackend` satisfy this protocol, enabling
+    Both ``OrcaDAG`` and ``NetworkxBackend`` satisfy this protocol, enabling
     callers to switch graph implementations via a config flag (ENG-494).
 
-    NodeT must be `Hashable`.  The `topological_sort_deterministic` method
+    NodeT must be ``Hashable``.  The ``topological_sort_deterministic`` method
     is not part of this protocol because it additionally requires NodeT to
-    satisfy `Comparable`; callers that need deterministic ordering should
-    use `OrcaDAG` or `NetworkxBackend` directly with a comparable node type
-    (e.g. `OrcaDAG[str]`).
+    satisfy ``Comparable``; callers that need deterministic ordering should
+    use ``OrcaDAG`` or ``NetworkxBackend`` directly with a comparable node type
+    (e.g. ``OrcaDAG[str]``).
     """
 
     def add_node(self, node: NodeT, **attrs: Any) -> None: ...
@@ -93,6 +93,8 @@ class GraphBackend(Protocol[NodeT]):
 
     def topological_sort(self) -> list[NodeT]: ...
 
+    def ancestors(self, node: NodeT) -> frozenset[NodeT]: ...
+
 
 class OrcaDAG(Generic[NodeT]):
     """Minimal directed acyclic graph for Orcapod pipeline topology.
@@ -101,7 +103,7 @@ class OrcaDAG(Generic[NodeT]):
     attribute storage, basic traversal, and topological sort.  No external
     dependencies; backed entirely by plain dicts and stdlib `graphlib`.
 
-    Satisfies `GraphBackend[NodeT]` for any hashable NodeT.
+    Satisfies ``GraphProtocol[NodeT]`` for any hashable NodeT.
 
     Args:
         NodeT: The node type.  Must be hashable (used as a dict key).
@@ -346,3 +348,27 @@ class OrcaDAG(Generic[NodeT]):
             raise AssertionError("unreachable")  # pragma: no cover
 
         return ordered
+
+    def ancestors(self, node: NodeT) -> frozenset[NodeT]:
+        """Return all transitive predecessors of *node* via BFS.
+
+        Args:
+            node: The node whose ancestors to find.
+
+        Returns:
+            Frozen set of all nodes from which there is a directed path to
+            *node*. Empty if *node* is a source (no incoming edges).
+
+        Raises:
+            KeyError: If *node* is not in the graph.
+        """
+        if node not in self._predecessors:
+            raise KeyError(node)
+        visited: set[NodeT] = set()
+        queue: list[NodeT] = list(self._predecessors[node])
+        while queue:
+            n = queue.pop()
+            if n not in visited:
+                visited.add(n)
+                queue.extend(self._predecessors.get(n, set()))
+        return frozenset(visited)
