@@ -13,11 +13,12 @@ Example::
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sqlite3
 import threading
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from typing import TYPE_CHECKING, Any
 
 from orcapod.types import ColumnInfo
@@ -371,6 +372,67 @@ class SQLiteConnector:
 
     def __exit__(self, *args: Any) -> None:
         self.close()
+
+    # ── Async lifecycle ───────────────────────────────────────────────────────
+
+    async def __aenter__(self) -> SQLiteConnector:
+        """Return self; the sync connection is already open from ``__init__``."""
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        await self.async_close()
+
+    async def async_close(self) -> None:
+        """Close the database connection.
+
+        Implementations must be idempotent — calling this multiple times must
+        not raise.
+        """
+        await asyncio.to_thread(self.close)
+
+    # ── Async schema introspection ────────────────────────────────────────────
+
+    async def async_get_table_names(self) -> list[str]:
+        """Return all user table names asynchronously."""
+        return await asyncio.to_thread(self.get_table_names)
+
+    async def async_get_pk_columns(self, table_name: str) -> list[str]:
+        """Return primary-key column names asynchronously.
+
+        Returns:
+            List of PK column names; empty list if the table has no primary key.
+        """
+        return await asyncio.to_thread(self.get_pk_columns, table_name)
+
+    async def async_get_column_info(self, table_name: str) -> list[ColumnInfo]:
+        """Return column metadata asynchronously."""
+        return await asyncio.to_thread(self.get_column_info, table_name)
+
+    # ── Async read ────────────────────────────────────────────────────────────
+
+    async def async_iter_batches(
+        self,
+        query: str,
+        params: Any = None,
+        batch_size: int = 1000,
+    ) -> AsyncIterator[pa.RecordBatch]:
+        """Execute a query and yield results as Arrow RecordBatches.
+
+        Runs the full synchronous iteration in a thread-pool worker (so blocking
+        I/O does not stall the event loop), then yields each collected batch.
+
+        Args:
+            query: SQL query string. Table names should be double-quoted
+                (``SELECT * FROM "my_table"``); all connectors must support
+                ANSI-standard double-quoted identifiers.
+            params: Optional query parameters.
+            batch_size: Maximum rows per yielded batch.
+        """
+        batches = await asyncio.to_thread(
+            lambda: list(self.iter_batches(query, params, batch_size))
+        )
+        for batch in batches:
+            yield batch
 
     # ── Serialization ─────────────────────────────────────────────────────────
 
