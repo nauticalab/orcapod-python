@@ -112,7 +112,7 @@ class AbstractPipelineBase(AutoRegisteringContextBasedTracker, ABC):
         return self._hash_graph
 
     @property
-    def compiled_nodes(self) -> dict[str, Any]:
+    def nodes(self) -> dict[str, Any]:
         """Copy of the compiled nodes dict (label → node)."""
         return self._nodes.copy()
 

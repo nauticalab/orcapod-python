@@ -41,8 +41,8 @@ def test_smoke_run_completes():
     assert completed._has_run is True
 
 
-def test_smoke_compiled_nodes_accessible_after_run():
-    """job.pipeline.compiled_nodes returns nodes with database attached after run."""
+def test_smoke_nodes_accessible_after_run():
+    """job.pipeline.nodes returns nodes with database attached after run."""
     pf = PythonDataFunction(_increment_x, output_keys="incremented")
     pod = FunctionPod(pf)
     db = InMemoryArrowDatabase()
@@ -52,7 +52,7 @@ def test_smoke_compiled_nodes_accessible_after_run():
         pod(_make_source(), label="adder")
 
     completed = job.run()
-    assert "adder" in completed.pipeline.compiled_nodes
+    assert "adder" in completed.pipeline.nodes
 
 
 def test_smoke_run_raises_without_pipeline():

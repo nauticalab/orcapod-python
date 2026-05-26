@@ -686,7 +686,7 @@ class PipelineJob(AbstractPipelineBase):
 
         Note:
             Updates the cloned ``exec_pipeline._nodes`` with the fresh exec nodes
-            (keyed by label) so that the returned pipeline's ``compiled_nodes``
+            (keyed by label) so that the returned pipeline's ``nodes``
             returns execution-ready nodes after a run. The original
             ``self.compiled_pipeline`` is never mutated.
 
@@ -853,7 +853,7 @@ class PipelineJob(AbstractPipelineBase):
         first-class outcome — excluded spec names are recorded in the
         returned job's ``unresolved_specs``.
 
-        After a successful run, ``job.pipeline.compiled_nodes`` returns the
+        After a successful run, ``job.pipeline.nodes`` returns the
         execution-ready nodes with databases attached.
 
         Args:

@@ -152,7 +152,7 @@ class TestCompileSourceWrapping:
 
         pipeline = job.pipeline
         assert pipeline._compiled
-        assert len(pipeline.compiled_nodes) > 0
+        assert len(pipeline.nodes) > 0
         source_nodes = [n for n in pipeline._node_graph.nodes() if isinstance(n, SourceNode)]
         assert len(source_nodes) == 2
 
@@ -172,8 +172,8 @@ class TestCompileFunctionNode:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
 
-        assert "adder" in job.pipeline.compiled_nodes
-        node = job.pipeline.compiled_nodes["adder"]
+        assert "adder" in job.pipeline.nodes
+        node = job.pipeline.nodes["adder"]
         assert isinstance(node, FunctionNode)
 
     def test_function_node_pipeline_path_prefix(self, pipeline_db):
@@ -185,7 +185,7 @@ class TestCompileFunctionNode:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
 
-        node = job.pipeline.compiled_nodes["adder"]
+        node = job.pipeline.nodes["adder"]
         assert isinstance(node, FunctionNode)
         assert node.node_identity_path[0] == "add_values"
 
@@ -201,8 +201,8 @@ class TestCompileOperatorNode:
         job = PipelineJob(store=pipeline_db)
         with job:
             Join()(src_a, src_b, label="joiner")
-        assert "joiner" in job.pipeline.compiled_nodes
-        node = job.pipeline.compiled_nodes["joiner"]
+        assert "joiner" in job.pipeline.nodes
+        node = job.pipeline.nodes["joiner"]
         assert isinstance(node, OperatorNode)
 
     def test_operator_node_pipeline_path_prefix(self, pipeline_db):
@@ -210,7 +210,7 @@ class TestCompileOperatorNode:
         job = PipelineJob(store=pipeline_db)
         with job:
             Join()(src_a, src_b, label="joiner")
-        node = job.pipeline.compiled_nodes["joiner"]
+        node = job.pipeline.nodes["joiner"]
         assert isinstance(node, OperatorNode)
         assert node.node_identity_path[0] == "Join"
 
@@ -232,8 +232,8 @@ class TestCompileMutatesNodes:
             pod(joined, label="adder")
         result = job.run()
 
-        # After run, compiled_nodes["adder"] is the exec node in the returned result
-        exec_node = result.pipeline.compiled_nodes["adder"]
+        # After run, nodes["adder"] is the exec node in the returned result
+        exec_node = result.pipeline.nodes["adder"]
         assert isinstance(exec_node, FunctionJobNode)
         assert exec_node._pipeline_database is not None
 
@@ -245,7 +245,7 @@ class TestCompileMutatesNodes:
             Join()(src_a, src_b, label="joiner")
         result = job.run()
 
-        exec_node = result.pipeline.compiled_nodes["joiner"]
+        exec_node = result.pipeline.nodes["joiner"]
         assert isinstance(exec_node, OperatorJobNode)
         assert exec_node._pipeline_database is not None
 
@@ -267,7 +267,7 @@ class TestFunctionDatabaseHandling:
             pod(joined, label="adder")
         result = job.run()
 
-        exec_node = result.pipeline.compiled_nodes["adder"]
+        exec_node = result.pipeline.nodes["adder"]
         assert isinstance(exec_node, FunctionJobNode)
         # Verify the exec node has databases attached
         assert exec_node._pipeline_database is not None
@@ -311,8 +311,8 @@ class TestLabelAccess:
 
         pipeline = job.pipeline
         # Both should be disambiguated
-        assert "compute_1" in pipeline.compiled_nodes
-        assert "compute_2" in pipeline.compiled_nodes
+        assert "compute_1" in pipeline.nodes
+        assert "compute_2" in pipeline.nodes
         assert isinstance(pipeline.compute_1, FunctionNode)
         assert isinstance(pipeline.compute_2, FunctionNode)
 
@@ -353,7 +353,7 @@ class TestAutoCompileAndRun:
 
         # Should be compiled after exiting context
         assert job.pipeline._compiled
-        assert "joiner" in job.pipeline.compiled_nodes
+        assert "joiner" in job.pipeline.nodes
 
     def test_run_executes_all_nodes(self, pipeline_db):
         src_a, src_b = _make_two_sources()
@@ -368,7 +368,7 @@ class TestAutoCompileAndRun:
         result = job.run()
 
         # After run, function node should have records (in the returned result job)
-        node = result.pipeline.compiled_nodes["adder"]
+        node = result.pipeline.nodes["adder"]
         records = node.get_all_records()
         assert records is not None
         assert records.num_rows == 2  # two input rows (a, b)
@@ -387,11 +387,11 @@ class TestAutoCompileAndRun:
         result = job.run()
 
         # Check operator node
-        joiner = result.pipeline.compiled_nodes["joiner"]
+        joiner = result.pipeline.nodes["joiner"]
         assert joiner.node_identity_path[0] == "Join"
 
         # Check function node
-        adder = result.pipeline.compiled_nodes["adder"]
+        adder = result.pipeline.nodes["adder"]
         assert adder.node_identity_path[0] == "add_values"
 
 
@@ -410,16 +410,16 @@ class TestEndToEnd:
             joined = Join()(src_a, src_b, label="joiner")
             pod(joined, label="adder")
 
-        assert isinstance(job.pipeline.compiled_nodes["joiner"], OperatorNode)
-        assert isinstance(job.pipeline.compiled_nodes["adder"], FunctionNode)
+        assert isinstance(job.pipeline.nodes["joiner"], OperatorNode)
+        assert isinstance(job.pipeline.nodes["adder"], FunctionNode)
 
         result = job.run()
 
-        fn_records = result.pipeline.compiled_nodes["adder"].get_all_records()
+        fn_records = result.pipeline.nodes["adder"].get_all_records()
         assert fn_records is not None
         assert fn_records.num_rows == 2
 
-        table = result.pipeline.compiled_nodes["adder"].as_table()
+        table = result.pipeline.nodes["adder"].as_table()
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]
 
@@ -442,7 +442,7 @@ class TestHashChainDetaching:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
         result = job.run()
-        fn_node = result.pipeline.compiled_nodes["adder"]
+        fn_node = result.pipeline.nodes["adder"]
         derived = fn_node.as_source()
         # DerivedSource uses RootSource hash (schema-only), not topology hash
         assert derived.pipeline_hash() != fn_node.pipeline_hash()
@@ -457,7 +457,7 @@ class TestHashChainDetaching:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
         result = job.run()
-        fn_node = result.pipeline.compiled_nodes["adder"]
+        fn_node = result.pipeline.nodes["adder"]
         derived = fn_node.as_source()
         assert derived.content_hash() != fn_node.content_hash()
 
@@ -471,7 +471,7 @@ class TestHashChainDetaching:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
         result = job.run()
-        fn_node = result.pipeline.compiled_nodes["adder"]
+        fn_node = result.pipeline.nodes["adder"]
         derived1 = fn_node.as_source()
         derived2 = fn_node.as_source()
         assert derived1.pipeline_hash() == derived2.pipeline_hash()
@@ -500,7 +500,7 @@ class TestHashGraph:
         pipeline = job.pipeline
         g = pipeline.graph
         assert len(g.edges) > 0
-        joiner_hash = job.pipeline.compiled_nodes["joiner"].content_hash().to_string()
+        joiner_hash = job.pipeline.nodes["joiner"].content_hash().to_string()
         assert joiner_hash in g.nodes
 
     def test_graph_multi_node_has_more_edges_than_single_node(self, pipeline_db):
@@ -600,19 +600,19 @@ class TestCompileDoesNotTriggerExecution:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
         # After compile but before run, adder node is a blueprint FunctionNode with no DB
-        pre_run_node = job.pipeline.compiled_nodes["adder"]
+        pre_run_node = job.pipeline.nodes["adder"]
         assert isinstance(pre_run_node, FunctionNode)
         assert not isinstance(pre_run_node, FunctionJobNode)
         # Running should work correctly
         result = job.run()
-        table = result.pipeline.compiled_nodes["adder"].as_table()
+        table = result.pipeline.nodes["adder"].as_table()
         assert table.num_rows == 2
 
 
 class TestSourceNodesInPipeline:
     """Verify that source nodes are first-class pipeline members."""
 
-    def test_source_nodes_in_compiled_nodes(self, pipeline_db):
+    def test_source_nodes_in_nodes(self, pipeline_db):
         src_a, src_b = _make_two_sources()
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(data_function=pf)
@@ -621,12 +621,12 @@ class TestSourceNodesInPipeline:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
         source_nodes = [
-            n for n in job.pipeline.compiled_nodes.values() if isinstance(n, SourceNode)
+            n for n in job.pipeline.nodes.values() if isinstance(n, SourceNode)
         ]
         assert len(source_nodes) > 0
 
     def test_source_node_accessible_by_source_id(self, pipeline_db):
-        """SourceNode is accessible in compiled_nodes via its source_id (the identity key)."""
+        """SourceNode is accessible in nodes via its source_id (the identity key)."""
         src = ArrowTableSource(
             table=pa.table({
                 "key": pa.array(["a"], type=pa.large_string()),
@@ -641,8 +641,8 @@ class TestSourceNodesInPipeline:
         job = PipelineJob(store=pipeline_db)
         with job:
             pod(src, label="doubler")
-        assert "my_source" in job.pipeline.compiled_nodes
-        assert isinstance(job.pipeline.compiled_nodes["my_source"], SourceNode)
+        assert "my_source" in job.pipeline.nodes
+        assert isinstance(job.pipeline.nodes["my_source"], SourceNode)
 
     def test_source_node_label_from_content_hash_when_unlabeled(self, pipeline_db):
         """Source without explicit label gets content-hash-based spec name."""
@@ -653,7 +653,7 @@ class TestSourceNodesInPipeline:
         with job:
             pod(src_a, label="doubler")
         source_nodes = [
-            n for n in job.pipeline.compiled_nodes.values() if isinstance(n, SourceNode)
+            n for n in job.pipeline.nodes.values() if isinstance(n, SourceNode)
         ]
         assert len(source_nodes) == 1
 
@@ -671,7 +671,7 @@ class TestSourceNodeNoCaching:
             joined = Join()(src_a, src_b)
             pod(joined, label="adder")
         result = job.run()
-        records = result.pipeline.compiled_nodes["adder"].get_all_records()
+        records = result.pipeline.nodes["adder"].get_all_records()
         assert records is not None
         assert records.num_rows == 2
         source_nodes = [
@@ -694,7 +694,7 @@ class TestSourceNodeNoCaching:
             joined = Join()(cached_a, cached_b)
             pod(joined, label="adder")
         result = job.run()
-        records = result.pipeline.compiled_nodes["adder"].get_all_records()
+        records = result.pipeline.nodes["adder"].get_all_records()
         assert records is not None
         assert records.num_rows == 2
 
