@@ -75,16 +75,16 @@ class PipelineJob(AbstractPipelineBase):
         # name → bound concrete source (user-facing API: job.sources).
         self._sources: dict[str, cp.StreamProtocol] = {}
         # hash → bound concrete source, keyed by the same hash as
-        # _persistent_node_map.  Used by _build_execution_graph() for O(1)
-        # lookup by content hash; avoids name collisions when multiple concrete
-        # sources share the same class name (e.g. two ArrowTableSource objects).
+        # _persistent_node_map.  Used by bind() for O(1) lookup by content
+        # hash; avoids name collisions when multiple concrete sources share
+        # the same class name (e.g. two ArrowTableSource objects).
         self._sources_by_hash: dict[str, cp.StreamProtocol] = {}
         self._has_run: bool = False
         self._run_id: str | None = None
 
         # Lazy cache for the corresponding Pipeline blueprint.
         # Set to None after compile() to force recomputation on next access.
-        # Pre-set by from_pipeline() / run() via _set_compiled_pipeline().
+        # Pre-set by from_pipeline() via _set_compiled_pipeline().
         self._compiled_pipeline: Pipeline | None = None
 
     # ------------------------------------------------------------------
@@ -122,7 +122,7 @@ class PipelineJob(AbstractPipelineBase):
 
         # Collect bound SourceJobNodes created during compilation.
         # _sources is name-keyed (user-facing API via job.sources).
-        # _sources_by_hash is hash-keyed (internal use by _build_execution_graph()).
+        # _sources_by_hash is hash-keyed (internal use by bind()).
         # Two concrete sources of the same class (e.g. two ArrowTableSource objects)
         # would collide on name but have distinct hash keys.
         from orcapod.core.nodes.source_node import SourceJobNode
@@ -832,12 +832,24 @@ class PipelineJob(AbstractPipelineBase):
         else:
             status = "complete"
 
+        # Collect the live (data-inclusive) content hashes for FunctionJobNodes.
+        # The pipeline blueprint stores schema-only blueprint hashes; but the DB
+        # records are written with the live hash (which includes the upstream data
+        # content).  Saving these ensures that PipelineJob.load() can reconstruct
+        # stubs whose content_hash() matches the _node_content_hash column in the
+        # DB — required for _filter_by_content_hash() in get_all_records().
+        node_job_content_hashes: dict[str, str] = {}
+        for node in (self._persistent_node_map or {}).values():
+            if isinstance(node, FunctionJobNode) and node._label is not None:
+                node_job_content_hashes[node._label] = node.content_hash().to_string()
+
         output: dict[str, Any] = {
             "orcapod_pipeline_job_version": PIPELINE_JOB_FORMAT_VERSION,
             "run": {
                 "run_id": self._run_id,
                 "status": status,
                 "unbound_sources": list(self.unbound_sources),
+                "node_job_content_hashes": node_job_content_hashes,
             },
             "pipeline": pipeline_data,
             "bindings": {
@@ -935,10 +947,7 @@ class PipelineJob(AbstractPipelineBase):
         job = cls(name=pipeline._name, store=effective_store)
         job._compiled_pipeline = pipeline
         # Mark compiled so save() / compiled_pipeline can be accessed.
-        # _persistent_node_map etc. remain empty (job was not recorded in a
-        # with-block), but all public API goes through _compiled_pipeline.
         job._compiled = True
-        job._nodes = dict(pipeline._nodes)
 
         # Populate _upstreams / _node_lut / _graph_edges / _hash_graph from pipeline.
         job._upstreams = dict(pipeline._upstreams)
@@ -946,35 +955,103 @@ class PipelineJob(AbstractPipelineBase):
         job._graph_edges = list(pipeline._graph_edges)
         job._hash_graph = pipeline._hash_graph.copy()
 
-        # Populate _persistent_node_map, _sources, and _sources_by_hash from the
-        # blueprint pipeline.
+        # Populate _persistent_node_map with job-node instances for ALL node types,
+        # keyed by the same hash keys as pipeline._persistent_node_map.
         #
-        # _persistent_node_map must contain SourceJobNode objects (keyed by the
-        # same hash keys used in pipeline._upstreams) so that bind() can locate
-        # source slots and update them in-place.  Without this, bind() sees an
-        # empty _persistent_node_map and raises "no matching source slot" for
-        # every key.
-        #
-        # is_runnable() uses hash-based traversal via _hash_graph +
-        # _persistent_node_map rather than _node_graph, so it is robust to the
-        # mutable content_hash() of SourceJobNode after bind() and does not
-        # require SourceJobNode objects to appear in _node_graph.  We copy
-        # pipeline._node_graph directly here so graph-introspection callers
-        # (e.g. renderers) still have a valid node-object graph.
+        # SourceJobNode stubs must be present so that bind() can locate source slots
+        # and update them in-place.  FunctionJobNode and OperatorJobNode stubs must
+        # also be present so that:
+        #   • _distribute_databases() wires their databases correctly
+        #   • job.nodes["label"].get_all_records() works after loading a completed job
+        #   • run() includes them in the execution DAG
+        import networkx as _nx
+        from orcapod.core.nodes.function_node import (
+            FunctionNode as _FunctionNode,
+            FunctionJobNode as _FunctionJobNode,
+        )
+        from orcapod.core.nodes.operator_node import (
+            OperatorNode as _OperatorNode,
+            OperatorJobNode as _OperatorJobNode,
+        )
         from orcapod.core.nodes.source_node import SourceJobNode, SourceNode as _SourceNode
 
         job._sources = dict(sources)
-        for h, source_node in pipeline._upstreams.items():
-            if isinstance(source_node, _SourceNode):
+
+        # Extract the live (data-inclusive) content hashes saved at run time.
+        # These are keyed by node label and used below to override the blueprint
+        # hash stored in each FunctionNode descriptor so that loaded stubs'
+        # content_hash() matches the _node_content_hash column in the DB.
+        run_block = data.get("run", {})
+        node_job_content_hashes: dict[str, str] = run_block.get(
+            "node_job_content_hashes", {}
+        )
+
+        for node_hash in _nx.topological_sort(job._hash_graph):
+            bp_node = pipeline._persistent_node_map.get(node_hash)
+            if bp_node is None:
+                continue
+
+            if isinstance(bp_node, _SourceNode):
                 sjn = SourceJobNode(
-                    name=source_node.name,
-                    tag_schema=source_node.tag_schema,
-                    data_schema=source_node.data_schema,
-                    bound_source=sources.get(source_node.name),
+                    name=bp_node.name,
+                    tag_schema=bp_node.tag_schema,
+                    data_schema=bp_node.data_schema,
+                    bound_source=sources.get(bp_node.name),
                 )
-                job._persistent_node_map[h] = sjn
-                if source_node.name in sources:
-                    job._sources_by_hash[h] = sources[source_node.name]
+                job._persistent_node_map[node_hash] = sjn
+                if bp_node.name in sources:
+                    job._sources_by_hash[node_hash] = sources[bp_node.name]
+
+            elif isinstance(bp_node, _FunctionNode):
+                descriptor = getattr(bp_node, "_descriptor", None) or {}
+                preds = list(job._hash_graph.predecessors(node_hash))
+                input_stream = (
+                    job._persistent_node_map.get(preds[0]) if preds else None
+                )
+                # Pass the live content hash (from the run) so the stub's
+                # content_hash() matches the _node_content_hash column in
+                # the DB — required for _filter_by_content_hash() to work
+                # in get_all_records() on a loaded job.
+                live_content_hash = node_job_content_hashes.get(
+                    bp_node.label
+                )
+                fjn = _FunctionJobNode.from_descriptor(
+                    descriptor,
+                    input_stream=input_stream,
+                    job_content_hash=live_content_hash,
+                )
+                job._persistent_node_map[node_hash] = fjn
+
+            elif isinstance(bp_node, _OperatorNode):
+                descriptor = getattr(bp_node, "_descriptor", None) or {}
+                preds = list(job._hash_graph.predecessors(node_hash))
+                input_streams = tuple(
+                    job._persistent_node_map[p]
+                    for p in preds
+                    if p in job._persistent_node_map
+                )
+                # Use the reconstructed operator from the blueprint if available.
+                operator = getattr(bp_node, "_operator", None)
+                ojn = _OperatorJobNode.from_descriptor(
+                    descriptor,
+                    operator=operator,
+                    input_streams=input_streams,
+                    databases={},
+                )
+                job._persistent_node_map[node_hash] = ojn
+
+        # Update _nodes to point to job nodes (FunctionJobNode/OperatorJobNode stubs)
+        # rather than blueprint nodes, so that job.nodes["label"].get_all_records()
+        # works on a loaded job.
+        bp_id_to_hash: dict[int, str] = {
+            id(bp): h for h, bp in pipeline._persistent_node_map.items()
+        }
+        job._nodes = {
+            label: job._persistent_node_map.get(
+                bp_id_to_hash.get(id(bp_node), ""), bp_node
+            )
+            for label, bp_node in pipeline._nodes.items()
+        }
 
         # Copy pipeline._node_graph for graph-introspection use (renderers, etc.).
         # Nodes here are SourceNode / FunctionNode / OperatorNode from the blueprint;
@@ -984,8 +1061,7 @@ class PipelineJob(AbstractPipelineBase):
         if effective_store is not None:
             job._distribute_databases()
 
-        # Restore run metadata
-        run_block = data.get("run", {})
+        # Restore run metadata (run_block was already parsed earlier in this method)
         status = run_block.get("status", "pending")
         if status in ("complete", "partial"):
             job._has_run = True
