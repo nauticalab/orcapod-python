@@ -533,7 +533,11 @@ class PostgreSQLConnector:
             return [row[0] for row in await cur.fetchall()]
 
     async def async_get_pk_columns(self, table_name: str) -> list[str]:
-        """Return primary-key column names in key-sequence order."""
+        """Return primary-key column names in key-sequence order.
+
+        Returns:
+            List of PK column names; empty list if the table has no primary key.
+        """
         conn = self._require_async_open()
         self._validate_table_name(table_name)
         async with conn.cursor() as cur:
