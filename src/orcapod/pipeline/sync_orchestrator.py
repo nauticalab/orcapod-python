@@ -18,8 +18,7 @@ from orcapod.protocols.node_protocols import (
 )
 
 if TYPE_CHECKING:
-    import networkx as nx
-
+    from orcapod.pipeline.dag import GraphProtocol
     from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
     from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
 
@@ -45,9 +44,9 @@ class SyncPipelineOrchestrator:
 
     def run(
         self,
-        graph: nx.DiGraph,
+        graph: "GraphProtocol[Any]",
         *,
-        observer: ExecutionObserverProtocol | None = None,
+        observer: "ExecutionObserverProtocol | None" = None,
         materialize_results: bool = True,
         run_id: str | None = None,
         pipeline_uri: str = "",
@@ -55,7 +54,7 @@ class SyncPipelineOrchestrator:
         """Execute the node graph synchronously.
 
         Args:
-            graph: A NetworkX DiGraph with GraphNode objects as vertices.
+            graph: A ``GraphProtocol`` DAG with GraphNode objects as vertices.
             observer: Optional execution observer forwarded to nodes.
             materialize_results: If True, keep all node outputs in memory
                 and return them. If False, discard buffers after downstream
@@ -70,14 +69,13 @@ class SyncPipelineOrchestrator:
             OrchestratorResult with node outputs.
         """
         from orcapod.pipeline.observer import NoOpObserver
-        import networkx as nx
 
         run_id = run_id or str(uuid.uuid4())
         effective_observer = observer if observer is not None else NoOpObserver()
         effective_observer.on_run_start(run_id, pipeline_uri=pipeline_uri)
 
         try:
-            topo_order = list(nx.topological_sort(graph))
+            topo_order = list(graph.topological_sort())
             buffers: dict[Any, list[tuple[TagProtocol, DataProtocol]]] = {}
             processed: set[Any] = set()
 
@@ -119,7 +117,7 @@ class SyncPipelineOrchestrator:
 
     @staticmethod
     def _gather_upstream(
-        node: Any, graph: nx.DiGraph, buffers: dict[Any, list[tuple[Any, Any]]]
+        node: Any, graph: "GraphProtocol[Any]", buffers: dict[Any, list[tuple[Any, Any]]]
     ) -> list[tuple[Any, Any]]:
         """Gather a single upstream buffer (for function nodes)."""
         predecessors = list(graph.predecessors(node))
@@ -131,7 +129,7 @@ class SyncPipelineOrchestrator:
 
     @staticmethod
     def _gather_upstream_multi(
-        node: Any, graph: nx.DiGraph, buffers: dict[Any, list[tuple[Any, Any]]]
+        node: Any, graph: "GraphProtocol[Any]", buffers: dict[Any, list[tuple[Any, Any]]]
     ) -> list[tuple[list[tuple[Any, Any]], Any]]:
         """Gather multiple upstream buffers with their nodes (for operators).
 
@@ -217,7 +215,7 @@ class SyncPipelineOrchestrator:
     @staticmethod
     def _gc_buffers(
         current_node: Any,
-        graph: nx.DiGraph,
+        graph: "GraphProtocol[Any]",
         buffers: dict[Any, list[tuple[Any, Any]]],
         processed: set[Any],
     ) -> None:
