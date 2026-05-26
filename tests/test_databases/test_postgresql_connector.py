@@ -404,7 +404,11 @@ class TestAsyncSchemaIntrospectionUnit:
         with patch("psycopg.connect") as mock_connect:
             mock_connect.return_value = MagicMock()
             connector = PostgreSQLConnector("postgresql://localhost/test")
-        # _async_conn is None — all methods should raise
+        # _async_conn is None — all three methods should raise
         with pytest.raises(RuntimeError, match="async context manager"):
             await connector.async_get_table_names()
+        with pytest.raises(RuntimeError, match="async context manager"):
+            await connector.async_get_pk_columns("t")
+        with pytest.raises(RuntimeError, match="async context manager"):
+            await connector.async_get_column_info("t")
         connector._conn = None
