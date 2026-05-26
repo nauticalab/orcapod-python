@@ -500,6 +500,8 @@ class TestAsyncIterBatchesUnit:
                 'SELECT * FROM "t"'
             )]
         assert batches == []
+        mock_cursor.close.assert_called_once()
+        mock_read_conn.close.assert_called_once()
         connector._conn = None
 
     @pytest.mark.asyncio
@@ -512,6 +514,7 @@ class TestAsyncIterBatchesUnit:
                    return_value=mock_read_conn):
             _ = [b async for b in connector.async_iter_batches('SELECT * FROM "t"')]
         mock_cursor.close.assert_called_once()
+        mock_read_conn.rollback.assert_called_once()
         mock_read_conn.close.assert_called_once()
         connector._conn = None
 
@@ -527,6 +530,7 @@ class TestAsyncIterBatchesUnit:
             await gen.__anext__()  # consume one batch
             await gen.aclose()    # abandon mid-stream
         mock_cursor.close.assert_called_once()
+        mock_read_conn.rollback.assert_called_once()
         mock_read_conn.close.assert_called_once()
         connector._conn = None
 
