@@ -220,6 +220,11 @@ class PostgreSQLConnector:
     Uses named server-side cursors in iter_batches so PostgreSQL streams
     results row-by-row rather than buffering the full result set.
 
+    **Async context manager note:** ``async with connector:`` opens an async
+    psycopg3 connection. Exiting the async context manager calls
+    ``async_close()``, which closes *both* the async and the sync connections.
+    After ``async with``, the connector must not be used further.
+
     Args:
         dsn: libpq connection string.
             URI form: ``"postgresql://user:pass@host:5432/dbname"``
@@ -536,6 +541,10 @@ class PostgreSQLConnector:
 
     # ── Async read ────────────────────────────────────────────────────────────
 
+    # Note: declared as plain `def` (not `async def`) because the concrete
+    # implementation will be an async generator function (`async def … yield`).
+    # A Protocol method declared as `def` allows both async generators and
+    # coroutines returning AsyncIterator to satisfy the contract structurally.
     def async_iter_batches(
         self,
         query: str,
