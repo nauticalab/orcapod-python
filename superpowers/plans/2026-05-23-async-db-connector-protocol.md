@@ -123,7 +123,7 @@ class AsyncDBConnectorProtocol(Protocol):
 
     # ── Read ──────────────────────────────────────────────────────────────────
 
-    async def async_iter_batches(
+    def async_iter_batches(
         self,
         query: str,
         params: Any = None,
