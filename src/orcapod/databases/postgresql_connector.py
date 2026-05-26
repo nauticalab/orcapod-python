@@ -518,26 +518,65 @@ class PostgreSQLConnector:
     # ── Async schema introspection ────────────────────────────────────────────
 
     async def async_get_table_names(self) -> list[str]:
-        """Return all user table names in this database (sorted, excludes views).
-
-        Requires the async context manager to have been entered.
-        """
-        raise NotImplementedError("async_get_table_names not yet implemented")
+        """Return all user table names in this database (sorted, excludes views)."""
+        conn = self._require_async_open()
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = current_schema()
+                  AND table_type = 'BASE TABLE'
+                ORDER BY table_name
+                """
+            )
+            return [row[0] for row in await cur.fetchall()]
 
     async def async_get_pk_columns(self, table_name: str) -> list[str]:
-        """Return primary-key column names for a table, in key-sequence order.
-
-        Requires the async context manager to have been entered.
-        Returns an empty list if the table has no primary key.
-        """
-        raise NotImplementedError("async_get_pk_columns not yet implemented")
+        """Return primary-key column names in key-sequence order."""
+        conn = self._require_async_open()
+        self._validate_table_name(table_name)
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT kcu.column_name
+                FROM information_schema.key_column_usage kcu
+                JOIN information_schema.table_constraints tc
+                  ON kcu.constraint_name = tc.constraint_name
+                 AND kcu.table_schema    = tc.table_schema
+                 AND kcu.table_name      = tc.table_name
+                WHERE tc.constraint_type = 'PRIMARY KEY'
+                  AND kcu.table_schema   = current_schema()
+                  AND kcu.table_name     = %s
+                ORDER BY kcu.ordinal_position
+                """,
+                (table_name,),
+            )
+            return [row[0] for row in await cur.fetchall()]
 
     async def async_get_column_info(self, table_name: str) -> list[ColumnInfo]:
-        """Return column metadata for a table, with types mapped to Arrow.
-
-        Requires the async context manager to have been entered.
-        """
-        raise NotImplementedError("async_get_column_info not yet implemented")
+        """Return column metadata with Arrow-mapped types."""
+        conn = self._require_async_open()
+        self._validate_table_name(table_name)
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT column_name, data_type, udt_name, is_nullable
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name   = %s
+                ORDER BY ordinal_position
+                """,
+                (table_name,),
+            )
+            return [
+                ColumnInfo(
+                    name=row[0],
+                    arrow_type=_pg_type_to_arrow(row[1], row[2]),
+                    nullable=(row[3].upper() == "YES"),
+                )
+                for row in await cur.fetchall()
+            ]
 
     # ── Async read ────────────────────────────────────────────────────────────
 
