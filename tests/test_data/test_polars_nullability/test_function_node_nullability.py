@@ -11,7 +11,7 @@ import orcapod as op
 from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import PipelineJob
-from orcapod.pipeline.graph import Pipeline
+from orcapod.pipeline.base import AbstractPipelineBase
 
 
 # ---------------------------------------------------------------------------
@@ -19,7 +19,7 @@ from orcapod.pipeline.graph import Pipeline
 # ---------------------------------------------------------------------------
 
 
-def _get_function_nodes(pipeline: Pipeline) -> list[FunctionJobNode]:
+def _get_function_nodes(pipeline: AbstractPipelineBase) -> list[FunctionJobNode]:
     """Return all FunctionJobNode instances from compiled pipeline nodes."""
     return [n for n in pipeline.nodes.values() if isinstance(n, FunctionJobNode)]
 

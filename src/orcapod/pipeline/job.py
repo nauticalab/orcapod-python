@@ -743,6 +743,7 @@ class PipelineJob(AbstractPipelineBase):
         SyncPipelineOrchestrator().run(
             exec_dag,
             observer=effective_observer,
+            run_id=run_id,
             pipeline_uri=pipeline_uri,
         )
 
