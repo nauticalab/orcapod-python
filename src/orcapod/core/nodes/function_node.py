@@ -894,7 +894,11 @@ class FunctionJobNode(FunctionNodeBase):
             f"schema:{pipeline_hash_str}",
         )
         if raw_table_scope != "pipeline_hash":
-            content_hash_str = descriptor.get("content_hash", "")
+            # Use _stored_content_hash (already set to job_content_hash when
+            # provided, otherwise falls back to the blueprint hash from the
+            # descriptor) so the instance fragment matches the DB path written
+            # during the original run for table_scope="content_hash".
+            content_hash_str = node._stored_content_hash or ""
             node._stored_pipeline_path += (f"instance:{content_hash_str}",)
 
         # FunctionJobNode — stream-level caching state
