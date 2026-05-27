@@ -34,6 +34,40 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# SQL query strings (shared between sync and async methods)
+# ---------------------------------------------------------------------------
+
+_SQL_TABLE_NAMES = """
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = current_schema()
+      AND table_type = 'BASE TABLE'
+    ORDER BY table_name
+"""
+
+_SQL_PK_COLUMNS = """
+    SELECT kcu.column_name
+    FROM information_schema.key_column_usage kcu
+    JOIN information_schema.table_constraints tc
+      ON kcu.constraint_name = tc.constraint_name
+     AND kcu.table_schema    = tc.table_schema
+     AND kcu.table_name      = tc.table_name
+    WHERE tc.constraint_type = 'PRIMARY KEY'
+      AND kcu.table_schema   = current_schema()
+      AND kcu.table_name     = %s
+    ORDER BY kcu.ordinal_position
+"""
+
+_SQL_COLUMN_INFO = """
+    SELECT column_name, data_type, udt_name, is_nullable
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name   = %s
+    ORDER BY ordinal_position
+"""
+
+
+# ---------------------------------------------------------------------------
 # Module-level helpers (pure functions, no I/O)
 # These are kept module-level so AsyncPostgreSQLConnector (future) can reuse
 # them without subclassing.
@@ -151,31 +185,22 @@ def _arrow_type_to_pg_sql(arrow_type: pa.DataType) -> str:
     return "TEXT"
 
 
-def _resolve_column_type_lookup(
-    query: str,
-    connector: "PostgreSQLConnector",
-) -> dict[str, pa.DataType]:
-    """Parse the FROM clause of query to find the source table, then return
-    a column-name → Arrow-type dict from get_column_info.
+def _parse_table_from_query(query: str) -> str | None:
+    """Extract the single unambiguous source table name from a SELECT query.
 
-    Returns an empty dict if no single unambiguous table can be identified,
-    causing iter_batches to fall back to pa.large_string() for all columns.
+    Returns ``None`` when the query references more than one table (JOINs,
+    comma-separated tables, subqueries, CTEs) so callers fall back to treating
+    all columns as ``pa.large_string()``.
 
     Args:
         query: SQL query string.
-        connector: The connector to call get_column_info on.
 
     Returns:
-        Dict mapping column name to Arrow DataType.
+        The table name string, or ``None`` if no single table can be identified.
     """
-    # Be conservative: only resolve types when we can unambiguously identify
-    # a single source table. For multi-table queries (JOINs, comma-separated
-    # tables, multiple FROM clauses, subqueries, etc.) return {} so callers
-    # fall back to treating all columns as pa.large_string().
-
     # Fast path: any JOIN keyword means multi-table.
     if re.search(r"\bJOIN\b", query, re.IGNORECASE):
-        return {}
+        return None
 
     # Find all FROM <table> occurrences.  We only proceed when there is
     # exactly one (multiple FROMs indicate subqueries or CTEs).
@@ -185,7 +210,7 @@ def _resolve_column_type_lookup(
     )
     from_matches = list(from_pattern.finditer(query))
     if len(from_matches) != 1:
-        return {}
+        return None
 
     match = from_matches[0]
     table_name = match.group(1) or match.group(2)
@@ -202,8 +227,31 @@ def _resolve_column_type_lookup(
         from_tail = from_tail[: clause_boundary.start()]
 
     if "," in from_tail:
-        return {}
+        return None
 
+    return table_name
+
+
+def _resolve_column_type_lookup(
+    query: str,
+    connector: "PostgreSQLConnector",
+) -> dict[str, pa.DataType]:
+    """Return a column-name → Arrow-type dict for the source table of ``query``.
+
+    Returns an empty dict if no single unambiguous table can be identified,
+    causing ``iter_batches`` to fall back to ``pa.large_string()`` for all
+    columns.
+
+    Args:
+        query: SQL query string.
+        connector: The connector to call ``get_column_info`` on.
+
+    Returns:
+        Dict mapping column name to Arrow DataType.
+    """
+    table_name = _parse_table_from_query(query)
+    if table_name is None:
+        return {}
     return {ci.name: ci.arrow_type for ci in connector.get_column_info(table_name)}
 
 
@@ -211,10 +259,7 @@ async def _async_resolve_column_type_lookup(
     query: str,
     connector: "PostgreSQLConnector",
 ) -> dict[str, pa.DataType]:
-    """Async version of ``_resolve_column_type_lookup``.
-
-    Parses the FROM clause of query to find the source table, then returns a
-    column-name → Arrow-type dict by calling ``async_get_column_info``.
+    """Async counterpart to ``_resolve_column_type_lookup``.
 
     Returns an empty dict if no single unambiguous table can be identified,
     causing ``async_iter_batches`` to fall back to ``pa.large_string()`` for
@@ -227,32 +272,9 @@ async def _async_resolve_column_type_lookup(
     Returns:
         Dict mapping column name to Arrow DataType.
     """
-    if re.search(r"\bJOIN\b", query, re.IGNORECASE):
+    table_name = _parse_table_from_query(query)
+    if table_name is None:
         return {}
-
-    from_pattern = re.compile(
-        r'\bFROM\b\s+(?:"([^"]+)"|(\w+))',
-        re.IGNORECASE,
-    )
-    from_matches = list(from_pattern.finditer(query))
-    if len(from_matches) != 1:
-        return {}
-
-    match = from_matches[0]
-    table_name = match.group(1) or match.group(2)
-
-    from_tail = query[match.end():]
-    clause_boundary = re.search(
-        r"\b(WHERE|GROUP\s+BY|ORDER\s+BY|LIMIT|OFFSET|HAVING|UNION|EXCEPT|INTERSECT)\b",
-        from_tail,
-        re.IGNORECASE,
-    )
-    if clause_boundary:
-        from_tail = from_tail[: clause_boundary.start()]
-
-    if "," in from_tail:
-        return {}
-
     return {ci.name: ci.arrow_type for ci in await connector.async_get_column_info(table_name)}
 
 
@@ -324,15 +346,7 @@ class PostgreSQLConnector:
         with self._lock:
             conn = self._require_open()
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT table_name
-                    FROM information_schema.tables
-                    WHERE table_schema = current_schema()
-                      AND table_type = 'BASE TABLE'
-                    ORDER BY table_name
-                    """
-                )
+                cur.execute(_SQL_TABLE_NAMES)
                 return [row[0] for row in cur.fetchall()]
 
     def get_pk_columns(self, table_name: str) -> list[str]:
@@ -341,21 +355,7 @@ class PostgreSQLConnector:
             conn = self._require_open()
             self._validate_table_name(table_name)
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT kcu.column_name
-                    FROM information_schema.key_column_usage kcu
-                    JOIN information_schema.table_constraints tc
-                      ON kcu.constraint_name = tc.constraint_name
-                     AND kcu.table_schema    = tc.table_schema
-                     AND kcu.table_name      = tc.table_name
-                    WHERE tc.constraint_type = 'PRIMARY KEY'
-                      AND kcu.table_schema   = current_schema()
-                      AND kcu.table_name     = %s
-                    ORDER BY kcu.ordinal_position
-                    """,
-                    (table_name,),
-                )
+                cur.execute(_SQL_PK_COLUMNS, (table_name,))
                 return [row[0] for row in cur.fetchall()]
 
     def get_column_info(self, table_name: str) -> list[ColumnInfo]:
@@ -364,16 +364,7 @@ class PostgreSQLConnector:
             conn = self._require_open()
             self._validate_table_name(table_name)
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT column_name, data_type, udt_name, is_nullable
-                    FROM information_schema.columns
-                    WHERE table_schema = current_schema()
-                      AND table_name   = %s
-                    ORDER BY ordinal_position
-                    """,
-                    (table_name,),
-                )
+                cur.execute(_SQL_COLUMN_INFO, (table_name,))
                 return [
                     ColumnInfo(
                         name=row[0],
@@ -571,15 +562,7 @@ class PostgreSQLConnector:
         """Return all user table names in this database (sorted, excludes views)."""
         conn = self._require_async_open()
         async with conn.cursor() as cur:
-            await cur.execute(
-                """
-                SELECT table_name
-                FROM information_schema.tables
-                WHERE table_schema = current_schema()
-                  AND table_type = 'BASE TABLE'
-                ORDER BY table_name
-                """
-            )
+            await cur.execute(_SQL_TABLE_NAMES)
             return [row[0] for row in await cur.fetchall()]
 
     async def async_get_pk_columns(self, table_name: str) -> list[str]:
@@ -591,21 +574,7 @@ class PostgreSQLConnector:
         conn = self._require_async_open()
         self._validate_table_name(table_name)
         async with conn.cursor() as cur:
-            await cur.execute(
-                """
-                SELECT kcu.column_name
-                FROM information_schema.key_column_usage kcu
-                JOIN information_schema.table_constraints tc
-                  ON kcu.constraint_name = tc.constraint_name
-                 AND kcu.table_schema    = tc.table_schema
-                 AND kcu.table_name      = tc.table_name
-                WHERE tc.constraint_type = 'PRIMARY KEY'
-                  AND kcu.table_schema   = current_schema()
-                  AND kcu.table_name     = %s
-                ORDER BY kcu.ordinal_position
-                """,
-                (table_name,),
-            )
+            await cur.execute(_SQL_PK_COLUMNS, (table_name,))
             return [row[0] for row in await cur.fetchall()]
 
     async def async_get_column_info(self, table_name: str) -> list[ColumnInfo]:
@@ -613,16 +582,7 @@ class PostgreSQLConnector:
         conn = self._require_async_open()
         self._validate_table_name(table_name)
         async with conn.cursor() as cur:
-            await cur.execute(
-                """
-                SELECT column_name, data_type, udt_name, is_nullable
-                FROM information_schema.columns
-                WHERE table_schema = current_schema()
-                  AND table_name   = %s
-                ORDER BY ordinal_position
-                """,
-                (table_name,),
-            )
+            await cur.execute(_SQL_COLUMN_INFO, (table_name,))
             return [
                 ColumnInfo(
                     name=row[0],
@@ -690,12 +650,21 @@ class PostgreSQLConnector:
                 yield _pa.RecordBatch.from_arrays(arrays, schema=schema)
                 rows = await cur.fetchmany(batch_size)
         finally:
-            await cur.close()
+            # Each step runs independently so one failure doesn't block the
+            # others.  Note: CancelledError (BaseException subclass) can still
+            # interrupt an individual await; full shield() protection is deferred.
+            try:
+                await cur.close()
+            except Exception:
+                pass
             try:
                 await read_conn.rollback()
             except Exception:
                 pass
-            await read_conn.close()
+            try:
+                await read_conn.close()
+            except Exception:
+                pass
 
     # ── Serialization ─────────────────────────────────────────────────────────
 

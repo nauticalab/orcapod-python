@@ -5,10 +5,8 @@ from .noop_database import NoOpArrowDatabase
 from .spiraldb_connector import SpiralDBConnector
 from .sqlite_connector import SQLiteConnector
 from .postgresql_connector import PostgreSQLConnector
-from orcapod.protocols.async_db_connector_protocol import AsyncDBConnectorProtocol
 
 __all__ = [
-    "AsyncDBConnectorProtocol",
     "ConnectorArrowDatabase",
     "DeltaTableDatabase",
     "InMemoryArrowDatabase",
