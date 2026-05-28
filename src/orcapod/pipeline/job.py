@@ -688,7 +688,30 @@ class PipelineJob(AbstractPipelineBase):
         if self._store is None:
             raise ValueError(
                 "PipelineJob.run() requires a store. "
-                "Call job.bind(store=db) before run()."
+                "Call job.bind(store=db) before run(). "
+                "For transient (in-memory) storage use "
+                "job.bind(store=InMemoryArrowDatabase())."
+            )
+
+        # Reject loaded read-only stubs: nodes created by load() have no live
+        # function pod and cannot compute new outputs.  Replaying cached results
+        # would silently produce no output for cache misses; a clear error is
+        # better.  Use get_all_records() on the loaded job to inspect results.
+        from orcapod.pipeline.serialization import LoadStatus
+
+        unavailable_labels = [
+            node.label
+            for node in self._persistent_node_map.values()
+            if isinstance(node, FunctionJobNode)
+            and node.load_status == LoadStatus.UNAVAILABLE
+        ]
+        if unavailable_labels:
+            raise RuntimeError(
+                "PipelineJob.run() cannot execute a loaded job: the following "
+                f"function nodes are read-only stubs: {unavailable_labels}. "
+                "PipelineJob.load() is for result inspection only. "
+                "To run a new computation, create a fresh PipelineJob from the "
+                "original pipeline definition."
             )
 
         # --- Build hash-keyed OrcaDAG for topological ordering + exclusion ---
@@ -841,8 +864,8 @@ class PipelineJob(AbstractPipelineBase):
         # DB — required for _filter_by_content_hash() in get_all_records().
         node_job_content_hashes: dict[str, str] = {}
         for node in (self._persistent_node_map or {}).values():
-            if isinstance(node, FunctionJobNode) and node._label is not None:
-                node_job_content_hashes[node._label] = node.content_hash().to_string()
+            if isinstance(node, FunctionJobNode):
+                node_job_content_hashes[node.label] = node.content_hash().to_string()
 
         output: dict[str, Any] = {
             "orcapod_pipeline_job_version": PIPELINE_JOB_FORMAT_VERSION,
