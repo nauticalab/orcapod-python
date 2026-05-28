@@ -44,9 +44,9 @@ class SyncPipelineOrchestrator:
 
     def run(
         self,
-        graph: "GraphProtocol[Any]",
+        graph: GraphProtocol[Any],
         *,
-        observer: "ExecutionObserverProtocol | None" = None,
+        observer: ExecutionObserverProtocol | None = None,
         materialize_results: bool = True,
         run_id: str | None = None,
         pipeline_uri: str = "",

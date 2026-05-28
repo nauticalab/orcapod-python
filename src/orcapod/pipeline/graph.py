@@ -159,6 +159,8 @@ class Pipeline(AbstractPipelineBase):
                 _dc = getattr(node, "_data_context", None)
                 data_context_key = _dc.context_key if _dc is not None else None
 
+            import dataclasses
+
             descriptor: dict[str, Any] = {
                 "node_type": node.node_type,
                 "label": node.label,
@@ -170,6 +172,7 @@ class Pipeline(AbstractPipelineBase):
                 },
                 "node_uri": list(node.node_uri),
                 "data_context_key": data_context_key,
+                "config": dataclasses.asdict(node.orcapod_config),
             }
 
             match node:

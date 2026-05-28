@@ -548,9 +548,12 @@ class FunctionNode(FunctionNodeBase):
         node._data_context = contexts.resolve_context(
             descriptor.get("data_context_key")
         )
-        from orcapod.config import DEFAULT_CONFIG
+        from orcapod.config import DEFAULT_CONFIG, OrcapodConfig
 
-        node._orcapod_config = DEFAULT_CONFIG
+        config_dict = descriptor.get("config")
+        node._orcapod_config = (
+            OrcapodConfig(**config_dict) if config_dict is not None else DEFAULT_CONFIG
+        )
 
         # From ContentIdentifiableBase
         node._content_hash_cache = {}
@@ -822,7 +825,7 @@ class FunctionJobNode(FunctionNodeBase):
             A ``FunctionJobNode`` in read-only stub mode
             (``load_status=UNAVAILABLE``).
         """
-        from orcapod.config import DEFAULT_CONFIG
+        from orcapod.config import DEFAULT_CONFIG, OrcapodConfig
         from orcapod.pipeline.serialization import LoadStatus
 
         if "table_scope" not in descriptor:
@@ -847,7 +850,10 @@ class FunctionJobNode(FunctionNodeBase):
         node._data_context = contexts.resolve_context(
             descriptor.get("data_context_key")
         )
-        node._orcapod_config = DEFAULT_CONFIG
+        config_dict = descriptor.get("config")
+        node._orcapod_config = (
+            OrcapodConfig(**config_dict) if config_dict is not None else DEFAULT_CONFIG
+        )
 
         # From ContentIdentifiableBase
         node._content_hash_cache = {}

@@ -291,6 +291,8 @@ class NetworkxBackend(Generic[NodeT]):
             Frozen set of all nodes from which there is a directed path to
             *node*. Empty if *node* is a source (no incoming edges).
         """
+        if node not in self._graph:
+            raise KeyError(node)
         import networkx as nx
 
         return frozenset(nx.ancestors(self._graph, node))
