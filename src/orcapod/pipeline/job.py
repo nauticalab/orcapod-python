@@ -696,21 +696,22 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             )
 
         # Reject loaded read-only stubs: nodes created by load() have no live
-        # function pod and cannot compute new outputs.  Replaying cached results
-        # would silently produce no output for cache misses; a clear error is
-        # better.  Use get_all_records() on the loaded job to inspect results.
+        # function pod / operator and cannot compute new outputs.  Replaying
+        # cached results would silently produce no output for cache misses; a
+        # clear error is better.  Use get_all_records() on the loaded job to
+        # inspect results.
         from orcapod.pipeline.serialization import LoadStatus
 
         unavailable_labels = [
             node.label
             for node in self._persistent_node_map.values()
-            if isinstance(node, FunctionJobNode)
+            if isinstance(node, (FunctionJobNode, OperatorJobNode))
             and node.load_status == LoadStatus.UNAVAILABLE
         ]
         if unavailable_labels:
             raise RuntimeError(
                 "PipelineJob.run() cannot execute a loaded job: the following "
-                f"function nodes are read-only stubs: {unavailable_labels}. "
+                f"nodes are read-only stubs: {unavailable_labels}. "
                 "PipelineJob.load() is for result inspection only. "
                 "To run a new computation, create a fresh PipelineJob from the "
                 "original pipeline definition."

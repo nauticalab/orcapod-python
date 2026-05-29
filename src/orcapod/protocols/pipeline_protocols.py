@@ -1,6 +1,7 @@
 # Protocols for pipeline and nodes
 from __future__ import annotations
 
+from collections.abc import Hashable
 from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
 
 from orcapod.protocols import core_protocols as cp
@@ -10,7 +11,7 @@ if TYPE_CHECKING:
     from orcapod.pipeline.dag import GraphProtocol
 
 
-NodeT = TypeVar("NodeT")
+NodeT = TypeVar("NodeT", bound=Hashable)
 
 
 @runtime_checkable
