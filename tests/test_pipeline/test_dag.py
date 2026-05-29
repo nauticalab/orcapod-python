@@ -588,3 +588,60 @@ class TestPipelineProtocolConformance:
             pass
 
         assert isinstance(pipeline.dag, GraphProtocol)
+
+
+# ---------------------------------------------------------------------------
+# PipelineJob.load() dag property returns OrcaDAG[JobNode]
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineJobDagOnLoadedJob:
+    """job.dag returns OrcaDAG[JobNode] even for loaded (not compiled) jobs."""
+
+    def test_loaded_job_dag_returns_job_nodes(self, tmp_path):
+        """PipelineJob.load() must produce OrcaDAG with JobNode objects."""
+        import pyarrow as pa
+        from orcapod.core.data_function import PythonDataFunction
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.nodes import JobNode
+        from orcapod.core.sources.arrow_table_source import ArrowTableSource
+        from orcapod.databases.in_memory_databases import InMemoryArrowDatabase
+        from orcapod.pipeline.graph import Pipeline
+        from orcapod.pipeline.job import PipelineJob
+
+        src = ArrowTableSource(
+            pa.table(
+                {
+                    "id": pa.array(["a"], type=pa.large_string()),
+                    "v": pa.array([1], type=pa.int64()),
+                }
+            ),
+            tag_columns=["id"],
+            source_id="src",
+            infer_nullable=True,
+        )
+        def double_v(v: int) -> int:
+            return v * 2
+
+        fn = PythonDataFunction(double_v, output_keys="out")
+        pod = FunctionPod(fn)
+
+        # Build, run, and save a pipeline job
+        pipeline = Pipeline(name="load_dag_test")
+        with pipeline:
+            pod(src)
+        job = PipelineJob.from_pipeline(
+            pipeline, sources={"src": src}, store=InMemoryArrowDatabase()
+        )
+        job.run()
+        save_path = tmp_path / "job.json"
+        job.save(str(save_path))
+
+        # Load and check dag
+        loaded_job = PipelineJob.load(str(save_path))
+        assert isinstance(loaded_job.dag, OrcaDAG)
+        # All nodes in the loaded job's dag must be JobNode instances
+        for node in loaded_job.dag.nodes():
+            assert isinstance(node, JobNode), (
+                f"Expected JobNode, got {type(node).__name__}"
+            )
