@@ -108,9 +108,7 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
         Raises:
             RuntimeError: If the pipeline has not been compiled yet.
         """
-        if self._node_graph is None:
-            raise RuntimeError("Pipeline must be compiled before showing the graph.")
-        return render_graph(self._node_graph, **kwargs)
+        return render_graph(self.dag, **kwargs)
 
     # ------------------------------------------------------------------
     # Serialization
@@ -391,15 +389,15 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
             if node.label:
                 attrs["label"] = node.label
 
-        # Restore _node_lut and _upstreams so PipelineJob._build_execution_graph()
-        # can substitute bound sources and build a correct execution graph.
+        # Restore _node_lut and _upstreams so PipelineJob can substitute bound
+        # sources and build a correct execution graph at run time.
         pipeline._node_lut = {
             h: n
             for h, n in reconstructed.items()
             if n.node_type != "source"
         }
-        # SourceNode IS the upstream — store it directly so _build_execution_graph()
-        # can find it by hash and substitute a concrete source at run time.
+        # SourceNode IS the upstream — store it directly so run() can find it
+        # by hash and substitute a concrete source at run time.
         pipeline._upstreams = {
             h: n
             for h, n in reconstructed.items()
@@ -416,7 +414,7 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
         ``_hash_graph``, ``_node_graph``, ``_persistent_node_map``) is shared
         read-only with the original — these are immutable after ``compile()``.
         Only ``_nodes`` (the label → exec-node mapping) gets its own copy so
-        that ``_build_execution_graph()`` can update it without affecting other
+        that execution setup can update it without affecting other
         ``PipelineJob`` instances that reference this blueprint.
 
         The clone is never registered as a tracker context manager.
