@@ -14,11 +14,13 @@ from orcapod.core.nodes import (
 )
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
 from orcapod.pipeline.base import AbstractPipelineBase
+from orcapod.pipeline.dag import OrcaDAG
 from orcapod.protocols import core_protocols as cp
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import networkx as nx
+    from orcapod.pipeline.dag import GraphProtocol
     from orcapod.pipeline.execution_context import ExecutionContext
 else:
     nx = LazyModule("networkx")
@@ -31,7 +33,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class Pipeline(AbstractPipelineBase):
+class Pipeline(AbstractPipelineBase[GraphNode]):
     """A pure computational blueprint recording operator and function pod invocations.
 
     During the ``with`` block, operator and function pod invocations are
@@ -366,15 +368,16 @@ class Pipeline(AbstractPipelineBase):
                     nodes_by_label[node.label] = node
         pipeline._nodes = nodes_by_label
 
-        pipeline._node_graph = nx.DiGraph()
+        node_dag: OrcaDAG[GraphNode] = OrcaDAG()
         for up_hash, down_hash in edges:
             up_node = reconstructed.get(up_hash)
             down_node = reconstructed.get(down_hash)
             if up_node is not None and down_node is not None:
-                pipeline._node_graph.add_edge(up_node, down_node)
+                node_dag.add_edge(up_node, down_node)
         for node in reconstructed.values():
-            if node not in pipeline._node_graph:
-                pipeline._node_graph.add_node(node)
+            if node not in node_dag:
+                node_dag.add_node(node)
+        pipeline._node_graph = node_dag
 
         pipeline._graph_edges = [(up, down) for up, down in edges]
         pipeline._hash_graph = nx.DiGraph()
@@ -600,7 +603,7 @@ class GraphRenderer:
 
     def generate_dot(
         self,
-        graph: "nx.DiGraph",
+        graph: "GraphProtocol[GraphNode]",
         label_lut: dict[GraphNode, str] | None = None,
         style_rules: dict[str, dict[str, str]] | None = None,
         **style_overrides,
@@ -644,7 +647,7 @@ class GraphRenderer:
 
     def render_graph(
         self,
-        graph: "nx.DiGraph",
+        graph: "GraphProtocol[GraphNode]",
         label_lut: dict[GraphNode, str] | None = None,
         show: bool = True,
         output_path: str | None = None,
@@ -724,7 +727,7 @@ class GraphRenderer:
 # CONVENIENCE FUNCTION
 # =====================
 def render_graph(
-    graph: "nx.DiGraph",
+    graph: "GraphProtocol[GraphNode]",
     label_lut: dict[GraphNode, str] | None = None,
     style_rules: dict[str, dict[str, str]] | None = None,
     **kwargs,
@@ -742,7 +745,7 @@ def render_graph(
 
 
 def render_graph_dark_theme(
-    graph: "nx.DiGraph",
+    graph: "GraphProtocol[GraphNode]",
     label_lut: dict[GraphNode, str] | None = None,
     **kwargs,
 ) -> str | None:
