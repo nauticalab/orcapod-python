@@ -410,12 +410,15 @@ class OperatorNode(OperatorNodeBase):
         node._label = descriptor.get("label")
 
         # From DataContextMixin
-        from orcapod.config import DEFAULT_CONFIG
+        from orcapod.config import DEFAULT_CONFIG, OrcapodConfig
 
         node._data_context = contexts.resolve_context(
             descriptor.get("data_context_key")
         )
-        node._orcapod_config = DEFAULT_CONFIG
+        config_dict = descriptor.get("config")
+        node._orcapod_config = (
+            OrcapodConfig(**config_dict) if config_dict is not None else DEFAULT_CONFIG
+        )
 
         # From ContentIdentifiableBase
         node._content_hash_cache = {}
@@ -679,12 +682,15 @@ class OperatorJobNode(OperatorNodeBase):
         node._label = descriptor.get("label")
 
         # From DataContextMixin
-        from orcapod.config import DEFAULT_CONFIG
+        from orcapod.config import DEFAULT_CONFIG, OrcapodConfig
 
         node._data_context = contexts.resolve_context(
             descriptor.get("data_context_key")
         )
-        node._orcapod_config = DEFAULT_CONFIG
+        config_dict = descriptor.get("config")
+        node._orcapod_config = (
+            OrcapodConfig(**config_dict) if config_dict is not None else DEFAULT_CONFIG
+        )
 
         # From ContentIdentifiableBase
         node._content_hash_cache = {}
