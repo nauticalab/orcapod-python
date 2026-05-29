@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from orcapod.core.nodes import JobNode
 from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.nodes.source_node import SourceJobNode
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class PipelineJob(AbstractPipelineBase):
+class PipelineJob(AbstractPipelineBase[JobNode]):
     """Pipeline + source bindings + execution context.
 
     ``PipelineJob`` is the everyday working object. It is built incrementally:
@@ -527,17 +528,18 @@ class PipelineJob(AbstractPipelineBase):
             and job_id_to_bp_hash[id(job_node)] in node_map
         }
 
-        # Build _node_graph (DiGraph with node objects as vertices).
-        # Mirrors AbstractPipelineBase.compile() step 5.
-        pipeline._node_graph = _nx.DiGraph()
+        # Build _node_graph (OrcaDAG with node objects as vertices).
+        # node_map here contains GraphNode objects (blueprint nodes).
+        bp_dag: OrcaDAG = OrcaDAG()
         for up_h, down_h in self._hash_graph.edges():
             up_node = node_map.get(up_h)
             down_node = node_map.get(down_h)
             if up_node is not None and down_node is not None:
-                pipeline._node_graph.add_edge(up_node, down_node)
+                bp_dag.add_edge(up_node, down_node)
         for node in node_map.values():
-            if node not in pipeline._node_graph:
-                pipeline._node_graph.add_node(node)
+            if node not in bp_dag:
+                bp_dag.add_node(node)
+        pipeline._node_graph = bp_dag
 
         pipeline._compiled = True
 
