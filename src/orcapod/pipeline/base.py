@@ -95,7 +95,7 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
         self._node_graph: OrcaDAG[NodeT] | None = None
         self._compiled: bool = False
 
-        # --- Legacy fields kept for _build_execution_graph() compat ----
+        # --- Fields populated by compile(); used by is_runnable(), run(), save() ----
         # Populated from _persistent_node_map / _hash_graph at end of compile().
         self._node_lut: dict[str, Any] = {}       # hash → non-source compiled node
         self._upstreams: dict[str, Any] = {}      # hash → source compiled node
@@ -281,8 +281,8 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
         - ``_persistent_node_map`` — hash → compiled node (all node types)
         - ``_nodes`` — label → compiled node (labelled nodes only)
         - ``_node_graph`` — OrcaDAG with node objects as vertices
-        - Legacy fields ``_node_lut``, ``_upstreams``, ``_graph_edges``
-          are repopulated for backward compat with ``_build_execution_graph()``.
+        - ``_node_lut``, ``_upstreams``, and ``_graph_edges`` are repopulated
+          and used by ``is_runnable()``, ``run()``, and ``save()``.
         - ``_compiled`` is set to ``True``.
 
         This method always rebuilds from scratch; it does NOT perform
@@ -386,7 +386,7 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
         for node in node_map.values():
             if node not in node_dag:
                 node_dag.add_node(node)
-        self._node_graph = node_dag  # type: ignore[assignment]
+        self._node_graph = node_dag  # type: ignore[assignment]  # OrcaDAG[Any] → OrcaDAG[NodeT]: safe, subclass constrains NodeT
 
         # 6. Enrich hash_graph node attributes (used by GraphRenderer and serialization).
         for node_hash, node in node_map.items():
@@ -404,7 +404,7 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
             if not attrs.get("pipeline_hash"):
                 attrs["pipeline_hash"] = node.pipeline_hash().to_string()
 
-        # 7. Populate legacy fields for _build_execution_graph() backward compat.
+        # 7. Populate fields used by is_runnable(), run(), and save().
         self._node_lut = {
             h: n for h, n in node_map.items()
             if not isinstance(n, source_node_cls)
