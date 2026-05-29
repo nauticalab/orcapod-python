@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Hashable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
@@ -23,7 +24,7 @@ else:
 
 logger = logging.getLogger(__name__)
 
-NodeT = TypeVar("NodeT")
+NodeT = TypeVar("NodeT", bound=Hashable)
 
 
 @dataclass(frozen=True)
@@ -89,8 +90,8 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
         self._hash_graph: "nx.DiGraph" = nx.DiGraph()
 
         # --- Compiled state (populated / replaced by compile()) --------
-        self._persistent_node_map: dict[str, NodeT] = {}  # type: ignore[assignment]
-        self._nodes: dict[str, NodeT] = {}  # type: ignore[assignment]
+        self._persistent_node_map: dict[str, NodeT] = {}
+        self._nodes: dict[str, NodeT] = {}
         self._node_graph: OrcaDAG[NodeT] | None = None
         self._compiled: bool = False
 
