@@ -1079,10 +1079,19 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             for label, bp_node in pipeline._nodes.items()
         }
 
-        # Copy pipeline._node_graph for graph-introspection use (renderers, etc.).
-        # Nodes here are SourceNode / FunctionNode / OperatorNode from the blueprint;
-        # is_runnable() does not use this graph and is unaffected.
-        job._node_graph = pipeline._node_graph
+        # Build job._node_graph as OrcaDAG[JobNode] from the job's own persistent
+        # node map.  This makes job.dag consistent with the compiled-job path
+        # (where compile() builds _node_graph from job nodes).
+        # Callers needing blueprint nodes for rendering use job.pipeline.dag.
+        job_dag: OrcaDAG = OrcaDAG()
+        for node in job._persistent_node_map.values():
+            job_dag.add_node(node)
+        for u_hash, v_hash in job._graph_edges:
+            u_node = job._persistent_node_map.get(u_hash)
+            v_node = job._persistent_node_map.get(v_hash)
+            if u_node is not None and v_node is not None:
+                job_dag.add_edge(u_node, v_node)
+        job._node_graph = job_dag
 
         if effective_store is not None:
             job._distribute_databases()
