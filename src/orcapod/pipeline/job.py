@@ -126,7 +126,6 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         # _sources_by_hash is hash-keyed (internal use by bind()).
         # Two concrete sources of the same class (e.g. two ArrowTableSource objects)
         # would collide on name but have distinct hash keys.
-        from orcapod.core.nodes.source_node import SourceJobNode
         compiled_by_name: dict[str, Any] = {}
         compiled_by_hash: dict[str, Any] = {}
         for h, n in self._persistent_node_map.items():
@@ -313,7 +312,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             SourceSpecMismatchError: If any source's schema is incompatible.
             ValueError: If a source key has no matching ``SourceJobNode`` slot.
         """
-        from orcapod.core.nodes.source_node import SourceJobNode, SourceNodeBase
+        from orcapod.core.nodes.source_node import SourceNodeBase
 
         store_changed = store is not None and store is not self._store
 
@@ -366,10 +365,6 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         Raises:
             RuntimeError: If ``_store`` is not set.
         """
-        from orcapod.core.nodes.function_node import FunctionJobNode
-        from orcapod.core.nodes.operator_node import OperatorJobNode
-        from orcapod.types import CacheMode
-
         if self._store is None:
             raise RuntimeError(
                 "Cannot distribute databases: no store is set. "
@@ -416,9 +411,8 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             RuntimeError: If this job has not been compiled.
         """
         import networkx as _nx
-        from orcapod.core.nodes.function_node import FunctionJobNode, FunctionNode
-        from orcapod.core.nodes.operator_node import OperatorJobNode, OperatorNode
-        from orcapod.core.nodes.source_node import SourceJobNode
+        from orcapod.core.nodes.function_node import FunctionNode
+        from orcapod.core.nodes.operator_node import OperatorNode
         from orcapod.pipeline.graph import Pipeline
 
         if not self._compiled:
@@ -574,8 +568,6 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             List of unbound source slot names, in order of appearance in
             the pipeline graph. Empty list if the job is not yet compiled.
         """
-        from orcapod.core.nodes.source_node import SourceJobNode
-
         if not self._compiled:
             return []
         seen: set[str] = set()
@@ -613,8 +605,6 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         Returns:
             ``True`` if the node can be executed with current bindings.
         """
-        from orcapod.core.nodes.source_node import SourceJobNode
-
         if not self._compiled:
             return False
 
@@ -678,7 +668,6 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         import hashlib
         import uuid
 
-        from orcapod.core.nodes.source_node import SourceJobNode
         from orcapod.pipeline.observer import NoOpObserver
         from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
 
@@ -992,15 +981,9 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         #   • job.nodes["label"].get_all_records() works after loading a completed job
         #   • run() includes them in the execution DAG
         import networkx as _nx
-        from orcapod.core.nodes.function_node import (
-            FunctionNode as _FunctionNode,
-            FunctionJobNode as _FunctionJobNode,
-        )
-        from orcapod.core.nodes.operator_node import (
-            OperatorNode as _OperatorNode,
-            OperatorJobNode as _OperatorJobNode,
-        )
-        from orcapod.core.nodes.source_node import SourceJobNode, SourceNode as _SourceNode
+        from orcapod.core.nodes.function_node import FunctionNode as _FunctionNode
+        from orcapod.core.nodes.operator_node import OperatorNode as _OperatorNode
+        from orcapod.core.nodes.source_node import SourceNode as _SourceNode
 
         job._sources = dict(sources)
 
@@ -1042,7 +1025,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 live_content_hash = node_job_content_hashes.get(
                     bp_node.label
                 )
-                fjn = _FunctionJobNode.from_descriptor(
+                fjn = FunctionJobNode.from_descriptor(
                     descriptor,
                     input_stream=input_stream,
                     job_content_hash=live_content_hash,
@@ -1059,7 +1042,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
                 )
                 # Use the reconstructed operator from the blueprint if available.
                 operator = getattr(bp_node, "_operator", None)
-                ojn = _OperatorJobNode.from_descriptor(
+                ojn = OperatorJobNode.from_descriptor(
                     descriptor,
                     operator=operator,
                     input_streams=input_streams,
