@@ -545,3 +545,67 @@ class TestPipelineDagProperty:
         pipeline = Pipeline(name="uncompiled", auto_compile=False)
         with pytest.raises(RuntimeError, match="not been compiled"):
             _ = pipeline.dag
+
+
+# ---------------------------------------------------------------------------
+# PipelineProtocol structural conformance
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineProtocolConformance:
+    """Pipeline and PipelineJob satisfy PipelineProtocol structurally."""
+
+    def test_pipeline_satisfies_protocol(self):
+        """Pipeline is runtime-checkable as PipelineProtocol."""
+        import pyarrow as pa
+        from orcapod.core.sources.arrow_table_source import ArrowTableSource
+        from orcapod.pipeline.graph import Pipeline
+        from orcapod.protocols.pipeline_protocols import PipelineProtocol
+
+        src = ArrowTableSource(
+            pa.table({"id": pa.array(["a"], type=pa.large_string()), "v": pa.array([1], type=pa.int64())}),
+            tag_columns=["id"],
+            source_id="src",
+        )
+        pipeline = Pipeline(name="proto_test")
+        with pipeline:
+            pass  # no ops, just compile
+
+        assert isinstance(pipeline, PipelineProtocol)
+
+    def test_pipeline_job_satisfies_protocol(self):
+        """PipelineJob is runtime-checkable as PipelineProtocol."""
+        import pyarrow as pa
+        from orcapod.core.sources.arrow_table_source import ArrowTableSource
+        from orcapod.databases import InMemoryArrowDatabase
+        from orcapod.pipeline.job import PipelineJob
+        from orcapod.protocols.pipeline_protocols import PipelineProtocol
+
+        src = ArrowTableSource(
+            pa.table({"id": pa.array(["a"], type=pa.large_string()), "v": pa.array([1], type=pa.int64())}),
+            tag_columns=["id"],
+            source_id="src",
+        )
+        job = PipelineJob(store=InMemoryArrowDatabase())
+        with job:
+            pass
+
+        assert isinstance(job, PipelineProtocol)
+
+    def test_protocol_dag_returns_graph_protocol(self):
+        """dag attribute on PipelineProtocol returns GraphProtocol."""
+        import pyarrow as pa
+        from orcapod.core.sources.arrow_table_source import ArrowTableSource
+        from orcapod.pipeline.graph import Pipeline
+        from orcapod.pipeline.dag import GraphProtocol
+
+        src = ArrowTableSource(
+            pa.table({"id": pa.array(["a"], type=pa.large_string()), "v": pa.array([1], type=pa.int64())}),
+            tag_columns=["id"],
+            source_id="src",
+        )
+        pipeline = Pipeline(name="proto_dag_test")
+        with pipeline:
+            pass
+
+        assert isinstance(pipeline.dag, GraphProtocol)

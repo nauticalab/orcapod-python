@@ -1,22 +1,57 @@
 # Protocols for pipeline and nodes
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
 
 from orcapod.protocols import core_protocols as cp
 
 if TYPE_CHECKING:
     import pyarrow as pa
+    from orcapod.pipeline.dag import GraphProtocol
 
 
-class NodeProtocol(cp.Source, Protocol):
+NodeT = TypeVar("NodeT")
+
+
+@runtime_checkable
+class PipelineProtocol(Protocol[NodeT]):
+    """Structural protocol for ``Pipeline`` and ``PipelineJob``.
+
+    Both ``Pipeline`` (``NodeT=GraphNode``) and ``PipelineJob``
+    (``NodeT=JobNode``) satisfy this protocol.  Callers that only need
+    DAG introspection can accept ``PipelineProtocol[Any]`` rather than
+    importing the concrete classes.
+
+    Note:
+        The ``dag`` return type is ``GraphProtocol[NodeT]`` here (the abstract
+        protocol).  Callers using the concrete classes receive the more
+        specific ``OrcaDAG[NodeT]`` type.
+    """
+
+    @property
+    def name(self) -> tuple[str, ...]:
+        """Pipeline name as a tuple of path components."""
+        ...
+
+    @property
+    def nodes(self) -> dict[str, NodeT]:
+        """Copy of the compiled label -> node mapping."""
+        ...
+
+    @property
+    def dag(self) -> "GraphProtocol[NodeT]":
+        """Node-object DAG for topology traversal and introspection."""
+        ...
+
+
+class NodeProtocol(cp.SourceProtocol, Protocol):
     # def record_pipeline_outputs(self):
     #     pass
     ...
 
 
 @runtime_checkable
-class PodNodeProtocol(cp.CachedPod, Protocol):
+class PodNodeProtocol(cp.PodProtocol, Protocol):
     def get_all_records(
         self, include_system_columns: bool = False
     ) -> "pa.Table | None":
