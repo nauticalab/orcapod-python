@@ -70,7 +70,7 @@ class TestPipelineJobRecording:
 
         # Pipeline should have SourceNode leaf nodes
         source_nodes = [
-            n for n in job.pipeline._node_graph.nodes() if isinstance(n, SourceNode)
+            n for n in job.pipeline.dag.nodes() if isinstance(n, SourceNode)
         ]
         assert len(source_nodes) == 2
         assert all(isinstance(n, SourceNode) for n in source_nodes)

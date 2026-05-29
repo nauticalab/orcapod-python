@@ -38,9 +38,7 @@ def _make_source(n: int = 3) -> ArrowTableSource:
 
 def _get_function_node(pipeline: Pipeline):
     """Return the first function node from the pipeline graph."""
-    import networkx as nx
-
-    for node in nx.topological_sort(pipeline._node_graph):
+    for node in pipeline.dag.topological_sort():
         if node.node_type == "function":
             return node
     raise RuntimeError("No function node found")

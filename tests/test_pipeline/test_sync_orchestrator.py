@@ -49,7 +49,7 @@ class TestSyncOrchestratorLinear:
             pod(src, label="doubler")
 
         orch = SyncPipelineOrchestrator()
-        result = orch.run(pipeline._node_graph)
+        result = orch.run(pipeline.dag)
 
         assert len(result.node_outputs) > 0
 
@@ -82,7 +82,7 @@ class TestSyncOrchestratorWithOperator:
             pod(mapped, label="doubler")
 
         orch = SyncPipelineOrchestrator()
-        result = orch.run(pipeline._node_graph)
+        result = orch.run(pipeline.dag)
 
         fn_outputs = [
             v for k, v in result.node_outputs.items() if k.node_type == "function"
@@ -108,7 +108,7 @@ class TestSyncOrchestratorDiamond:
             pod(joined, label="adder")
 
         orch = SyncPipelineOrchestrator()
-        result = orch.run(pipeline._node_graph)
+        result = orch.run(pipeline.dag)
 
         fn_outputs = [
             v for k, v in result.node_outputs.items() if k.node_type == "function"
@@ -152,7 +152,7 @@ class TestSyncOrchestratorObserver:
                 return self
 
         orch = SyncPipelineOrchestrator()
-        orch.run(pipeline._node_graph, observer=RecordingObserver())
+        orch.run(pipeline.dag, observer=RecordingObserver())
 
         # First two events are source node start/end
         assert events[0][0] == "node_start"
@@ -282,7 +282,7 @@ class TestSyncAsyncParity:
         with async_pipeline:
             pod(src, label="doubler")
         async_pipeline.compile()
-        AsyncPipelineOrchestrator().run(async_pipeline._node_graph)
+        AsyncPipelineOrchestrator().run(async_pipeline.dag)
         async_pipeline.flush()
         async_records = async_pipeline.doubler.get_all_records()
         async_values = sorted(async_records.column("result").to_pylist())
@@ -315,7 +315,7 @@ class TestSyncAsyncParity:
             joined = Join()(src_a, src_b, label="join")
             pod(joined, label="adder")
         async_pipeline.compile()
-        AsyncPipelineOrchestrator().run(async_pipeline._node_graph)
+        AsyncPipelineOrchestrator().run(async_pipeline.dag)
         async_pipeline.flush()
         async_values = sorted(
             async_pipeline.adder.get_all_records().column("total").to_pylist()
@@ -453,7 +453,7 @@ class TestSyncObserverInjection:
                 return self
 
         orch = SyncPipelineOrchestrator()
-        orch.run(pipeline._node_graph, observer=RecordingObserver())
+        orch.run(pipeline.dag, observer=RecordingObserver())
 
         # Mapper fires node_start/node_end only (no data-level hooks)
         assert ("node_start", "mapper") in events
@@ -496,7 +496,7 @@ class TestSyncObserverInjection:
             def contextualize(self, *identity_path):
                 return self
 
-        SyncPipelineOrchestrator().run(pipeline._node_graph, observer=Obs1())
+        SyncPipelineOrchestrator().run(pipeline.dag, observer=Obs1())
         assert events1 == [False]
 
         # Second run — should be cached=True
@@ -518,7 +518,7 @@ class TestSyncObserverInjection:
             def contextualize(self, *identity_path):
                 return self
 
-        SyncPipelineOrchestrator().run(pipeline._node_graph, observer=Obs2())
+        SyncPipelineOrchestrator().run(pipeline.dag, observer=Obs2())
         assert events2 == [True]
 
     def test_diamond_dag_observer_event_order(self):
@@ -551,7 +551,7 @@ class TestSyncObserverInjection:
             def contextualize(self, *identity_path):
                 return self
 
-        SyncPipelineOrchestrator().run(pipeline._node_graph, observer=OrderObserver())
+        SyncPipelineOrchestrator().run(pipeline.dag, observer=OrderObserver())
 
         # Extract just the node labels in start order
         starts = [label for event, label in node_order if event == "start"]
@@ -575,7 +575,7 @@ class TestSyncObserverInjection:
             pod(src, label="doubler")
 
         orch = SyncPipelineOrchestrator()  # no observer
-        result = orch.run(pipeline._node_graph)
+        result = orch.run(pipeline.dag)
         fn_outputs = [v for k, v in result.node_outputs.items() if k.node_type == "function"]
         assert len(fn_outputs[0]) == 1
 
@@ -592,7 +592,7 @@ class TestMaterializeResults:
             pod(src, label="doubler")
 
         orch = SyncPipelineOrchestrator()
-        result = orch.run(pipeline._node_graph, materialize_results=False)
+        result = orch.run(pipeline.dag, materialize_results=False)
         assert result.node_outputs == {}
 
     def test_async_materialize_true_collects_all(self):
@@ -606,7 +606,7 @@ class TestMaterializeResults:
 
         pipeline.compile()
         orch = AsyncPipelineOrchestrator()
-        result = orch.run(pipeline._node_graph, materialize_results=True)
+        result = orch.run(pipeline.dag, materialize_results=True)
         assert len(result.node_outputs) > 0
 
     def test_async_materialize_false_returns_empty(self):
@@ -620,5 +620,5 @@ class TestMaterializeResults:
 
         pipeline.compile()
         orch = AsyncPipelineOrchestrator()
-        result = orch.run(pipeline._node_graph, materialize_results=False)
+        result = orch.run(pipeline.dag, materialize_results=False)
         assert result.node_outputs == {}

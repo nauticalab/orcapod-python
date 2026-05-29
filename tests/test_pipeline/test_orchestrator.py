@@ -180,7 +180,7 @@ class TestOrchestratorLinearPipeline:
             pod(src, label="doubler")
 
         pipeline.compile()
-        AsyncPipelineOrchestrator().run(pipeline._node_graph)
+        AsyncPipelineOrchestrator().run(pipeline.dag)
         pipeline.flush()
 
         records = pipeline.doubler.get_all_records()
@@ -212,7 +212,7 @@ class TestOrchestratorLinearPipeline:
             pod(src, label="doubler")
         pipeline = async_pipeline
         pipeline.compile()
-        AsyncPipelineOrchestrator().run(pipeline._node_graph)
+        AsyncPipelineOrchestrator().run(pipeline.dag)
         pipeline.flush()
         async_records = pipeline.doubler.get_all_records()
         async_values = sorted(async_records.column("result").to_pylist())
@@ -245,7 +245,7 @@ class TestOrchestratorOperatorPipeline:
             pod(mapped, label="doubler")
 
         pipeline.compile()
-        AsyncPipelineOrchestrator().run(pipeline._node_graph)
+        AsyncPipelineOrchestrator().run(pipeline.dag)
         pipeline.flush()
 
         records = pipeline.doubler.get_all_records()
@@ -275,7 +275,7 @@ class TestOrchestratorDiamondDag:
             pod(joined, label="adder")
 
         pipeline.compile()
-        AsyncPipelineOrchestrator().run(pipeline._node_graph)
+        AsyncPipelineOrchestrator().run(pipeline.dag)
         pipeline.flush()
 
         records = pipeline.adder.get_all_records()
@@ -310,7 +310,7 @@ class TestOrchestratorDiamondDag:
             joined = Join()(src_a, src_b, label="join")
             pod(joined, label="adder")
         async_pipeline.compile()
-        AsyncPipelineOrchestrator().run(async_pipeline._node_graph)
+        AsyncPipelineOrchestrator().run(async_pipeline.dag)
         async_pipeline.flush()
         async_values = sorted(
             async_pipeline.adder.get_all_records().column("total").to_pylist()
@@ -341,7 +341,7 @@ class TestOrchestratorRunAsync:
 
         pipeline.compile()
         orchestrator = AsyncPipelineOrchestrator()
-        await orchestrator.run_async(pipeline._node_graph)
+        await orchestrator.run_async(pipeline.dag)
         pipeline.flush()
 
         records = pipeline.doubler.get_all_records()
@@ -368,7 +368,7 @@ class TestBufferSizeConfiguration:
             pod(src, label="doubler")
 
         pipeline.compile()
-        AsyncPipelineOrchestrator(buffer_size=4).run(pipeline._node_graph)
+        AsyncPipelineOrchestrator(buffer_size=4).run(pipeline.dag)
         pipeline.flush()
 
         records = pipeline.doubler.get_all_records()
@@ -404,7 +404,7 @@ class TestAsyncOrchestratorFanOut:
 
         pipeline.compile()
         orch = AsyncPipelineOrchestrator()
-        result = orch.run(pipeline._node_graph, materialize_results=True)
+        result = orch.run(pipeline.dag, materialize_results=True)
         pipeline.flush()
 
         fn_outputs = [
@@ -472,7 +472,7 @@ class TestAsyncOrchestratorErrorPropagation:
         orch = AsyncPipelineOrchestrator()
 
         # Pipeline must complete without raising; failing data is silently dropped.
-        orch.run(pipeline._node_graph)
+        orch.run(pipeline.dag)
 
     def test_node_failure_calls_on_data_crash(self):
         """When an observer is set, on_data_crash is called for the failing data."""
@@ -497,7 +497,7 @@ class TestAsyncOrchestratorErrorPropagation:
 
         pipeline.compile()
         orch = AsyncPipelineOrchestrator()
-        orch.run(pipeline._node_graph, observer=CrashRecorder())
+        orch.run(pipeline.dag, observer=CrashRecorder())
 
         assert len(crashes) == 1
         assert isinstance(crashes[0], (ValueError, RuntimeError))
@@ -539,7 +539,7 @@ class TestAsyncOrchestratorObserverInjection:
 
         pipeline.compile()
         orch = AsyncPipelineOrchestrator()
-        orch.run(pipeline._node_graph, observer=RecordingObserver())
+        orch.run(pipeline.dag, observer=RecordingObserver())
 
         # Source fires node_start/node_end (label contains "ArrowTableSource" or similar)
         source_starts = [e for e in events if e[0] == "node_start" and e[1] != "doubler"]
@@ -596,7 +596,7 @@ class TestAsyncOrchestratorObserverInjection:
 
         pipeline.compile()
         orch = AsyncPipelineOrchestrator()
-        orch.run(pipeline._node_graph, observer=RecordingObserver())
+        orch.run(pipeline.dag, observer=RecordingObserver())
 
         # All labeled nodes fire start/end
         assert ("node_start", "mapper") in events
@@ -622,7 +622,7 @@ class TestAsyncOrchestratorObserverInjection:
 
         pipeline.compile()
         orch = AsyncPipelineOrchestrator()  # no observer
-        result = orch.run(pipeline._node_graph, materialize_results=True)
+        result = orch.run(pipeline.dag, materialize_results=True)
         fn_outputs = [
             v for k, v in result.node_outputs.items() if k.node_type == "function"
         ]
