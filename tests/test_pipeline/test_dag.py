@@ -645,3 +645,6 @@ class TestPipelineJobDagOnLoadedJob:
             assert isinstance(node, JobNode), (
                 f"Expected JobNode, got {type(node).__name__}"
             )
+        # Topology should match the original: 2 nodes, 1 edge (source → function)
+        assert len(list(loaded_job.dag.nodes())) == 2
+        assert len(list(loaded_job.dag.edges())) == 1
