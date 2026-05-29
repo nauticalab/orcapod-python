@@ -80,7 +80,7 @@ class TestPipelineBlueprintSave:
         pipeline.save(str(path))
         loaded = Pipeline.load(str(path))
         assert len(loaded._persistent_node_map) == len(pipeline._persistent_node_map)
-        assert len(list(loaded._node_graph.edges())) == len(list(pipeline._node_graph.edges()))
+        assert len(list(loaded.dag.edges())) == len(list(pipeline.dag.edges()))
 
     def test_save_load_restores_spec_names(self, spec_pipeline):
         """SourceNode names must survive save/load."""

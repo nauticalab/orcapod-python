@@ -100,26 +100,6 @@ def _grades_from_table(table: pa.Table) -> dict[str, str]:
     }
 
 
-def _build_exec_dag(job: PipelineJob):
-    """Build an OrcaDAG from the job's persistent node map for orchestrator testing.
-
-    Used by tests that exercise AsyncPipelineOrchestrator directly rather than
-    going through the synchronous ``job.run()`` path.
-    """
-    from orcapod.pipeline.dag import OrcaDAG
-
-    exec_dag: OrcaDAG = OrcaDAG()
-    for node in job._persistent_node_map.values():
-        exec_dag.add_node(node)
-    for u_hash, v_hash in job._graph_edges:
-        if u_hash in job._persistent_node_map and v_hash in job._persistent_node_map:
-            exec_dag.add_edge(
-                job._persistent_node_map[u_hash],
-                job._persistent_node_map[v_hash],
-            )
-    return exec_dag
-
-
 # ── Tests ────────────────────────────────────────────────────────────────
 
 
@@ -129,8 +109,7 @@ class TestAsyncPipelineIntegration:
     def test_orchestrator_then_db_retrieval(self):
         """Run via orchestrator, then retrieve results from the persistent node."""
         job = _build_job()
-        exec_dag = _build_exec_dag(job)
-        AsyncPipelineOrchestrator().run(exec_dag)
+        AsyncPipelineOrchestrator().run(job.dag)
         job.store.at(*job._name).flush()
         job.store.at(*job._name).at("_result").flush()
 
@@ -142,8 +121,7 @@ class TestAsyncPipelineIntegration:
     def test_pipeline_run_with_async_executor(self):
         """Test async execution via AsyncPipelineOrchestrator directly."""
         job = _build_job()
-        exec_dag = _build_exec_dag(job)
-        AsyncPipelineOrchestrator().run(exec_dag)
+        AsyncPipelineOrchestrator().run(job.dag)
         job.store.at(*job._name).flush()
         job.store.at(*job._name).at("_result").flush()
 
@@ -156,9 +134,8 @@ class TestAsyncPipelineIntegration:
     async def test_orchestrator_run_async_from_event_loop(self):
         """run_async() works when an event loop is already running."""
         job = _build_job()
-        exec_dag = _build_exec_dag(job)
         orchestrator = AsyncPipelineOrchestrator()
-        await orchestrator.run_async(exec_dag)
+        await orchestrator.run_async(job.dag)
         job.store.at(*job._name).flush()
         job.store.at(*job._name).at("_result").flush()
 
@@ -188,8 +165,7 @@ class TestAsyncPipelineIntegration:
 
         # Async path
         async_job = _build_job()
-        exec_dag = _build_exec_dag(async_job)
-        AsyncPipelineOrchestrator().run(exec_dag)
+        AsyncPipelineOrchestrator().run(async_job.dag)
         async_job.store.at(*async_job._name).flush()
         async_job.store.at(*async_job._name).at("_result").flush()
         async_records = async_job.nodes["letter_grade"].get_all_records()
@@ -226,8 +202,7 @@ class TestSyncAsyncSystemTagEquivalence:
         assert sync_records is not None
 
         async_job = _build_job()
-        exec_dag = _build_exec_dag(async_job)
-        AsyncPipelineOrchestrator().run(exec_dag)
+        AsyncPipelineOrchestrator().run(async_job.dag)
         async_job.store.at(*async_job._name).flush()
         async_job.store.at(*async_job._name).at("_result").flush()
         async_records = async_job.nodes["letter_grade"].get_all_records(
@@ -250,8 +225,7 @@ class TestSyncAsyncSystemTagEquivalence:
         """System-tag columns should follow the name-extending convention."""
 
         job = _build_job()
-        exec_dag = _build_exec_dag(job)
-        AsyncPipelineOrchestrator().run(exec_dag)
+        AsyncPipelineOrchestrator().run(job.dag)
         job.store.at(*job._name).flush()
         job.store.at(*job._name).at("_result").flush()
         records = job.nodes["letter_grade"].get_all_records(
@@ -283,8 +257,7 @@ class TestSyncAsyncSystemTagEquivalence:
         assert sync_records is not None
 
         async_job = _build_job()
-        exec_dag = _build_exec_dag(async_job)
-        AsyncPipelineOrchestrator().run(exec_dag)
+        AsyncPipelineOrchestrator().run(async_job.dag)
         async_job.store.at(*async_job._name).flush()
         async_job.store.at(*async_job._name).at("_result").flush()
         async_records = async_job.nodes["letter_grade"].get_all_records(

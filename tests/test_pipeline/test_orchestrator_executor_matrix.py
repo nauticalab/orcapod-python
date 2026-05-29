@@ -174,7 +174,7 @@ class TestSyncOrchestratorSyncFunction:
             pod(_make_source(), label="node")
 
         orch = SyncPipelineOrchestrator()
-        result = orch.run(pipeline._node_graph)
+        result = orch.run(pipeline.dag)
         fn_outputs = [
             v for k, v in result.node_outputs.items() if k.node_type == "function"
         ]
@@ -508,7 +508,7 @@ async def _run_async_with_limited_pool(
     loop.set_default_executor(limited_pool)
     # asyncio.run() creates a fresh loop each call, so no need to restore.
     t0 = time.perf_counter()
-    await AsyncPipelineOrchestrator().run_async(pipeline._node_graph)
+    await AsyncPipelineOrchestrator().run_async(pipeline.dag)
     elapsed = time.perf_counter() - t0
     limited_pool.shutdown(wait=False)
 

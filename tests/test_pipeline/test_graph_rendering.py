@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 from unittest.mock import patch
 
-import networkx as nx
 import pyarrow as pa
 import pytest
 
@@ -20,6 +19,7 @@ from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import Pipeline
+from orcapod.pipeline.dag import OrcaDAG
 from orcapod.pipeline.graph import (
     GraphRenderer,
     StyleRuleSets,
@@ -78,9 +78,8 @@ def compiled_pipeline(pipeline_db: InMemoryArrowDatabase) -> Pipeline:
 
 
 @pytest.fixture
-def node_graph(compiled_pipeline: Pipeline) -> nx.DiGraph:
-    assert compiled_pipeline._node_graph is not None
-    return compiled_pipeline._node_graph
+def node_graph(compiled_pipeline: Pipeline) -> OrcaDAG:
+    return compiled_pipeline.dag
 
 
 # ---------------------------------------------------------------------------
@@ -90,14 +89,14 @@ def node_graph(compiled_pipeline: Pipeline) -> nx.DiGraph:
 
 @pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestGraphRenderer:
-    def test_generate_dot_returns_dot_source(self, node_graph: nx.DiGraph) -> None:
+    def test_generate_dot_returns_dot_source(self, node_graph: OrcaDAG) -> None:
         renderer = GraphRenderer()
         dot_text = renderer.generate_dot(node_graph)
 
         assert isinstance(dot_text, str)
         assert "digraph" in dot_text
 
-    def test_generate_dot_includes_all_nodes(self, node_graph: nx.DiGraph) -> None:
+    def test_generate_dot_includes_all_nodes(self, node_graph: OrcaDAG) -> None:
         renderer = GraphRenderer()
         dot_text = renderer.generate_dot(node_graph)
 
@@ -105,7 +104,7 @@ class TestGraphRenderer:
             sanitized = renderer._sanitize_node_id(node)
             assert sanitized in dot_text
 
-    def test_generate_dot_includes_edges(self, node_graph: nx.DiGraph) -> None:
+    def test_generate_dot_includes_edges(self, node_graph: OrcaDAG) -> None:
         renderer = GraphRenderer()
         dot_text = renderer.generate_dot(node_graph)
 
@@ -115,7 +114,7 @@ class TestGraphRenderer:
             assert source_id in dot_text
             assert target_id in dot_text
 
-    def test_generate_dot_with_label_lut(self, node_graph: nx.DiGraph) -> None:
+    def test_generate_dot_with_label_lut(self, node_graph: OrcaDAG) -> None:
         renderer = GraphRenderer()
         first_node = next(iter(node_graph.nodes()))
         label_lut = {first_node: "Custom Label"}
@@ -124,7 +123,7 @@ class TestGraphRenderer:
         assert "Custom Label" in dot_text
 
     def test_generate_dot_with_custom_style_rules(
-        self, node_graph: nx.DiGraph
+        self, node_graph: OrcaDAG
     ) -> None:
         renderer = GraphRenderer()
         custom_rules = {
@@ -140,14 +139,14 @@ class TestGraphRenderer:
         assert "red" in dot_text
         assert "ellipse" in dot_text
 
-    def test_render_graph_raw_output(self, node_graph: nx.DiGraph) -> None:
+    def test_render_graph_raw_output(self, node_graph: OrcaDAG) -> None:
         renderer = GraphRenderer()
         dot_text = renderer.render_graph(node_graph, raw_output=True, show=False)
 
         assert isinstance(dot_text, str)
         assert "digraph" in dot_text
 
-    def test_render_graph_with_dark_theme(self, node_graph: nx.DiGraph) -> None:
+    def test_render_graph_with_dark_theme(self, node_graph: OrcaDAG) -> None:
         renderer = GraphRenderer()
         dot_text = renderer.render_graph(
             node_graph,
@@ -167,7 +166,7 @@ class TestGraphRenderer:
 
 @pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestNodeAttributes:
-    def test_source_node_gets_source_style(self, node_graph: nx.DiGraph) -> None:
+    def test_source_node_gets_source_style(self, node_graph: OrcaDAG) -> None:
         renderer = GraphRenderer()
         source_nodes = [n for n in node_graph.nodes() if isinstance(n, SourceNode)]
         assert len(source_nodes) > 0
@@ -177,7 +176,7 @@ class TestNodeAttributes:
         assert attrs["fillcolor"] == expected["fillcolor"]
         assert attrs["shape"] == expected["shape"]
 
-    def test_function_node_gets_function_style(self, node_graph: nx.DiGraph) -> None:
+    def test_function_node_gets_function_style(self, node_graph: OrcaDAG) -> None:
         renderer = GraphRenderer()
         fn_nodes = [n for n in node_graph.nodes() if isinstance(n, FunctionNode)]
         assert len(fn_nodes) > 0
@@ -187,7 +186,7 @@ class TestNodeAttributes:
         assert attrs["fillcolor"] == expected["fillcolor"]
         assert attrs["shape"] == expected["shape"]
 
-    def test_operator_node_gets_operator_style(self, node_graph: nx.DiGraph) -> None:
+    def test_operator_node_gets_operator_style(self, node_graph: OrcaDAG) -> None:
         renderer = GraphRenderer()
         op_nodes = [n for n in node_graph.nodes() if isinstance(n, OperatorNode)]
         assert len(op_nodes) > 0
@@ -197,7 +196,7 @@ class TestNodeAttributes:
         assert attrs["fillcolor"] == expected["fillcolor"]
         assert attrs["shape"] == expected["shape"]
 
-    def test_custom_rules_override_defaults(self, node_graph: nx.DiGraph) -> None:
+    def test_custom_rules_override_defaults(self, node_graph: OrcaDAG) -> None:
         renderer = GraphRenderer()
         source_node = next(
             n for n in node_graph.nodes() if isinstance(n, SourceNode)
@@ -217,7 +216,7 @@ class TestNodeAttributes:
 @pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestHtmlLabel:
     def test_label_contains_node_type_and_label(
-        self, node_graph: nx.DiGraph
+        self, node_graph: OrcaDAG
     ) -> None:
         renderer = GraphRenderer()
         for node in node_graph.nodes():
@@ -227,14 +226,14 @@ class TestHtmlLabel:
             assert node.node_type in html
             assert str(node.label) in html
 
-    def test_label_lut_overrides_default(self, node_graph: nx.DiGraph) -> None:
+    def test_label_lut_overrides_default(self, node_graph: OrcaDAG) -> None:
         renderer = GraphRenderer()
         node = next(iter(node_graph.nodes()))
         label_lut = {node: "overridden"}
 
         assert renderer._get_node_label(node, label_lut) == "overridden"
 
-    def test_default_label_uses_node_label(self, node_graph: nx.DiGraph) -> None:
+    def test_default_label_uses_node_label(self, node_graph: OrcaDAG) -> None:
         renderer = GraphRenderer()
         node = next(iter(node_graph.nodes()))
 
@@ -248,13 +247,13 @@ class TestHtmlLabel:
 
 @pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestConvenienceFunctions:
-    def test_render_graph_function(self, node_graph: nx.DiGraph) -> None:
+    def test_render_graph_function(self, node_graph: OrcaDAG) -> None:
         dot_text = render_graph(node_graph, raw_output=True, show=False)
 
         assert isinstance(dot_text, str)
         assert "digraph" in dot_text
 
-    def test_render_graph_dark_theme_function(self, node_graph: nx.DiGraph) -> None:
+    def test_render_graph_dark_theme_function(self, node_graph: OrcaDAG) -> None:
         dot_text = render_graph_dark_theme(
             node_graph, raw_output=True, show=False
         )
@@ -316,8 +315,7 @@ class TestPipelineShowGraph:
     def test_show_graph_with_label_lut(
         self, compiled_pipeline: Pipeline
     ) -> None:
-        assert compiled_pipeline._node_graph is not None
-        first_node = next(iter(compiled_pipeline._node_graph.nodes()))
+        first_node = next(iter(compiled_pipeline.dag.nodes()))
         label_lut = {first_node: "MyCustomLabel"}
 
         dot_text = compiled_pipeline.show_graph(
@@ -351,7 +349,7 @@ class TestPipelineShowGraph:
 class TestRenderGraphFullPath:
     """Exercise the graphviz rendering code paths (not just raw DOT output)."""
 
-    def test_render_no_show_no_output(self, node_graph: nx.DiGraph) -> None:
+    def test_render_no_show_no_output(self, node_graph: OrcaDAG) -> None:
         """render_graph with show=False exercises graphviz build without display."""
         renderer = GraphRenderer()
         result = renderer.render_graph(node_graph, show=False)
@@ -360,7 +358,7 @@ class TestRenderGraphFullPath:
         assert "digraph" in result
 
     def test_render_with_output_path(
-        self, node_graph: nx.DiGraph, tmp_path
+        self, node_graph: OrcaDAG, tmp_path
     ) -> None:
         output_file = str(tmp_path / "graph.png")
         renderer = GraphRenderer()
@@ -371,7 +369,7 @@ class TestRenderGraphFullPath:
         assert isinstance(result, str)
         assert os.path.exists(output_file)
 
-    def test_render_with_show_mocked(self, node_graph: nx.DiGraph) -> None:
+    def test_render_with_show_mocked(self, node_graph: OrcaDAG) -> None:
         """Exercise the show=True path with matplotlib mocked."""
         renderer = GraphRenderer()
         with (
@@ -387,7 +385,7 @@ class TestRenderGraphFullPath:
         assert "digraph" in result
 
     def test_render_with_label_lut_full_path(
-        self, node_graph: nx.DiGraph
+        self, node_graph: OrcaDAG
     ) -> None:
         first_node = next(iter(node_graph.nodes()))
         label_lut = {first_node: "FullPathLabel"}
@@ -399,7 +397,7 @@ class TestRenderGraphFullPath:
         assert isinstance(result, str)
 
     def test_render_with_style_rules_full_path(
-        self, node_graph: nx.DiGraph
+        self, node_graph: OrcaDAG
     ) -> None:
         custom = StyleRuleSets.create_custom_rules(source_bg="coral")
         renderer = GraphRenderer()
@@ -409,7 +407,7 @@ class TestRenderGraphFullPath:
 
         assert isinstance(result, str)
 
-    def test_render_with_style_overrides(self, node_graph: nx.DiGraph) -> None:
+    def test_render_with_style_overrides(self, node_graph: OrcaDAG) -> None:
         renderer = GraphRenderer()
         result = renderer.render_graph(
             node_graph, show=False, dpi=72, rankdir="LR"
@@ -420,14 +418,14 @@ class TestRenderGraphFullPath:
 
 @pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestConvenienceFunctionsFullPath:
-    def test_render_graph_no_show(self, node_graph: nx.DiGraph) -> None:
+    def test_render_graph_no_show(self, node_graph: OrcaDAG) -> None:
         result = render_graph(node_graph, show=False)
 
         assert isinstance(result, str)
         assert "digraph" in result
 
     def test_render_graph_dark_theme_no_show(
-        self, node_graph: nx.DiGraph
+        self, node_graph: OrcaDAG
     ) -> None:
         result = render_graph_dark_theme(node_graph, show=False)
 

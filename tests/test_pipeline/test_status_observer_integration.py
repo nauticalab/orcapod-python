@@ -39,9 +39,7 @@ def _make_source(n: int = 3) -> ArrowTableSource:
 
 def _get_function_node(pipeline: Pipeline):
     """Return the first function node from the pipeline graph."""
-    import networkx as nx
-
-    for node in nx.topological_sort(pipeline._node_graph):
+    for node in pipeline.dag.topological_sort():
         if node.node_type == "function":
             return node
     raise RuntimeError("No function node found")
@@ -451,7 +449,7 @@ class TestRunIdTracking:
         obs = StatusObserver(status_database=db)
         orch = SyncPipelineOrchestrator()
         # Pass run_id via the orchestrator's run() method directly
-        orch.run(pipeline._node_graph, observer=obs, run_id="my-custom-run-id")
+        orch.run(pipeline.dag, observer=obs, run_id="my-custom-run-id")
 
         status = obs.get_status()
 

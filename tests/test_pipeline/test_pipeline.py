@@ -99,7 +99,7 @@ class TestPipelineSourceSpecEnforcement:
 
         assert pipeline._compiled
         source_nodes = [
-            n for n in pipeline._node_graph.nodes() if isinstance(n, SourceNode)
+            n for n in pipeline.dag.nodes() if isinstance(n, SourceNode)
         ]
         assert len(source_nodes) == 2
 
@@ -112,7 +112,7 @@ class TestPipelineSourceSpecEnforcement:
             Join()(src_a, src_b)
 
         # Concrete streams at the leaves are automatically wrapped as SourceNode
-        source_nodes = [n for n in pipeline._node_graph.nodes() if isinstance(n, SourceNode)]
+        source_nodes = [n for n in pipeline.dag.nodes() if isinstance(n, SourceNode)]
         assert len(source_nodes) == 2
 
     def test_pipeline_from_pipeline_returns_pipeline_job(self):
@@ -153,7 +153,7 @@ class TestCompileSourceWrapping:
         pipeline = job.pipeline
         assert pipeline._compiled
         assert len(pipeline.nodes) > 0
-        source_nodes = [n for n in pipeline._node_graph.nodes() if isinstance(n, SourceNode)]
+        source_nodes = [n for n in pipeline.dag.nodes() if isinstance(n, SourceNode)]
         assert len(source_nodes) == 2
 
 
@@ -675,7 +675,7 @@ class TestSourceNodeNoCaching:
         assert records is not None
         assert records.num_rows == 2
         source_nodes = [
-            n for n in job.pipeline._node_graph.nodes() if isinstance(n, SourceNode)
+            n for n in job.pipeline.dag.nodes() if isinstance(n, SourceNode)
         ]
         assert len(source_nodes) == 2
         for sn in source_nodes:
