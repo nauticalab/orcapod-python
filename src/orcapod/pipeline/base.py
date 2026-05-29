@@ -377,7 +377,7 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
                 self._nodes[label] = nodes[0]
 
         # 5. Build node_graph (OrcaDAG with node objects as vertices).
-        node_dag: OrcaDAG[Any] = OrcaDAG()
+        node_dag: OrcaDAG[NodeT] = OrcaDAG()
         for up_hash, down_hash in self._hash_graph.edges():
             up_node = node_map.get(up_hash)
             down_node = node_map.get(down_hash)
@@ -386,7 +386,7 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
         for node in node_map.values():
             if node not in node_dag:
                 node_dag.add_node(node)
-        self._node_graph = node_dag  # type: ignore[assignment]  # OrcaDAG[Any] → OrcaDAG[NodeT]: safe, subclass constrains NodeT
+        self._node_graph = node_dag
 
         # 6. Enrich hash_graph node attributes (used by GraphRenderer and serialization).
         for node_hash, node in node_map.items():
