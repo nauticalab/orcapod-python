@@ -471,3 +471,77 @@ class TestOrcaDAGAncestors:
         dag.add_node("a")
         with pytest.raises(KeyError):
             dag.ancestors("z")
+
+
+# ---------------------------------------------------------------------------
+# dag property on Pipeline / PipelineJob
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineDagProperty:
+    """Pipeline.dag and PipelineJob.dag expose an OrcaDAG of node objects."""
+
+    def _make_simple_pipeline(self):
+        """Return a compiled single-function Pipeline."""
+        import pyarrow as pa
+        from orcapod.core.sources.arrow_table_source import ArrowTableSource
+        from orcapod.core.function_pod import FunctionPod
+        from orcapod.core.data_function import PythonDataFunction
+        from orcapod.pipeline.graph import Pipeline
+
+        src = ArrowTableSource(
+            pa.table({"id": pa.array(["a"], type=pa.large_string()), "v": pa.array([1], type=pa.int64())}),
+            tag_columns=["id"],
+            source_id="src",
+            infer_nullable=True,
+        )
+
+        def double_v(v: int) -> int:
+            return v * 2
+
+        fn = PythonDataFunction(
+            function=double_v,
+            output_keys="out",
+        )
+        pod = FunctionPod(fn)
+        pipeline = Pipeline(name="test_dag")
+        with pipeline:
+            pod(src)
+        return pipeline
+
+    def test_dag_returns_orca_dag_after_compile(self):
+        """pipeline.dag returns an OrcaDAG instance after compilation."""
+        pipeline = self._make_simple_pipeline()
+        assert isinstance(pipeline.dag, OrcaDAG)
+
+    def test_dag_has_correct_node_count(self):
+        """dag contains source node + function node = 2 nodes."""
+        pipeline = self._make_simple_pipeline()
+        assert len(list(pipeline.dag.nodes())) == 2
+
+    def test_dag_has_correct_edge(self):
+        """dag has exactly one edge (source → function)."""
+        pipeline = self._make_simple_pipeline()
+        assert len(list(pipeline.dag.edges())) == 1
+
+    def test_dag_topological_sort_works(self):
+        """dag.topological_sort() returns a 2-element list."""
+        pipeline = self._make_simple_pipeline()
+        order = pipeline.dag.topological_sort()
+        assert len(order) == 2
+
+    def test_dag_predecessors_and_successors(self):
+        """Source node has no predecessors; function node is its successor."""
+        from orcapod.core.nodes import SourceNode, FunctionNode
+        pipeline = self._make_simple_pipeline()
+        source = next(n for n in pipeline.dag.nodes() if isinstance(n, SourceNode))
+        fn_node = next(n for n in pipeline.dag.nodes() if isinstance(n, FunctionNode))
+        assert pipeline.dag.successors(source) == {fn_node}
+        assert pipeline.dag.predecessors(fn_node) == {source}
+
+    def test_dag_raises_before_compile(self):
+        """Accessing dag before compile() raises RuntimeError."""
+        from orcapod.pipeline.graph import Pipeline
+        pipeline = Pipeline(name="uncompiled", auto_compile=False)
+        with pytest.raises(RuntimeError, match="not been compiled"):
+            _ = pipeline.dag
