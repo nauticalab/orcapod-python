@@ -4,9 +4,10 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from orcapod.core.tracker import AutoRegisteringContextBasedTracker
+from orcapod.pipeline.dag import OrcaDAG
 from orcapod.pipeline.pod_invocation import (
     FunctionInvocation,
     OperatorInvocation,
@@ -21,6 +22,8 @@ else:
     nx = LazyModule("networkx")
 
 logger = logging.getLogger(__name__)
+
+NodeT = TypeVar("NodeT")
 
 
 @dataclass(frozen=True)
@@ -43,7 +46,7 @@ class InvocationGraph:
     source_streams: dict[str, Any]  # hash → StreamProtocol-compatible node
 
 
-class AbstractPipelineBase(AutoRegisteringContextBasedTracker, ABC):
+class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, ABC):
     """Shared recording mechanism and graph state for Pipeline and PipelineJob.
 
     Manages the ``with``-block recording phase: accumulating invocations into
@@ -86,9 +89,9 @@ class AbstractPipelineBase(AutoRegisteringContextBasedTracker, ABC):
         self._hash_graph: "nx.DiGraph" = nx.DiGraph()
 
         # --- Compiled state (populated / replaced by compile()) --------
-        self._persistent_node_map: dict[str, Any] = {}
-        self._nodes: dict[str, Any] = {}
-        self._node_graph: "nx.DiGraph | None" = None
+        self._persistent_node_map: dict[str, NodeT] = {}  # type: ignore[assignment]
+        self._nodes: dict[str, NodeT] = {}  # type: ignore[assignment]
+        self._node_graph: OrcaDAG[NodeT] | None = None
         self._compiled: bool = False
 
         # --- Legacy fields kept for _build_execution_graph() compat ----
@@ -115,6 +118,24 @@ class AbstractPipelineBase(AutoRegisteringContextBasedTracker, ABC):
     def nodes(self) -> dict[str, Any]:
         """Copy of the compiled nodes dict (label → node)."""
         return self._nodes.copy()
+
+    @property
+    def dag(self) -> OrcaDAG[NodeT]:
+        """Node-object DAG for this pipeline.
+
+        Returns an ``OrcaDAG`` whose vertices are the compiled node objects
+        (``GraphNode`` for ``Pipeline``, ``JobNode`` for ``PipelineJob``) and
+        whose edges follow the data-flow topology.
+
+        Raises:
+            RuntimeError: If the pipeline has not been compiled yet.
+        """
+        if self._node_graph is None:
+            raise RuntimeError(
+                "Pipeline has not been compiled. "
+                "Use 'with pipeline:' or call compile() first."
+            )
+        return self._node_graph
 
     # ------------------------------------------------------------------
     # Abstract — subclass node-factory declarations
@@ -258,7 +279,7 @@ class AbstractPipelineBase(AutoRegisteringContextBasedTracker, ABC):
 
         - ``_persistent_node_map`` — hash → compiled node (all node types)
         - ``_nodes`` — label → compiled node (labelled nodes only)
-        - ``_node_graph`` — nx.DiGraph with node objects as vertices
+        - ``_node_graph`` — OrcaDAG with node objects as vertices
         - Legacy fields ``_node_lut``, ``_upstreams``, ``_graph_edges``
           are repopulated for backward compat with ``_build_execution_graph()``.
         - ``_compiled`` is set to ``True``.
@@ -354,16 +375,17 @@ class AbstractPipelineBase(AutoRegisteringContextBasedTracker, ABC):
             else:
                 self._nodes[label] = nodes[0]
 
-        # 5. Build node_graph (DiGraph with node objects as vertices).
-        self._node_graph = _nx.DiGraph()
+        # 5. Build node_graph (OrcaDAG with node objects as vertices).
+        node_dag: OrcaDAG[Any] = OrcaDAG()
         for up_hash, down_hash in self._hash_graph.edges():
             up_node = node_map.get(up_hash)
             down_node = node_map.get(down_hash)
             if up_node is not None and down_node is not None:
-                self._node_graph.add_edge(up_node, down_node)
+                node_dag.add_edge(up_node, down_node)
         for node in node_map.values():
-            if node not in self._node_graph:
-                self._node_graph.add_node(node)
+            if node not in node_dag:
+                node_dag.add_node(node)
+        self._node_graph = node_dag  # type: ignore[assignment]
 
         # 6. Enrich hash_graph node attributes (used by GraphRenderer and serialization).
         for node_hash, node in node_map.items():
