@@ -407,7 +407,7 @@ class TestGenericNodeTypes:
         assert "hash_a" in dag
 
     def test_object_nodes(self) -> None:
-        """OrcaPod uses GraphNode objects as nodes in _node_graph."""
+        """OrcaPod uses GraphNode objects as nodes in the dag."""
 
         class FakeNode:
             def __init__(self, name: str) -> None:
