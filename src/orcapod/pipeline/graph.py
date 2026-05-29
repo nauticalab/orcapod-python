@@ -161,6 +161,19 @@ class Pipeline(AbstractPipelineBase):
 
             import dataclasses
 
+            from orcapod.config import DEFAULT_CONFIG as _DEFAULT_CONFIG
+
+            # Save None when the config matches DEFAULT_CONFIG so that future
+            # changes to the default are picked up on load (forward-compatible).
+            # See ENG-544 for the tradeoff discussion (reproducibility vs.
+            # forward-compatibility).
+            _cfg = node.orcapod_config
+            config_val = (
+                None
+                if _cfg == _DEFAULT_CONFIG
+                else dataclasses.asdict(_cfg)
+            )
+
             descriptor: dict[str, Any] = {
                 "node_type": node.node_type,
                 "label": node.label,
@@ -172,7 +185,7 @@ class Pipeline(AbstractPipelineBase):
                 },
                 "node_uri": list(node.node_uri),
                 "data_context_key": data_context_key,
-                "config": dataclasses.asdict(node.orcapod_config),
+                "config": config_val,
             }
 
             match node:
