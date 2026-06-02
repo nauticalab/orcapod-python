@@ -1381,44 +1381,41 @@ class FunctionJobNode(FunctionNodeBase):
         columns: ColumnConfig | dict[str, Any] | None = None,
         all_info: bool = False,
     ) -> pa.Table | None:
-        """Return all computed results joined with their pipeline tag records.
+        """Public table view: return all computed results joined with their pipeline records.
+
+        Calls ``_fetch_joined_records`` to obtain the raw joined table, then
+        applies ``ColumnConfig``-driven column dropping to produce a
+        user-facing result. ``_PIPELINE_ENTRY_ID_COL`` and
+        ``NODE_CONTENT_HASH_COL`` are always dropped — they are internal
+        discriminator columns, not user-facing data.
+
+        Does NOT populate the in-memory cache — see ``get_cached_results``
+        for that.
 
         Args:
-            columns: Column configuration controlling which groups are included.
-            all_info: Shorthand to include all info columns.
+            columns: Column configuration controlling which groups are
+                included. Accepts a ``ColumnConfig`` instance or a dict
+                shorthand (e.g. ``{"meta": True}``).
+            all_info: If ``True``, equivalent to enabling all column groups.
 
         Returns:
-            A PyArrow table of joined results, or ``None`` if no database is
-            attached or no records exist.
+            A ``pa.Table`` of joined results, or ``None`` if no database is
+            attached, either DB fetch returns ``None``, or the join produces
+            no rows.
         """
-        if self._cached_function_pod is None:
+        fetched = self._fetch_joined_records()
+        if fetched is None:
             return None
 
-        results = self._cached_function_pod._result_database.get_all_records(
-            self._cached_function_pod.record_path,
-            record_id_column=constants.DATA_RECORD_ID,
-        )
-        taginfo = self._pipeline_database.get_all_records(self.node_identity_path)
-
-        if results is None or taginfo is None:
-            return None
-
-        taginfo = self._filter_by_content_hash(taginfo)
-        taginfo_schema = taginfo.schema
-        results_schema = results.schema
-        joined = (
-            pl.DataFrame(taginfo)
-            .join(pl.DataFrame(results), on=constants.DATA_RECORD_ID, how="inner")
-            .to_arrow()
-        )
-        joined = arrow_utils.restore_schema_nullability(joined, taginfo_schema, results_schema)
-
+        joined = fetched.table
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
 
-        drop_columns = []
-        # Always drop the node content hash column — it is an internal
-        # row-level discriminator, not a user-facing column.
-        drop_columns.append(constants.NODE_CONTENT_HASH_COL)
+        # Always drop internal discriminator columns regardless of column_config.
+        # _PIPELINE_ENTRY_ID_COL starts with META_PREFIX so it is covered by
+        # the meta drop in the default case, but must be listed explicitly
+        # here so it is also dropped when all_info=True (which skips the
+        # meta-prefix sweep).
+        drop_columns = [constants.NODE_CONTENT_HASH_COL, _PIPELINE_ENTRY_ID_COL]
         if not column_config.meta and not column_config.all_info:
             drop_columns.extend(
                 c for c in joined.column_names if c.startswith(constants.META_PREFIX)
@@ -1434,7 +1431,12 @@ class FunctionJobNode(FunctionNodeBase):
                 if c.startswith(constants.SYSTEM_TAG_PREFIX)
             )
         if drop_columns:
-            joined = joined.drop([c for c in drop_columns if c in joined.column_names])
+            # Deduplicate while preserving order — PyArrow's drop() misbehaves
+            # when the same column name appears more than once in the list
+            # (it can drop an unintended adjacent column).
+            unique_drop = list(dict.fromkeys(c for c in drop_columns if c in joined.column_names))
+            if unique_drop:
+                joined = joined.drop(unique_drop)
 
         return joined if joined.num_rows > 0 else None
 
