@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 from orcapod import contexts
 from orcapod.channels import ReadableChannel, WritableChannel
@@ -66,6 +66,10 @@ else:
     pa = LazyModule("pyarrow")
     pc = LazyModule("pyarrow.compute")
     pl = LazyModule("polars")
+
+# Pipeline entry ID column name used when fetching records from the pipeline
+# database. Always present in the table returned by _fetch_joined_records.
+_PIPELINE_ENTRY_ID_COL = "__pipeline_entry_id"
 
 
 def _executor_supports_concurrent(
@@ -679,6 +683,26 @@ class _ResultDatabaseReader:
 # ---------------------------------------------------------------------------
 # FunctionJobNode — DB-backed execution node
 # ---------------------------------------------------------------------------
+
+
+class _JoinedRecords(NamedTuple):
+    """Internal result type returned by ``_fetch_joined_records``.
+
+    Attributes:
+        table: The joined ``pa.Table``, always including a
+            ``__pipeline_entry_id`` column (the pipeline DB row key) and
+            ``DATA_RECORD_ID``. Does not have ``ColumnConfig`` filtering
+            applied — that is the caller's responsibility.
+        taginfo_columns: Column names from the pipeline database fetch,
+            captured before the join. Used by ``_load_cached_entries`` to
+            derive tag keys in the CACHE_ONLY (``_input_stream is None``)
+            fallback path, where the tag columns cannot be inferred from the
+            input stream and must be identified by exclusion from the taginfo
+            column set.
+    """
+
+    table: pa.Table
+    taginfo_columns: tuple[str, ...]
 
 
 class FunctionJobNode(FunctionNodeBase):
@@ -1438,6 +1462,74 @@ class FunctionJobNode(FunctionNodeBase):
     # ------------------------------------------------------------------
     # Cache-only helpers (PLT-1156)
     # ------------------------------------------------------------------
+
+    def _fetch_joined_records(
+        self,
+        entry_ids: list[str] | None = None,
+    ) -> _JoinedRecords | None:
+        """Internal primitive: fetch both DBs, content-hash-filter, and inner-join.
+
+        Fetches ``taginfo`` from the pipeline database with
+        ``_PIPELINE_ENTRY_ID_COL`` as the row-key column, fetches ``results``
+        from the result database, applies ``_filter_by_content_hash``, and
+        inner-joins the two tables on ``DATA_RECORD_ID`` via polars.
+
+        If ``entry_ids`` is provided, the polars DataFrame is filtered to
+        matching ``_PIPELINE_ENTRY_ID_COL`` values before conversion to Arrow,
+        avoiding a round-trip.
+
+        Does NOT apply ``ColumnConfig`` column dropping (that is
+        ``get_all_records``'s job), convert rows to ``(tag, data)`` tuples
+        (that is ``_load_cached_entries``'s job), or touch the in-memory cache
+        (that is ``get_cached_results``'s job).
+
+        Args:
+            entry_ids: If given, return only rows whose
+                ``_PIPELINE_ENTRY_ID_COL`` value is in this list.
+                If ``None``, return all rows.
+
+        Returns:
+            A ``_JoinedRecords`` whose ``table`` always includes a
+            ``_PIPELINE_ENTRY_ID_COL`` column, or ``None`` when either
+            database is absent or either DB fetch returns ``None``. A 0-row
+            table is returned (not ``None``) when both fetches succeed but the
+            join finds no matching rows — callers check ``num_rows``
+            themselves.
+        """
+        if self._cached_function_pod is None or self._pipeline_database is None:
+            return None
+
+        taginfo = self._pipeline_database.get_all_records(
+            self.node_identity_path,
+            record_id_column=_PIPELINE_ENTRY_ID_COL,
+        )
+        results = self._cached_function_pod._result_database.get_all_records(
+            self._cached_function_pod.record_path,
+            record_id_column=constants.DATA_RECORD_ID,
+        )
+
+        if taginfo is None or results is None:
+            return None
+
+        taginfo_columns = tuple(taginfo.column_names)
+        taginfo = self._filter_by_content_hash(taginfo)
+        taginfo_schema = taginfo.schema
+        results_schema = results.schema
+
+        joined_df = pl.DataFrame(taginfo).join(
+            pl.DataFrame(results),
+            on=constants.DATA_RECORD_ID,
+            how="inner",
+        )
+        if entry_ids is not None:
+            joined_df = joined_df.filter(
+                pl.col(_PIPELINE_ENTRY_ID_COL).is_in(entry_ids)
+            )
+        joined = joined_df.to_arrow()
+        joined = arrow_utils.restore_schema_nullability(
+            joined, taginfo_schema, results_schema
+        )
+        return _JoinedRecords(table=joined, taginfo_columns=taginfo_columns)
 
     def _load_cached_entries(
         self,
