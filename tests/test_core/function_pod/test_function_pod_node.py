@@ -645,6 +645,19 @@ class TestGetAllRecordsAllInfo:
             full_result.column("result").to_pylist()
         )
 
+    def test_all_info_excludes_pipeline_entry_id(self, filled_node):
+        """__pipeline_entry_id must not appear in get_all_records output even with all_info."""
+        result = filled_node.get_all_records(all_info=True)
+        assert result is not None
+        assert "__pipeline_entry_id" not in result.column_names
+
+    def test_all_info_excludes_node_content_hash(self, filled_node):
+        """NODE_CONTENT_HASH_COL must not appear in get_all_records output even with all_info."""
+        from orcapod.system_constants import constants
+        result = filled_node.get_all_records(all_info=True)
+        assert result is not None
+        assert constants.NODE_CONTENT_HASH_COL not in result.column_names
+
 
 # ---------------------------------------------------------------------------
 # 12. node_identity_path structure

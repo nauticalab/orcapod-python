@@ -1590,7 +1590,6 @@ class FunctionJobNode(FunctionNodeBase):
             c
             for c in joined.column_names
             if c.startswith(constants.META_PREFIX)
-            or c == _PIPELINE_ENTRY_ID_COL
             or c == constants.NODE_CONTENT_HASH_COL
         ]
         data_table = joined.drop([c for c in drop_cols if c in joined.column_names])
