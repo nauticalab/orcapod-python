@@ -75,11 +75,17 @@ class TestFetchJoinedRecords:
         assert _PIPELINE_ENTRY_ID_COL in result.table.column_names
 
     def test_taginfo_columns_present_in_result(self, executed_node):
-        """taginfo_columns in the returned NamedTuple is a non-empty tuple of strings."""
+        """taginfo_columns contains the pre-join pipeline DB column names as strings.
+
+        Specifically, _PIPELINE_ENTRY_ID_COL must be present because it is added
+        by the pipeline DB fetch (record_id_column=_PIPELINE_ENTRY_ID_COL) and
+        captured before the join — confirming the pre-filter snapshot is correct.
+        """
         result = executed_node._fetch_joined_records()
         assert result is not None
         assert isinstance(result.taginfo_columns, tuple)
-        assert len(result.taginfo_columns) > 0
+        assert all(isinstance(c, str) for c in result.taginfo_columns)
+        assert _PIPELINE_ENTRY_ID_COL in result.taginfo_columns
 
     def test_no_entry_ids_returns_all_rows(self, executed_node):
         """Calling with entry_ids=None returns all executed rows."""
@@ -97,3 +103,9 @@ class TestFetchJoinedRecords:
         assert result is not None
         assert result.table.num_rows == 1
         assert result.table.column(_PIPELINE_ENTRY_ID_COL)[0].as_py() == entry_id_0
+
+    def test_empty_entry_ids_returns_zero_rows(self, executed_node):
+        """Passing entry_ids=[] returns a 0-row table, not None."""
+        result = executed_node._fetch_joined_records(entry_ids=[])
+        assert result is not None
+        assert result.table.num_rows == 0
