@@ -1590,7 +1590,9 @@ class FunctionJobNode(FunctionNodeBase):
                 and c != constants.NODE_CONTENT_HASH_COL
             )
 
-        # Drop internal columns (SOURCE_PREFIX is kept — ArrowTableStream needs it)
+        # Drop internal columns (SOURCE_PREFIX is kept — ArrowTableStream needs it).
+        # _PIPELINE_ENTRY_ID_COL starts with META_PREFIX ("__") so it is covered
+        # by the startswith check without needing to be listed explicitly.
         entry_ids_col = joined.column(_PIPELINE_ENTRY_ID_COL).to_pylist()
         drop_cols = [
             c
