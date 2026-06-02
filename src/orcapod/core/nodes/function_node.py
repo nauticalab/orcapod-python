@@ -1437,10 +1437,13 @@ class FunctionJobNode(FunctionNodeBase):
                 if c.startswith(constants.SYSTEM_TAG_PREFIX)
             )
         if drop_columns:
-            # Deduplicate while preserving order — PyArrow's drop() misbehaves
-            # when the same column name appears more than once in the list
-            # (it can drop an unintended adjacent column).
-            unique_drop = list(dict.fromkeys(c for c in drop_columns if c in joined.column_names))
+            # pa.Table.drop() requires no duplicate names in its input list.
+            # Guard against duplicates that arise when _PIPELINE_ENTRY_ID_COL (which
+            # starts with META_PREFIX) ends up in both the always-drop seed and the
+            # meta-prefix sweep extension.
+            unique_drop = list(
+                dict.fromkeys(c for c in drop_columns if c in joined.column_names)
+            )
             if unique_drop:
                 joined = joined.drop(unique_drop)
 
