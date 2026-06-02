@@ -1185,19 +1185,25 @@ class FunctionJobNode(FunctionNodeBase):
     def get_cached_results(
         self, entry_ids: list[str]
     ) -> dict[str, tuple[TagProtocol, DataProtocol]]:
-        """Retrieve cached results for specific pipeline entry IDs.
+        """Public cache façade: return already-computed results for the given entry IDs.
 
-        Checks in-memory cache first. Loads only truly missing entries from DB.
+        Serves hits directly from the in-memory cache (``_cached_output_datas``).
+        For IDs not yet cached, delegates to ``_load_cached_entries`` which calls
+        ``_fetch_joined_records`` to load from the pipeline and result databases.
         Add-only semantics: existing in-memory entries are never cleared or
-        overwritten (overwrite is safe since in-memory and DB entries for the
-        same entry_id are always semantically equivalent).
+        overwritten (safe because in-memory and DB entries for the same entry_id
+        are always semantically equivalent).
+
+        Does NOT apply user-facing column filtering — see ``get_all_records``
+        for that.
 
         Args:
             entry_ids: Pipeline entry IDs to look up.
 
         Returns:
             Mapping from entry_id to ``(tag, output_data)`` for found entries.
-            Empty dict if no DB is attached or no matches found.
+            Empty dict if no DB is attached, ``entry_ids`` is empty, or no
+            matches are found.
         """
         if self._cached_function_pod is None or not entry_ids:
             return {}
