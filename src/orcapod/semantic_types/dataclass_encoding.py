@@ -203,7 +203,12 @@ def struct_dict_to_dataclass(
             module_path, _, class_attr = fqcn.rpartition(".")
             try:
                 module = importlib.import_module(module_path)
-                cls = getattr(module, class_attr)
+                resolved = getattr(module, class_attr)
+                if not dataclasses.is_dataclass(resolved):
+                    raise AttributeError(
+                        f"{class_attr!r} in {module_path!r} is not a dataclass"
+                    )
+                cls = resolved
                 lookup_cache[fqcn] = cls
             except (ImportError, AttributeError) as exc:
                 logger.debug(
