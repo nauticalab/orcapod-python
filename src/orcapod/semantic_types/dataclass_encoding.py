@@ -10,6 +10,7 @@ import -> registry -> synthesize.
 from __future__ import annotations
 
 import dataclasses
+import importlib
 import logging
 import re
 import typing
@@ -146,3 +147,96 @@ def dataclass_to_struct_dict(
         converter_fn = field_converters.get(f.name, lambda v: v)
         result[f.name] = converter_fn(value)
     return result
+
+
+def struct_dict_to_dataclass(
+    struct_dict: dict[str, Any],
+    field_converters: dict[str, Any],
+    lookup_cache: dict[str, type],
+) -> Any:
+    """Decode an Arrow struct dict to a Python dataclass instance.
+
+    Uses a three-tier fallback:
+
+    1. **Import** — ``importlib``-import the class from its fully-qualified name.
+    2. **Registry** — look up the FQCN in the process-global ``_DATACLASS_REGISTRY``.
+    3. **Synthesize** — create a throwaway dataclass with ``dataclasses.make_dataclass``
+       matching the struct's field names (all fields typed as ``Any``).
+
+    Tier 3 never raises. A ``lookup_cache`` (keyed by FQCN) amortises repeated
+    resolution across rows in the same read operation.
+
+    Args:
+        struct_dict: Arrow struct row dict as produced by ``pa.Table.to_pylist()``.
+        field_converters: Per-field Arrow->Python converter callables (keyed by
+            field name, excluding ``__type``).
+        lookup_cache: Mutable dict used as a per-read cache. Pass the same dict
+            for all rows in a read operation; clear between operations if needed.
+
+    Returns:
+        A dataclass instance (real or synthesized) with field values set.
+    """
+    type_str = struct_dict.get(DATACLASS_TYPE_FIELD)
+
+    fqcn: str | None = None
+    class_name = "SynthesizedDataclass"
+
+    if type_str and isinstance(type_str, str) and type_str.startswith(DATACLASS_TYPE_PREFIX):
+        candidate = type_str[len(DATACLASS_TYPE_PREFIX):]
+        if _FQCN_RE.match(candidate):
+            fqcn = candidate
+            class_name = fqcn.rsplit(".", 1)[-1]
+        else:
+            logger.warning(
+                "struct_dict_to_dataclass: invalid __type value %r — falling back to tier 3",
+                type_str,
+            )
+
+    cls: type | None = None
+
+    if fqcn is not None:
+        # Check lookup cache first (amortises tiers 1-3 across rows)
+        if fqcn in lookup_cache:
+            cls = lookup_cache[fqcn]
+        else:
+            # Tier 1: import
+            module_path, _, class_attr = fqcn.rpartition(".")
+            try:
+                module = importlib.import_module(module_path)
+                cls = getattr(module, class_attr)
+                lookup_cache[fqcn] = cls
+            except (ImportError, AttributeError) as exc:
+                logger.debug(
+                    "struct_dict_to_dataclass: tier 1 import failed for %r: %s",
+                    fqcn, exc,
+                )
+
+            # Tier 2: registry
+            if cls is None:
+                cls = _DATACLASS_REGISTRY.get(fqcn)
+                if cls is not None:
+                    lookup_cache[fqcn] = cls
+
+            # Tier 3: synthesize (fqcn valid but unresolvable)
+            if cls is None:
+                field_names = [k for k in struct_dict if k != DATACLASS_TYPE_FIELD]
+                cls = dataclasses.make_dataclass(
+                    class_name, [(name, typing.Any) for name in field_names]
+                )
+                lookup_cache[fqcn] = cls
+    else:
+        # No valid fqcn — tier 3 with no caching (no stable key)
+        field_names = [k for k in struct_dict if k != DATACLASS_TYPE_FIELD]
+        cls = dataclasses.make_dataclass(
+            class_name, [(name, typing.Any) for name in field_names]
+        )
+
+    # Instantiate: apply field converters, skip the __type sentinel
+    data_kwargs: dict[str, Any] = {}
+    for key, value in struct_dict.items():
+        if key == DATACLASS_TYPE_FIELD:
+            continue
+        converter_fn = field_converters.get(key, lambda v: v)
+        data_kwargs[key] = converter_fn(value) if value is not None else None
+
+    return cls(**data_kwargs)
