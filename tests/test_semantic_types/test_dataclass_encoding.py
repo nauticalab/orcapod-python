@@ -149,3 +149,116 @@ def test_struct_dict_type_error_on_class():
 def test_struct_dict_type_error_on_non_dataclass():
     with pytest.raises(TypeError, match="not a dataclass instance"):
         dataclass_to_struct_dict(42, {})
+
+
+from unittest.mock import MagicMock, patch
+from orcapod.semantic_types.dataclass_encoding import struct_dict_to_dataclass
+
+
+@dataclasses.dataclass
+class _TierOne:
+    value: int
+
+
+def test_tier1_import():
+    """Tier 1: class is importable via importlib."""
+    fqcn = f"{_TierOne.__module__}.{_TierOne.__qualname__}"
+    struct_dict = {
+        "__type": f"dataclass:{fqcn}",
+        "value": 7,
+    }
+    field_converters = {"value": lambda v: v}
+    cache: dict = {}
+
+    # Patch importlib so tier 1 returns _TierOne
+    module_path, _, class_attr = fqcn.rpartition(".")
+    with patch("importlib.import_module") as mock_import:
+        mock_mod = MagicMock()
+        setattr(mock_mod, class_attr, _TierOne)
+        mock_import.return_value = mock_mod
+
+        result = struct_dict_to_dataclass(struct_dict, field_converters, cache)
+
+    assert isinstance(result, _TierOne)
+    assert result.value == 7
+    # Cache should be populated
+    assert cache[fqcn] is _TierOne
+
+
+def test_tier1_cache_hit():
+    """Tier 1: cache hit skips importlib entirely."""
+    fqcn = "some.module.SomeClass"
+    cache = {fqcn: _TierOne}
+    struct_dict = {"__type": f"dataclass:{fqcn}", "value": 3}
+    field_converters = {"value": lambda v: v}
+
+    with patch("importlib.import_module") as mock_import:
+        result = struct_dict_to_dataclass(struct_dict, field_converters, cache)
+        mock_import.assert_not_called()
+
+    assert isinstance(result, _TierOne)
+    assert result.value == 3
+
+
+def test_tier2_registry():
+    """Tier 2: importlib fails, class found in registry."""
+    @dataclasses.dataclass
+    class _RegClass:
+        score: float
+
+    fqcn = "fake.module.RegClass"
+    _DATACLASS_REGISTRY[fqcn] = _RegClass
+
+    struct_dict = {"__type": f"dataclass:{fqcn}", "score": 9.5}
+    field_converters = {"score": lambda v: v}
+    cache: dict = {}
+
+    with patch("importlib.import_module", side_effect=ImportError("no module")):
+        result = struct_dict_to_dataclass(struct_dict, field_converters, cache)
+
+    assert isinstance(result, _RegClass)
+    assert result.score == 9.5
+    assert cache[fqcn] is _RegClass
+
+
+def test_tier3_synthesize():
+    """Tier 3: neither importable nor registered — synthesize a dataclass."""
+    fqcn = "totally.unknown.Ghost"
+    struct_dict = {"__type": f"dataclass:{fqcn}", "name": "phantom", "age": 99}
+    field_converters = {"name": lambda v: v, "age": lambda v: v}
+    cache: dict = {}
+
+    with patch("importlib.import_module", side_effect=ImportError("no module")):
+        result = struct_dict_to_dataclass(struct_dict, field_converters, cache)
+
+    assert dataclasses.is_dataclass(result)
+    assert result.name == "phantom"  # type: ignore[attr-defined]
+    assert result.age == 99  # type: ignore[attr-defined]
+    # Synthesized class cached under fqcn for future rows
+    assert fqcn in cache
+
+
+def test_missing_type_field_tier3():
+    """Struct without __type falls through to tier 3 silently."""
+    struct_dict = {"value": 42}
+    field_converters = {"value": lambda v: v}
+    cache: dict = {}
+
+    result = struct_dict_to_dataclass(struct_dict, field_converters, cache)
+
+    assert dataclasses.is_dataclass(result)
+    assert result.value == 42  # type: ignore[attr-defined]
+    # No cache entry — no valid fqcn to cache under
+    assert len(cache) == 0
+
+
+def test_malformed_type_field_tier3():
+    """Invalid __type format (fails regex) falls through to tier 3."""
+    struct_dict = {"__type": "not-valid!!!", "x": 1}
+    field_converters = {"x": lambda v: v}
+    cache: dict = {}
+
+    result = struct_dict_to_dataclass(struct_dict, field_converters, cache)
+
+    assert dataclasses.is_dataclass(result)
+    assert result.x == 1  # type: ignore[attr-defined]
