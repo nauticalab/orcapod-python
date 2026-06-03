@@ -112,3 +112,37 @@ def dataclass_to_arrow_struct_type(
         arrow_type = converter.python_type_to_arrow_type(hints[f.name])
         fields.append(pa.field(f.name, arrow_type))
     return pa.struct(fields)
+
+
+def dataclass_to_struct_dict(
+    obj: Any,
+    field_converters: dict[str, Any],
+) -> dict[str, Any]:
+    """Encode a dataclass instance to an Arrow-compatible struct dict.
+
+    Args:
+        obj: A dataclass instance to encode.
+        field_converters: Pre-built per-field converter callables keyed by
+            field name. Build these once per type at converter-creation time
+            and reuse per row to avoid repeated type dispatch.
+
+    Returns:
+        A dict with ``__type`` as the first key followed by encoded field values.
+
+    Raises:
+        TypeError: If ``obj`` is not a dataclass instance (e.g. a class itself
+            or a non-dataclass value).
+    """
+    # dataclasses.is_dataclass() returns True for both classes and instances;
+    # isinstance(obj, type) distinguishes: True for classes, False for instances.
+    if not dataclasses.is_dataclass(obj) or isinstance(obj, type):
+        raise TypeError(f"{obj!r} is not a dataclass instance")
+
+    cls = type(obj)
+    type_str = f"{DATACLASS_TYPE_PREFIX}{cls.__module__}.{cls.__qualname__}"
+    result: dict[str, Any] = {DATACLASS_TYPE_FIELD: type_str}
+    for f in dataclasses.fields(cls):
+        value = getattr(obj, f.name)
+        converter_fn = field_converters.get(f.name, lambda v: v)
+        result[f.name] = converter_fn(value)
+    return result
