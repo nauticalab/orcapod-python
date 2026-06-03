@@ -35,6 +35,7 @@ import dataclasses
 
 from orcapod.semantic_types.dataclass_encoding import (
     DATACLASS_TYPE_FIELD,
+    _get_type_hints_safe,
     dataclass_to_arrow_struct_type,
     dataclass_to_struct_dict,
     has_dataclass_type_sentinel,
@@ -703,7 +704,6 @@ class UniversalTypeConverter:
 
         # Dataclass instances → struct dict with __type sentinel
         if dataclasses.is_dataclass(python_type) and isinstance(python_type, type):
-            from orcapod.semantic_types.dataclass_encoding import _get_type_hints_safe
             hints = _get_type_hints_safe(python_type)
             field_converters = {
                 f.name: self.get_python_to_arrow_converter(hints[f.name])
