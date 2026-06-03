@@ -172,7 +172,7 @@ def test_tier1_import():
 
     # Patch importlib so tier 1 returns _TierOne
     module_path, _, class_attr = fqcn.rpartition(".")
-    with patch("importlib.import_module") as mock_import:
+    with patch("orcapod.semantic_types.dataclass_encoding.importlib.import_module") as mock_import:
         mock_mod = MagicMock()
         setattr(mock_mod, class_attr, _TierOne)
         mock_import.return_value = mock_mod
@@ -192,7 +192,7 @@ def test_tier1_cache_hit():
     struct_dict = {"__type": f"dataclass:{fqcn}", "value": 3}
     field_converters = {"value": lambda v: v}
 
-    with patch("importlib.import_module") as mock_import:
+    with patch("orcapod.semantic_types.dataclass_encoding.importlib.import_module") as mock_import:
         result = struct_dict_to_dataclass(struct_dict, field_converters, cache)
         mock_import.assert_not_called()
 
