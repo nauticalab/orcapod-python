@@ -50,8 +50,15 @@ def test_register_non_dataclass_raises():
         register_dataclass(int)
 
 
+import typing
+
 import pyarrow as pa
-from orcapod.semantic_types.dataclass_encoding import has_dataclass_type_sentinel, dataclass_to_arrow_struct_type
+from orcapod.semantic_types.dataclass_encoding import (
+    DATACLASS_TYPE_FIELD,
+    has_dataclass_type_sentinel,
+    dataclass_to_arrow_struct_type,
+    dataclass_to_struct_dict,
+)
 from orcapod.semantic_types.universal_converter import UniversalTypeConverter
 
 
@@ -106,3 +113,39 @@ def test_struct_type_non_dataclass_raises():
     converter = UniversalTypeConverter()
     with pytest.raises(TypeError, match="not a dataclass"):
         dataclass_to_arrow_struct_type(int, converter)
+
+
+def _build_field_converters(cls: type, converter: UniversalTypeConverter) -> dict:
+    """Helper: build per-field Python-to-Arrow converters for a dataclass."""
+    hints = typing.get_type_hints(cls)
+    return {
+        f.name: converter.get_python_to_arrow_converter(hints[f.name])
+        for f in dataclasses.fields(cls)
+    }
+
+
+def test_struct_dict_simple():
+    @dataclasses.dataclass
+    class _Box:
+        width: int
+        label: str
+
+    converter = UniversalTypeConverter()
+    field_converters = _build_field_converters(_Box, converter)
+    obj = _Box(width=10, label="big")
+    result = dataclass_to_struct_dict(obj, field_converters)
+
+    fqcn = f"{_Box.__module__}.{_Box.__qualname__}"
+    assert result[DATACLASS_TYPE_FIELD] == f"dataclass:{fqcn}"
+    assert result["width"] == 10
+    assert result["label"] == "big"
+
+
+def test_struct_dict_type_error_on_class():
+    with pytest.raises(TypeError, match="not a dataclass instance"):
+        dataclass_to_struct_dict(_Simple, {})
+
+
+def test_struct_dict_type_error_on_non_dataclass():
+    with pytest.raises(TypeError, match="not a dataclass instance"):
+        dataclass_to_struct_dict(42, {})
