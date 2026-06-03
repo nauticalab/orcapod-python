@@ -88,3 +88,10 @@ dev = [
     "mkdocs-material>=9.7.5",
     "mkdocstrings[python]>=1.0.3",
 ]
+
+
+[tool.coverage.report]
+# Exclude lines that are never executed at runtime and cannot be covered by tests.
+exclude_also = [
+    "if TYPE_CHECKING:",  # typing-only imports; evaluated by type checkers only
+]
