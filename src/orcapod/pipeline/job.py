@@ -18,8 +18,10 @@ from orcapod.types import CacheMode
 if TYPE_CHECKING:
     from orcapod.core.nodes import FunctionNode, GraphNode, OperatorNode
     from orcapod.core.nodes.source_node import SourceNode
+    from orcapod.pipeline.async_orchestrator import AsyncPipelineOrchestrator
     from orcapod.pipeline.execution_context import ExecutionContext
     from orcapod.pipeline.graph import Pipeline
+    from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
     from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
     from orcapod.protocols.observability_protocols import ExecutionObserverProtocol
 
@@ -642,6 +644,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
 
     def run(
         self,
+        orchestrator: "SyncPipelineOrchestrator | AsyncPipelineOrchestrator | None" = None,
         observer: "ExecutionObserverProtocol | None" = None,
     ) -> "PipelineJob":
         """Execute the resolvable subgraph of this job in place.
@@ -655,6 +658,8 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         nodes with populated database caches.
 
         Args:
+            orchestrator: Orchestrator to use for execution. Defaults to
+                ``SyncPipelineOrchestrator`` when ``None``.
             observer: Optional execution observer.
 
         Returns:
@@ -755,7 +760,8 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         snapshot_hash = hashlib.sha256("\n".join(leaf_hashes).encode()).hexdigest()[:16]
         pipeline_uri = "/".join(self._name) + "@" + snapshot_hash
 
-        SyncPipelineOrchestrator().run(
+        effective_orchestrator = orchestrator or SyncPipelineOrchestrator()
+        effective_orchestrator.run(
             exec_dag,
             observer=effective_observer,
             run_id=run_id,
