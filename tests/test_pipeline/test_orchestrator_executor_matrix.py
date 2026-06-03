@@ -119,8 +119,7 @@ async def async_double(x: int) -> int:
 
 def slow_sync_double(x: int) -> int:
     """Sync I/O-bound function: blocks for SLEEP_S seconds."""
-    import time as _time
-    _time.sleep(_SLEEP_S)
+    time.sleep(_SLEEP_S)
     return x * 2
 
 
@@ -574,8 +573,6 @@ class TestSyncOrchestratorSyncFunctionPipelineJob:
 
     def test_correctness_via_pipeline_job(self):
         """Sync orchestrator + sync function produces correct results via PipelineJob."""
-        from orcapod.pipeline import PipelineJob
-
         pf = PythonDataFunction(sync_double, output_keys="result")
         pod = FunctionPod(pf)
         db = InMemoryArrowDatabase()
@@ -584,10 +581,9 @@ class TestSyncOrchestratorSyncFunctionPipelineJob:
         with job:
             pod(_make_source(), label="node")
 
-        completed = job.run()
-        assert completed._has_run is True
+        job.run()
 
-        fn_node = completed.nodes.get("node")
+        fn_node = job.nodes.get("node")
         assert fn_node is not None
         records = fn_node.get_all_records()
         assert records is not None
