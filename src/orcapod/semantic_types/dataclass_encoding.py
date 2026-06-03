@@ -55,3 +55,25 @@ def register_dataclass(cls: type) -> type:
     key = f"{cls.__module__}.{cls.__qualname__}"
     _DATACLASS_REGISTRY[key] = cls
     return cls
+
+
+def has_dataclass_type_sentinel(arrow_type: pa.DataType) -> bool:
+    """Return `True` if `arrow_type` is a struct with a `__type` string field.
+
+    Accepts both `pa.large_string()` and `pa.string()` for compatibility
+    with data written by older Arrow versions.
+
+    Args:
+        arrow_type: Any PyArrow data type.
+
+    Returns:
+        True if `arrow_type` is a struct containing a `__type: (large_)string`
+        field.
+    """
+    if not pa.types.is_struct(arrow_type):
+        return False
+    for i in range(arrow_type.num_fields):
+        field = arrow_type.field(i)
+        if field.name == DATACLASS_TYPE_FIELD:
+            return pa.types.is_large_string(field.type) or pa.types.is_string(field.type)
+    return False
