@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import dataclasses
-import typing
 
 import pytest
 
@@ -44,3 +43,8 @@ def test_register_as_decorator():
 
     key = f"{_Decorated.__module__}.{_Decorated.__qualname__}"
     assert _DATACLASS_REGISTRY[key] is _Decorated
+
+
+def test_register_non_dataclass_raises():
+    with pytest.raises(TypeError, match="not a dataclass"):
+        register_dataclass(int)
