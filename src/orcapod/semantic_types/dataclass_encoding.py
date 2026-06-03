@@ -12,7 +12,8 @@ from __future__ import annotations
 import dataclasses
 import logging
 import re
-from typing import TYPE_CHECKING
+import typing
+from typing import TYPE_CHECKING, Any
 
 from orcapod.utils.lazy_module import LazyModule
 
@@ -77,3 +78,37 @@ def has_dataclass_type_sentinel(arrow_type: pa.DataType) -> bool:
         if field.name == DATACLASS_TYPE_FIELD:
             return pa.types.is_large_string(field.type) or pa.types.is_string(field.type)
     return False
+
+
+def dataclass_to_arrow_struct_type(
+    cls: type,
+    converter: Any,
+) -> pa.StructType:
+    """Derive the Arrow struct type for a dataclass class.
+
+    The resulting struct has `__type: large_string` as its first field,
+    followed by one field per dataclass field. Field types are resolved via
+    `converter` (a `UniversalTypeConverter`), so nested dataclasses
+    produce nested structs automatically once the converter has the dataclass
+    branch wired in.
+
+    Args:
+        cls: A Python dataclass type.
+        converter: A `UniversalTypeConverter` instance used for field type
+            resolution.
+
+    Returns:
+        A `pa.StructType` with `__type` as the first field.
+
+    Raises:
+        TypeError: If `cls` is not a dataclass type.
+    """
+    if not dataclasses.is_dataclass(cls) or not isinstance(cls, type):
+        raise TypeError(f"{cls!r} is not a dataclass type")
+
+    hints = typing.get_type_hints(cls)
+    fields: list[pa.Field] = [pa.field(DATACLASS_TYPE_FIELD, pa.large_string())]
+    for f in dataclasses.fields(cls):
+        arrow_type = converter.python_type_to_arrow_type(hints[f.name])
+        fields.append(pa.field(f.name, arrow_type))
+    return pa.struct(fields)

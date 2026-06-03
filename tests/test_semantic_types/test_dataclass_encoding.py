@@ -51,7 +51,8 @@ def test_register_non_dataclass_raises():
 
 
 import pyarrow as pa
-from orcapod.semantic_types.dataclass_encoding import has_dataclass_type_sentinel
+from orcapod.semantic_types.dataclass_encoding import has_dataclass_type_sentinel, dataclass_to_arrow_struct_type
+from orcapod.semantic_types.universal_converter import UniversalTypeConverter
 
 
 def test_sentinel_large_string():
@@ -72,3 +73,36 @@ def test_sentinel_missing_field():
 
 def test_sentinel_non_struct():
     assert has_dataclass_type_sentinel(pa.int64()) is False
+
+
+def test_struct_type_basic_fields():
+    @dataclasses.dataclass
+    class _Point:
+        x: int
+        y: float
+
+    converter = UniversalTypeConverter()
+    result = dataclass_to_arrow_struct_type(_Point, converter)
+
+    assert pa.types.is_struct(result)
+    # __type must be the first field
+    assert result[0].name == "__type"
+    assert result[0].type == pa.large_string()
+    assert result.field("x").type == pa.int64()
+    assert result.field("y").type == pa.float64()
+
+
+def test_struct_type_string_field():
+    @dataclasses.dataclass
+    class _Named:
+        name: str
+
+    converter = UniversalTypeConverter()
+    result = dataclass_to_arrow_struct_type(_Named, converter)
+    assert result.field("name").type == pa.large_string()
+
+
+def test_struct_type_non_dataclass_raises():
+    converter = UniversalTypeConverter()
+    with pytest.raises(TypeError, match="not a dataclass"):
+        dataclass_to_arrow_struct_type(int, converter)
