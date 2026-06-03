@@ -28,7 +28,7 @@ to the new `PipelineJob` API and restore regression coverage.
 |---|---|---|
 | Construction | `Pipeline(name, pipeline_database=db)` | `PipelineJob(name, store=db)` |
 | Execution | `pipeline.run(orchestrator=orch, observer=obs)` | `job.run(orchestrator=orch, observer=obs)` |
-| Node access | `pipeline.label.get_all_records()` | `job.pipeline.nodes["label"].get_all_records()` |
+| Node access | `pipeline.label.get_all_records()` | `job.nodes["label"].get_all_records()` |
 | DAG access | `pipeline.dag` | `job.pipeline.dag` (available post-`with`, no `run()` needed) |
 | Return value | `None` | `self` (same instance; see ENG-565 for follow-up) |
 
@@ -125,7 +125,7 @@ job = PipelineJob(name="test", store=db)
 with job:
     pod(source, label="doubler")
 job.run(observer=obs)  # orchestrator defaults to SyncPipelineOrchestrator
-records = job.pipeline.nodes["doubler"].get_all_records()
+records = job.nodes["doubler"].get_all_records()
 ```
 
 ### Group B — Async orchestrator
