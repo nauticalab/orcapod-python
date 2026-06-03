@@ -6,7 +6,6 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes import FunctionNode, OperatorNode, SourceNode
 from orcapod.core.operators import SelectDataColumns
 from orcapod.core.operators.join import Join
 from orcapod.core.operators.mappers import MapData
@@ -223,6 +222,9 @@ class TestPipelineRunIntegration:
         assert len(events) > 0
         records = job.nodes["doubler"].get_all_records()
         assert records is not None
+        assert records.num_rows == 2
+        result_values = sorted(records.column("result").to_pylist())
+        assert result_values == [2, 4]
 
     def test_run_populates_node_caches(self):
         """After run(), iter_data()/as_table() should work on nodes."""
@@ -555,4 +557,5 @@ class TestSyncObserverInjection:
 # TestMaterializeResults deleted: PipelineJob.run() always materialises
 # results to the store database. The materialize_results=False path is
 # a SyncPipelineOrchestrator / AsyncPipelineOrchestrator implementation
-# detail tested directly in test_orchestrator.py orchestrator unit tests.
+# detail; coverage will be restored when test_orchestrator.py is migrated
+# in the same ENG-491 migration pass.
