@@ -2,7 +2,7 @@
 
 Demonstrates the interplay of two independent concurrency axes:
 
-1. **Pipeline executor** — sync (sequential node execution) vs async
+1. **Pipeline orchestrator** — sync (sequential node execution) vs async
    (concurrent node execution via channels).
 
 2. **Data function** — sync (GIL-holding busy-wait) vs async
@@ -15,10 +15,10 @@ async+sync and async+async clearly visible:
 +---------------------+----------------------------+----------------------------+
 |                     | sync function (holds GIL)  | async function             |
 +---------------------+----------------------------+----------------------------+
-| sync executor       | fully sequential           | sequential (async fn       |
+| sync orchestrator   | fully sequential           | sequential (async fn       |
 |                     |                            | called via sync fallback)  |
 +---------------------+----------------------------+----------------------------+
-| async executor      | branches overlap, but      | branches overlap AND       |
+| async orchestrator  | branches overlap, but      | branches overlap AND       |
 |                     | data serialize on GIL   | data run concurrently   |
 |                     | (thread pool can't help)   | (native coroutines)        |
 +---------------------+----------------------------+----------------------------+
@@ -39,7 +39,7 @@ from orcapod.core.function_pod import FunctionPod
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import Pipeline
-from orcapod.types import ExecutorType, NodeConfig, PipelineConfig
+from orcapod.types import NodeConfig, OrchestratorType, PipelineConfig
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -116,12 +116,12 @@ def build_pipeline(use_async_fn: bool) -> Pipeline:
     return pipeline
 
 
-def run_case(label: str, use_async_fn: bool, use_async_executor: bool) -> float:
+def run_case(label: str, use_async_fn: bool, use_async_orchestrator: bool) -> float:
     """Run a single combination and return elapsed time."""
     pipeline = build_pipeline(use_async_fn=use_async_fn)
     t0 = time.perf_counter()
-    if use_async_executor:
-        pipeline.run(config=PipelineConfig(executor=ExecutorType.ASYNC_CHANNELS))
+    if use_async_orchestrator:
+        pipeline.run(config=PipelineConfig(orchestrator=OrchestratorType.ASYNC_CHANNELS))
     else:
         pipeline.run()
     elapsed = time.perf_counter() - t0
@@ -153,10 +153,10 @@ def main() -> None:
     print("    source ──┬── slow_double (branch_a)")
     print("             └── slow_double (branch_b)\n")
 
-    t1 = run_case("sync executor  + sync function :", False, False)
-    t2 = run_case("sync executor  + async function:", True, False)
-    t3 = run_case("async executor + sync function :", False, True)
-    t4 = run_case("async executor + async function:", True, True)
+    t1 = run_case("sync orchestrator  + sync function :", False, False)
+    t2 = run_case("sync orchestrator  + async function:", True, False)
+    t3 = run_case("async orchestrator + sync function :", False, True)
+    t4 = run_case("async orchestrator + async function:", True, True)
 
     print()
     print("  Analysis:")
@@ -164,7 +164,7 @@ def main() -> None:
         f"    sync+sync   {t1:.2f}s  — fully sequential ({NUM_DATA}x2 x {SLEEP_SECONDS}s)"
     )
     print(
-        f"    sync+async  {t2:.2f}s  — still sequential (sync executor runs nodes one by one)"
+        f"    sync+async  {t2:.2f}s  — still sequential (sync orchestrator runs nodes one by one)"
     )
     print(f"    async+sync  {t3:.2f}s  — branches overlap, but GIL-holding busy-wait")
     print(f"                          serializes data even across threads")

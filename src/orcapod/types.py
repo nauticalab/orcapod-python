@@ -271,14 +271,20 @@ class Schema(Mapping[str, DataType]):
         return cls({})
 
 
-class ExecutorType(Enum):
-    """Pipeline execution strategy.
+class OrchestratorType(Enum):
+    """Pipeline orchestrator selection.
 
     Attributes:
-        SYNCHRONOUS: Current behavior -- ``static_process`` chain with
-            pull-based materialization.
+        SYNCHRONOUS: Pull-based synchronous DAG walk via
+            ``SyncPipelineOrchestrator``.
         ASYNC_CHANNELS: Push-based async channel execution via
-            ``async_execute``.
+            ``AsyncPipelineOrchestrator``.
+
+    Note:
+        This is distinct from ``DataFunction.executor``, which controls
+        distributed execution of individual data functions (e.g. Ray).
+        ``OrchestratorType`` selects the pipeline-level coordination
+        strategy only.
     """
 
     SYNCHRONOUS = "synchronous"
@@ -290,7 +296,7 @@ class PipelineConfig:
     """Pipeline-level execution configuration.
 
     Attributes:
-        executor: Which execution strategy to use.
+        orchestrator: Which orchestrator strategy to use.
         channel_buffer_size: Max items buffered per channel edge.
         default_max_concurrency: Pipeline-wide default for per-node
             concurrency.  ``None`` means unlimited.
@@ -301,7 +307,7 @@ class PipelineConfig:
             via ``with_options()`` (e.g. ``{"num_cpus": 4}``).
     """
 
-    executor: ExecutorType = ExecutorType.SYNCHRONOUS
+    orchestrator: OrchestratorType = OrchestratorType.SYNCHRONOUS
     channel_buffer_size: int = 64
     default_max_concurrency: int | None = None
     execution_engine: DataFunctionExecutorProtocol | None = None
