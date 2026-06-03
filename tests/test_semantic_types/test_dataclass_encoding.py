@@ -2,15 +2,26 @@
 from __future__ import annotations
 
 import dataclasses
+import os
+import tempfile
+import typing
+from unittest.mock import MagicMock, patch
 
+import pyarrow as pa
 import pytest
 
 from orcapod.semantic_types.dataclass_encoding import (
     DATACLASS_TYPE_FIELD,
     DATACLASS_TYPE_PREFIX,
     _DATACLASS_REGISTRY,
+    dataclass_to_arrow_struct_type,
+    dataclass_to_struct_dict,
+    has_dataclass_type_sentinel,
     register_dataclass,
+    struct_dict_to_dataclass,
 )
+from orcapod.semantic_types.universal_converter import UniversalTypeConverter
+from orcapod.types import Schema
 
 
 @dataclasses.dataclass
@@ -48,18 +59,6 @@ def test_register_as_decorator():
 def test_register_non_dataclass_raises():
     with pytest.raises(TypeError, match="not a dataclass"):
         register_dataclass(int)
-
-
-import typing
-
-import pyarrow as pa
-from orcapod.semantic_types.dataclass_encoding import (
-    DATACLASS_TYPE_FIELD,
-    has_dataclass_type_sentinel,
-    dataclass_to_arrow_struct_type,
-    dataclass_to_struct_dict,
-)
-from orcapod.semantic_types.universal_converter import UniversalTypeConverter
 
 
 def test_sentinel_large_string():
@@ -151,10 +150,6 @@ def test_struct_dict_type_error_on_non_dataclass():
         dataclass_to_struct_dict(42, {})
 
 
-from unittest.mock import MagicMock, patch
-from orcapod.semantic_types.dataclass_encoding import struct_dict_to_dataclass
-
-
 @dataclasses.dataclass
 class _TierOne:
     value: int
@@ -213,7 +208,7 @@ def test_tier2_registry(monkeypatch):
     field_converters = {"score": lambda v: v}
     cache: dict = {}
 
-    with patch("importlib.import_module", side_effect=ImportError("no module")):
+    with patch("orcapod.semantic_types.dataclass_encoding.importlib.import_module", side_effect=ImportError("no module")):
         result = struct_dict_to_dataclass(struct_dict, field_converters, cache)
 
     assert isinstance(result, _RegClass)
@@ -228,7 +223,7 @@ def test_tier3_synthesize():
     field_converters = {"name": lambda v: v, "age": lambda v: v}
     cache: dict = {}
 
-    with patch("importlib.import_module", side_effect=ImportError("no module")):
+    with patch("orcapod.semantic_types.dataclass_encoding.importlib.import_module", side_effect=ImportError("no module")):
         result = struct_dict_to_dataclass(struct_dict, field_converters, cache)
 
     assert dataclasses.is_dataclass(result)
@@ -264,9 +259,6 @@ def test_malformed_type_field_tier3():
     assert result.x == 1  # type: ignore[attr-defined]
 
 
-from orcapod.semantic_types.universal_converter import UniversalTypeConverter as _UTC
-
-
 def test_utc_simple_round_trip():
     """Full encode->decode round-trip through UniversalTypeConverter."""
     @dataclasses.dataclass
@@ -275,7 +267,7 @@ def test_utc_simple_round_trip():
         g: int
         b: int
 
-    converter = _UTC()
+    converter = UniversalTypeConverter()
     arrow_type = converter.python_type_to_arrow_type(_Color)
     assert has_dataclass_type_sentinel(arrow_type)
 
@@ -306,7 +298,7 @@ def test_utc_nested_round_trip():
         x: int
         inner: _Inner
 
-    converter = _UTC()
+    converter = UniversalTypeConverter()
     arrow_type = converter.python_type_to_arrow_type(_Outer)
 
     # Nested struct: inner field should itself be a __type-bearing struct
@@ -344,7 +336,7 @@ def test_utc_nested_round_trip():
 
 def test_utc_clear_cache_clears_dataclass_cache():
     """clear_cache() also clears the per-instance dataclass lookup cache."""
-    converter = _UTC()
+    converter = UniversalTypeConverter()
 
     @dataclasses.dataclass
     class _Temp:
@@ -354,10 +346,6 @@ def test_utc_clear_cache_clears_dataclass_cache():
     converter._dataclass_lookup_cache[fqcn] = _Temp
     converter.clear_cache()
     assert fqcn not in converter._dataclass_lookup_cache
-
-
-import tempfile
-import os
 
 
 def test_polymorphic_decode():
@@ -378,7 +366,7 @@ def test_polymorphic_decode():
         pa.field("__type", pa.large_string()),
         pa.field("name", pa.large_string()),
     ])
-    converter = _UTC()
+    converter = UniversalTypeConverter()
     decode = converter.get_arrow_to_python_converter(arrow_type)
 
     cat_attr = cat_fqcn.rpartition(".")[2]
@@ -409,13 +397,12 @@ def test_parquet_round_trip():
         score: float
         label: str
 
-    converter = _UTC()
+    converter = UniversalTypeConverter()
 
     python_dicts = [
         {"rec": _Record(score=0.9, label="good")},
         {"rec": _Record(score=0.1, label="bad")},
     ]
-    from orcapod.types import Schema
     python_schema = Schema({"rec": _Record})
     table = converter.python_dicts_to_arrow_table(python_dicts, python_schema=python_schema)
 

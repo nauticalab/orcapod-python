@@ -2,7 +2,7 @@
 """
 Dataclass <-> Arrow struct encoding for Orcapod.
 
-Encodes Python dataclasses as Arrow structs with a `__type` sentinel field
+Encodes Python dataclasses as Arrow structs with a ``__type`` sentinel field
 carrying the fully-qualified class name. Decoding uses a three-tier fallback:
 import -> registry -> synthesize.
 """
@@ -64,16 +64,16 @@ def register_dataclass(cls: type) -> type:
 
 
 def has_dataclass_type_sentinel(arrow_type: pa.DataType) -> bool:
-    """Return `True` if `arrow_type` is a struct with a `__type` string field.
+    """Return ``True`` if ``arrow_type`` is a struct with a ``__type`` string field.
 
-    Accepts both `pa.large_string()` and `pa.string()` for compatibility
+    Accepts both ``pa.large_string()`` and ``pa.string()`` for compatibility
     with data written by older Arrow versions.
 
     Args:
         arrow_type: Any PyArrow data type.
 
     Returns:
-        True if `arrow_type` is a struct containing a `__type: (large_)string`
+        True if ``arrow_type`` is a struct containing a ``__type: (large_)string``
         field.
     """
     if not pa.types.is_struct(arrow_type):
@@ -144,19 +144,19 @@ def dataclass_to_arrow_struct_type(
 ) -> pa.StructType:
     """Derive the Arrow struct type for a dataclass class.
 
-    The resulting struct has `__type: large_string` as its first field,
+    The resulting struct has ``__type: large_string`` as its first field,
     followed by one field per dataclass field. Field types are resolved via
-    `converter` (a `UniversalTypeConverter`), so nested dataclasses
+    ``converter`` (a ``UniversalTypeConverter``), so nested dataclasses
     produce nested structs automatically once the converter has the dataclass
     branch wired in.
 
     Args:
         cls: A Python dataclass type.
-        converter: A `UniversalTypeConverter` instance used for field type
+        converter: A ``UniversalTypeConverter`` instance used for field type
             resolution.
 
     Returns:
-        A `pa.StructType` with `__type` as the first field.
+        A ``pa.StructType`` with ``__type`` as the first field.
 
     Raises:
         TypeError: If `cls` is not a dataclass type.
