@@ -646,6 +646,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         self,
         orchestrator: "SyncPipelineOrchestrator | AsyncPipelineOrchestrator | None" = None,
         observer: "ExecutionObserverProtocol | None" = None,
+        materialize_results: bool = True,
     ) -> "PipelineJob":
         """Execute the resolvable subgraph of this job in place.
 
@@ -661,6 +662,12 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             orchestrator: Orchestrator to use for execution. Defaults to
                 ``SyncPipelineOrchestrator`` when ``None``.
             observer: Optional execution observer.
+            materialize_results: When ``True`` (the default) node outputs are
+                kept in memory and accessible after the run. When ``False``
+                the in-memory buffers are released immediately after each node
+                completes, reducing peak memory at the cost of not being able
+                to inspect in-process results. Database records are written
+                regardless of this setting.
 
         Returns:
             ``self`` — the same ``PipelineJob`` instance, with
@@ -766,6 +773,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             observer=effective_observer,
             run_id=run_id,
             pipeline_uri=pipeline_uri,
+            materialize_results=materialize_results,
         )
 
         # Flush databases.

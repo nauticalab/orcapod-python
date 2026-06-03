@@ -554,7 +554,50 @@ class TestSyncObserverInjection:
         assert records.num_rows == 1
 
 
-# TestMaterializeResults deleted: PipelineJob.run() always materialises
-# results to the store database. The materialize_results=False path is
-# a SyncPipelineOrchestrator / AsyncPipelineOrchestrator implementation
-# detail; direct coverage of this path is deferred to a follow-up issue.
+class TestMaterializeResults:
+    """materialize_results=False discards in-memory buffers but DB records persist."""
+
+    SOURCE_DATA = {"key": ["a", "b", "c"], "value": [1, 2, 3]}
+
+    def _make_job(self) -> PipelineJob:
+        db = InMemoryArrowDatabase()
+        job = PipelineJob(name="materialize_test", store=db)
+        src = _make_source("key", "value", self.SOURCE_DATA)
+        pod = FunctionPod(
+            data_function=PythonDataFunction(double_value, output_keys="result"),
+        )
+        with job:
+            pod(src, label="doubler")
+        return job
+
+    def test_sync_materialize_false_db_records_persisted(self):
+        """Sync orchestrator: DB records written even when in-memory results discarded."""
+        job = self._make_job()
+        job.run(materialize_results=False)
+        records = job.nodes["doubler"].get_all_records()
+        assert records is not None
+        assert records.num_rows == 3
+
+    def test_sync_materialize_true_db_records_persisted(self):
+        """Sync orchestrator: DB records written when in-memory results kept (default)."""
+        job = self._make_job()
+        job.run(materialize_results=True)
+        records = job.nodes["doubler"].get_all_records()
+        assert records is not None
+        assert records.num_rows == 3
+
+    def test_async_materialize_false_db_records_persisted(self):
+        """Async orchestrator: DB records written even when in-memory results discarded."""
+        job = self._make_job()
+        job.run(orchestrator=AsyncPipelineOrchestrator(), materialize_results=False)
+        records = job.nodes["doubler"].get_all_records()
+        assert records is not None
+        assert records.num_rows == 3
+
+    def test_async_materialize_true_db_records_persisted(self):
+        """Async orchestrator: DB records written when in-memory results kept (default)."""
+        job = self._make_job()
+        job.run(orchestrator=AsyncPipelineOrchestrator(), materialize_results=True)
+        records = job.nodes["doubler"].get_all_records()
+        assert records is not None
+        assert records.num_rows == 3
