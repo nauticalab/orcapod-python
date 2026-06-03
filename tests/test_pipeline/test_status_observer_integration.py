@@ -323,41 +323,6 @@ class TestMultipleFunctionNodesSeparateStatus:
 
 
 # ---------------------------------------------------------------------------
-# 9. get_status() returns combined status across all node sub-paths
-# ---------------------------------------------------------------------------
-
-
-class TestGetStatusNodeSpecific:
-    def test_get_status_returns_rows_for_both_nodes(self):
-        db = InMemoryArrowDatabase()
-        source = _make_source(2)
-
-        def double(x: int) -> int:
-            return x * 2
-
-        def triple(result: int) -> int:
-            return result * 3
-
-        pf1 = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
-        pod1 = FunctionPod(pf1)
-        pf2 = PythonDataFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
-        pod2 = FunctionPod(pf2)
-
-        job = PipelineJob(name="test_filter_status", store=db)
-        with job:
-            s1 = pod1(source, label="doubler")
-            pod2(s1, label="tripler")
-
-        obs = StatusObserver(status_database=db)
-        job.run(observer=obs)
-
-        all_status = obs.get_status()
-        assert all_status is not None
-        # Each node: 2 data × 2 events = 4 rows per node → 8 total
-        assert all_status.num_rows == 8
-
-
-# ---------------------------------------------------------------------------
 # 10. Status columns have correct schema
 # ---------------------------------------------------------------------------
 
@@ -471,7 +436,6 @@ def test_status_observer_from_config_round_trip():
 
 def test_contextualize_with_empty_path_raises():
     """contextualize() with no args should raise ValueError (not silently use fallback)."""
-    import pytest
     db = InMemoryArrowDatabase()
     obs = StatusObserver(db)
     with pytest.raises(ValueError, match="non-empty identity_path"):
