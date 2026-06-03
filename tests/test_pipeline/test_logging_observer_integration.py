@@ -2,7 +2,7 @@
 
 Exercises the full logging pipeline: capture → CapturedLogs return type →
 FunctionNode → observer → DataLogger → database, using InMemoryArrowDatabase
-and real Pipeline objects.
+and real PipelineJob objects.
 """
 
 from __future__ import annotations
@@ -17,9 +17,9 @@ from orcapod.core.sources.arrow_table_source import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import (
     AsyncPipelineOrchestrator,
-    Pipeline,
     SyncPipelineOrchestrator,
 )
+from orcapod.pipeline.job import PipelineJob
 from orcapod.pipeline.logging_observer import LoggingObserver
 
 
@@ -36,20 +36,11 @@ def _make_source(n: int = 3) -> ArrowTableSource:
     return ArrowTableSource(table, tag_columns=["id"], infer_nullable=True)
 
 
-def _get_function_node(pipeline: Pipeline):
-    """Return the first function node from the pipeline graph."""
-    for node in pipeline.dag.topological_sort():
-        if node.node_type == "function":
-            return node
-    raise RuntimeError("No function node found")
-
-
 # ---------------------------------------------------------------------------
 # 1. Sync pipeline — succeeding data → log rows with stdout captured
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestSyncPipelineSuccessLogs:
     def test_success_logs_captured(self):
         db = InMemoryArrowDatabase()
@@ -62,13 +53,12 @@ class TestSyncPipelineSuccessLogs:
         pf = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="test_logs", pipeline_database=db)
-        with pipeline:
+        job = PipelineJob(name="test_logs", store=db)
+        with job:
             pod(source, label="doubler")
 
         obs = LoggingObserver(log_database=db)
-        orch = SyncPipelineOrchestrator()
-        pipeline.run(orchestrator=orch, observer=obs)
+        job.run(observer=obs)
 
         logs = obs.get_logs()
 
@@ -83,7 +73,6 @@ class TestSyncPipelineSuccessLogs:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestFailingDatasLogged:
     def test_failure_logged_with_traceback(self):
         db = InMemoryArrowDatabase()
@@ -95,13 +84,12 @@ class TestFailingDatasLogged:
         pf = PythonDataFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="test_fail", pipeline_database=db)
-        with pipeline:
+        job = PipelineJob(name="test_fail", store=db)
+        with job:
             pod(source, label="failing")
 
         obs = LoggingObserver(log_database=db)
-        orch = SyncPipelineOrchestrator()
-        pipeline.run(orchestrator=orch, observer=obs)
+        job.run(observer=obs)
 
         logs = obs.get_logs()
 
@@ -120,7 +108,6 @@ class TestFailingDatasLogged:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestFlatLogStorage:
     def test_log_stored_in_flat_table(self):
         db = InMemoryArrowDatabase()
@@ -132,13 +119,12 @@ class TestFlatLogStorage:
         pf = PythonDataFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="test_flat", pipeline_database=db)
-        with pipeline:
+        job = PipelineJob(name="test_flat", store=db)
+        with job:
             pod(source, label="ident")
 
         obs = LoggingObserver(log_database=db)
-        orch = SyncPipelineOrchestrator()
-        pipeline.run(orchestrator=orch, observer=obs)
+        job.run(observer=obs)
 
         logs = obs.get_logs()
         assert logs is not None
@@ -153,7 +139,6 @@ class TestFlatLogStorage:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestQueryableTagColumns:
     def test_tag_columns_in_log_table(self):
         db = InMemoryArrowDatabase()
@@ -165,13 +150,12 @@ class TestQueryableTagColumns:
         pf = PythonDataFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="test_tags", pipeline_database=db)
-        with pipeline:
+        job = PipelineJob(name="test_tags", store=db)
+        with job:
             pod(source, label="ident")
 
         obs = LoggingObserver(log_database=db)
-        orch = SyncPipelineOrchestrator()
-        pipeline.run(orchestrator=orch, observer=obs)
+        job.run(observer=obs)
 
         logs = obs.get_logs()
 
@@ -188,7 +172,6 @@ class TestQueryableTagColumns:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestAsyncOrchestratorLogs:
     def test_async_pipeline_captures_logs(self):
         db = InMemoryArrowDatabase()
@@ -200,13 +183,12 @@ class TestAsyncOrchestratorLogs:
         pf = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="test_async_logs", pipeline_database=db)
-        with pipeline:
+        job = PipelineJob(name="test_async_logs", store=db)
+        with job:
             pod(source, label="doubler")
 
         obs = LoggingObserver(log_database=db)
-        orch = AsyncPipelineOrchestrator()
-        pipeline.run(orchestrator=orch, observer=obs)
+        job.run(orchestrator=AsyncPipelineOrchestrator(), observer=obs)
 
         logs = obs.get_logs()
 
@@ -220,7 +202,6 @@ class TestAsyncOrchestratorLogs:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestFailFastErrorPolicy:
     def test_fail_fast_aborts_and_logs(self):
         db = InMemoryArrowDatabase()
@@ -232,15 +213,15 @@ class TestFailFastErrorPolicy:
         pf = PythonDataFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="test_failfast", pipeline_database=db)
-        with pipeline:
+        job = PipelineJob(name="test_failfast", store=db)
+        with job:
             pod(source, label="failing")
 
         obs = LoggingObserver(log_database=db)
         orch = SyncPipelineOrchestrator(error_policy="fail_fast")
 
         with pytest.raises(RuntimeError, match="crash"):
-            pipeline.run(orchestrator=orch, observer=obs)
+            job.run(orchestrator=orch, observer=obs)
 
         logs = obs.get_logs()
 
@@ -255,7 +236,6 @@ class TestFailFastErrorPolicy:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestMixedSuccessFailure:
     def test_mixed_results_logged_correctly(self):
         db = InMemoryArrowDatabase()
@@ -274,13 +254,12 @@ class TestMixedSuccessFailure:
         pf = PythonDataFunction(safe_div, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="test_mixed", pipeline_database=db)
-        with pipeline:
+        job = PipelineJob(name="test_mixed", store=db)
+        with job:
             pod(source, label="divider")
 
         obs = LoggingObserver(log_database=db)
-        orch = SyncPipelineOrchestrator()
-        pipeline.run(orchestrator=orch, observer=obs)
+        job.run(observer=obs)
 
         logs = obs.get_logs()
 
@@ -296,7 +275,6 @@ class TestMixedSuccessFailure:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestMultipleFunctionNodesCombinedLogs:
     def test_two_nodes_combined_log_table(self):
         db = InMemoryArrowDatabase()
@@ -313,14 +291,13 @@ class TestMultipleFunctionNodesCombinedLogs:
         pf2 = PythonDataFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
         pod2 = FunctionPod(pf2)
 
-        pipeline = Pipeline(name="test_multi", pipeline_database=db)
-        with pipeline:
+        job = PipelineJob(name="test_multi", store=db)
+        with job:
             s1 = pod1(source, label="doubler")
             pod2(s1, label="tripler")
 
         obs = LoggingObserver(log_database=db)
-        orch = SyncPipelineOrchestrator()
-        pipeline.run(orchestrator=orch, observer=obs)
+        job.run(observer=obs)
 
         logs = obs.get_logs()
         assert logs is not None
@@ -333,7 +310,6 @@ class TestMultipleFunctionNodesCombinedLogs:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestGetLogsNodeSpecific:
     def test_get_logs_returns_rows_for_all_nodes(self):
         db = InMemoryArrowDatabase()
@@ -350,14 +326,13 @@ class TestGetLogsNodeSpecific:
         pf2 = PythonDataFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
         pod2 = FunctionPod(pf2)
 
-        pipeline = Pipeline(name="test_filter", pipeline_database=db)
-        with pipeline:
+        job = PipelineJob(name="test_filter", store=db)
+        with job:
             s1 = pod1(source, label="doubler")
             pod2(s1, label="tripler")
 
         obs = LoggingObserver(log_database=db)
-        orch = SyncPipelineOrchestrator()
-        pipeline.run(orchestrator=orch, observer=obs)
+        job.run(observer=obs)
 
         logs = obs.get_logs()
         assert logs is not None
