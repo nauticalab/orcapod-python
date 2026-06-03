@@ -46,7 +46,8 @@ jobs:
     runs-on: ubuntu-latest
     # Only run on push/manual trigger — not on PRs — to avoid consuming SpiralDB
     # resources on every review cycle.
-    # Requires SPIRAL_WORKLOAD_ID secret to be configured; skips gracefully if absent.
+    # Requires SPIRAL_WORKLOAD_ID secret; fails loudly if absent so missing
+    # credentials don't silently drop coverage.
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     needs: test
     permissions:
@@ -62,34 +63,28 @@ jobs:
       - name: Check for SPIRAL_WORKLOAD_ID
         if: env.SPIRAL_WORKLOAD_ID == ''
         run: |
-          echo "::notice::SPIRAL_WORKLOAD_ID not set — skipping SpiralDB integration tests"
-          exit 0
+          echo "::error::SPIRAL_WORKLOAD_ID secret is not set. SpiralDB integration tests cannot run. Configure the secret or investigate why it is missing."
+          exit 1
 
       - uses: actions/checkout@v4
-        if: env.SPIRAL_WORKLOAD_ID != ''
         with:
           fetch-depth: 0   # required: hatch-vcs needs full tag history
 
       - name: Install uv
-        if: env.SPIRAL_WORKLOAD_ID != ''
         uses: astral-sh/setup-uv@v5
 
       - name: Set up Python 3.11
-        if: env.SPIRAL_WORKLOAD_ID != ''
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install system dependencies
-        if: env.SPIRAL_WORKLOAD_ID != ''
         run: sudo apt-get update && sudo apt-get install -y graphviz libgraphviz-dev
 
       - name: Install dependencies
-        if: env.SPIRAL_WORKLOAD_ID != ''
         run: uv sync --locked --all-extras --dev
 
       - name: Run SpiralDB integration tests
-        if: env.SPIRAL_WORKLOAD_ID != ''
         run: uv run pytest tests/test_databases/test_spiraldb_connector_integration.py -v
 
   license-check:
