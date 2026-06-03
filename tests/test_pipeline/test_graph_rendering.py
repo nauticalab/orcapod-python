@@ -18,7 +18,7 @@ from orcapod.core.operators import Join
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.pipeline import Pipeline
+from orcapod.pipeline.job import PipelineJob
 from orcapod.pipeline.dag import OrcaDAG
 from orcapod.pipeline.graph import (
     GraphRenderer,
@@ -63,23 +63,23 @@ def pipeline_db() -> InMemoryArrowDatabase:
 
 
 @pytest.fixture
-def compiled_pipeline(pipeline_db: InMemoryArrowDatabase) -> Pipeline:
-    """A compiled pipeline with source, operator, and function nodes."""
+def compiled_job(pipeline_db: InMemoryArrowDatabase) -> PipelineJob:
+    """A compiled job with source, operator, and function nodes."""
     src_a, src_b = _make_two_sources()
     pf = PythonDataFunction(_add_values, output_keys="total")
     pod = FunctionPod(data_function=pf)
 
-    pipeline = Pipeline(name="test_render", pipeline_database=pipeline_db)
-    with pipeline:
+    job = PipelineJob(name="test_render", store=pipeline_db)
+    with job:
         joined = Join()(src_a, src_b)
         pod(joined, label="adder")
 
-    return pipeline
+    return job
 
 
 @pytest.fixture
-def node_graph(compiled_pipeline: Pipeline) -> OrcaDAG:
-    return compiled_pipeline.dag
+def node_graph(compiled_job: PipelineJob) -> OrcaDAG:
+    return compiled_job.pipeline.dag
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +87,6 @@ def node_graph(compiled_pipeline: Pipeline) -> OrcaDAG:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestGraphRenderer:
     def test_generate_dot_returns_dot_source(self, node_graph: OrcaDAG) -> None:
         renderer = GraphRenderer()
@@ -164,7 +163,6 @@ class TestGraphRenderer:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestNodeAttributes:
     def test_source_node_gets_source_style(self, node_graph: OrcaDAG) -> None:
         renderer = GraphRenderer()
@@ -213,7 +211,6 @@ class TestNodeAttributes:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestHtmlLabel:
     def test_label_contains_node_type_and_label(
         self, node_graph: OrcaDAG
@@ -245,7 +242,6 @@ class TestHtmlLabel:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestConvenienceFunctions:
     def test_render_graph_function(self, node_graph: OrcaDAG) -> None:
         dot_text = render_graph(node_graph, raw_output=True, show=False)
@@ -296,39 +292,38 @@ class TestStyleRuleSets:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestPipelineShowGraph:
     def test_show_graph_raises_before_compile(self, pipeline_db) -> None:
-        pipeline = Pipeline(name="uncompiled", pipeline_database=pipeline_db)
+        job = PipelineJob(name="uncompiled", store=pipeline_db)
 
-        with pytest.raises(RuntimeError, match="compiled"):
-            pipeline.show_graph(raw_output=True, show=False)
+        with pytest.raises(RuntimeError):
+            job.pipeline.show_graph(raw_output=True, show=False)
 
     def test_show_graph_returns_dot(
-        self, compiled_pipeline: Pipeline
+        self, compiled_job: PipelineJob
     ) -> None:
-        dot_text = compiled_pipeline.show_graph(raw_output=True, show=False)
+        dot_text = compiled_job.pipeline.show_graph(raw_output=True, show=False)
 
         assert isinstance(dot_text, str)
         assert "digraph" in dot_text
 
     def test_show_graph_with_label_lut(
-        self, compiled_pipeline: Pipeline
+        self, compiled_job: PipelineJob
     ) -> None:
-        first_node = next(iter(compiled_pipeline.dag.nodes()))
+        first_node = next(iter(compiled_job.pipeline.dag.nodes()))
         label_lut = {first_node: "MyCustomLabel"}
 
-        dot_text = compiled_pipeline.show_graph(
+        dot_text = compiled_job.pipeline.show_graph(
             label_lut=label_lut, raw_output=True, show=False
         )
 
         assert "MyCustomLabel" in dot_text
 
     def test_show_graph_with_style_rules(
-        self, compiled_pipeline: Pipeline
+        self, compiled_job: PipelineJob
     ) -> None:
         custom = StyleRuleSets.create_custom_rules(source_bg="lime")
-        dot_text = compiled_pipeline.show_graph(
+        dot_text = compiled_job.pipeline.show_graph(
             style_rules=custom, raw_output=True, show=False
         )
 
@@ -345,7 +340,6 @@ class TestPipelineShowGraph:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestRenderGraphFullPath:
     """Exercise the graphviz rendering code paths (not just raw DOT output)."""
 
@@ -416,7 +410,6 @@ class TestRenderGraphFullPath:
         assert isinstance(result, str)
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestConvenienceFunctionsFullPath:
     def test_render_graph_no_show(self, node_graph: OrcaDAG) -> None:
         result = render_graph(node_graph, show=False)
@@ -433,16 +426,15 @@ class TestConvenienceFunctionsFullPath:
         assert "digraph" in result
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestPipelineShowGraphFullPath:
-    def test_show_graph_no_show(self, compiled_pipeline: Pipeline) -> None:
-        result = compiled_pipeline.show_graph(show=False)
+    def test_show_graph_no_show(self, compiled_job: PipelineJob) -> None:
+        result = compiled_job.pipeline.show_graph(show=False)
 
         assert isinstance(result, str)
         assert "digraph" in result
 
     def test_show_graph_with_show_mocked(
-        self, compiled_pipeline: Pipeline
+        self, compiled_job: PipelineJob
     ) -> None:
         with (
             patch("matplotlib.pyplot.figure"),
@@ -451,7 +443,7 @@ class TestPipelineShowGraphFullPath:
             patch("matplotlib.pyplot.tight_layout"),
             patch("matplotlib.pyplot.show"),
         ):
-            result = compiled_pipeline.show_graph(show=True)
+            result = compiled_job.pipeline.show_graph(show=True)
 
         assert isinstance(result, str)
         assert "digraph" in result
