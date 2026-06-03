@@ -262,3 +262,94 @@ def test_malformed_type_field_tier3():
 
     assert dataclasses.is_dataclass(result)
     assert result.x == 1  # type: ignore[attr-defined]
+
+
+from orcapod.semantic_types.universal_converter import UniversalTypeConverter as _UTC
+
+
+def test_utc_simple_round_trip():
+    """Full encode->decode round-trip through UniversalTypeConverter."""
+    @dataclasses.dataclass
+    class _Color:
+        r: int
+        g: int
+        b: int
+
+    converter = _UTC()
+    arrow_type = converter.python_type_to_arrow_type(_Color)
+    assert has_dataclass_type_sentinel(arrow_type)
+
+    obj = _Color(r=255, g=128, b=0)
+    encode = converter.get_python_to_arrow_converter(_Color)
+    encoded = encode(obj)
+    assert encoded["__type"] == f"dataclass:{_Color.__module__}.{_Color.__qualname__}"
+
+    decode = converter.get_arrow_to_python_converter(arrow_type)
+    with patch("orcapod.semantic_types.dataclass_encoding.importlib.import_module") as mock_import:
+        mock_mod = MagicMock()
+        setattr(mock_mod, "_Color", _Color)
+        mock_import.return_value = mock_mod
+        result = decode(encoded)
+
+    assert isinstance(result, _Color)
+    assert result.r == 255 and result.g == 128 and result.b == 0
+
+
+def test_utc_nested_round_trip():
+    """Nested dataclass encodes and decodes recursively."""
+    @dataclasses.dataclass
+    class _Inner:
+        y: float
+
+    @dataclasses.dataclass
+    class _Outer:
+        x: int
+        inner: _Inner
+
+    converter = _UTC()
+    arrow_type = converter.python_type_to_arrow_type(_Outer)
+
+    # Nested struct: inner field should itself be a __type-bearing struct
+    inner_arrow = arrow_type.field("inner").type
+    assert has_dataclass_type_sentinel(inner_arrow)
+
+    obj = _Outer(x=1, inner=_Inner(y=3.14))
+    encode = converter.get_python_to_arrow_converter(_Outer)
+    encoded = encode(obj)
+
+    assert encoded["inner"]["__type"] == f"dataclass:{_Inner.__module__}.{_Inner.__qualname__}"
+    assert encoded["inner"]["y"] == 3.14
+
+    decode = converter.get_arrow_to_python_converter(arrow_type)
+
+    inner_fqcn = f"{_Inner.__module__}.{_Inner.__qualname__}"
+    outer_fqcn = f"{_Outer.__module__}.{_Outer.__qualname__}"
+    inner_attr = inner_fqcn.rpartition(".")[2]
+    outer_attr = outer_fqcn.rpartition(".")[2]
+
+    with patch("orcapod.semantic_types.dataclass_encoding.importlib.import_module") as mock_import:
+        def fake_import(module_path):
+            mod = MagicMock()
+            setattr(mod, inner_attr, _Inner)
+            setattr(mod, outer_attr, _Outer)
+            return mod
+        mock_import.side_effect = fake_import
+        result = decode(encoded)
+
+    assert isinstance(result, _Outer)
+    assert result.x == 1
+    assert isinstance(result.inner, _Inner)
+    assert result.inner.y == 3.14
+
+
+def test_utc_clear_cache_clears_dataclass_cache():
+    converter = _UTC()
+
+    @dataclasses.dataclass
+    class _Temp:
+        n: int
+
+    fqcn = f"{_Temp.__module__}.{_Temp.__qualname__}"
+    converter._dataclass_lookup_cache[fqcn] = _Temp
+    converter.clear_cache()
+    assert fqcn not in converter._dataclass_lookup_cache

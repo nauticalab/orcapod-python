@@ -31,6 +31,15 @@ if TYPE_CHECKING:
 else:
     pa = LazyModule("pyarrow")
 
+import dataclasses
+
+from orcapod.semantic_types.dataclass_encoding import (
+    DATACLASS_TYPE_FIELD,
+    dataclass_to_arrow_struct_type,
+    dataclass_to_struct_dict,
+    has_dataclass_type_sentinel,
+    struct_dict_to_dataclass,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +157,7 @@ class UniversalTypeConverter:
         # Cache for type mappings
         self._python_to_arrow_types: dict[DataType, pa.DataType] = {}
         self._arrow_to_python_types: dict[pa.DataType, DataType] = {}
+        self._dataclass_lookup_cache: dict[str, type] = {}
 
     def python_type_to_arrow_type(self, python_type: DataType) -> pa.DataType:
         """
@@ -395,6 +405,10 @@ class UniversalTypeConverter:
         if python_type in self._typeddict_to_struct_signature:
             return self._typeddict_to_struct_signature[python_type]
 
+        # Dataclass types → struct with __type sentinel
+        if dataclasses.is_dataclass(python_type) and isinstance(python_type, type):
+            return dataclass_to_arrow_struct_type(python_type, self)
+
         # Check generic types
         origin = get_origin(python_type)
         args = get_args(python_type)
@@ -502,6 +516,10 @@ class UniversalTypeConverter:
                 )
                 if python_type:
                     return python_type
+
+            # Dataclass structs: actual type is resolved per-row at decode time via __type value
+            if has_dataclass_type_sentinel(arrow_type):
+                return Any
 
             # Check if it is heterogeneous tuple
             if len(arrow_type) > 0 and all(
@@ -683,6 +701,16 @@ class UniversalTypeConverter:
             if converter:
                 return converter.python_to_struct_dict
 
+        # Dataclass instances → struct dict with __type sentinel
+        if dataclasses.is_dataclass(python_type) and isinstance(python_type, type):
+            from orcapod.semantic_types.dataclass_encoding import _get_type_hints_safe
+            hints = _get_type_hints_safe(python_type)
+            field_converters = {
+                f.name: self.get_python_to_arrow_converter(hints[f.name])
+                for f in dataclasses.fields(python_type)
+            }
+            return lambda obj: dataclass_to_struct_dict(obj, field_converters)
+
         # Create conversion function based on type
 
         origin = get_origin(python_type)
@@ -826,6 +854,16 @@ class UniversalTypeConverter:
 
         # Handle struct types - heterogeneous tuple or dynamic TypedDict
         elif pa.types.is_struct(arrow_type):
+            # Dataclass structs: per-row dispatch via __type value
+            if has_dataclass_type_sentinel(arrow_type):
+                field_converters = {
+                    field.name: self.get_arrow_to_python_converter(field.type)
+                    for field in arrow_type
+                    if field.name != DATACLASS_TYPE_FIELD
+                }
+                cache = self._dataclass_lookup_cache
+                return lambda d: struct_dict_to_dataclass(d, field_converters, cache)
+
             # if python_type
             if python_type is tuple or get_origin(python_type) is tuple:
                 n = len(get_args(python_type))
@@ -878,6 +916,7 @@ class UniversalTypeConverter:
         self._arrow_to_python_converters.clear()
         self._python_to_arrow_types.clear()
         self._arrow_to_python_types.clear()
+        self._dataclass_lookup_cache.clear()
 
     def get_cache_stats(self) -> dict[str, int]:
         """Get statistics about cache usage (useful for debugging/optimization)."""
