@@ -354,3 +354,89 @@ def test_utc_clear_cache_clears_dataclass_cache():
     converter._dataclass_lookup_cache[fqcn] = _Temp
     converter.clear_cache()
     assert fqcn not in converter._dataclass_lookup_cache
+
+
+import tempfile
+import os
+
+
+def test_polymorphic_decode():
+    """Two rows with different __type values each decode to their own class."""
+    @dataclasses.dataclass
+    class _Cat:
+        name: str
+
+    @dataclasses.dataclass
+    class _Dog:
+        name: str
+
+    cat_fqcn = f"{_Cat.__module__}.{_Cat.__qualname__}"
+    dog_fqcn = f"{_Dog.__module__}.{_Dog.__qualname__}"
+
+    # Both have the same Arrow schema (name: large_string) plus __type
+    arrow_type = pa.struct([
+        pa.field("__type", pa.large_string()),
+        pa.field("name", pa.large_string()),
+    ])
+    converter = _UTC()
+    decode = converter.get_arrow_to_python_converter(arrow_type)
+
+    cat_attr = cat_fqcn.rpartition(".")[2]
+    dog_attr = dog_fqcn.rpartition(".")[2]
+
+    with patch("orcapod.semantic_types.dataclass_encoding.importlib.import_module") as mock_import:
+        def fake_import(module_path):
+            mod = MagicMock()
+            setattr(mod, cat_attr, _Cat)
+            setattr(mod, dog_attr, _Dog)
+            return mod
+        mock_import.side_effect = fake_import
+
+        row0 = decode({"__type": f"dataclass:{cat_fqcn}", "name": "Whiskers"})
+        row1 = decode({"__type": f"dataclass:{dog_fqcn}", "name": "Rex"})
+
+    assert isinstance(row0, _Cat) and row0.name == "Whiskers"
+    assert isinstance(row1, _Dog) and row1.name == "Rex"
+
+
+@pytest.mark.integration
+def test_parquet_round_trip():
+    """Full round-trip: python_dicts_to_arrow_table -> Parquet -> arrow_table_to_python_dicts."""
+    import pyarrow.parquet as pq
+
+    @dataclasses.dataclass
+    class _Record:
+        score: float
+        label: str
+
+    converter = _UTC()
+
+    python_dicts = [
+        {"rec": _Record(score=0.9, label="good")},
+        {"rec": _Record(score=0.1, label="bad")},
+    ]
+    from orcapod.types import Schema
+    python_schema = Schema({"rec": _Record})
+    table = converter.python_dicts_to_arrow_table(python_dicts, python_schema=python_schema)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "test.parquet")
+        pq.write_table(table, path)
+        loaded = pq.read_table(path)
+
+    rec_fqcn = f"{_Record.__module__}.{_Record.__qualname__}"
+    rec_attr = rec_fqcn.rpartition(".")[2]
+
+    with patch("orcapod.semantic_types.dataclass_encoding.importlib.import_module") as mock_import:
+        mod = MagicMock()
+        setattr(mod, rec_attr, _Record)
+        mock_import.return_value = mod
+        results = converter.arrow_table_to_python_dicts(loaded)
+
+    assert len(results) == 2
+    assert isinstance(results[0]["rec"], _Record)
+    assert results[0]["rec"].score == 0.9
+    assert results[0]["rec"].label == "good"
+    assert isinstance(results[1]["rec"], _Record)
+    assert results[1]["rec"].score == 0.1
+    assert results[1]["rec"].label == "bad"

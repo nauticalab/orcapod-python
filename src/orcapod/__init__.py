@@ -5,6 +5,7 @@ from .core.function_pod import (
 )
 from .core.nodes.source_node import SourceNode
 from .pipeline import Pipeline, PipelineJob
+from .semantic_types.dataclass_encoding import register_dataclass
 
 # Subpackage re-exports for clean public API
 from . import databases  # noqa: F401
@@ -21,6 +22,7 @@ __all__ = [
     "Pipeline",
     "PipelineJob",
     "SourceNode",
+    "register_dataclass",
     "databases",
     "nodes",
     "operators",
