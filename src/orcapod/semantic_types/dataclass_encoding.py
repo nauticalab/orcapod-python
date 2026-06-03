@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import dataclasses
 import importlib
-import inspect
 import logging
 import re
 import sys
@@ -35,6 +34,11 @@ DATACLASS_TYPE_PREFIX = "dataclass:"
 # class definitions (e.g. "mod.func.<locals>.MyClass").  Each dot-separated
 # segment may be a normal identifier or the literal token "<locals>".
 _FQCN_RE = re.compile(r"^[A-Za-z_]\w*(\.[A-Za-z_]\w*|\.<locals>)+$")
+
+# Matches all identifier tokens within a stringified annotation.
+# Used by _get_type_hints_safe to handle compound forms like
+# "Optional[_Inner]", "list[_Inner]", or "_Inner | None".
+_IDENT_RE = re.compile(r"[A-Za-z_]\w*")
 
 # Process-global registry for tier-2 reconstruction.
 # Populated via register_dataclass(); persists for the process lifetime.
@@ -90,9 +94,19 @@ def _get_type_hints_safe(cls: type) -> dict[str, Any]:
 
     Calls ``typing.get_type_hints(cls)`` first. If that raises ``NameError``
     (which happens for classes with annotations that reference locally-scoped
-    types, e.g. when ``from __future__ import annotations`` is in effect), falls
-    back to searching the call-stack frames for the named types, then to module
-    globals, and finally returns raw string annotations as a last resort.
+    types when ``from __future__ import annotations`` is in effect), falls
+    back to searching call-stack frames for the identifier tokens referenced
+    in the annotations, then to module globals, and finally returns raw string
+    annotations as a last resort.
+
+    The token scan (via ``_IDENT_RE``) extracts *all* identifiers from each
+    string annotation, so compound forms like ``"Optional[_Inner]"``,
+    ``"list[_Inner]"``, and ``"_Inner | None"`` are handled correctly — only
+    matching the whole annotation string would miss them.
+
+    Frame traversal uses ``sys._getframe()``/``f_back`` rather than
+    ``inspect.stack()`` to avoid the overhead and strong-reference pitfalls
+    introduced by ``inspect.stack()``'s ``FrameInfo`` wrapper objects.
 
     Args:
         cls: A Python dataclass type.
@@ -106,28 +120,36 @@ def _get_type_hints_safe(cls: type) -> dict[str, Any]:
     except NameError:
         pass
 
-    # Collect candidate localns from multiple sources.
     localns: dict[str, Any] = {}
 
-    # 1. Module globals for the class's module.
+    # 1. Module globals for the class's module (cheap, no frame traversal needed).
     module = sys.modules.get(cls.__module__)
     if module is not None:
         for name, obj in vars(module).items():
             if isinstance(obj, type):
                 localns[name] = obj
 
-    # 2. Walk the call stack to find local frames that define the referenced names.
+    # 2. Collect *all* identifier tokens from string annotations so that compound
+    #    forms like "Optional[_Inner]" or "_Inner | None" are handled correctly.
     raw_annotations = cls.__annotations__
-    unresolved = {v for v in raw_annotations.values() if isinstance(v, str)}
-    if unresolved:
-        for frame_info in inspect.stack():
-            frame_locals = frame_info.frame.f_locals
-            for name in list(unresolved):
-                if name in frame_locals and isinstance(frame_locals[name], type):
-                    localns[name] = frame_locals[name]
-            unresolved -= set(localns)
-            if not unresolved:
+    token_names: set[str] = set()
+    for v in raw_annotations.values():
+        if isinstance(v, str):
+            token_names.update(_IDENT_RE.findall(v))
+
+    # 3. Walk the live frame chain via f_back — no FrameInfo objects, no extra
+    #    strong references to frames.
+    if token_names:
+        frame = sys._getframe(0)
+        while frame is not None:
+            remaining = token_names - set(localns)
+            if not remaining:
                 break
+            for name in remaining:
+                obj = frame.f_locals.get(name)
+                if obj is not None and isinstance(obj, type):
+                    localns[name] = obj
+            frame = frame.f_back
 
     try:
         return typing.get_type_hints(cls, localns=localns)
@@ -261,9 +283,9 @@ def struct_dict_to_dataclass(
             try:
                 module = importlib.import_module(module_path)
                 resolved = getattr(module, class_attr)
-                if not dataclasses.is_dataclass(resolved):
+                if not dataclasses.is_dataclass(resolved) or not isinstance(resolved, type):
                     raise AttributeError(
-                        f"{class_attr!r} in {module_path!r} is not a dataclass"
+                        f"{class_attr!r} in {module_path!r} is not a dataclass type"
                     )
                 cls = resolved
                 lookup_cache[fqcn] = cls
