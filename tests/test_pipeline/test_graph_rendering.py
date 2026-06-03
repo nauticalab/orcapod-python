@@ -13,7 +13,7 @@ import pyarrow as pa
 import pytest
 
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes import FunctionNode, GraphNode, OperatorNode, SourceNode
+from orcapod.core.nodes import FunctionNode, OperatorNode, SourceNode
 from orcapod.core.operators import Join
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
@@ -328,11 +328,6 @@ class TestPipelineShowGraph:
         )
 
         assert "lime" in dot_text
-
-
-# ---------------------------------------------------------------------------
-# Tests: style merging
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
