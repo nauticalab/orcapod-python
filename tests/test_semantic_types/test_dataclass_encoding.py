@@ -48,3 +48,27 @@ def test_register_as_decorator():
 def test_register_non_dataclass_raises():
     with pytest.raises(TypeError, match="not a dataclass"):
         register_dataclass(int)
+
+
+import pyarrow as pa
+from orcapod.semantic_types.dataclass_encoding import has_dataclass_type_sentinel
+
+
+def test_sentinel_large_string():
+    t = pa.struct([pa.field("__type", pa.large_string()), pa.field("a", pa.int64())])
+    assert has_dataclass_type_sentinel(t) is True
+
+
+def test_sentinel_string_compat():
+    # older Arrow versions wrote pa.string() instead of pa.large_string()
+    t = pa.struct([pa.field("__type", pa.string()), pa.field("a", pa.int64())])
+    assert has_dataclass_type_sentinel(t) is True
+
+
+def test_sentinel_missing_field():
+    t = pa.struct([pa.field("a", pa.int64()), pa.field("b", pa.large_string())])
+    assert has_dataclass_type_sentinel(t) is False
+
+
+def test_sentinel_non_struct():
+    assert has_dataclass_type_sentinel(pa.int64()) is False
