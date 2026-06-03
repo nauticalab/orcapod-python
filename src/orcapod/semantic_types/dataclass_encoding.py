@@ -29,8 +29,10 @@ DATACLASS_TYPE_FIELD = "__type"
 DATACLASS_TYPE_PREFIX = "dataclass:"
 
 # Validates fully-qualified class names like "my_module.sub.MyClass".
-# Used by struct_dict_to_dataclass (tier-1 import path).
-_FQCN_RE = re.compile(r"^[A-Za-z_]\w*(\.[A-Za-z_]\w*)+$")
+# Also accepts qualnames containing "<locals>" segments produced by local
+# class definitions (e.g. "mod.func.<locals>.MyClass").  Each dot-separated
+# segment may be a normal identifier or the literal token "<locals>".
+_FQCN_RE = re.compile(r"^[A-Za-z_]\w*(\.[A-Za-z_]\w*|\.<locals>)+$")
 
 # Process-global registry for tier-2 reconstruction.
 # Populated via register_dataclass(); persists for the process lifetime.
@@ -81,6 +83,63 @@ def has_dataclass_type_sentinel(arrow_type: pa.DataType) -> bool:
     return False
 
 
+def _get_type_hints_safe(cls: type) -> dict[str, Any]:
+    """Return type hints for a dataclass, tolerating unresolvable local annotations.
+
+    Calls ``typing.get_type_hints(cls)`` first. If that raises ``NameError``
+    (which happens for classes with annotations that reference locally-scoped
+    types, e.g. when ``from __future__ import annotations`` is in effect), falls
+    back to searching the call-stack frames for the named types, then to module
+    globals, and finally returns raw string annotations as a last resort.
+
+    Args:
+        cls: A Python dataclass type.
+
+    Returns:
+        A dict mapping field names to resolved type hints. Values may be string
+        annotations for names that could not be resolved.
+    """
+    import sys
+
+    try:
+        return typing.get_type_hints(cls)
+    except NameError:
+        pass
+
+    # Collect candidate localns from multiple sources.
+    localns: dict[str, Any] = {}
+
+    # 1. Module globals for the class's module.
+    module = sys.modules.get(cls.__module__)
+    if module is not None:
+        for name, obj in vars(module).items():
+            if isinstance(obj, type):
+                localns[name] = obj
+
+    # 2. Walk the call stack to find local frames that define the referenced names.
+    import inspect
+
+    raw_annotations = cls.__annotations__
+    unresolved = {v for v in raw_annotations.values() if isinstance(v, str)}
+    if unresolved:
+        for frame_info in inspect.stack():
+            frame_locals = frame_info.frame.f_locals
+            for name in list(unresolved):
+                if name in frame_locals and isinstance(frame_locals[name], type):
+                    localns[name] = frame_locals[name]
+            unresolved -= set(localns)
+            if not unresolved:
+                break
+
+    try:
+        return typing.get_type_hints(cls, localns=localns)
+    except NameError:
+        pass
+
+    # Last resort: return raw annotations (may contain strings for local types).
+    return dict(raw_annotations)
+
+
 def dataclass_to_arrow_struct_type(
     cls: type,
     converter: Any,
@@ -107,7 +166,7 @@ def dataclass_to_arrow_struct_type(
     if not dataclasses.is_dataclass(cls) or not isinstance(cls, type):
         raise TypeError(f"{cls!r} is not a dataclass type")
 
-    hints = typing.get_type_hints(cls)
+    hints = _get_type_hints_safe(cls)
     fields: list[pa.Field] = [pa.field(DATACLASS_TYPE_FIELD, pa.large_string())]
     for f in dataclasses.fields(cls):
         arrow_type = converter.python_type_to_arrow_type(hints[f.name])
