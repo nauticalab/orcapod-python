@@ -24,7 +24,6 @@ import pytest
 
 from orcapod.channels import Channel
 from orcapod.core.function_pod import FunctionPod
-from orcapod.core.nodes import FunctionNode, OperatorNode, SourceNode
 from orcapod.core.nodes.function_node import FunctionJobNode
 from orcapod.core.nodes.operator_node import OperatorJobNode
 from orcapod.core.nodes.source_node import SourceJobNode
@@ -34,7 +33,8 @@ from orcapod.core.operators.mappers import MapData
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.pipeline import AsyncPipelineOrchestrator, Pipeline
+from orcapod.pipeline import AsyncPipelineOrchestrator
+from orcapod.pipeline.job import PipelineJob
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -166,7 +166,6 @@ class TestFunctionNodeAsyncExecute:
 # ===========================================================================
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestOrchestratorLinearPipeline:
     """Source -> FunctionPod (linear pipeline)."""
 
@@ -175,15 +174,12 @@ class TestOrchestratorLinearPipeline:
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="linear", pipeline_database=InMemoryArrowDatabase())
-        with pipeline:
+        job = PipelineJob(name="linear", store=InMemoryArrowDatabase())
+        with job:
             pod(src, label="doubler")
+        job.run(orchestrator=AsyncPipelineOrchestrator())
 
-        pipeline.compile()
-        AsyncPipelineOrchestrator().run(pipeline.dag)
-        pipeline.flush()
-
-        records = pipeline.doubler.get_all_records()
+        records = job.nodes["doubler"].get_all_records()
         assert records is not None
         assert records.num_rows == 3
 
@@ -197,24 +193,19 @@ class TestOrchestratorLinearPipeline:
         pod = FunctionPod(pf)
 
         # Sync
-        sync_pipeline = Pipeline(name="sync", pipeline_database=InMemoryArrowDatabase())
-        with sync_pipeline:
+        sync_job = PipelineJob(name="sync", store=InMemoryArrowDatabase())
+        with sync_job:
             pod(src, label="doubler")
-        sync_pipeline.run()
-        sync_records = sync_pipeline.doubler.get_all_records()
+        sync_job.run()
+        sync_records = sync_job.nodes["doubler"].get_all_records()
         sync_values = sorted(sync_records.column("result").to_pylist())
 
         # Async
-        async_pipeline = Pipeline(
-            name="async", pipeline_database=InMemoryArrowDatabase()
-        )
-        with async_pipeline:
+        async_job = PipelineJob(name="async", store=InMemoryArrowDatabase())
+        with async_job:
             pod(src, label="doubler")
-        pipeline = async_pipeline
-        pipeline.compile()
-        AsyncPipelineOrchestrator().run(pipeline.dag)
-        pipeline.flush()
-        async_records = pipeline.doubler.get_all_records()
+        async_job.run(orchestrator=AsyncPipelineOrchestrator())
+        async_records = async_job.nodes["doubler"].get_all_records()
         async_values = sorted(async_records.column("result").to_pylist())
 
         assert sync_values == async_values
@@ -225,7 +216,6 @@ class TestOrchestratorLinearPipeline:
 # ===========================================================================
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestOrchestratorOperatorPipeline:
     """Source -> Operator -> FunctionPod."""
 
@@ -239,16 +229,13 @@ class TestOrchestratorOperatorPipeline:
         pf = PythonDataFunction(double_val, output_keys="result")
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="op_pipe", pipeline_database=InMemoryArrowDatabase())
-        with pipeline:
+        job = PipelineJob(name="op_pipe", store=InMemoryArrowDatabase())
+        with job:
             mapped = op(src, label="mapper")
             pod(mapped, label="doubler")
+        job.run(orchestrator=AsyncPipelineOrchestrator())
 
-        pipeline.compile()
-        AsyncPipelineOrchestrator().run(pipeline.dag)
-        pipeline.flush()
-
-        records = pipeline.doubler.get_all_records()
+        records = job.nodes["doubler"].get_all_records()
         assert records is not None
         assert records.num_rows == 3
         values = sorted(records.column("result").to_pylist())
@@ -260,7 +247,6 @@ class TestOrchestratorOperatorPipeline:
 # ===========================================================================
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestOrchestratorDiamondDag:
     """Two sources -> Join -> FunctionPod."""
 
@@ -269,16 +255,13 @@ class TestOrchestratorDiamondDag:
         pf = PythonDataFunction(add_values, output_keys="total")
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="diamond", pipeline_database=InMemoryArrowDatabase())
-        with pipeline:
+        job = PipelineJob(name="diamond", store=InMemoryArrowDatabase())
+        with job:
             joined = Join()(src_a, src_b, label="join")
             pod(joined, label="adder")
+        job.run(orchestrator=AsyncPipelineOrchestrator())
 
-        pipeline.compile()
-        AsyncPipelineOrchestrator().run(pipeline.dag)
-        pipeline.flush()
-
-        records = pipeline.adder.get_all_records()
+        records = job.nodes["adder"].get_all_records()
         assert records is not None
         assert records.num_rows == 2
         values = sorted(records.column("total").to_pylist())
@@ -291,29 +274,23 @@ class TestOrchestratorDiamondDag:
         pod = FunctionPod(pf)
 
         # Sync
-        sync_pipeline = Pipeline(
-            name="sync_diamond", pipeline_database=InMemoryArrowDatabase()
-        )
-        with sync_pipeline:
+        sync_job = PipelineJob(name="sync_diamond", store=InMemoryArrowDatabase())
+        with sync_job:
             joined = Join()(src_a, src_b, label="join")
             pod(joined, label="adder")
-        sync_pipeline.run()
+        sync_job.run()
         sync_values = sorted(
-            sync_pipeline.adder.get_all_records().column("total").to_pylist()
+            sync_job.nodes["adder"].get_all_records().column("total").to_pylist()
         )
 
         # Async
-        async_pipeline = Pipeline(
-            name="async_diamond", pipeline_database=InMemoryArrowDatabase()
-        )
-        with async_pipeline:
+        async_job = PipelineJob(name="async_diamond", store=InMemoryArrowDatabase())
+        with async_job:
             joined = Join()(src_a, src_b, label="join")
             pod(joined, label="adder")
-        async_pipeline.compile()
-        AsyncPipelineOrchestrator().run(async_pipeline.dag)
-        async_pipeline.flush()
+        async_job.run(orchestrator=AsyncPipelineOrchestrator())
         async_values = sorted(
-            async_pipeline.adder.get_all_records().column("total").to_pylist()
+            async_job.nodes["adder"].get_all_records().column("total").to_pylist()
         )
 
         assert sync_values == async_values
@@ -324,27 +301,19 @@ class TestOrchestratorDiamondDag:
 # ===========================================================================
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestOrchestratorRunAsync:
-    @pytest.mark.asyncio
-    async def test_run_async_from_event_loop(self):
-        """run_async should work when called from inside an event loop."""
+    def test_run_async_from_event_loop(self):
+        """PipelineJob.run() drives the event loop synchronously."""
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(
-            name="async_loop", pipeline_database=InMemoryArrowDatabase()
-        )
-        with pipeline:
+        job = PipelineJob(name="async_loop", store=InMemoryArrowDatabase())
+        with job:
             pod(src, label="doubler")
+        job.run(orchestrator=AsyncPipelineOrchestrator())
 
-        pipeline.compile()
-        orchestrator = AsyncPipelineOrchestrator()
-        await orchestrator.run_async(pipeline.dag)
-        pipeline.flush()
-
-        records = pipeline.doubler.get_all_records()
+        records = job.nodes["doubler"].get_all_records()
         assert records is not None
         values = sorted(records.column("result").to_pylist())
         assert values == [2, 4]
@@ -355,23 +324,19 @@ class TestOrchestratorRunAsync:
 # ===========================================================================
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestBufferSizeConfiguration:
     def test_custom_buffer_size(self):
-        """Pipeline should work with custom buffer sizes."""
+        """PipelineJob should work with custom buffer sizes."""
         src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="bufsize", pipeline_database=InMemoryArrowDatabase())
-        with pipeline:
+        job = PipelineJob(name="bufsize", store=InMemoryArrowDatabase())
+        with job:
             pod(src, label="doubler")
+        job.run(orchestrator=AsyncPipelineOrchestrator(buffer_size=4))
 
-        pipeline.compile()
-        AsyncPipelineOrchestrator(buffer_size=4).run(pipeline.dag)
-        pipeline.flush()
-
-        records = pipeline.doubler.get_all_records()
+        records = job.nodes["doubler"].get_all_records()
         assert records is not None
         assert records.num_rows == 2
 
@@ -385,7 +350,6 @@ def triple_value(value: int) -> int:
     return value * 3
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestAsyncOrchestratorFanOut:
     """One source fans out to multiple downstream nodes."""
 
@@ -397,25 +361,22 @@ class TestAsyncOrchestratorFanOut:
         pf2 = PythonDataFunction(triple_value, output_keys="result")
         pod2 = FunctionPod(pf2)
 
-        pipeline = Pipeline(name="fanout", pipeline_database=InMemoryArrowDatabase())
-        with pipeline:
+        job = PipelineJob(name="fanout", store=InMemoryArrowDatabase())
+        with job:
             pod1(src, label="doubler")
             pod2(src, label="tripler")
+        job.run(orchestrator=AsyncPipelineOrchestrator())
 
-        pipeline.compile()
-        orch = AsyncPipelineOrchestrator()
-        result = orch.run(pipeline.dag, materialize_results=True)
-        pipeline.flush()
+        doubler_records = job.nodes["doubler"].get_all_records()
+        tripler_records = job.nodes["tripler"].get_all_records()
+        assert doubler_records is not None
+        assert tripler_records is not None
 
-        fn_outputs = [
-            v for k, v in result.node_outputs.items() if k.node_type == "function"
-        ]
-        assert len(fn_outputs) == 2
-        all_values = sorted(
-            [pkt.as_dict()["result"] for output in fn_outputs for _, pkt in output]
-        )
+        doubler_values = sorted(doubler_records.column("result").to_pylist())
+        tripler_values = sorted(tripler_records.column("result").to_pylist())
         # double_value: [2, 4], triple_value: [3, 6]
-        assert all_values == [2, 3, 4, 6]
+        assert doubler_values == [2, 4]
+        assert tripler_values == [3, 6]
 
 
 # ===========================================================================
@@ -451,7 +412,6 @@ class TestAsyncOrchestratorTerminalNode:
 # ===========================================================================
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestAsyncOrchestratorErrorPropagation:
     """Failed data do not abort the pipeline; they are handled per-data."""
 
@@ -464,15 +424,12 @@ class TestAsyncOrchestratorErrorPropagation:
         pf = PythonDataFunction(failing_fn, output_keys="result")
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="error", pipeline_database=InMemoryArrowDatabase())
-        with pipeline:
+        job = PipelineJob(name="error", store=InMemoryArrowDatabase())
+        with job:
             pod(src, label="failer")
 
-        pipeline.compile()
-        orch = AsyncPipelineOrchestrator()
-
         # Pipeline must complete without raising; failing data is silently dropped.
-        orch.run(pipeline.dag)
+        job.run(orchestrator=AsyncPipelineOrchestrator())
 
     def test_node_failure_calls_on_data_crash(self):
         """When an observer is set, on_data_crash is called for the failing data."""
@@ -485,8 +442,8 @@ class TestAsyncOrchestratorErrorPropagation:
         pf = PythonDataFunction(failing_fn, output_keys="result")
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="error2", pipeline_database=InMemoryArrowDatabase())
-        with pipeline:
+        job = PipelineJob(name="error2", store=InMemoryArrowDatabase())
+        with job:
             pod(src, label="failer")
 
         crashes = []
@@ -495,15 +452,12 @@ class TestAsyncOrchestratorErrorPropagation:
             def on_data_crash(self, node_label, tag, data, error):
                 crashes.append(error)
 
-        pipeline.compile()
-        orch = AsyncPipelineOrchestrator()
-        orch.run(pipeline.dag, observer=CrashRecorder())
+        job.run(orchestrator=AsyncPipelineOrchestrator(), observer=CrashRecorder())
 
         assert len(crashes) == 1
         assert isinstance(crashes[0], (ValueError, RuntimeError))
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestAsyncOrchestratorObserverInjection:
     """Verify observer passed to async orchestrator flows through to nodes."""
 
@@ -513,8 +467,8 @@ class TestAsyncOrchestratorObserverInjection:
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="async_obs", pipeline_database=InMemoryArrowDatabase())
-        with pipeline:
+        job = PipelineJob(name="async_obs", store=InMemoryArrowDatabase())
+        with job:
             pod(src, label="doubler")
 
         events = []
@@ -537,9 +491,7 @@ class TestAsyncOrchestratorObserverInjection:
             def contextualize(self, *identity_path):
                 return self
 
-        pipeline.compile()
-        orch = AsyncPipelineOrchestrator()
-        orch.run(pipeline.dag, observer=RecordingObserver())
+        job.run(orchestrator=AsyncPipelineOrchestrator(), observer=RecordingObserver())
 
         # Source fires node_start/node_end (label contains "ArrowTableSource" or similar)
         source_starts = [e for e in events if e[0] == "node_start" and e[1] != "doubler"]
@@ -567,10 +519,8 @@ class TestAsyncOrchestratorObserverInjection:
         pf = PythonDataFunction(double_val, output_keys="result")
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(
-            name="async_obs_op", pipeline_database=InMemoryArrowDatabase()
-        )
-        with pipeline:
+        job = PipelineJob(name="async_obs_op", store=InMemoryArrowDatabase())
+        with job:
             mapped = op(src, label="mapper")
             pod(mapped, label="doubler")
 
@@ -594,9 +544,7 @@ class TestAsyncOrchestratorObserverInjection:
             def contextualize(self, *identity_path):
                 return self
 
-        pipeline.compile()
-        orch = AsyncPipelineOrchestrator()
-        orch.run(pipeline.dag, observer=RecordingObserver())
+        job.run(orchestrator=AsyncPipelineOrchestrator(), observer=RecordingObserver())
 
         # All labeled nodes fire start/end
         assert ("node_start", "mapper") in events
@@ -614,20 +562,14 @@ class TestAsyncOrchestratorObserverInjection:
         pf = PythonDataFunction(double_value, output_keys="result")
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(
-            name="async_no_obs", pipeline_database=InMemoryArrowDatabase()
-        )
-        with pipeline:
+        job = PipelineJob(name="async_no_obs", store=InMemoryArrowDatabase())
+        with job:
             pod(src, label="doubler")
+        job.run(orchestrator=AsyncPipelineOrchestrator())  # no observer
 
-        pipeline.compile()
-        orch = AsyncPipelineOrchestrator()  # no observer
-        result = orch.run(pipeline.dag, materialize_results=True)
-        fn_outputs = [
-            v for k, v in result.node_outputs.items() if k.node_type == "function"
-        ]
-        assert len(fn_outputs) == 1
-        assert len(fn_outputs[0]) == 1
+        records = job.nodes["doubler"].get_all_records()
+        assert records is not None
+        assert records.num_rows == 1
 
 
 def test_async_orchestrator_accepts_observer_in_run():
