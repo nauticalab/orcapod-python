@@ -535,7 +535,8 @@ class TestPipelineJobRun:
 
         completed = job.run(orchestrator=SyncPipelineOrchestrator())
         records = completed.nodes["doubler"].get_all_records()
-        assert len(records) == 2
+        assert records is not None
+        assert records.num_rows == 2
 
     def test_run_accepts_async_orchestrator(self):
         from orcapod.pipeline import AsyncPipelineOrchestrator
@@ -554,7 +555,8 @@ class TestPipelineJobRun:
 
         completed = job.run(orchestrator=AsyncPipelineOrchestrator())
         records = completed.nodes["doubler"].get_all_records()
-        assert len(records) == 2
+        assert records is not None
+        assert records.num_rows == 2
 
 
 class TestPipelineJobEndToEnd:

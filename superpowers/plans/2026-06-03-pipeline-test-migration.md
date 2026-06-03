@@ -391,7 +391,7 @@ This file has 8 skipped classes. The migration pattern for all of them is:
 - Replace `pipeline.label.get_all_records()` → `job.nodes["label"].get_all_records()`
 - Replace `result.node_outputs` access → `job.nodes["label"].get_all_records()`
 
-The `TestMaterializeResults` class tests `materialize_results=False` on the orchestrator. Since `PipelineJob.run()` does not expose this parameter (results always written to DB), delete this class entirely and add a comment explaining why.
+The `TestMaterializeResults` class tests `materialize_results=False` on the orchestrator. `PipelineJob.run()` exposes this parameter and passes it through to the orchestrator, so this class can be fully migrated. The migration pattern is the same as the other classes, plus the assertion must check `job.nodes["label"].get_all_records().num_rows` to confirm DB records are written regardless of the `materialize_results` setting.
 
 - [ ] **Step 1: Read the skipped test classes**
 
@@ -503,15 +503,25 @@ The `TestMaterializeResults` class tests `materialize_results=False` on the orch
   async_records = job_async.nodes["node"].get_all_records()
   ```
 
-- [ ] **Step 5: Delete `TestMaterializeResults` entirely**
+- [ ] **Step 5: Migrate `TestMaterializeResults`**
 
-  Remove the entire `TestMaterializeResults` class (including the `@pytest.mark.skip` decorator). Add a comment at its former location:
+  Remove the `@pytest.mark.skip` decorator and migrate the class to use `PipelineJob`. Each test should call `job.run(materialize_results=False)` (or `True`) and verify that DB records are written regardless:
 
   ```python
-  # TestMaterializeResults deleted: PipelineJob.run() always materialises
-  # results to the store database. The materialize_results=False path is
-  # a SyncPipelineOrchestrator / AsyncPipelineOrchestrator implementation
-  # detail tested directly in test_orchestrator.py orchestrator unit tests.
+  class TestMaterializeResults:
+      def test_sync_materialize_false_db_records_persisted(self):
+          job = self._make_job()
+          job.run(materialize_results=False)
+          records = job.nodes["doubler"].get_all_records()
+          assert records is not None
+          assert records.num_rows == 3
+
+      def test_async_materialize_false_db_records_persisted(self):
+          job = self._make_job()
+          job.run(orchestrator=AsyncPipelineOrchestrator(), materialize_results=False)
+          records = job.nodes["doubler"].get_all_records()
+          assert records is not None
+          assert records.num_rows == 3
   ```
 
 - [ ] **Step 6: Run the migrated tests**

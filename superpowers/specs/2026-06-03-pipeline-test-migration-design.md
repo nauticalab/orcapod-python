@@ -93,10 +93,16 @@ def run(
     self,
     orchestrator: "PipelineOrchestratorProtocol | None" = None,
     observer: "ExecutionObserverProtocol | None" = None,
+    materialize_results: bool = True,
 ) -> "PipelineJob":
     ...
     effective_orchestrator = orchestrator or SyncPipelineOrchestrator()
-    effective_orchestrator.run(exec_dag, observer=effective_observer, ...)
+    effective_orchestrator.run(
+        exec_dag,
+        observer=effective_observer,
+        materialize_results=materialize_results,
+        ...
+    )
 ```
 
 Default behavior is unchanged — callers that pass no arguments continue to work.

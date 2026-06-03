@@ -662,12 +662,15 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
             orchestrator: Orchestrator to use for execution. Defaults to
                 ``SyncPipelineOrchestrator`` when ``None``.
             observer: Optional execution observer.
-            materialize_results: When ``True`` (the default) node outputs are
-                kept in memory and accessible after the run. When ``False``
-                the in-memory buffers are released immediately after each node
-                completes, reducing peak memory at the cost of not being able
-                to inspect in-process results. Database records are written
-                regardless of this setting.
+            materialize_results: Controls whether the orchestrator retains
+                node outputs in its transient in-process buffer during
+                execution. When ``True`` (the default) the buffer is kept for
+                the duration of the run. When ``False`` each node's buffer is
+                released as soon as the node completes, reducing peak memory.
+                This setting does not affect database persistence or post-run
+                result access — DB records are written regardless, and
+                ``job.nodes["label"].get_all_records()`` works the same in
+                either case.
 
         Returns:
             ``self`` — the same ``PipelineJob`` instance, with
