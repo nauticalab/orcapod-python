@@ -20,8 +20,8 @@ restored by PR #99.
 
 Terminology
 -----------
-* "sync orchestrator"  = ``SyncPipelineOrchestrator`` / ``ExecutorType.SYNCHRONOUS``
-* "async orchestrator" = ``AsyncPipelineOrchestrator`` / ``ExecutorType.ASYNC_CHANNELS``
+* "sync orchestrator"  = ``SyncPipelineOrchestrator`` / ``OrchestratorType.SYNCHRONOUS``
+* "async orchestrator" = ``AsyncPipelineOrchestrator`` / ``OrchestratorType.ASYNC_CHANNELS``
 * "sync function"      = regular ``def`` (blocking, runs in executor thread
                          when called from async context)
 * "async function"     = ``async def`` (native coroutine, awaited directly
@@ -43,7 +43,7 @@ from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import AsyncPipelineOrchestrator, Pipeline
 from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
-from orcapod.types import ExecutorType, NodeConfig, PipelineConfig
+from orcapod.types import NodeConfig, OrchestratorType, PipelineConfig
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -85,7 +85,7 @@ def _build_pipeline(
 def _run_sync(pipeline: Pipeline) -> tuple[list[int], float]:
     """Run with SyncPipelineOrchestrator, return (sorted results, elapsed)."""
     t0 = time.perf_counter()
-    pipeline.run(config=PipelineConfig(executor=ExecutorType.SYNCHRONOUS))
+    pipeline.run(config=PipelineConfig(orchestrator=OrchestratorType.SYNCHRONOUS))
     elapsed = time.perf_counter() - t0
     records = pipeline.node.get_all_records()
     assert records is not None
@@ -95,7 +95,7 @@ def _run_sync(pipeline: Pipeline) -> tuple[list[int], float]:
 def _run_async(pipeline: Pipeline) -> tuple[list[int], float]:
     """Run with AsyncPipelineOrchestrator, return (sorted results, elapsed)."""
     t0 = time.perf_counter()
-    pipeline.run(config=PipelineConfig(executor=ExecutorType.ASYNC_CHANNELS))
+    pipeline.run(config=PipelineConfig(orchestrator=OrchestratorType.ASYNC_CHANNELS))
     elapsed = time.perf_counter() - t0
     records = pipeline.node.get_all_records()
     assert records is not None
