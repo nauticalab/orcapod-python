@@ -343,6 +343,7 @@ def test_utc_nested_round_trip():
 
 
 def test_utc_clear_cache_clears_dataclass_cache():
+    """clear_cache() also clears the per-instance dataclass lookup cache."""
     converter = _UTC()
 
     @dataclasses.dataclass

@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import dataclasses
 import importlib
+import inspect
 import logging
 import re
+import sys
 import typing
 from typing import TYPE_CHECKING, Any
 
@@ -99,8 +101,6 @@ def _get_type_hints_safe(cls: type) -> dict[str, Any]:
         A dict mapping field names to resolved type hints. Values may be string
         annotations for names that could not be resolved.
     """
-    import sys
-
     try:
         return typing.get_type_hints(cls)
     except NameError:
@@ -117,8 +117,6 @@ def _get_type_hints_safe(cls: type) -> dict[str, Any]:
                 localns[name] = obj
 
     # 2. Walk the call stack to find local frames that define the referenced names.
-    import inspect
-
     raw_annotations = cls.__annotations__
     unresolved = {v for v in raw_annotations.values() if isinstance(v, str)}
     if unresolved:
