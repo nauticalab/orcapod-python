@@ -34,7 +34,9 @@ from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
 from orcapod.pipeline import AsyncPipelineOrchestrator
+from orcapod.pipeline.dag import OrcaDAG
 from orcapod.pipeline.job import PipelineJob
+from orcapod.pipeline.observer import NoOpObserver
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -296,27 +298,13 @@ class TestOrchestratorDiamondDag:
         assert sync_values == async_values
 
 
-# ===========================================================================
-# 7. run_async entry point (for callers inside event loop)
-# ===========================================================================
-
-
-class TestOrchestratorRunAsync:
-    def test_run_async_from_event_loop(self):
-        """PipelineJob.run() drives the event loop synchronously."""
-        src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
-        pf = PythonDataFunction(double_value, output_keys="result")
-        pod = FunctionPod(pf)
-
-        job = PipelineJob(name="async_loop", store=InMemoryArrowDatabase())
-        with job:
-            pod(src, label="doubler")
-        job.run(orchestrator=AsyncPipelineOrchestrator())
-
-        records = job.nodes["doubler"].get_all_records()
-        assert records is not None
-        values = sorted(records.column("result").to_pylist())
-        assert values == [2, 4]
+# ---------------------------------------------------------------------------
+# TestOrchestratorRunAsync — DELETED
+# The original test exercised `AsyncPipelineOrchestrator.run_async()` from
+# inside a running event loop.  After migration to `job.run()` it became
+# a duplicate of `TestOrchestratorLinearPipeline`.  Direct `run_async()`
+# coverage is tracked as a follow-up.
+# ---------------------------------------------------------------------------
 
 
 # ===========================================================================
@@ -338,7 +326,7 @@ class TestBufferSizeConfiguration:
 
         records = job.nodes["doubler"].get_all_records()
         assert records is not None
-        assert records.num_rows == 2
+        assert records.num_rows == 2  # source has 2 rows
 
 
 # ===========================================================================
@@ -389,8 +377,6 @@ class TestAsyncOrchestratorTerminalNode:
 
     def test_single_terminal_source(self):
         """A pipeline with just a source (terminal) should work."""
-        from orcapod.pipeline.dag import OrcaDAG
-
         src = _make_source("key", "value", {"key": ["a"], "value": [1]})
         tag_schema, data_schema = src.output_schema()
         node = SourceJobNode(
@@ -433,8 +419,6 @@ class TestAsyncOrchestratorErrorPropagation:
 
     def test_node_failure_calls_on_data_crash(self):
         """When an observer is set, on_data_crash is called for the failing data."""
-        from orcapod.pipeline.observer import NoOpObserver
-
         def failing_fn(value: int) -> int:
             raise ValueError("intentional failure")
 
@@ -486,8 +470,7 @@ class TestAsyncOrchestratorObserverInjection:
                 events.append(("data_end", node_label, cached))
             def on_data_crash(self, node_label, tag, data, exc): pass
             def create_data_logger(self, tag, data, **kwargs):
-                from orcapod.pipeline.observer import _NOOP_LOGGER
-                return _NOOP_LOGGER
+                return NoOpObserver().create_data_logger(tag, data)
             def contextualize(self, *identity_path):
                 return self
 
@@ -539,8 +522,7 @@ class TestAsyncOrchestratorObserverInjection:
                 events.append(("data_end", node_label))
             def on_data_crash(self, node_label, tag, data, exc): pass
             def create_data_logger(self, tag, data, **kwargs):
-                from orcapod.pipeline.observer import _NOOP_LOGGER
-                return _NOOP_LOGGER
+                return NoOpObserver().create_data_logger(tag, data)
             def contextualize(self, *identity_path):
                 return self
 
