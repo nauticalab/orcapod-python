@@ -38,8 +38,9 @@ from orcapod.sources import ArrowTableSource
 from orcapod.core.function_pod import FunctionPod
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.pipeline import Pipeline
-from orcapod.types import NodeConfig, OrchestratorType, PipelineConfig
+from orcapod.pipeline import AsyncPipelineOrchestrator
+from orcapod.pipeline.job import PipelineJob
+from orcapod.types import NodeConfig
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -88,8 +89,8 @@ def sync_slow_double(x: int) -> int:
 # ---------------------------------------------------------------------------
 
 
-def build_pipeline(use_async_fn: bool) -> Pipeline:
-    """Build a pipeline with two independent branches from the same source.
+def build_job(use_async_fn: bool) -> PipelineJob:
+    """Build a job with two independent branches from the same source.
 
     Pipeline::
 
@@ -97,11 +98,11 @@ def build_pipeline(use_async_fn: bool) -> Pipeline:
                  └── slow_double (branch_b)
     """
     db = InMemoryArrowDatabase()
-    pipeline = Pipeline(name="demo", pipeline_database=db)
+    job = PipelineJob(name="demo", store=db)
 
     fn = async_slow_double if use_async_fn else sync_slow_double
-    with pipeline:
-        source = ArrowTableSource(SOURCE_TABLE, tag_columns=["id"])
+    with job:
+        source = ArrowTableSource(SOURCE_TABLE, tag_columns=["id"], infer_nullable=True)
         pf_a = PythonDataFunction(fn, output_keys="result", function_name="branch_a")
         pf_b = PythonDataFunction(fn, output_keys="result", function_name="branch_b")
         FunctionPod(
@@ -113,21 +114,21 @@ def build_pipeline(use_async_fn: bool) -> Pipeline:
             node_config=NodeConfig(max_concurrency=NUM_DATA),
         )(source, label="branch_b")
 
-    return pipeline
+    return job
 
 
 def run_case(label: str, use_async_fn: bool, use_async_orchestrator: bool) -> float:
     """Run a single combination and return elapsed time."""
-    pipeline = build_pipeline(use_async_fn=use_async_fn)
+    job = build_job(use_async_fn=use_async_fn)
     t0 = time.perf_counter()
     if use_async_orchestrator:
-        pipeline.run(config=PipelineConfig(orchestrator=OrchestratorType.ASYNC_CHANNELS))
+        job.run(orchestrator=AsyncPipelineOrchestrator())
     else:
-        pipeline.run()
+        job.run()
     elapsed = time.perf_counter() - t0
 
-    a = pipeline.branch_a.get_all_records()
-    b = pipeline.branch_b.get_all_records()
+    a = job.nodes["branch_a"].get_all_records()
+    b = job.nodes["branch_b"].get_all_records()
     assert a is not None and b is not None
     total_rows = a.num_rows + b.num_rows
     print(f"  {label:44s} {elapsed:5.2f}s  ({total_rows} rows)")

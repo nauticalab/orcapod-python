@@ -557,5 +557,4 @@ class TestSyncObserverInjection:
 # TestMaterializeResults deleted: PipelineJob.run() always materialises
 # results to the store database. The materialize_results=False path is
 # a SyncPipelineOrchestrator / AsyncPipelineOrchestrator implementation
-# detail; coverage will be restored when test_orchestrator.py is migrated
-# in the same ENG-491 migration pass.
+# detail; direct coverage of this path is deferred to a follow-up issue.
