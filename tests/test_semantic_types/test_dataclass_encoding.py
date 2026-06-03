@@ -200,14 +200,14 @@ def test_tier1_cache_hit():
     assert result.value == 3
 
 
-def test_tier2_registry():
+def test_tier2_registry(monkeypatch):
     """Tier 2: importlib fails, class found in registry."""
     @dataclasses.dataclass
     class _RegClass:
         score: float
 
     fqcn = "fake.module.RegClass"
-    _DATACLASS_REGISTRY[fqcn] = _RegClass
+    monkeypatch.setitem(_DATACLASS_REGISTRY, fqcn, _RegClass)
 
     struct_dict = {"__type": f"dataclass:{fqcn}", "score": 9.5}
     field_converters = {"score": lambda v: v}
