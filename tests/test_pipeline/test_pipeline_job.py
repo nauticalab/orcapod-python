@@ -518,6 +518,44 @@ class TestPipelineJobRun:
         totals = sorted(cast(list[int], table.column("total").to_pylist()))
         assert totals == [110, 220]
 
+    def test_run_accepts_explicit_sync_orchestrator(self):
+        from orcapod.pipeline.sync_orchestrator import SyncPipelineOrchestrator
+
+        def double_x(x: int) -> int:
+            return x * 2
+
+        db = InMemoryArrowDatabase()
+        src = _make_source("key", "x", {"key": ["a", "b"], "x": [1, 2]})
+        pf = PythonDataFunction(double_x, output_keys="result")
+        pod = FunctionPod(data_function=pf)
+
+        job = PipelineJob(name="orch_param", store=db)
+        with job:
+            pod(src, label="doubler")
+
+        completed = job.run(orchestrator=SyncPipelineOrchestrator())
+        records = completed.nodes["doubler"].get_all_records()
+        assert len(records) == 2
+
+    def test_run_accepts_async_orchestrator(self):
+        from orcapod.pipeline import AsyncPipelineOrchestrator
+
+        def double_x(x: int) -> int:
+            return x * 2
+
+        db = InMemoryArrowDatabase()
+        src = _make_source("key", "x", {"key": ["a", "b"], "x": [1, 2]})
+        pf = PythonDataFunction(double_x, output_keys="result")
+        pod = FunctionPod(data_function=pf)
+
+        job = PipelineJob(name="async_orch", store=db)
+        with job:
+            pod(src, label="doubler")
+
+        completed = job.run(orchestrator=AsyncPipelineOrchestrator())
+        records = completed.nodes["doubler"].get_all_records()
+        assert len(records) == 2
+
 
 class TestPipelineJobEndToEnd:
     def test_end_to_end_source_join_function(self, store):
