@@ -15,13 +15,9 @@ from orcapod.core.function_pod import FunctionPod
 from orcapod.core.data_function import PythonDataFunction
 from orcapod.core.sources.arrow_table_source import ArrowTableSource
 from orcapod.databases import InMemoryArrowDatabase
-from orcapod.pipeline import (
-    Pipeline,
-    SyncPipelineOrchestrator,
-)
+from orcapod.pipeline import PipelineJob
 from orcapod.pipeline.composite_observer import CompositeObserver
-from orcapod.pipeline.logging_observer import LoggingObserver, DataLogger
-from orcapod.pipeline.observer import NoOpLogger
+from orcapod.pipeline.logging_observer import LoggingObserver
 from orcapod.pipeline.serialization import DatabaseRegistry, resolve_observer_from_config
 from orcapod.pipeline.status_observer import StatusObserver
 
@@ -44,7 +40,6 @@ def _make_source(n: int = 3) -> ArrowTableSource:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestLoggingAndStatusTogether:
     def test_both_observers_populated(self):
         pipeline_db = InMemoryArrowDatabase()
@@ -57,16 +52,15 @@ class TestLoggingAndStatusTogether:
         pf = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="test_composite", pipeline_database=pipeline_db)
-        with pipeline:
+        job = PipelineJob(name="test_composite", store=pipeline_db)
+        with job:
             pod(source, label="doubler")
 
         log_obs = LoggingObserver(log_database=obs_db.at("test_composite", "_log"))
         status_obs = StatusObserver(status_database=obs_db.at("test_composite", "_status"))
         observer = CompositeObserver(log_obs, status_obs)
 
-        orch = SyncPipelineOrchestrator()
-        pipeline.run(orchestrator=orch, observer=observer)
+        job.run(observer=observer)
 
         # Logging observer should have logs
         logs = log_obs.get_logs()
@@ -84,7 +78,6 @@ class TestLoggingAndStatusTogether:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestCreateDataLoggerDelegation:
     def test_returns_logging_observer_logger(self):
         pipeline_db = InMemoryArrowDatabase()
@@ -98,16 +91,15 @@ class TestCreateDataLoggerDelegation:
         pf = PythonDataFunction(identity, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="test_logger_delegation", pipeline_database=pipeline_db)
-        with pipeline:
+        job = PipelineJob(name="test_logger_delegation", store=pipeline_db)
+        with job:
             pod(source, label="ident")
 
         log_obs = LoggingObserver(log_database=obs_db.at("test_logger_delegation", "_log"))
         status_obs = StatusObserver(status_database=obs_db.at("test_logger_delegation", "_status"))
         observer = CompositeObserver(log_obs, status_obs)
 
-        orch = SyncPipelineOrchestrator()
-        pipeline.run(orchestrator=orch, observer=observer)
+        job.run(observer=observer)
 
         # Logs should have captured the print output, proving the real
         # LoggingObserver logger was used (not the no-op)
@@ -122,8 +114,7 @@ class TestCreateDataLoggerDelegation:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
-class TestContextualizeReturnsComposite:
+class TestCompositeObserverMultiNodeIntegration:
     def test_contextualized_composite_delegates(self):
         pipeline_db = InMemoryArrowDatabase()
         obs_db = InMemoryArrowDatabase()
@@ -140,8 +131,8 @@ class TestContextualizeReturnsComposite:
         pf2 = PythonDataFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
         pod2 = FunctionPod(pf2)
 
-        pipeline = Pipeline(name="test_ctx_composite", pipeline_database=pipeline_db)
-        with pipeline:
+        job = PipelineJob(name="test_ctx_composite", store=pipeline_db)
+        with job:
             s1 = pod1(source, label="doubler")
             pod2(s1, label="tripler")
 
@@ -149,8 +140,7 @@ class TestContextualizeReturnsComposite:
         status_obs = StatusObserver(status_database=obs_db.at("test_ctx_composite", "_status"))
         observer = CompositeObserver(log_obs, status_obs)
 
-        orch = SyncPipelineOrchestrator()
-        pipeline.run(orchestrator=orch, observer=observer)
+        job.run(observer=observer)
 
         # Both observers should have received events for both function nodes
         # 2 nodes × 2 data each = 4 log rows total
@@ -168,7 +158,6 @@ class TestContextualizeReturnsComposite:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Migrating to PipelineJob-based API — pending migration task")
 class TestCompositeWithFailures:
     def test_failures_tracked_by_both_observers(self):
         pipeline_db = InMemoryArrowDatabase()
@@ -181,16 +170,15 @@ class TestCompositeWithFailures:
         pf = PythonDataFunction(failing, output_keys="result", executor=LocalPythonFunctionExecutor())
         pod = FunctionPod(pf)
 
-        pipeline = Pipeline(name="test_composite_fail", pipeline_database=pipeline_db)
-        with pipeline:
+        job = PipelineJob(name="test_composite_fail", store=pipeline_db)
+        with job:
             pod(source, label="failing")
 
         log_obs = LoggingObserver(log_database=obs_db.at("test_composite_fail", "_log"))
         status_obs = StatusObserver(status_database=obs_db.at("test_composite_fail", "_status"))
         observer = CompositeObserver(log_obs, status_obs)
 
-        orch = SyncPipelineOrchestrator()
-        pipeline.run(orchestrator=orch, observer=observer)
+        job.run(observer=observer)
 
         # Logs should show failures
         logs = log_obs.get_logs()
