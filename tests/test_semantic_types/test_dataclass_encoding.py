@@ -531,29 +531,60 @@ def test_init_false_round_trip():
 # ---------------------------------------------------------------------------
 
 
-def test_decoder_tolerates_extra_struct_fields():
-    """struct_dict_to_dataclass must not pass extra struct keys to the constructor."""
+def test_decoder_extra_null_field_no_warning(caplog):
+    """A NULL extra field (schema evolution — column present but empty for this row)
+    is silently dropped without a warning."""
     @dataclasses.dataclass
     class _Narrow:
         name: str
 
     fqcn = f"{_Narrow.__module__}.{_Narrow.__qualname__}"
-    # Struct has an extra field 'age' not present in _Narrow
+    struct_dict = {"__type": f"dataclass:{fqcn}", "name": "Alice", "age": None}
+    field_converters = {"name": lambda v: v, "age": lambda v: v}
+    cache: dict = {}
+
+    attr = fqcn.rpartition(".")[2]
+    import logging
+    with caplog.at_level(logging.WARNING, logger="orcapod.semantic_types.dataclass_encoding"):
+        with patch("orcapod.semantic_types.dataclass_encoding.importlib.import_module") as m:
+            mod = MagicMock()
+            setattr(mod, attr, _Narrow)
+            m.return_value = mod
+            result = struct_dict_to_dataclass(struct_dict, field_converters, cache)
+
+    assert isinstance(result, _Narrow)
+    assert result.name == "Alice"
+    # No warning for a null extra field
+    assert not any("age" in r.message for r in caplog.records)
+
+
+def test_decoder_extra_nonnull_field_warns(caplog):
+    """A non-null extra field being discarded must emit a WARNING — it signals a
+    schema mismatch or encoding bug, not normal schema evolution."""
+    @dataclasses.dataclass
+    class _Narrow:
+        name: str
+
+    fqcn = f"{_Narrow.__module__}.{_Narrow.__qualname__}"
+    # 'age' is non-null: real data being silently dropped is a bug signal
     struct_dict = {"__type": f"dataclass:{fqcn}", "name": "Alice", "age": 30}
     field_converters = {"name": lambda v: v, "age": lambda v: v}
     cache: dict = {}
 
     attr = fqcn.rpartition(".")[2]
-    with patch("orcapod.semantic_types.dataclass_encoding.importlib.import_module") as m:
-        mod = MagicMock()
-        setattr(mod, attr, _Narrow)
-        m.return_value = mod
-        result = struct_dict_to_dataclass(struct_dict, field_converters, cache)
+    import logging
+    with caplog.at_level(logging.WARNING, logger="orcapod.semantic_types.dataclass_encoding"):
+        with patch("orcapod.semantic_types.dataclass_encoding.importlib.import_module") as m:
+            mod = MagicMock()
+            setattr(mod, attr, _Narrow)
+            m.return_value = mod
+            result = struct_dict_to_dataclass(struct_dict, field_converters, cache)
 
     assert isinstance(result, _Narrow)
     assert result.name == "Alice"
-    # Extra 'age' field should be silently dropped, not cause a TypeError
     assert not hasattr(result, "age")
+    # Must emit a warning mentioning the dropped field
+    assert any("age" in r.message and r.levelno == logging.WARNING for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------

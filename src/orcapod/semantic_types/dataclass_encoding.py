@@ -341,12 +341,24 @@ def struct_dict_to_dataclass(
     # pass keys that correspond to init=True fields on the resolved class.
     # Filtering to init fields tolerates superset-schema structs (extra keys
     # are silently dropped) and avoids passing init=False fields to __init__.
+    #
+    # A non-null value for a dropped key is flagged as a warning: NULL is the
+    # expected state (column present in schema but not applicable to this row /
+    # this class); a real value being discarded is a sign of a schema mismatch
+    # or a bug in the encoding pipeline.
     init_field_names = {f.name for f in dataclasses.fields(cls) if f.init}
     data_kwargs: dict[str, Any] = {}
     for key, value in struct_dict.items():
         if key == DATACLASS_TYPE_FIELD:
             continue
         if key not in init_field_names:
+            if value is not None:
+                logger.warning(
+                    "struct_dict_to_dataclass: field %r has a non-null value (%r) "
+                    "but is not accepted by %r.__init__ — the value will be discarded. "
+                    "This may indicate a schema mismatch or a bug in the encoding pipeline.",
+                    key, value, cls,
+                )
             continue
         converter_fn = field_converters.get(key, lambda v: v)
         data_kwargs[key] = converter_fn(value) if value is not None else None
