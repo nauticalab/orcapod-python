@@ -12,6 +12,7 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import logging
+import os
 import re
 import sys
 import typing
@@ -43,6 +44,12 @@ _IDENT_RE = re.compile(r"[A-Za-z_]\w*")
 # Process-global registry for tier-2 reconstruction.
 # Populated via register_dataclass(); persists for the process lifetime.
 _DATACLASS_REGISTRY: dict[str, type] = {}
+
+# Tier-1 import gate.
+# Set ORCAPOD_DATACLASS_IMPORT=0 to disable importlib-based reconstruction,
+# e.g. in environments where arbitrary module import from on-disk __type values
+# is not acceptable.  Tier-2 (registry) and tier-3 (synthesize) still work.
+_TIER1_IMPORT_ENABLED: bool = os.environ.get("ORCAPOD_DATACLASS_IMPORT", "1") != "0"
 
 
 def register_dataclass(cls: type) -> type:
@@ -189,6 +196,10 @@ def dataclass_to_arrow_struct_type(
     hints = _get_type_hints_safe(cls)
     fields: list[pa.Field] = [pa.field(DATACLASS_TYPE_FIELD, pa.large_string())]
     for f in dataclasses.fields(cls):
+        if not f.init:
+            # Fields excluded from __init__ are not part of the serialized
+            # representation — they are typically derived/computed post-init.
+            continue
         arrow_type = converter.python_type_to_arrow_type(hints[f.name])
         fields.append(pa.field(f.name, arrow_type))
     return pa.struct(fields)
@@ -222,6 +233,10 @@ def dataclass_to_struct_dict(
     type_str = f"{DATACLASS_TYPE_PREFIX}{cls.__module__}.{cls.__qualname__}"
     result: dict[str, Any] = {DATACLASS_TYPE_FIELD: type_str}
     for f in dataclasses.fields(cls):
+        if not f.init:
+            # Fields excluded from __init__ are not part of the serialized
+            # representation — they are typically derived/computed post-init.
+            continue
         value = getattr(obj, f.name)
         converter_fn = field_converters.get(f.name, lambda v: v)
         result[f.name] = converter_fn(value)
@@ -278,21 +293,28 @@ def struct_dict_to_dataclass(
         if fqcn in lookup_cache:
             cls = lookup_cache[fqcn]
         else:
-            # Tier 1: import
-            module_path, _, class_attr = fqcn.rpartition(".")
-            try:
-                module = importlib.import_module(module_path)
-                resolved = getattr(module, class_attr)
-                if not dataclasses.is_dataclass(resolved) or not isinstance(resolved, type):
-                    raise AttributeError(
-                        f"{class_attr!r} in {module_path!r} is not a dataclass type"
+            # Tier 1: import (disabled when ORCAPOD_DATACLASS_IMPORT=0)
+            if _TIER1_IMPORT_ENABLED:
+                module_path, _, class_attr = fqcn.rpartition(".")
+                try:
+                    module = importlib.import_module(module_path)
+                    resolved = getattr(module, class_attr)
+                    if not dataclasses.is_dataclass(resolved) or not isinstance(resolved, type):
+                        raise AttributeError(
+                            f"{class_attr!r} in {module_path!r} is not a dataclass type"
+                        )
+                    cls = resolved
+                    lookup_cache[fqcn] = cls
+                except (ImportError, AttributeError) as exc:
+                    logger.debug(
+                        "struct_dict_to_dataclass: tier 1 import failed for %r: %s",
+                        fqcn, exc,
                     )
-                cls = resolved
-                lookup_cache[fqcn] = cls
-            except (ImportError, AttributeError) as exc:
+            else:
                 logger.debug(
-                    "struct_dict_to_dataclass: tier 1 import failed for %r: %s",
-                    fqcn, exc,
+                    "struct_dict_to_dataclass: tier 1 disabled (ORCAPOD_DATACLASS_IMPORT=0), "
+                    "skipping import for %r",
+                    fqcn,
                 )
 
             # Tier 2: registry
@@ -315,10 +337,16 @@ def struct_dict_to_dataclass(
             class_name, [(name, typing.Any) for name in field_names]
         )
 
-    # Instantiate: apply field converters, skip the __type sentinel
+    # Instantiate: apply field converters, skip the __type sentinel, and only
+    # pass keys that correspond to init=True fields on the resolved class.
+    # Filtering to init fields tolerates superset-schema structs (extra keys
+    # are silently dropped) and avoids passing init=False fields to __init__.
+    init_field_names = {f.name for f in dataclasses.fields(cls) if f.init}
     data_kwargs: dict[str, Any] = {}
     for key, value in struct_dict.items():
         if key == DATACLASS_TYPE_FIELD:
+            continue
+        if key not in init_field_names:
             continue
         converter_fn = field_converters.get(key, lambda v: v)
         data_kwargs[key] = converter_fn(value) if value is not None else None
