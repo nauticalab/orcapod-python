@@ -20,6 +20,7 @@ from orcapod.semantic_types.dataclass_encoding import (
     register_dataclass,
     struct_dict_to_dataclass,
 )
+import orcapod.semantic_types.dataclass_encoding as _dc_enc
 from orcapod.semantic_types.universal_converter import UniversalTypeConverter
 from orcapod.types import Schema
 
@@ -427,3 +428,173 @@ def test_parquet_round_trip():
     assert isinstance(results[1]["rec"], _Record)
     assert results[1]["rec"].score == 0.1
     assert results[1]["rec"].label == "bad"
+
+
+# ---------------------------------------------------------------------------
+# init=False field exclusion
+# ---------------------------------------------------------------------------
+
+
+def test_struct_type_excludes_init_false_fields():
+    """dataclass_to_arrow_struct_type must not include fields with init=False."""
+    @dataclasses.dataclass
+    class _WithComputed:
+        value: int
+        cached: str = dataclasses.field(init=False, default="")
+
+        def __post_init__(self) -> None:
+            self.cached = f"v={self.value}"
+
+    converter = UniversalTypeConverter()
+    result = dataclass_to_arrow_struct_type(_WithComputed, converter)
+
+    field_names = [result.field(i).name for i in range(result.num_fields)]
+    assert "__type" in field_names
+    assert "value" in field_names
+    assert "cached" not in field_names, "init=False field must be excluded from Arrow schema"
+
+
+def test_struct_dict_excludes_init_false_fields():
+    """dataclass_to_struct_dict must not include fields with init=False."""
+    @dataclasses.dataclass
+    class _WithComputed:
+        value: int
+        cached: str = dataclasses.field(init=False, default="")
+
+        def __post_init__(self) -> None:
+            self.cached = f"v={self.value}"
+
+    obj = _WithComputed(value=42)
+    result = dataclass_to_struct_dict(obj, {})
+
+    assert "value" in result
+    assert "cached" not in result, "init=False field must be excluded from encoded dict"
+
+
+def test_utc_converter_excludes_init_false_fields():
+    """UniversalTypeConverter converter closure must not include init=False fields."""
+    @dataclasses.dataclass
+    class _WithComputed:
+        x: int
+        derived: str = dataclasses.field(init=False, default="")
+
+        def __post_init__(self) -> None:
+            self.derived = str(self.x * 2)
+
+    converter = UniversalTypeConverter()
+    encode = converter.get_python_to_arrow_converter(_WithComputed)
+    encoded = encode(_WithComputed(x=7))
+
+    assert "x" in encoded
+    assert "derived" not in encoded, "init=False field must not appear in encoded output"
+
+
+def test_init_false_round_trip():
+    """Full round-trip: init=False field is excluded from Arrow and reconstructed post-init."""
+    @dataclasses.dataclass
+    class _Computed:
+        n: int
+        doubled: int = dataclasses.field(init=False)
+
+        def __post_init__(self) -> None:
+            self.doubled = self.n * 2
+
+    converter = UniversalTypeConverter()
+    arrow_type = converter.python_type_to_arrow_type(_Computed)
+
+    # Arrow schema must not contain 'doubled'
+    field_names = [arrow_type.field(i).name for i in range(arrow_type.num_fields)]
+    assert "doubled" not in field_names
+
+    obj = _Computed(n=5)
+    encode = converter.get_python_to_arrow_converter(_Computed)
+    encoded = encode(obj)
+    assert "doubled" not in encoded
+
+    decode = converter.get_arrow_to_python_converter(arrow_type)
+    fqcn = f"{_Computed.__module__}.{_Computed.__qualname__}"
+    attr = fqcn.rpartition(".")[2]
+    with patch("orcapod.semantic_types.dataclass_encoding.importlib.import_module") as m:
+        mod = MagicMock()
+        setattr(mod, attr, _Computed)
+        m.return_value = mod
+        result = decode(encoded)
+
+    assert isinstance(result, _Computed)
+    assert result.n == 5
+    # __post_init__ recomputes doubled
+    assert result.doubled == 10
+
+
+# ---------------------------------------------------------------------------
+# Extra-field / superset-schema kwargs filtering in decoder
+# ---------------------------------------------------------------------------
+
+
+def test_decoder_tolerates_extra_struct_fields():
+    """struct_dict_to_dataclass must not pass extra struct keys to the constructor."""
+    @dataclasses.dataclass
+    class _Narrow:
+        name: str
+
+    fqcn = f"{_Narrow.__module__}.{_Narrow.__qualname__}"
+    # Struct has an extra field 'age' not present in _Narrow
+    struct_dict = {"__type": f"dataclass:{fqcn}", "name": "Alice", "age": 30}
+    field_converters = {"name": lambda v: v, "age": lambda v: v}
+    cache: dict = {}
+
+    attr = fqcn.rpartition(".")[2]
+    with patch("orcapod.semantic_types.dataclass_encoding.importlib.import_module") as m:
+        mod = MagicMock()
+        setattr(mod, attr, _Narrow)
+        m.return_value = mod
+        result = struct_dict_to_dataclass(struct_dict, field_converters, cache)
+
+    assert isinstance(result, _Narrow)
+    assert result.name == "Alice"
+    # Extra 'age' field should be silently dropped, not cause a TypeError
+    assert not hasattr(result, "age")
+
+
+# ---------------------------------------------------------------------------
+# Tier-1 import gate (_TIER1_IMPORT_ENABLED)
+# ---------------------------------------------------------------------------
+
+
+def test_tier1_disabled_skips_to_tier2(monkeypatch):
+    """When _TIER1_IMPORT_ENABLED is False, tier-1 import is skipped and tier-2 is used."""
+    @dataclasses.dataclass
+    class _GatedClass:
+        val: int
+
+    fqcn = "some.module.GatedClass"
+    monkeypatch.setitem(_DATACLASS_REGISTRY, fqcn, _GatedClass)
+    monkeypatch.setattr(_dc_enc, "_TIER1_IMPORT_ENABLED", False)
+
+    struct_dict = {"__type": f"dataclass:{fqcn}", "val": 99}
+    field_converters = {"val": lambda v: v}
+    cache: dict = {}
+
+    with patch("orcapod.semantic_types.dataclass_encoding.importlib.import_module") as mock_import:
+        result = struct_dict_to_dataclass(struct_dict, field_converters, cache)
+        mock_import.assert_not_called()
+
+    assert isinstance(result, _GatedClass)
+    assert result.val == 99
+
+
+def test_tier1_disabled_falls_to_tier3(monkeypatch):
+    """When _TIER1_IMPORT_ENABLED is False and class is unregistered, tier-3 synthesizes."""
+    monkeypatch.setattr(_dc_enc, "_TIER1_IMPORT_ENABLED", False)
+
+    fqcn = "totally.absent.UnknownClass"
+    struct_dict = {"__type": f"dataclass:{fqcn}", "score": 7.5}
+    field_converters = {"score": lambda v: v}
+    cache: dict = {}
+
+    with patch("orcapod.semantic_types.dataclass_encoding.importlib.import_module") as mock_import:
+        result = struct_dict_to_dataclass(struct_dict, field_converters, cache)
+        mock_import.assert_not_called()
+
+    assert dataclasses.is_dataclass(result)
+    assert result.score == 7.5  # type: ignore[attr-defined]

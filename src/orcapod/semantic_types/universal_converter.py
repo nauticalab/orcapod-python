@@ -708,6 +708,7 @@ class UniversalTypeConverter:
             field_converters = {
                 f.name: self.get_python_to_arrow_converter(hints[f.name])
                 for f in dataclasses.fields(python_type)
+                if f.init  # skip init=False fields: not part of the serialized repr
             }
             return lambda obj: dataclass_to_struct_dict(obj, field_converters)
 
