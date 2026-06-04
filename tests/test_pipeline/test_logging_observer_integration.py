@@ -307,7 +307,44 @@ class TestMultipleFunctionNodesCombinedLogs:
 
 
 # ---------------------------------------------------------------------------
-# 9. Serialization round-trip tests
+# 9. get_logs() aggregates across all node sub-paths
+# ---------------------------------------------------------------------------
+
+
+class TestGetLogsNodeSpecific:
+    def test_get_logs_returns_rows_for_all_nodes(self):
+        """get_logs() should return aggregated rows covering every node."""
+        db = InMemoryArrowDatabase()
+        source = _make_source(2)
+
+        def double(x: int) -> int:
+            return x * 2
+
+        def triple(result: int) -> int:
+            return result * 3
+
+        pf1 = PythonDataFunction(double, output_keys="result", executor=LocalPythonFunctionExecutor())
+        pod1 = FunctionPod(pf1)
+        pf2 = PythonDataFunction(triple, output_keys="final", executor=LocalPythonFunctionExecutor())
+        pod2 = FunctionPod(pf2)
+
+        job = PipelineJob(name="test_filter", store=db)
+        with job:
+            s1 = pod1(source, label="doubler")
+            pod2(s1, label="tripler")
+
+        obs = LoggingObserver(log_database=db)
+        job.run(observer=obs)
+
+        logs = obs.get_logs()
+        assert logs is not None
+        # get_logs() aggregates across all node sub-paths:
+        # 2 data × 2 nodes = 4 log rows total
+        assert logs.num_rows == 4
+
+
+# ---------------------------------------------------------------------------
+# 10. Serialization round-trip tests
 # ---------------------------------------------------------------------------
 
 
