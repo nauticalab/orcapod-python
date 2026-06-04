@@ -179,6 +179,8 @@ class TestOrchestratorLinearPipeline:
         job = PipelineJob(name="linear", store=InMemoryArrowDatabase())
         with job:
             pod(src, label="doubler")
+        # job.run() auto-flushes database writes at the end of execution;
+        # explicit pipeline.flush() is no longer required.
         job.run(orchestrator=AsyncPipelineOrchestrator())
 
         records = job.nodes["doubler"].get_all_records()
@@ -284,6 +286,9 @@ class TestOrchestratorDiamondDag:
         sync_values = sorted(
             sync_job.nodes["adder"].get_all_records().column("total").to_pylist()
         )
+        # Attribute-based access (sync_job.adder) is equivalent to
+        # sync_job.nodes["adder"] via AbstractPipelineBase.__getattr__.
+        assert sync_job.adder is sync_job.nodes["adder"]
 
         # Async
         async_job = PipelineJob(name="async_diamond", store=InMemoryArrowDatabase())
@@ -298,13 +303,54 @@ class TestOrchestratorDiamondDag:
         assert sync_values == async_values
 
 
-# ---------------------------------------------------------------------------
-# TestOrchestratorRunAsync — DELETED
-# The original test exercised `AsyncPipelineOrchestrator.run_async()` from
-# inside a running event loop.  After migration to `job.run()` it became
-# a duplicate of `TestOrchestratorLinearPipeline`.  Direct `run_async()`
-# coverage is tracked as a follow-up.
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# 7. run_async entry point (for callers inside an event loop)
+# ===========================================================================
+
+
+class TestOrchestratorRunAsync:
+    @pytest.mark.asyncio
+    async def test_run_async_from_event_loop(self):
+        """run_async() can be awaited from within a running event loop.
+
+        ``job.run()`` calls ``asyncio.run()`` internally, which cannot be
+        invoked from inside a running event loop.  ``run_async()`` is the
+        correct entry point for callers that are already inside an event loop
+        (e.g. async frameworks, async tests).  This test verifies that path
+        directly by constructing the execution DAG that the orchestrator
+        operates on and calling ``run_async()`` instead of ``run()``.
+        """
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [1, 2]})
+        pf = PythonDataFunction(double_value, output_keys="result")
+        pod = FunctionPod(pf)
+
+        job = PipelineJob(name="async_loop", store=InMemoryArrowDatabase())
+        with job:
+            pod(src, label="doubler")
+
+        # Build the execution DAG from the job's internal node map, mirroring
+        # what PipelineJob.run() does.  Tests are allowed to access internal
+        # state to exercise code paths not reachable through the public API.
+        exec_dag: OrcaDAG = OrcaDAG()
+        for node in job._persistent_node_map.values():
+            exec_dag.add_node(node)
+        for u_hash, v_hash in job._graph_edges:
+            if (
+                u_hash in job._persistent_node_map
+                and v_hash in job._persistent_node_map
+            ):
+                exec_dag.add_edge(
+                    job._persistent_node_map[u_hash],
+                    job._persistent_node_map[v_hash],
+                )
+
+        orchestrator = AsyncPipelineOrchestrator()
+        await orchestrator.run_async(exec_dag)
+
+        records = job.nodes["doubler"].get_all_records()
+        assert records is not None
+        values = sorted(records.column("result").to_pylist())
+        assert values == [2, 4]
 
 
 # ===========================================================================
