@@ -32,7 +32,7 @@ class _Simple:
 
 
 def test_constants():
-    assert DATACLASS_TYPE_FIELD == "__type"
+    assert DATACLASS_TYPE_FIELD == "__dataclass."
     assert DATACLASS_TYPE_PREFIX == "dataclass:"
 
 
@@ -63,13 +63,13 @@ def test_register_non_dataclass_raises():
 
 
 def test_sentinel_large_string():
-    t = pa.struct([pa.field("__type", pa.large_string()), pa.field("a", pa.int64())])
+    t = pa.struct([pa.field("__dataclass.", pa.large_string()), pa.field("a", pa.int64())])
     assert has_dataclass_type_sentinel(t) is True
 
 
 def test_sentinel_string_compat():
     # older Arrow versions wrote pa.string() instead of pa.large_string()
-    t = pa.struct([pa.field("__type", pa.string()), pa.field("a", pa.int64())])
+    t = pa.struct([pa.field("__dataclass.", pa.string()), pa.field("a", pa.int64())])
     assert has_dataclass_type_sentinel(t) is True
 
 
@@ -92,8 +92,8 @@ def test_struct_type_basic_fields():
     result = dataclass_to_arrow_struct_type(_Point, converter)
 
     assert pa.types.is_struct(result)
-    # __type must be the first field
-    assert result[0].name == "__type"
+    # __dataclass. must be the first field
+    assert result[0].name == "__dataclass."
     assert result[0].type == pa.large_string()
     assert result.field("x").type == pa.int64()
     assert result.field("y").type == pa.float64()
@@ -160,7 +160,7 @@ def test_tier1_import():
     """Tier 1: class is importable via importlib."""
     fqcn = f"{_TierOne.__module__}.{_TierOne.__qualname__}"
     struct_dict = {
-        "__type": f"dataclass:{fqcn}",
+        "__dataclass.": f"dataclass:{fqcn}",
         "value": 7,
     }
     field_converters = {"value": lambda v: v}
@@ -185,7 +185,7 @@ def test_tier1_cache_hit():
     """Tier 1: cache hit skips importlib entirely."""
     fqcn = "some.module.SomeClass"
     cache = {fqcn: _TierOne}
-    struct_dict = {"__type": f"dataclass:{fqcn}", "value": 3}
+    struct_dict = {"__dataclass.": f"dataclass:{fqcn}", "value": 3}
     field_converters = {"value": lambda v: v}
 
     with patch("orcapod.semantic_types.dataclass_encoding.importlib.import_module") as mock_import:
@@ -205,7 +205,7 @@ def test_tier2_registry(monkeypatch):
     fqcn = "fake.module.RegClass"
     monkeypatch.setitem(_DATACLASS_REGISTRY, fqcn, _RegClass)
 
-    struct_dict = {"__type": f"dataclass:{fqcn}", "score": 9.5}
+    struct_dict = {"__dataclass.": f"dataclass:{fqcn}", "score": 9.5}
     field_converters = {"score": lambda v: v}
     cache: dict = {}
 
@@ -220,7 +220,7 @@ def test_tier2_registry(monkeypatch):
 def test_tier3_synthesize():
     """Tier 3: neither importable nor registered — synthesize a dataclass."""
     fqcn = "totally.unknown.Ghost"
-    struct_dict = {"__type": f"dataclass:{fqcn}", "name": "phantom", "age": 99}
+    struct_dict = {"__dataclass.": f"dataclass:{fqcn}", "name": "phantom", "age": 99}
     field_converters = {"name": lambda v: v, "age": lambda v: v}
     cache: dict = {}
 
@@ -249,8 +249,8 @@ def test_missing_type_field_tier3():
 
 
 def test_malformed_type_field_tier3():
-    """Invalid __type format (fails regex) falls through to tier 3."""
-    struct_dict = {"__type": "not-valid!!!", "x": 1}
+    """Invalid __dataclass. format (fails regex) falls through to tier 3."""
+    struct_dict = {"__dataclass.": "not-valid!!!", "x": 1}
     field_converters = {"x": lambda v: v}
     cache: dict = {}
 
@@ -275,7 +275,7 @@ def test_utc_simple_round_trip():
     obj = _Color(r=255, g=128, b=0)
     encode = converter.get_python_to_arrow_converter(_Color)
     encoded = encode(obj)
-    assert encoded["__type"] == f"dataclass:{_Color.__module__}.{_Color.__qualname__}"
+    assert encoded["__dataclass."] == f"dataclass:{_Color.__module__}.{_Color.__qualname__}"
 
     decode = converter.get_arrow_to_python_converter(arrow_type)
     with patch("orcapod.semantic_types.dataclass_encoding.importlib.import_module") as mock_import:
@@ -310,7 +310,7 @@ def test_utc_nested_round_trip():
     encode = converter.get_python_to_arrow_converter(_Outer)
     encoded = encode(obj)
 
-    assert encoded["inner"]["__type"] == f"dataclass:{_Inner.__module__}.{_Inner.__qualname__}"
+    assert encoded["inner"]["__dataclass."] == f"dataclass:{_Inner.__module__}.{_Inner.__qualname__}"
     assert encoded["inner"]["y"] == 3.14
 
     decode = converter.get_arrow_to_python_converter(arrow_type)
@@ -362,9 +362,9 @@ def test_polymorphic_decode():
     cat_fqcn = f"{_Cat.__module__}.{_Cat.__qualname__}"
     dog_fqcn = f"{_Dog.__module__}.{_Dog.__qualname__}"
 
-    # Both have the same Arrow schema (name: large_string) plus __type
+    # Both have the same Arrow schema (name: large_string) plus __dataclass.
     arrow_type = pa.struct([
-        pa.field("__type", pa.large_string()),
+        pa.field("__dataclass.", pa.large_string()),
         pa.field("name", pa.large_string()),
     ])
     converter = UniversalTypeConverter()
@@ -381,8 +381,8 @@ def test_polymorphic_decode():
             return mod
         mock_import.side_effect = fake_import
 
-        row0 = decode({"__type": f"dataclass:{cat_fqcn}", "name": "Whiskers"})
-        row1 = decode({"__type": f"dataclass:{dog_fqcn}", "name": "Rex"})
+        row0 = decode({"__dataclass.": f"dataclass:{cat_fqcn}", "name": "Whiskers"})
+        row1 = decode({"__dataclass.": f"dataclass:{dog_fqcn}", "name": "Rex"})
 
     assert isinstance(row0, _Cat) and row0.name == "Whiskers"
     assert isinstance(row1, _Dog) and row1.name == "Rex"
@@ -449,7 +449,7 @@ def test_struct_type_excludes_init_false_fields():
     result = dataclass_to_arrow_struct_type(_WithComputed, converter)
 
     field_names = [result.field(i).name for i in range(result.num_fields)]
-    assert "__type" in field_names
+    assert "__dataclass." in field_names
     assert "value" in field_names
     assert "cached" not in field_names, "init=False field must be excluded from Arrow schema"
 
@@ -539,7 +539,7 @@ def test_decoder_extra_null_field_no_warning(caplog):
         name: str
 
     fqcn = f"{_Narrow.__module__}.{_Narrow.__qualname__}"
-    struct_dict = {"__type": f"dataclass:{fqcn}", "name": "Alice", "age": None}
+    struct_dict = {"__dataclass.": f"dataclass:{fqcn}", "name": "Alice", "age": None}
     field_converters = {"name": lambda v: v, "age": lambda v: v}
     cache: dict = {}
 
@@ -567,7 +567,7 @@ def test_decoder_extra_nonnull_field_warns(caplog):
 
     fqcn = f"{_Narrow.__module__}.{_Narrow.__qualname__}"
     # 'age' is non-null: real data being silently dropped is a bug signal
-    struct_dict = {"__type": f"dataclass:{fqcn}", "name": "Alice", "age": 30}
+    struct_dict = {"__dataclass.": f"dataclass:{fqcn}", "name": "Alice", "age": 30}
     field_converters = {"name": lambda v: v, "age": lambda v: v}
     cache: dict = {}
 
@@ -602,7 +602,7 @@ def test_tier1_disabled_skips_to_tier2(monkeypatch):
     monkeypatch.setitem(_DATACLASS_REGISTRY, fqcn, _GatedClass)
     monkeypatch.setattr(_dc_enc, "_TIER1_IMPORT_ENABLED", False)
 
-    struct_dict = {"__type": f"dataclass:{fqcn}", "val": 99}
+    struct_dict = {"__dataclass.": f"dataclass:{fqcn}", "val": 99}
     field_converters = {"val": lambda v: v}
     cache: dict = {}
 
@@ -619,7 +619,7 @@ def test_tier1_disabled_falls_to_tier3(monkeypatch):
     monkeypatch.setattr(_dc_enc, "_TIER1_IMPORT_ENABLED", False)
 
     fqcn = "totally.absent.UnknownClass"
-    struct_dict = {"__type": f"dataclass:{fqcn}", "score": 7.5}
+    struct_dict = {"__dataclass.": f"dataclass:{fqcn}", "score": 7.5}
     field_converters = {"score": lambda v: v}
     cache: dict = {}
 
@@ -629,3 +629,67 @@ def test_tier1_disabled_falls_to_tier3(monkeypatch):
 
     assert dataclasses.is_dataclass(result)
     assert result.score == 7.5  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# arrow_schema_to_python_schema for dataclass structs (Item 4 fix)
+# ---------------------------------------------------------------------------
+
+
+def test_arrow_schema_to_python_schema_dataclass_returns_concrete_type():
+    """arrow_schema_to_python_schema returns a concrete dataclass type for sentinel structs.
+
+    After the fix, converting a dataclass struct Arrow type back to a Python
+    schema must return a proper @dataclass type rather than typing.Any, so
+    that python_schema_to_arrow_schema can complete the round-trip.
+    """
+    @dataclasses.dataclass
+    class _Point:
+        x: int
+        y: float
+
+    converter = UniversalTypeConverter()
+    arrow_type = converter.python_type_to_arrow_type(_Point)
+    assert has_dataclass_type_sentinel(arrow_type)
+
+    # Build a one-field Arrow schema wrapping the struct
+    arrow_schema = pa.schema([pa.field("point", arrow_type, nullable=False)])
+    python_schema = converter.arrow_schema_to_python_schema(arrow_schema)
+
+    python_type = python_schema["point"]
+    assert dataclasses.is_dataclass(python_type), (
+        f"Expected a dataclass type, got {python_type!r}"
+    )
+    field_names = {f.name for f in dataclasses.fields(python_type)}
+    assert "x" in field_names
+    assert "y" in field_names
+    assert DATACLASS_TYPE_FIELD not in field_names, (
+        "Sentinel field must not appear among the synthesized dataclass fields"
+    )
+
+
+def test_arrow_schema_to_python_schema_dataclass_round_trip():
+    """python_schema → arrow_schema → python_schema is lossless for dataclass fields.
+
+    After the fix, the synthesized dataclass type is itself a proper dataclass,
+    so python_schema_to_arrow_schema can convert it back to the original struct.
+    """
+    @dataclasses.dataclass
+    class _Box:
+        width: int
+        label: str
+
+    converter = UniversalTypeConverter()
+    original_arrow = converter.python_type_to_arrow_type(_Box)
+
+    # Round-trip via python schema
+    schema = pa.schema([pa.field("box", original_arrow, nullable=False)])
+    python_schema = converter.arrow_schema_to_python_schema(schema)
+    synthesized_type = python_schema["box"]
+
+    assert dataclasses.is_dataclass(synthesized_type)
+    # Convert the synthesized type back to Arrow — must produce the same struct
+    recovered_arrow = converter.python_type_to_arrow_type(synthesized_type)
+    assert has_dataclass_type_sentinel(recovered_arrow)
+    assert recovered_arrow.field("width").type == pa.int64()
+    assert recovered_arrow.field("label").type == pa.large_string()

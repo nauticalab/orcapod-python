@@ -182,6 +182,25 @@ class Schema(Mapping[str, DataType]):
             {**self._data, **other}, optional_fields=self._optional | other_optional
         )
 
+    def __add__(self, other: object) -> Self:
+        """Concatenate two schemas, delegating to ``merge()``.
+
+        Args:
+            other: Another ``Schema`` to merge with this one.
+
+        Returns:
+            A new ``Schema`` containing all fields from both schemas.
+
+        Raises:
+            ValueError: If any shared field has a different type in ``other``.
+            NotImplementedError: If ``other`` is not a ``Schema``.
+        """
+        if isinstance(other, Schema):
+            return self.merge(other)
+        raise NotImplementedError(
+            f"Adding {Schema} to {type(other)} is not supported"
+        )
+
     def with_values(self, other: dict[str, type] | None, **kwargs: type) -> Schema:
         """Return a new Schema with the specified fields added or overridden.
 
