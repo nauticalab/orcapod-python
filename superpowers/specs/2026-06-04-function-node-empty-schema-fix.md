@@ -47,25 +47,30 @@ Additional problem in the non-empty branch: `data_schema` is inferred from the
 first datagram (`data.arrow_schema(all_info=True)`) instead of from the pod's
 declared output schema.  The declared schema is authoritative and more stable.
 
-### Part A: `StreamBase._apply_column_config()`
+### Part A: `arrow_utils.apply_column_config()` standalone function
 
 The second half of `as_table()` — dropping system tags / source / context / meta
-columns, optionally sorting — is purely table-manipulation logic that belongs on
-`StreamBase`.  Content-hash handling (which requires `_cached_content_hash_column`
-and re-iterates `iter_data()`) stays in `FunctionNodeBase`.
+columns, optionally sorting — is purely table-manipulation logic with no meaningful
+dependency on class state beyond the column key names.  It belongs as a standalone
+function in `arrow_utils.py`.  Content-hash handling (which requires
+`_cached_content_hash_column` and re-iterates `iter_data()`) stays in
+`FunctionNodeBase`.
 
 ```python
-# StreamBase
-def _apply_column_config(
-    self,
+# src/orcapod/utils/arrow_utils.py
+def apply_column_config(
     table: "pa.Table",
-    column_config: ColumnConfig,
+    column_config: "ColumnConfig",
+    tag_keys: tuple[str, ...],
+    data_keys: tuple[str, ...],
 ) -> "pa.Table":
-    """Apply ``ColumnConfig`` column filtering and optional tag-sort to ``table``.
+    """Apply ``ColumnConfig`` column filtering and optional tag-sort to a table.
 
     Args:
         table: A fully-materialized PyArrow table (all columns present).
         column_config: Resolved column configuration.
+        tag_keys: Names of the regular (non-system) tag columns.
+        data_keys: Names of the data columns.
 
     Returns:
         A new table with the appropriate columns dropped and optionally
@@ -79,7 +84,7 @@ def _apply_column_config(
         )
     if not column_config.source:
         drop_columns.extend(
-            f"{constants.SOURCE_PREFIX}{c}" for c in self.keys()[1]
+            f"{constants.SOURCE_PREFIX}{c}" for c in data_keys
         )
     if not column_config.context:
         drop_columns.append(constants.CONTEXT_KEY)
@@ -97,16 +102,22 @@ def _apply_column_config(
         [c for c in drop_columns if c in table.column_names]
     )
     if column_config.sort_by_tags:
+        import polars as pl
         output_table_schema = output_table.schema
         output_table = (
             pl.DataFrame(output_table)
-            .sort(by=self.keys()[0], descending=False)
+            .sort(by=list(tag_keys), descending=False)
             .to_arrow()
         )
-        output_table = arrow_utils.restore_schema_nullability(
-            output_table, output_table_schema
-        )
+        output_table = restore_schema_nullability(output_table, output_table_schema)
     return output_table
+```
+
+`FunctionNodeBase.as_table()` calls it as:
+```python
+output_table = arrow_utils.apply_column_config(
+    self._cached_output_table, column_config, *self.keys()
+)
 ```
 
 ### Part B: Restructured `FunctionNodeBase.as_table()`
@@ -297,8 +308,8 @@ recognises dataclasses and delegates to `dataclass_to_arrow_struct_type`.
 
 | File | Change |
 |---|---|
-| `src/orcapod/core/streams/base.py` | Add `_apply_column_config()` |
-| `src/orcapod/core/nodes/function_node.py` | Restructure `as_table()` to use `output_schema()` and `_apply_column_config()` |
+| `src/orcapod/utils/arrow_utils.py` | Add `apply_column_config(table, column_config, tag_keys, data_keys)` standalone function |
+| `src/orcapod/core/nodes/function_node.py` | Fix import order (merge stray `observability_protocols` import into main block); restructure `as_table()` to use `output_schema()` and `arrow_utils.apply_column_config()` |
 | `src/orcapod/types.py` | Add `Schema.__add__` |
 | `src/orcapod/semantic_types/dataclass_encoding.py` | `DATACLASS_TYPE_FIELD = "__dataclass."` |
 | `src/orcapod/semantic_types/universal_converter.py` | Fix `_convert_arrow_to_python` for dataclass structs; import `dataclasses` and `DATACLASS_TYPE_FIELD` |
