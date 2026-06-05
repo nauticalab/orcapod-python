@@ -566,32 +566,6 @@ class SourceJobNode(SourceNodeBase):
             )
         return self._bound_source.iter_data()
 
-    def keys(
-        self,
-        *,
-        columns: ColumnConfig | dict[str, Any] | None = None,
-        all_info: bool = False,
-    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        """Return ``(tag_keys, data_keys)``, delegating to ``bound_source`` when set.
-
-        When ``bound_source`` is present, this is a transparent pass-through to
-        ``bound_source.keys(columns=columns, all_info=all_info)`` so callers get
-        the same result as querying the source directly.
-
-        When unbound, delegates to ``SourceNodeBase.keys()`` which computes
-        system-tag column names from the declared schemas.
-
-        Args:
-            columns: Column selection config.
-            all_info: If ``True``, include all available column groups.
-
-        Returns:
-            Tuple of ``(tag_column_names, data_column_names)``.
-        """
-        if self._bound_source is None:
-            return super().keys(columns=columns, all_info=all_info)
-        return self._bound_source.keys(columns=columns, all_info=all_info)
-
     def output_schema(
         self,
         *,
