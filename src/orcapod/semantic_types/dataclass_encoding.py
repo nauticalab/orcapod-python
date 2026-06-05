@@ -2,9 +2,9 @@
 """
 Dataclass <-> Arrow struct encoding for Orcapod.
 
-Encodes Python dataclasses as Arrow structs with a ``__type`` sentinel field
-carrying the fully-qualified class name. Decoding uses a three-tier fallback:
-import -> registry -> synthesize.
+Encodes Python dataclasses as Arrow structs with a ``__dataclass.`` sentinel
+field carrying the fully-qualified class name. Decoding uses a three-tier
+fallback: import -> registry -> synthesize.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ else:
 
 logger = logging.getLogger(__name__)
 
-DATACLASS_TYPE_FIELD = "__type"
+DATACLASS_TYPE_FIELD = "__dataclass."
 DATACLASS_TYPE_PREFIX = "dataclass:"
 
 # Validates fully-qualified class names like "my_module.sub.MyClass".
@@ -75,7 +75,7 @@ def register_dataclass(cls: type) -> type:
 
 
 def has_dataclass_type_sentinel(arrow_type: pa.DataType) -> bool:
-    """Return ``True`` if ``arrow_type`` is a struct with a ``__type`` string field.
+    """Return ``True`` if ``arrow_type`` is a struct with a ``__dataclass.`` string field.
 
     Accepts both ``pa.large_string()`` and ``pa.string()`` for compatibility
     with data written by older Arrow versions.
@@ -84,8 +84,8 @@ def has_dataclass_type_sentinel(arrow_type: pa.DataType) -> bool:
         arrow_type: Any PyArrow data type.
 
     Returns:
-        True if ``arrow_type`` is a struct containing a ``__type: (large_)string``
-        field.
+        True if ``arrow_type`` is a struct containing a
+        ``__dataclass.: (large_)string`` field.
     """
     if not pa.types.is_struct(arrow_type):
         return False
@@ -173,7 +173,7 @@ def dataclass_to_arrow_struct_type(
 ) -> pa.StructType:
     """Derive the Arrow struct type for a dataclass class.
 
-    The resulting struct has ``__type: large_string`` as its first field,
+    The resulting struct has ``__dataclass.: large_string`` as its first field,
     followed by one field per dataclass field. Field types are resolved via
     ``converter`` (a ``UniversalTypeConverter``), so nested dataclasses
     produce nested structs automatically once the converter has the dataclass
@@ -218,7 +218,7 @@ def dataclass_to_struct_dict(
             and reuse per row to avoid repeated type dispatch.
 
     Returns:
-        A dict with ``__type`` as the first key followed by encoded field values.
+        A dict with ``__dataclass.`` as the first key followed by encoded field values.
 
     Raises:
         TypeError: If ``obj`` is not a dataclass instance (e.g. a class itself

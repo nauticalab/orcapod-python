@@ -112,6 +112,8 @@ class TestIterDatasReadOnly:
             mock_proc.assert_not_called()
         assert isinstance(table, pa.Table)
         assert len(table) == 0
+        assert "id" in table.column_names
+        assert "result" in table.column_names
 
     def test_run_cache_only_is_noop(self):
         """run() on a CACHE_ONLY node returns without error and without computation."""
@@ -163,3 +165,18 @@ class TestIterDatasReadOnly:
         assert isinstance(errors[0], ValueError)
         # Two non-failing data should succeed
         assert len(results) == 2
+
+
+def test_as_table_empty_schema_matches_non_empty_schema():
+    """as_table() empty table schema matches populated table schema column-for-column."""
+    db = InMemoryArrowDatabase()
+    node_after = _make_node(db=db)
+    node_after.run()
+    full_table = node_after.as_table()
+
+    node_before = _make_node()
+    empty_table = node_before.as_table()
+
+    assert empty_table.num_rows == 0
+    assert full_table.num_rows > 0
+    assert set(empty_table.column_names) == set(full_table.column_names)

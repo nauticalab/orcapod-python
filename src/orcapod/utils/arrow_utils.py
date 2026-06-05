@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping, Collection
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-
-from typing import TYPE_CHECKING
-from orcapod.utils.lazy_module import LazyModule
 from orcapod.system_constants import constants
+from orcapod.types import ColumnConfig
+from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -1207,6 +1206,61 @@ def add_source_info(
         )
 
     return table
+
+
+def apply_column_config(
+    table: "pa.Table",
+    column_config: ColumnConfig,
+    tag_keys: tuple[str, ...],
+    data_keys: tuple[str, ...],
+) -> "pa.Table":
+    """Apply ``ColumnConfig`` column filtering and optional tag-sort to a table.
+
+    Args:
+        table: A fully-materialized PyArrow table (all columns present).
+        column_config: Resolved column configuration.
+        tag_keys: Names of the regular (non-system) tag columns.
+        data_keys: Names of the data columns.
+
+    Returns:
+        A new table with the appropriate columns dropped and optionally
+        sorted by tag columns.
+    """
+    drop_columns = []
+    if not column_config.system_tags:
+        drop_columns.extend(
+            c for c in table.column_names
+            if c.startswith(constants.SYSTEM_TAG_PREFIX)
+        )
+    if not column_config.source:
+        drop_columns.extend(
+            f"{constants.SOURCE_PREFIX}{c}" for c in data_keys
+        )
+    if not column_config.context:
+        drop_columns.append(constants.CONTEXT_KEY)
+    if not column_config.meta:
+        drop_columns.extend(
+            c for c in table.column_names if c.startswith(constants.META_PREFIX)
+        )
+    elif not isinstance(column_config.meta, bool):
+        drop_columns.extend(
+            c for c in table.column_names
+            if c.startswith(constants.META_PREFIX)
+            and not any(c.startswith(p) for p in column_config.meta)
+        )
+    output_table = table.drop(
+        [c for c in drop_columns if c in table.column_names]
+    )
+    if column_config.sort_by_tags:
+        import polars as pl
+        output_table_schema = output_table.schema
+        output_table = (
+            pl.DataFrame(output_table)
+            .sort(by=list(tag_keys), descending=False)
+            .to_arrow()
+        )
+        output_table = restore_schema_nullability(output_table, output_table_schema)
+    return output_table
 
 
 if __name__ == "__main__":

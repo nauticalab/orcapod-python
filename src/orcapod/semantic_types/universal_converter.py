@@ -518,9 +518,19 @@ class UniversalTypeConverter:
                 if python_type:
                     return python_type
 
-            # Dataclass structs: actual type is resolved per-row at decode time via __type value
+            # Dataclass structs: synthesize a concrete dataclass from the struct's
+            # field definitions. The sentinel field is excluded; each remaining
+            # field's Arrow type is recursively converted to a Python type.
+            # The result is cached automatically by arrow_type_to_python_type()'s
+            # _arrow_to_python_types dict so the same class is reused for the
+            # same struct schema.
             if has_dataclass_type_sentinel(arrow_type):
-                return Any
+                fields = [
+                    (field.name, self.arrow_type_to_python_type(field.type))
+                    for field in arrow_type
+                    if field.name != DATACLASS_TYPE_FIELD
+                ]
+                return dataclasses.make_dataclass("_SynthesizedDataclass", fields)
 
             # Check if it is heterogeneous tuple
             if len(arrow_type) > 0 and all(

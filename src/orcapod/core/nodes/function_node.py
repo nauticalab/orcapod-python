@@ -39,6 +39,10 @@ from orcapod.protocols.core_protocols import (
     TrackerManagerProtocol,
 )
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
+from orcapod.protocols.observability_protocols import (
+    DataExecutionLoggerProtocol,
+    ExecutionObserverProtocol,
+)
 from orcapod.system_constants import constants
 from orcapod.types import (
     ColumnConfig,
@@ -52,11 +56,6 @@ from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
 logger = logging.getLogger(__name__)
-
-from orcapod.protocols.observability_protocols import (
-    ExecutionObserverProtocol,
-    DataExecutionLoggerProtocol,
-)
 
 if TYPE_CHECKING:
     import polars as pl
@@ -319,80 +318,43 @@ class FunctionNodeBase(StreamBase):
         all_info: bool = False,
     ) -> "pa.Table":
         if self._cached_output_table is None:
-            all_tags = []
-            all_data = []
-            tag_schema, data_schema = None, None
+            all_tags: list[dict] = []
+            all_data: list[dict] = []
+            tag_python_schema, data_python_schema = self.output_schema(all_info=True)
             for tag, data in self.iter_data():
-                if tag_schema is None:
-                    tag_schema = tag.arrow_schema(all_info=True)
-                if data_schema is None:
-                    data_schema = data.arrow_schema(all_info=True)
                 all_tags.append(tag.as_dict(all_info=True))
                 all_data.append(data.as_dict(all_info=True))
 
-            if not all_tags:
-                self._cached_output_table = pa.table({})
-
             converter = self.data_context.type_converter
+            tag_arrow_schema = converter.python_schema_to_arrow_schema(tag_python_schema)
+            data_arrow_schema = converter.python_schema_to_arrow_schema(data_python_schema)
 
-            # Derive the Python schema from the Arrow schema when available,
-            # rather than re-inferring from dict values. This preserves precise
-            # types for empty containers (e.g. {} infers as dict[Any, Any] but
-            # the Arrow schema knows it's dict[str, str]).
-            data_python_schema = (
-                converter.arrow_schema_to_python_schema(data_schema)
-                if data_schema is not None
-                else None
-            )
-            struct_data = converter.python_dicts_to_struct_dicts(
-                all_data, python_schema=data_python_schema
-            )
-            all_tags_as_tables: pa.Table = pa.Table.from_pylist(
-                all_tags, schema=tag_schema
-            )
-            if constants.CONTEXT_KEY in all_tags_as_tables.column_names:
-                all_tags_as_tables = all_tags_as_tables.drop([constants.CONTEXT_KEY])
-            all_data_as_tables: pa.Table = pa.Table.from_pylist(
-                struct_data, schema=data_schema
-            )
-
-            self._cached_output_table = arrow_utils.hstack_tables(
-                all_tags_as_tables, all_data_as_tables
-            )
-        if self._cached_output_table is None:
-            self._cached_output_table = pa.table({})
+            if not all_tags:
+                self._cached_output_table = pa.Table.from_pylist(
+                    [],
+                    schema=converter.python_schema_to_arrow_schema(
+                        tag_python_schema + data_python_schema
+                    ),
+                )
+            else:
+                struct_data = converter.python_dicts_to_struct_dicts(
+                    all_data, python_schema=data_python_schema
+                )
+                all_tags_as_tables: pa.Table = pa.Table.from_pylist(
+                    all_tags, schema=tag_arrow_schema
+                )
+                if constants.CONTEXT_KEY in all_tags_as_tables.column_names:
+                    all_tags_as_tables = all_tags_as_tables.drop([constants.CONTEXT_KEY])
+                all_data_as_tables: pa.Table = pa.Table.from_pylist(
+                    struct_data, schema=data_arrow_schema
+                )
+                self._cached_output_table = arrow_utils.hstack_tables(
+                    all_tags_as_tables, all_data_as_tables
+                )
 
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
-
-        drop_columns = []
-        if not column_config.system_tags:
-            drop_columns.extend(
-                [
-                    c
-                    for c in self._cached_output_table.column_names
-                    if c.startswith(constants.SYSTEM_TAG_PREFIX)
-                ]
-            )
-        if not column_config.source:
-            drop_columns.extend(f"{constants.SOURCE_PREFIX}{c}" for c in self.keys()[1])
-        if not column_config.context:
-            drop_columns.append(constants.CONTEXT_KEY)
-        if not column_config.meta:
-            drop_columns.extend(
-                c
-                for c in self._cached_output_table.column_names
-                if c.startswith(constants.META_PREFIX)
-            )
-        elif not isinstance(column_config.meta, bool):
-            # Collection[str]: keep only meta columns matching the specified prefixes
-            drop_columns.extend(
-                c
-                for c in self._cached_output_table.column_names
-                if c.startswith(constants.META_PREFIX)
-                and not any(c.startswith(p) for p in column_config.meta)
-            )
-        output_table = self._cached_output_table.drop(
-            [c for c in drop_columns if c in self._cached_output_table.column_names]
+        output_table = arrow_utils.apply_column_config(
+            self._cached_output_table, column_config, *self.keys()
         )
 
         if column_config.content_hash:
@@ -403,9 +365,7 @@ class FunctionNodeBase(StreamBase):
                 self._cached_content_hash_column = pa.array(
                     content_hashes, type=pa.large_string()
                 )
-            assert self._cached_content_hash_column is not None, (
-                "_cached_content_hash_column should not be None here."
-            )
+            assert self._cached_content_hash_column is not None
             hash_column_name = (
                 "_content_hash"
                 if column_config.content_hash is True
@@ -415,14 +375,6 @@ class FunctionNodeBase(StreamBase):
                 hash_column_name, self._cached_content_hash_column
             )
 
-        if column_config.sort_by_tags:
-            output_table_schema = output_table.schema
-            output_table = (
-                pl.DataFrame(output_table)
-                .sort(by=self.keys()[0], descending=False)
-                .to_arrow()
-            )
-            output_table = arrow_utils.restore_schema_nullability(output_table, output_table_schema)
         return output_table
 
     def __repr__(self) -> str:
