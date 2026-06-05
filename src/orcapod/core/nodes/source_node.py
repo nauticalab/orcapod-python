@@ -204,28 +204,19 @@ class SourceNodeBase(TraceableBase, ABC):
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """Return ``(tag_keys, data_keys)``.
 
-        When ``columns.system_tags`` is ``True`` (or ``all_info=True``), the two
-        system-tag columns for this node's schema are appended to ``tag_keys``.
-        Their names are deterministic from the declared schemas and match what a
-        concrete source with the same schema would produce.
-
-        Other ``ColumnConfig`` flags (``meta``, ``context``, ``source``,
-        ``content_hash``, ``sort_by_tags``) are no-ops at the node level —
-        consistent with ``ArrowTableStream.keys()`` which also ignores them.
+        Derived from ``output_schema()`` to ensure the two methods are always
+        consistent. See ``output_schema()`` for the full description of which
+        ``ColumnConfig`` flags are honoured at the node level.
 
         Args:
             columns: Column selection config.
-            all_info: If ``True``, equivalent to ``ColumnConfig(system_tags=True)``
-                for this method.
+            all_info: If ``True``, include all available column groups.
 
         Returns:
             Tuple of ``(tag_column_names, data_column_names)``.
         """
-        columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
-        tag_keys = tuple(self._tag_schema.keys())
-        if columns_config.system_tags:
-            tag_keys += system_tag_column_names(self._schema_hash_str)
-        return tag_keys, tuple(self._data_schema.keys())
+        tag_schema, data_schema = self.output_schema(columns=columns, all_info=all_info)
+        return tuple(tag_schema.keys()), tuple(data_schema.keys())
 
     # ------------------------------------------------------------------
     # Validation
