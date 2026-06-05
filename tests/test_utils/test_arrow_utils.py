@@ -3,8 +3,10 @@
 import pyarrow as pa
 import pytest
 
+from orcapod.types import ColumnConfig
 from orcapod.utils.arrow_utils import (
     add_source_info,
+    apply_column_config,
     infer_schema_nullable,
     make_schema_non_nullable,
     prepare_prefixed_columns,
@@ -283,3 +285,66 @@ class TestSystemTagColumnNames:
         src_col, rec_col = system_tag_column_names(schema_hash)
         assert src_col in enriched.column_names
         assert rec_col in enriched.column_names
+
+
+# ---------------------------------------------------------------------------
+# apply_column_config
+# ---------------------------------------------------------------------------
+
+
+class TestApplyColumnConfigMetaNormalization:
+    """apply_column_config must normalise unprefixed meta names by prepending '__'.
+
+    ColumnConfig documents: "prefix '__' is added automatically if not present".
+    Without normalisation, ``ColumnConfig(meta=["pipeline"])`` would DROP
+    ``__pipeline*`` columns because ``"__pipeline_hash".startswith("pipeline")``
+    is False.
+    """
+
+    def _make_table(self) -> pa.Table:
+        return pa.table(
+            {
+                "id": pa.array([1], type=pa.int64()),
+                "result": pa.array([42], type=pa.int64()),
+                "__pipeline_hash": pa.array(["abc"], type=pa.large_string()),
+                "__data_id": pa.array(["xyz"], type=pa.large_string()),
+            }
+        )
+
+    def test_unprefixed_meta_name_keeps_matching_meta_column(self):
+        """meta=['pipeline'] (no leading '__') keeps __pipeline* columns."""
+        table = self._make_table()
+        config = ColumnConfig(meta=["pipeline"])
+        result = apply_column_config(table, config, tag_keys=("id",))
+        assert "__pipeline_hash" in result.column_names
+
+    def test_unprefixed_meta_name_drops_non_matching_meta_column(self):
+        """meta=['pipeline'] drops __data_id because it doesn't match 'pipeline'."""
+        table = self._make_table()
+        config = ColumnConfig(meta=["pipeline"])
+        result = apply_column_config(table, config, tag_keys=("id",))
+        assert "__data_id" not in result.column_names
+
+    def test_prefixed_meta_name_also_works(self):
+        """meta=['__pipeline'] (already prefixed) behaves identically."""
+        table = self._make_table()
+        config = ColumnConfig(meta=["__pipeline"])
+        result = apply_column_config(table, config, tag_keys=("id",))
+        assert "__pipeline_hash" in result.column_names
+        assert "__data_id" not in result.column_names
+
+    def test_meta_true_keeps_all_meta_columns(self):
+        """meta=True keeps every __* column."""
+        table = self._make_table()
+        config = ColumnConfig(meta=True)
+        result = apply_column_config(table, config, tag_keys=("id",))
+        assert "__pipeline_hash" in result.column_names
+        assert "__data_id" in result.column_names
+
+    def test_meta_false_drops_all_meta_columns(self):
+        """meta=False (default) drops every __* column."""
+        table = self._make_table()
+        config = ColumnConfig(meta=False)
+        result = apply_column_config(table, config, tag_keys=("id",))
+        assert "__pipeline_hash" not in result.column_names
+        assert "__data_id" not in result.column_names

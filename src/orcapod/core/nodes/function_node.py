@@ -320,20 +320,26 @@ class FunctionNodeBase(StreamBase):
         if self._cached_output_table is None:
             all_tags: list[dict] = []
             all_data: list[dict] = []
-            tag_python_schema, data_python_schema = self.output_schema(all_info=True)
+            # Arrow schemas captured from the first datagram in the stream; these
+            # include source-info, meta, and system-tag columns that the declared
+            # output_schema() does not expose.
+            first_tag_arrow_schema: "pa.Schema | None" = None
+            first_data_arrow_schema: "pa.Schema | None" = None
             for tag, data in self.iter_data():
+                if first_tag_arrow_schema is None:
+                    first_tag_arrow_schema = tag.arrow_schema(all_info=True)
+                    first_data_arrow_schema = data.arrow_schema(all_info=True)
                 all_tags.append(tag.as_dict(all_info=True))
                 all_data.append(data.as_dict(all_info=True))
 
             converter = self.data_context.type_converter
-            tag_arrow_schema = converter.python_schema_to_arrow_schema(tag_python_schema)
-            data_arrow_schema = converter.python_schema_to_arrow_schema(data_python_schema)
 
             if not all_tags:
                 # No data was produced (node has not been run yet or produced zero
                 # outputs).  Build a zero-row table whose schema is derived from the
                 # pod's declared output so that callers always receive a well-formed
                 # schema regardless of whether the node has actually executed.
+                tag_python_schema, data_python_schema = self.output_schema(all_info=True)
                 self._cached_output_table = pa.Table.from_pylist(
                     [],
                     schema=converter.python_schema_to_arrow_schema(
@@ -341,16 +347,24 @@ class FunctionNodeBase(StreamBase):
                     ),
                 )
             else:
+                assert first_tag_arrow_schema is not None
+                assert first_data_arrow_schema is not None
+                # Derive the Python schema from the actual data Arrow schema so that
+                # python_dicts_to_struct_dicts processes source-info, meta, and other
+                # extra columns alongside the declared data fields.
+                data_python_schema_full = converter.arrow_schema_to_python_schema(
+                    first_data_arrow_schema
+                )
                 struct_data = converter.python_dicts_to_struct_dicts(
-                    all_data, python_schema=data_python_schema
+                    all_data, python_schema=data_python_schema_full
                 )
                 all_tags_as_tables: pa.Table = pa.Table.from_pylist(
-                    all_tags, schema=tag_arrow_schema
+                    all_tags, schema=first_tag_arrow_schema
                 )
                 if constants.CONTEXT_KEY in all_tags_as_tables.column_names:
                     all_tags_as_tables = all_tags_as_tables.drop([constants.CONTEXT_KEY])
                 all_data_as_tables: pa.Table = pa.Table.from_pylist(
-                    struct_data, schema=data_arrow_schema
+                    struct_data, schema=first_data_arrow_schema
                 )
                 self._cached_output_table = arrow_utils.hstack_tables(
                     all_tags_as_tables, all_data_as_tables
