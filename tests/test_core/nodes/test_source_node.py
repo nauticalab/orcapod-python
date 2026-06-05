@@ -319,3 +319,85 @@ class TestSourceNodeColumnConfig:
         t, d = node.output_schema()
         assert t == tag_schema
         assert d == data_schema
+
+    def test_unbound_job_node_keys_default_unchanged(self, tag_schema, data_schema):
+        """Regression: unbound SourceJobNode.keys() still returns plain schema keys."""
+        from orcapod.core.nodes.source_node import SourceJobNode
+
+        job_node = SourceJobNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
+        tag_keys, data_keys = job_node.keys()
+        assert tag_keys == ("id",)
+        assert data_keys == ("value",)
+
+    def test_unbound_system_tag_names_match_bound(self, tag_schema, data_schema):
+        """Unbound SJN.keys(system_tags=True) returns the same names as the equivalent bound source."""
+        from orcapod.core.nodes.source_node import SourceJobNode
+        from orcapod.core.sources.dict_source import DictSource
+        from orcapod.types import ColumnConfig
+
+        src = DictSource(data=[{"id": 1, "value": 1.0}], tag_columns=["id"])
+        unbound = SourceJobNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
+        bound = SourceJobNode(
+            name="x", tag_schema=tag_schema, data_schema=data_schema, bound_source=src
+        )
+
+        unbound_keys = unbound.keys(columns=ColumnConfig(system_tags=True))
+        bound_keys = bound.keys(columns=ColumnConfig(system_tags=True))
+        assert unbound_keys == bound_keys
+
+    def test_bound_keys_delegates_to_source(self, tag_schema, data_schema):
+        """Bound SourceJobNode.keys() delegates to bound_source.keys()."""
+        from unittest.mock import MagicMock
+        from orcapod.core.nodes.source_node import SourceJobNode
+        from orcapod.types import ColumnConfig
+
+        mock_source = MagicMock()
+        mock_source.output_schema.return_value = (tag_schema, data_schema)
+        mock_source.keys.return_value = (("id",), ("value",))
+
+        job_node = SourceJobNode(name="x", bound_source=mock_source)
+        cfg = ColumnConfig(system_tags=True)
+        job_node.keys(columns=cfg, all_info=False)
+
+        mock_source.keys.assert_called_once_with(columns=cfg, all_info=False)
+
+    def test_bound_keys_all_info_matches_source_directly(self, tag_schema, data_schema):
+        """Bound SJN.keys(all_info=True) == bound_source.keys(all_info=True)."""
+        from orcapod.core.nodes.source_node import SourceJobNode
+        from orcapod.core.sources.dict_source import DictSource
+
+        src = DictSource(data=[{"id": 1, "value": 1.0}], tag_columns=["id"])
+        job_node = SourceJobNode(
+            name="x", tag_schema=tag_schema, data_schema=data_schema, bound_source=src
+        )
+
+        assert job_node.keys(all_info=True) == src.keys(all_info=True)
+
+    def test_bound_output_schema_delegates_to_source(self, tag_schema, data_schema):
+        """Bound SourceJobNode.output_schema() delegates to bound_source.output_schema()."""
+        from unittest.mock import MagicMock
+        from orcapod.core.nodes.source_node import SourceJobNode
+        from orcapod.types import ColumnConfig
+
+        mock_source = MagicMock()
+        mock_source.output_schema.return_value = (tag_schema, data_schema)
+
+        job_node = SourceJobNode(name="x", bound_source=mock_source)
+        # Reset call history accumulated during __init__ (schema derivation).
+        mock_source.output_schema.reset_mock()
+        cfg = ColumnConfig(system_tags=True)
+        job_node.output_schema(columns=cfg, all_info=False)
+
+        mock_source.output_schema.assert_called_once_with(columns=cfg, all_info=False)
+
+    def test_bound_output_schema_all_info_matches_source_directly(self, tag_schema, data_schema):
+        """Bound SJN.output_schema(all_info=True) == bound_source.output_schema(all_info=True)."""
+        from orcapod.core.nodes.source_node import SourceJobNode
+        from orcapod.core.sources.dict_source import DictSource
+
+        src = DictSource(data=[{"id": 1, "value": 1.0}], tag_columns=["id"])
+        job_node = SourceJobNode(
+            name="x", tag_schema=tag_schema, data_schema=data_schema, bound_source=src
+        )
+
+        assert job_node.output_schema(all_info=True) == src.output_schema(all_info=True)
