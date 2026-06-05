@@ -1259,10 +1259,17 @@ def apply_column_config(
             c for c in table.column_names if c.startswith(constants.META_PREFIX)
         )
     elif not isinstance(column_config.meta, bool):
+        # Normalize: prepend META_PREFIX to any user-supplied prefix that doesn't
+        # already carry it.  This matches ColumnConfig's documented behaviour that
+        # the '__' prefix is added automatically when not present.
+        normalized_meta_prefixes = [
+            p if p.startswith(constants.META_PREFIX) else f"{constants.META_PREFIX}{p}"
+            for p in column_config.meta
+        ]
         drop_columns.extend(
             c for c in table.column_names
             if c.startswith(constants.META_PREFIX)
-            and not any(c.startswith(p) for p in column_config.meta)
+            and not any(c.startswith(p) for p in normalized_meta_prefixes)
         )
     output_table = table.drop(
         [c for c in drop_columns if c in table.column_names]

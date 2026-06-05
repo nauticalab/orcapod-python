@@ -180,3 +180,21 @@ def test_as_table_empty_schema_matches_non_empty_schema():
     assert empty_table.num_rows == 0
     assert full_table.num_rows > 0
     assert set(empty_table.column_names) == set(full_table.column_names)
+
+
+def test_as_table_all_info_includes_source_columns():
+    """as_table(all_info=True) includes _source_<field> columns for each data field.
+
+    Regression guard: the refactored implementation previously derived the cached
+    table schema from ``output_schema()`` which omits source-info columns, causing
+    them to be silently dropped from the cached table and therefore absent even when
+    the caller requested them via ``all_info=True``.
+    """
+    node = _make_node()
+    node.run()
+    table = node.as_table(all_info=True)
+    assert "result" in table.column_names, "data column 'result' must be present"
+    assert "_source_result" in table.column_names, (
+        "_source_result must be present when all_info=True; "
+        "schema was incorrectly derived from declared output_schema() only"
+    )
