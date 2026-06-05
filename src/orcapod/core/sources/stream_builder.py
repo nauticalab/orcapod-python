@@ -16,6 +16,7 @@ from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.system_constants import constants
 from orcapod.types import ContentHash
 from orcapod.utils import arrow_utils
+from orcapod.utils.schema_utils import compute_schema_hash
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -126,9 +127,12 @@ class SourceStreamBuilder:
         data_python = self._data_context.type_converter.arrow_schema_to_python_schema(
             data_schema
         )
-        schema_hash = self._data_context.semantic_hasher.hash_object(
-            (tag_python, data_python)
-        ).to_hex(char_count=self._config.schema_hash_n_char)
+        schema_hash = compute_schema_hash(
+            tag_python,
+            data_python,
+            self._data_context.semantic_hasher,
+            self._config.schema_hash_n_char,
+        )
 
         # 5. Compute table hash for data identity.
         table_hash = self._data_context.arrow_hasher.hash_table(table)
