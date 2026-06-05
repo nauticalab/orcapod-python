@@ -346,20 +346,21 @@ class TestSourceNodeColumnConfig:
         assert unbound_keys == bound_keys
 
     def test_bound_keys_delegates_to_source(self, tag_schema, data_schema):
-        """Bound SourceJobNode.keys() delegates to bound_source.keys()."""
+        """Bound SourceJobNode.keys() delegates to bound_source.output_schema()."""
         from unittest.mock import MagicMock
         from orcapod.core.nodes.source_node import SourceJobNode
         from orcapod.types import ColumnConfig
 
         mock_source = MagicMock()
         mock_source.output_schema.return_value = (tag_schema, data_schema)
-        mock_source.keys.return_value = (("id",), ("value",))
 
         job_node = SourceJobNode(name="x", bound_source=mock_source)
+        mock_source.output_schema.reset_mock()  # clear init-time schema derivation call
+
         cfg = ColumnConfig(system_tags=True)
         job_node.keys(columns=cfg, all_info=False)
 
-        mock_source.keys.assert_called_once_with(columns=cfg, all_info=False)
+        mock_source.output_schema.assert_called_once_with(columns=cfg, all_info=False)
 
     def test_bound_keys_all_info_matches_source_directly(self, tag_schema, data_schema):
         """Bound SJN.keys(all_info=True) == bound_source.keys(all_info=True)."""
