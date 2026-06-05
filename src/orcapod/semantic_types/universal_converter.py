@@ -18,7 +18,7 @@ import typing
 from collections.abc import Callable, Mapping
 
 # Handle generic types
-from typing import TYPE_CHECKING, Any, TypedDict, get_args, get_origin
+from typing import TYPE_CHECKING, Any, Optional, TypedDict, get_args, get_origin
 
 from orcapod.contexts import DataContext, resolve_context
 from orcapod.semantic_types.semantic_registry import SemanticTypeRegistry
@@ -525,15 +525,26 @@ class UniversalTypeConverter:
             # _arrow_to_python_types dict so the same class is reused for the
             # same struct schema.
             if has_dataclass_type_sentinel(arrow_type):
+                # Respect per-field nullability: nullable Arrow fields become
+                # Optional[T] annotations so that the synthesized dataclass
+                # correctly conveys that those fields can hold None, and so
+                # that round-trips through python_schema_to_arrow_schema
+                # preserve the nullable flag.
                 fields = [
-                    (field.name, self.arrow_type_to_python_type(field.type))
+                    (
+                        field.name,
+                        Optional[self.arrow_type_to_python_type(field.type)]
+                        if field.nullable
+                        else self.arrow_type_to_python_type(field.type),
+                    )
                     for field in arrow_type
                     if field.name != DATACLASS_TYPE_FIELD
                 ]
-                # Use a hash of the field signatures as the class name so that
-                # two distinct dataclass schemas never collide in the lookup cache.
+                # Include nullability in the hash so that two structs with
+                # identical field names and Arrow types but different per-field
+                # nullability produce distinct class names in the lookup cache.
                 field_parts = [
-                    f"{f.name}:{f.type}"
+                    f"{f.name}:{'?' if f.nullable else ''}{f.type}"
                     for f in arrow_type
                     if f.name != DATACLASS_TYPE_FIELD
                 ]

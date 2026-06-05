@@ -695,6 +695,53 @@ def test_arrow_schema_to_python_schema_dataclass_round_trip():
     assert recovered_arrow.field("label").type == pa.large_string()
 
 
+def test_arrow_schema_to_python_schema_dataclass_nullable_fields():
+    """Nullable struct fields produce Optional[T] annotations in the synthesized dataclass.
+
+    Regression guard for the nullability fix: when a dataclass-sentinel struct has a
+    nullable field, the synthesized Python dataclass must annotate it as ``Optional[T]``
+    so that:
+    - The type correctly conveys that None is a valid value.
+    - Round-trips through ``python_schema_to_arrow_schema`` preserve ``nullable=True``
+      (because ``Optional[T]`` triggers ``_is_optional_type``).
+
+    Non-nullable fields must remain plain ``T`` (not Optional).
+    """
+    converter = UniversalTypeConverter()
+
+    # Build a raw dataclass-sentinel struct type manually with mixed nullability.
+    import pyarrow as _pa
+    struct_type = _pa.struct([
+        _pa.field(DATACLASS_TYPE_FIELD, _pa.large_string()),     # sentinel (excluded)
+        _pa.field("required_field", _pa.int64(), nullable=False),
+        _pa.field("optional_field", _pa.int64(), nullable=True),
+    ])
+    assert has_dataclass_type_sentinel(struct_type)
+
+    synthesized = converter.arrow_type_to_python_type(struct_type)
+    assert dataclasses.is_dataclass(synthesized)
+
+    field_map = {f.name: f.type for f in dataclasses.fields(synthesized)}
+
+    # Non-nullable field must be plain int (or equivalent), not Optional.
+    import typing as _typing
+    required_type = field_map["required_field"]
+    assert _typing.get_origin(required_type) is not _typing.Union, (
+        "required_field (nullable=False) must not be Optional"
+    )
+
+    # Nullable field must be Optional[T].
+    optional_type = field_map["optional_field"]
+    assert _typing.get_origin(optional_type) is _typing.Union, (
+        "optional_field (nullable=True) must be Optional[T]"
+    )
+    non_none_args = [a for a in _typing.get_args(optional_type) if a is not type(None)]
+    assert len(non_none_args) == 1, "Optional[T] must wrap exactly one non-None type"
+
+    # Sentinel must not appear in the synthesized dataclass fields.
+    assert DATACLASS_TYPE_FIELD not in field_map
+
+
 def test_two_distinct_dataclass_columns_no_collision():
     """Two dataclass columns with different schemas are synthesized as distinct types.
 

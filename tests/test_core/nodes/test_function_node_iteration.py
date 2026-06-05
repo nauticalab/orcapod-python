@@ -168,7 +168,7 @@ class TestIterDatasReadOnly:
 
 
 def test_as_table_empty_schema_matches_non_empty_schema():
-    """as_table() empty table schema matches populated table schema column-for-column."""
+    """as_table() empty table has the same set of columns as the populated table."""
     db = InMemoryArrowDatabase()
     node_after = _make_node(db=db)
     node_after.run()
