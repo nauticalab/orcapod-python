@@ -723,20 +723,26 @@ def test_arrow_schema_to_python_schema_dataclass_nullable_fields():
 
     field_map = {f.name: f.type for f in dataclasses.fields(synthesized)}
 
-    # Non-nullable field must be plain int (or equivalent), not Optional.
+    import types as _types
     import typing as _typing
+
+    def _is_union_with_none(t: object) -> bool:
+        """Return True for both T | None (types.UnionType) and Optional[T] (typing.Union)."""
+        return isinstance(t, _types.UnionType) or _typing.get_origin(t) is _typing.Union
+
+    # Non-nullable field must be plain int (or equivalent), not a union-with-None.
     required_type = field_map["required_field"]
-    assert _typing.get_origin(required_type) is not _typing.Union, (
-        "required_field (nullable=False) must not be Optional"
+    assert not _is_union_with_none(required_type), (
+        "required_field (nullable=False) must not be T | None"
     )
 
-    # Nullable field must be Optional[T].
+    # Nullable field must be T | None (or Optional[T]).
     optional_type = field_map["optional_field"]
-    assert _typing.get_origin(optional_type) is _typing.Union, (
-        "optional_field (nullable=True) must be Optional[T]"
+    assert _is_union_with_none(optional_type), (
+        "optional_field (nullable=True) must be T | None"
     )
     non_none_args = [a for a in _typing.get_args(optional_type) if a is not type(None)]
-    assert len(non_none_args) == 1, "Optional[T] must wrap exactly one non-None type"
+    assert len(non_none_args) == 1, "T | None must wrap exactly one non-None type"
 
     # Sentinel must not appear in the synthesized dataclass fields.
     assert DATACLASS_TYPE_FIELD not in field_map
