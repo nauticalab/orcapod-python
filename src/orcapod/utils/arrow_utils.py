@@ -937,6 +937,30 @@ def get_system_columns(table: "pa.Table") -> "pa.Table":
     )
 
 
+def system_tag_column_names(schema_hash: str) -> tuple[str, str]:
+    """Return the (source_id_col_name, record_id_col_name) system-tag column names.
+
+    These are the two column names that ``add_system_tag_columns`` adds to every
+    source table, and that ``ArrowTableStream`` exposes via ``keys(system_tags=True)``
+    and ``output_schema(system_tags=True)``.
+
+    Args:
+        schema_hash: Hex schema hash produced by ``compute_schema_hash()``.
+
+    Returns:
+        Tuple of ``(source_id_column_name, record_id_column_name)``.
+        Both start with ``constants.SYSTEM_TAG_PREFIX`` and have ``large_string``
+        type in the Arrow table.
+    """
+    source_id_col = (
+        f"{constants.SYSTEM_TAG_SOURCE_ID_PREFIX}{constants.BLOCK_SEPARATOR}{schema_hash}"
+    )
+    record_id_col = (
+        f"{constants.SYSTEM_TAG_RECORD_ID_PREFIX}{constants.BLOCK_SEPARATOR}{schema_hash}"
+    )
+    return source_id_col, record_id_col
+
+
 def add_system_tag_columns(
     table: "pa.Table",
     schema_hash: str,
@@ -961,8 +985,7 @@ def add_system_tag_columns(
     if len(record_ids) != table.num_rows:
         raise ValueError("Length of record_ids must match number of rows in the table.")
 
-    source_id_col_name = f"{constants.SYSTEM_TAG_SOURCE_ID_PREFIX}{constants.BLOCK_SEPARATOR}{schema_hash}"
-    record_id_col_name = f"{constants.SYSTEM_TAG_RECORD_ID_PREFIX}{constants.BLOCK_SEPARATOR}{schema_hash}"
+    source_id_col_name, record_id_col_name = system_tag_column_names(schema_hash)
 
     source_id_array = pa.array(source_ids, type=pa.large_string())
     record_id_array = pa.array(record_ids, type=pa.large_string())
