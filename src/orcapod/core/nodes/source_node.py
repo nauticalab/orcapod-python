@@ -6,6 +6,7 @@ Both share SourceNodeBase which provides schema-based identity.
 """
 from __future__ import annotations
 
+import functools
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
@@ -110,12 +111,14 @@ class SourceNodeBase(TraceableBase, ABC):
         """Data schema for this input slot."""
         return self._data_schema
 
-    def _schema_hash(self) -> str:
-        """Compute the schema hash used for system-tag column naming.
+    @functools.cached_property
+    def _schema_hash_str(self) -> str:
+        """Cached schema hash used for system-tag column naming.
 
         Produces the same hash that ``SourceStreamBuilder`` embeds in system-tag
         column names, making it possible to predict those names from the declared
-        schemas alone without requiring a live source.
+        schemas alone without requiring a live source. Computed once and cached
+        since ``_tag_schema`` and ``_data_schema`` are immutable after construction.
 
         Returns:
             Hex string schema hash.
@@ -187,7 +190,7 @@ class SourceNodeBase(TraceableBase, ABC):
         columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
         tag_schema = self._tag_schema
         if columns_config.system_tags:
-            source_id_col, record_id_col = system_tag_column_names(self._schema_hash())
+            source_id_col, record_id_col = system_tag_column_names(self._schema_hash_str)
             tag_schema = Schema(
                 {**dict(tag_schema), source_id_col: str, record_id_col: str}
             )
@@ -221,7 +224,7 @@ class SourceNodeBase(TraceableBase, ABC):
         columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
         tag_keys = tuple(self._tag_schema.keys())
         if columns_config.system_tags:
-            tag_keys += system_tag_column_names(self._schema_hash())
+            tag_keys += system_tag_column_names(self._schema_hash_str)
         return tag_keys, tuple(self._data_schema.keys())
 
     # ------------------------------------------------------------------
