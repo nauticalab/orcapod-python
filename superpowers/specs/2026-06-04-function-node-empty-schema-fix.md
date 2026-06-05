@@ -8,27 +8,24 @@
 
 ## Overview
 
-Three related changes, all motivated by the original bug (ENG-572) in which
+Four related changes, all motivated by the original bug (ENG-572) in which
 `FunctionNodeBase.as_table()` returns a zero-row table with no columns when no
 data exists:
 
-1. **`as_table()` cleanup** — stop inferring schema from datagram content;
-   derive it exclusively from `self.output_schema()`.  Add clean empty/non-empty
-   branching.
-2. **`__type` → `__dataclass.` sentinel rename** — improve discoverability:
-   the sentinel field name now encodes *what* the struct represents.
-3. **`arrow_schema_to_python_schema` fix** — when the converter encounters a
-   dataclass struct, return a synthesized concrete dataclass type instead of `Any`.
-
-Items 2 and 3 are connected: after the rename, the sentinel is more obviously a
-type discriminator, and the converter fix means the round-trip
-`arrow_schema → python_schema → arrow_schema` works correctly for dataclass columns.
+1. **`as_table()` cleanup** — derive schema from `self.output_schema()` upfront;
+   branch immediately on empty vs. non-empty; extract the column-filtering second
+   half into a `StreamBase` helper.
+2. **`Schema.__add__`** — convenience operator that delegates to `Schema.merge()`.
+3. **`__type` → `__dataclass.` sentinel rename** — field name now encodes what the
+   struct represents.
+4. **`arrow_schema_to_python_schema` fix** — return a synthesized concrete dataclass
+   type instead of `Any` for structs with the sentinel.
 
 ---
 
-## Item 1: `as_table()` cleanup in `FunctionNodeBase`
+## Item 1: `as_table()` cleanup
 
-### Root cause of the original bug
+### Root cause
 
 In `FunctionNodeBase.as_table()`, when `iter_data()` yields nothing:
 
@@ -41,115 +38,192 @@ if not all_tags:
     self._cached_output_table = pa.table({})   # placeholder…
 
 # FALLS THROUGH — no else, no early return
-struct_data = converter.python_dicts_to_struct_dicts([], python_schema=None)
 all_tags_as_tables = pa.Table.from_pylist([], schema=None)   # no columns
 all_data_as_tables = pa.Table.from_pylist([], schema=None)   # no columns
 self._cached_output_table = hstack_tables(...)               # OVERWRITES with no columns
 ```
 
-The `pa.table({})` placeholder is immediately overwritten.
+Additional problem in the non-empty branch: `data_schema` is inferred from the
+first datagram (`data.arrow_schema(all_info=True)`) instead of from the pod's
+declared output schema.  The declared schema is authoritative and more stable.
 
-### Additional problem in the non-empty branch
+### Part A: `StreamBase._apply_column_config()`
 
-Even when data exists, the current code infers `data_schema` from the first
-datagram (`data.arrow_schema(all_info=True)`).  This is fragile: the schema
-could differ from the pod's declared output if the runtime type diverges from the
-annotation.  It also requires a redundant `arrow_schema_to_python_schema` round-
-trip.  The declared schema from `self.output_schema()[1]` is the authoritative
-source and should be used directly.
-
-### Design: clean branch + `_make_empty_table()`
-
-**New method `FunctionNodeBase._make_empty_table()`:**
+The second half of `as_table()` — dropping system tags / source / context / meta
+columns, optionally sorting — is purely table-manipulation logic that belongs on
+`StreamBase`.  Content-hash handling (which requires `_cached_content_hash_column`
+and re-iterates `iter_data()`) stays in `FunctionNodeBase`.
 
 ```python
-def _make_empty_table(self) -> "pa.Table":
-    """Build a zero-row PyArrow table matching this node's full output schema.
+# StreamBase
+def _apply_column_config(
+    self,
+    table: "pa.Table",
+    column_config: ColumnConfig,
+) -> "pa.Table":
+    """Apply ``ColumnConfig`` column filtering and optional tag-sort to ``table``.
 
-    Uses ``output_schema(all_info=True)`` for column names/types and
-    ``data_context.type_converter`` for the Python → Arrow type mapping.
+    Args:
+        table: A fully-materialized PyArrow table (all columns present).
+        column_config: Resolved column configuration.
 
     Returns:
-        A zero-row ``pa.Table`` whose schema matches the declared output.
-        Falls back to ``pa.table({})`` for read-only nodes without a live pod.
+        A new table with the appropriate columns dropped and optionally
+        sorted by tag columns.
     """
-    if self._function_pod is None:
-        return pa.table({})
-    tag_schema, data_schema = self.output_schema(all_info=True)
-    converter = self.data_context.type_converter
-    tag_arrow_schema = converter.python_schema_to_arrow_schema(tag_schema)
-    data_arrow_schema = converter.python_schema_to_arrow_schema(data_schema)
-    empty_tag_table = pa.Table.from_pylist([], schema=tag_arrow_schema)
-    empty_data_table = pa.Table.from_pylist([], schema=data_arrow_schema)
-    return arrow_utils.hstack_tables(empty_tag_table, empty_data_table)
+    drop_columns = []
+    if not column_config.system_tags:
+        drop_columns.extend(
+            c for c in table.column_names
+            if c.startswith(constants.SYSTEM_TAG_PREFIX)
+        )
+    if not column_config.source:
+        drop_columns.extend(
+            f"{constants.SOURCE_PREFIX}{c}" for c in self.keys()[1]
+        )
+    if not column_config.context:
+        drop_columns.append(constants.CONTEXT_KEY)
+    if not column_config.meta:
+        drop_columns.extend(
+            c for c in table.column_names if c.startswith(constants.META_PREFIX)
+        )
+    elif not isinstance(column_config.meta, bool):
+        drop_columns.extend(
+            c for c in table.column_names
+            if c.startswith(constants.META_PREFIX)
+            and not any(c.startswith(p) for p in column_config.meta)
+        )
+    output_table = table.drop(
+        [c for c in drop_columns if c in table.column_names]
+    )
+    if column_config.sort_by_tags:
+        output_table_schema = output_table.schema
+        output_table = (
+            pl.DataFrame(output_table)
+            .sort(by=self.keys()[0], descending=False)
+            .to_arrow()
+        )
+        output_table = arrow_utils.restore_schema_nullability(
+            output_table, output_table_schema
+        )
+    return output_table
 ```
 
-**Restructured `as_table()` (the `if self._cached_output_table is None` block):**
+### Part B: Restructured `FunctionNodeBase.as_table()`
 
 ```python
-if self._cached_output_table is None:
-    all_tags = []
-    all_data = []
-    for tag, data in self.iter_data():
-        all_tags.append(tag.as_dict(all_info=True))
-        all_data.append(data.as_dict(all_info=True))
+def as_table(
+    self,
+    *,
+    columns: ColumnConfig | dict[str, Any] | None = None,
+    all_info: bool = False,
+) -> "pa.Table":
+    if self._cached_output_table is None:
+        all_tags = []
+        all_data = []
+        tag_python_schema, data_python_schema = self.output_schema(all_info=True)
+        for tag, data in self.iter_data():
+            all_tags.append(tag.as_dict(all_info=True))
+            all_data.append(data.as_dict(all_info=True))
 
-    if not all_tags:
-        self._cached_output_table = self._make_empty_table()
-    else:
-        tag_schema, data_schema = self.output_schema(all_info=True)
         converter = self.data_context.type_converter
-        tag_arrow_schema = converter.python_schema_to_arrow_schema(tag_schema)
-        data_arrow_schema = converter.python_schema_to_arrow_schema(data_schema)
+        tag_arrow_schema = converter.python_schema_to_arrow_schema(tag_python_schema)
+        data_arrow_schema = converter.python_schema_to_arrow_schema(data_python_schema)
 
-        all_tags_as_table = pa.Table.from_pylist(all_tags, schema=tag_arrow_schema)
-        # _context_key is excluded by the schema; no explicit drop needed.
+        if not all_tags:
+            self._cached_output_table = pa.Table.from_pylist(
+                [],
+                schema=converter.python_schema_to_arrow_schema(
+                    tag_python_schema + data_python_schema
+                ),
+            )
+        else:
+            struct_data = converter.python_dicts_to_struct_dicts(
+                all_data, python_schema=data_python_schema
+            )
+            all_tags_as_tables = pa.Table.from_pylist(
+                all_tags, schema=tag_arrow_schema
+            )
+            if constants.CONTEXT_KEY in all_tags_as_tables.column_names:
+                all_tags_as_tables = all_tags_as_tables.drop([constants.CONTEXT_KEY])
+            all_data_as_tables = pa.Table.from_pylist(
+                struct_data, schema=data_arrow_schema
+            )
+            self._cached_output_table = arrow_utils.hstack_tables(
+                all_tags_as_tables, all_data_as_tables
+            )
 
-        struct_data = converter.python_dicts_to_struct_dicts(
-            all_data, python_schema=data_schema
+    column_config = ColumnConfig.handle_config(columns, all_info=all_info)
+    output_table = self._apply_column_config(self._cached_output_table, column_config)
+
+    if column_config.content_hash:
+        if self._cached_content_hash_column is None:
+            content_hashes = []
+            for tag, data in self.iter_data():
+                content_hashes.append(data.content_hash().to_string())
+            self._cached_content_hash_column = pa.array(
+                content_hashes, type=pa.large_string()
+            )
+        assert self._cached_content_hash_column is not None
+        hash_column_name = (
+            "_content_hash"
+            if column_config.content_hash is True
+            else column_config.content_hash
         )
-        all_data_as_table = pa.Table.from_pylist(struct_data, schema=data_arrow_schema)
-
-        self._cached_output_table = arrow_utils.hstack_tables(
-            all_tags_as_table, all_data_as_table
+        output_table = output_table.append_column(
+            hash_column_name, self._cached_content_hash_column
         )
-# Remove the now-unreachable fallback:
-# if self._cached_output_table is None:
-#     self._cached_output_table = pa.table({})
+
+    return output_table
 ```
 
-### What this removes
+Key differences from the old implementation:
+- `output_schema(all_info=True)` is called **once**, before the loop — schema is never
+  inferred from datagram content.
+- Empty branch creates a zero-row flat table from the combined schema
+  (`tag + data` via `Schema.__add__`) rather than hstacking two empty tables.
+- Non-empty branch uses `data_python_schema` from `output_schema()` directly,
+  eliminating the `arrow_schema_to_python_schema` round-trip.
+- The `_context_key` guard remains as defensive code (the schema passed to
+  `from_pylist` excludes it, but the explicit drop is kept for safety).
+- The `sort_by_tags` block is removed from `as_table()` — handled by
+  `_apply_column_config()`.
+- The unreachable `if self._cached_output_table is None: pa.table({})` fallback
+  at the end is deleted.
 
-| Removed | Reason |
-|---|---|
-| `tag_schema = tag.arrow_schema(all_info=True)` inside the loop | Replaced by `output_schema()` |
-| `data_schema = data.arrow_schema(all_info=True)` inside the loop | Replaced by `output_schema()` |
-| `data_python_schema = converter.arrow_schema_to_python_schema(data_schema)` | No longer needed; `output_schema()[1]` is already a Python schema |
-| `if constants.CONTEXT_KEY in all_tags_as_tables.column_names: drop(...)` | `output_schema()` tag schema excludes `_context_key` — `from_pylist` with an explicit schema silently ignores extra dict keys |
-| Final `if self._cached_output_table is None: pa.table({})` fallback | Unreachable after the restructuring |
+### Why `StreamBase`, not `FunctionNodeBase`, for the helper
 
-### Behavioral note: meta columns
+`StreamBase` already declares `keys()` (abstract) and `iter_data()` (abstract).
+The column-filtering helper uses only `self.keys()[1]` (data column names) and
+operates on an already-materialized table.  It has no dependency on `data_context`
+or any DB state.  Placing it on `StreamBase` makes it available to `OperatorJobNode`
+and any future DB-backed node without code duplication.
 
-The current `as_table(all_info=True)` exposes meta columns (`__data_id`,
-`__pod_version`, etc.) because `tag.arrow_schema(all_info=True)` includes them.
-After the cleanup, `output_schema()` is the authority — it does NOT include meta
-columns (they live on datagrams, not on the declared schema).  `as_table(all_info=True)`
-will no longer return meta columns.  This is more correct: the declared schema is
-canonical; datagram-internal bookkeeping should not leak into the output table.
+`ArrowTableStream.as_table()` is unaffected — it already uses its own optimised
+path and does not call this helper.
 
 ---
 
-## Item 2: Rename `DATACLASS_TYPE_FIELD` from `"__type"` to `"__dataclass."`
+## Item 2: `Schema.__add__`
 
-### Motivation
+Add to `Schema` in `src/orcapod/types.py`:
 
-The current sentinel field name `__type` is generic.  Changing it to `__dataclass.`
-encodes *what kind of thing* the struct represents, making it unambiguous when
-inspecting an Arrow schema.  The trailing dot is intentional: it makes pattern
-matching (`field.name.startswith("__dataclass.")`) unambiguous and signals
-structured namespace usage.
+```python
+def __add__(self, other: object) -> Self:
+    if isinstance(other, Schema):
+        return self.merge(other)
+    raise NotImplementedError(
+        f"Adding {Schema} to {type(other)} is not supported"
+    )
+```
 
-### Change
+`merge()` already exists and raises `ValueError` on type conflicts, which is the
+correct strict behaviour for schema concatenation.  `Self` is already imported from
+`typing`.
+
+---
+
+## Item 3: Rename `DATACLASS_TYPE_FIELD` → `"__dataclass."`
 
 In `src/orcapod/semantic_types/dataclass_encoding.py`:
 
@@ -162,21 +236,20 @@ DATACLASS_TYPE_FIELD = "__dataclass."
 ```
 
 All downstream uses already reference the constant (`has_dataclass_type_sentinel`,
-`dataclass_to_struct_dict`, `struct_dict_to_dataclass`, `dataclass_to_arrow_struct_type`,
-and the Arrow → Python converter in `universal_converter.py`) and require no further
-edits beyond the constant.
+`dataclass_to_struct_dict`, `struct_dict_to_dataclass`,
+`dataclass_to_arrow_struct_type`, and the converter in `universal_converter.py`).
+No further code edits required beyond the constant and test assertions that check
+the literal field name.
 
-### Impact
+The trailing dot is intentional: it is both unambiguous and supports pattern
+matching via `field.name.startswith("__dataclass.")`.
 
-- Serialized data written with `"__type"` is incompatible.  Pre-v0.1.0, no
-  backward-compatibility shims are needed (per project convention).
-- `has_dataclass_type_sentinel()` automatically checks for `"__dataclass."` after
-  the rename.
-- Tests that assert on field names must be updated.
+Serialized data written with `"__type"` is incompatible.  Pre-v0.1.0, no backward-
+compatibility shims are added (per project convention).
 
 ---
 
-## Item 3: Fix `arrow_schema_to_python_schema` for dataclass structs
+## Item 4: Fix `arrow_schema_to_python_schema` for dataclass structs
 
 ### Current behavior
 
@@ -187,21 +260,13 @@ if has_dataclass_type_sentinel(arrow_type):
     return Any   # loses all field-type information
 ```
 
-`Any` is returned because the actual class is resolved per-row at decode time.
-However, at the schema level we *do* know the field names and their types — they
-are encoded in the Arrow struct.  Returning `Any` means `output_schema()` reports
-`Any` for dataclass columns, which breaks `python_schema_to_arrow_schema` round-
-trips and makes schema introspection useless for dataclass outputs.
-
-### Fix: synthesize a concrete dataclass type
-
-Replace the `return Any` with a synthesized concrete dataclass type whose fields
-match the struct (excluding the sentinel):
+### Fix
 
 ```python
 if has_dataclass_type_sentinel(arrow_type):
-    # Build a synthesized dataclass type from the struct fields.
-    # Excludes the sentinel field; converts each field's Arrow type to Python.
+    # Synthesize a concrete dataclass type from the struct's fields.
+    # The sentinel field is excluded; each remaining field's Arrow type
+    # is recursively converted to Python via arrow_type_to_python_type().
     fields = [
         (field.name, self.arrow_type_to_python_type(field.type))
         for field in arrow_type
@@ -210,25 +275,21 @@ if has_dataclass_type_sentinel(arrow_type):
     return dataclasses.make_dataclass("_SynthesizedDataclass", fields)
 ```
 
-The result is a proper `@dataclass` class.  It is automatically cached by
+The result is a proper `@dataclass` type.  It is automatically cached by
 `arrow_type_to_python_type()`'s `_arrow_to_python_types` dict (keyed by
 `pa.StructType`), so the same synthesized class is returned for the same struct
-schema.
+schema — no extra caching needed.
+
+`DATACLASS_TYPE_FIELD` must be imported explicitly in `universal_converter.py`
+(it is currently referenced only indirectly via `has_dataclass_type_sentinel`).
+`dataclasses` (stdlib) must also be imported.
 
 ### Round-trip correctness
 
-After the fix, `python_schema_to_arrow_schema` can convert the synthesized type
-back to the original Arrow struct (because the type is a dataclass, and
-`_convert_python_to_arrow` recognises dataclasses and delegates to
-`dataclass_to_arrow_struct_type`).  The round-trip
-`arrow_schema → python_schema → arrow_schema` is now correct for dataclass columns.
-
-### Imports required in `universal_converter.py`
-
-`dataclasses` and `DATACLASS_TYPE_FIELD` must be imported.  `dataclasses` is a
-stdlib module; `DATACLASS_TYPE_FIELD` is already imported indirectly via
-`has_dataclass_type_sentinel` from `dataclass_encoding` — add an explicit import
-of the constant.
+After the fix, `arrow_schema → python_schema → arrow_schema` works correctly for
+dataclass columns: `python_schema_to_arrow_schema` can convert the synthesized
+type back to the original Arrow struct because `_convert_python_to_arrow`
+recognises dataclasses and delegates to `dataclass_to_arrow_struct_type`.
 
 ---
 
@@ -236,12 +297,14 @@ of the constant.
 
 | File | Change |
 |---|---|
-| `src/orcapod/core/nodes/function_node.py` | Add `_make_empty_table()`; restructure `as_table()` |
+| `src/orcapod/core/streams/base.py` | Add `_apply_column_config()` |
+| `src/orcapod/core/nodes/function_node.py` | Restructure `as_table()` to use `output_schema()` and `_apply_column_config()` |
+| `src/orcapod/types.py` | Add `Schema.__add__` |
 | `src/orcapod/semantic_types/dataclass_encoding.py` | `DATACLASS_TYPE_FIELD = "__dataclass."` |
-| `src/orcapod/semantic_types/universal_converter.py` | Fix `_convert_arrow_to_python` for dataclass structs; import `DATACLASS_TYPE_FIELD` |
+| `src/orcapod/semantic_types/universal_converter.py` | Fix `_convert_arrow_to_python` for dataclass structs; import `dataclasses` and `DATACLASS_TYPE_FIELD` |
 | `tests/test_core/nodes/test_function_node_iteration.py` | Schema assertions in existing test; new empty-vs-non-empty schema test |
 | `tests/test_semantic_types/test_dataclass_encoding.py` | Update sentinel field name assertions; add converter round-trip test |
-| `DESIGN_ISSUES.md` | Add entry for items 1–3 |
+| `DESIGN_ISSUES.md` | Add entry |
 
 ---
 
@@ -249,13 +312,13 @@ of the constant.
 
 ### `test_function_node_iteration.py`
 
-**Update `test_as_table_fresh_node_returns_empty_no_compute`** — add:
+**Update `test_as_table_fresh_node_returns_empty_no_compute`:**
 ```python
-assert "id" in table.column_names      # tag column
-assert "result" in table.column_names  # declared output column
+assert "id" in table.column_names
+assert "result" in table.column_names
 ```
 
-**New `test_as_table_empty_schema_matches_non_empty_schema`**:
+**New `test_as_table_empty_schema_matches_non_empty_schema`:**
 ```python
 def test_as_table_empty_schema_matches_non_empty_schema():
     db = InMemoryArrowDatabase()
@@ -274,14 +337,21 @@ def test_as_table_empty_schema_matches_non_empty_schema():
 ### `test_dataclass_encoding.py`
 
 - Replace all `"__type"` field-name assertions with `"__dataclass."`.
-- **New test**: `arrow_schema_to_python_schema` for a struct with the sentinel
-  returns a dataclass type (not `Any`) with the expected field names and types.
+- **New**: `arrow_schema_to_python_schema` for a dataclass struct returns a
+  concrete dataclass type (not `Any`) with matching field names and types.
+
+### `test_types.py` (or equivalent)
+
+- `Schema.__add__` delegates to `merge()` — test that `s1 + s2` returns the
+  correct combined schema and raises `ValueError` on type conflict.
+- `Schema.__add__` with a non-`Schema` raises `NotImplementedError`.
 
 ---
 
 ## Out of scope
 
-- Behavior for `as_table(all_info=True)` returning meta columns — this is a
-  pre-existing inconsistency that the cleanup removes as a side effect.
-- Schema behavior for `SourceNode` or `OperatorNode`.
+- `ArrowTableStream.as_table()` — already optimised; not touched.
+- `OperatorJobNode.as_table()` — delegates to cached streams; not touched here.
+  Could adopt `_apply_column_config()` in a follow-up.
+- Schema behavior for `SourceNode` or other node types.
 - Changes to the semantic type registry or `SemanticStructConverter` hierarchy.
