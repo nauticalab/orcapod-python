@@ -18,7 +18,7 @@ import typing
 from collections.abc import Callable, Mapping
 
 # Handle generic types
-from typing import TYPE_CHECKING, Any, Optional, TypedDict, get_args, get_origin
+from typing import TYPE_CHECKING, Any, TypedDict, get_args, get_origin
 
 from orcapod.contexts import DataContext, resolve_context
 from orcapod.semantic_types.semantic_registry import SemanticTypeRegistry
@@ -533,7 +533,7 @@ class UniversalTypeConverter:
                 fields = [
                     (
                         field.name,
-                        Optional[self.arrow_type_to_python_type(field.type)]
+                        self.arrow_type_to_python_type(field.type) | None
                         if field.nullable
                         else self.arrow_type_to_python_type(field.type),
                     )
