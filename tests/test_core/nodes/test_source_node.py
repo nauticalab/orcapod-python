@@ -252,3 +252,70 @@ class TestSourceNodeAsTable:
         )
         table = job_node.as_table()
         assert isinstance(table, pa.Table)
+
+
+class TestSourceNodeColumnConfig:
+    """SourceNodeBase must honour column_config / all_info in keys() and output_schema()."""
+
+    def test_unbound_keys_default_unchanged(self, tag_schema, data_schema):
+        """Regression: keys() with no args still returns plain schema keys."""
+        from orcapod.core.nodes.source_node import SourceNode
+
+        node = SourceNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
+        tag_keys, data_keys = node.keys()
+        assert tag_keys == ("id",)
+        assert data_keys == ("value",)
+
+    def test_unbound_keys_system_tags_includes_both_system_cols(self, tag_schema, data_schema):
+        """keys(system_tags=True) adds both system-tag column names to tag_keys."""
+        from orcapod.core.nodes.source_node import SourceNode
+        from orcapod.system_constants import constants
+        from orcapod.types import ColumnConfig
+
+        node = SourceNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
+        tag_keys, data_keys = node.keys(columns=ColumnConfig(system_tags=True))
+
+        assert data_keys == ("value",)
+        assert len(tag_keys) == 3  # id + source_id_col + record_id_col
+        assert tag_keys[0] == "id"
+        # Both extra columns start with the system-tag prefix
+        assert all(k.startswith(constants.SYSTEM_TAG_PREFIX) for k in tag_keys[1:])
+
+    def test_unbound_keys_all_info_same_as_system_tags(self, tag_schema, data_schema):
+        """keys(all_info=True) produces the same result as keys(system_tags=True)."""
+        from orcapod.core.nodes.source_node import SourceNode
+        from orcapod.types import ColumnConfig
+
+        node = SourceNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
+        via_system_tags = node.keys(columns=ColumnConfig(system_tags=True))
+        via_all_info = node.keys(all_info=True)
+        assert via_system_tags == via_all_info
+
+    def test_unbound_output_schema_system_tags_adds_str_entries(self, tag_schema, data_schema):
+        """output_schema(system_tags=True) tag schema includes two str-typed system-tag entries."""
+        from orcapod.core.nodes.source_node import SourceNode
+        from orcapod.system_constants import constants
+        from orcapod.types import ColumnConfig
+
+        node = SourceNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
+        extended_tag_schema, data_schema_out = node.output_schema(
+            columns=ColumnConfig(system_tags=True)
+        )
+
+        assert data_schema_out == data_schema
+        assert "id" in extended_tag_schema
+        system_tag_entries = {
+            k: v for k, v in extended_tag_schema.items()
+            if k.startswith(constants.SYSTEM_TAG_PREFIX)
+        }
+        assert len(system_tag_entries) == 2
+        assert all(v is str for v in system_tag_entries.values())
+
+    def test_unbound_output_schema_default_unchanged(self, tag_schema, data_schema):
+        """Regression: output_schema() with no args still returns plain schemas."""
+        from orcapod.core.nodes.source_node import SourceNode
+
+        node = SourceNode(name="x", tag_schema=tag_schema, data_schema=data_schema)
+        t, d = node.output_schema()
+        assert t == tag_schema
+        assert d == data_schema

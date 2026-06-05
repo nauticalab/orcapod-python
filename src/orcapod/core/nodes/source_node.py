@@ -17,6 +17,8 @@ from orcapod.core.base import TraceableBase
 from orcapod.errors import SourceSpecMismatchError, UnboundSourceError
 from orcapod.protocols.core_protocols import DataProtocol, TagProtocol
 from orcapod.types import ColumnConfig, Schema
+from orcapod.utils.arrow_utils import system_tag_column_names
+from orcapod.utils.schema_utils import compute_schema_hash
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -108,6 +110,23 @@ class SourceNodeBase(TraceableBase, ABC):
         """Data schema for this input slot."""
         return self._data_schema
 
+    def _schema_hash(self) -> str:
+        """Compute the schema hash used for system-tag column naming.
+
+        Produces the same hash that ``SourceStreamBuilder`` embeds in system-tag
+        column names, making it possible to predict those names from the declared
+        schemas alone without requiring a live source.
+
+        Returns:
+            Hex string schema hash.
+        """
+        return compute_schema_hash(
+            self._tag_schema,
+            self._data_schema,
+            self.data_context.semantic_hasher,
+            self.orcapod_config.schema_hash_n_char,
+        )
+
     @property
     def node_uri(self) -> tuple[str, ...]:
         """Canonical URI tuple for this source node.
@@ -147,14 +166,32 @@ class SourceNodeBase(TraceableBase, ABC):
     ) -> tuple[Schema, Schema]:
         """Return ``(tag_schema, data_schema)``.
 
+        When ``columns.system_tags`` is ``True`` (or ``all_info=True``), the
+        returned tag schema is extended with the two system-tag entries for this
+        node's schema (both typed as ``str``). Their names are deterministic from
+        the declared schemas and match what a concrete source with the same schema
+        would produce.
+
+        Other ``ColumnConfig`` flags (``meta``, ``context``, ``source``,
+        ``content_hash``, ``sort_by_tags``) are no-ops at the node level —
+        consistent with ``ArrowTableStream.output_schema()`` which also ignores them.
+
         Args:
-            columns: Ignored.
-            all_info: Ignored.
+            columns: Column selection config.
+            all_info: If ``True``, equivalent to ``ColumnConfig(system_tags=True)``
+                for this method.
 
         Returns:
             Tuple of ``(tag_schema, data_schema)``.
         """
-        return (self._tag_schema, self._data_schema)
+        columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        tag_schema = self._tag_schema
+        if columns_config.system_tags:
+            source_id_col, record_id_col = system_tag_column_names(self._schema_hash())
+            tag_schema = Schema(
+                {**dict(tag_schema), source_id_col: str, record_id_col: str}
+            )
+        return tag_schema, self._data_schema
 
     def keys(
         self,
@@ -164,14 +201,28 @@ class SourceNodeBase(TraceableBase, ABC):
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """Return ``(tag_keys, data_keys)``.
 
+        When ``columns.system_tags`` is ``True`` (or ``all_info=True``), the two
+        system-tag columns for this node's schema are appended to ``tag_keys``.
+        Their names are deterministic from the declared schemas and match what a
+        concrete source with the same schema would produce.
+
+        Other ``ColumnConfig`` flags (``meta``, ``context``, ``source``,
+        ``content_hash``, ``sort_by_tags``) are no-ops at the node level —
+        consistent with ``ArrowTableStream.keys()`` which also ignores them.
+
         Args:
-            columns: Ignored.
-            all_info: Ignored.
+            columns: Column selection config.
+            all_info: If ``True``, equivalent to ``ColumnConfig(system_tags=True)``
+                for this method.
 
         Returns:
             Tuple of ``(tag_column_names, data_column_names)``.
         """
-        return (tuple(self._tag_schema.keys()), tuple(self._data_schema.keys()))
+        columns_config = ColumnConfig.handle_config(columns, all_info=all_info)
+        tag_keys = tuple(self._tag_schema.keys())
+        if columns_config.system_tags:
+            tag_keys += system_tag_column_names(self._schema_hash())
+        return tag_keys, tuple(self._data_schema.keys())
 
     # ------------------------------------------------------------------
     # Validation
