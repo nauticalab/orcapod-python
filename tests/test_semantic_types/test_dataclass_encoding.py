@@ -693,3 +693,59 @@ def test_arrow_schema_to_python_schema_dataclass_round_trip():
     assert has_dataclass_type_sentinel(recovered_arrow)
     assert recovered_arrow.field("width").type == pa.int64()
     assert recovered_arrow.field("label").type == pa.large_string()
+
+
+def test_two_distinct_dataclass_columns_no_collision():
+    """Two dataclass columns with different schemas are synthesized as distinct types.
+
+    Regression test for the hash-based naming fix: when an Arrow schema contains
+    two struct columns that both have the dataclass sentinel but different fields,
+    ``arrow_schema_to_python_schema`` must return two *different* Python types —
+    one per column — rather than returning the same cached class for both.
+    """
+    @dataclasses.dataclass
+    class _Alpha:
+        x: int
+        y: float
+
+    @dataclasses.dataclass
+    class _Beta:
+        name: str
+        count: int
+
+    converter = UniversalTypeConverter()
+    alpha_arrow = converter.python_type_to_arrow_type(_Alpha)
+    beta_arrow = converter.python_type_to_arrow_type(_Beta)
+
+    # Both columns carry the dataclass sentinel.
+    assert has_dataclass_type_sentinel(alpha_arrow)
+    assert has_dataclass_type_sentinel(beta_arrow)
+
+    # Place both in the same Arrow schema (simulating two dataclass columns in one table).
+    schema = pa.schema([
+        pa.field("col_a", alpha_arrow, nullable=False),
+        pa.field("col_b", beta_arrow, nullable=False),
+    ])
+    python_schema = converter.arrow_schema_to_python_schema(schema)
+
+    type_a = python_schema["col_a"]
+    type_b = python_schema["col_b"]
+
+    # Both must be synthesized dataclasses …
+    assert dataclasses.is_dataclass(type_a), f"col_a type is not a dataclass: {type_a!r}"
+    assert dataclasses.is_dataclass(type_b), f"col_b type is not a dataclass: {type_b!r}"
+
+    # … but they must be *different* types (no name collision in the lookup cache).
+    assert type_a is not type_b, (
+        "Both dataclass columns resolved to the same synthesized class — "
+        "hash-based naming is required to prevent this collision."
+    )
+
+    # Verify that the field sets are correct for each synthesized type.
+    fields_a = {f.name for f in dataclasses.fields(type_a)}
+    fields_b = {f.name for f in dataclasses.fields(type_b)}
+    assert fields_a == {"x", "y"}
+    assert fields_b == {"name", "count"}
+    # Sentinel must not leak into either synthesized type.
+    assert DATACLASS_TYPE_FIELD not in fields_a
+    assert DATACLASS_TYPE_FIELD not in fields_b

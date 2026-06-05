@@ -330,6 +330,10 @@ class FunctionNodeBase(StreamBase):
             data_arrow_schema = converter.python_schema_to_arrow_schema(data_python_schema)
 
             if not all_tags:
+                # No data was produced (node has not been run yet or produced zero
+                # outputs).  Build a zero-row table whose schema is derived from the
+                # pod's declared output so that callers always receive a well-formed
+                # schema regardless of whether the node has actually executed.
                 self._cached_output_table = pa.Table.from_pylist(
                     [],
                     schema=converter.python_schema_to_arrow_schema(
@@ -354,7 +358,7 @@ class FunctionNodeBase(StreamBase):
 
         column_config = ColumnConfig.handle_config(columns, all_info=all_info)
         output_table = arrow_utils.apply_column_config(
-            self._cached_output_table, column_config, *self.keys()
+            self._cached_output_table, column_config, self.keys()[0]
         )
 
         if column_config.content_hash:

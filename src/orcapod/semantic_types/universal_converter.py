@@ -530,7 +530,16 @@ class UniversalTypeConverter:
                     for field in arrow_type
                     if field.name != DATACLASS_TYPE_FIELD
                 ]
-                return dataclasses.make_dataclass("_SynthesizedDataclass", fields)
+                # Use a hash of the field signatures as the class name so that
+                # two distinct dataclass schemas never collide in the lookup cache.
+                field_parts = [
+                    f"{f.name}:{f.type}"
+                    for f in arrow_type
+                    if f.name != DATACLASS_TYPE_FIELD
+                ]
+                name_hash = hashlib.md5("|".join(field_parts).encode()).hexdigest()[:8]
+                class_name = f"_SynthesizedDataclass_{name_hash}"
+                return dataclasses.make_dataclass(class_name, fields)
 
             # Check if it is heterogeneous tuple
             if len(arrow_type) > 0 and all(
