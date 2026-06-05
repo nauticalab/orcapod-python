@@ -380,3 +380,32 @@ def intersection_schemas(*schemas: SchemaLike) -> Schema:
                     f"Type conflict for key '{key}': {intersection[key]} vs {schema[key]}"
                 )
     return Schema(intersection)
+
+
+def compute_schema_hash(
+    tag_schema: Schema,
+    data_schema: Schema,
+    semantic_hasher: Any,
+    char_count: int,
+) -> str:
+    """Compute the schema hash used for system-tag column naming.
+
+    This is the same hash that ``SourceStreamBuilder`` embeds in system-tag
+    column names when building an ``ArrowTableStream`` from a source table.
+    Extracting it here lets ``SourceNodeBase`` predict the system-tag column
+    names from its declared schemas alone, without requiring a live source.
+
+    Args:
+        tag_schema: Python tag schema (``Schema`` mapping column names to types).
+        data_schema: Python data schema.
+        semantic_hasher: Hasher from the active ``DataContext``
+            (``data_context.semantic_hasher``).
+        char_count: Number of hex characters to use in the output string
+            (``OrcapodConfig.schema_hash_n_char``).
+
+    Returns:
+        Hex string of length ``char_count``.
+    """
+    return semantic_hasher.hash_object(
+        (tag_schema, data_schema)
+    ).to_hex(char_count=char_count)
