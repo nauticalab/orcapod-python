@@ -1212,20 +1212,36 @@ def apply_column_config(
     table: "pa.Table",
     column_config: ColumnConfig,
     tag_keys: tuple[str, ...],
-    data_keys: tuple[str, ...],
 ) -> "pa.Table":
     """Apply ``ColumnConfig`` column filtering and optional tag-sort to a table.
+
+    Data columns are derived automatically from the table's column names by
+    excluding the known tag columns and all system-managed column groups
+    (system tags, source-info, context, meta).  This means callers only need to
+    supply ``tag_keys``; there is no need to thread ``data_keys`` through the
+    call site.
 
     Args:
         table: A fully-materialized PyArrow table (all columns present).
         column_config: Resolved column configuration.
         tag_keys: Names of the regular (non-system) tag columns.
-        data_keys: Names of the data columns.
 
     Returns:
         A new table with the appropriate columns dropped and optionally
         sorted by tag columns.
     """
+    tag_key_set = set(tag_keys)
+    # Derive data column names: anything that is not a tag, not a system-prefix
+    # column, and not the context key.
+    data_keys = tuple(
+        c
+        for c in table.column_names
+        if c not in tag_key_set
+        and not c.startswith(constants.SYSTEM_TAG_PREFIX)
+        and not c.startswith(constants.META_PREFIX)
+        and not c.startswith(constants.SOURCE_PREFIX)
+        and c != constants.CONTEXT_KEY
+    )
     drop_columns = []
     if not column_config.system_tags:
         drop_columns.extend(
