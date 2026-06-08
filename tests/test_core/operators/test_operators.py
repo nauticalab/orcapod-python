@@ -1317,7 +1317,7 @@ class TestJoinSystemTagCanonicalOrdering:
         from orcapod.system_constants import constants
 
         src_a, src_b, src_c = three_sources
-        n_char = OrcapodConfig().system_tag_hash_n_char
+        n_char = OrcapodConfig().hashing.system_tag_n_char
 
         # Independently determine expected position → source mapping
         sources = [src_a, src_b, src_c]
@@ -1412,7 +1412,7 @@ class TestJoinSystemTagCanonicalOrdering:
         from orcapod.core.sources.arrow_table_source import ArrowTableSource
         from orcapod.system_constants import constants
 
-        n_char = OrcapodConfig().system_tag_hash_n_char
+        n_char = OrcapodConfig().hashing.system_tag_n_char
 
         src_a = ArrowTableSource(
             pa.table(

@@ -417,7 +417,7 @@ class OperatorNode(OperatorNodeBase):
         )
         config_dict = descriptor.get("config")
         node._orcapod_config = (
-            OrcapodConfig(**config_dict) if config_dict is not None else DEFAULT_CONFIG
+            OrcapodConfig.from_dict(config_dict) if config_dict is not None else DEFAULT_CONFIG
         )
 
         # From ContentIdentifiableBase
@@ -689,7 +689,7 @@ class OperatorJobNode(OperatorNodeBase):
         )
         config_dict = descriptor.get("config")
         node._orcapod_config = (
-            OrcapodConfig(**config_dict) if config_dict is not None else DEFAULT_CONFIG
+            OrcapodConfig.from_dict(config_dict) if config_dict is not None else DEFAULT_CONFIG
         )
 
         # From ContentIdentifiableBase

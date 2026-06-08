@@ -16,7 +16,7 @@ def semantic_hasher():
 
 @pytest.fixture
 def char_count():
-    return DEFAULT_CONFIG.schema_hash_n_char
+    return DEFAULT_CONFIG.hashing.schema_n_char
 
 
 class TestComputeSchemaHash:

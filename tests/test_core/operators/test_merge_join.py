@@ -644,7 +644,7 @@ class TestMergeJoinSystemTags:
         from orcapod.config import OrcapodConfig
         from orcapod.system_constants import constants
 
-        n_char = OrcapodConfig().system_tag_hash_n_char
+        n_char = OrcapodConfig().hashing.system_tag_n_char
 
         op = MergeJoin()
         result = op.static_process(left_source, right_source)
