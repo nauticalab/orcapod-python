@@ -1,4 +1,5 @@
 from pathlib import Path, PosixPath
+from typing import Any
 
 import pytest
 
@@ -121,8 +122,6 @@ def test_round_trip_pydict_pylist():
 # ---------------------------------------------------------------------------
 # ENG-389: empty container inference produces list[Any] / dict[Any, Any]
 # ---------------------------------------------------------------------------
-
-from typing import Any
 
 
 def test_infer_empty_list_schema():
