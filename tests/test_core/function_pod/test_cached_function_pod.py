@@ -78,6 +78,12 @@ class TestConstruction:
                 record_path_prefix=("x",),
             )
 
+    def test_result_database_is_public(self, cached_pod):
+        """result_database must be accessible as a public property (no underscore prefix)."""
+        # Will raise AttributeError until the rename in cached_function_pod.py is made.
+        db = cached_pod.result_database
+        assert db is not None
+
 
 # ---------------------------------------------------------------------------
 # Cache miss
