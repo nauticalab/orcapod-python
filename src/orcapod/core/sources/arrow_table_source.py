@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.utils import arrow_utils
+from orcapod.utils.schema_utils import _normalize_column_list
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -53,13 +54,14 @@ class ArrowTableSource(RootSource):
     def __init__(
         self,
         table: "pa.Table",
-        tag_columns: Collection[str] = (),
+        tag_columns: str | Collection[str] = (),
         system_tag_columns: Collection[str] = (),
         record_id_column: str | None = None,
         infer_nullable: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
+        tag_columns = _normalize_column_list(tag_columns)
 
         if infer_nullable:
             logger.debug(

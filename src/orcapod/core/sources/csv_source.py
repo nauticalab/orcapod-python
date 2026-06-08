@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.utils import arrow_utils
+from orcapod.utils.schema_utils import _normalize_column_list
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -25,7 +26,7 @@ class CSVSource(RootSource):
     def __init__(
         self,
         file_path: str,
-        tag_columns: Collection[str] = (),
+        tag_columns: str | Collection[str] = (),
         system_tag_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
@@ -37,6 +38,7 @@ class CSVSource(RootSource):
         if source_id is None:
             source_id = file_path
         super().__init__(source_id=source_id, **kwargs)
+        tag_columns = _normalize_column_list(tag_columns)
 
         self._file_path = file_path
         table: pa.Table = pa_csv.read_csv(file_path)
