@@ -38,16 +38,14 @@ touches library code.
 **In scope:**
 
 * `_normalize_column_list()` helper in `src/orcapod/utils/schema_utils.py`.
-* All call sites where a user-supplied `tag_columns` value is first consumed:
-  - `SourceStreamBuilder.build()` — defense-in-depth for any current or future
-    source that passes `tag_columns` directly to the builder.
-  - `DBTableSource.__init__` — replaces `list(tag_columns)`.
-  - `SQLiteTableSource.__init__` — replaces `list(tag_columns)`.
-  - `SpiralDBTableSource.__init__` — replaces `list(tag_columns)`.
+* All user-facing source constructors that accept `tag_columns` from the caller:
   - `DataFrameSource.__init__` — replaces the inline `isinstance(tag_columns, str)`
     check.
   - `ArrowTableSource.__init__`, `CSVSource.__init__`, `DictSource.__init__`,
     `DeltaTableSource.__init__` — add normalization before passing to builder.
+  - `DBTableSource.__init__` — replaces `list(tag_columns)`.
+  - `SQLiteTableSource.__init__` — replaces `list(tag_columns)`.
+  - `SpiralDBTableSource.__init__` — replaces `list(tag_columns)`.
 * Type annotation updates at all affected `__init__` signatures.
 * New test file `tests/test_core/sources/test_tag_columns_normalization.py`.
 
@@ -107,42 +105,50 @@ def _normalize_column_list(value: Any) -> list[str]:
 The helper is private (`_` prefix) — it is an implementation detail of the
 sources package, not a public API.
 
-### Two distinct flows — both fixed
+### Normalization is user-facing only
 
-There are two paths through which a user-supplied `tag_columns` reaches
-`SourceStreamBuilder.build()`:
+`SourceStreamBuilder.build()` is an internal component; it receives a
+`Collection[str]` that is already well-formed and does not participate in
+normalization.  Its signature and implementation are unchanged.
 
-**Flow 1 — Direct pass** (`ArrowTableSource`, `CSVSource`, `DictSource`,
-`DeltaTableSource`):
+Normalization happens exclusively at the user-facing source constructors, which
+are the only places where a raw caller-supplied value enters the library.
+
+### Two constructor patterns — both fixed
+
+**Pattern 1 — Direct pass** (`ArrowTableSource`, `CSVSource`, `DictSource`,
+`DeltaTableSource`): the constructor passes `tag_columns` straight to the
+builder.  Fix: call `_normalize_column_list(tag_columns)` in `__init__` and
+pass the result to the builder.
+
 ```
-__init__(tag_columns=...) ──► builder.build(tag_columns=tag_columns)
-```
-Fix: normalize in `__init__` before the builder call **and** in
-`SourceStreamBuilder.build()` as defense-in-depth.
-
-**Flow 2 — Pre-processed** (`DBTableSource`, `SQLiteTableSource`,
-`SpiralDBTableSource`, `PostgreSQLTableSource`):
-```
-__init__(tag_columns=...) ──► list(tag_columns) ──► super().__init__(...) ──► builder.build(...)
-```
-Fix: replace `list(tag_columns)` with `_normalize_column_list(tag_columns)` at
-each call site.  The builder fix also applies here as defense-in-depth.
-
-### `SourceStreamBuilder.build()` change
-
-The method normalizes `tag_columns` at entry before converting to a tuple:
-
-```python
-def build(self, table, tag_columns, ...):
-    tag_columns = _normalize_column_list(tag_columns)
-    tag_columns_tuple = tuple(tag_columns)
-    ...
+user ──► __init__(tag_columns=...)
+              │  _normalize_column_list(tag_columns)
+              ▼
+         builder.build(tag_columns=normalized)
 ```
 
-The method's type annotation for `tag_columns` is updated to
-`str | Collection[str]`.
+**Pattern 2 — Pre-processed** (`DBTableSource`, `SQLiteTableSource`,
+`SpiralDBTableSource`): the constructor calls `list(tag_columns)` before
+delegating to `super().__init__()`, which then calls the builder.  Fix: replace
+`list(tag_columns)` with `_normalize_column_list(tag_columns)`.
+
+```
+user ──► __init__(tag_columns=...)
+              │  _normalize_column_list(tag_columns)  ← was: list(tag_columns)
+              ▼
+         super().__init__(tag_columns=normalized)
+              ▼
+         builder.build(tag_columns=normalized)
+```
+
+`PostgreSQLTableSource` delegates directly to `DBTableSource` without calling
+`list()` itself, so fixing `DBTableSource` covers it.
 
 ### Type annotation updates
+
+`SourceStreamBuilder.build()` retains `Collection[str]` — it is an internal
+contract.  Only the user-facing source constructors gain the `str |` union.
 
 | File | Parameter | Old type | New type |
 |---|---|---|---|
@@ -155,7 +161,7 @@ The method's type annotation for `tag_columns` is updated to
 | `sqlite_table_source.py` | `tag_columns` | `Collection[str] \| None` | `str \| Collection[str] \| None` |
 | `postgresql_table_source.py` | `tag_columns` | `Collection[str] \| None` | `str \| Collection[str] \| None` |
 | `spiraldb_table_source.py` | `tag_columns` | `Collection[str] \| None` | `str \| Collection[str] \| None` |
-| `stream_builder.py` | `tag_columns` | `Collection[str]` | `str \| Collection[str]` |
+| `stream_builder.py` | `tag_columns` | `Collection[str]` | unchanged |
 
 ---
 
@@ -210,15 +216,15 @@ normalization is validated indirectly through `DBTableSource` tests using the
 ## Implementation checklist
 
 1. Add `_normalize_column_list()` to `src/orcapod/utils/schema_utils.py`.
-2. Update `SourceStreamBuilder.build()`: normalize `tag_columns` at entry, update type hint.
-3. Update `DataFrameSource.__init__`: replace inline check with `_normalize_column_list()`.
-4. Update `ArrowTableSource.__init__`: add normalization before builder call, update type hint.
-5. Update `CSVSource.__init__`: add normalization, update type hint.
-6. Update `DictSource.__init__`: add normalization, update type hint.
-7. Update `DeltaTableSource.__init__`: add normalization, update type hint.
-8. Update `DBTableSource.__init__`: replace `list(tag_columns)` with helper, update type hint.
-9. Update `SQLiteTableSource.__init__`: replace `list(tag_columns)` with helper, update type hint.
-10. Update `SpiralDBTableSource.__init__`: replace `list(tag_columns)` with helper, update type hint.
-11. Update `PostgreSQLTableSource.__init__`: update type hint only (delegates to `DBTableSource`).
+2. Update `DataFrameSource.__init__`: replace inline check with `_normalize_column_list()`.
+3. Update `ArrowTableSource.__init__`: add normalization before builder call, update type hint.
+4. Update `CSVSource.__init__`: add normalization, update type hint.
+5. Update `DictSource.__init__`: add normalization, update type hint.
+6. Update `DeltaTableSource.__init__`: add normalization, update type hint.
+7. Update `DBTableSource.__init__`: replace `list(tag_columns)` with helper, update type hint.
+8. Update `SQLiteTableSource.__init__`: replace `list(tag_columns)` with helper, update type hint.
+9. Update `SpiralDBTableSource.__init__`: replace `list(tag_columns)` with helper, update type hint.
+10. Update `PostgreSQLTableSource.__init__`: update type hint only (delegates to `DBTableSource`).
+11. `SourceStreamBuilder.build()`: no changes — internal contract, stays `Collection[str]`.
 12. Write `tests/test_core/sources/test_tag_columns_normalization.py`.
 13. Run full test suite; confirm no regressions.
