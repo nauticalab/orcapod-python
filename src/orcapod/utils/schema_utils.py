@@ -409,3 +409,38 @@ def compute_schema_hash(
     return semantic_hasher.hash_object(
         (tag_schema, data_schema)
     ).to_hex(char_count=char_count)
+
+
+def _normalize_column_list(value: Any) -> list[str]:
+    """Normalize a column-list argument to a plain list of strings.
+
+    Accepts a bare string (wraps it in a list), any iterable of strings
+    (converts to list), or raises ``TypeError`` for non-string non-iterable
+    inputs or iterables that contain non-string elements.
+
+    Args:
+        value: A single column name (``str``) or an iterable of column names.
+
+    Returns:
+        A list of column name strings.
+
+    Raises:
+        TypeError: If ``value`` is not a ``str`` or iterable, or if any
+            element of the iterable is not a ``str``.
+    """
+    if isinstance(value, str):
+        return [value]
+    try:
+        result = list(value)
+    except TypeError:
+        raise TypeError(
+            f"tag_columns must be a string or iterable of strings, "
+            f"got {type(value).__name__!r}"
+        )
+    bad = [x for x in result if not isinstance(x, str)]
+    if bad:
+        raise TypeError(
+            f"All tag_columns elements must be strings; "
+            f"got {[type(x).__name__ for x in bad]!r}"
+        )
+    return result
