@@ -65,6 +65,8 @@ def _get_python_to_arrow_map() -> dict:
         str: pa.large_string(),  # Use large_string by default for Polars compatibility
         bool: pa.bool_(),
         bytes: pa.large_binary(),  # Use large_binary by default for Polars compatibility
+        # typing.Any — used when element type is unknown (e.g. inferred from empty containers)
+        Any: pa.null(),
         # String representations (for when we get type names as strings)
         "int": pa.int64(),
         "float": pa.float64(),
@@ -420,17 +422,7 @@ class UniversalTypeConverter:
                 type_name = getattr(python_type, "__name__")
                 if type_name in type_map:
                     return type_map[type_name]
-            hint = ""
-            if python_type is Any:
-                hint = (
-                    " Hint: typing.Any usually appears when an Arrow type had "
-                    "no mapping in arrow_type_to_python_type (check warnings). "
-                    "It can also come from schema inference on empty containers "
-                    "(e.g. {} infers as dict[Any, Any])."
-                )
-            raise ValueError(
-                f"Unsupported Python type: {python_type}.{hint}"
-            )
+            raise ValueError(f"Unsupported Python type: {python_type}.")
 
         # Handle list types
         if origin is list:
@@ -495,6 +487,10 @@ class UniversalTypeConverter:
 
     def _convert_arrow_to_python(self, arrow_type: pa.DataType) -> type | Any:
         """Core Arrow → Python type conversion logic."""
+
+        # Handle null type — maps to Any (unknown element type, e.g. from empty containers)
+        if pa.types.is_null(arrow_type):
+            return Any
 
         # Handle basic types
         if pa.types.is_integer(arrow_type):
