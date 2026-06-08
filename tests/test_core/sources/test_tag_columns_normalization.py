@@ -244,27 +244,37 @@ class TestDeltaTableSourceTagColumns:
 class _MockConnector:
     """Minimal in-memory DBConnectorProtocol for normalization tests."""
 
-    _TABLE = pa.table(
-        {
-            "session_id": pa.array(["s1", "s2"], type=pa.large_string()),
-            "value": pa.array([10, 20], type=pa.int64()),
+    def __init__(
+        self,
+        tables: dict[str, pa.Table] | None = None,
+        pk_columns: dict[str, list[str]] | None = None,
+    ) -> None:
+        self._tables = tables or {
+            "events": pa.table(
+                {
+                    "session_id": pa.array(["s1", "s2"], type=pa.large_string()),
+                    "value": pa.array([10, 20], type=pa.int64()),
+                }
+            )
         }
-    )
+        self._pk_columns = pk_columns or {"events": ["session_id"]}
 
     def get_table_names(self) -> list[str]:
-        return ["events"]
+        return list(self._tables.keys())
 
     def get_pk_columns(self, table_name: str) -> list[str]:
-        return ["session_id"]
+        return self._pk_columns.get(table_name, [])
 
     def get_column_info(self, table_name: str):
         from orcapod.types import ColumnInfo
-        return [ColumnInfo(name=f.name, arrow_type=f.type) for f in self._TABLE.schema]
+        return [ColumnInfo(name=f.name, arrow_type=f.type) for f in self._tables[table_name].schema]
 
     def iter_batches(self, query: str, params: Any = None, batch_size: int = 1000) -> Iterator[pa.RecordBatch]:
         m = re.search(r'FROM\s+"?(\w+)"?', query, re.IGNORECASE)
-        if m and m.group(1) == "events":
-            yield from self._TABLE.to_batches()
+        if m:
+            table = self._tables.get(m.group(1))
+            if table is not None:
+                yield from table.to_batches()
 
     def create_table_if_not_exists(self, *a: Any, **kw: Any) -> None:
         pass
@@ -274,6 +284,19 @@ class _MockConnector:
 
     def close(self) -> None:
         pass
+
+    def __enter__(self) -> "_MockConnector":
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        pass
+
+    def to_config(self) -> dict[str, Any]:
+        return {"connector_type": "mock"}
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "_MockConnector":
+        return cls()
 
 
 class TestDBTableSourceTagColumns:
