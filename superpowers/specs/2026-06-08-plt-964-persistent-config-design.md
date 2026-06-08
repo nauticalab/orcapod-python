@@ -287,7 +287,7 @@ from orcapod.config import DEFAULT_CONFIG, DisplayConfig, HashingConfig, Orcapod
 
 - Saving / writing config to a TOML file (deferred — new Linear issue to be filed)
 - CLI tool for inspecting or editing config
-- Wiring `DisplayConfig` fields into stream output methods (that is the responsibility of
-  the features that consume display settings; this issue only defines and persists the values)
+- Wiring `DisplayConfig` fields into stream output methods — tracked in
+  [PLT-1570](https://linear.app/enigma-metamorphic/issue/PLT-1570/wire-displayconfig-into-stream-and-table-output-methods)
 - Walking parent directories for project-local config (always uses `cwd`)
 - Environment variable overrides
