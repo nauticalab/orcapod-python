@@ -137,7 +137,7 @@ class MergeJoin(BinaryOperator):
         appending ::{pipeline_hash}:{canonical_position}. This method
         computes those output column names without performing the join.
         """
-        n_char = self.orcapod_config.system_tag_hash_n_char
+        n_char = self.orcapod_config.hashing.system_tag_n_char
         canonical = self._canonical_order(left_stream, right_stream)
 
         system_tag_fields: dict[str, type] = {}
@@ -156,7 +156,7 @@ class MergeJoin(BinaryOperator):
     def binary_static_process(
         self, left_stream: StreamProtocol, right_stream: StreamProtocol
     ) -> StreamProtocol:
-        n_char = self.orcapod_config.system_tag_hash_n_char
+        n_char = self.orcapod_config.hashing.system_tag_n_char
 
         # Determine canonical ordering for system tag positions
         canonical = self._canonical_order(left_stream, right_stream)

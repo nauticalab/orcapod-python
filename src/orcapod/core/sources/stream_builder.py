@@ -131,7 +131,7 @@ class SourceStreamBuilder:
             tag_python,
             data_python,
             self._data_context.semantic_hasher,
-            self._config.schema_hash_n_char,
+            self._config.hashing.schema_n_char,
         )
 
         # 5. Compute table hash for data identity.
@@ -139,7 +139,7 @@ class SourceStreamBuilder:
 
         # 6. Default source_id to table hash.
         if source_id is None:
-            source_id = table_hash.to_hex(char_count=self._config.path_hash_n_char)
+            source_id = table_hash.to_hex(char_count=self._config.hashing.path_n_char)
 
         # 7. Build per-row source-info strings.
         rows_as_dicts = table.to_pylist()

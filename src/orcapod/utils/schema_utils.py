@@ -401,7 +401,7 @@ def compute_schema_hash(
         semantic_hasher: Hasher from the active ``DataContext``
             (``data_context.semantic_hasher``).
         char_count: Number of hex characters to use in the output string
-            (``OrcapodConfig.schema_hash_n_char``).
+            (``OrcapodConfig.hashing.schema_n_char``).
 
     Returns:
         Hex string of length ``char_count``.
