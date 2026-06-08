@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod.core.sources.db_table_source import DBTableSource
 from orcapod.databases.spiraldb_connector import SpiralDBConnector
+from orcapod.utils.schema_utils import _normalize_column_list
 
 if TYPE_CHECKING:
     from orcapod import contexts
@@ -68,7 +69,8 @@ class SpiralDBTableSource(DBTableSource):
         project_id: SpiralDB project identifier (e.g. ``"my-project-123456"``).
         table_name: Name of the SpiralDB table to expose as a source.
         dataset: Dataset within the project. Defaults to ``"default"``.
-        tag_columns: Columns to use as tag columns. If ``None`` (default),
+        tag_columns: Columns to use as tag columns. A bare string is
+            accepted as a single column name. If ``None`` (default),
             the table's primary-key (key-schema) columns are used. Raises
             ``ValueError`` if the table has no key schema.
         system_tag_columns: Additional system-level tag columns.
@@ -92,7 +94,7 @@ class SpiralDBTableSource(DBTableSource):
         project_id: str,
         table_name: str,
         dataset: str = "default",
-        tag_columns: Collection[str] | None = None,
+        tag_columns: str | Collection[str] | None = None,
         system_tag_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
@@ -113,7 +115,7 @@ class SpiralDBTableSource(DBTableSource):
 
         try:
             resolved_tags: list[str] | None = (
-                list(tag_columns) if tag_columns is not None else None
+                _normalize_column_list(tag_columns) if tag_columns is not None else None
             )
 
             # DBTableSource handles PK resolution and raises ValueError when

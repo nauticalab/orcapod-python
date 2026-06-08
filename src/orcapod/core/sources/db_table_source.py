@@ -18,6 +18,7 @@ from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
+from orcapod.utils.schema_utils import _normalize_column_list
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -41,7 +42,8 @@ class DBTableSource(RootSource):
     Args:
         connector: A ``DBConnectorProtocol`` providing DB access.
         table_name: Name of the table to expose as a source.
-        tag_columns: Columns to use as tag columns.  If ``None`` (default),
+        tag_columns: Columns to use as tag columns.  A bare string is
+            accepted as a single column name.  If ``None`` (default),
             the table's primary-key columns are used.  Raises ``ValueError``
             if the table has no primary key and no explicit columns are given.
         system_tag_columns: Additional system-level tag columns (passed through
@@ -63,7 +65,7 @@ class DBTableSource(RootSource):
         self,
         connector: DBConnectorProtocol,
         table_name: str,
-        tag_columns: Collection[str] | None = None,
+        tag_columns: str | Collection[str] | None = None,
         system_tag_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
@@ -100,7 +102,7 @@ class DBTableSource(RootSource):
                     "Provide explicit tag_columns."
                 )
         else:
-            resolved_tag_columns = list(tag_columns)
+            resolved_tag_columns = _normalize_column_list(tag_columns)
 
         # Step 3: Fetch the full table as Arrow.
         # _query allows subclasses (e.g. SQLiteTableSource) to inject a custom
