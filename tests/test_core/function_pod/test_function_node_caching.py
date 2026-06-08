@@ -165,7 +165,7 @@ class TestResultVsPipelineRecordCounts:
         node.run()
 
         # Result DB: 1 record (same data hash, second is cache hit)
-        result_records = node._cached_function_pod._result_database.get_all_records(
+        result_records = node._cached_function_pod.result_database.get_all_records(
             node._cached_function_pod.record_path
         )
         assert result_records is not None
@@ -186,7 +186,7 @@ class TestResultVsPipelineRecordCounts:
         node, db = _make_node(stream)
         node.run()
 
-        result_records = node._cached_function_pod._result_database.get_all_records(
+        result_records = node._cached_function_pod.result_database.get_all_records(
             node._cached_function_pod.record_path
         )
         assert result_records is not None
@@ -203,7 +203,7 @@ class TestResultVsPipelineRecordCounts:
         node, db = _make_node(stream)
         node.run()
 
-        result_records = node._cached_function_pod._result_database.get_all_records(
+        result_records = node._cached_function_pod.result_database.get_all_records(
             node._cached_function_pod.record_path
         )
         assert result_records is not None
@@ -293,7 +293,7 @@ class TestPhase1Phase2PipelineEntryId:
         assert all_pipeline_records.num_rows == 2
 
         # Result DB should still have only 1 record (same data hash, cache hit)
-        result_records = node2._cached_function_pod._result_database.get_all_records(
+        result_records = node2._cached_function_pod.result_database.get_all_records(
             node2._cached_function_pod.record_path
         )
         assert result_records is not None
