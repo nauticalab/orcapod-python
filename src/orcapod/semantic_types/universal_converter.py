@@ -636,6 +636,7 @@ class UniversalTypeConverter:
             # downstream when code tries to convert Any back to Arrow
             # (e.g. "Unsupported Python type: typing.Any"). If you hit that,
             # the root cause is likely an unmapped Arrow type here.
+            # (pa.null() is intentionally excluded — it is handled above.)
             logger.warning(
                 "arrow_type_to_python_type: no mapping for Arrow type %r, "
                 "falling back to typing.Any. This may cause errors downstream "
