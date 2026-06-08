@@ -116,3 +116,22 @@ def test_round_trip_pydict_pylist():
     pydict = pydata_utils.pylist_to_pydict(pylist)
     for k in data:
         assert pydict[k] == data[k]
+
+
+# ---------------------------------------------------------------------------
+# ENG-389: empty container inference produces list[Any] / dict[Any, Any]
+# ---------------------------------------------------------------------------
+
+from typing import Any
+
+
+def test_infer_empty_list_schema():
+    """A field whose only value is [] infers as list[Any]."""
+    schema = pydata_utils.infer_python_schema_from_pylist_data([{"items": []}])
+    assert schema["items"] == list[Any]
+
+
+def test_infer_empty_dict_schema():
+    """A field whose only value is {} infers as dict[Any, Any]."""
+    schema = pydata_utils.infer_python_schema_from_pylist_data([{"meta": {}}])
+    assert schema["meta"] == dict[Any, Any]
