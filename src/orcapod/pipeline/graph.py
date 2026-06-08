@@ -231,7 +231,7 @@ class Pipeline(AbstractPipelineBase[GraphNode]):
         ``PipelineJob.from_pipeline(pipeline, sources=..., store=...)``.
 
         Args:
-            path: Path to the JSON file produced by :meth:`save`.
+            path: Path to the JSON file produced by ``save()``.
 
         Returns:
             A compiled ``Pipeline`` instance with SourceNode leaf nodes.
