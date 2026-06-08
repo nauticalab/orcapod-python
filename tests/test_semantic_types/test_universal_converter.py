@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import pyarrow as pa
@@ -412,3 +412,70 @@ def test_round_trip_preserves_optionality():
     assert recovered["required"] == int
     assert recovered["nullable_field"] == int | None
     assert recovered == original
+
+
+# ---------------------------------------------------------------------------
+# ENG-389: Any <-> pa.null() round-trip
+# ---------------------------------------------------------------------------
+
+
+def test_any_to_arrow_type():
+    """typing.Any maps to pa.null()."""
+    assert universal_converter.python_type_to_arrow_type(Any) == pa.null()
+
+
+def test_list_any_to_arrow_type():
+    """list[Any] maps to pa.large_list(pa.null())."""
+    assert (
+        universal_converter.python_type_to_arrow_type(list[Any])
+        == pa.large_list(pa.null())
+    )
+
+
+def test_dict_any_any_to_arrow_type():
+    """dict[Any, Any] maps to pa.large_list(pa.struct([("key", pa.null()), ("value", pa.null())]))."""
+    expected = pa.large_list(
+        pa.struct([("key", pa.null()), ("value", pa.null())])
+    )
+    assert universal_converter.python_type_to_arrow_type(dict[Any, Any]) == expected
+
+
+def test_null_arrow_to_any_python_type():
+    """pa.null() maps back to typing.Any."""
+    assert universal_converter.arrow_type_to_python_type(pa.null()) is Any
+
+
+def test_list_any_round_trip():
+    """list[Any] round-trips: list[Any] -> pa.large_list(pa.null()) -> list[Any]."""
+    arrow_type = universal_converter.python_type_to_arrow_type(list[Any])
+    assert universal_converter.arrow_type_to_python_type(arrow_type) == list[Any]
+
+
+def test_dict_any_any_round_trip():
+    """dict[Any, Any] round-trips through Arrow and back to dict[Any, Any]."""
+    arrow_type = universal_converter.python_type_to_arrow_type(dict[Any, Any])
+    assert universal_converter.arrow_type_to_python_type(arrow_type) == dict[Any, Any]
+
+
+def test_empty_container_inference_to_arrow_no_error():
+    """Inferring schema from empty containers and converting to Arrow does not raise."""
+    from orcapod.semantic_types.pydata_utils import infer_python_schema_from_pylist_data
+    from orcapod.semantic_types.universal_converter import UniversalTypeConverter
+
+    schema = infer_python_schema_from_pylist_data([{"items": [], "meta": {}}])
+    converter = UniversalTypeConverter()
+    # Must not raise ValueError: Unsupported Python type: typing.Any
+    arrow_schema = converter.python_schema_to_arrow_schema(schema)
+    assert "items" in [f.name for f in arrow_schema]
+    assert "meta" in [f.name for f in arrow_schema]
+
+
+def test_pyarrow_empty_list_with_null_type():
+    """PyArrow accepts empty lists for pa.large_list(pa.null()) and pa.large_list(pa.struct(...)) columns."""
+    schema = pa.schema([
+        pa.field("items", pa.large_list(pa.null())),
+        pa.field("meta", pa.large_list(pa.struct([("key", pa.null()), ("value", pa.null())]))),
+    ])
+    table = pa.Table.from_pylist([{"items": [], "meta": []}], schema=schema)
+    assert table.num_rows == 1
+    assert table.schema.field("items").type == pa.large_list(pa.null())
