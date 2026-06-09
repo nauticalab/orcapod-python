@@ -21,6 +21,7 @@ from orcapod.errors import CursorInvalidatedError, InputValidationError, SchemaI
 from orcapod.types import ColumnConfig, Cursor, PollingConfig
 from orcapod.utils import arrow_utils, polars_data_utils
 from orcapod.utils.lazy_module import LazyModule
+from orcapod.utils.schema_utils import _normalize_column_list
 
 if TYPE_CHECKING:
     import polars as pl
@@ -226,10 +227,7 @@ class PollingSource(RootSource, Generic[T]):
             config=config,
         )
         self._impl: DynamicSourceProtocol[T] = impl
-        if isinstance(tag_columns, str):
-            self._tag_columns: tuple[str, ...] = (tag_columns,)
-        else:
-            self._tag_columns = tuple(tag_columns)
+        self._tag_columns: tuple[str, ...] = tuple(_normalize_column_list(tag_columns))
         self._polling_config = polling_config
         self._tag_schema = tag_schema
         self._data_schema = data_schema
