@@ -1,4 +1,10 @@
-from .config import DEFAULT_CONFIG, DisplayConfig, HashingConfig, OrcapodConfig, load_config
+from .config import (
+    DEFAULT_CONFIG,
+    DisplayConfig,
+    HashingConfig,
+    OrcapodConfig,
+    load_config,
+)
 from .core.function_pod import (
     FunctionPod,
     function_pod,

@@ -161,6 +161,11 @@ class OrcapodConfig:
 
         hashing_dict = data.get("hashing", {})
         known_hashing = set(HashingConfig.__dataclass_fields__)
+        if not isinstance(hashing_dict, dict):
+            logger.warning(
+                "Config section [hashing]%s is not a table — ignored", path_str
+            )
+            hashing_dict = {}
         for key in hashing_dict:
             if key not in known_hashing:
                 logger.warning(
@@ -172,6 +177,11 @@ class OrcapodConfig:
 
         display_dict = data.get("display", {})
         known_display = set(DisplayConfig.__dataclass_fields__)
+        if not isinstance(display_dict, dict):
+            logger.warning(
+                "Config section [display]%s is not a table — ignored", path_str
+            )
+            display_dict = {}
         for key in display_dict:
             if key not in known_display:
                 logger.warning(
@@ -227,6 +237,9 @@ def load_config(
         else Path.cwd() / "orcapod_config.toml"
     )
 
+    known_hashing = set(HashingConfig.__dataclass_fields__)
+    known_display = set(DisplayConfig.__dataclass_fields__)
+
     config = DEFAULT_CONFIG
 
     for path in (_user_path, _project_path):
@@ -237,7 +250,54 @@ def load_config(
                 data = tomllib.load(f)
         except tomllib.TOMLDecodeError as e:
             raise ValueError(f"Malformed TOML in {path}: {e}") from e
-        overlay = OrcapodConfig.from_dict(data, source_path=path)
-        config = config.merge(overlay)
+
+        # Warn on unknown top-level sections.
+        for key in data:
+            if key not in {"hashing", "display"}:
+                logger.warning(
+                    "Unknown config section %r in %s — ignored", key, path
+                )
+
+        # Apply only the keys explicitly present in this file so that a
+        # higher-precedence file can reset a field back to its default value
+        # and still win over a lower-precedence non-default.
+        hashing_data = data.get("hashing", {})
+        if not isinstance(hashing_data, dict):
+            logger.warning(
+                "Config section [hashing] in %s is not a table — ignored", path
+            )
+            hashing_data = {}
+        else:
+            for key in hashing_data:
+                if key not in known_hashing:
+                    logger.warning(
+                        "Unknown field %r in [hashing] in %s — ignored", key, path
+                    )
+        hashing_updates = {k: v for k, v in hashing_data.items() if k in known_hashing}
+
+        display_data = data.get("display", {})
+        if not isinstance(display_data, dict):
+            logger.warning(
+                "Config section [display] in %s is not a table — ignored", path
+            )
+            display_data = {}
+        else:
+            for key in display_data:
+                if key not in known_display:
+                    logger.warning(
+                        "Unknown field %r in [display] in %s — ignored", key, path
+                    )
+        display_updates = {
+            k: v for k, v in display_data.items() if k in known_display
+        }
+
+        if hashing_updates:
+            config = config.with_updates(
+                hashing=replace(config.hashing, **hashing_updates)
+            )
+        if display_updates:
+            config = config.with_updates(
+                display=replace(config.display, **display_updates)
+            )
 
     return config
