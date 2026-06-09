@@ -78,6 +78,10 @@ class TestConstruction:
                 record_path_prefix=("x",),
             )
 
+    def test_result_database_is_public(self, cached_pod, cache_db):
+        """result_database must be accessible as a public property (no underscore prefix)."""
+        assert cached_pod.result_database is cache_db
+
 
 # ---------------------------------------------------------------------------
 # Cache miss

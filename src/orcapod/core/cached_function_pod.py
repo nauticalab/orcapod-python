@@ -55,8 +55,8 @@ class CachedFunctionPod(WrappedFunctionPod):
         )
 
     @property
-    def _result_database(self) -> ArrowDatabaseProtocol:
-        """The underlying result database (for FunctionNode access)."""
+    def result_database(self) -> ArrowDatabaseProtocol:
+        """The underlying result database."""
         return self._cache.result_database
 
     @property
