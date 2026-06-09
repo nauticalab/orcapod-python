@@ -378,3 +378,85 @@ class TestSQLiteTableSourceTagColumns:
             SQLiteTableSource(
                 db_path=sqlite_db_path, table_name="events", tag_columns=42
             )
+
+
+# ---------------------------------------------------------------------------
+# PollingSource
+# ---------------------------------------------------------------------------
+
+
+class _FakePollingImpl:
+    """Minimal DynamicSourceProtocol stub for tag_columns normalization tests.
+
+    No real data is served — ``tag_schema`` and ``data_schema`` are declared
+    at construction so that ``keys()`` can answer without triggering a fetch.
+    """
+
+    def identity(self) -> Any:
+        return "_FakePollingImpl"
+
+    def to_config(self) -> dict[str, Any] | None:
+        return None
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "_FakePollingImpl":
+        return cls()
+
+    async def poll(self, cursor: Any = None) -> bool:
+        return False
+
+    async def fetch(self, cursor: Any = None) -> tuple[Any, Any]:
+        from orcapod.types import Cursor
+
+        return Cursor(value=0), {}
+
+    async def close(self) -> None:
+        pass
+
+
+class TestPollingSourceTagColumns:
+    def test_bare_string_same_as_list(self):
+        from orcapod.core.sources.polling_source import PollingSource
+        from orcapod.types import Schema
+
+        tag_schema = Schema({"session_id": str})
+        data_schema = Schema({"value": int})
+        stub = _FakePollingImpl()
+        src_str = PollingSource(
+            impl=stub,
+            tag_columns="session_id",
+            tag_schema=tag_schema,
+            data_schema=data_schema,
+        )
+        src_list = PollingSource(
+            impl=stub,
+            tag_columns=["session_id"],
+            tag_schema=tag_schema,
+            data_schema=data_schema,
+        )
+        tag_keys_str, _ = src_str.keys()
+        tag_keys_list, _ = src_list.keys()
+        assert set(tag_keys_str) == set(tag_keys_list) == {"session_id"}
+
+    def test_tuple_accepted(self):
+        from orcapod.core.sources.polling_source import PollingSource
+        from orcapod.types import Schema
+
+        tag_schema = Schema({"session_id": str})
+        data_schema = Schema({"value": int})
+        stub = _FakePollingImpl()
+        src = PollingSource(
+            impl=stub,
+            tag_columns=("session_id",),
+            tag_schema=tag_schema,
+            data_schema=data_schema,
+        )
+        tag_keys, _ = src.keys()
+        assert "session_id" in tag_keys
+
+    def test_invalid_type_raises(self):
+        from orcapod.core.sources.polling_source import PollingSource
+
+        stub = _FakePollingImpl()
+        with pytest.raises(TypeError):
+            PollingSource(impl=stub, tag_columns=42)
