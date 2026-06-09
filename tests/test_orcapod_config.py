@@ -297,3 +297,8 @@ class TestOrcapodConfigTopLevelExport:
         import orcapod
 
         assert "load_config" in orcapod.__all__
+
+    def test_default_config_in_all(self):
+        import orcapod
+
+        assert "DEFAULT_CONFIG" in orcapod.__all__
