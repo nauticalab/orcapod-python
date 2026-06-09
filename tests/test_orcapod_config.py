@@ -197,6 +197,26 @@ class TestOrcapodConfigFromDict:
             )
         assert "/some/config.toml" in caplog.text
 
+    def test_non_dict_hashing_section_warns_and_uses_defaults(self, caplog):
+        import logging
+
+        from orcapod.config import OrcapodConfig
+
+        with caplog.at_level(logging.WARNING, logger="orcapod.config"):
+            cfg = OrcapodConfig.from_dict({"hashing": "not-a-table"})
+        assert "hashing" in caplog.text
+        assert cfg.hashing.system_tag_n_char == 12  # falls back to default
+
+    def test_non_dict_display_section_warns_and_uses_defaults(self, caplog):
+        import logging
+
+        from orcapod.config import OrcapodConfig
+
+        with caplog.at_level(logging.WARNING, logger="orcapod.config"):
+            cfg = OrcapodConfig.from_dict({"display": 42})
+        assert "display" in caplog.text
+        assert cfg.display.max_rows is None  # falls back to default
+
 
 class TestLoadConfig:
     def test_no_files_returns_default(self, tmp_path):
@@ -239,6 +259,22 @@ class TestLoadConfig:
         project_cfg.write_text("[hashing]\nsystem_tag_n_char = 10\n")
         result = load_config(user_config_path=user_cfg, project_config_path=project_cfg)
         assert result.hashing.system_tag_n_char == 10
+
+    def test_project_local_can_reset_field_to_default(self, tmp_path):
+        """Project-local file can explicitly reset a field to its default value.
+
+        Verifies that a higher-precedence file setting a value equal to the
+        built-in default still wins over a lower-precedence non-default.
+        """
+        from orcapod.config import load_config
+
+        user_cfg = tmp_path / "user.toml"
+        user_cfg.write_text("[hashing]\nsystem_tag_n_char = 6\n")
+        project_cfg = tmp_path / "project.toml"
+        # Explicitly set back to the built-in default (12) — should win.
+        project_cfg.write_text("[hashing]\nsystem_tag_n_char = 12\n")
+        result = load_config(user_config_path=user_cfg, project_config_path=project_cfg)
+        assert result.hashing.system_tag_n_char == 12
 
     def test_malformed_toml_raises_value_error(self, tmp_path):
         import pytest
