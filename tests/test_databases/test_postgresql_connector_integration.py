@@ -440,3 +440,153 @@ class TestConnectorArrowDatabaseWithPostgreSQL:
         db.add_record(("fn", "mismatch"), record_id="r2", record=r2)
         with pytest.raises(ValueError, match="Schema mismatch"):
             db.flush()
+
+
+# ---------------------------------------------------------------------------
+# Async lifecycle
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.postgres
+class TestAsyncLifecycle:
+    @pytest.mark.asyncio
+    async def test_aenter_opens_async_conn(self, connector: PostgreSQLConnector) -> None:
+        assert connector._async_conn is None
+        async with connector:
+            assert connector._async_conn is not None
+
+    @pytest.mark.asyncio
+    async def test_async_close_idempotent(self, connector: PostgreSQLConnector) -> None:
+        async with connector:
+            pass
+        await connector.async_close()  # second call must not raise
+
+    def test_require_async_open_raises_outside_context(
+        self, connector: PostgreSQLConnector
+    ) -> None:
+        with pytest.raises(RuntimeError, match="async context manager"):
+            connector._require_async_open()
+
+
+# ---------------------------------------------------------------------------
+# Async schema introspection
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.postgres
+class TestAsyncSchemaIntrospection:
+    @pytest.mark.asyncio
+    async def test_async_get_table_names_matches_sync(
+        self, connector: PostgreSQLConnector
+    ) -> None:
+        with connector._conn.cursor() as cur:
+            cur.execute('CREATE TABLE "t1" (id INTEGER PRIMARY KEY)')
+            cur.execute('CREATE TABLE "t2" (id INTEGER PRIMARY KEY)')
+        connector._conn.commit()
+        sync_result = connector.get_table_names()
+        async with connector:
+            async_result = await connector.async_get_table_names()
+        assert async_result == sync_result
+
+    @pytest.mark.asyncio
+    async def test_async_get_pk_columns_matches_sync(
+        self, connector: PostgreSQLConnector
+    ) -> None:
+        with connector._conn.cursor() as cur:
+            cur.execute('CREATE TABLE "t" (id TEXT PRIMARY KEY, val REAL)')
+        connector._conn.commit()
+        sync_result = connector.get_pk_columns("t")
+        async with connector:
+            async_result = await connector.async_get_pk_columns("t")
+        assert async_result == sync_result
+
+    @pytest.mark.asyncio
+    async def test_async_get_column_info_matches_sync(
+        self, connector: PostgreSQLConnector
+    ) -> None:
+        with connector._conn.cursor() as cur:
+            cur.execute('CREATE TABLE "t" (id TEXT NOT NULL, val REAL)')
+        connector._conn.commit()
+        sync_result = connector.get_column_info("t")
+        async with connector:
+            async_result = await connector.async_get_column_info("t")
+        assert async_result == sync_result
+
+
+# ---------------------------------------------------------------------------
+# Async iter_batches
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.postgres
+class TestAsyncIterBatches:
+    def _setup_data(self, connector: PostgreSQLConnector) -> None:
+        cols = [
+            ColumnInfo("id", pa.large_string(), nullable=False),
+            ColumnInfo("score", pa.float64(), nullable=True),
+        ]
+        connector.create_table_if_not_exists("data", cols, "id")
+        records = pa.table({
+            "id": pa.array(["a", "b", "c"], type=pa.large_string()),
+            "score": pa.array([1.5, 2.5, 3.5], type=pa.float64()),
+        })
+        connector.upsert_records("data", records, "id")
+
+    @pytest.mark.asyncio
+    async def test_returns_all_rows(self, connector: PostgreSQLConnector) -> None:
+        self._setup_data(connector)
+        async with connector:
+            batches = [
+                b async for b in connector.async_iter_batches('SELECT * FROM "data"')
+            ]
+        assert sum(b.num_rows for b in batches) == 3
+
+    @pytest.mark.asyncio
+    async def test_correct_arrow_types(self, connector: PostgreSQLConnector) -> None:
+        self._setup_data(connector)
+        async with connector:
+            batches = [
+                b async for b in connector.async_iter_batches('SELECT * FROM "data"')
+            ]
+        table = pa.Table.from_batches(batches)
+        assert table.schema.field("id").type == pa.large_string()
+        assert table.schema.field("score").type == pa.float64()
+
+    @pytest.mark.asyncio
+    async def test_batch_size_respected(self, connector: PostgreSQLConnector) -> None:
+        self._setup_data(connector)
+        async with connector:
+            batches = [
+                b async for b in connector.async_iter_batches(
+                    'SELECT * FROM "data"', batch_size=2
+                )
+            ]
+        assert len(batches) == 2
+        assert batches[0].num_rows == 2
+        assert batches[1].num_rows == 1
+
+    @pytest.mark.asyncio
+    async def test_empty_result(self, connector: PostgreSQLConnector) -> None:
+        self._setup_data(connector)
+        async with connector:
+            batches = [
+                b async for b in connector.async_iter_batches(
+                    'SELECT * FROM "data" WHERE 1=0'
+                )
+            ]
+        assert batches == []
+
+    @pytest.mark.asyncio
+    async def test_early_abandonment_closes_cursor(
+        self, connector: PostgreSQLConnector
+    ) -> None:
+        self._setup_data(connector)
+        async with connector:
+            gen = connector.async_iter_batches('SELECT * FROM "data"', batch_size=1)
+            await gen.__anext__()  # consume one batch
+            await gen.aclose()    # abandon — must not leak server-side cursor
+            # Subsequent queries must still work
+            batches = [
+                b async for b in connector.async_iter_batches('SELECT * FROM "data"')
+            ]
+        assert sum(b.num_rows for b in batches) == 3

@@ -2,7 +2,7 @@
 """Unit tests for PostgreSQLConnector — no live database required."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pyarrow as pa
 import pytest
@@ -12,6 +12,7 @@ from orcapod.databases.postgresql_connector import (
     _arrow_type_to_pg_sql,
     _pg_type_to_arrow,
 )
+from orcapod.protocols.async_db_connector_protocol import AsyncDBConnectorProtocol
 from orcapod.protocols.db_connector_protocol import DBConnectorProtocol
 
 
@@ -258,4 +259,288 @@ class TestSchemaIntrospectionUnit:
         connector._conn.cursor.return_value = mock_cursor
         result = connector.get_pk_columns("my_table")
         assert result == []
+        connector._conn = None
+
+
+class TestAsyncLifecycle:
+    """Unit tests for PostgreSQLConnector async lifecycle methods."""
+
+    def _make_connector(self) -> PostgreSQLConnector:
+        with patch("psycopg.connect") as mock_connect:
+            mock_connect.return_value = MagicMock()
+            return PostgreSQLConnector("postgresql://localhost/test")
+
+    def test_isinstance_async_protocol(self) -> None:
+        connector = self._make_connector()
+        assert isinstance(connector, AsyncDBConnectorProtocol)
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_aenter_sets_async_conn(self) -> None:
+        connector = self._make_connector()
+        mock_async_conn = AsyncMock()
+        with patch("psycopg.AsyncConnection.connect", new_callable=AsyncMock,
+                   return_value=mock_async_conn):
+            result = await connector.__aenter__()
+        assert result is connector
+        assert connector._async_conn is mock_async_conn
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_aexit_closes_async_and_sync(self) -> None:
+        connector = self._make_connector()
+        mock_async_conn = AsyncMock()
+        connector._async_conn = mock_async_conn
+        await connector.__aexit__(None, None, None)
+        mock_async_conn.close.assert_called_once()
+        assert connector._async_conn is None
+        assert connector._conn is None  # sync also closed
+
+    @pytest.mark.asyncio
+    async def test_async_close_idempotent(self) -> None:
+        connector = self._make_connector()
+        mock_async_conn = AsyncMock()
+        connector._async_conn = mock_async_conn
+        await connector.async_close()
+        await connector.async_close()  # must not raise
+        mock_async_conn.close.assert_called_once()
+
+    def test_require_async_open_raises_before_aenter(self) -> None:
+        connector = self._make_connector()
+        with pytest.raises(RuntimeError, match="async context manager"):
+            connector._require_async_open()
+        connector._conn = None
+
+    def test_require_async_open_returns_conn_after_aenter(self) -> None:
+        connector = self._make_connector()
+        mock_async_conn = MagicMock()
+        connector._async_conn = mock_async_conn
+        result = connector._require_async_open()
+        assert result is mock_async_conn
+        connector._conn = None
+
+
+class TestAsyncSchemaIntrospectionUnit:
+    """Unit tests for async schema introspection — mocked cursor."""
+
+    def _make_connector_with_async_conn(self) -> PostgreSQLConnector:
+        with patch("psycopg.connect") as mock_connect:
+            mock_connect.return_value = MagicMock()
+            connector = PostgreSQLConnector("postgresql://localhost/test")
+        connector._async_conn = AsyncMock()
+        return connector
+
+    def _mock_cursor_returning(self, connector: PostgreSQLConnector,
+                               rows: list) -> AsyncMock:
+        """Wire up connector._async_conn.cursor() to return rows from fetchall."""
+        mock_cursor = AsyncMock()
+        mock_cursor.fetchall.return_value = rows
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_cursor)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+        # cursor() must be a sync call returning an async context manager;
+        # override the AsyncMock attribute with a plain MagicMock so that
+        # conn.cursor() returns mock_cm directly (not a coroutine).
+        connector._async_conn.cursor = MagicMock(return_value=mock_cm)
+        return mock_cursor
+
+    @pytest.mark.asyncio
+    async def test_async_get_table_names(self) -> None:
+        connector = self._make_connector_with_async_conn()
+        self._mock_cursor_returning(connector, [("alpha",), ("beta",)])
+        result = await connector.async_get_table_names()
+        assert result == ["alpha", "beta"]
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_async_get_pk_columns_single(self) -> None:
+        connector = self._make_connector_with_async_conn()
+        self._mock_cursor_returning(connector, [("id",)])
+        result = await connector.async_get_pk_columns("my_table")
+        assert result == ["id"]
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_async_get_pk_columns_empty(self) -> None:
+        connector = self._make_connector_with_async_conn()
+        self._mock_cursor_returning(connector, [])
+        result = await connector.async_get_pk_columns("my_table")
+        assert result == []
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_async_get_pk_columns_raises_on_bad_name(self) -> None:
+        connector = self._make_connector_with_async_conn()
+        with pytest.raises(ValueError, match="double-quote"):
+            await connector.async_get_pk_columns('bad"name')
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_async_get_column_info(self) -> None:
+        connector = self._make_connector_with_async_conn()
+        self._mock_cursor_returning(connector, [
+            ("id", "text", "text", "NO"),
+            ("val", "double precision", "float8", "YES"),
+        ])
+        result = await connector.async_get_column_info("my_table")
+        assert len(result) == 2
+        assert result[0].name == "id"
+        assert result[0].arrow_type == pa.large_string()
+        assert result[0].nullable is False
+        assert result[1].name == "val"
+        assert result[1].arrow_type == pa.float64()
+        assert result[1].nullable is True
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_async_get_column_info_raises_on_bad_name(self) -> None:
+        connector = self._make_connector_with_async_conn()
+        with pytest.raises(ValueError, match="double-quote"):
+            await connector.async_get_column_info('bad"name')
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_schema_methods_raise_without_aenter(self) -> None:
+        with patch("psycopg.connect") as mock_connect:
+            mock_connect.return_value = MagicMock()
+            connector = PostgreSQLConnector("postgresql://localhost/test")
+        # _async_conn is None — all three methods should raise
+        with pytest.raises(RuntimeError, match="async context manager"):
+            await connector.async_get_table_names()
+        with pytest.raises(RuntimeError, match="async context manager"):
+            await connector.async_get_pk_columns("t")
+        with pytest.raises(RuntimeError, match="async context manager"):
+            await connector.async_get_column_info("t")
+        connector._conn = None
+
+
+class TestAsyncIterBatchesUnit:
+    """Unit tests for async_iter_batches — mocked psycopg async connection."""
+
+    def _make_connector(self) -> PostgreSQLConnector:
+        with patch("psycopg.connect") as mock_connect:
+            mock_connect.return_value = MagicMock()
+            connector = PostgreSQLConnector("postgresql://localhost/test")
+        # Simulate entered context with an async connection whose cursor()
+        # returns an async context manager. async_get_column_info uses this
+        # to discover column types — return "id INTEGER NOT NULL" so that
+        # int test data is accepted by pyarrow without type errors.
+        inner_cursor = AsyncMock()
+        inner_cursor.fetchall = AsyncMock(
+            return_value=[("id", "integer", "int4", "NO")]
+        )
+        mock_cursor_cm = MagicMock()
+        mock_cursor_cm.__aenter__ = AsyncMock(return_value=inner_cursor)
+        mock_cursor_cm.__aexit__ = AsyncMock(return_value=False)
+        mock_async_conn = AsyncMock()
+        mock_async_conn.cursor = MagicMock(return_value=mock_cursor_cm)
+        connector._async_conn = mock_async_conn
+        return connector
+
+    def _make_mock_read_conn(self, rows_per_call: list[list]) -> tuple[AsyncMock, AsyncMock]:
+        """Return (mock_read_conn, mock_cursor).
+
+        rows_per_call: list of row lists returned by successive fetchmany calls.
+        The last entry must be an empty list to signal end-of-results.
+        """
+        mock_cursor = AsyncMock()
+        col = MagicMock()
+        col.name = "id"
+        mock_cursor.description = [col]
+        mock_cursor.fetchmany = AsyncMock(side_effect=rows_per_call)
+
+        mock_read_conn = AsyncMock()
+        # cursor() is a sync call in psycopg AsyncConnection; use MagicMock so
+        # that read_conn.cursor(name=...) returns mock_cursor directly.
+        mock_read_conn.cursor = MagicMock(return_value=mock_cursor)
+
+        return mock_read_conn, mock_cursor
+
+    @pytest.mark.asyncio
+    async def test_yields_correct_row_count(self) -> None:
+        connector = self._make_connector()
+        mock_read_conn, _ = self._make_mock_read_conn(
+            [[(1,), (2,), (3,)], []]
+        )
+        with patch("psycopg.AsyncConnection.connect", new_callable=AsyncMock,
+                   return_value=mock_read_conn):
+            batches = [b async for b in connector.async_iter_batches(
+                'SELECT * FROM "t"'
+            )]
+        assert sum(b.num_rows for b in batches) == 3
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_multiple_batches(self) -> None:
+        connector = self._make_connector()
+        mock_read_conn, _ = self._make_mock_read_conn(
+            [[(1,), (2,)], [(3,)], []]
+        )
+        with patch("psycopg.AsyncConnection.connect", new_callable=AsyncMock,
+                   return_value=mock_read_conn):
+            batches = [b async for b in connector.async_iter_batches(
+                'SELECT * FROM "t"', batch_size=2
+            )]
+        assert len(batches) == 2
+        assert batches[0].num_rows == 2
+        assert batches[1].num_rows == 1
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_empty_result(self) -> None:
+        connector = self._make_connector()
+        mock_cursor = AsyncMock()
+        mock_cursor.description = None
+        mock_read_conn = AsyncMock()
+        # cursor() is sync in psycopg; use MagicMock so the call is not awaited
+        mock_read_conn.cursor = MagicMock(return_value=mock_cursor)
+        with patch("psycopg.AsyncConnection.connect", new_callable=AsyncMock,
+                   return_value=mock_read_conn):
+            batches = [b async for b in connector.async_iter_batches(
+                'SELECT * FROM "t"'
+            )]
+        assert batches == []
+        mock_cursor.close.assert_called_once()
+        mock_read_conn.close.assert_called_once()
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_cursor_closed_on_completion(self) -> None:
+        connector = self._make_connector()
+        mock_read_conn, mock_cursor = self._make_mock_read_conn(
+            [[(1,)], []]
+        )
+        with patch("psycopg.AsyncConnection.connect", new_callable=AsyncMock,
+                   return_value=mock_read_conn):
+            _ = [b async for b in connector.async_iter_batches('SELECT * FROM "t"')]
+        mock_cursor.close.assert_called_once()
+        mock_read_conn.rollback.assert_called_once()
+        mock_read_conn.close.assert_called_once()
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_cursor_closed_on_early_abandonment(self) -> None:
+        connector = self._make_connector()
+        mock_read_conn, mock_cursor = self._make_mock_read_conn(
+            [[(1,)], [(2,)], []]
+        )
+        with patch("psycopg.AsyncConnection.connect", new_callable=AsyncMock,
+                   return_value=mock_read_conn):
+            gen = connector.async_iter_batches('SELECT * FROM "t"', batch_size=1)
+            await gen.__anext__()  # consume one batch
+            await gen.aclose()    # abandon mid-stream
+        mock_cursor.close.assert_called_once()
+        mock_read_conn.rollback.assert_called_once()
+        mock_read_conn.close.assert_called_once()
+        connector._conn = None
+
+    @pytest.mark.asyncio
+    async def test_raises_without_aenter(self) -> None:
+        with patch("psycopg.connect") as mock_connect:
+            mock_connect.return_value = MagicMock()
+            connector = PostgreSQLConnector("postgresql://localhost/test")
+        # _async_conn is None
+        with pytest.raises(RuntimeError, match="async context manager"):
+            async for _ in connector.async_iter_batches('SELECT * FROM "t"'):
+                pass
         connector._conn = None

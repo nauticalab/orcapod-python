@@ -12,11 +12,12 @@ Example::
 """
 from __future__ import annotations
 
+import asyncio
 import itertools
 import logging
 import re
 import threading
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from typing import TYPE_CHECKING, Any
 
 from orcapod.types import ColumnInfo
@@ -30,6 +31,40 @@ else:
     pa = LazyModule("pyarrow")
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# SQL query strings (shared between sync and async methods)
+# ---------------------------------------------------------------------------
+
+_SQL_TABLE_NAMES = """
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = current_schema()
+      AND table_type = 'BASE TABLE'
+    ORDER BY table_name
+"""
+
+_SQL_PK_COLUMNS = """
+    SELECT kcu.column_name
+    FROM information_schema.key_column_usage kcu
+    JOIN information_schema.table_constraints tc
+      ON kcu.constraint_name = tc.constraint_name
+     AND kcu.table_schema    = tc.table_schema
+     AND kcu.table_name      = tc.table_name
+    WHERE tc.constraint_type = 'PRIMARY KEY'
+      AND kcu.table_schema   = current_schema()
+      AND kcu.table_name     = %s
+    ORDER BY kcu.ordinal_position
+"""
+
+_SQL_COLUMN_INFO = """
+    SELECT column_name, data_type, udt_name, is_nullable
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name   = %s
+    ORDER BY ordinal_position
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -150,31 +185,22 @@ def _arrow_type_to_pg_sql(arrow_type: pa.DataType) -> str:
     return "TEXT"
 
 
-def _resolve_column_type_lookup(
-    query: str,
-    connector: "PostgreSQLConnector",
-) -> dict[str, pa.DataType]:
-    """Parse the FROM clause of query to find the source table, then return
-    a column-name → Arrow-type dict from get_column_info.
+def _parse_table_from_query(query: str) -> str | None:
+    """Extract the single unambiguous source table name from a SELECT query.
 
-    Returns an empty dict if no single unambiguous table can be identified,
-    causing iter_batches to fall back to pa.large_string() for all columns.
+    Returns ``None`` when the query references more than one table (JOINs,
+    comma-separated tables, subqueries, CTEs) so callers fall back to treating
+    all columns as ``pa.large_string()``.
 
     Args:
         query: SQL query string.
-        connector: The connector to call get_column_info on.
 
     Returns:
-        Dict mapping column name to Arrow DataType.
+        The table name string, or ``None`` if no single table can be identified.
     """
-    # Be conservative: only resolve types when we can unambiguously identify
-    # a single source table. For multi-table queries (JOINs, comma-separated
-    # tables, multiple FROM clauses, subqueries, etc.) return {} so callers
-    # fall back to treating all columns as pa.large_string().
-
     # Fast path: any JOIN keyword means multi-table.
     if re.search(r"\bJOIN\b", query, re.IGNORECASE):
-        return {}
+        return None
 
     # Find all FROM <table> occurrences.  We only proceed when there is
     # exactly one (multiple FROMs indicate subqueries or CTEs).
@@ -184,7 +210,7 @@ def _resolve_column_type_lookup(
     )
     from_matches = list(from_pattern.finditer(query))
     if len(from_matches) != 1:
-        return {}
+        return None
 
     match = from_matches[0]
     table_name = match.group(1) or match.group(2)
@@ -201,9 +227,55 @@ def _resolve_column_type_lookup(
         from_tail = from_tail[: clause_boundary.start()]
 
     if "," in from_tail:
-        return {}
+        return None
 
+    return table_name
+
+
+def _resolve_column_type_lookup(
+    query: str,
+    connector: "PostgreSQLConnector",
+) -> dict[str, pa.DataType]:
+    """Return a column-name → Arrow-type dict for the source table of ``query``.
+
+    Returns an empty dict if no single unambiguous table can be identified,
+    causing ``iter_batches`` to fall back to ``pa.large_string()`` for all
+    columns.
+
+    Args:
+        query: SQL query string.
+        connector: The connector to call ``get_column_info`` on.
+
+    Returns:
+        Dict mapping column name to Arrow DataType.
+    """
+    table_name = _parse_table_from_query(query)
+    if table_name is None:
+        return {}
     return {ci.name: ci.arrow_type for ci in connector.get_column_info(table_name)}
+
+
+async def _async_resolve_column_type_lookup(
+    query: str,
+    connector: "PostgreSQLConnector",
+) -> dict[str, pa.DataType]:
+    """Async counterpart to ``_resolve_column_type_lookup``.
+
+    Returns an empty dict if no single unambiguous table can be identified,
+    causing ``async_iter_batches`` to fall back to ``pa.large_string()`` for
+    all columns.
+
+    Args:
+        query: SQL query string.
+        connector: The connector to call ``async_get_column_info`` on.
+
+    Returns:
+        Dict mapping column name to Arrow DataType.
+    """
+    table_name = _parse_table_from_query(query)
+    if table_name is None:
+        return {}
+    return {ci.name: ci.arrow_type for ci in await connector.async_get_column_info(table_name)}
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +292,11 @@ class PostgreSQLConnector:
     Uses named server-side cursors in iter_batches so PostgreSQL streams
     results row-by-row rather than buffering the full result set.
 
+    **Async context manager note:** ``async with connector:`` opens an async
+    psycopg3 connection. Exiting the async context manager calls
+    ``async_close()``, which closes *both* the async and the sync connections.
+    After ``async with``, the connector must not be used further.
+
     Args:
         dsn: libpq connection string.
             URI form: ``"postgresql://user:pass@host:5432/dbname"``
@@ -231,6 +308,7 @@ class PostgreSQLConnector:
         self._conn: Any = psycopg.connect(dsn, autocommit=False)
         self._lock = threading.RLock()  # RLock required: iter_batches → _resolve_column_type_lookup → get_column_info re-enters the lock
         self._cursor_seq = itertools.count()
+        self._async_conn: Any = None  # psycopg.AsyncConnection; set by __aenter__
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -239,6 +317,19 @@ class PostgreSQLConnector:
         if self._conn is None:
             raise RuntimeError("PostgreSQLConnector is closed")
         return self._conn
+
+    def _require_async_open(self) -> Any:
+        """Return the open async connection or raise RuntimeError if not entered.
+
+        Raises:
+            RuntimeError: If ``__aenter__`` has not been called.
+        """
+        if self._async_conn is None:
+            raise RuntimeError(
+                "PostgreSQLConnector: enter the async context manager before "
+                "calling async methods"
+            )
+        return self._async_conn
 
     @staticmethod
     def _validate_table_name(table_name: str) -> None:
@@ -255,15 +346,7 @@ class PostgreSQLConnector:
         with self._lock:
             conn = self._require_open()
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT table_name
-                    FROM information_schema.tables
-                    WHERE table_schema = current_schema()
-                      AND table_type = 'BASE TABLE'
-                    ORDER BY table_name
-                    """
-                )
+                cur.execute(_SQL_TABLE_NAMES)
                 return [row[0] for row in cur.fetchall()]
 
     def get_pk_columns(self, table_name: str) -> list[str]:
@@ -272,21 +355,7 @@ class PostgreSQLConnector:
             conn = self._require_open()
             self._validate_table_name(table_name)
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT kcu.column_name
-                    FROM information_schema.key_column_usage kcu
-                    JOIN information_schema.table_constraints tc
-                      ON kcu.constraint_name = tc.constraint_name
-                     AND kcu.table_schema    = tc.table_schema
-                     AND kcu.table_name      = tc.table_name
-                    WHERE tc.constraint_type = 'PRIMARY KEY'
-                      AND kcu.table_schema   = current_schema()
-                      AND kcu.table_name     = %s
-                    ORDER BY kcu.ordinal_position
-                    """,
-                    (table_name,),
-                )
+                cur.execute(_SQL_PK_COLUMNS, (table_name,))
                 return [row[0] for row in cur.fetchall()]
 
     def get_column_info(self, table_name: str) -> list[ColumnInfo]:
@@ -295,16 +364,7 @@ class PostgreSQLConnector:
             conn = self._require_open()
             self._validate_table_name(table_name)
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT column_name, data_type, udt_name, is_nullable
-                    FROM information_schema.columns
-                    WHERE table_schema = current_schema()
-                      AND table_name   = %s
-                    ORDER BY ordinal_position
-                    """,
-                    (table_name,),
-                )
+                cur.execute(_SQL_COLUMN_INFO, (table_name,))
                 return [
                     ColumnInfo(
                         name=row[0],
@@ -467,6 +527,144 @@ class PostgreSQLConnector:
 
     def __exit__(self, *args: Any) -> None:
         self.close()
+
+    # ── Async lifecycle ───────────────────────────────────────────────────────
+
+    async def __aenter__(self) -> PostgreSQLConnector:
+        """Open an async psycopg3 connection and return self.
+
+        The async connection is used by ``async_get_table_names``,
+        ``async_get_pk_columns``, and ``async_get_column_info``.
+        ``async_iter_batches`` opens its own dedicated connection per call.
+        """
+        self._async_conn = await psycopg.AsyncConnection.connect(
+            self._dsn, autocommit=False
+        )
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        await self.async_close()
+
+    async def async_close(self) -> None:
+        """Close async and sync connections.
+
+        Implementations must be idempotent — calling this multiple times must
+        not raise.
+        """
+        if self._async_conn is not None:
+            await self._async_conn.close()
+            self._async_conn = None
+        await asyncio.to_thread(self.close)
+
+    # ── Async schema introspection ────────────────────────────────────────────
+
+    async def async_get_table_names(self) -> list[str]:
+        """Return all user table names in this database (sorted, excludes views)."""
+        conn = self._require_async_open()
+        async with conn.cursor() as cur:
+            await cur.execute(_SQL_TABLE_NAMES)
+            return [row[0] for row in await cur.fetchall()]
+
+    async def async_get_pk_columns(self, table_name: str) -> list[str]:
+        """Return primary-key column names in key-sequence order.
+
+        Returns:
+            List of PK column names; empty list if the table has no primary key.
+        """
+        conn = self._require_async_open()
+        self._validate_table_name(table_name)
+        async with conn.cursor() as cur:
+            await cur.execute(_SQL_PK_COLUMNS, (table_name,))
+            return [row[0] for row in await cur.fetchall()]
+
+    async def async_get_column_info(self, table_name: str) -> list[ColumnInfo]:
+        """Return column metadata with Arrow-mapped types."""
+        conn = self._require_async_open()
+        self._validate_table_name(table_name)
+        async with conn.cursor() as cur:
+            await cur.execute(_SQL_COLUMN_INFO, (table_name,))
+            return [
+                ColumnInfo(
+                    name=row[0],
+                    arrow_type=_pg_type_to_arrow(row[1], row[2]),
+                    nullable=(row[3].upper() == "YES"),
+                )
+                for row in await cur.fetchall()
+            ]
+
+    # ── Async read ────────────────────────────────────────────────────────────
+
+    # The Protocol declares this as plain `def` returning `AsyncIterator` (see
+    # async_db_connector_protocol.py). Here, `async def` + `yield` makes it an
+    # async generator, which correctly satisfies that declared return type.
+    async def async_iter_batches(
+        self,
+        query: str,
+        params: Any = None,
+        batch_size: int = 1000,
+    ) -> AsyncIterator[pa.RecordBatch]:
+        """Execute a query and yield results as Arrow RecordBatches.
+
+        Opens a dedicated ``AsyncConnection`` per call so that the server-side
+        cursor portal is isolated from operations on the shared ``_async_conn``.
+        The dedicated connection is closed in the finally block regardless of
+        how the generator is consumed or abandoned.
+
+        Args:
+            query: SQL query string. Table names should be double-quoted
+                (``SELECT * FROM "my_table"``); all connectors must support
+                ANSI-standard double-quoted identifiers.
+            params: Optional query parameters.
+            batch_size: Maximum rows per yielded batch.
+
+        Raises:
+            RuntimeError: If the async context manager has not been entered.
+        """
+        import pyarrow as _pa
+
+        self._require_async_open()  # guard: raise if context manager not entered
+        self._require_open()  # guard: raise if sync connector is closed
+        dsn = self._dsn  # immutable after __init__; no lock needed
+
+        read_conn = await psycopg.AsyncConnection.connect(dsn, autocommit=False)
+        cursor_name = f"orcapod_{next(self._cursor_seq)}"
+        cur = read_conn.cursor(name=cursor_name)
+
+        try:
+            await cur.execute(query, params)
+            if cur.description is None:
+                return
+            col_names = [d.name for d in cur.description]
+            type_lookup = await _async_resolve_column_type_lookup(query, self)
+            arrow_types = [type_lookup.get(n, _pa.large_string()) for n in col_names]
+            schema = _pa.schema(
+                [_pa.field(n, t) for n, t in zip(col_names, arrow_types)]
+            )
+            rows = await cur.fetchmany(batch_size)
+
+            while rows:
+                arrays = [
+                    _pa.array([r[i] for r in rows], type=t)
+                    for i, t in enumerate(arrow_types)
+                ]
+                yield _pa.RecordBatch.from_arrays(arrays, schema=schema)
+                rows = await cur.fetchmany(batch_size)
+        finally:
+            # Each step runs independently so one failure doesn't block the
+            # others.  Note: CancelledError (BaseException subclass) can still
+            # interrupt an individual await; full shield() protection is deferred.
+            try:
+                await cur.close()
+            except Exception:
+                pass
+            try:
+                await read_conn.rollback()
+            except Exception:
+                pass
+            try:
+                await read_conn.close()
+            except Exception:
+                pass
 
     # ── Serialization ─────────────────────────────────────────────────────────
 

@@ -25,6 +25,12 @@ __all__ = [
 #   PostgreSQLConnector  -- PLT-1075 (psycopg3)                          ✓
 #   SpiralDBConnector    -- PLT-1074
 #
+# Connectors that also implement AsyncDBConnectorProtocol:
+#
+#   PostgreSQLConnector  -- native psycopg3 async (PLT-1453)              ✓
+#   SQLiteConnector      -- asyncio.to_thread() wrappers (PLT-1453)       ✓
+#   SpiralDBConnector    -- deferred to PLT-1456
+#
 # ArrowDatabaseProtocol backends (existing, not connector-based):
 #
 #   DeltaTableDatabase    -- Delta Lake (deltalake package)

@@ -13,6 +13,7 @@ from orcapod.databases.sqlite_connector import (
     _coerce_column,
     _sqlite_type_to_arrow,
 )
+from orcapod.protocols.async_db_connector_protocol import AsyncDBConnectorProtocol
 from orcapod.protocols.db_connector_protocol import DBConnectorProtocol
 from orcapod.types import ColumnInfo
 
@@ -426,3 +427,105 @@ class TestRowidTyping:
         assert "rowid" in batch.schema.names
         # Should remain large_string (declared type), not int64
         assert batch.schema.field("rowid").type == pa.large_string()
+
+
+class TestAsyncMethods:
+    """Async method tests using a real in-memory SQLite DB — no mocks needed."""
+
+    def _setup(self) -> SQLiteConnector:
+        """Return a connector with a simple table pre-populated."""
+        connector = SQLiteConnector(":memory:")
+        connector._conn.execute(
+            'CREATE TABLE "t" (id INTEGER PRIMARY KEY, val TEXT NOT NULL)'
+        )
+        connector._conn.execute(
+            "INSERT INTO \"t\" VALUES (1, 'a'), (2, 'b'), (3, 'c')"
+        )
+        return connector
+
+    def test_isinstance_async_protocol(self) -> None:
+        connector = SQLiteConnector(":memory:")
+        assert isinstance(connector, AsyncDBConnectorProtocol)
+
+    @pytest.mark.asyncio
+    async def test_aenter_returns_self(self) -> None:
+        connector = SQLiteConnector(":memory:")
+        result = await connector.__aenter__()
+        assert result is connector
+        await connector.async_close()
+
+    @pytest.mark.asyncio
+    async def test_aexit_closes_connection(self) -> None:
+        connector = SQLiteConnector(":memory:")
+        await connector.__aenter__()
+        await connector.__aexit__(None, None, None)
+        with pytest.raises(RuntimeError, match="closed"):
+            connector._require_open()
+
+    @pytest.mark.asyncio
+    async def test_async_close_idempotent(self) -> None:
+        connector = SQLiteConnector(":memory:")
+        await connector.async_close()
+        await connector.async_close()  # must not raise
+
+    @pytest.mark.asyncio
+    async def test_async_context_manager(self) -> None:
+        async with SQLiteConnector(":memory:") as connector:
+            assert connector._conn is not None
+        with pytest.raises(RuntimeError, match="closed"):
+            connector._require_open()
+
+    @pytest.mark.asyncio
+    async def test_async_get_table_names_matches_sync(self) -> None:
+        connector = self._setup()
+        assert await connector.async_get_table_names() == connector.get_table_names()
+        await connector.async_close()
+
+    @pytest.mark.asyncio
+    async def test_async_get_pk_columns_matches_sync(self) -> None:
+        connector = self._setup()
+        assert (
+            await connector.async_get_pk_columns("t") == connector.get_pk_columns("t")
+        )
+        await connector.async_close()
+
+    @pytest.mark.asyncio
+    async def test_async_get_column_info_matches_sync(self) -> None:
+        connector = self._setup()
+        assert (
+            await connector.async_get_column_info("t")
+            == connector.get_column_info("t")
+        )
+        await connector.async_close()
+
+    @pytest.mark.asyncio
+    async def test_async_iter_batches_returns_correct_rows(self) -> None:
+        connector = self._setup()
+        batches = [b async for b in connector.async_iter_batches('SELECT * FROM "t"')]
+        total_rows = sum(b.num_rows for b in batches)
+        assert total_rows == 3
+        await connector.async_close()
+
+    @pytest.mark.asyncio
+    async def test_async_iter_batches_matches_sync_data(self) -> None:
+        connector = self._setup()
+
+        sync_table = pa.Table.from_batches(
+            list(connector.iter_batches('SELECT * FROM "t"'))
+        )
+        async_table = pa.Table.from_batches(
+            [b async for b in connector.async_iter_batches('SELECT * FROM "t"')]
+        )
+        assert async_table.equals(sync_table)
+        await connector.async_close()
+
+    @pytest.mark.asyncio
+    async def test_async_iter_batches_empty_result(self) -> None:
+        connector = self._setup()
+        batches = [
+            b async for b in connector.async_iter_batches(
+                'SELECT * FROM "t" WHERE 1=0'
+            )
+        ]
+        assert batches == []
+        await connector.async_close()
