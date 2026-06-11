@@ -131,7 +131,10 @@ SQLite has no native UUID type; all UUID columns are stored as `TEXT` and arrive
 as strings from the driver. Because `TEXT` is used for all string-like data, the
 connector cannot automatically distinguish UUID columns from other string columns.
 `TEXT` columns therefore continue to map to `pa.large_string()` by default.
-No change is required to the SQLite connector as part of this spec.
+No change is required to the SQLite connector as part of this spec. The broader
+question of how OrcaPod preserves Arrow type fidelity when round-tripping through
+loosely-typed backends is tracked in
+[PLT-1615](https://linear.app/enigma-metamorphic/issue/PLT-1615).
 
 ### No truncation — enforcement
 
