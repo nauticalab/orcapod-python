@@ -483,3 +483,90 @@ class TestAtMethod:
     def test_at_rejects_non_str_component(self, db):
         with pytest.raises(TypeError):
             db.at(42)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# string_view columns (ENG-601)
+# ---------------------------------------------------------------------------
+
+
+def make_string_view_table(**columns: list) -> pa.Table:
+    """Build a table where every all-string column is physically ``string_view``.
+
+    Mirrors what ``polars.DataFrame.to_arrow(compat_level=newest)`` (newer polars,
+    e.g. on Ray workers) produces, which PyArrow has no comparison kernels for.
+    """
+    fields = []
+    arrays = []
+    for name, values in columns.items():
+        if values and all(isinstance(v, str) for v in values):
+            arrays.append(pa.array(values, type=pa.string_view()))
+            fields.append(pa.field(name, pa.string_view()))
+        else:
+            arr = pa.array(values)
+            arrays.append(arr)
+            fields.append(pa.field(name, arr.type))
+    return pa.table(arrays, schema=pa.schema(fields))
+
+
+class TestStringViewColumns:
+    """Regression for ENG-601.
+
+    PyArrow (both 23.x and 24.x) has no comparison kernels for ``string_view``,
+    so filtering/sorting a stored Delta table whose columns are physically
+    ``string_view`` raised ``ArrowNotImplementedError``. Reads must tolerate
+    pre-existing ``string_view`` data; writes must not persist ``string_view``.
+    """
+
+    PATH = ("sv", "v1")
+
+    def test_lookup_on_preexisting_string_view_table(self, db):
+        # Simulate data already persisted with string_view columns (e.g. written
+        # by a worker running a newer polars). Write straight to the table URI so
+        # we exercise the read path against on-disk string_view data.
+        import deltalake
+
+        uri = db._get_table_uri(self.PATH)
+        tbl = make_string_view_table(
+            __record_id=["p", "q", "r"], category=["A", "B", "A"]
+        )
+        assert tbl.schema.field("category").type == pa.string_view()
+        deltalake.write_deltalake(uri, tbl, mode="overwrite")
+
+        result = db.get_records_with_column_value(
+            self.PATH, {"category": "A"}, flush=True
+        )
+        assert result is not None
+        assert result.num_rows == 2
+
+    def test_get_all_records_on_preexisting_string_view_table(self, db):
+        import deltalake
+
+        uri = db._get_table_uri(self.PATH)
+        tbl = make_string_view_table(__record_id=["p", "q"], category=["A", "B"])
+        deltalake.write_deltalake(uri, tbl, mode="overwrite")
+
+        result = db.get_all_records(self.PATH)
+        assert result is not None
+        assert result.num_rows == 2
+        # Read path normalizes away string_view.
+        assert not any(pa.types.is_string_view(f.type) for f in result.schema)
+
+    def test_add_records_does_not_persist_string_view(self, db):
+        import glob
+        import os
+
+        import pyarrow.parquet as pq
+
+        tbl = make_string_view_table(__record_id=["p", "q"], category=["A", "B"])
+        db.add_records(self.PATH, tbl, record_id_column="__record_id", flush=True)
+
+        # Inspect the physical parquet (bypasses read-side normalization).
+        uri = db._get_table_uri(self.PATH)
+        files = glob.glob(os.path.join(uri, "*.parquet"))
+        assert files
+        for f in files:
+            schema = pq.read_schema(f)
+            assert not any(
+                pa.types.is_string_view(field.type) for field in schema
+            ), f"string_view persisted in {f}"

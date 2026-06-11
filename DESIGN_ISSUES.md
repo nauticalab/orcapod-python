@@ -756,6 +756,39 @@ behavior configurable (warn, error, or silent).
 
 ---
 
+### D8 — Cache lookups crash on `string_view` columns (missing PyArrow comparison kernels)
+**Status:** in progress
+**Severity:** high
+**Issue:** ENG-601
+
+`get_records_with_column_value()` pushes a filter predicate into a PyArrow scan
+(`_read_delta_table`, line ~852: `dataset.to_table(filter=filter_expr)`). When a stored
+string column is physically typed `string_view`, the scan crashes — PyArrow (verified on
+both 23.0.1 and 24.0.0) has no comparison kernels (`equal` / `greater_equal` / `less_equal`)
+for `string_view`:
+```
+pyarrow.lib.ArrowNotImplementedError: Function 'greater_equal'
+  has no kernel matching input types (string_view, string_view)
+```
+This breaks every `ResultCache.lookup()`, so any rerun that hits already-stored records fails
+(discovered in the spike-sorting pipeline: probes that succeeded on a first run failed on
+rerun). `string_view` enters via `polars.DataFrame.to_arrow()`, which returns `large_string`
+by default in polars 1.41.2 but `string_view` at `compat_level=newest` (newer polars makes it
+the default). orcapod calls plain `df.to_arrow()` across the write path and never normalizes
+`string_view` → `large_string` before persisting: `normalize_to_large_types` has no
+`string_view` branch and is not applied on the write path. `as_large_types=True` only relabels
+the advertised schema; the scanner still feeds `string_view` data to the predicate. No test
+exercises `string_view`.
+
+**Fix:** (read-side, primary) cast `string_view` → `large_string` after read / before
+filtering and sorting in `_read_delta_table` — repairs already-persisted data and is agnostic
+to the producer; also protects the `sort_by` / `take` path in `ResultCache.lookup`.
+(write-side, hardening) add a `string_view` branch to `normalize_to_large_types` and normalize
+before persisting so stored schemas stay canonical. Regression test: a Delta table whose filter
+column is physically `string_view`, asserting `get_records_with_column_value` succeeds.
+
+---
+
 ## `src/orcapod/hashing/`
 
 ### H1 — `FunctionSignatureExtractor` ignores `input_types` and `output_types` parameters
