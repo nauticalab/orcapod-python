@@ -12,6 +12,10 @@ from .core.function_pod import (
 from .core.nodes.source_node import SourceNode
 from .pipeline import Pipeline, PipelineJob
 from .semantic_types.dataclass_encoding import register_dataclass
+from .types import (
+    UUID_ARROW_TYPE,
+    UUID_STRUCT_ARROW_TYPE,
+)
 
 # Subpackage re-exports for clean public API
 from . import databases  # noqa: F401
@@ -33,6 +37,8 @@ __all__ = [
     "PipelineJob",
     "SourceNode",
     "register_dataclass",
+    "UUID_ARROW_TYPE",
+    "UUID_STRUCT_ARROW_TYPE",
     "databases",
     "nodes",
     "operators",
