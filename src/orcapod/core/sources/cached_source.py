@@ -221,7 +221,8 @@ class CachedSource(RootSource):
         )
 
         # Compute per-row record hashes for dedup: hash(full row excluding
-        # system tag record_id columns, which are non-deterministic UUID bytes).
+        # system tag record_id columns — they are derived from the row's provenance
+        # data already captured in this hash, so including them would be redundant.
         # The source_id system tag IS deterministic and is included in the hash.
         record_id_tag_cols = [
             c for c in live_table.column_names
