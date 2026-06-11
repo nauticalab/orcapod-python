@@ -6,7 +6,7 @@ knows how to process out of the box:
 
   - PathContentHandler    -- pathlib.Path: returns ContentHash of file content
   - UPathContentHandler   -- upath.UPath: returns ContentHash of file content (remote-aware)
-  - UUIDHandler           -- uuid.UUID: canonical string representation
+  - UUIDHandler           -- uuid.UUID: raw 16-byte binary representation
   - BytesHandler          -- bytes / bytearray: hex string representation
   - FunctionHandler       -- callable with __code__: via FunctionInfoExtractorProtocol
   - TypeObjectHandler     -- type objects (classes): stable "type:<name>" string
