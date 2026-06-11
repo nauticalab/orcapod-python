@@ -23,6 +23,7 @@ def test_uuid_handler_returns_bytes():
 
 
 def test_uuid_handler_different_uuids_produce_different_bytes():
+    """Different UUID values must produce different byte sequences."""
     from orcapod.hashing.semantic_hashing.builtin_handlers import UUIDHandler
 
     handler = UUIDHandler()
