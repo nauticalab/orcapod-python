@@ -74,6 +74,28 @@ Accepted wherever a ``Schema`` is expected so callers can pass plain dicts."""
 
 _T = TypeVar("_T")
 
+# ---------------------------------------------------------------------------
+# UUID Arrow type constants
+# ---------------------------------------------------------------------------
+
+
+def _make_uuid_types() -> "tuple[pa.DataType, pa.StructType]":
+    """Build UUID Arrow types (deferred so pyarrow is not imported at module level)."""
+    import pyarrow as _pa
+
+    arrow_type = _pa.binary(16)
+    struct_type = _pa.struct([_pa.field("uuid", arrow_type)])
+    return arrow_type, struct_type
+
+
+# Canonical Arrow type for all UUID values in OrcaPod.
+# Stored as fixed_size_binary[16] — 16 raw bytes, no hex encoding, no dashes.
+UUID_ARROW_TYPE: "pa.DataType"
+# Semantic struct type for Python uuid.UUID round-trips through the type system.
+UUID_STRUCT_ARROW_TYPE: "pa.StructType"
+UUID_ARROW_TYPE, UUID_STRUCT_ARROW_TYPE = _make_uuid_types()
+del _make_uuid_types
+
 
 class Schema(Mapping[str, DataType]):
     """Immutable schema representing a mapping of field names to Python types.
