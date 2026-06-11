@@ -139,16 +139,16 @@ class UPathContentHandler:
 
 
 class UUIDHandler:
-    """
-    Handler for uuid.UUID objects.
+    """Handler for ``uuid.UUID`` objects.
 
-    Converts the UUID to its canonical hyphenated string representation
-    (e.g. ``"550e8400-e29b-41d4-a716-446655440000"``), which is stable,
-    human-readable, and unambiguous.
+    Returns the raw 16-byte binary representation of the UUID, consistent
+    with OrcaPod's canonical ``pa.binary(16)`` Arrow storage format.
+    The binary form is compact, unambiguous, and independent of string
+    formatting conventions.
     """
 
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
-        return str(obj)
+        return obj.bytes
 
 
 class BytesHandler:
