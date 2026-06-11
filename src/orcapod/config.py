@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Self
@@ -10,7 +11,44 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class HashingConfig:
+class _SectionConfig:
+    """Base class for frozen leaf config section dataclasses.
+
+    Provides a shared ``merge()`` implementation: fields with non-default values
+    in ``other`` override the corresponding fields in ``self``; fields that are
+    at their default in ``other`` are left unchanged.
+
+    Subclasses must be frozen dataclasses whose fields all carry default values
+    so that ``type(self)()`` produces a valid defaults instance.
+    """
+
+    def merge(self, other: Self) -> Self:
+        """Return a new instance with non-default fields from ``other`` applied.
+
+        Args:
+            other: Config to merge in. Must be an instance of the same concrete type.
+
+        Returns:
+            New instance with non-default values from ``other`` applied.
+
+        Raises:
+            TypeError: If ``other`` is not an instance of the same type.
+        """
+        if not isinstance(other, type(self)):
+            raise TypeError(
+                f"Can only merge with another {type(self).__name__} instance"
+            )
+        defaults = type(self)()
+        updates = {
+            f: getattr(other, f)
+            for f in self.__dataclass_fields__
+            if getattr(other, f) != getattr(defaults, f)
+        }
+        return replace(self, **updates)
+
+
+@dataclass(frozen=True)
+class HashingConfig(_SectionConfig):
     """Hash truncation length settings.
 
     Controls the number of hex characters used when truncating hashes for
@@ -21,31 +59,9 @@ class HashingConfig:
     schema_n_char: int = 12
     path_n_char: int = 20
 
-    def merge(self, other: "HashingConfig") -> "HashingConfig":
-        """Merge with another ``HashingConfig``; other takes precedence for non-default values.
-
-        Args:
-            other: Config to merge in. Must be a ``HashingConfig`` instance.
-
-        Returns:
-            New ``HashingConfig`` with non-default values from ``other`` applied.
-
-        Raises:
-            TypeError: If ``other`` is not a ``HashingConfig`` instance.
-        """
-        if not isinstance(other, HashingConfig):
-            raise TypeError("Can only merge with another HashingConfig instance")
-        defaults = HashingConfig()
-        updates = {
-            f: getattr(other, f)
-            for f in self.__dataclass_fields__
-            if getattr(other, f) != getattr(defaults, f)
-        }
-        return replace(self, **updates)
-
 
 @dataclass(frozen=True)
-class DisplayConfig:
+class DisplayConfig(_SectionConfig):
     """Display and preview preference settings.
 
     Controls default row limits and column visibility when rendering streams
@@ -58,28 +74,6 @@ class DisplayConfig:
     show_source_columns: bool = False
     show_system_tag_columns: bool = False
     show_context_columns: bool = False
-
-    def merge(self, other: "DisplayConfig") -> "DisplayConfig":
-        """Merge with another ``DisplayConfig``; other takes precedence for non-default values.
-
-        Args:
-            other: Config to merge in. Must be a ``DisplayConfig`` instance.
-
-        Returns:
-            New ``DisplayConfig`` with non-default values from ``other`` applied.
-
-        Raises:
-            TypeError: If ``other`` is not a ``DisplayConfig`` instance.
-        """
-        if not isinstance(other, DisplayConfig):
-            raise TypeError("Can only merge with another DisplayConfig instance")
-        defaults = DisplayConfig()
-        updates = {
-            f: getattr(other, f)
-            for f in self.__dataclass_fields__
-            if getattr(other, f) != getattr(defaults, f)
-        }
-        return replace(self, **updates)
 
 
 @dataclass(frozen=True)
@@ -131,7 +125,7 @@ class OrcapodConfig:
     @classmethod
     def from_dict(
         cls,
-        data: dict[str, Any],
+        data: Mapping[str, Any],
         source_path: Path | str | None = None,
     ) -> "OrcapodConfig":
         """Construct an ``OrcapodConfig`` from a plain dict.
@@ -141,7 +135,7 @@ class OrcapodConfig:
         a config written by a newer orcapod will not break an older version).
 
         Args:
-            data: Mapping of section name to field dict (e.g. as produced by
+            data: Mapping of section name to field mapping (e.g. as produced by
                 ``dataclasses.asdict()`` or parsed from a TOML file).
             source_path: Optional file path included in warning messages to help
                 users locate typos.
