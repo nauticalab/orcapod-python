@@ -9,6 +9,8 @@ from orcapod.utils.arrow_utils import (
     apply_column_config,
     infer_schema_nullable,
     make_schema_non_nullable,
+    normalize_table_view_types,
+    normalize_view_types,
     prepare_prefixed_columns,
 )
 
@@ -348,3 +350,76 @@ class TestApplyColumnConfigMetaNormalization:
         result = apply_column_config(table, config, tag_keys=("id",))
         assert "__pipeline_hash" not in result.column_names
         assert "__data_id" not in result.column_names
+
+
+class TestNormalizeViewTypes:
+    """View-type normalization (ENG-601): string_view/binary_view -> large variants."""
+
+    def test_string_view_to_large_string(self):
+        assert normalize_view_types(pa.string_view()) == pa.large_string()
+
+    def test_binary_view_to_large_binary(self):
+        assert normalize_view_types(pa.binary_view()) == pa.large_binary()
+
+    def test_non_view_types_unchanged(self):
+        for t in (pa.int64(), pa.string(), pa.large_string(), pa.binary(), pa.bool_()):
+            assert normalize_view_types(t) == t
+
+    def test_list_of_string_view(self):
+        assert normalize_view_types(pa.list_(pa.string_view())) == pa.list_(
+            pa.large_string()
+        )
+
+    def test_large_list_of_string_view(self):
+        assert normalize_view_types(pa.large_list(pa.string_view())) == pa.large_list(
+            pa.large_string()
+        )
+
+    def test_fixed_size_list_of_string_view(self):
+        assert normalize_view_types(
+            pa.list_(pa.string_view(), 3)
+        ) == pa.list_(pa.large_string(), 3)
+
+    def test_struct_with_string_view_field(self):
+        src = pa.struct([pa.field("a", pa.string_view()), pa.field("b", pa.int64())])
+        expected = pa.struct(
+            [pa.field("a", pa.large_string()), pa.field("b", pa.int64())]
+        )
+        assert normalize_view_types(src) == expected
+
+    def test_map_with_string_view(self):
+        assert normalize_view_types(
+            pa.map_(pa.string_view(), pa.string_view())
+        ) == pa.map_(pa.large_string(), pa.large_string())
+
+    def test_nested_list_of_struct_with_view(self):
+        src = pa.list_(pa.struct([pa.field("a", pa.string_view())]))
+        expected = pa.list_(pa.struct([pa.field("a", pa.large_string())]))
+        assert normalize_view_types(src) == expected
+
+
+class TestNormalizeTableViewTypes:
+    """Table-level view normalization (ENG-601)."""
+
+    def test_casts_string_view_column(self):
+        tbl = pa.table(
+            [pa.array(["x", "y"], type=pa.string_view()), pa.array([1, 2])],
+            names=["s", "n"],
+        )
+        result = normalize_table_view_types(tbl)
+        assert result.schema.field("s").type == pa.large_string()
+        assert result.schema.field("n").type == pa.int64()
+        assert result.column("s").to_pylist() == ["x", "y"]
+
+    def test_no_view_types_returns_same_table(self):
+        tbl = pa.table({"s": ["x"], "n": [1]})  # string -> large_string by default? plain string
+        result = normalize_table_view_types(tbl)
+        # No view types present -> object returned unchanged (identity).
+        assert result is tbl
+
+    def test_preserves_field_nullability(self):
+        schema = pa.schema([pa.field("s", pa.string_view(), nullable=False)])
+        tbl = pa.table([pa.array(["x"], type=pa.string_view())], schema=schema)
+        result = normalize_table_view_types(tbl)
+        assert result.schema.field("s").type == pa.large_string()
+        assert result.schema.field("s").nullable is False
