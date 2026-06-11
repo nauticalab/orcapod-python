@@ -55,6 +55,34 @@ class TestNormalizeColumnList:
         with pytest.raises(TypeError, match="All tag_columns elements must be strings"):
             _normalize_column_list([1, 2, 3])
 
+    def test_single_char_string_not_iterated(self):
+        # The core footgun fix: a single-character string must produce a
+        # one-element list, not be iterated character-by-character.
+        assert _normalize_column_list("a") == ["a"]
+
+    def test_generator_of_strings_returns_list(self):
+        result = _normalize_column_list(x for x in ["col_a", "col_b"])
+        assert result == ["col_a", "col_b"]
+
+    def test_set_of_strings_returns_list(self):
+        result = _normalize_column_list({"x", "y", "z"})
+        assert set(result) == {"x", "y", "z"}
+        assert isinstance(result, list)
+
+    def test_none_raises_type_error(self):
+        # None is not accepted by the helper — callers that allow None as
+        # "use primary key" must guard before calling _normalize_column_list.
+        with pytest.raises(TypeError, match="tag_columns must be a string or iterable"):
+            _normalize_column_list(None)
+
+    def test_error_message_includes_type_name_for_non_iterable(self):
+        with pytest.raises(TypeError, match="'int'"):
+            _normalize_column_list(42)
+
+    def test_error_message_includes_element_type_names(self):
+        with pytest.raises(TypeError, match="'int'"):
+            _normalize_column_list([1, "b"])
+
 
 # ---------------------------------------------------------------------------
 # Shared Arrow table fixture
