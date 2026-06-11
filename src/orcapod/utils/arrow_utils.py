@@ -258,30 +258,29 @@ def normalize_view_types(arrow_type: "pa.DataType") -> "pa.DataType":
         return pa.large_string()
     if pa.types.is_binary_view(arrow_type):
         return pa.large_binary()
+    # For nested types, preserve the child fields' name/nullability/metadata
+    # (and keys_sorted for maps) and only swap out the view type underneath.
     if pa.types.is_list(arrow_type):
-        return pa.list_(normalize_view_types(arrow_type.value_type))
+        vf = arrow_type.value_field
+        return pa.list_(vf.with_type(normalize_view_types(vf.type)))
     if pa.types.is_large_list(arrow_type):
-        return pa.large_list(normalize_view_types(arrow_type.value_type))
+        vf = arrow_type.value_field
+        return pa.large_list(vf.with_type(normalize_view_types(vf.type)))
     if pa.types.is_fixed_size_list(arrow_type):
+        vf = arrow_type.value_field
         return pa.list_(
-            normalize_view_types(arrow_type.value_type), arrow_type.list_size
+            vf.with_type(normalize_view_types(vf.type)), arrow_type.list_size
         )
     if pa.types.is_struct(arrow_type):
         return pa.struct(
-            [
-                pa.field(
-                    f.name,
-                    normalize_view_types(f.type),
-                    nullable=f.nullable,
-                    metadata=f.metadata,
-                )
-                for f in arrow_type
-            ]
+            [f.with_type(normalize_view_types(f.type)) for f in arrow_type]
         )
     if pa.types.is_map(arrow_type):
+        kf, itf = arrow_type.key_field, arrow_type.item_field
         return pa.map_(
-            normalize_view_types(arrow_type.key_type),
-            normalize_view_types(arrow_type.item_type),
+            kf.with_type(normalize_view_types(kf.type)),
+            itf.with_type(normalize_view_types(itf.type)),
+            keys_sorted=arrow_type.keys_sorted,
         )
     return arrow_type
 

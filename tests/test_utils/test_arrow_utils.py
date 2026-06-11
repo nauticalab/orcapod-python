@@ -397,6 +397,29 @@ class TestNormalizeViewTypes:
         expected = pa.list_(pa.struct([pa.field("a", pa.large_string())]))
         assert normalize_view_types(src) == expected
 
+    def test_list_preserves_value_field_attributes(self):
+        src = pa.list_(
+            pa.field("elem", pa.string_view(), nullable=False, metadata={b"k": b"v"})
+        )
+        result = normalize_view_types(src)
+        vf = result.value_field
+        assert vf.type == pa.large_string()
+        assert vf.name == "elem"
+        assert vf.nullable is False
+        assert vf.metadata == {b"k": b"v"}
+
+    def test_map_preserves_field_attributes_and_keys_sorted(self):
+        src = pa.map_(
+            pa.string_view(),
+            pa.field("value", pa.string_view(), nullable=False),
+            keys_sorted=True,
+        )
+        result = normalize_view_types(src)
+        assert result.key_field.type == pa.large_string()
+        assert result.item_field.type == pa.large_string()
+        assert result.item_field.nullable is False
+        assert result.keys_sorted is True
+
 
 class TestNormalizeTableViewTypes:
     """Table-level view normalization (ENG-601)."""
