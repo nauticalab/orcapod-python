@@ -12,12 +12,14 @@ class TestHashingConfig:
         assert cfg.path_n_char == 20
 
     def test_is_frozen(self):
+        import dataclasses
+
         import pytest
 
         from orcapod.config import HashingConfig
 
         cfg = HashingConfig()
-        with pytest.raises((AttributeError, TypeError)):
+        with pytest.raises(dataclasses.FrozenInstanceError):
             cfg.system_tag_n_char = 99  # type: ignore[misc]
 
     def test_merge_non_default_wins(self):
@@ -50,12 +52,14 @@ class TestDisplayConfig:
         assert cfg.show_context_columns is False
 
     def test_is_frozen(self):
+        import dataclasses
+
         import pytest
 
         from orcapod.config import DisplayConfig
 
         cfg = DisplayConfig()
-        with pytest.raises((AttributeError, TypeError)):
+        with pytest.raises(dataclasses.FrozenInstanceError):
             cfg.max_rows = 10  # type: ignore[misc]
 
     def test_merge_non_default_wins(self):
