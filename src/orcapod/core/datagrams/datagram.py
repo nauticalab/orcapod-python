@@ -66,7 +66,7 @@ class Datagram(ContentIdentifiableBase):
         data: Mapping[str, DataValue] | pa.Table | pa.RecordBatch,
         python_schema: SchemaLike | None = None,
         meta_info: Mapping[str, DataValue] | None = None,
-        record_id: str | None = None,
+        record_id: bytes | None = None,
         data_context: str | contexts.DataContext | None = None,
         config: OrcapodConfig | None = None,
     ) -> None:
@@ -86,7 +86,7 @@ class Datagram(ContentIdentifiableBase):
         python_schema: SchemaLike | None,
         meta_info: Mapping[str, DataValue] | None,
         data_context: str | contexts.DataContext | None,
-        record_id: str | None,
+        record_id: bytes | None,
     ) -> None:
         data_columns: dict[str, DataValue] = {}
         meta_columns: dict[str, DataValue] = {}
@@ -134,7 +134,7 @@ class Datagram(ContentIdentifiableBase):
         table: pa.Table,
         meta_info: Mapping[str, DataValue] | None,
         data_context: str | contexts.DataContext | None,
-        record_id: str | None,
+        record_id: bytes | None,
     ) -> None:
         if len(table) != 1:
             raise ValueError(
@@ -426,10 +426,10 @@ class Datagram(ContentIdentifiableBase):
         return self._ensure_data_table()
 
     @property
-    def datagram_id(self) -> str:
+    def datagram_id(self) -> bytes:
         """Return (or lazily generate) the datagram's unique ID."""
         if self._datagram_id is None:
-            self._datagram_id = str(uuid7())
+            self._datagram_id = uuid7().bytes
         return self._datagram_id
 
     @property

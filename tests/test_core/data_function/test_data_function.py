@@ -522,11 +522,10 @@ class TestCall:
         result = add_pf.call(add_data)
         source_str = result.source_info()["result"]
         # The record_id segment is between the URI components and the key name
-        # Format: uri_part1:uri_part2:..::record_id::key
-        uuid_pattern = re.compile(
-            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-        )
-        assert uuid_pattern.search(source_str), f"No UUID found in {source_str!r}"
+        # Format: uri_part1:uri_part2:..::record_id_hex::key
+        # record_id is stored as a 32-char hex string (UUID7 bytes, no dashes)
+        uuid_hex_pattern = re.compile(r"[0-9a-f]{32}")
+        assert uuid_hex_pattern.search(source_str), f"No UUID hex found in {source_str!r}"
 
     def test_inactive_returns_none(self, add_pf, add_data):
         add_pf.set_active(False)

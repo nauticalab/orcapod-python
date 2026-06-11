@@ -38,7 +38,7 @@ class InMemoryArrowDatabase:
         _path_prefix: tuple[str, ...] = (),
         _shared_tables: "dict[str, pa.Table] | None" = None,
         _shared_pending_batches: "dict[str, pa.Table] | None" = None,
-        _shared_pending_record_ids: "dict[str, set[str]] | None" = None,
+        _shared_pending_record_ids: "dict[str, set[str | bytes]] | None" = None,
         _root: InMemoryArrowDatabase | None = None,
         _scoped_path: tuple[str, ...] = (),
     ):
@@ -48,7 +48,7 @@ class InMemoryArrowDatabase:
         self.max_hierarchy_depth = max_hierarchy_depth
         self._tables: dict[str, pa.Table] = _shared_tables if _shared_tables is not None else {}
         self._pending_batches: dict[str, pa.Table] = _shared_pending_batches if _shared_pending_batches is not None else {}
-        self._pending_record_ids: dict[str, set[str]] = _shared_pending_record_ids if _shared_pending_record_ids is not None else defaultdict(set)
+        self._pending_record_ids: dict[str, set[str | bytes]] = _shared_pending_record_ids if _shared_pending_record_ids is not None else defaultdict(set)
 
     # ------------------------------------------------------------------
     # Path helpers
@@ -86,10 +86,11 @@ class InMemoryArrowDatabase:
     # ------------------------------------------------------------------
 
     def _ensure_record_id_column(
-        self, arrow_data: "pa.Table", record_id: str
+        self, arrow_data: "pa.Table", record_id: "str | bytes"
     ) -> "pa.Table":
         if self.RECORD_ID_COLUMN not in arrow_data.column_names:
-            key_array = pa.array([record_id] * len(arrow_data), type=pa.large_string())
+            arrow_type = pa.binary(16) if isinstance(record_id, bytes) else pa.large_string()
+            key_array = pa.array([record_id] * len(arrow_data), type=arrow_type)
             arrow_data = arrow_data.add_column(0, self.RECORD_ID_COLUMN, key_array)
         return arrow_data
 
@@ -136,14 +137,13 @@ class InMemoryArrowDatabase:
     # Internal helpers for duplicate detection
     # ------------------------------------------------------------------
 
-    def _committed_ids(self, record_key: str) -> set[str]:
+    def _committed_ids(self, record_key: str) -> "set[str | bytes]":
         committed = self._tables.get(record_key)
         if committed is None or committed.num_rows == 0:
             return set()
         existing_ids = committed[self.RECORD_ID_COLUMN].to_pylist()
-        existing_ids = [str(id) for id in existing_ids if id is not None]
         # TODO: evaluate the efficiency of this implementation
-        return set(existing_ids)
+        return {id for id in existing_ids if id is not None}
 
     def _filter_existing_records(
         self, record_key: str, table: "pa.Table"
@@ -167,7 +167,7 @@ class InMemoryArrowDatabase:
     def add_record(
         self,
         record_path: tuple[str, ...],
-        record_id: str,
+        record_id: "str | bytes",
         record: "pa.Table",
         skip_duplicates: bool = False,
         flush: bool = False,
@@ -237,7 +237,7 @@ class InMemoryArrowDatabase:
             self._pending_batches[record_key] = pa.concat_tables(
                 [existing_pending, records]
             )
-        pending_ids = cast(list[str], records[self.RECORD_ID_COLUMN].to_pylist())
+        pending_ids = cast(list[str | bytes], records[self.RECORD_ID_COLUMN].to_pylist())
         self._pending_record_ids[record_key].update(pending_ids)
 
         if flush:

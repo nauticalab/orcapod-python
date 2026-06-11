@@ -211,12 +211,13 @@ class DeltaTableDatabase:
             raise
 
     def _ensure_record_id_column(
-        self, arrow_data: pa.Table, record_id: str
+        self, arrow_data: pa.Table, record_id: str | bytes
     ) -> pa.Table:
         """Ensure the table has an record id column."""
         if self.RECORD_ID_COLUMN not in arrow_data.column_names:
             # Add record_id column at the beginning
-            key_array = pa.array([record_id] * len(arrow_data), type=pa.large_string())
+            arrow_type = pa.binary(16) if isinstance(record_id, bytes) else pa.large_string()
+            key_array = pa.array([record_id] * len(arrow_data), type=arrow_type)
             arrow_data = arrow_data.add_column(0, self.RECORD_ID_COLUMN, key_array)
         return arrow_data
 
@@ -333,7 +334,7 @@ class DeltaTableDatabase:
     def add_record(
         self,
         record_path: tuple[str, ...],
-        record_id: str,
+        record_id: str | bytes,
         record: pa.Table,
         skip_duplicates: bool = False,
         flush: bool = False,

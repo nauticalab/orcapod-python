@@ -501,11 +501,11 @@ class TestGetAllRecordsMetaColumns:
         hashes = result.column(constants.INPUT_DATA_HASH_COL).to_pylist()
         assert all(isinstance(h, str) and len(h) > 0 for h in hashes)
 
-    def test_data_record_id_values_are_non_empty_strings(self, filled_node):
+    def test_data_record_id_values_are_non_empty_bytes(self, filled_node):
         result = filled_node.get_all_records(columns={"meta": True})
         assert result is not None
         ids = result.column(constants.DATA_RECORD_ID).to_pylist()
-        assert all(isinstance(rid, str) and len(rid) > 0 for rid in ids)
+        assert all(isinstance(rid, bytes) and len(rid) == 16 for rid in ids)
 
 
 # ---------------------------------------------------------------------------

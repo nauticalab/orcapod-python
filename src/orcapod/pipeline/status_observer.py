@@ -21,7 +21,7 @@ Status schema (fixed columns):
     Fixed columns are prefixed with ``_status_`` to follow system column
     conventions and avoid collision with user-defined tag column names.
 
-    - ``_status_id`` (large_utf8): UUID7 unique to this status event.
+    - ``_status_id`` (binary(16)): UUID7 unique to this status event.
     - ``_status_run_id`` (large_utf8): UUID of the pipeline run (from ``on_run_start``).
     - ``_status_pipeline_uri`` (large_utf8): Opaque URI identifying the pipeline version
       that produced this event (e.g. ``"my_pipeline@a1b2c3d4e5f6a1b2"``).  Set to ``""``
@@ -270,11 +270,11 @@ class StatusObserver:
 
         tag_schema = self._tag_schema_per_node.get(node_label, {})
 
-        status_id = str(uuid7())
+        status_id = uuid7().bytes
         timestamp = datetime.now(timezone.utc).isoformat()
 
         columns: dict[str, pa.Array] = {
-            "_status_id":            pa.array([status_id],       type=pa.large_utf8()),
+            "_status_id":            pa.array([status_id],       type=pa.binary(16)),
             "_status_run_id":        pa.array([self._current_run_id], type=pa.large_utf8()),
             "_status_pipeline_uri":  pa.array([self._current_pipeline_uri], type=pa.large_utf8()),
             "_status_state":         pa.array([state],           type=pa.large_utf8()),
@@ -397,11 +397,11 @@ class _ContextualizedStatusObserver:
         """Build and write a single status event row to the scoped database."""
         import pyarrow as pa
 
-        status_id = str(uuid7())
+        status_id = uuid7().bytes
         timestamp = datetime.now(timezone.utc).isoformat()
 
         columns: dict[str, pa.Array] = {
-            "_status_id":            pa.array([status_id],               type=pa.large_utf8()),
+            "_status_id":            pa.array([status_id],               type=pa.binary(16)),
             "_status_run_id":        pa.array([self._current_run_id],     type=pa.large_utf8()),
             "_status_pipeline_uri":  pa.array([self._current_pipeline_uri], type=pa.large_utf8()),
             "_status_state":         pa.array([state],                    type=pa.large_utf8()),
