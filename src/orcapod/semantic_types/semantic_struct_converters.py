@@ -7,13 +7,14 @@ making semantic types visible in schemas and preserved through operations.
 
 from __future__ import annotations
 
+import uuid as _uuid_module
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from upath import UPath
 
-from orcapod.types import ContentHash
+from orcapod.types import ContentHash, UUID_STRUCT_ARROW_TYPE
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -218,3 +219,77 @@ class UPathStructConverter(PathStructConverterBase):
 
     def _make_path(self, path_str: str) -> UPath:
         return UPath(path_str)
+
+
+class UUIDStructConverter(SemanticStructConverterBase):
+    """Converter for ``uuid.UUID`` objects to/from Arrow semantic structs.
+
+    Stores UUIDs as fixed 16-byte binary values inside a single-field struct,
+    following the same pattern as ``PythonPathStructConverter`` and
+    ``UPathStructConverter``.
+
+    Note:
+        ``uuid_utils.UUID`` objects (e.g. from ``uuid7()``) are accepted via
+        duck typing because they expose a ``.bytes`` attribute but do not
+        inherit from ``uuid.UUID``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("uuid")
+        self._python_type = _uuid_module.UUID
+        self._arrow_struct_type = UUID_STRUCT_ARROW_TYPE
+
+    @property
+    def python_type(self) -> type:
+        """The Python type this converter handles (``uuid.UUID``)."""
+        return self._python_type
+
+    @property
+    def arrow_struct_type(self) -> "pa.StructType":
+        """The Arrow struct type used for serialisation."""
+        return self._arrow_struct_type
+
+    def python_to_struct_dict(self, value: Any) -> dict[str, bytes]:
+        """Convert a UUID to a struct dictionary with a single ``uuid`` field.
+
+        Accepts both ``uuid.UUID`` instances and duck-typed UUID-compatible
+        objects (e.g. ``uuid_utils.UUID``) that expose a ``.bytes`` attribute
+        returning 16 raw bytes.
+
+        Args:
+            value: A ``uuid.UUID`` instance or compatible UUID-like object.
+
+        Returns:
+            A dict with a single key ``"uuid"`` whose value is 16 raw bytes.
+
+        Raises:
+            TypeError: If ``value`` is not a ``uuid.UUID`` instance or
+                compatible duck-typed UUID object.
+        """
+        if isinstance(value, _uuid_module.UUID):
+            return {"uuid": value.bytes}
+        # Accept uuid_utils.UUID and other duck-typed UUID objects
+        raw = getattr(value, "bytes", None)
+        if isinstance(raw, bytes) and len(raw) == 16:
+            return {"uuid": raw}
+        raise TypeError(
+            f"Expected uuid.UUID or compatible UUID object, got {type(value)}"
+        )
+
+    def struct_dict_to_python(self, struct_dict: dict[str, Any]) -> _uuid_module.UUID:
+        """Convert a struct dictionary back to a ``uuid.UUID`` instance.
+
+        Args:
+            struct_dict: Dict with a ``"uuid"`` key containing 16 raw bytes
+                (``bytes`` or ``bytearray``).
+
+        Returns:
+            A ``uuid.UUID`` constructed from the raw bytes.
+
+        Raises:
+            ValueError: If the ``"uuid"`` key is absent from ``struct_dict``.
+        """
+        raw = struct_dict.get("uuid")
+        if raw is None:
+            raise ValueError("Missing 'uuid' field in struct dict")
+        return _uuid_module.UUID(bytes=bytes(raw))
