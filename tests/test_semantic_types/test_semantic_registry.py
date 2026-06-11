@@ -1,8 +1,10 @@
+import uuid
 from unittest.mock import Mock
 
 import pytest
 
 from orcapod.semantic_types import semantic_registry
+from orcapod.types import UUID_STRUCT_ARROW_TYPE
 
 
 def test_registry_initialization():
@@ -128,6 +130,39 @@ def test_integration_with_converter():
     registry.register_converter("mock_type", converter)
     retrieved = registry.get_converter_for_semantic_type("mock_type")
     assert retrieved is converter
+
+
+def test_uuid_type_registered_in_default_registry():
+    """uuid.UUID should be registered and map to UUID_STRUCT_ARROW_TYPE."""
+    from orcapod.hashing.versioned_hashers import get_versioned_semantic_arrow_hasher
+
+    hasher = get_versioned_semantic_arrow_hasher()
+    registry = hasher.semantic_registry
+    converter = registry.get_converter_for_python_type(uuid.UUID)
+    assert converter is not None
+    assert converter.arrow_struct_type == UUID_STRUCT_ARROW_TYPE
+
+
+def test_uuid_struct_resolves_to_converter():
+    """UUID_STRUCT_ARROW_TYPE should resolve back to a converter for uuid.UUID."""
+    from orcapod.hashing.versioned_hashers import get_versioned_semantic_arrow_hasher
+
+    hasher = get_versioned_semantic_arrow_hasher()
+    registry = hasher.semantic_registry
+    converter = registry.get_converter_for_struct_signature(UUID_STRUCT_ARROW_TYPE)
+    assert converter is not None
+    assert converter.python_type is uuid.UUID
+
+
+def test_uuid_semantic_type_name_registered():
+    """Converter registered under the name 'uuid'."""
+    from orcapod.hashing.versioned_hashers import get_versioned_semantic_arrow_hasher
+
+    hasher = get_versioned_semantic_arrow_hasher()
+    registry = hasher.semantic_registry
+    converter = registry.get_converter_for_semantic_type("uuid")
+    assert converter is not None
+    assert converter.python_type is uuid.UUID
 
 
 # Comprehensive unregister tests for future implementation
