@@ -907,7 +907,7 @@ class PipelineJob(AbstractPipelineBase[JobNode]):
         explicitly to override any serialized store configuration.
 
         Args:
-            path: Path to the JSON file produced by :meth:`save`.
+            path: Path to the JSON file produced by ``save()``.
             store: Optional store override. When provided, takes precedence
                 over any store configuration in the file.
 
