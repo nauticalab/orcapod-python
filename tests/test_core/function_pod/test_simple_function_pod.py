@@ -81,7 +81,7 @@ class TestSimpleFunctionPodConstruction:
         assert f"v{double_pf.major_version}" in double_pod.uri
 
     def test_pod_uri_equals_data_function_uri(self, double_pod, double_pf):
-        """_FunctionPodBase.uri must equal self.data_function.uri exactly."""
+        """pod.uri must equal pod.data_function.uri exactly."""
         assert double_pod.uri == double_pf.uri
 
     def test_output_schema_data_matches_pf_output_schema(self, double_pod, double_pf):
