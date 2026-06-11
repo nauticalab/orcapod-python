@@ -91,9 +91,12 @@ def normalize_to_large_types(arrow_type: "pa.DataType") -> "pa.DataType":
     if pa.types.is_null(arrow_type):
         # TODO: make this configurable
         return pa.large_string()
-    if pa.types.is_string(arrow_type):
+    if pa.types.is_string(arrow_type) or pa.types.is_string_view(arrow_type):
+        # string_view has no comparison/sort kernels in PyArrow (>=23, <=24), so
+        # normalizing it to large_string is required for filtering, not just for
+        # consistency. See DESIGN_ISSUES D8 / ENG-601.
         return pa.large_string()
-    elif pa.types.is_binary(arrow_type):
+    elif pa.types.is_binary(arrow_type) or pa.types.is_binary_view(arrow_type):
         return pa.large_binary()
     elif pa.types.is_list(arrow_type):
         # Regular list -> large_list with normalized element type
@@ -238,6 +241,70 @@ def normalize_table_to_large_types(table: "pa.Table") -> "pa.Table":
     # Use cast() for safety - should be zero-copy for large variant conversions
     # but handles Arrow's internal type validation and any edge cases properly
     return table.cast(normalized_schema)
+
+
+def normalize_view_types(arrow_type: "pa.DataType") -> "pa.DataType":
+    """Recursively convert Arrow *view* types to their large variants.
+
+    Maps ``string_view`` -> ``large_string`` and ``binary_view`` ->
+    ``large_binary``, recursing into nested types; all other types are returned
+    unchanged. PyArrow (>=23, <=24) has no comparison/sort kernels for view
+    types, so they must be converted before any grouping, filtering, or storage
+    or those operations raise ``ArrowNotImplementedError`` (ENG-601). Unlike
+    ``normalize_to_large_types`` this leaves ``string`` / ``binary`` / ``list``
+    as-is.
+    """
+    if pa.types.is_string_view(arrow_type):
+        return pa.large_string()
+    if pa.types.is_binary_view(arrow_type):
+        return pa.large_binary()
+    if pa.types.is_list(arrow_type):
+        return pa.list_(normalize_view_types(arrow_type.value_type))
+    if pa.types.is_large_list(arrow_type):
+        return pa.large_list(normalize_view_types(arrow_type.value_type))
+    if pa.types.is_fixed_size_list(arrow_type):
+        return pa.list_(
+            normalize_view_types(arrow_type.value_type), arrow_type.list_size
+        )
+    if pa.types.is_struct(arrow_type):
+        return pa.struct(
+            [
+                pa.field(
+                    f.name,
+                    normalize_view_types(f.type),
+                    nullable=f.nullable,
+                    metadata=f.metadata,
+                )
+                for f in arrow_type
+            ]
+        )
+    if pa.types.is_map(arrow_type):
+        return pa.map_(
+            normalize_view_types(arrow_type.key_type),
+            normalize_view_types(arrow_type.item_type),
+        )
+    return arrow_type
+
+
+def normalize_table_view_types(table: "pa.Table") -> "pa.Table":
+    """Cast a table's view-typed columns to their large variants.
+
+    Returns the table unchanged if it has no view types. PyArrow lacks
+    comparison/sort kernels for ``string_view`` / ``binary_view``, so a table
+    carrying them breaks group_by, filter, and Delta predicate pushdown until
+    converted (ENG-601).
+    """
+    new_types = [normalize_view_types(f.type) for f in table.schema]
+    if all(nt == f.type for nt, f in zip(new_types, table.schema)):
+        return table
+    new_schema = pa.schema(
+        [
+            pa.field(f.name, nt, nullable=f.nullable, metadata=f.metadata)
+            for f, nt in zip(table.schema, new_types)
+        ],
+        metadata=table.schema.metadata,
+    )
+    return table.cast(new_schema)
 
 
 def pylist_to_pydict(pylist: list[dict]) -> dict:

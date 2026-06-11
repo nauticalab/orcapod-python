@@ -6,6 +6,7 @@ from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 from orcapod.databases.storage_utils import is_cloud_uri, parse_base_path
 
@@ -376,6 +377,10 @@ class DeltaTableDatabase:
 
         if records.num_rows == 0:
             return
+
+        # Convert view types up front so the whole write path (group_by dedup,
+        # filters, storage) avoids string_view's missing kernels (ENG-601).
+        records = arrow_utils.normalize_table_view_types(records)
 
         if record_id_column is None:
             record_id_column = records.column_names[0]
@@ -848,10 +853,13 @@ class DeltaTableDatabase:
         elif expression is not None:
             filter_expr = expression
 
+        # Convert view types before filtering: PyArrow has no comparison/sort
+        # kernels for string_view, so filtering the scan directly crashes
+        # (ENG-601). Trades predicate pushdown for correctness.
+        table = arrow_utils.normalize_table_view_types(dataset.to_table())
         if filter_expr is not None:
-            return dataset.to_table(filter=filter_expr)
-
-        return dataset.to_table()
+            return table.filter(filter_expr)
+        return table
 
     def to_config(self, db_registry: Any = None) -> dict[str, Any]:
         """Serialize database configuration to a JSON-compatible dict."""
@@ -949,8 +957,11 @@ class DeltaTableDatabase:
             table_uri = self._root_uri.rstrip("/") + "/" + record_key
 
         try:
-            # Combine all tables in the batch
-            combined_table = pending_batch.combine_chunks()
+            # Combine all tables in the batch. Convert view types so they never
+            # reach storage (see _read_delta_table / ENG-601).
+            combined_table = arrow_utils.normalize_table_view_types(
+                pending_batch.combine_chunks()
+            )
 
             # Ensure parent directory exists (local only)
             if not self._is_cloud:
