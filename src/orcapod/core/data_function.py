@@ -549,8 +549,9 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
             inner_parsed = [":".join(component) for component in components]
             return "::".join(inner_parsed)
 
-        record_id = str(uuid7())
-        source_info = {k: combine(self.uri, (record_id,), (k,)) for k in output_data}
+        _uuid = uuid7()
+        record_id = _uuid.bytes
+        source_info = {k: combine(self.uri, (_uuid.hex,), (k,)) for k in output_data}
 
         return Data(
             output_data,

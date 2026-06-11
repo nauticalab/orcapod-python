@@ -1266,7 +1266,7 @@ class FunctionJobNode(FunctionNodeBase):
         self,
         tag: TagProtocol,
         input_data: DataProtocol,
-        data_record_id: str,
+        data_record_id: bytes,
         computed: bool,
         skip_cache_lookup: bool = False,
     ) -> None:
@@ -1309,7 +1309,7 @@ class FunctionJobNode(FunctionNodeBase):
         meta_table = pa.table(
             {
                 constants.DATA_RECORD_ID: pa.array(
-                    [data_record_id], type=pa.large_string()
+                    [data_record_id], type=pa.binary(16)
                 ),
                 constants.NODE_CONTENT_HASH_COL: pa.array(
                     [self.content_hash().to_string()], type=pa.large_string()

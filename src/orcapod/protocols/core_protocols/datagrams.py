@@ -47,12 +47,12 @@ class DatagramProtocol(ContentIdentifiableProtocol, DataContextAwareProtocol, Pr
     """
 
     @property
-    def datagram_id(self) -> str:
+    def datagram_id(self) -> bytes:
         """
-        Return the UUID of this datagram.
+        Return the UUID of this datagram as 16 raw bytes (UUID v7).
 
         Returns:
-            UUID: The unique identifier for this instance of datagram.
+            bytes: The 16-byte binary UUID for this datagram instance.
         """
         ...
 
