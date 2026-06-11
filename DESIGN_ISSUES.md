@@ -119,11 +119,15 @@ logic entirely.
 ---
 
 ### P4 — `PythonDataFunction` computes the output schema hash twice
-**Status:** open
+**Status:** resolved
 **Severity:** low
 `__init__` stores `self._output_schema_hash` (line ~289). `DataFunctionBase` also lazily
 caches `self._output_data_schema_hash` (different attribute name) via
 `output_data_schema_hash`. Two fields holding the same value. One is redundant.
+
+**Fix:** Removed the eager `self._output_schema_hash` assignment from
+`PythonDataFunction.__init__`. The canonical schema hash is now computed and cached exclusively
+by `DataFunctionBase.output_data_schema_hash` (stored in `_output_data_schema_hash`).
 
 ---
 
@@ -192,12 +196,17 @@ implementation.
 ---
 
 ### F3 — Dual URI computation paths in the class hierarchy
-**Status:** open
+**Status:** resolved
 **Severity:** low
 `TrackedDataFunctionPod.uri` assembles the URI from `self.data_function.*` with its own lazy
 schema-hash cache. `WrappedFunctionPod.uri` simply delegates to `self._function_pod.uri`. These
 should agree (and do, after the `data_function` fix), but having two independent implementations
 makes future changes fragile.
+
+**Fix:** Removed `_output_schema_hash` cache from `_FunctionPodBase.__init__` and replaced the
+`uri` property body with `return self.data_function.uri`. `_FunctionPodBase.uri` now delegates
+to `DataFunctionBase.uri`, which owns the canonical hash computation and caching via
+`output_data_schema_hash`.
 
 ---
 
