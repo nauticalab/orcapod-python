@@ -552,6 +552,19 @@ class TestStringViewColumns:
         # Read path normalizes away string_view.
         assert not any(pa.types.is_string_view(f.type) for f in result.schema)
 
+    def test_read_delta_table_no_filter_normalizes_views(self, db):
+        # The unfiltered read path must also drop string_view (protects callers
+        # that sort/compare the result).
+        import deltalake
+
+        uri = db._get_table_uri(self.PATH)
+        tbl = make_string_view_table(__record_id=["p", "q"], category=["A", "B"])
+        deltalake.write_deltalake(uri, tbl, mode="overwrite")
+
+        result = db._read_delta_table(db._get_delta_table(self.PATH))
+        assert result.num_rows == 2
+        assert not any(pa.types.is_string_view(f.type) for f in result.schema)
+
     def test_add_records_does_not_persist_string_view(self, db):
         import glob
         import os
