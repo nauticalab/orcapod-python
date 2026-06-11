@@ -40,6 +40,21 @@ class PipelineProtocol(Protocol[NodeT]):
         ...
 
     @property
+    def source_pods(self) -> dict[str, NodeT]:
+        """Copy of compiled nodes that are source nodes (label → node)."""
+        ...
+
+    @property
+    def function_pods(self) -> dict[str, NodeT]:
+        """Copy of compiled nodes that are function-pod nodes (label → node)."""
+        ...
+
+    @property
+    def operator_pods(self) -> dict[str, NodeT]:
+        """Copy of compiled nodes that are operator-pod nodes (label → node)."""
+        ...
+
+    @property
     def dag(self) -> "GraphProtocol[NodeT]":
         """Node-object DAG for topology traversal and introspection."""
         ...
