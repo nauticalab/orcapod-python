@@ -10,6 +10,7 @@ from orcapod.core.sources.base import RootSource
 from orcapod.core.streams.arrow_table_stream import ArrowTableStream
 from orcapod.protocols.core_protocols import DataProtocol, SourceProtocol, TagProtocol
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
+from orcapod.system_constants import constants
 from orcapod.types import ColumnConfig, Schema
 from orcapod.utils.lazy_module import LazyModule
 
@@ -219,10 +220,21 @@ class CachedSource(RootSource):
             columns={"source": True, "system_tags": True}
         )
 
-        # Compute per-row record hashes for dedup: hash(full row)
+        # Compute per-row record hashes for dedup: hash(full row excluding
+        # system tag record_id columns, which are non-deterministic UUID bytes).
+        # The source_id system tag IS deterministic and is included in the hash.
+        record_id_tag_cols = [
+            c for c in live_table.column_names
+            if c.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX)
+        ]
+        hash_table = (
+            live_table.drop(record_id_tag_cols)
+            if record_id_tag_cols
+            else live_table
+        )
         arrow_hasher = self.data_context.arrow_hasher
         record_hashes: list[str] = []
-        for batch in live_table.to_batches():
+        for batch in hash_table.to_batches():
             for i in range(len(batch)):
                 record_hashes.append(
                     arrow_hasher.hash_table(batch.slice(i, 1)).to_hex()

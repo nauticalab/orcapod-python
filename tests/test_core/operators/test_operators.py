@@ -1382,7 +1382,8 @@ class TestJoinSystemTagCanonicalOrdering:
 
     def test_system_tag_values_are_per_row_source_provenance(self, three_sources):
         """System tag column values should reflect the source provenance.
-        source_id columns contain the source_id, record_id columns contain the record_id."""
+        source_id columns contain the source_id (str), record_id columns
+        contain the record_id (bytes, UUID_ARROW_TYPE)."""
         from orcapod.system_constants import constants
 
         src_a, src_b, src_c = three_sources
@@ -1395,7 +1396,9 @@ class TestJoinSystemTagCanonicalOrdering:
             values = result_table.column(col).to_pylist()
             assert len(values) == result_table.num_rows
             for val in values:
-                assert isinstance(val, str)
+                # source_id columns are large_string (str), record_id columns are
+                # fixed_size_binary[16] (bytes, UUID_ARROW_TYPE)
+                assert isinstance(val, (str, bytes))
                 assert len(val) > 0
 
     def test_intermediate_operators_produce_different_stream_hash(self):

@@ -144,13 +144,13 @@ class MergeJoin(BinaryOperator):
         for stream, orig_idx in canonical:
             canon_pos = canonical.index((stream, orig_idx))
             stream_tag_schema, _ = stream.output_schema(columns={"system_tags": True})
-            for col_name in stream_tag_schema:
+            for col_name, col_type in stream_tag_schema.items():
                 if col_name.startswith(constants.SYSTEM_TAG_PREFIX):
                     new_name = (
                         f"{col_name}{constants.BLOCK_SEPARATOR}"
                         f"{stream.pipeline_hash().to_hex(n_char)}:{canon_pos}"
                     )
-                    system_tag_fields[new_name] = str
+                    system_tag_fields[new_name] = col_type
         return Schema(system_tag_fields)
 
     def binary_static_process(
