@@ -755,11 +755,11 @@ class TestTypePodAccess:
 
     def test_type_pods_union_covers_all_nodes(self):
         src_a, src_b = _make_two_sources()
-        pod = FunctionPod(PythonDataFunction(double_value, output_keys="result"))
+        pod = FunctionPod(PythonDataFunction(add_values, output_keys="result"))
         pipeline = Pipeline(name="test")
         with pipeline:
             joined = Join()(src_a, src_b, label="joined")
-            pod(joined, label="doubled")
+            pod(joined, label="summed")
         all_nodes = pipeline.nodes
         combined = {
             **pipeline.source_pods,
