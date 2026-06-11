@@ -7,6 +7,7 @@ from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.types import DataValue, SchemaLike
 from orcapod.utils import arrow_utils
+from orcapod.utils.schema_utils import _normalize_column_list
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -26,13 +27,14 @@ class DictSource(RootSource):
     def __init__(
         self,
         data: Collection[Mapping[str, DataValue]],
-        tag_columns: Collection[str] = (),
+        tag_columns: str | Collection[str] = (),
         system_tag_columns: Collection[str] = (),
         data_schema: SchemaLike | pa.Schema | None = None,
         source_id: str | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(source_id=source_id, **kwargs)
+        tag_columns = _normalize_column_list(tag_columns)
 
         # Accept either a Python SchemaLike (Mapping[str, type]) or a
         # pa.Schema directly via data_schema; route to the converter accordingly.
