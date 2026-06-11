@@ -12,10 +12,6 @@ from .core.function_pod import (
 from .core.nodes.source_node import SourceNode
 from .pipeline import Pipeline, PipelineJob
 from .semantic_types.dataclass_encoding import register_dataclass
-from .types import (
-    UUID_ARROW_TYPE,
-    UUID_STRUCT_ARROW_TYPE,
-)
 
 # Subpackage re-exports for clean public API
 from . import databases  # noqa: F401
@@ -46,3 +42,18 @@ __all__ = [
     "streams",
     "types",
 ]
+
+
+def __getattr__(name: str) -> object:
+    """Lazy resolution for module-level constants that depend on pyarrow.
+
+    Delegates UUID Arrow type constants to ``orcapod.types`` so that importing
+    ``orcapod`` does not eagerly load the pyarrow C extension.
+    """
+    if name in ("UUID_ARROW_TYPE", "UUID_STRUCT_ARROW_TYPE"):
+        from . import types as _types
+
+        value = getattr(_types, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
