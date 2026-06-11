@@ -74,7 +74,6 @@ class _FunctionPodBase(TraceableBase):
         )
         self.tracker_manager = tracker_manager or DEFAULT_TRACKER_MANAGER
         self._data_function = data_function
-        self._output_schema_hash = None
 
     def computed_label(self) -> str | None:
         """Use the data function's canonical name as the default label."""
@@ -102,17 +101,7 @@ class _FunctionPodBase(TraceableBase):
 
     @property
     def uri(self) -> tuple[str, ...]:
-        if self._output_schema_hash is None:
-            self._output_schema_hash = self.data_context.semantic_hasher.hash_object(
-                # hash the vanilla output schema with no extra columns
-                self.data_function.output_data_schema
-            ).to_string()
-        return (
-            self.data_function.canonical_function_name,
-            self._output_schema_hash,
-            f"v{self.data_function.major_version}",
-            self.data_function.data_function_type_id,
-        )
+        return self.data_function.uri
 
     def multi_stream_handler(self) -> PodProtocol:
         from orcapod.core.operators import Join
