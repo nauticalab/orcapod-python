@@ -699,7 +699,7 @@ class Join(NonZeroInputOperator):
                 sid_val = merged_sys.get(fmap.get(sid_field, ""))
                 rid_val = merged_sys.get(fmap.get(rid_field, ""))
                 vals = {ft: merged_sys[k] for ft, k in fmap.items()}
-                entries.append(((sid_val or "", rid_val or ""), vals))
+                entries.append(((sid_val or "", rid_val or b""), vals))
 
             entries.sort(key=lambda e: e[0])
 
