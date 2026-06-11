@@ -121,6 +121,21 @@ class AbstractPipelineBase(Generic[NodeT], AutoRegisteringContextBasedTracker, A
         return self._nodes.copy()
 
     @property
+    def source_pods(self) -> dict[str, Any]:
+        """Copy of compiled nodes that are source nodes (label → node)."""
+        return {k: v for k, v in self._nodes.items() if v.node_type == "source"}
+
+    @property
+    def function_pods(self) -> dict[str, Any]:
+        """Copy of compiled nodes that are function-pod nodes (label → node)."""
+        return {k: v for k, v in self._nodes.items() if v.node_type == "function"}
+
+    @property
+    def operator_pods(self) -> dict[str, Any]:
+        """Copy of compiled nodes that are operator-pod nodes (label → node)."""
+        return {k: v for k, v in self._nodes.items() if v.node_type == "operator"}
+
+    @property
     def dag(self) -> OrcaDAG[NodeT]:
         """Node-object DAG for this pipeline.
 

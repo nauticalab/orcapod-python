@@ -46,6 +46,15 @@ class DataFunctionProtocol(
         ...
 
     @property
+    def uri(self) -> tuple[str, ...]:
+        """Stable, content-addressable identifier for this data function.
+
+        Returns a tuple of strings uniquely identifying the function by name,
+        output schema hash, major version, and function type.
+        """
+        ...
+
+    @property
     def input_data_schema(self) -> Schema:
         """Schema describing the input data this function accepts."""
         ...

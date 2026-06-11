@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.utils import arrow_utils, polars_data_utils
+from orcapod.utils.schema_utils import _normalize_column_list
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -51,9 +52,7 @@ class DataFrameSource(RootSource):
             )
             df = df.with_columns([pl.from_arrow(c) for c in sub_table])
 
-        if isinstance(tag_columns, str):
-            tag_columns = [tag_columns]
-        tag_columns = list(tag_columns)
+        tag_columns = _normalize_column_list(tag_columns)
 
         df = polars_data_utils.drop_system_columns(df)
 

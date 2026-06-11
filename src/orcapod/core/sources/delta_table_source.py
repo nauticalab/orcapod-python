@@ -8,6 +8,7 @@ from orcapod.core.sources.base import RootSource
 from orcapod.core.sources.stream_builder import SourceStreamBuilder
 from orcapod.types import PathLike
 from orcapod.utils.lazy_module import LazyModule
+from orcapod.utils.schema_utils import _normalize_column_list
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -28,7 +29,7 @@ class DeltaTableSource(RootSource):
     def __init__(
         self,
         delta_table_path: PathLike,
-        tag_columns: Collection[str] = (),
+        tag_columns: str | Collection[str] = (),
         system_tag_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
@@ -39,6 +40,7 @@ class DeltaTableSource(RootSource):
         if source_id is None:
             source_id = resolved.name
         super().__init__(source_id=source_id, **kwargs)
+        tag_columns = _normalize_column_list(tag_columns)
 
         self._delta_table_path = resolved
 

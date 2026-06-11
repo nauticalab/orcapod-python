@@ -453,9 +453,6 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
         self._function_content_hash = semantic_hasher.hash_object(
             get_function_components(self._function)
         ).to_string()
-        self._output_schema_hash = semantic_hasher.hash_object(
-            self.output_data_schema
-        ).to_string()
 
     @property
     def canonical_function_name(self) -> str:

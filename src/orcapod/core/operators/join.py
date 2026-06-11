@@ -95,7 +95,7 @@ class Join(NonZeroInputOperator):
         appending ::{pipeline_hash}:{canonical_position}. This method
         computes those output column names without performing the join.
         """
-        n_char = self.orcapod_config.system_tag_hash_n_char
+        n_char = self.orcapod_config.hashing.system_tag_n_char
         ordered_streams = self.order_input_streams(*streams)
 
         system_tag_fields: dict[str, type] = {}
@@ -124,7 +124,7 @@ class Join(NonZeroInputOperator):
 
         COMMON_JOIN_KEY = "_common"
 
-        n_char = self.orcapod_config.system_tag_hash_n_char
+        n_char = self.orcapod_config.hashing.system_tag_n_char
 
         stream = ordered_streams[0]
 
@@ -238,7 +238,7 @@ class Join(NonZeroInputOperator):
         Returns:
             List of suffix strings, one per input position.
         """
-        n_char = self.orcapod_config.system_tag_hash_n_char
+        n_char = self.orcapod_config.hashing.system_tag_n_char
         hex_strings = [h.to_hex() for h in input_pipeline_hashes]
 
         # Canonical order: sorted by full hex (same as order_input_streams).

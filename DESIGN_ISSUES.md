@@ -119,11 +119,15 @@ logic entirely.
 ---
 
 ### P4 — `PythonDataFunction` computes the output schema hash twice
-**Status:** open
+**Status:** resolved
 **Severity:** low
 `__init__` stores `self._output_schema_hash` (line ~289). `DataFunctionBase` also lazily
 caches `self._output_data_schema_hash` (different attribute name) via
 `output_data_schema_hash`. Two fields holding the same value. One is redundant.
+
+**Fix:** Removed the eager `self._output_schema_hash` assignment from
+`PythonDataFunction.__init__`. The canonical schema hash is now computed and cached exclusively
+by `DataFunctionBase.output_data_schema_hash` (stored in `_output_data_schema_hash`).
 
 ---
 
@@ -192,12 +196,17 @@ implementation.
 ---
 
 ### F3 — Dual URI computation paths in the class hierarchy
-**Status:** open
+**Status:** resolved
 **Severity:** low
 `TrackedDataFunctionPod.uri` assembles the URI from `self.data_function.*` with its own lazy
 schema-hash cache. `WrappedFunctionPod.uri` simply delegates to `self._function_pod.uri`. These
 should agree (and do, after the `data_function` fix), but having two independent implementations
 makes future changes fragile.
+
+**Fix:** Removed `_output_schema_hash` cache from `_FunctionPodBase.__init__` and replaced the
+`uri` property body with `return self.data_function.uri`. `_FunctionPodBase.uri` now delegates
+to `DataFunctionBase.uri`, which owns the canonical hash computation and caching via
+`output_data_schema_hash`.
 
 ---
 
@@ -989,3 +998,21 @@ Open questions:
    context override?
 
 ---
+
+## `src/orcapod/semantic_types/universal_converter.py`
+
+### UC1 — `python_type_to_arrow_type` raised on `typing.Any` from empty-container inference
+**Status:** resolved
+**Severity:** medium
+**Issue:** ENG-389
+
+`_infer_list_type` and `_infer_dict_type` in `pydata_utils.py` return `list[Any]` /
+`dict[Any, Any]` when all sampled containers are empty (no elements to inspect). Passing
+these inferred types to `python_type_to_arrow_type` raised `ValueError: Unsupported
+Python type: typing.Any`.
+
+**Fix:** Added `Any: pa.null()` to `_PYTHON_TO_ARROW_MAP` (forward path) and an explicit
+`pa.types.is_null → Any` check to `_convert_arrow_to_python` (reverse path). `pa.null()`
+is Arrow's canonical "unknown/no-type" marker; empty containers have no elements to
+validate, so the encoding is semantically correct. The now-unreachable `Any`-specific hint
+in the error branch was removed.

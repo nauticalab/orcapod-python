@@ -712,3 +712,73 @@ def test_run_with_override_observer_does_not_raise():
         Join()(src_a, src_b, label="joiner")
     # Passing an explicit observer must not raise
     job.run(observer=NoOpObserver())
+
+
+# ---------------------------------------------------------------------------
+# Tests: Type-specific pod access (PLT-420)
+# ---------------------------------------------------------------------------
+
+
+class TestTypePodAccess:
+    """Tests for source_pods, function_pods, and operator_pods properties."""
+
+    def test_function_pods_returns_only_function_nodes(self):
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
+        pod = FunctionPod(PythonDataFunction(double_value, output_keys="result"))
+        pipeline = Pipeline(name="test")
+        with pipeline:
+            pod(src, label="doubled")
+        fp = pipeline.function_pods
+        assert len(fp) == 1
+        assert "doubled" in fp
+        assert isinstance(fp["doubled"], FunctionNode)
+
+    def test_source_pods_returns_only_source_nodes(self):
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
+        pod = FunctionPod(PythonDataFunction(double_value, output_keys="result"))
+        pipeline = Pipeline(name="test")
+        with pipeline:
+            pod(src, label="doubled")
+        sp = pipeline.source_pods
+        assert len(sp) == 1
+        assert isinstance(list(sp.values())[0], SourceNode)
+
+    def test_operator_pods_returns_only_operator_nodes(self):
+        src_a, src_b = _make_two_sources()
+        pipeline = Pipeline(name="test")
+        with pipeline:
+            Join()(src_a, src_b, label="joined")
+        op = pipeline.operator_pods
+        assert len(op) == 1
+        assert "joined" in op
+        assert isinstance(op["joined"], OperatorNode)
+
+    def test_type_pods_union_covers_all_nodes(self):
+        src_a, src_b = _make_two_sources()
+        pod = FunctionPod(PythonDataFunction(add_values, output_keys="result"))
+        pipeline = Pipeline(name="test")
+        with pipeline:
+            joined = Join()(src_a, src_b, label="joined")
+            pod(joined, label="summed")
+        all_nodes = pipeline.nodes
+        combined = {
+            **pipeline.source_pods,
+            **pipeline.function_pods,
+            **pipeline.operator_pods,
+        }
+        assert combined == all_nodes
+
+    def test_function_pods_empty_when_no_function_nodes(self):
+        src_a, src_b = _make_two_sources()
+        pipeline = Pipeline(name="test")
+        with pipeline:
+            Join()(src_a, src_b, label="joined")
+        assert pipeline.function_pods == {}
+
+    def test_operator_pods_empty_when_no_operator_nodes(self):
+        src = _make_source("key", "value", {"key": ["a", "b"], "value": [10, 20]})
+        pod = FunctionPod(PythonDataFunction(double_value, output_keys="result"))
+        pipeline = Pipeline(name="test")
+        with pipeline:
+            pod(src, label="doubled")
+        assert pipeline.operator_pods == {}

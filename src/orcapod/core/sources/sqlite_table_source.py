@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from orcapod.core.sources.db_table_source import DBTableSource
 from orcapod.databases.sqlite_connector import SQLiteConnector
+from orcapod.utils.schema_utils import _normalize_column_list
 
 if TYPE_CHECKING:
     from orcapod import contexts
@@ -54,7 +55,8 @@ class SQLiteTableSource(DBTableSource):
         db_path: Path to the SQLite database file, or ``":memory:"`` for an
             in-process in-memory database.
         table_name: Name of the table to expose as a source.
-        tag_columns: Columns to use as tag columns. If ``None`` (default),
+        tag_columns: Columns to use as tag columns. A bare string is
+            accepted as a single column name. If ``None`` (default),
             the table's primary-key columns are used; ROWID-only tables fall
             back to ``["rowid"]``.
         system_tag_columns: Additional system-level tag columns.
@@ -73,7 +75,7 @@ class SQLiteTableSource(DBTableSource):
         self,
         db_path: str | os.PathLike,
         table_name: str,
-        tag_columns: Collection[str] | None = None,
+        tag_columns: str | Collection[str] | None = None,
         system_tag_columns: Collection[str] = (),
         record_id_column: str | None = None,
         source_id: str | None = None,
@@ -90,7 +92,7 @@ class SQLiteTableSource(DBTableSource):
                 pk_cols = connector.get_pk_columns(table_name)
                 resolved_tags: list[str] = pk_cols if pk_cols else ["rowid"]
             else:
-                resolved_tags = list(tag_columns)
+                resolved_tags = _normalize_column_list(tag_columns)
 
             # Step 4: Determine the fetch query.
             # If "rowid" is in resolved_tags but not a real column, we need

@@ -127,7 +127,7 @@ class SourceNodeBase(TraceableBase, ABC):
             self._tag_schema,
             self._data_schema,
             self.data_context.semantic_hasher,
-            self.orcapod_config.schema_hash_n_char,
+            self.orcapod_config.hashing.schema_n_char,
         )
 
     @property

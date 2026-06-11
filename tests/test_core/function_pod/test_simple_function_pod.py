@@ -80,6 +80,10 @@ class TestSimpleFunctionPodConstruction:
     def test_uri_contains_version(self, double_pod, double_pf):
         assert f"v{double_pf.major_version}" in double_pod.uri
 
+    def test_pod_uri_equals_data_function_uri(self, double_pod, double_pf):
+        """pod.uri must equal pod.data_function.uri exactly."""
+        assert double_pod.uri == double_pf.uri
+
     def test_output_schema_data_matches_pf_output_schema(self, double_pod, double_pf):
         _, data_schema = double_pod.output_schema(make_int_stream())
         assert data_schema == double_pf.output_data_schema

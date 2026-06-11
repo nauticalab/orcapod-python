@@ -1,4 +1,10 @@
-from .config import OrcapodConfig
+from .config import (
+    DEFAULT_CONFIG,
+    DisplayConfig,
+    HashingConfig,
+    OrcapodConfig,
+    load_config,
+)
 from .core.function_pod import (
     FunctionPod,
     function_pod,
@@ -16,7 +22,11 @@ from . import streams  # noqa: F401
 from . import types  # noqa: F401
 
 __all__ = [
+    "DEFAULT_CONFIG",
+    "DisplayConfig",
+    "HashingConfig",
     "OrcapodConfig",
+    "load_config",
     "FunctionPod",
     "function_pod",
     "Pipeline",

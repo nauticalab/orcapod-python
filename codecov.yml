@@ -1,3 +1,6 @@
+ignore:
+  - "src/orcapod/protocols/**"
+
 coverage:
   status:
     project:

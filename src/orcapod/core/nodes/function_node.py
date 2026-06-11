@@ -515,7 +515,7 @@ class FunctionNode(FunctionNodeBase):
 
         config_dict = descriptor.get("config")
         node._orcapod_config = (
-            OrcapodConfig(**config_dict) if config_dict is not None else DEFAULT_CONFIG
+            OrcapodConfig.from_dict(config_dict) if config_dict is not None else DEFAULT_CONFIG
         )
 
         # From ContentIdentifiableBase
@@ -620,7 +620,7 @@ class _ResultDatabaseReader:
 
     Used by ``FunctionJobNode.attach_databases()`` when ``_function_pod`` is
     ``None`` (i.e., nodes loaded from a saved job without a live function pod).
-    Provides the ``_result_database`` and ``record_path`` attributes that
+    Provides the ``result_database`` and ``record_path`` attributes that
     ``get_all_records()`` and ``_load_cached_entries()`` require, without
     needing a ``CachedFunctionPod``.
     """
@@ -630,7 +630,7 @@ class _ResultDatabaseReader:
         result_database: ArrowDatabaseProtocol,
         record_path: tuple[str, ...],
     ) -> None:
-        self._result_database = result_database
+        self.result_database = result_database
         self._record_path = record_path
 
     @property
@@ -835,7 +835,7 @@ class FunctionJobNode(FunctionNodeBase):
         )
         config_dict = descriptor.get("config")
         node._orcapod_config = (
-            OrcapodConfig(**config_dict) if config_dict is not None else DEFAULT_CONFIG
+            OrcapodConfig.from_dict(config_dict) if config_dict is not None else DEFAULT_CONFIG
         )
 
         # From ContentIdentifiableBase
@@ -1473,7 +1473,7 @@ class FunctionJobNode(FunctionNodeBase):
             self.node_identity_path,
             record_id_column=_PIPELINE_ENTRY_ID_COL,
         )
-        results = self._cached_function_pod._result_database.get_all_records(
+        results = self._cached_function_pod.result_database.get_all_records(
             self._cached_function_pod.record_path,
             record_id_column=constants.DATA_RECORD_ID,
         )

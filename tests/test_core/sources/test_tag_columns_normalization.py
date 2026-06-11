@@ -1,0 +1,490 @@
+"""Tests for tag_columns bare-string normalization (ENG-571).
+
+Covers:
+- _normalize_column_list: bare string, list, tuple, empty, invalid inputs
+- Per-source integration: all user-facing sources accept bare string identically
+  to a single-element list.
+"""
+from __future__ import annotations
+
+import re
+import sqlite3
+from collections.abc import Iterator
+from typing import Any
+
+import pyarrow as pa
+import pytest
+
+from orcapod.utils.schema_utils import _normalize_column_list
+
+
+# ---------------------------------------------------------------------------
+# Helper unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeColumnList:
+    def test_bare_string_returns_single_element_list(self):
+        assert _normalize_column_list("session_id") == ["session_id"]
+
+    def test_single_element_list_unchanged(self):
+        assert _normalize_column_list(["session_id"]) == ["session_id"]
+
+    def test_multi_element_list_unchanged(self):
+        assert _normalize_column_list(["a", "b", "c"]) == ["a", "b", "c"]
+
+    def test_tuple_returns_list(self):
+        assert _normalize_column_list(("a", "b")) == ["a", "b"]
+
+    def test_empty_list_returns_empty_list(self):
+        assert _normalize_column_list([]) == []
+
+    def test_integer_raises_type_error(self):
+        with pytest.raises(TypeError, match="tag_columns must be a string or iterable"):
+            _normalize_column_list(42)
+
+    def test_float_raises_type_error(self):
+        with pytest.raises(TypeError, match="tag_columns must be a string or iterable"):
+            _normalize_column_list(3.14)
+
+    def test_list_with_non_string_element_raises_type_error(self):
+        with pytest.raises(TypeError, match="All tag_columns elements must be strings"):
+            _normalize_column_list([1, "b"])
+
+    def test_list_with_all_non_string_elements_raises_type_error(self):
+        with pytest.raises(TypeError, match="All tag_columns elements must be strings"):
+            _normalize_column_list([1, 2, 3])
+
+    def test_single_char_string_not_iterated(self):
+        # The core footgun fix: a single-character string must produce a
+        # one-element list, not be iterated character-by-character.
+        assert _normalize_column_list("a") == ["a"]
+
+    def test_generator_of_strings_returns_list(self):
+        result = _normalize_column_list(x for x in ["col_a", "col_b"])
+        assert result == ["col_a", "col_b"]
+
+    def test_set_of_strings_returns_list(self):
+        result = _normalize_column_list({"x", "y", "z"})
+        assert set(result) == {"x", "y", "z"}
+        assert isinstance(result, list)
+
+    def test_none_raises_type_error(self):
+        # None is not accepted by the helper — callers that allow None as
+        # "use primary key" must guard before calling _normalize_column_list.
+        with pytest.raises(TypeError, match="tag_columns must be a string or iterable"):
+            _normalize_column_list(None)
+
+    def test_error_message_includes_type_name_for_non_iterable(self):
+        with pytest.raises(TypeError, match="'int'"):
+            _normalize_column_list(42)
+
+    def test_error_message_includes_element_type_names(self):
+        with pytest.raises(TypeError, match="'int'"):
+            _normalize_column_list([1, "b"])
+
+
+# ---------------------------------------------------------------------------
+# Shared Arrow table fixture
+# ---------------------------------------------------------------------------
+
+
+def _make_table() -> pa.Table:
+    """Two-column table: session_id (tag candidate) + value (data)."""
+    return pa.table(
+        {
+            "session_id": pa.array(["s1", "s2"], type=pa.large_string()),
+            "value": pa.array([10, 20], type=pa.int64()),
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# ArrowTableSource
+# ---------------------------------------------------------------------------
+
+
+class TestArrowTableSourceTagColumns:
+    def test_bare_string_same_as_list(self):
+        from orcapod.core.sources import ArrowTableSource
+
+        t = _make_table()
+        src_str = ArrowTableSource(table=t, tag_columns="session_id", infer_nullable=True)
+        src_list = ArrowTableSource(table=t, tag_columns=["session_id"], infer_nullable=True)
+        tag_keys_str, _ = src_str.keys()
+        tag_keys_list, _ = src_list.keys()
+        assert set(tag_keys_str) == set(tag_keys_list) == {"session_id"}
+
+    def test_tuple_accepted(self):
+        from orcapod.core.sources import ArrowTableSource
+
+        t = _make_table()
+        src = ArrowTableSource(table=t, tag_columns=("session_id",), infer_nullable=True)
+        tag_keys, _ = src.keys()
+        assert "session_id" in tag_keys
+
+    def test_invalid_type_raises(self):
+        from orcapod.core.sources import ArrowTableSource
+
+        with pytest.raises(TypeError):
+            ArrowTableSource(table=_make_table(), tag_columns=42, infer_nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# DataFrameSource
+# ---------------------------------------------------------------------------
+
+
+class TestDataFrameSourceTagColumns:
+    def test_bare_string_same_as_list(self):
+        from orcapod.core.sources import DataFrameSource
+
+        data = {"session_id": ["s1", "s2"], "value": [10, 20]}
+        src_str = DataFrameSource(data=data, tag_columns="session_id")
+        src_list = DataFrameSource(data=data, tag_columns=["session_id"])
+        tag_keys_str, _ = src_str.keys()
+        tag_keys_list, _ = src_list.keys()
+        assert set(tag_keys_str) == set(tag_keys_list) == {"session_id"}
+
+    def test_tuple_accepted(self):
+        from orcapod.core.sources import DataFrameSource
+
+        src = DataFrameSource(
+            data={"session_id": ["s1"], "value": [10]},
+            tag_columns=("session_id",),
+        )
+        tag_keys, _ = src.keys()
+        assert "session_id" in tag_keys
+
+    def test_invalid_type_raises(self):
+        from orcapod.core.sources import DataFrameSource
+
+        with pytest.raises(TypeError):
+            DataFrameSource(data={"session_id": ["s1"], "value": [1]}, tag_columns=42)
+
+
+# ---------------------------------------------------------------------------
+# CSVSource
+# ---------------------------------------------------------------------------
+
+
+class TestCSVSourceTagColumns:
+    def test_bare_string_same_as_list(self, tmp_path):
+        from orcapod.core.sources import CSVSource
+
+        p = tmp_path / "data.csv"
+        p.write_text("session_id,value\ns1,10\ns2,20\n")
+        src_str = CSVSource(file_path=str(p), tag_columns="session_id")
+        src_list = CSVSource(file_path=str(p), tag_columns=["session_id"])
+        tag_keys_str, _ = src_str.keys()
+        tag_keys_list, _ = src_list.keys()
+        assert set(tag_keys_str) == set(tag_keys_list) == {"session_id"}
+
+    def test_tuple_accepted(self, tmp_path):
+        from orcapod.core.sources import CSVSource
+
+        p = tmp_path / "data.csv"
+        p.write_text("session_id,value\ns1,10\n")
+        src = CSVSource(file_path=str(p), tag_columns=("session_id",))
+        tag_keys, _ = src.keys()
+        assert "session_id" in tag_keys
+
+    def test_invalid_type_raises(self, tmp_path):
+        from orcapod.core.sources import CSVSource
+
+        p = tmp_path / "data.csv"
+        p.write_text("session_id,value\ns1,10\n")
+        with pytest.raises(TypeError):
+            CSVSource(file_path=str(p), tag_columns=42)
+
+
+# ---------------------------------------------------------------------------
+# DictSource
+# ---------------------------------------------------------------------------
+
+
+class TestDictSourceTagColumns:
+    _DATA = [{"session_id": "s1", "value": 10}, {"session_id": "s2", "value": 20}]
+
+    def test_bare_string_same_as_list(self):
+        from orcapod.core.sources import DictSource
+
+        src_str = DictSource(data=self._DATA, tag_columns="session_id")
+        src_list = DictSource(data=self._DATA, tag_columns=["session_id"])
+        tag_keys_str, _ = src_str.keys()
+        tag_keys_list, _ = src_list.keys()
+        assert set(tag_keys_str) == set(tag_keys_list) == {"session_id"}
+
+    def test_tuple_accepted(self):
+        from orcapod.core.sources import DictSource
+
+        src = DictSource(data=self._DATA, tag_columns=("session_id",))
+        tag_keys, _ = src.keys()
+        assert "session_id" in tag_keys
+
+    def test_invalid_type_raises(self):
+        from orcapod.core.sources import DictSource
+
+        with pytest.raises(TypeError):
+            DictSource(data=self._DATA, tag_columns=42)
+
+
+# ---------------------------------------------------------------------------
+# DeltaTableSource (skipped when deltalake not installed)
+# ---------------------------------------------------------------------------
+
+
+class TestDeltaTableSourceTagColumns:
+    @pytest.fixture
+    def delta_path(self, tmp_path):
+        deltalake = pytest.importorskip("deltalake")
+        t = pa.table(
+            {
+                "session_id": pa.array(["s1", "s2"], type=pa.large_string()),
+                "value": pa.array([10, 20], type=pa.int64()),
+            }
+        )
+        dest = tmp_path / "delta"
+        deltalake.write_deltalake(str(dest), t)
+        return dest
+
+    def test_bare_string_same_as_list(self, delta_path):
+        from orcapod.core.sources import DeltaTableSource
+
+        src_str = DeltaTableSource(delta_table_path=delta_path, tag_columns="session_id")
+        src_list = DeltaTableSource(delta_table_path=delta_path, tag_columns=["session_id"])
+        tag_keys_str, _ = src_str.keys()
+        tag_keys_list, _ = src_list.keys()
+        assert set(tag_keys_str) == set(tag_keys_list) == {"session_id"}
+
+    def test_invalid_type_raises(self, delta_path):
+        from orcapod.core.sources import DeltaTableSource
+
+        with pytest.raises(TypeError):
+            DeltaTableSource(delta_table_path=delta_path, tag_columns=42)
+
+
+# ---------------------------------------------------------------------------
+# DBTableSource (via MockDBConnector — no external DB required)
+# ---------------------------------------------------------------------------
+
+
+class _MockConnector:
+    """Minimal in-memory DBConnectorProtocol for normalization tests."""
+
+    def __init__(
+        self,
+        tables: dict[str, pa.Table] | None = None,
+        pk_columns: dict[str, list[str]] | None = None,
+    ) -> None:
+        self._tables = tables or {
+            "events": pa.table(
+                {
+                    "session_id": pa.array(["s1", "s2"], type=pa.large_string()),
+                    "value": pa.array([10, 20], type=pa.int64()),
+                }
+            )
+        }
+        self._pk_columns = pk_columns or {"events": ["session_id"]}
+
+    def get_table_names(self) -> list[str]:
+        return list(self._tables.keys())
+
+    def get_pk_columns(self, table_name: str) -> list[str]:
+        return self._pk_columns.get(table_name, [])
+
+    def get_column_info(self, table_name: str):
+        from orcapod.types import ColumnInfo
+        return [ColumnInfo(name=f.name, arrow_type=f.type) for f in self._tables[table_name].schema]
+
+    def iter_batches(self, query: str, params: Any = None, batch_size: int = 1000) -> Iterator[pa.RecordBatch]:
+        m = re.search(r'FROM\s+"?(\w+)"?', query, re.IGNORECASE)
+        if m:
+            table = self._tables.get(m.group(1))
+            if table is not None:
+                yield from table.to_batches()
+
+    def create_table_if_not_exists(self, *a: Any, **kw: Any) -> None:
+        pass
+
+    def upsert_records(self, *a: Any, **kw: Any) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def __enter__(self) -> "_MockConnector":
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        pass
+
+    def to_config(self) -> dict[str, Any]:
+        return {"connector_type": "mock"}
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "_MockConnector":
+        return cls()
+
+
+class TestDBTableSourceTagColumns:
+    def test_bare_string_same_as_list(self):
+        from orcapod.core.sources import DBTableSource
+
+        src_str = DBTableSource(
+            connector=_MockConnector(), table_name="events", tag_columns="session_id"
+        )
+        src_list = DBTableSource(
+            connector=_MockConnector(), table_name="events", tag_columns=["session_id"]
+        )
+        tag_keys_str, _ = src_str.keys()
+        tag_keys_list, _ = src_list.keys()
+        assert set(tag_keys_str) == set(tag_keys_list) == {"session_id"}
+
+    def test_tuple_accepted(self):
+        from orcapod.core.sources import DBTableSource
+
+        src = DBTableSource(
+            connector=_MockConnector(), table_name="events", tag_columns=("session_id",)
+        )
+        tag_keys, _ = src.keys()
+        assert "session_id" in tag_keys
+
+    def test_invalid_type_raises(self):
+        from orcapod.core.sources import DBTableSource
+
+        with pytest.raises(TypeError):
+            DBTableSource(connector=_MockConnector(), table_name="events", tag_columns=42)
+
+
+# ---------------------------------------------------------------------------
+# SQLiteTableSource
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def sqlite_db_path(tmp_path):
+    """SQLite DB with an 'events' table; session_id is the primary key."""
+    db_path = tmp_path / "test.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "CREATE TABLE events (session_id TEXT PRIMARY KEY, value INTEGER NOT NULL)"
+    )
+    conn.executemany("INSERT INTO events VALUES (?, ?)", [("s1", 10), ("s2", 20)])
+    conn.commit()
+    conn.close()
+    return str(db_path)
+
+
+class TestSQLiteTableSourceTagColumns:
+    def test_bare_string_same_as_list(self, sqlite_db_path):
+        from orcapod.core.sources import SQLiteTableSource
+
+        src_str = SQLiteTableSource(
+            db_path=sqlite_db_path, table_name="events", tag_columns="session_id"
+        )
+        src_list = SQLiteTableSource(
+            db_path=sqlite_db_path, table_name="events", tag_columns=["session_id"]
+        )
+        tag_keys_str, _ = src_str.keys()
+        tag_keys_list, _ = src_list.keys()
+        assert set(tag_keys_str) == set(tag_keys_list) == {"session_id"}
+
+    def test_tuple_accepted(self, sqlite_db_path):
+        from orcapod.core.sources import SQLiteTableSource
+
+        src = SQLiteTableSource(
+            db_path=sqlite_db_path, table_name="events", tag_columns=("session_id",)
+        )
+        tag_keys, _ = src.keys()
+        assert "session_id" in tag_keys
+
+    def test_invalid_type_raises(self, sqlite_db_path):
+        from orcapod.core.sources import SQLiteTableSource
+
+        with pytest.raises(TypeError):
+            SQLiteTableSource(
+                db_path=sqlite_db_path, table_name="events", tag_columns=42
+            )
+
+
+# ---------------------------------------------------------------------------
+# PollingSource
+# ---------------------------------------------------------------------------
+
+
+class _FakePollingImpl:
+    """Minimal DynamicSourceProtocol stub for tag_columns normalization tests.
+
+    No real data is served — ``tag_schema`` and ``data_schema`` are declared
+    at construction so that ``keys()`` can answer without triggering a fetch.
+    """
+
+    def identity(self) -> Any:
+        return "_FakePollingImpl"
+
+    def to_config(self) -> dict[str, Any] | None:
+        return None
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "_FakePollingImpl":
+        return cls()
+
+    async def poll(self, cursor: Any = None) -> bool:
+        return False
+
+    async def fetch(self, cursor: Any = None) -> tuple[Any, Any]:
+        from orcapod.types import Cursor
+
+        return Cursor(value=0), {}
+
+    async def close(self) -> None:
+        pass
+
+
+class TestPollingSourceTagColumns:
+    def test_bare_string_same_as_list(self):
+        from orcapod.core.sources.polling_source import PollingSource
+        from orcapod.types import Schema
+
+        tag_schema = Schema({"session_id": str})
+        data_schema = Schema({"value": int})
+        stub = _FakePollingImpl()
+        src_str = PollingSource(
+            impl=stub,
+            tag_columns="session_id",
+            tag_schema=tag_schema,
+            data_schema=data_schema,
+        )
+        src_list = PollingSource(
+            impl=stub,
+            tag_columns=["session_id"],
+            tag_schema=tag_schema,
+            data_schema=data_schema,
+        )
+        tag_keys_str, _ = src_str.keys()
+        tag_keys_list, _ = src_list.keys()
+        assert set(tag_keys_str) == set(tag_keys_list) == {"session_id"}
+
+    def test_tuple_accepted(self):
+        from orcapod.core.sources.polling_source import PollingSource
+        from orcapod.types import Schema
+
+        tag_schema = Schema({"session_id": str})
+        data_schema = Schema({"value": int})
+        stub = _FakePollingImpl()
+        src = PollingSource(
+            impl=stub,
+            tag_columns=("session_id",),
+            tag_schema=tag_schema,
+            data_schema=data_schema,
+        )
+        tag_keys, _ = src.keys()
+        assert "session_id" in tag_keys
+
+    def test_invalid_type_raises(self):
+        from orcapod.core.sources.polling_source import PollingSource
+
+        stub = _FakePollingImpl()
+        with pytest.raises(TypeError):
+            PollingSource(impl=stub, tag_columns=42)
