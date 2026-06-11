@@ -155,7 +155,7 @@ class OrcapodConfig:
 
         hashing_dict = data.get("hashing", {})
         known_hashing = set(HashingConfig.__dataclass_fields__)
-        if not isinstance(hashing_dict, dict):
+        if not isinstance(hashing_dict, Mapping):
             logger.warning(
                 "Config section [hashing]%s is not a table — ignored", path_str
             )
@@ -171,7 +171,7 @@ class OrcapodConfig:
 
         display_dict = data.get("display", {})
         known_display = set(DisplayConfig.__dataclass_fields__)
-        if not isinstance(display_dict, dict):
+        if not isinstance(display_dict, Mapping):
             logger.warning(
                 "Config section [display]%s is not a table — ignored", path_str
             )
@@ -203,8 +203,8 @@ def load_config(
       → user-global config (``~/.orcapod/config.toml``)
       → project-local config (``./orcapod_config.toml`` in cwd)
 
-    Missing files are silently skipped. Malformed TOML raises ``ValueError``
-    with the offending file path included in the message.
+    Missing or non-file paths are silently skipped. Malformed TOML raises
+    ``ValueError`` with the offending file path included in the message.
 
     Args:
         project_config_path: Override the project-local config file path.
@@ -237,7 +237,7 @@ def load_config(
     config = DEFAULT_CONFIG
 
     for path in (_user_path, _project_path):
-        if not path.exists():
+        if not path.is_file():
             continue
         try:
             with open(path, "rb") as f:
