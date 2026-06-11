@@ -75,26 +75,16 @@ Accepted wherever a ``Schema`` is expected so callers can pass plain dicts."""
 _T = TypeVar("_T")
 
 # ---------------------------------------------------------------------------
-# UUID Arrow type constants
+# UUID Arrow type constants — resolved lazily on first access
 # ---------------------------------------------------------------------------
-
-
-def _make_uuid_types() -> "tuple[pa.DataType, pa.StructType]":
-    """Build UUID Arrow types (deferred so pyarrow is not imported at module level)."""
-    import pyarrow as _pa
-
-    arrow_type = _pa.binary(16)
-    struct_type = _pa.struct([_pa.field("uuid", arrow_type)])
-    return arrow_type, struct_type
-
-
-# Canonical Arrow type for all UUID values in OrcaPod.
-# Stored as fixed_size_binary[16] — 16 raw bytes, no hex encoding, no dashes.
-UUID_ARROW_TYPE: "pa.DataType"
-# Semantic struct type for Python uuid.UUID round-trips through the type system.
-UUID_STRUCT_ARROW_TYPE: "pa.StructType"
-UUID_ARROW_TYPE, UUID_STRUCT_ARROW_TYPE = _make_uuid_types()
-del _make_uuid_types
+#
+# UUID_ARROW_TYPE: pa.DataType
+#   Canonical Arrow type for all UUID values in OrcaPod.
+#   Stored as fixed_size_binary[16] — 16 raw bytes, no hex encoding, no dashes.
+#
+# UUID_STRUCT_ARROW_TYPE: pa.StructType
+#   Semantic struct type for Python uuid.UUID round-trips through the type system.
+#   Follows the same single-field struct pattern as path/upath.
 
 
 class Schema(Mapping[str, DataType]):
@@ -718,3 +708,22 @@ class PollingConfig:
                 f"PollingConfig.error_backoff_base must be > 0, "
                 f"got {self.error_backoff_base}"
             )
+
+
+def __getattr__(name: str) -> "Any":
+    """Lazy resolution for module-level constants that depend on pyarrow.
+
+    This allows ``orcapod.types`` to be imported without eagerly loading the
+    pyarrow C extension. The constants are computed and cached on first access.
+    """
+    if name in ("UUID_ARROW_TYPE", "UUID_STRUCT_ARROW_TYPE"):
+        import pyarrow as _pa
+
+        _arrow_type = _pa.binary(16)
+        _struct_type = _pa.struct([_pa.field("uuid", _arrow_type)])
+        # Cache both so subsequent accesses are O(1) dict lookups
+        _globals = globals()
+        _globals["UUID_ARROW_TYPE"] = _arrow_type
+        _globals["UUID_STRUCT_ARROW_TYPE"] = _struct_type
+        return _globals[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
