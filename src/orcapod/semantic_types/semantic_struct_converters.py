@@ -293,3 +293,49 @@ class UUIDStructConverter(SemanticStructConverterBase):
         if raw is None:
             raise ValueError("Missing 'uuid' field in struct dict")
         return _uuid_module.UUID(bytes=bytes(raw))
+
+    def can_handle_python_type(self, python_type: type) -> bool:
+        """Check if this converter can handle the given Python type.
+
+        Args:
+            python_type: The Python type to check.
+
+        Returns:
+            ``True`` if ``python_type`` is ``uuid.UUID`` or a subclass of it.
+        """
+        return issubclass(python_type, self._python_type)
+
+    def can_handle_struct_type(self, struct_type: "pa.StructType") -> bool:
+        """Check if this converter can handle the given Arrow struct type.
+
+        Args:
+            struct_type: The Arrow struct type to check.
+
+        Returns:
+            ``True`` if ``struct_type`` equals the UUID Arrow struct type.
+        """
+        return struct_type == self._arrow_struct_type
+
+    def hash_struct_dict(
+        self, struct_dict: dict[str, Any], add_prefix: bool = False
+    ) -> str:
+        """Compute a SHA-256 hash of the UUID from its struct dictionary representation.
+
+        Hashes the raw 16 UUID bytes directly.
+
+        Args:
+            struct_dict: Dict with a ``"uuid"`` key containing 16 raw bytes.
+            add_prefix: If ``True``, prefix the hash with semantic type and
+                algorithm info (e.g. ``"uuid:sha256:<hex>"``).
+
+        Returns:
+            Hash string, optionally prefixed.
+
+        Raises:
+            ValueError: If the ``"uuid"`` key is absent from ``struct_dict``.
+        """
+        raw = struct_dict.get("uuid")
+        if raw is None:
+            raise ValueError("Missing 'uuid' field in struct dict")
+        content_hash = self._compute_content_hash(bytes(raw))
+        return self._format_hash_string(content_hash.digest, add_prefix=add_prefix)

@@ -94,3 +94,42 @@ def test_arrow_array_round_trip(converter, sample_uuid):
 def test_distinct_uuids_produce_distinct_struct_dicts(converter):
     u1, u2 = uuid.uuid4(), uuid.uuid4()
     assert converter.python_to_struct_dict(u1) != converter.python_to_struct_dict(u2)
+
+
+def test_can_handle_python_type_uuid(converter):
+    assert converter.can_handle_python_type(uuid.UUID) is True
+
+
+def test_can_handle_python_type_rejects_str(converter):
+    assert converter.can_handle_python_type(str) is False
+
+
+def test_can_handle_struct_type_uuid(converter):
+    assert converter.can_handle_struct_type(UUID_STRUCT_ARROW_TYPE) is True
+
+
+def test_can_handle_struct_type_rejects_other(converter):
+    import pyarrow as pa
+
+    assert converter.can_handle_struct_type(pa.struct([pa.field("path", pa.large_string())])) is False
+
+
+def test_hash_struct_dict_returns_string(converter, sample_uuid):
+    struct_dict = converter.python_to_struct_dict(sample_uuid)
+    result = converter.hash_struct_dict(struct_dict)
+    assert isinstance(result, str)
+    assert len(result) > 0
+
+
+def test_hash_struct_dict_consistent(converter, sample_uuid):
+    """Same UUID always produces the same hash."""
+    struct_dict = converter.python_to_struct_dict(sample_uuid)
+    assert converter.hash_struct_dict(struct_dict) == converter.hash_struct_dict(struct_dict)
+
+
+def test_hash_struct_dict_different_uuids(converter):
+    """Different UUIDs produce different hashes."""
+    u1, u2 = uuid.uuid4(), uuid.uuid4()
+    d1 = converter.python_to_struct_dict(u1)
+    d2 = converter.python_to_struct_dict(u2)
+    assert converter.hash_struct_dict(d1) != converter.hash_struct_dict(d2)
