@@ -47,37 +47,37 @@ class SemanticStructConverterBase:
         """Default hasher ID based on semantic type name"""
         return self._hasher_id
 
-    def _format_hash_string(self, hash_bytes: bytes, add_prefix: bool = False) -> str:
-        """
-        Format hash bytes into the standard hash string format.
-
-        Args:
-            hash_bytes: Raw hash bytes
-            add_prefix: Whether to add semantic type and algorithm prefix
-
-        Returns:
-            Formatted hash string
-        """
-        hash_hex = hash_bytes.hex()
-        if add_prefix:
-            return f"{self.semantic_type_name}:sha256:{hash_hex}"
-        else:
-            return hash_hex
-
     def _compute_content_hash(self, content: bytes) -> ContentHash:
-        """
-        Compute SHA-256 hash of content bytes.
+        """Compute SHA-256 hash of content bytes.
 
         Args:
-            content: Content to hash
+            content: Content to hash.
 
         Returns:
-            SHA-256 hash bytes
+            ``ContentHash`` with ``method="sha256"`` and the raw digest.
         """
         import hashlib
 
         digest = hashlib.sha256(content).digest()
-        return ContentHash(method=f"{self.semantic_type_name}:sha256", digest=digest)
+        return ContentHash(method="sha256", digest=digest)
+
+    def _format_semantic_hash(self, content_hash: ContentHash, add_prefix: bool) -> str:
+        """Format a ``ContentHash`` into the standard semantic hash string.
+
+        When ``add_prefix`` is ``True`` the result is
+        ``"{semantic_type_name}:{method}:{hex}"``, e.g. ``"uuid:sha256:abc123"``.
+        When ``False`` only the hex digest is returned.
+
+        Args:
+            content_hash: Hash to format.
+            add_prefix: Whether to prepend the semantic type name and algorithm.
+
+        Returns:
+            Formatted hash string.
+        """
+        if add_prefix:
+            return f"{self.semantic_type_name}:{content_hash.to_string(prefix_method=True)}"
+        return content_hash.to_hex()
 
 
 class PathStructConverterBase(SemanticStructConverterBase, ABC):
@@ -175,8 +175,8 @@ class PathStructConverterBase(SemanticStructConverterBase, ABC):
         if path.is_dir():
             raise IsADirectoryError(f"Path is a directory: {path}")
 
-        content_hash = self._file_hasher.hash_file(path)
-        return self._format_hash_string(content_hash.digest, add_prefix=add_prefix)
+        file_hash = self._file_hasher.hash_file(path)
+        return self._format_semantic_hash(file_hash, add_prefix)
 
 
 class PythonPathStructConverter(PathStructConverterBase):
@@ -338,4 +338,4 @@ class UUIDStructConverter(SemanticStructConverterBase):
         if raw is None:
             raise ValueError("Missing 'uuid' field in struct dict")
         content_hash = self._compute_content_hash(bytes(raw))
-        return self._format_hash_string(content_hash.digest, add_prefix=add_prefix)
+        return self._format_semantic_hash(content_hash, add_prefix)

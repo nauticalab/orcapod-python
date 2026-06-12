@@ -16,6 +16,7 @@ import itertools
 import logging
 import re
 import threading
+import uuid
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
@@ -165,7 +166,7 @@ def _coerce_pg_value(value: Any, arrow_type: "pa.DataType") -> Any:
     if value is None:
         return None
     # psycopg returns uuid columns as uuid.UUID objects; binary(16) needs raw bytes
-    if arrow_type == _pa.binary(16) and hasattr(value, "bytes") and not isinstance(value, (bytes, bytearray)):
+    if arrow_type == _pa.binary(16) and isinstance(value, uuid.UUID):
         return value.bytes
     return value
 

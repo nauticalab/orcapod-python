@@ -43,15 +43,6 @@ def test_semantic_struct_converter_base_properties():
     assert converter.hasher_id == "dummy_content_sha256"
 
 
-def test_format_hash_string():
-    converter = DummyConverter()
-    hash_bytes = b"\x01\x02"
-    assert converter._format_hash_string(hash_bytes, add_prefix=False) == "0102"
-    assert (
-        converter._format_hash_string(hash_bytes, add_prefix=True)
-        == "dummy:sha256:0102"
-    )
-
 
 def test_compute_content_hash():
     converter = DummyConverter()

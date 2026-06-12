@@ -67,7 +67,7 @@ class Datagram(ContentIdentifiableBase):
         data: Mapping[str, DataValue] | pa.Table | pa.RecordBatch,
         python_schema: SchemaLike | None = None,
         meta_info: Mapping[str, DataValue] | None = None,
-        record_id: uuid.UUID | None = None,
+        record_uuid: uuid.UUID | None = None,
         data_context: str | contexts.DataContext | None = None,
         config: OrcapodConfig | None = None,
     ) -> None:
@@ -75,10 +75,10 @@ class Datagram(ContentIdentifiableBase):
             data = pa.Table.from_batches([data])
 
         if isinstance(data, pa.Table):
-            self._init_from_table(data, meta_info, data_context, record_id)
+            self._init_from_table(data, meta_info, data_context, record_uuid)
         else:
             self._init_from_dict(
-                data, python_schema, meta_info, data_context, record_id
+                data, python_schema, meta_info, data_context, record_uuid
             )
 
     def _init_from_dict(
@@ -87,7 +87,7 @@ class Datagram(ContentIdentifiableBase):
         python_schema: SchemaLike | None,
         meta_info: Mapping[str, DataValue] | None,
         data_context: str | contexts.DataContext | None,
-        record_id: uuid.UUID | None,
+        record_uuid: uuid.UUID | None,
     ) -> None:
         data_columns: dict[str, DataValue] = {}
         meta_columns: dict[str, DataValue] = {}
@@ -103,7 +103,7 @@ class Datagram(ContentIdentifiableBase):
                 data_columns[k] = v
 
         super().__init__(data_context=data_context or extracted_context)
-        self._datagram_uuid = record_id
+        self._datagram_uuid = record_uuid
 
         self._data_dict: dict[str, DataValue] | None = data_columns
         self._data_table: pa.Table | None = None
@@ -135,7 +135,7 @@ class Datagram(ContentIdentifiableBase):
         table: pa.Table,
         meta_info: Mapping[str, DataValue] | None,
         data_context: str | contexts.DataContext | None,
-        record_id: uuid.UUID | None,
+        record_uuid: uuid.UUID | None,
     ) -> None:
         if len(table) != 1:
             raise ValueError(
@@ -151,7 +151,7 @@ class Datagram(ContentIdentifiableBase):
         context_cols = [c for c in table.column_names if c == constants.CONTEXT_KEY]
 
         super().__init__(data_context=data_context)
-        self._datagram_uuid = record_id
+        self._datagram_uuid = record_uuid
 
         meta_col_names = [
             c for c in table.column_names if c.startswith(constants.META_PREFIX)
