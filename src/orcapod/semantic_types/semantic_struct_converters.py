@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from upath import UPath
 
-from orcapod.types import ContentHash, UUID_STRUCT_ARROW_TYPE
+from orcapod.types import ContentHash
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -237,7 +237,7 @@ class UUIDStructConverter(SemanticStructConverterBase):
     def __init__(self) -> None:
         super().__init__("uuid")
         self._python_type = _uuid_module.UUID
-        self._arrow_struct_type = UUID_STRUCT_ARROW_TYPE
+        self._arrow_struct_type = pa.struct([pa.field("uuid", pa.binary(16))])
 
     @property
     def python_type(self) -> type:

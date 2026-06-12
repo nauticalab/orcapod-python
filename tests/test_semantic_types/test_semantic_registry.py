@@ -1,10 +1,10 @@
 import uuid
 from unittest.mock import Mock
 
+import pyarrow as pa
 import pytest
 
 from orcapod.semantic_types import semantic_registry
-from orcapod.types import UUID_STRUCT_ARROW_TYPE
 
 
 def test_registry_initialization():
@@ -133,23 +133,25 @@ def test_integration_with_converter():
 
 
 def test_uuid_type_registered_in_default_registry():
-    """uuid.UUID should be registered and map to UUID_STRUCT_ARROW_TYPE."""
+    """uuid.UUID should be registered and map to pa.struct([pa.field('uuid', pa.binary(16))])."""
     from orcapod.hashing.versioned_hashers import get_versioned_semantic_arrow_hasher
 
     hasher = get_versioned_semantic_arrow_hasher()
     registry = hasher.semantic_registry
     converter = registry.get_converter_for_python_type(uuid.UUID)
     assert converter is not None
-    assert converter.arrow_struct_type == UUID_STRUCT_ARROW_TYPE
+    assert converter.arrow_struct_type == pa.struct([pa.field("uuid", pa.binary(16))])
 
 
 def test_uuid_struct_resolves_to_converter():
-    """UUID_STRUCT_ARROW_TYPE should resolve back to a converter for uuid.UUID."""
+    """pa.struct([pa.field('uuid', pa.binary(16))]) should resolve back to a converter for uuid.UUID."""
     from orcapod.hashing.versioned_hashers import get_versioned_semantic_arrow_hasher
 
     hasher = get_versioned_semantic_arrow_hasher()
     registry = hasher.semantic_registry
-    converter = registry.get_converter_for_struct_signature(UUID_STRUCT_ARROW_TYPE)
+    converter = registry.get_converter_for_struct_signature(
+        pa.struct([pa.field("uuid", pa.binary(16))])
+    )
     assert converter is not None
     assert converter.python_type is uuid.UUID
 

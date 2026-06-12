@@ -5,7 +5,7 @@ from collections.abc import Mapping, Collection
 from typing import Any, TYPE_CHECKING
 
 from orcapod.system_constants import constants
-from orcapod.types import ColumnConfig, UUID_ARROW_TYPE
+from orcapod.types import ColumnConfig
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -1015,8 +1015,8 @@ def system_tag_column_names(schema_hash: str) -> tuple[str, str]:
     Returns:
         Tuple of ``(source_id_column_name, record_id_column_name)``.
         Both start with ``constants.SYSTEM_TAG_PREFIX``. The source_id column
-        has ``large_string`` type; the record_id column has ``fixed_size_binary[16]``
-        (``UUID_ARROW_TYPE``) type in the Arrow table.
+        has ``large_string`` type; the record_id column has ``binary(16)``
+        (fixed-size 16-byte binary) type in the Arrow table.
     """
     source_id_col = (
         f"{constants.SYSTEM_TAG_SOURCE_ID_PREFIX}{constants.BLOCK_SEPARATOR}{schema_hash}"
@@ -1054,7 +1054,7 @@ def add_system_tag_columns(
     source_id_col_name, record_id_col_name = system_tag_column_names(schema_hash)
 
     source_id_array = pa.array(source_ids, type=pa.large_string())
-    record_id_array = pa.array(record_ids, type=UUID_ARROW_TYPE)
+    record_id_array = pa.array(record_ids, type=pa.binary(16))
 
     # System tag columns are always computed, never null — declare nullable=False
     # explicitly so the schema intent is not lost in Polars round-trips.
@@ -1062,7 +1062,7 @@ def add_system_tag_columns(
         pa.field(source_id_col_name, pa.large_string(), nullable=False), source_id_array
     )
     table = table.append_column(
-        pa.field(record_id_col_name, UUID_ARROW_TYPE, nullable=False), record_id_array
+        pa.field(record_id_col_name, pa.binary(16), nullable=False), record_id_array
     )
     return table
 

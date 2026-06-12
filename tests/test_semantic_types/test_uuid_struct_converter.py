@@ -5,7 +5,6 @@ import pyarrow as pa
 import pytest
 
 from orcapod.semantic_types.semantic_struct_converters import UUIDStructConverter
-from orcapod.types import UUID_ARROW_TYPE, UUID_STRUCT_ARROW_TYPE
 
 
 @pytest.fixture
@@ -23,7 +22,7 @@ def test_python_type(converter):
 
 
 def test_arrow_struct_type(converter):
-    assert converter.arrow_struct_type == UUID_STRUCT_ARROW_TYPE
+    assert converter.arrow_struct_type == pa.struct([pa.field("uuid", pa.binary(16))])
 
 
 def test_semantic_type_name(converter):
@@ -85,7 +84,7 @@ def test_round_trip_all_versions():
 def test_arrow_array_round_trip(converter, sample_uuid):
     """Verify UUID survives a PyArrow array round-trip."""
     struct_dict = converter.python_to_struct_dict(sample_uuid)
-    arr = pa.array([struct_dict], type=UUID_STRUCT_ARROW_TYPE)
+    arr = pa.array([struct_dict], type=pa.struct([pa.field("uuid", pa.binary(16))]))
     recovered_dict = arr[0].as_py()
     recovered_uuid = converter.struct_dict_to_python(recovered_dict)
     assert recovered_uuid == sample_uuid
@@ -105,7 +104,7 @@ def test_can_handle_python_type_rejects_str(converter):
 
 
 def test_can_handle_struct_type_uuid(converter):
-    assert converter.can_handle_struct_type(UUID_STRUCT_ARROW_TYPE) is True
+    assert converter.can_handle_struct_type(pa.struct([pa.field("uuid", pa.binary(16))])) is True
 
 
 def test_can_handle_struct_type_rejects_other(converter):

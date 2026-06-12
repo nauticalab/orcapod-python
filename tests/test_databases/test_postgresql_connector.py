@@ -14,7 +14,6 @@ from orcapod.databases.postgresql_connector import (
     _pg_type_to_arrow,
 )
 from orcapod.protocols.db_connector_protocol import DBConnectorProtocol
-from orcapod.types import UUID_ARROW_TYPE
 
 
 class TestPgTypeToArrow:
@@ -56,7 +55,6 @@ class TestPgTypeToArrow:
 
     def test_uuid(self):
         result = _pg_type_to_arrow("uuid", "uuid")
-        assert result == UUID_ARROW_TYPE
         assert result == pa.binary(16)
 
     def test_json(self):

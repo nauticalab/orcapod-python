@@ -17,6 +17,7 @@ Tag and Data — datagram subclasses with system-tags and source-info support.
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Self
 
@@ -61,7 +62,7 @@ class Tag(Datagram):
         meta_info: "Mapping[str, DataValue] | None" = None,
         python_schema: "SchemaLike | None" = None,
         data_context: "str | contexts.DataContext | None" = None,
-        record_id: "bytes | None" = None,
+        record_id: "uuid.UUID | None" = None,
         **kwargs,
     ) -> None:
         import pyarrow as _pa
@@ -256,7 +257,7 @@ class Data(Datagram):
         source_info: "Mapping[str, str | None] | None" = None,
         python_schema: "SchemaLike | None" = None,
         data_context: "str | contexts.DataContext | None" = None,
-        record_id: "bytes | None" = None,
+        record_id: "uuid.UUID | None" = None,
         **kwargs,
     ) -> None:
         import pyarrow as _pa

@@ -20,6 +20,7 @@ Principles
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Collection, Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Self, cast
 
@@ -66,7 +67,7 @@ class Datagram(ContentIdentifiableBase):
         data: Mapping[str, DataValue] | pa.Table | pa.RecordBatch,
         python_schema: SchemaLike | None = None,
         meta_info: Mapping[str, DataValue] | None = None,
-        record_id: bytes | None = None,
+        record_id: uuid.UUID | None = None,
         data_context: str | contexts.DataContext | None = None,
         config: OrcapodConfig | None = None,
     ) -> None:
@@ -86,7 +87,7 @@ class Datagram(ContentIdentifiableBase):
         python_schema: SchemaLike | None,
         meta_info: Mapping[str, DataValue] | None,
         data_context: str | contexts.DataContext | None,
-        record_id: bytes | None,
+        record_id: uuid.UUID | None,
     ) -> None:
         data_columns: dict[str, DataValue] = {}
         meta_columns: dict[str, DataValue] = {}
@@ -134,7 +135,7 @@ class Datagram(ContentIdentifiableBase):
         table: pa.Table,
         meta_info: Mapping[str, DataValue] | None,
         data_context: str | contexts.DataContext | None,
-        record_id: bytes | None,
+        record_id: uuid.UUID | None,
     ) -> None:
         if len(table) != 1:
             raise ValueError(
@@ -426,10 +427,12 @@ class Datagram(ContentIdentifiableBase):
         return self._ensure_data_table()
 
     @property
-    def datagram_id(self) -> bytes:
+    def datagram_id(self) -> uuid.UUID:
         """Return (or lazily generate) the datagram's unique ID."""
         if self._datagram_id is None:
-            self._datagram_id = uuid7().bytes
+            # uuid7() returns a uuid_utils.UUID; normalise to stdlib uuid.UUID
+            # so that equality comparisons work regardless of how the UUID was created.
+            self._datagram_id = uuid.UUID(bytes=uuid7().bytes)
         return self._datagram_id
 
     @property
