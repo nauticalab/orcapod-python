@@ -79,10 +79,10 @@ def test_hash_struct_dict_content_based(converter, tmp_path):
 
 
 def test_hash_struct_dict_with_prefix(converter, tmp_path):
-    """Prefixed hash starts with 'upath:sha256:'."""
+    """Hash always starts with 'upath:sha256:'."""
     file = tmp_path / "file.txt"
     file.write_text("hello")
-    hash_str = converter.hash_struct_dict({"upath": str(file)}, add_prefix=True)
+    hash_str = converter.hash_struct_dict({"upath": str(file)})
     assert hash_str.startswith("upath:sha256:")
 
 

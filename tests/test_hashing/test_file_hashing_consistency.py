@@ -181,17 +181,20 @@ class TestCrossPathConsistency:
         self, path_converter, semantic_hasher, file_hasher, tmp_path
     ):
         """The file content hash extracted by PythonPathStructConverter.hash_struct_dict
-        must match the ContentHash produced by PathContentHandler.handle (which
-        the semantic hasher uses internally for Path objects).
+        must embed the same digest as ContentHash produced by PathContentHandler.handle
+        (which the semantic hasher uses internally for Path objects).
 
-        We compare at the file_hasher level: both paths ultimately call
-        file_hasher.hash_file(path), so the raw digest must be identical.
+        Both paths ultimately call file_hasher.hash_file(path), so the raw digest
+        must be identical. hash_struct_dict always returns the fully-prefixed form
+        "path:sha256:<hex>", so we strip the prefix when comparing.
         """
         file = tmp_path / "shared.txt"
         file.write_text("shared content for both paths")
 
-        # Arrow path: PythonPathStructConverter.hash_struct_dict (no prefix)
-        arrow_hash_hex = path_converter.hash_struct_dict({"path": str(file)})
+        # Arrow path: PythonPathStructConverter.hash_struct_dict — always prefixed
+        arrow_hash = path_converter.hash_struct_dict({"path": str(file)})
+        # Strip "path:sha256:" prefix to get the raw hex
+        arrow_hash_hex = arrow_hash.split(":")[-1]
 
         # Semantic path: file_hasher.hash_file directly (same as PathContentHandler)
         semantic_content_hash = file_hasher.hash_file(file)
@@ -209,7 +212,8 @@ class TestCrossPathConsistency:
         file1.write_text(content)
         file2.write_text(content)
 
-        arrow_hex = path_converter.hash_struct_dict({"path": str(file1)})
+        # hash_struct_dict always returns "path:sha256:<hex>" — strip prefix
+        arrow_hex = path_converter.hash_struct_dict({"path": str(file1)}).split(":")[-1]
         semantic_hex = file_hasher.hash_file(file2).digest.hex()
 
         assert arrow_hex == semantic_hex
