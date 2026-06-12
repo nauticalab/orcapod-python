@@ -140,6 +140,37 @@ class TestArrowTypeToPgSql:
         assert result == "TEXT"
 
 
+class TestCoercePgValue:
+    """Unit tests for _coerce_pg_value."""
+
+    def test_none_passthrough(self):
+        assert _coerce_pg_value(None, pa.binary(16)) is None
+
+    def test_uuid_coerced_to_bytes_for_binary16(self):
+        import uuid as _uuid
+        u = _uuid.UUID("12345678-1234-5678-1234-567812345678")
+        result = _coerce_pg_value(u, pa.binary(16))
+        assert result == u.bytes
+        assert isinstance(result, bytes)
+        assert len(result) == 16
+
+    def test_uuid_not_coerced_for_other_types(self):
+        import uuid as _uuid
+        u = _uuid.UUID("12345678-1234-5678-1234-567812345678")
+        # Non-binary(16) target — UUID object passed through unchanged
+        result = _coerce_pg_value(u, pa.large_string())
+        assert result is u
+
+    def test_plain_bytes_passthrough_for_binary16(self):
+        raw = b"\x00" * 16
+        result = _coerce_pg_value(raw, pa.binary(16))
+        assert result is raw
+
+    def test_non_uuid_value_passthrough(self):
+        assert _coerce_pg_value(42, pa.int32()) == 42
+        assert _coerce_pg_value("hello", pa.large_string()) == "hello"
+
+
 class TestPostgreSQLConnectorScaffold:
     def test_isinstance_dbconnector_protocol(self) -> None:
         with patch("psycopg.connect") as mock_connect:

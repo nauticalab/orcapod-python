@@ -765,7 +765,7 @@ class TestJoinOutputSchemaSystemTags:
         """_predict_system_tag_schema must carry col_type through unchanged.
 
         The Schema stores Python types.  record_id system-tag columns are
-        stored as ``pa.large_binary()`` in Arrow, which maps to ``bytes`` in
+        stored as ``pa.binary(16)`` in Arrow, which maps to ``bytes`` in
         the Python Schema.  source_id columns are ``pa.large_string()`` →
         ``str``.  After a two-way join both Python types must survive — no
         silent coercion to ``str`` for record_id.
