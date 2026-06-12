@@ -1,4 +1,4 @@
-"""Pydantic-backed config loading for orcapod pipelines (ENG-601 / ENG-607).
+"""Pydantic-backed config loading for orcapod pipelines (ENG-607).
 
 Provides `load_pydantic_config` (validate a YAML file against a pydantic model)
 and `OrcapodBaseConfig` (a strict base for config schemas). A companion
@@ -9,6 +9,7 @@ first-class, content-hashed orcapod value.
 from __future__ import annotations
 
 import importlib
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -100,8 +101,9 @@ class PydanticModelConverter(SemanticStructConverterBase):
 
     Maps any `pydantic.BaseModel` instance to an Arrow struct holding the
     model's fully-qualified class name and its canonical JSON, and back. Content
-    is hashed over (class name + canonical JSON), so identity tracks the config's
-    meaning rather than source-file formatting. Modeled on `PythonPathStructConverter`.
+    is hashed over (class name + sorted-key canonical JSON), so identity tracks
+    the config's meaning rather than source-file formatting or dict key order.
+    Modeled on `PythonPathStructConverter`.
     """
 
     def __init__(self) -> None:
@@ -173,6 +175,11 @@ class PydanticModelConverter(SemanticStructConverterBase):
             raise ValueError(
                 f"Missing '{_MODEL_FIELD}'/'{_JSON_FIELD}' in struct dict"
             )
-        content = f"{qualified_name}\n{json_str}".encode("utf-8")
+        # Canonicalize (sorted keys) so semantically-equal configs that differ only
+        # in dict key order hash equal -- identity tracks meaning, not formatting.
+        canonical_json = json.dumps(
+            json.loads(json_str), sort_keys=True, separators=(",", ":")
+        )
+        content = f"{qualified_name}\n{canonical_json}".encode("utf-8")
         content_hash = self._compute_content_hash(content)
         return self._format_hash_string(content_hash.digest, add_prefix=add_prefix)

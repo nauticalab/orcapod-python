@@ -19,6 +19,11 @@ class SampleConfig(OrcapodBaseConfig):
     retries: int = 3
 
 
+class DictConfig(OrcapodBaseConfig):
+    name: str
+    params: dict[str, int]
+
+
 def _write(tmp_path: Path, text: str) -> Path:
     p = tmp_path / "config.yaml"
     p.write_text(text, encoding="utf-8")
@@ -172,6 +177,14 @@ def test_registered_in_default_context_roundtrip():
     restored = converter.arrow_table_to_python_dicts(table)
     assert isinstance(restored[0]["config"], SampleConfig)
     assert restored[0]["config"] == cfg
+
+
+def test_hash_stable_across_dict_key_order():
+    conv = _converter()
+    a = conv.python_to_struct_dict(DictConfig(name="x", params={"a": 1, "b": 2}))
+    b = conv.python_to_struct_dict(DictConfig(name="x", params={"b": 2, "a": 1}))
+    # Same contents, different insertion order -> must hash equal (meaning, not order).
+    assert conv.hash_struct_dict(a) == conv.hash_struct_dict(b)
 
 
 def test_default_context_hashes_model_stably():
