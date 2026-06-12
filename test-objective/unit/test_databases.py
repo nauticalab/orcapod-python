@@ -42,8 +42,8 @@ class TestInMemoryArrowDatabaseRoundtrip:
         path = ("test", "table")
         record = _make_record(42)
 
-        db.add_record(path, "rec_1", record, flush=True)
-        result = db.get_record_by_id(path, "rec_1")
+        db.add_record(path, b"rec_1", record, flush=True)
+        result = db.get_record_by_id(path, b"rec_1")
 
         assert result is not None
         assert result.num_rows == 1
@@ -54,8 +54,8 @@ class TestInMemoryArrowDatabaseRoundtrip:
         path = ("data",)
         record = pa.table({"x": [10], "y": ["hello"]})
 
-        db.add_record(path, "id1", record, flush=True)
-        result = db.get_record_by_id(path, "id1")
+        db.add_record(path, b"id1", record, flush=True)
+        result = db.get_record_by_id(path, b"id1")
 
         assert result is not None
         assert result["x"].to_pylist() == [10]
@@ -70,7 +70,7 @@ class TestInMemoryArrowDatabaseBatchAdd:
         path = ("batch",)
         records = pa.table(
             {
-                "__record_id": ["a", "b", "c"],
+                "__record_id": pa.array([b"a", b"b", b"c"], type=pa.large_binary()),
                 "value": [1, 2, 3],
             }
         )
@@ -89,8 +89,8 @@ class TestInMemoryArrowDatabaseGetAll:
         db = InMemoryArrowDatabase()
         path = ("multi",)
 
-        db.add_record(path, "r1", _make_record(1), flush=True)
-        db.add_record(path, "r2", _make_record(2), flush=True)
+        db.add_record(path, b"r1", _make_record(1), flush=True)
+        db.add_record(path, b"r2", _make_record(2), flush=True)
 
         all_records = db.get_all_records(path)
         assert all_records is not None
@@ -105,10 +105,10 @@ class TestInMemoryArrowDatabaseGetByIds:
         path = ("subset",)
 
         for i in range(5):
-            db.add_record(path, f"id_{i}", _make_record(i))
+            db.add_record(path, f"id_{i}".encode(), _make_record(i))
         db.flush()
 
-        result = db.get_records_by_ids(path, ["id_1", "id_3"])
+        result = db.get_records_by_ids(path, [b"id_1", b"id_3"])
         assert result is not None
         assert result.num_rows == 2
 
@@ -120,37 +120,37 @@ class TestInMemoryArrowDatabaseSkipDuplicates:
         db = InMemoryArrowDatabase()
         path = ("dup",)
 
-        db.add_record(path, "same_id", _make_record(1), flush=True)
+        db.add_record(path, b"same_id", _make_record(1), flush=True)
         # Adding same ID again with skip_duplicates=True should not raise.
-        db.add_record(path, "same_id", _make_record(2), skip_duplicates=True, flush=True)
+        db.add_record(path, b"same_id", _make_record(2), skip_duplicates=True, flush=True)
 
-        result = db.get_record_by_id(path, "same_id")
+        result = db.get_record_by_id(path, b"same_id")
         assert result is not None
         # Original record should be preserved (duplicate was skipped).
         assert result.num_rows == 1
 
 
 class TestInMemoryArrowDatabasePendingBatch:
-    """Pending batch semantics: records not visible until flush()."""
+    """Pending batch semantics: records accessible before flush()."""
 
     def test_records_accessible_before_flush(self) -> None:
         db = InMemoryArrowDatabase()
         path = ("pending",)
 
-        db.add_record(path, "p1", _make_record(1))
+        db.add_record(path, b"p1", _make_record(1))
         # Records should be accessible via public API even before flush
-        result = db.get_record_by_id(path, "p1")
+        result = db.get_record_by_id(path, b"p1")
         assert result is not None, "Record should be accessible via get_record_by_id before flush"
 
     def test_flush_makes_records_visible(self) -> None:
         db = InMemoryArrowDatabase()
         path = ("pending",)
 
-        db.add_record(path, "p1", _make_record(1))
+        db.add_record(path, b"p1", _make_record(1))
         db.flush()
 
         # After flush, records should still be accessible via public API
-        result = db.get_record_by_id(path, "p1")
+        result = db.get_record_by_id(path, b"p1")
         assert result is not None, "Record should be accessible after flush"
 
         all_records = db.get_all_records(path)
@@ -165,8 +165,8 @@ class TestInMemoryArrowDatabaseFlush:
         db = InMemoryArrowDatabase()
         path = ("flush_test",)
 
-        db.add_record(path, "f1", _make_record(10))
-        db.add_record(path, "f2", _make_record(20))
+        db.add_record(path, b"f1", _make_record(10))
+        db.add_record(path, b"f2", _make_record(20))
         db.flush()
 
         all_records = db.get_all_records(path)
@@ -180,7 +180,7 @@ class TestInMemoryArrowDatabaseInvalidPath:
     def test_empty_path_raises(self) -> None:
         db = InMemoryArrowDatabase()
         with pytest.raises(ValueError, match="cannot be empty"):
-            db.add_record((), "id", _make_record())
+            db.add_record((), b"id", _make_record())
 
 
 class TestInMemoryArrowDatabaseNonexistentPath:
@@ -188,7 +188,7 @@ class TestInMemoryArrowDatabaseNonexistentPath:
 
     def test_get_record_by_id_nonexistent(self) -> None:
         db = InMemoryArrowDatabase()
-        result = db.get_record_by_id(("no", "such"), "missing_id")
+        result = db.get_record_by_id(("no", "such"), b"missing_id")
         assert result is None
 
     def test_get_all_records_nonexistent(self) -> None:
@@ -198,7 +198,7 @@ class TestInMemoryArrowDatabaseNonexistentPath:
 
     def test_get_records_by_ids_nonexistent(self) -> None:
         db = InMemoryArrowDatabase()
-        result = db.get_records_by_ids(("no", "such"), ["a", "b"])
+        result = db.get_records_by_ids(("no", "such"), [b"a", b"b"])
         assert result is None
 
 
@@ -212,7 +212,7 @@ class TestNoOpArrowDatabaseWrites:
 
     def test_add_record_no_error(self) -> None:
         db = NoOpArrowDatabase()
-        db.add_record(("path",), "id", _make_record())
+        db.add_record(("path",), b"id", _make_record())
 
     def test_add_records_no_error(self) -> None:
         db = NoOpArrowDatabase()
@@ -224,8 +224,8 @@ class TestNoOpArrowDatabaseReads:
 
     def test_get_record_by_id_returns_none(self) -> None:
         db = NoOpArrowDatabase()
-        db.add_record(("path",), "id", _make_record())
-        assert db.get_record_by_id(("path",), "id") is None
+        db.add_record(("path",), b"id", _make_record())
+        assert db.get_record_by_id(("path",), b"id") is None
 
     def test_get_all_records_returns_none(self) -> None:
         db = NoOpArrowDatabase()
@@ -233,7 +233,7 @@ class TestNoOpArrowDatabaseReads:
 
     def test_get_records_by_ids_returns_none(self) -> None:
         db = NoOpArrowDatabase()
-        assert db.get_records_by_ids(("path",), ["a"]) is None
+        assert db.get_records_by_ids(("path",), [b"a"]) is None
 
     def test_get_records_with_column_value_returns_none(self) -> None:
         db = NoOpArrowDatabase()
@@ -262,8 +262,8 @@ class TestDeltaTableDatabaseRoundtrip:
         path = ("delta", "test")
         record = _make_record(99)
 
-        db.add_record(path, "d1", record, flush=True)
-        result = db.get_record_by_id(path, "d1")
+        db.add_record(path, b"d1", record, flush=True)
+        result = db.get_record_by_id(path, b"d1")
 
         assert result is not None
         assert result.num_rows == 1
@@ -279,12 +279,12 @@ class TestDeltaTableDatabaseFlush:
         path = ("persist",)
         record = _make_record(7)
 
-        db.add_record(path, "p1", record)
+        db.add_record(path, b"p1", record)
         db.flush()
 
         # Create a new database instance pointing at the same path to verify
         # data was persisted.
         db2 = DeltaTableDatabase(base_path=tmp_path, create_base_path=False)
-        result = db2.get_record_by_id(path, "p1")
+        result = db2.get_record_by_id(path, b"p1")
         assert result is not None
         assert result["col_a"].to_pylist() == [7]

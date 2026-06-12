@@ -55,7 +55,7 @@ class TestPgTypeToArrow:
 
     def test_uuid(self):
         result = _pg_type_to_arrow("uuid", "uuid")
-        assert result == pa.binary(16)
+        assert result == pa.large_string()
 
     def test_json(self):
         assert _pg_type_to_arrow("json", "json") == pa.large_string()
