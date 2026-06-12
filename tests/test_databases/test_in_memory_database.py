@@ -140,7 +140,7 @@ class TestAddRecordsRoundTrip:
     PATH = ("multi", "v1")
 
     def test_add_records_bulk_and_retrieve_all(self, db):
-        records = make_table(__record_id=["a", "b", "c"], value=[10, 20, 30])
+        records = make_table(__record_id=[b"a", b"b", b"c"], value=[10, 20, 30])
         db.add_records(self.PATH, records, record_id_column="__record_id")
         db.flush()
         result = db.get_all_records(self.PATH)
@@ -148,7 +148,7 @@ class TestAddRecordsRoundTrip:
         assert result.num_rows == 3
 
     def test_get_all_records_includes_pending(self, db):
-        records = make_table(__record_id=["x", "y"], value=[1, 2])
+        records = make_table(__record_id=[b"x", b"y"], value=[1, 2])
         db.add_records(self.PATH, records, record_id_column="__record_id")
         # do NOT flush — should still be visible
         result = db.get_all_records(self.PATH)
@@ -156,7 +156,7 @@ class TestAddRecordsRoundTrip:
         assert result.num_rows == 2
 
     def test_first_column_used_as_record_id_by_default(self, db):
-        records = make_table(id=["r1", "r2"], score=[5, 6])
+        records = make_table(id=[b"r1", b"r2"], score=[5, 6])
         db.add_records(self.PATH, records)
         db.flush()
         result = db.get_all_records(self.PATH)
@@ -185,13 +185,13 @@ class TestDuplicateHandling:
         with pytest.raises(ValueError):
             db.add_records(
                 self.PATH,
-                make_table(__record_id=["dup-id2"], value=[99]),
+                make_table(__record_id=[b"dup-id2"], value=[99]),
                 record_id_column="__record_id",
                 skip_duplicates=False,
             )
 
     def test_within_batch_deduplication_keeps_last(self, db):
-        records = make_table(__record_id=["same", "same"], value=[1, 2])
+        records = make_table(__record_id=[b"same", b"same"], value=[1, 2])
         db.add_records(self.PATH, records, record_id_column="__record_id")
         db.flush()
         result = db.get_all_records(self.PATH)
@@ -238,7 +238,7 @@ class TestGetRecordsWithColumnValue:
     PATH = ("colval", "v1")
 
     def _populate(self, db):
-        records = make_table(__record_id=["p", "q", "r"], category=["A", "B", "A"])
+        records = make_table(__record_id=[b"p", b"q", b"r"], category=["A", "B", "A"])
         db.add_records(self.PATH, records, record_id_column="__record_id")
         db.flush()
 

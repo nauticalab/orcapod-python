@@ -12,7 +12,7 @@ Example::
 
     connector = SQLiteConnector(":memory:")   # PLT-1076
     db = ConnectorArrowDatabase(connector)
-    db.add_record(("results", "my_fn"), record_id=b"\\x00" * 16, record=table)
+    db.add_record(("results", "my_fn"), record_id=b"sha256:abc", record=table)
     db.flush()
 """
 from __future__ import annotations
@@ -233,6 +233,15 @@ class ConnectorArrowDatabase:
             rename_map = {record_id_column: self.RECORD_ID_COLUMN}
             records = records.rename_columns(
                 [rename_map.get(c, c) for c in records.column_names]
+            )
+
+        # Enforce binary record-id type — string columns are rejected to prevent
+        # silent deduplication failures (set[str] & set[bytes] is always empty).
+        rid_type = records[self.RECORD_ID_COLUMN].type
+        if not pa.types.is_large_binary(rid_type) and not pa.types.is_binary(rid_type):
+            raise TypeError(
+                f"Record-id column must be pa.large_binary() or pa.binary(), "
+                f"got {rid_type}. Encode the column to bytes before calling add_records()."
             )
 
         records = self._deduplicate_within_table(records)

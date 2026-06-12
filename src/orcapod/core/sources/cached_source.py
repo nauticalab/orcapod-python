@@ -237,7 +237,7 @@ class CachedSource(RootSource):
         live_with_hash = live_table.add_column(
             0,
             self.HASH_COLUMN_NAME,
-            pa.array(record_hashes, type=pa.large_string()),
+            pa.array([h.encode() for h in record_hashes], type=pa.large_binary()),
         )
         self._cache_database.add_records(
             self.cache_path,
