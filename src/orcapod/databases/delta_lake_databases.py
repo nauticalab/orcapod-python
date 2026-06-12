@@ -55,7 +55,7 @@ class DeltaTableDatabase:
         _root: "DeltaTableDatabase | None" = None,
         _scoped_path: tuple[str, ...] = (),
         _shared_pending_batches: "dict[str, pa.Table] | None" = None,
-        _shared_pending_record_ids: "defaultdict[str, set[str]] | None" = None,
+        _shared_pending_record_ids: "defaultdict[str, set[bytes]] | None" = None,
     ):
         self._root_uri, self._storage_options = parse_base_path(base_path, storage_options)
         self._is_cloud: bool = is_cloud_uri(self._root_uri)
@@ -88,7 +88,7 @@ class DeltaTableDatabase:
         if _shared_pending_record_ids is not None:
             self._pending_record_ids = _shared_pending_record_ids
         else:
-            self._pending_record_ids: dict[str, set[str]] = defaultdict(set)
+            self._pending_record_ids: dict[str, set[bytes]] = defaultdict(set)
         self._existing_ids_cache: dict[str, set[str]] = defaultdict(set)
         self._cache_dirty: dict[str, bool] = defaultdict(lambda: True)
 
@@ -211,13 +211,12 @@ class DeltaTableDatabase:
             raise
 
     def _ensure_record_id_column(
-        self, arrow_data: pa.Table, record_id: str | bytes
+        self, arrow_data: pa.Table, record_id: bytes
     ) -> pa.Table:
         """Ensure the table has an record id column."""
         if self.RECORD_ID_COLUMN not in arrow_data.column_names:
             # Add record_id column at the beginning
-            arrow_type = pa.binary(16) if isinstance(record_id, bytes) else pa.large_string()
-            key_array = pa.array([record_id] * len(arrow_data), type=arrow_type)
+            key_array = pa.array([record_id] * len(arrow_data), type=pa.large_binary())
             arrow_data = arrow_data.add_column(0, self.RECORD_ID_COLUMN, key_array)
         return arrow_data
 
@@ -255,7 +254,7 @@ class DeltaTableDatabase:
                 f"Record ID column '{self.RECORD_ID_COLUMN}' not found in the table and cannot be renamed."
             )
 
-    def _create_record_id_filter(self, record_id: str) -> list:
+    def _create_record_id_filter(self, record_id: bytes) -> list:
         """
         Create a proper filter expression for Delta Lake.
 
@@ -334,7 +333,7 @@ class DeltaTableDatabase:
     def add_record(
         self,
         record_path: tuple[str, ...],
-        record_id: str | bytes,
+        record_id: bytes,
         record: pa.Table,
         skip_duplicates: bool = False,
         flush: bool = False,
@@ -699,7 +698,7 @@ class DeltaTableDatabase:
     def get_record_by_id(
         self,
         record_path: tuple[str, ...],
-        record_id: str,
+        record_id: bytes,
         record_id_column: str | None = None,
         flush: bool = False,
     ) -> "pa.Table | None":
@@ -757,7 +756,7 @@ class DeltaTableDatabase:
     def get_records_by_ids(
         self,
         record_path: tuple[str, ...],
-        record_ids: Collection[str] | pl.Series | pa.Array,
+        record_ids: Collection[bytes] | pl.Series | pa.Array,
         record_id_column: str | None = None,
         flush: bool = False,
     ) -> "pa.Table | None":

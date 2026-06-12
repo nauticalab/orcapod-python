@@ -430,8 +430,14 @@ class Datagram(ContentIdentifiableBase):
     def datagram_id(self) -> uuid.UUID:
         """Return (or lazily generate) the datagram's unique ID."""
         if self._datagram_id is None:
-            # uuid7() returns a uuid_utils.UUID; normalise to stdlib uuid.UUID
-            # so that equality comparisons work regardless of how the UUID was created.
+            # uuid_utils is used here because it provides UUIDv7 (time-ordered,
+            # monotonic) generation, which is not available in the stdlib before
+            # Python 3.12.  However, uuid_utils.UUID and stdlib uuid.UUID are
+            # distinct types that do not compare equal even for identical bit
+            # patterns.  We therefore normalise to stdlib uuid.UUID immediately
+            # so that the public API always returns a consistent type and
+            # equality / hashing work correctly regardless of how a UUID was
+            # originally produced.
             self._datagram_id = uuid.UUID(bytes=uuid7().bytes)
         return self._datagram_id
 

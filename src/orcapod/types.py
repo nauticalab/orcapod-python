@@ -584,6 +584,25 @@ class ContentHash:
             return f"{self.method}:{self.to_hex(hexdigits)}"
         return self.to_hex(hexdigits)
 
+    def to_prefixed_digest(self) -> bytes:
+        """Return the hash as method-prefixed raw bytes: ``b"{method}:{digest}"``.
+
+        Encodes the method name as ASCII, appends a literal ``:`` byte, then
+        appends the raw digest bytes.  The result is suitable for storage in a
+        ``pa.large_binary()`` column and preserves the hash method for
+        introspection without the hex-encoding overhead of ``to_string()``.
+
+        Example::
+
+            h = ContentHash("arrow_v2.1", b"\\x00" * 32)
+            h.to_prefixed_digest()
+            # b"arrow_v2.1:\\x00\\x00...\\x00"
+
+        Returns:
+            Raw bytes in the form ``b"{method}:{raw_digest}"``.
+        """
+        return self.method.encode("ascii") + b":" + self.digest
+
     def __str__(self) -> str:
         return self.to_string()
 

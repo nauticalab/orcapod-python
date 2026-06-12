@@ -12,7 +12,7 @@ Example::
 
     connector = SQLiteConnector(":memory:")   # PLT-1076
     db = ConnectorArrowDatabase(connector)
-    db.add_record(("results", "my_fn"), record_id="abc", record=table)
+    db.add_record(("results", "my_fn"), record_id=b"\\x00" * 16, record=table)
     db.flush()
 """
 from __future__ import annotations
@@ -64,7 +64,7 @@ class ConnectorArrowDatabase:
         max_hierarchy_depth: int = 10,
         _path_prefix: tuple[str, ...] = (),
         _shared_pending_batches: dict[str, pa.Table] | None = None,
-        _shared_pending_record_ids: dict[str, set[str | bytes]] | None = None,
+        _shared_pending_record_ids: dict[str, set[bytes]] | None = None,
         _shared_pending_skip_existing: dict[str, bool] | None = None,
         _root: ConnectorArrowDatabase | None = None,
         _scoped_path: tuple[str, ...] = (),
@@ -75,7 +75,7 @@ class ConnectorArrowDatabase:
         self._root = _root
         self._scoped_path = _scoped_path
         self._pending_batches: dict[str, pa.Table] = _shared_pending_batches if _shared_pending_batches is not None else {}
-        self._pending_record_ids: dict[str, set[str | bytes]] = _shared_pending_record_ids if _shared_pending_record_ids is not None else defaultdict(set)
+        self._pending_record_ids: dict[str, set[bytes]] = _shared_pending_record_ids if _shared_pending_record_ids is not None else defaultdict(set)
         # Per-batch flag: True when the batch was added with skip_duplicates=True,
         # so flush() can pass skip_existing=True to the connector and let it use
         # native INSERT-OR-IGNORE semantics rather than Python-side prefiltering.
@@ -125,12 +125,11 @@ class ConnectorArrowDatabase:
     # ── Record-ID column helpers ──────────────────────────────────────────────
 
     def _ensure_record_id_column(
-        self, arrow_data: pa.Table, record_id: str | bytes
+        self, arrow_data: pa.Table, record_id: bytes
     ) -> pa.Table:
         if self.RECORD_ID_COLUMN not in arrow_data.column_names:
-            arrow_type = pa.binary(16) if isinstance(record_id, bytes) else pa.large_string()
             key_array = pa.array(
-                [record_id] * len(arrow_data), type=arrow_type
+                [record_id] * len(arrow_data), type=pa.large_binary()
             )
             arrow_data = arrow_data.add_column(0, self.RECORD_ID_COLUMN, key_array)
         return arrow_data
@@ -191,7 +190,7 @@ class ConnectorArrowDatabase:
     def add_record(
         self,
         record_path: tuple[str, ...],
-        record_id: str | bytes,
+        record_id: bytes,
         record: pa.Table,
         skip_duplicates: bool = False,
         flush: bool = False,
@@ -236,7 +235,7 @@ class ConnectorArrowDatabase:
 
         records = self._deduplicate_within_table(records)
         record_key = self._get_record_key(record_path)
-        input_ids = set(cast(list[str | bytes], records[self.RECORD_ID_COLUMN].to_pylist()))
+        input_ids = set(cast(list[bytes], records[self.RECORD_ID_COLUMN].to_pylist()))
 
         if skip_duplicates:
             # Only filter records that conflict with the in-flight pending batch.
@@ -273,7 +272,7 @@ class ConnectorArrowDatabase:
                 [existing_pending, records]
             )
         self._pending_record_ids[record_key].update(
-            cast(list[str | bytes], records[self.RECORD_ID_COLUMN].to_pylist())
+            cast(list[bytes], records[self.RECORD_ID_COLUMN].to_pylist())
         )
 
         if flush:
@@ -366,7 +365,7 @@ class ConnectorArrowDatabase:
     def get_record_by_id(
         self,
         record_path: tuple[str, ...],
-        record_id: str,
+        record_id: bytes,
         record_id_column: str | None = None,
         flush: bool = False,
     ) -> pa.Table | None:
@@ -413,7 +412,7 @@ class ConnectorArrowDatabase:
     def get_records_by_ids(
         self,
         record_path: tuple[str, ...],
-        record_ids: Collection[str],
+        record_ids: Collection[bytes],
         record_id_column: str | None = None,
         flush: bool = False,
     ) -> pa.Table | None:

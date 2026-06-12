@@ -23,9 +23,9 @@ pytestmark = pytest.mark.minio
 def test_s3_add_record_and_retrieve(s3_base_uri, s3_storage_options):
     db = DeltaTableDatabase(s3_base_uri, storage_options=s3_storage_options)
     record = pa.table({"x": [1], "y": ["hello"]})
-    db.add_record(("run1",), "rec-001", record, flush=True)
+    db.add_record(("run1",), b"rec-001", record, flush=True)
 
-    result = db.get_record_by_id(("run1",), "rec-001")
+    result = db.get_record_by_id(("run1",), b"rec-001")
     assert result is not None
     assert result["x"][0].as_py() == 1
 
@@ -43,7 +43,7 @@ def test_s3_add_records_batch(s3_base_uri, s3_storage_options):
 def test_s3_flush_and_read(s3_base_uri, s3_storage_options):
     db = DeltaTableDatabase(s3_base_uri, storage_options=s3_storage_options)
     for i in range(3):
-        db.add_record(("src",), f"r{i}", pa.table({"n": [i]}))
+        db.add_record(("src",), f"r{i}".encode(), pa.table({"n": [i]}))
     db.flush()
 
     result = db.get_all_records(("src",), retrieve_pending=False)
@@ -54,8 +54,8 @@ def test_s3_flush_and_read(s3_base_uri, s3_storage_options):
 def test_s3_skip_duplicates(s3_base_uri, s3_storage_options):
     db = DeltaTableDatabase(s3_base_uri, storage_options=s3_storage_options)
     record = pa.table({"v": [1]})
-    db.add_record(("src",), "dup", record, flush=True)
-    db.add_record(("src",), "dup", record, skip_duplicates=True, flush=True)
+    db.add_record(("src",), b"dup", record, flush=True)
+    db.add_record(("src",), b"dup", record, skip_duplicates=True, flush=True)
 
     result = db.get_all_records(("src",))
     assert result is not None
@@ -94,8 +94,8 @@ def test_s3_upath_credentials(s3_base_uri, minio_server):
         },
     )
     record = pa.table({"k": ["hello"]})
-    db.add_record(("t",), "r1", record, flush=True)
-    result = db.get_record_by_id(("t",), "r1")
+    db.add_record(("t",), b"r1", record, flush=True)
+    result = db.get_record_by_id(("t",), b"r1")
     assert result is not None
     assert result["k"][0].as_py() == "hello"
 

@@ -300,13 +300,13 @@ class TestEmptyTable:
     PATH = ("source", "v1")
 
     def test_get_record_by_id_returns_none_when_empty(self, db):
-        assert db.get_record_by_id(self.PATH, "id-1", flush=True) is None
+        assert db.get_record_by_id(self.PATH, b"id-1", flush=True) is None
 
     def test_get_all_records_returns_none_when_empty(self, db):
         assert db.get_all_records(self.PATH) is None
 
     def test_get_records_by_ids_returns_none_when_empty(self, db):
-        assert db.get_records_by_ids(self.PATH, ["id-1"], flush=True) is None
+        assert db.get_records_by_ids(self.PATH, [b"id-1"], flush=True) is None
 
     def test_get_records_with_column_value_returns_none_when_empty(self, db):
         assert (
@@ -325,51 +325,51 @@ class TestAddRecordRoundTrip:
 
     def test_added_record_retrievable_from_pending(self, db):
         record = make_table(value=[42])
-        db.add_record(self.PATH, "id-1", record)
-        result = db.get_record_by_id(self.PATH, "id-1")
+        db.add_record(self.PATH, b"id-1", record)
+        result = db.get_record_by_id(self.PATH, b"id-1")
         assert result is not None
         assert result.column("value").to_pylist() == [42]
 
     def test_added_record_retrievable_after_flush(self, db):
         record = make_table(value=[99])
-        db.add_record(self.PATH, "id-2", record)
+        db.add_record(self.PATH, b"id-2", record)
         db.flush()
-        result = db.get_record_by_id(self.PATH, "id-2", flush=True)
+        result = db.get_record_by_id(self.PATH, b"id-2", flush=True)
         assert result is not None
         assert result.column("value").to_pylist() == [99]
 
     def test_record_id_column_not_in_result_by_default(self, db):
         record = make_table(value=[1])
-        db.add_record(self.PATH, "id-3", record)
-        result = db.get_record_by_id(self.PATH, "id-3")
+        db.add_record(self.PATH, b"id-3", record)
+        result = db.get_record_by_id(self.PATH, b"id-3")
         assert result is not None
         assert ConnectorArrowDatabase.RECORD_ID_COLUMN not in result.column_names
 
     def test_record_id_column_exposed_when_requested(self, db):
         record = make_table(value=[1])
-        db.add_record(self.PATH, "id-4", record)
+        db.add_record(self.PATH, b"id-4", record)
         db.flush()
         result = db.get_record_by_id(
-            self.PATH, "id-4", record_id_column="my_id", flush=True
+            self.PATH, b"id-4", record_id_column="my_id", flush=True
         )
         assert result is not None
         assert "my_id" in result.column_names
-        assert result.column("my_id").to_pylist() == ["id-4"]
+        assert result.column("my_id").to_pylist() == [b"id-4"]
 
     def test_unknown_record_returns_none(self, db):
         record = make_table(value=[1])
-        db.add_record(self.PATH, "id-5", record)
+        db.add_record(self.PATH, b"id-5", record)
         db.flush()
-        assert db.get_record_by_id(self.PATH, "nonexistent", flush=True) is None
+        assert db.get_record_by_id(self.PATH, b"nonexistent", flush=True) is None
 
     def test_multi_row_record_deduplicates_to_last_row(self, db):
         # add_record stamps ALL rows with the same __record_id value, so
         # within-batch deduplication (keep-last) leaves a single row.
         # This mirrors InMemoryArrowDatabase behaviour by design.
         record = make_table(x=[1, 2, 3])
-        db.add_record(self.PATH, "multi-row", record)
+        db.add_record(self.PATH, b"multi-row", record)
         db.flush()
-        result = db.get_record_by_id(self.PATH, "multi-row", flush=True)
+        result = db.get_record_by_id(self.PATH, b"multi-row", flush=True)
         assert result is not None
         assert result.num_rows == 1
         assert result.column("x").to_pylist() == [3]  # last row kept
@@ -438,22 +438,22 @@ class TestDuplicateHandling:
     PATH = ("dup", "v1")
 
     def test_skip_duplicates_true_does_not_raise(self, db):
-        db.add_record(self.PATH, "dup-id", make_table(value=[1]))
+        db.add_record(self.PATH, b"dup-id", make_table(value=[1]))
         db.flush()
         # same id again with skip_duplicates=True — should silently skip
-        db.add_record(self.PATH, "dup-id", make_table(value=[2]), skip_duplicates=True)
+        db.add_record(self.PATH, b"dup-id", make_table(value=[2]), skip_duplicates=True)
 
     def test_skip_duplicates_preserves_original_value(self, db):
-        db.add_record(self.PATH, "dup-id", make_table(value=[1]), flush=True)
+        db.add_record(self.PATH, b"dup-id", make_table(value=[1]), flush=True)
         db.add_record(
-            self.PATH, "dup-id", make_table(value=[99]), skip_duplicates=True, flush=True
+            self.PATH, b"dup-id", make_table(value=[99]), skip_duplicates=True, flush=True
         )
-        result = db.get_record_by_id(self.PATH, "dup-id", flush=True)
+        result = db.get_record_by_id(self.PATH, b"dup-id", flush=True)
         assert result is not None
         assert result.column("value").to_pylist() == [1]  # original preserved
 
     def test_skip_duplicates_false_raises_on_pending_duplicate(self, db):
-        db.add_record(self.PATH, "dup-id2", make_table(value=[1]))
+        db.add_record(self.PATH, b"dup-id2", make_table(value=[1]))
         with pytest.raises(ValueError):
             db.add_records(
                 self.PATH,
@@ -482,24 +482,24 @@ class TestGetRecordsByIds:
 
     @pytest.fixture(autouse=True)
     def populate(self, db):
-        records = make_table(__record_id=["a", "b", "c"], value=[10, 20, 30])
+        records = make_table(__record_id=[b"a", b"b", b"c"], value=[10, 20, 30])
         db.add_records(self.PATH, records, record_id_column="__record_id")
         db.flush()
 
     def test_retrieves_subset(self, db):
-        result = db.get_records_by_ids(self.PATH, ["a", "c"], flush=True)
+        result = db.get_records_by_ids(self.PATH, [b"a", b"c"], flush=True)
         assert result is not None
         assert result.num_rows == 2
 
     def test_returns_none_for_missing_ids(self, db):
-        result = db.get_records_by_ids(self.PATH, ["z"], flush=True)
+        result = db.get_records_by_ids(self.PATH, [b"z"], flush=True)
         assert result is None
 
     def test_empty_id_list_returns_none(self, db):
         assert db.get_records_by_ids(self.PATH, [], flush=True) is None
 
     def test_retrieves_single_id(self, db):
-        result = db.get_records_by_ids(self.PATH, ["b"], flush=True)
+        result = db.get_records_by_ids(self.PATH, [b"b"], flush=True)
         assert result is not None
         assert result.num_rows == 1
 
@@ -552,41 +552,41 @@ class TestGetRecordsWithColumnValue:
 class TestHierarchicalPath:
     def test_deep_path_stores_and_retrieves(self, db):
         path = ("org", "project", "dataset", "v1")
-        db.add_record(path, "deep-id", make_table(x=[7]))
+        db.add_record(path, b"deep-id", make_table(x=[7]))
         db.flush()
-        result = db.get_record_by_id(path, "deep-id", flush=True)
+        result = db.get_record_by_id(path, b"deep-id", flush=True)
         assert result is not None
         assert result.column("x").to_pylist() == [7]
 
     def test_different_paths_are_independent(self, db):
         path_a = ("ns", "a")
         path_b = ("ns", "b")
-        db.add_record(path_a, "id-1", make_table(v=[1]))
-        db.add_record(path_b, "id-1", make_table(v=[2]))
+        db.add_record(path_a, b"id-1", make_table(v=[1]))
+        db.add_record(path_b, b"id-1", make_table(v=[2]))
         db.flush()
-        result_a = db.get_record_by_id(path_a, "id-1", flush=True)
-        result_b = db.get_record_by_id(path_b, "id-1", flush=True)
+        result_a = db.get_record_by_id(path_a, b"id-1", flush=True)
+        result_b = db.get_record_by_id(path_b, b"id-1", flush=True)
         assert result_a.column("v").to_pylist() == [1]
         assert result_b.column("v").to_pylist() == [2]
 
     def test_invalid_empty_path_raises(self, db):
         with pytest.raises(ValueError):
-            db.add_record((), "id-1", make_table(v=[1]))
+            db.add_record((), b"id-1", make_table(v=[1]))
 
     def test_path_exceeding_max_depth_raises(self, db):
         path = tuple(f"part{i}" for i in range(db.max_hierarchy_depth + 1))
         with pytest.raises(ValueError, match="exceeds maximum"):
-            db.add_record(path, "id-1", make_table(v=[1]))
+            db.add_record(path, b"id-1", make_table(v=[1]))
 
     def test_path_component_with_slash_raises(self, db):
         # "/" is the _get_record_key separator; allowing it would corrupt
         # flush()'s record_path reconstruction via split("/").
         with pytest.raises(ValueError, match="invalid character"):
-            db.add_record(("bad/path",), "id-1", make_table(v=[1]))
+            db.add_record(("bad/path",), b"id-1", make_table(v=[1]))
 
     def test_path_component_with_null_byte_raises(self, db):
         with pytest.raises(ValueError, match="invalid character"):
-            db.add_record(("bad\x00path",), "id-1", make_table(v=[1]))
+            db.add_record(("bad\x00path",), b"id-1", make_table(v=[1]))
 
 
 class TestPathToTableName:
@@ -624,8 +624,8 @@ class TestFlushBehaviour:
     PATH = ("flush", "v1")
 
     def test_flush_writes_pending_to_connector(self, db, connector):
-        db.add_record(self.PATH, "f1", make_table(v=[1]))
-        db.add_record(self.PATH, "f2", make_table(v=[2]))
+        db.add_record(self.PATH, b"f1", make_table(v=[1]))
+        db.add_record(self.PATH, b"f2", make_table(v=[2]))
         # pending key exists before flush
         record_key = db._get_record_key(self.PATH)
         assert record_key in db._pending_batches
@@ -637,14 +637,14 @@ class TestFlushBehaviour:
         assert table_name in connector.get_table_names()
 
     def test_flush_inline_via_flush_kwarg(self, db, connector):
-        db.add_record(self.PATH, "x", make_table(v=[5]), flush=True)
+        db.add_record(self.PATH, b"x", make_table(v=[5]), flush=True)
         table_name = db._path_to_table_name(self.PATH)
         assert table_name in connector.get_table_names()
 
     def test_multiple_flushes_accumulate_records(self, db):
-        db.add_record(self.PATH, "m1", make_table(v=[10]))
+        db.add_record(self.PATH, b"m1", make_table(v=[10]))
         db.flush()
-        db.add_record(self.PATH, "m2", make_table(v=[20]))
+        db.add_record(self.PATH, b"m2", make_table(v=[20]))
         db.flush()
         result = db.get_all_records(self.PATH)
         assert result is not None
@@ -652,8 +652,8 @@ class TestFlushBehaviour:
 
     def test_second_flush_on_existing_table_upserts(self, db):
         """Flushing the same path twice should not duplicate rows."""
-        db.add_record(self.PATH, "u1", make_table(v=[1]), flush=True)
-        db.add_record(self.PATH, "u1", make_table(v=[99]), skip_duplicates=True, flush=True)
+        db.add_record(self.PATH, b"u1", make_table(v=[1]), flush=True)
+        db.add_record(self.PATH, b"u1", make_table(v=[99]), skip_duplicates=True, flush=True)
         result = db.get_all_records(self.PATH)
         assert result is not None
         # skip_existing=True means original is preserved, row count stays 1
@@ -669,21 +669,21 @@ class TestFlushBehaviour:
         """skip_duplicates=True must translate to skip_existing=True at flush,
         so connectors can use native INSERT-OR-IGNORE without a Python-side
         full-table read."""
-        db.add_record(("t",), "a", make_table(v=[1]), flush=True)
+        db.add_record(("t",), b"a", make_table(v=[1]), flush=True)
         # Second add with skip_duplicates=True should not overwrite v=1
-        db.add_record(("t",), "a", make_table(v=[99]), skip_duplicates=True, flush=True)
-        result = db.get_record_by_id(("t",), "a", flush=True)
+        db.add_record(("t",), b"a", make_table(v=[99]), skip_duplicates=True, flush=True)
+        result = db.get_record_by_id(("t",), b"a", flush=True)
         assert result is not None
         assert result["v"][0].as_py() == 1  # original preserved via skip_existing=True
 
     def test_flush_schema_mismatch_raises_value_error(self, db):
         """flush() must raise ValueError when the pending schema differs from
         the table already in the connector — before any data is written."""
-        db.add_record(("t",), "a", make_table(v=[1]), flush=True)
+        db.add_record(("t",), b"a", make_table(v=[1]), flush=True)
         # Now try to flush a batch with a different column name
         db.add_records(
             ("t",),
-            pa.table({"__record_id": pa.array(["b"]), "x": pa.array([2])}),
+            pa.table({"__record_id": pa.array([b"b"]), "x": pa.array([2])}),
             record_id_column="__record_id",
         )
         with pytest.raises(ValueError, match="Schema mismatch"):
@@ -740,37 +740,37 @@ class TestAtMethod:
     def test_writes_through_scoped_view_readable_from_same_view(self, db):
         scoped = db.at("pipeline", "node1")
         record = pa.table({"value": pa.array([42])})
-        scoped.add_record(("outputs",), "id1", record, flush=True)
-        result = scoped.get_record_by_id(("outputs",), "id1")
+        scoped.add_record(("outputs",), b"id1", record, flush=True)
+        result = scoped.get_record_by_id(("outputs",), b"id1")
         assert result is not None
         assert result.column("value").to_pylist() == [42]
 
     def test_scoped_write_not_visible_via_parent_at_same_path(self, db):
         scoped = db.at("pipeline", "node1")
-        scoped.add_record(("outputs",), "id1", pa.table({"v": pa.array([1])}), flush=True)
-        assert db.get_record_by_id(("outputs",), "id1") is None
+        scoped.add_record(("outputs",), b"id1", pa.table({"v": pa.array([1])}), flush=True)
+        assert db.get_record_by_id(("outputs",), b"id1") is None
 
     def test_two_scoped_views_share_storage(self, db):
         view_a = db.at("pipeline", "node1")
         view_b = db.at("pipeline", "node1")
-        view_a.add_record(("outputs",), "id1", pa.table({"v": pa.array([99])}), flush=True)
-        result = view_b.get_record_by_id(("outputs",), "id1")
+        view_a.add_record(("outputs",), b"id1", pa.table({"v": pa.array([99])}), flush=True)
+        result = view_b.get_record_by_id(("outputs",), b"id1")
         assert result is not None
         assert result.column("v").to_pylist() == [99]
 
     def test_prefix_appears_in_sql_table_name(self, db):
         """Prefix components are included in the SQL table name via _path_to_table_name."""
         scoped = db.at("pipeline", "node1")
-        scoped.add_record(("outputs",), "id1", pa.table({"v": pa.array([1])}), flush=True)
+        scoped.add_record(("outputs",), b"id1", pa.table({"v": pa.array([1])}), flush=True)
         # Table name should be pipeline__node1__outputs
         table_names = db._connector.get_table_names()
         assert "pipeline__node1__outputs" in table_names
 
     def test_validate_record_path_checks_combined_depth(self, db):
         scoped = db.at("a", "b", "c", "d", "e", "f", "g", "h", "i")  # 9 prefix components
-        scoped.add_record(("z",), "id1", pa.table({"v": pa.array([1])}))
+        scoped.add_record(("z",), b"id1", pa.table({"v": pa.array([1])}))
         with pytest.raises(ValueError):
-            scoped.add_record(("z", "extra"), "id2", pa.table({"v": pa.array([2])}))
+            scoped.add_record(("z", "extra"), b"id2", pa.table({"v": pa.array([2])}))
 
     def test_at_rejects_slash_in_component(self, db):
         with pytest.raises(ValueError, match="invalid character"):

@@ -141,10 +141,11 @@ class UPathContentHandler:
 class UUIDHandler:
     """Handler for ``uuid.UUID`` objects.
 
-    Returns the raw 16-byte binary representation of the UUID, consistent
-    with OrcaPod's canonical ``pa.binary(16)`` Arrow storage format.
+    Returns the raw 16-byte binary representation of the UUID.
     The binary form is compact, unambiguous, and independent of string
-    formatting conventions.
+    formatting conventions.  UUID values in data columns are stored as
+    ``pa.binary(16)`` (fixed-size) within the struct type used by
+    ``UUIDStructConverter``; database record IDs use ``pa.large_binary()``.
     """
 
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:

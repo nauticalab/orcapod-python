@@ -697,7 +697,7 @@ class FunctionJobNode(FunctionNodeBase):
 
         # stream-level caching state
         self._cached_output_datas: dict[
-            str, tuple[TagProtocol, DataProtocol | None]
+            bytes, tuple[TagProtocol, DataProtocol | None]
         ] = {}
         self._cached_output_table: "pa.Table | None" = None
         self._cached_content_hash_column: "pa.Array | None" = None
@@ -1043,7 +1043,7 @@ class FunctionJobNode(FunctionNodeBase):
         ctx_obs.on_node_start(node_label, node_hash, tag_schema=tag_schema)
 
         # Collect upstream entries and resolve entry_ids
-        upstream_entries: list[tuple[TagProtocol, DataProtocol, str]] = [
+        upstream_entries: list[tuple[TagProtocol, DataProtocol, bytes]] = [
             (tag, data, self.compute_pipeline_entry_id(tag, data))
             for tag, data in input_stream.iter_data()
         ]
@@ -1143,8 +1143,8 @@ class FunctionJobNode(FunctionNodeBase):
         return tag_out, output_data
 
     def get_cached_results(
-        self, entry_ids: list[str]
-    ) -> dict[str, tuple[TagProtocol, DataProtocol]]:
+        self, entry_ids: list[bytes]
+    ) -> dict[bytes, tuple[TagProtocol, DataProtocol]]:
         """Public cache façade: return already-computed results for the given entry IDs.
 
         Serves hits directly from the in-memory cache (``_cached_output_datas``).
@@ -1234,7 +1234,7 @@ class FunctionJobNode(FunctionNodeBase):
 
     def compute_pipeline_entry_id(
         self, tag: TagProtocol, input_data: DataProtocol
-    ) -> str:
+    ) -> bytes:
         """Compute a unique pipeline entry ID from tag + system tags + input data hash.
 
         ``NODE_CONTENT_HASH_COL`` is always included so that two runs processing
@@ -1247,8 +1247,9 @@ class FunctionJobNode(FunctionNodeBase):
             input_data: The input data.
 
         Returns:
-            A hash string uniquely identifying this (tag, input_data, node run)
-            combination.
+            Method-prefixed raw bytes (``b"{method}:{digest}"``) uniquely
+            identifying this (tag, input_data, node run) combination.  Suitable
+            for storage in a ``pa.large_binary()`` column.
         """
         tag_with_hash = (
             tag.as_table(columns={"system_tags": True})
@@ -1261,7 +1262,7 @@ class FunctionJobNode(FunctionNodeBase):
                 pa.array([self.content_hash().to_string()], type=pa.large_string()),
             )
         )
-        return self.data_context.arrow_hasher.hash_table(tag_with_hash).to_string()
+        return self.data_context.arrow_hasher.hash_table(tag_with_hash).to_prefixed_digest()
 
     def add_pipeline_record(
         self,
@@ -1310,7 +1311,7 @@ class FunctionJobNode(FunctionNodeBase):
         meta_table = pa.table(
             {
                 constants.DATA_RECORD_ID: pa.array(
-                    [data_record_id.bytes], type=pa.binary(16)
+                    [data_record_id.bytes], type=pa.large_binary()
                 ),
                 constants.NODE_CONTENT_HASH_COL: pa.array(
                     [self.content_hash().to_string()], type=pa.large_string()
@@ -1436,7 +1437,7 @@ class FunctionJobNode(FunctionNodeBase):
 
     def _fetch_joined_records(
         self,
-        entry_ids: list[str] | None = None,
+        entry_ids: list[bytes] | None = None,
     ) -> _JoinedRecords | None:
         """Internal primitive: fetch both DBs, content-hash-filter, and inner-join.
 
@@ -1504,8 +1505,8 @@ class FunctionJobNode(FunctionNodeBase):
 
     def _load_cached_entries(
         self,
-        entry_ids: list[str] | None = None,
-    ) -> "dict[str, tuple[TagProtocol, DataProtocol]]":
+        entry_ids: list[bytes] | None = None,
+    ) -> "dict[bytes, tuple[TagProtocol, DataProtocol]]":
         """DB loader: fetch ``(tag, data)`` pairs from the pipeline and result databases.
 
         Calls ``_fetch_joined_records`` to obtain the raw joined table, then
@@ -1566,7 +1567,7 @@ class FunctionJobNode(FunctionNodeBase):
         data_table = joined.drop([c for c in drop_cols if c in joined.column_names])
         stream = ArrowTableStream(data_table, tag_columns=tag_keys)
 
-        loaded: dict[str, tuple[TagProtocol, DataProtocol]] = {}
+        loaded: dict[bytes, tuple[TagProtocol, DataProtocol]] = {}
         for eid, (tag, data) in zip(entry_ids_col, stream.iter_data()):
             loaded[eid] = (tag, data)
         return loaded
@@ -1759,7 +1760,7 @@ class FunctionJobNode(FunctionNodeBase):
                 if loaded:
                     self._cached_output_table = None
                     self._cached_content_hash_column = None
-                cached_by_entry_id: dict[str, tuple[TagProtocol, DataProtocol]] = dict(loaded)
+                cached_by_entry_id: dict[bytes, tuple[TagProtocol, DataProtocol]] = dict(loaded)
 
                 # Phase 2: drive output from input channel — cached or compute
                 async def _process_one_db(

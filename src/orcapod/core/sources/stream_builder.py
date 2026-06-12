@@ -28,14 +28,15 @@ if TYPE_CHECKING:
 else:
     pa = LazyModule("pyarrow")
 
-# Namespace UUID for OrcaPod source record IDs.
-# Derived as UUID v5 of NAMESPACE_URL + a stable OrcaPod-specific string so the
+# Namespace UUID for Orcapod source record IDs.
+# Derived as UUID v5 of NAMESPACE_URL + a stable Orcapod-specific URL so the
 # value is principled rather than an opaque hex literal.  This value is fixed for
 # the lifetime of the project — changing it would invalidate all existing stored
 # record IDs.
+# Computed value: uuid.UUID('877ec89b-6645-5852-ba37-a94604043f5e')
 _SOURCE_RECORD_ID_NAMESPACE = uuid.uuid5(
     uuid.NAMESPACE_URL,
-    "https://orcapod.io/namespaces/source-record-id",
+    "https://orcapod.org/namespaces/source-record-id",
 )
 
 
@@ -51,12 +52,15 @@ def _make_provenance_token(record_id_column: str | None, row_index: int, row: di
     return f"row_{row_index}"
 
 
-def _make_record_id_bytes(source_id: str, provenance_token: str) -> bytes:
-    """Build a stable 16-byte record ID from source_id and provenance token.
+def _make_record_id(source_id: str, provenance_token: str) -> uuid.UUID:
+    """Build a stable record ID UUID from source_id and provenance token.
 
     Uses UUID v5 (name-based, SHA-1) to produce a deterministic UUID from
     the source identity and row provenance token. The result is stable across
     runs for the same source_id and provenance_token.
+
+    Callers that need raw bytes for Arrow storage (``pa.large_binary()``)
+    should call ``.bytes`` on the returned UUID.
 
     Args:
         source_id: The canonical source identifier.
@@ -64,10 +68,10 @@ def _make_record_id_bytes(source_id: str, provenance_token: str) -> bytes:
             (e.g. ``"row_0"`` or ``"col=value"``).
 
     Returns:
-        16 raw bytes suitable for ``pa.binary(16)`` storage.
+        A deterministic ``uuid.UUID`` identifying this (source, row) pair.
     """
     name = f"{source_id}::{provenance_token}"
-    return uuid.uuid5(_SOURCE_RECORD_ID_NAMESPACE, name).bytes
+    return uuid.uuid5(_SOURCE_RECORD_ID_NAMESPACE, name)
 
 
 @dataclass(frozen=True)
@@ -185,7 +189,7 @@ class SourceStreamBuilder:
         # deterministically derived from source_id and per-row provenance token.
         # Same source_id + same row position/content → same record_id bytes.
         record_id_values = [
-            _make_record_id_bytes(source_id, token) for token in provenance_tokens
+            _make_record_id(source_id, token).bytes for token in provenance_tokens
         ]
 
         # 8. Add source-info provenance columns.

@@ -71,13 +71,13 @@ class TestProtocolConformance:
 
 class TestWriteOperationsAreNoOps:
     def test_add_record_does_not_raise(self, db):
-        db.add_record(PATH, "id1", make_table(x=[1, 2]))
+        db.add_record(PATH, b"id1", make_table(x=[1, 2]))
 
     def test_add_record_with_skip_duplicates_does_not_raise(self, db):
-        db.add_record(PATH, "id1", make_table(x=[1]), skip_duplicates=True)
+        db.add_record(PATH, b"id1", make_table(x=[1]), skip_duplicates=True)
 
     def test_add_record_with_flush_does_not_raise(self, db):
-        db.add_record(PATH, "id1", make_table(x=[1]), flush=True)
+        db.add_record(PATH, b"id1", make_table(x=[1]), flush=True)
 
     def test_add_records_does_not_raise(self, db):
         db.add_records(PATH, make_table(x=[1, 2, 3]))
@@ -99,7 +99,7 @@ class TestWriteOperationsAreNoOps:
         db.flush()
 
     def test_flush_after_writes_does_not_raise(self, db):
-        db.add_record(PATH, "id1", make_table(x=[1]))
+        db.add_record(PATH, b"id1", make_table(x=[1]))
         db.add_records(PATH, make_table(x=[2, 3]))
         db.flush()
 
@@ -111,14 +111,14 @@ class TestWriteOperationsAreNoOps:
 
 class TestReadOperationsReturnNone:
     def test_get_record_by_id_returns_none_on_empty_db(self, db):
-        assert db.get_record_by_id(PATH, "id1") is None
+        assert db.get_record_by_id(PATH, b"id1") is None
 
     def test_get_record_by_id_returns_none_after_write(self, db):
-        db.add_record(PATH, "id1", make_table(x=[42]))
-        assert db.get_record_by_id(PATH, "id1") is None
+        db.add_record(PATH, b"id1", make_table(x=[42]))
+        assert db.get_record_by_id(PATH, b"id1") is None
 
     def test_get_record_by_id_with_record_id_column_returns_none(self, db):
-        assert db.get_record_by_id(PATH, "id1", record_id_column="rid") is None
+        assert db.get_record_by_id(PATH, b"id1", record_id_column="rid") is None
 
     def test_get_all_records_returns_none_on_empty_db(self, db):
         assert db.get_all_records(PATH) is None
@@ -131,11 +131,11 @@ class TestReadOperationsReturnNone:
         assert db.get_all_records(PATH, record_id_column="rid") is None
 
     def test_get_records_by_ids_returns_none_on_empty_db(self, db):
-        assert db.get_records_by_ids(PATH, ["id1", "id2"]) is None
+        assert db.get_records_by_ids(PATH, [b"id1", b"id2"]) is None
 
     def test_get_records_by_ids_returns_none_after_write(self, db):
-        db.add_record(PATH, "id1", make_table(x=[1]))
-        assert db.get_records_by_ids(PATH, ["id1"]) is None
+        db.add_record(PATH, b"id1", make_table(x=[1]))
+        assert db.get_records_by_ids(PATH, [b"id1"]) is None
 
     def test_get_records_by_ids_empty_collection_returns_none(self, db):
         assert db.get_records_by_ids(PATH, []) is None
@@ -198,6 +198,6 @@ class TestAtMethod:
     def test_scoped_reads_still_return_none(self):
         db = NoOpArrowDatabase()
         scoped = db.at("pipeline", "node1")
-        scoped.add_record(("outputs",), "id1", pa.table({"v": [1]}))
-        assert scoped.get_record_by_id(("outputs",), "id1") is None
+        scoped.add_record(("outputs",), b"id1", pa.table({"v": [1]}))
+        assert scoped.get_record_by_id(("outputs",), b"id1") is None
         assert scoped.get_all_records(("outputs",)) is None
