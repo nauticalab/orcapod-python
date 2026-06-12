@@ -220,22 +220,14 @@ class CachedSource(RootSource):
             columns={"source": True, "system_tags": True}
         )
 
-        # Compute per-row record hashes for dedup: hash(full row excluding
-        # system tag record_id columns — they are derived from the row's provenance
-        # data already captured in this hash, so including them would be redundant.
-        # The source_id system tag IS deterministic and is included in the hash.
-        record_id_tag_cols = [
-            c for c in live_table.column_names
-            if c.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX)
-        ]
-        hash_table = (
-            live_table.drop(record_id_tag_cols)
-            if record_id_tag_cols
-            else live_table
-        )
+        # Compute per-row record hashes for dedup: hash the full row including
+        # all system tag columns.  The record_id system tag encodes row origin
+        # (source_id + provenance token), so two rows that are byte-identical in
+        # their data columns but originate from different positions in the source
+        # will have different record_ids and must be stored as distinct entries.
         arrow_hasher = self.data_context.arrow_hasher
         record_hashes: list[str] = []
-        for batch in hash_table.to_batches():
+        for batch in live_table.to_batches():
             for i in range(len(batch)):
                 record_hashes.append(
                     arrow_hasher.hash_table(batch.slice(i, 1)).to_hex()

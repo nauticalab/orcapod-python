@@ -761,6 +761,55 @@ class TestJoinOutputSchemaSystemTags:
         assert dict(predicted_tag) == dict(actual_tag)
         assert dict(predicted_pkt) == dict(actual_pkt)
 
+    def test_output_schema_preserves_system_tag_col_types(self):
+        """_predict_system_tag_schema must carry col_type through unchanged.
+
+        The Schema stores Python types.  record_id system-tag columns are
+        stored as ``pa.large_binary()`` in Arrow, which maps to ``bytes`` in
+        the Python Schema.  source_id columns are ``pa.large_string()`` →
+        ``str``.  After a two-way join both Python types must survive — no
+        silent coercion to ``str`` for record_id.
+        """
+        from orcapod.core.sources.arrow_table_source import ArrowTableSource
+        from orcapod.system_constants import constants
+
+        src_a = ArrowTableSource(
+            pa.table(
+                {
+                    "id": pa.array([1, 2], type=pa.int64()),
+                    "alpha": pa.array([10, 20], type=pa.int64()),
+                }
+            ),
+            tag_columns=["id"],
+            infer_nullable=True,
+        )
+        src_b = ArrowTableSource(
+            pa.table(
+                {
+                    "id": pa.array([1, 2], type=pa.int64()),
+                    "beta": pa.array([100, 200], type=pa.int64()),
+                }
+            ),
+            tag_columns=["id"],
+            infer_nullable=True,
+        )
+
+        op = Join()
+        tag_schema, _ = op.output_schema(src_a, src_b, columns={"system_tags": True})
+
+        for col_name, col_type in tag_schema.items():
+            if not col_name.startswith(constants.SYSTEM_TAG_PREFIX):
+                continue
+            if col_name.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX):
+                assert col_type == bytes, (
+                    f"record_id column '{col_name}' should map to bytes, "
+                    f"got {col_type!r}"
+                )
+            else:
+                assert col_type == str, (
+                    f"source_id column '{col_name}' should map to str, got {col_type!r}"
+                )
+
 
 class TestSemiJoinBehavior:
     def test_semijoin_filters_left_by_right(self, left_stream, right_stream):

@@ -96,13 +96,14 @@ class TestIterDatasReadOnly:
             assert mock_load.call_count <= 1  # at most one DB query
         assert first == second
 
-    def test_cached_output_datas_keyed_by_entry_id_strings(self):
-        """After run(), _cached_output_datas keys are entry_id strings, not ints."""
+    def test_cached_output_datas_keyed_by_entry_id_bytes(self):
+        """After run(), _cached_output_datas keys are entry_id bytes (method-prefixed digest)."""
         node = _make_node()
         node.run()
         assert len(node._cached_output_datas) == 3
         for key in node._cached_output_datas:
-            assert isinstance(key, str), f"Expected str key, got {type(key)}: {key!r}"
+            assert isinstance(key, bytes), f"Expected bytes key, got {type(key)}: {key!r}"
+            assert b":" in key, f"Entry ID bytes should be method-prefixed, got {key!r}"
 
     def test_as_table_fresh_node_returns_empty_no_compute(self):
         """as_table() on a fresh node with no run() and empty DB returns empty table."""
