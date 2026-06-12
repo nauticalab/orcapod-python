@@ -105,3 +105,12 @@ def test_converter_can_handle_struct_type_and_is_semantic_struct():
     cfg = SampleConfig(name="x", threshold=1.0)
     assert conv.is_semantic_struct(conv.python_to_struct_dict(cfg)) is True
     assert conv.is_semantic_struct({"path": "/tmp/x"}) is False
+
+
+def test_struct_dict_to_python_bad_qualname_raises_importerror():
+    conv = _converter()
+    with pytest.raises(ImportError) as exc:
+        conv.struct_dict_to_python(
+            {"__pydantic_model__": "no.such.module:Nope", "__pydantic_json__": "{}"}
+        )
+    assert "no.such.module:Nope" in str(exc.value)

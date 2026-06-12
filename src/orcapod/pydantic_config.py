@@ -16,9 +16,12 @@ import pydantic
 import yaml
 
 from orcapod.semantic_types.semantic_struct_converters import SemanticStructConverterBase
+from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import pyarrow as pa
+else:
+    pa = LazyModule("pyarrow")
 
 M = TypeVar("M", bound=pydantic.BaseModel)
 
@@ -74,10 +77,21 @@ def _qualified_name(cls: type) -> str:
 
 def _import_model(qualified_name: str) -> type[pydantic.BaseModel]:
     module_path, _, qualname = qualified_name.partition(":")
-    module = importlib.import_module(module_path)
+    try:
+        module = importlib.import_module(module_path)
+    except ImportError as e:
+        raise ImportError(
+            f"Cannot import module '{module_path}' for pydantic model "
+            f"'{qualified_name}': {e}"
+        ) from e
     obj: Any = module
     for part in qualname.split("."):
-        obj = getattr(obj, part)
+        try:
+            obj = getattr(obj, part)
+        except AttributeError as e:
+            raise ImportError(
+                f"Cannot resolve '{part}' in '{qualified_name}': {e}"
+            ) from e
     return obj
 
 
@@ -92,8 +106,6 @@ class PydanticModelConverter(SemanticStructConverterBase):
 
     def __init__(self) -> None:
         super().__init__("pydantic")
-        import pyarrow as pa
-
         self._arrow_struct_type = pa.struct(
             [
                 pa.field(_MODEL_FIELD, pa.large_string()),
@@ -106,7 +118,7 @@ class PydanticModelConverter(SemanticStructConverterBase):
         return pydantic.BaseModel
 
     @property
-    def arrow_struct_type(self) -> Any:
+    def arrow_struct_type(self) -> "pa.StructType":
         return self._arrow_struct_type
 
     def can_handle_python_type(self, python_type: type) -> bool:
@@ -115,8 +127,6 @@ class PydanticModelConverter(SemanticStructConverterBase):
         )
 
     def can_handle_struct_type(self, struct_type: Any) -> bool:
-        import pyarrow as pa
-
         if not pa.types.is_struct(struct_type):
             return False
         for field in self._arrow_struct_type:
@@ -128,13 +138,19 @@ class PydanticModelConverter(SemanticStructConverterBase):
         return True
 
     def is_semantic_struct(self, struct_dict: dict[str, Any]) -> bool:
-        return set(struct_dict.keys()) == {_MODEL_FIELD, _JSON_FIELD}
+        return (
+            set(struct_dict.keys()) == {_MODEL_FIELD, _JSON_FIELD}
+            and isinstance(struct_dict[_MODEL_FIELD], str)
+            and isinstance(struct_dict[_JSON_FIELD], str)
+        )
 
     def python_to_struct_dict(self, value: Any) -> dict[str, Any]:
         if not isinstance(value, pydantic.BaseModel):
             raise TypeError(f"Expected a pydantic BaseModel, got {type(value)}")
         return {
             _MODEL_FIELD: _qualified_name(type(value)),
+            # model_dump_json() serialises fields in definition order (pydantic v2),
+            # so equal models produce identical JSON -> stable content hash.
             _JSON_FIELD: value.model_dump_json(),
         }
 
