@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterator, Mapping
 from typing import (
     TYPE_CHECKING,
@@ -47,12 +48,12 @@ class DatagramProtocol(ContentIdentifiableProtocol, DataContextAwareProtocol, Pr
     """
 
     @property
-    def datagram_id(self) -> bytes:
+    def datagram_id(self) -> uuid.UUID:
         """
-        Return the UUID of this datagram as 16 raw bytes (UUID v7).
+        Return the UUID of this datagram (UUID v7).
 
         Returns:
-            bytes: The 16-byte binary UUID for this datagram instance.
+            uuid.UUID: The UUID for this datagram instance.
         """
         ...
 

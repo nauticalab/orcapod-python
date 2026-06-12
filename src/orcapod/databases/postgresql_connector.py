@@ -19,7 +19,7 @@ import threading
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
-from orcapod.types import UUID_ARROW_TYPE, ColumnInfo
+from orcapod.types import ColumnInfo
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -75,7 +75,7 @@ def _pg_type_to_arrow(pg_type_name: str, udt_name: str) -> pa.DataType:
     if t in ("float8", "double precision", "numeric", "decimal"):
         return _pa.float64()
     if t == "uuid":
-        return UUID_ARROW_TYPE
+        return _pa.binary(16)
 
     if t in ("text", "varchar", "character varying", "char", "bpchar",
              "name", "json", "jsonb", "time", "timetz"):

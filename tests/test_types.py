@@ -1,22 +1,9 @@
 """Tests for orcapod.types — Schema operations."""
 from __future__ import annotations
 
-import pyarrow as pa
 import pytest
 
-from orcapod.types import UUID_ARROW_TYPE, UUID_STRUCT_ARROW_TYPE, Schema
-
-
-def test_uuid_arrow_type_is_binary16():
-    assert UUID_ARROW_TYPE == pa.binary(16)
-
-
-def test_uuid_struct_arrow_type_structure():
-    assert UUID_STRUCT_ARROW_TYPE == pa.struct([pa.field("uuid", pa.binary(16))])
-
-
-def test_uuid_struct_inner_type_matches_constant():
-    assert UUID_STRUCT_ARROW_TYPE.field("uuid").type == UUID_ARROW_TYPE
+from orcapod.types import Schema
 
 
 class TestSchemaAdd:

@@ -33,8 +33,6 @@ __all__ = [
     "PipelineJob",
     "SourceNode",
     "register_dataclass",
-    "UUID_ARROW_TYPE",
-    "UUID_STRUCT_ARROW_TYPE",
     "databases",
     "nodes",
     "operators",
@@ -44,16 +42,3 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str) -> object:
-    """Lazy resolution for module-level constants that depend on pyarrow.
-
-    Delegates UUID Arrow type constants to ``orcapod.types`` so that importing
-    ``orcapod`` does not eagerly load the pyarrow C extension.
-    """
-    if name in ("UUID_ARROW_TYPE", "UUID_STRUCT_ARROW_TYPE"):
-        from . import types as _types
-
-        value = getattr(_types, name)
-        globals()[name] = value
-        return value
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

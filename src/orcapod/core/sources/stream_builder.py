@@ -28,9 +28,15 @@ if TYPE_CHECKING:
 else:
     pa = LazyModule("pyarrow")
 
-# Namespace UUID for source record IDs — all source record IDs are derived
-# from this namespace and the row's source_id + provenance token.
-_SOURCE_RECORD_ID_NAMESPACE = uuid.UUID("7f8e9d0c-1b2a-3c4d-5e6f-7a8b9c0d1e2f")
+# Namespace UUID for OrcaPod source record IDs.
+# Derived as UUID v5 of NAMESPACE_URL + a stable OrcaPod-specific string so the
+# value is principled rather than an opaque hex literal.  This value is fixed for
+# the lifetime of the project — changing it would invalidate all existing stored
+# record IDs.
+_SOURCE_RECORD_ID_NAMESPACE = uuid.uuid5(
+    uuid.NAMESPACE_URL,
+    "https://orcapod.io/namespaces/source-record-id",
+)
 
 
 def _make_provenance_token(record_id_column: str | None, row_index: int, row: dict) -> str:
@@ -58,7 +64,7 @@ def _make_record_id_bytes(source_id: str, provenance_token: str) -> bytes:
             (e.g. ``"row_0"`` or ``"col=value"``).
 
     Returns:
-        16 raw bytes suitable for ``UUID_ARROW_TYPE`` storage.
+        16 raw bytes suitable for ``pa.binary(16)`` storage.
     """
     name = f"{source_id}::{provenance_token}"
     return uuid.uuid5(_SOURCE_RECORD_ID_NAMESPACE, name).bytes

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
@@ -1266,7 +1267,7 @@ class FunctionJobNode(FunctionNodeBase):
         self,
         tag: TagProtocol,
         input_data: DataProtocol,
-        data_record_id: bytes,
+        data_record_id: uuid.UUID,
         computed: bool,
         skip_cache_lookup: bool = False,
     ) -> None:
@@ -1309,7 +1310,7 @@ class FunctionJobNode(FunctionNodeBase):
         meta_table = pa.table(
             {
                 constants.DATA_RECORD_ID: pa.array(
-                    [data_record_id], type=pa.binary(16)
+                    [data_record_id.bytes], type=pa.binary(16)
                 ),
                 constants.NODE_CONTENT_HASH_COL: pa.array(
                     [self.content_hash().to_string()], type=pa.large_string()
