@@ -268,7 +268,7 @@ class DeltaTableDatabase:
         """
         return [(self.RECORD_ID_COLUMN, "=", coerce_record_id(record_id))]
 
-    def _create_record_ids_filter(self, record_ids: list[str]) -> list:
+    def _create_record_ids_filter(self, record_ids: list[bytes]) -> list:
         """
         Create a proper filter expression for multiple entry IDs.
 
@@ -779,17 +779,17 @@ class DeltaTableDatabase:
         if flush:
             self.flush_batch(record_path)
 
-        # Convert input to list of strings for consistency
+        # Convert input to a list of bytes for consistency
 
         if isinstance(record_ids, pl.Series):
-            record_ids_list = cast(list[str], record_ids.to_list())
+            record_ids_list = [coerce_record_id(r) for r in record_ids.to_list()]
         elif isinstance(record_ids, (pa.Array, pa.ChunkedArray)):
-            record_ids_list = cast(list[str], record_ids.to_pylist())
+            record_ids_list = [coerce_record_id(r) for r in record_ids.to_pylist()]
         elif isinstance(record_ids, Collection):
             record_ids_list = [coerce_record_id(r) for r in record_ids]
         else:
             raise TypeError(
-                f"record_ids must be list[str], pl.Series, or pa.Array, got {type(record_ids)}"
+                f"record_ids must be Collection[str | bytes], pl.Series, or pa.Array, got {type(record_ids)}"
             )
         if len(record_ids) == 0:
             return None
