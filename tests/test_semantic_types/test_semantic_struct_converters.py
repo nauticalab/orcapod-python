@@ -32,7 +32,7 @@ class DummyConverter(SemanticStructConverterBase):
     def is_semantic_struct(self, struct_dict):
         return isinstance(struct_dict, dict)
 
-    def hash_struct_dict(self, struct_dict, add_prefix=False):
+    def hash_struct_dict(self, struct_dict):
         return "dummyhash"
 
 
@@ -86,7 +86,7 @@ def test_extensibility_with_new_converter():
         def is_semantic_struct(self, struct_dict):
             return "data" in struct_dict
 
-        def hash_struct_dict(self, struct_dict, add_prefix=False):
+        def hash_struct_dict(self, struct_dict):
             return "newhash"
 
     converter = NewConverter()

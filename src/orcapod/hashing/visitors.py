@@ -181,7 +181,7 @@ class SemanticHashingVisitor(ArrowTypeDataVisitor):
         if converter:
             # This is a semantic type - hash it
             try:
-                hash_string = converter.hash_struct_dict(data, add_prefix=True)
+                hash_string = converter.hash_struct_dict(data)
                 return pa.large_string(), hash_string
             except Exception as e:
                 field_path = (

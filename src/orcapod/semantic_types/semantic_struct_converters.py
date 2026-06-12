@@ -61,23 +61,19 @@ class SemanticStructConverterBase:
         digest = hashlib.sha256(content).digest()
         return ContentHash(method="sha256", digest=digest)
 
-    def _format_semantic_hash(self, content_hash: ContentHash, add_prefix: bool) -> str:
+    def _format_semantic_hash(self, content_hash: ContentHash) -> str:
         """Format a ``ContentHash`` into the standard semantic hash string.
 
-        When ``add_prefix`` is ``True`` the result is
-        ``"{semantic_type_name}:{method}:{hex}"``, e.g. ``"uuid:sha256:abc123"``.
-        When ``False`` only the hex digest is returned.
+        Always returns ``"{semantic_type_name}:{method}:{hex}"``,
+        e.g. ``"uuid:sha256:abc123"``.
 
         Args:
             content_hash: Hash to format.
-            add_prefix: Whether to prepend the semantic type name and algorithm.
 
         Returns:
-            Formatted hash string.
+            Formatted hash string with semantic type and algorithm prefix.
         """
-        if add_prefix:
-            return f"{self.semantic_type_name}:{content_hash.to_string(prefix_method=True)}"
-        return content_hash.to_hex()
+        return f"{self.semantic_type_name}:{content_hash.to_string(prefix_method=True)}"
 
 
 class PathStructConverterBase(SemanticStructConverterBase, ABC):
@@ -149,17 +145,17 @@ class PathStructConverterBase(SemanticStructConverterBase, ABC):
             and isinstance(struct_dict[self._field_name], str)
         )
 
-    def hash_struct_dict(
-        self, struct_dict: dict[str, Any], add_prefix: bool = False
-    ) -> str:
+    def hash_struct_dict(self, struct_dict: dict[str, Any]) -> str:
         """Compute hash of a path semantic type by hashing the file content.
+
+        Returns a string of the form ``"{type}:{algorithm}:{hex}"``,
+        e.g. ``"path:sha256:abc123"``.
 
         Args:
             struct_dict: Dict with the path field containing a file path string.
-            add_prefix: If True, prefix with semantic type and algorithm info.
 
         Returns:
-            Hash string of the file content.
+            Hash string of the file content with semantic type and algorithm prefix.
 
         Raises:
             FileNotFoundError: If the path does not exist.
@@ -176,7 +172,7 @@ class PathStructConverterBase(SemanticStructConverterBase, ABC):
             raise IsADirectoryError(f"Path is a directory: {path}")
 
         file_hash = self._file_hasher.hash_file(path)
-        return self._format_semantic_hash(file_hash, add_prefix)
+        return self._format_semantic_hash(file_hash)
 
 
 class PythonPathStructConverter(PathStructConverterBase):
@@ -316,20 +312,16 @@ class UUIDStructConverter(SemanticStructConverterBase):
         """
         return struct_type == self._arrow_struct_type
 
-    def hash_struct_dict(
-        self, struct_dict: dict[str, Any], add_prefix: bool = False
-    ) -> str:
+    def hash_struct_dict(self, struct_dict: dict[str, Any]) -> str:
         """Compute a SHA-256 hash of the UUID from its struct dictionary representation.
 
         Hashes the raw 16 UUID bytes directly.
 
         Args:
             struct_dict: Dict with a ``"uuid"`` key containing 16 raw bytes.
-            add_prefix: If ``True``, prefix the hash with semantic type and
-                algorithm info (e.g. ``"uuid:sha256:<hex>"``).
 
         Returns:
-            Hash string, optionally prefixed.
+            Hash string of the form ``"uuid:sha256:<hex>"``.
 
         Raises:
             ValueError: If the ``"uuid"`` key is absent from ``struct_dict``.
@@ -338,4 +330,4 @@ class UUIDStructConverter(SemanticStructConverterBase):
         if raw is None:
             raise ValueError("Missing 'uuid' field in struct dict")
         content_hash = self._compute_content_hash(bytes(raw))
-        return self._format_semantic_hash(content_hash, add_prefix)
+        return self._format_semantic_hash(content_hash)
