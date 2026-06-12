@@ -75,7 +75,7 @@ def _pg_type_to_arrow(pg_type_name: str, udt_name: str) -> pa.DataType:
     if t in ("float8", "double precision", "numeric", "decimal"):
         return _pa.float64()
     if t == "uuid":
-        return _pa.large_string()
+        return _pa.binary(16)
 
     if t in ("text", "varchar", "character varying", "char", "bpchar",
              "name", "json", "jsonb", "time", "timetz"):
@@ -164,9 +164,9 @@ def _coerce_pg_value(value: Any, arrow_type: "pa.DataType") -> Any:
 
     if value is None:
         return None
-    # psycopg returns uuid columns as uuid.UUID objects; large_string() needs str
-    if arrow_type == _pa.large_string() and hasattr(value, "hex") and not isinstance(value, str):
-        return str(value)
+    # psycopg returns uuid columns as uuid.UUID objects; binary(16) needs raw bytes
+    if arrow_type == _pa.binary(16) and hasattr(value, "bytes") and not isinstance(value, (bytes, bytearray)):
+        return value.bytes
     return value
 
 
