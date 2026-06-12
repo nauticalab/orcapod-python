@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 import pydantic
 import yaml
+from upath import UPath
 
 from orcapod.semantic_types.semantic_struct_converters import SemanticStructConverterBase
 from orcapod.utils.lazy_module import LazyModule
@@ -38,28 +39,35 @@ class OrcapodBaseConfig(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(extra="forbid", frozen=True)
 
 
-def load_pydantic_config(path: str | Path, model_cls: type[M]) -> M:
+def load_pydantic_config(path: str | Path | UPath, model_cls: type[M]) -> M:
     """Read a YAML file and validate it against a pydantic model.
 
+    The path is resolved through ``UPath``, so local paths and remote object
+    storage (e.g. ``s3://``, ``gs://``) are both supported.
+
     Args:
-        path: Path to the YAML config file.
+        path: Path to the YAML config file. A local path or any ``UPath``-supported
+            URI (e.g. an object-storage location).
         model_cls: The pydantic model class to validate against.
 
     Returns:
         A validated instance of `model_cls`.
 
     Raises:
-        ValueError: If the YAML cannot be parsed or fails validation. The error
-            message includes the file path and the underlying field-level detail.
+        ValueError: If the file cannot be read, the YAML cannot be parsed, or
+            validation fails. The error message includes the file path and the
+            underlying detail.
     """
-    path = Path(path)
+    path = UPath(path)
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-    except yaml.YAMLError as e:
-        raise ValueError(f"Could not parse YAML config {path}: {e}") from e
+        text = path.read_text(encoding="utf-8")
     except OSError as e:
         raise ValueError(f"Could not read YAML config {path}: {e}") from e
+
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        raise ValueError(f"Could not parse YAML config {path}: {e}") from e
 
     try:
         return model_cls.model_validate(data)

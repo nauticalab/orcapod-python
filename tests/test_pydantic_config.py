@@ -7,6 +7,7 @@ from pathlib import Path
 import pyarrow as pa
 import pydantic
 import pytest
+from upath import UPath
 
 from orcapod.contexts import get_default_context
 from orcapod.pydantic_config import OrcapodBaseConfig, PydanticModelConverter, load_pydantic_config
@@ -37,6 +38,15 @@ def test_loads_valid_config(tmp_path):
     assert cfg.name == "run1"
     assert cfg.threshold == 6.0
     assert cfg.retries == 3  # default applied
+
+
+def test_loads_via_upath(tmp_path):
+    # UPath of a local path exercises the object-storage-capable read path.
+    path = _write(tmp_path, "name: run1\nthreshold: 6.0\n")
+    cfg = load_pydantic_config(UPath(path), SampleConfig)
+    assert isinstance(cfg, SampleConfig)
+    assert cfg.name == "run1"
+    assert cfg.threshold == 6.0
 
 
 def test_wrong_type_raises_with_path(tmp_path):
