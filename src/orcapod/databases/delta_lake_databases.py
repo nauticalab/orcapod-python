@@ -6,7 +6,7 @@ from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from orcapod.databases._utils import coerce_record_id
+from orcapod.databases.utils import coerce_record_id
 from orcapod.databases.storage_utils import is_cloud_uri, parse_base_path
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule

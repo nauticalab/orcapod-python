@@ -1,4 +1,4 @@
-"""Internal utilities shared across database implementations."""
+"""Utilities shared across database implementations."""
 
 from __future__ import annotations
 
