@@ -135,6 +135,8 @@ def get_versioned_semantic_arrow_hasher(
     registry: Any = SemanticTypeRegistry()
     file_hasher = BasicFileHasher(algorithm="sha256")
     path_converter: Any = PythonPathStructConverter(file_hasher=file_hasher)
+    # NOTE: keep this converter list in sync with the production registry in
+    # src/orcapod/contexts/data/v0.1.json (semantic_registry._config.converters).
     registry.register_converter("path", path_converter)
 
     from orcapod.pydantic_config import PydanticModelConverter

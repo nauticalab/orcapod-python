@@ -8,7 +8,9 @@ import pyarrow as pa
 import pydantic
 import pytest
 
+from orcapod.contexts import get_default_context
 from orcapod.pydantic_config import OrcapodBaseConfig, PydanticModelConverter, load_pydantic_config
+from orcapod.types import Schema
 
 
 class SampleConfig(OrcapodBaseConfig):
@@ -150,9 +152,6 @@ def test_hash_stable_across_yaml_formatting(tmp_path):
 # ---------------------------------------------------------------------------
 # Integration tests — default context registry (ENG-607 Task 5)
 # ---------------------------------------------------------------------------
-
-from orcapod.contexts import get_default_context  # noqa: E402
-from orcapod.types import Schema  # noqa: E402
 
 
 def test_registered_in_default_context_roundtrip():
