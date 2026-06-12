@@ -211,6 +211,15 @@ class InMemoryArrowDatabase:
                 [rename_map.get(c, c) for c in records.column_names]
             )
 
+        # Enforce binary record-id type — string columns are rejected to prevent
+        # silent deduplication failures (set[str] & set[bytes] is always empty).
+        rid_type = records[self.RECORD_ID_COLUMN].type
+        if not pa.types.is_large_binary(rid_type) and not pa.types.is_binary(rid_type):
+            raise TypeError(
+                f"Record-id column must be pa.large_binary() or pa.binary(), "
+                f"got {rid_type}. Encode the column to bytes before calling add_records()."
+            )
+
         # Deduplicate within the incoming batch (keep last)
         records = self._deduplicate_within_table(records)
 
