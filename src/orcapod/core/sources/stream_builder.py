@@ -69,13 +69,8 @@ def _make_record_id(source_id: str, provenance_token: str) -> uuid.UUID:
 
     Returns:
         A deterministic ``uuid.UUID`` identifying this (source, row) pair.
-
-    Note:
-        The name fed to UUID v5 is length-prefixed — ``"{L}:{source_id}:{token}"``
-        where ``L = len(source_id)`` — so that pairs whose components contain the
-        ``:`` separator cannot collide with each other.
     """
-    name = f"{len(source_id)}:{source_id}:{provenance_token}"
+    name = f"{source_id}::{provenance_token}"
     return uuid.uuid5(_SOURCE_RECORD_ID_NAMESPACE, name)
 
 
