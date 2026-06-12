@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.11.0"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'darwin'",
@@ -2301,6 +2301,7 @@ dependencies = [
     { name = "pandas" },
     { name = "polars" },
     { name = "pyarrow" },
+    { name = "pydantic" },
     { name = "pygraphviz" },
     { name = "pymongo" },
     { name = "pyyaml" },
@@ -2380,6 +2381,7 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], marker = "extra == 'all'", specifier = ">=3.0" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgresql'", specifier = ">=3.0" },
     { name = "pyarrow", specifier = ">=20.0.0" },
+    { name = "pydantic", specifier = ">=2" },
     { name = "pygraphviz", specifier = ">=1.14" },
     { name = "pymongo", specifier = ">=4.15.5" },
     { name = "pyspiral", marker = "extra == 'all'", specifier = ">=0.11.0" },
