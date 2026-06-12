@@ -50,3 +50,17 @@ def test_missing_required_raises(tmp_path):
     with pytest.raises(ValueError) as exc:
         load_pydantic_config(path, SampleConfig)
     assert "name" in str(exc.value)
+
+
+def test_missing_file_raises_value_error(tmp_path):
+    missing = tmp_path / "does_not_exist.yaml"
+    with pytest.raises(ValueError) as exc:
+        load_pydantic_config(missing, SampleConfig)
+    assert str(missing) in str(exc.value)
+
+
+def test_empty_file_raises_value_error(tmp_path):
+    path = _write(tmp_path, "")
+    with pytest.raises(ValueError) as exc:
+        load_pydantic_config(path, SampleConfig)
+    assert str(path) in str(exc.value)

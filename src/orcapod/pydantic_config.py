@@ -48,6 +48,8 @@ def load_pydantic_config(path: str | Path, model_cls: type[M]) -> M:
             data = yaml.safe_load(f)
     except yaml.YAMLError as e:
         raise ValueError(f"Could not parse YAML config {path}: {e}") from e
+    except OSError as e:
+        raise ValueError(f"Could not read YAML config {path}: {e}") from e
 
     try:
         return model_cls.model_validate(data)
