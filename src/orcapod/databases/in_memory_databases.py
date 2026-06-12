@@ -5,6 +5,7 @@ from collections import defaultdict
 from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, Any, cast
 
+from orcapod.databases._utils import coerce_record_id
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -86,8 +87,9 @@ class InMemoryArrowDatabase:
     # ------------------------------------------------------------------
 
     def _ensure_record_id_column(
-        self, arrow_data: "pa.Table", record_id: bytes
+        self, arrow_data: "pa.Table", record_id: str | bytes
     ) -> "pa.Table":
+        record_id = coerce_record_id(record_id)
         if self.RECORD_ID_COLUMN not in arrow_data.column_names:
             key_array = pa.array([record_id] * len(arrow_data), type=pa.large_binary())
             arrow_data = arrow_data.add_column(0, self.RECORD_ID_COLUMN, key_array)
@@ -166,7 +168,7 @@ class InMemoryArrowDatabase:
     def add_record(
         self,
         record_path: tuple[str, ...],
-        record_id: bytes,
+        record_id: str | bytes,
         record: "pa.Table",
         skip_duplicates: bool = False,
         flush: bool = False,
@@ -347,13 +349,14 @@ class InMemoryArrowDatabase:
     def get_record_by_id(
         self,
         record_path: tuple[str, ...],
-        record_id: bytes,
+        record_id: str | bytes,
         record_id_column: str | None = None,
         flush: bool = False,
     ) -> "pa.Table | None":
         if flush:
             self.flush()
 
+        record_id = coerce_record_id(record_id)
         record_key = self._get_record_key(record_path)
 
         # Check pending first
@@ -386,14 +389,14 @@ class InMemoryArrowDatabase:
     def get_records_by_ids(
         self,
         record_path: tuple[str, ...],
-        record_ids: "Collection[bytes]",
+        record_ids: "Collection[str | bytes]",
         record_id_column: str | None = None,
         flush: bool = False,
     ) -> "pa.Table | None":
         if flush:
             self.flush()
 
-        record_ids_list = list(record_ids)
+        record_ids_list = [coerce_record_id(r) for r in record_ids]
         if not record_ids_list:
             return None
 
