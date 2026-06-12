@@ -1126,7 +1126,7 @@ class FunctionJobNode(FunctionNodeBase):
                 self.add_pipeline_record(
                     tag,
                     data,
-                    data_record_id=output_data.datagram_id,
+                    data_record_id=output_data.datagram_uuid,
                     computed=result_computed,
                 )
         else:
@@ -1214,7 +1214,7 @@ class FunctionJobNode(FunctionNodeBase):
                 self.add_pipeline_record(
                     tag,
                     data,
-                    data_record_id=output_data.datagram_id,
+                    data_record_id=output_data.datagram_uuid,
                     computed=result_computed,
                 )
         else:

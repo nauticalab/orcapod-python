@@ -211,7 +211,7 @@ class TestSkipCacheLookup:
     def test_skip_cache_lookup_adds_another_record(self, cached_pf, input_data, db):
         cached_pf.call(input_data)  # first call — inserts record
         # Second call with skip_cache_lookup=True tries to insert again;
-        # skip_duplicates=False is the default, but the data has a new datagram_id
+        # skip_duplicates=False is the default, but the data has a new datagram_uuid
         # so a second record with the same input_data_hash is inserted.
         cached_pf.call(input_data, skip_cache_lookup=True)
         stored = db.get_all_records(cached_pf.record_path)

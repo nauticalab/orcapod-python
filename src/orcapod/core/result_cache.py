@@ -204,7 +204,7 @@ class ResultCache:
 
         self._result_database.add_record(
             self._record_path,
-            output_data.datagram_id.bytes,
+            output_data.datagram_uuid.bytes,
             data_table,
             skip_duplicates=skip_duplicates,
         )
