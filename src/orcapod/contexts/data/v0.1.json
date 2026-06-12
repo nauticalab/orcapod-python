@@ -23,6 +23,10 @@
                     "_config": {
                         "file_hasher": {"_ref": "file_hasher"}
                     }
+                },
+                "pydantic": {
+                    "_class": "orcapod.pydantic_config.PydanticModelConverter",
+                    "_config": {}
                 }
             }
         }

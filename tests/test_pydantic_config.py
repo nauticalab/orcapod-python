@@ -145,3 +145,46 @@ def test_hash_stable_across_yaml_formatting(tmp_path):
     ha = conv.hash_struct_dict(conv.python_to_struct_dict(cfg_a))
     hb = conv.hash_struct_dict(conv.python_to_struct_dict(cfg_b))
     assert ha == hb
+
+
+# ---------------------------------------------------------------------------
+# Integration tests — default context registry (ENG-607 Task 5)
+# ---------------------------------------------------------------------------
+
+from orcapod.contexts import get_default_context  # noqa: E402
+from orcapod.types import Schema  # noqa: E402
+
+
+def test_registered_in_default_context_roundtrip():
+    ctx = get_default_context()
+    converter = ctx.type_converter
+
+    cfg = SampleConfig(name="run1", threshold=6.0, retries=5)
+    table = converter.python_dicts_to_arrow_table(
+        [{"config": cfg}], python_schema=Schema({"config": SampleConfig})
+    )
+    # Stored as the pydantic struct, not an opaque blob.
+    assert pa.types.is_struct(table.schema.field("config").type)
+    assert {f.name for f in table.schema.field("config").type} == {
+        "__pydantic_model__",
+        "__pydantic_json__",
+    }
+
+    restored = converter.arrow_table_to_python_dicts(table)
+    assert isinstance(restored[0]["config"], SampleConfig)
+    assert restored[0]["config"] == cfg
+
+
+def test_default_context_hashes_model_stably():
+    ctx = get_default_context()
+    converter = ctx.type_converter
+    schema = Schema({"config": SampleConfig})
+    t1 = converter.python_dicts_to_arrow_table(
+        [{"config": SampleConfig(name="r", threshold=6.0)}], python_schema=schema
+    )
+    t2 = converter.python_dicts_to_arrow_table(
+        [{"config": SampleConfig(name="r", threshold=6.0)}], python_schema=schema
+    )
+    h1 = ctx.arrow_hasher.hash_table(t1)
+    h2 = ctx.arrow_hasher.hash_table(t2)
+    assert h1 == h2

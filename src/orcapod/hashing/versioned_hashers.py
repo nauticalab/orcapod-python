@@ -137,6 +137,10 @@ def get_versioned_semantic_arrow_hasher(
     path_converter: Any = PythonPathStructConverter(file_hasher=file_hasher)
     registry.register_converter("path", path_converter)
 
+    from orcapod.pydantic_config import PydanticModelConverter
+
+    registry.register_converter("pydantic", PydanticModelConverter())
+
     logger.debug(
         "get_versioned_semantic_arrow_hasher: creating StarfixArrowHasher "
         "(hasher_id=%r)",
