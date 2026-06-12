@@ -62,7 +62,7 @@ class Tag(Datagram):
         meta_info: "Mapping[str, DataValue] | None" = None,
         python_schema: "SchemaLike | None" = None,
         data_context: "str | contexts.DataContext | None" = None,
-        record_id: "uuid.UUID | None" = None,
+        record_uuid: "uuid.UUID | None" = None,
         **kwargs,
     ) -> None:
         import pyarrow as _pa
@@ -79,7 +79,7 @@ class Tag(Datagram):
                 data,
                 meta_info=meta_info,
                 data_context=data_context,
-                record_id=record_id,
+                record_uuid=record_uuid,
                 **kwargs,
             )
             sys_tag_cols = [
@@ -115,7 +115,7 @@ class Tag(Datagram):
                 python_schema=python_schema,
                 meta_info=meta_info,
                 data_context=data_context,
-                record_id=record_id,
+                record_uuid=record_uuid,
                 **kwargs,
             )
 
@@ -257,7 +257,7 @@ class Data(Datagram):
         source_info: "Mapping[str, str | None] | None" = None,
         python_schema: "SchemaLike | None" = None,
         data_context: "str | contexts.DataContext | None" = None,
-        record_id: "uuid.UUID | None" = None,
+        record_uuid: "uuid.UUID | None" = None,
         **kwargs,
     ) -> None:
         import pyarrow as _pa
@@ -288,7 +288,7 @@ class Data(Datagram):
                 data_table,
                 meta_info=meta_info,
                 data_context=data_context,
-                record_id=record_id,
+                record_uuid=record_uuid,
                 **kwargs,
             )
             si_table = prefixed_tables[constants.SOURCE_PREFIX]
@@ -316,7 +316,7 @@ class Data(Datagram):
                 python_schema=python_schema,
                 meta_info=meta_info,
                 data_context=data_context,
-                record_id=record_id,
+                record_uuid=record_uuid,
                 **kwargs,
             )
             self._source_info = {**contained_source_info, **(source_info or {})}
