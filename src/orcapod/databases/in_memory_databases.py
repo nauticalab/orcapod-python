@@ -5,7 +5,7 @@ from collections import defaultdict
 from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, Any, cast
 
-from orcapod.databases._utils import coerce_record_id
+from orcapod.databases.utils import coerce_record_id
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
