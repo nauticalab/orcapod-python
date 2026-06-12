@@ -114,3 +114,34 @@ def test_struct_dict_to_python_bad_qualname_raises_importerror():
             {"__pydantic_model__": "no.such.module:Nope", "__pydantic_json__": "{}"}
         )
     assert "no.such.module:Nope" in str(exc.value)
+
+
+def test_hash_equal_for_equal_values():
+    conv = _converter()
+    a = conv.python_to_struct_dict(SampleConfig(name="run1", threshold=6.0, retries=5))
+    b = conv.python_to_struct_dict(SampleConfig(name="run1", threshold=6.0, retries=5))
+    assert conv.hash_struct_dict(a) == conv.hash_struct_dict(b)
+
+
+def test_hash_differs_for_different_values():
+    conv = _converter()
+    a = conv.python_to_struct_dict(SampleConfig(name="run1", threshold=6.0))
+    b = conv.python_to_struct_dict(SampleConfig(name="run1", threshold=7.0))
+    assert conv.hash_struct_dict(a) != conv.hash_struct_dict(b)
+
+
+def test_hash_stable_across_yaml_formatting(tmp_path):
+    # Two YAMLs that differ only in comments / key order / whitespace
+    # must produce the same validated model and therefore the same hash.
+    yaml_a = "name: run1\nthreshold: 6.0\nretries: 5\n"
+    yaml_b = "# a comment\nretries: 5\nthreshold:   6.0\nname: run1\n"
+    pa_path = _write(tmp_path, yaml_a)
+    cfg_a = load_pydantic_config(pa_path, SampleConfig)
+    pb_path = tmp_path / "b.yaml"
+    pb_path.write_text(yaml_b, encoding="utf-8")
+    cfg_b = load_pydantic_config(pb_path, SampleConfig)
+
+    conv = _converter()
+    ha = conv.hash_struct_dict(conv.python_to_struct_dict(cfg_a))
+    hb = conv.hash_struct_dict(conv.python_to_struct_dict(cfg_b))
+    assert ha == hb
