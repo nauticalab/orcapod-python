@@ -48,7 +48,7 @@ class DatagramProtocol(ContentIdentifiableProtocol, DataContextAwareProtocol, Pr
     """
 
     @property
-    def datagram_id(self) -> uuid.UUID:
+    def datagram_uuid(self) -> uuid.UUID:
         """
         Return the UUID of this datagram (UUID v7).
 

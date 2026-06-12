@@ -103,7 +103,7 @@ class Datagram(ContentIdentifiableBase):
                 data_columns[k] = v
 
         super().__init__(data_context=data_context or extracted_context)
-        self._datagram_id = record_id
+        self._datagram_uuid = record_id
 
         self._data_dict: dict[str, DataValue] | None = data_columns
         self._data_table: pa.Table | None = None
@@ -151,7 +151,7 @@ class Datagram(ContentIdentifiableBase):
         context_cols = [c for c in table.column_names if c == constants.CONTEXT_KEY]
 
         super().__init__(data_context=data_context)
-        self._datagram_id = record_id
+        self._datagram_uuid = record_id
 
         meta_col_names = [
             c for c in table.column_names if c.startswith(constants.META_PREFIX)
@@ -427,9 +427,9 @@ class Datagram(ContentIdentifiableBase):
         return self._ensure_data_table()
 
     @property
-    def datagram_id(self) -> uuid.UUID:
-        """Return (or lazily generate) the datagram's unique ID."""
-        if self._datagram_id is None:
+    def datagram_uuid(self) -> uuid.UUID:
+        """Return (or lazily generate) the datagram's unique UUID."""
+        if self._datagram_uuid is None:
             # uuid_utils is used here because it provides UUIDv7 (time-ordered,
             # monotonic) generation, which is not available in the stdlib before
             # Python 3.12.  However, uuid_utils.UUID and stdlib uuid.UUID are
@@ -438,8 +438,8 @@ class Datagram(ContentIdentifiableBase):
             # so that the public API always returns a consistent type and
             # equality / hashing work correctly regardless of how a UUID was
             # originally produced.
-            self._datagram_id = uuid.UUID(bytes=uuid7().bytes)
-        return self._datagram_id
+            self._datagram_uuid = uuid.UUID(bytes=uuid7().bytes)
+        return self._datagram_uuid
 
     @property
     def converter(self) -> TypeConverterProtocol:
@@ -772,7 +772,7 @@ class Datagram(ContentIdentifiableBase):
         new_d._cached_int_hash = None
 
         # Datagram identity
-        new_d._datagram_id = self._datagram_id if preserve_id else None
+        new_d._datagram_uuid = self._datagram_uuid if preserve_id else None
 
         # Data representations — Arrow table is immutable so a ref copy is fine
         new_d._data_table = self._data_table

@@ -166,7 +166,7 @@ class TestConflictResolution:
         # Lookup should return the most recent
         cached = cache.lookup(input_pkt)
         assert cached is not None
-        assert cached.datagram_id == output2.datagram_id
+        assert cached.datagram_uuid == output2.datagram_uuid
 
 
 # ---------------------------------------------------------------------------
