@@ -111,14 +111,19 @@ class TestSpiralDBConnectorIntegration:
 
     def test_connector_arrow_database_round_trip(self, connector):
         """ConnectorArrowDatabase: add_record → flush → get_record_by_id."""
+        # Use a unique path so each CI run creates a fresh table and never
+        # conflicts with tables left by earlier runs (e.g. with a different
+        # __record_id Arrow type from a schema-migration commit).
+        unique_suffix = uuid.uuid4().hex[:8]
+        path = ("spiraldb", f"integration_{unique_suffix}")
         db = ConnectorArrowDatabase(connector)
         record = pa.table({"x": pa.array([42], type=pa.int64())})
         db.add_record(
-            ("spiraldb", "integration"),
-            record_id="test_r1",
+            path,
+            record_id=b"test_r1",
             record=record,
             flush=True,
         )
-        result = db.get_record_by_id(("spiraldb", "integration"), "test_r1")
+        result = db.get_record_by_id(path, b"test_r1")
         assert result is not None
         assert result.column("x")[0].as_py() == 42

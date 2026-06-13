@@ -354,10 +354,14 @@ class ConnectorArrowDatabase:
                 }
                 pending_cols = {c.name: c.arrow_type for c in columns}
                 if existing_cols != pending_cols:
+                    def _fmt(cols: dict) -> str:
+                        return "{" + ", ".join(
+                            f"{k}: {v}" for k, v in sorted(cols.items())
+                        ) + "}"
                     raise ValueError(
                         f"Schema mismatch for table {table_name!r}: "
-                        f"existing columns {sorted(existing_cols)} differ from "
-                        f"pending columns {sorted(pending_cols)}. "
+                        f"existing={_fmt(existing_cols)}, "
+                        f"pending={_fmt(pending_cols)}. "
                         "Schema evolution is not supported."
                     )
 
