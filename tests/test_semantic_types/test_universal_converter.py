@@ -84,6 +84,31 @@ def test_datetime_converter_accepts_non_utc_aware():
     assert result == non_utc  # converter passes through unchanged
 
 
+def test_datetime_converter_passes_none_through():
+    """None passes through the datetime converter unchanged (PyArrow enforces nullability)."""
+    to_arrow, _ = universal_converter.get_conversion_functions(datetime)
+    assert to_arrow(None) is None
+
+
+def test_tz_less_arrow_timestamp_read_as_utc_aware():
+    """Reading a tz-less Arrow timestamp column produces UTC-aware datetimes.
+
+    PyArrow returns naive datetimes for tz-less columns via .as_py().  The
+    converter must attach UTC so the values can be round-tripped through
+    python_dicts_to_arrow_table without triggering the naive-datetime guard.
+    """
+    converter = get_default_context().type_converter
+    naive_ts = datetime(2024, 5, 1, 9, 0, 0)  # naive — no tzinfo
+    table = pa.table({"ts": pa.array([naive_ts], type=pa.timestamp("us"))})
+
+    rows_out = converter.arrow_table_to_python_dicts(table)
+    result = rows_out[0]["ts"]
+
+    # Must be timezone-aware (UTC) so it can be stored back via the converter
+    assert result.tzinfo is not None
+    assert result == datetime(2024, 5, 1, 9, 0, 0, tzinfo=timezone.utc)
+
+
 def test_datetime_round_trip():
     converter = get_default_context().type_converter
     ts = datetime(2024, 3, 15, 10, 30, 45, 123456, tzinfo=timezone.utc)
