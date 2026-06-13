@@ -88,8 +88,7 @@ def _get_python_to_arrow_map() -> dict:
         "float64": pa.float64(),
         # Date/time types
         "date": pa.date32(),
-        "datetime": pa.timestamp("us"),
-        "timestamp": pa.timestamp("us"),
+        "datetime": pa.timestamp("us", tz="UTC"),
         datetime: pa.timestamp("us", tz="UTC"),
     }
 
@@ -750,12 +749,13 @@ class UniversalTypeConverter:
 
         # Create conversion function based on type
 
-        # datetime must be intercepted before the `origin is None` catch-all
-        # below, which would silently pass through naive datetimes.
+        # Without this guard, datetime would reach the `origin is None` catch-all
+        # below and be returned as a no-op passthrough — silently allowing naive
+        # datetimes to flow into PyArrow and fail with a cryptic ArrowInvalid error.
         if python_type is datetime:
 
             def _convert_datetime(dt: datetime) -> datetime:
-                if dt.tzinfo is None:
+                if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
                     raise ValueError(
                         "Naive datetime (no timezone info) is not supported. "
                         "Use a timezone-aware datetime, "
