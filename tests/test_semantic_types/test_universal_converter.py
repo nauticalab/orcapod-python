@@ -8,6 +8,7 @@ import pytest
 
 from orcapod.contexts import get_default_context
 from orcapod.semantic_types import universal_converter
+from orcapod.semantic_types.universal_converter import UniversalTypeConverter
 
 
 def test_python_type_to_arrow_type_basic():
@@ -72,8 +73,9 @@ def test_datetime_converter_accepts_aware():
 def test_datetime_converter_accepts_non_utc_aware():
     """Non-UTC timezone-aware datetimes pass through the converter unchanged.
 
-    PyArrow coerces the value to UTC when writing to a pa.timestamp("us", tz="UTC")
-    column; the converter itself does not normalise — it only rejects naive datetimes.
+    PyArrow normalises the value to UTC when writing to a pa.timestamp("us", tz="UTC")
+    column; the converter itself does not normalise — it only enforces the timezone
+    policy for naive datetimes.
     """
     import zoneinfo
 
@@ -90,23 +92,41 @@ def test_datetime_converter_passes_none_through():
     assert to_arrow(None) is None
 
 
-def test_tz_less_arrow_timestamp_read_as_utc_aware():
-    """Reading a tz-less Arrow timestamp column produces UTC-aware datetimes.
+def test_tz_less_arrow_timestamp_reads_as_naive():
+    """Reading a tz-less Arrow timestamp column produces naive (timezone-less) datetimes.
 
-    PyArrow returns naive datetimes for tz-less columns via .as_py().  The
-    converter must attach UTC so the values can be round-tripped through
-    python_dicts_to_arrow_table without triggering the naive-datetime guard.
+    PyArrow's ``.as_py()`` on a tz-less timestamp returns a naive datetime.  The
+    converter passes it through unchanged — no UTC attachment.  To write these values
+    back via the converter use the ``"coerce_utc"`` timezone policy, or attach timezone
+    info manually before calling ``python_dicts_to_arrow_table``.
     """
     converter = get_default_context().type_converter
-    naive_ts = datetime(2024, 5, 1, 9, 0, 0)  # naive — no tzinfo
+    naive_ts = datetime(2024, 5, 1, 9, 0, 0)
     table = pa.table({"ts": pa.array([naive_ts], type=pa.timestamp("us"))})
 
     rows_out = converter.arrow_table_to_python_dicts(table)
     result = rows_out[0]["ts"]
 
-    # Must be timezone-aware (UTC) so it can be stored back via the converter
-    assert result.tzinfo is not None
-    assert result == datetime(2024, 5, 1, 9, 0, 0, tzinfo=timezone.utc)
+    assert result.tzinfo is None
+    assert result == datetime(2024, 5, 1, 9, 0, 0)
+
+
+def test_datetime_coerce_utc_converts_naive():
+    """coerce_utc policy attaches timezone.utc to naive datetimes instead of raising."""
+    converter = UniversalTypeConverter(datetime_timezone="coerce_utc")
+    to_arrow = converter.get_python_to_arrow_converter(datetime)
+    naive = datetime(2024, 1, 15, 12, 30, 45, 123456)
+    result = to_arrow(naive)
+    assert result == datetime(2024, 1, 15, 12, 30, 45, 123456, tzinfo=timezone.utc)
+
+
+def test_datetime_coerce_utc_preserves_aware():
+    """coerce_utc policy leaves already-aware datetimes unchanged."""
+    converter = UniversalTypeConverter(datetime_timezone="coerce_utc")
+    to_arrow = converter.get_python_to_arrow_converter(datetime)
+    aware = datetime(2024, 1, 15, 12, 30, 45, 123456, tzinfo=timezone.utc)
+    result = to_arrow(aware)
+    assert result == aware
 
 
 def test_datetime_round_trip():
