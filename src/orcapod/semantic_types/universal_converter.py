@@ -146,8 +146,26 @@ class UniversalTypeConverter:
     - Integration with semantic type registries
     """
 
-    def __init__(self, semantic_registry: SemanticTypeRegistry | None = None):
+    def __init__(
+        self,
+        semantic_registry: SemanticTypeRegistry | None = None,
+        datetime_timezone: typing.Literal["strict", "coerce_utc"] = "strict",
+    ):
+        """
+        Args:
+            semantic_registry: Optional registry of semantic type converters.
+            datetime_timezone: How to handle naive (timezone-less) ``datetime``
+                values when converting Python → Arrow.
+
+                ``"strict"`` (default) — raise ``ValueError`` immediately so
+                callers are forced to be explicit about timezone semantics.
+
+                ``"coerce_utc"`` — silently attach ``timezone.utc`` to naive
+                datetimes before writing to Arrow.  Use this when you know that
+                all naive datetimes in your data represent UTC.
+        """
         self.semantic_registry = semantic_registry
+        self._datetime_timezone = datetime_timezone
 
         # Cache for created TypedDict classes
         self._struct_signature_to_typeddict: dict[pa.StructType, DataType] = {}
@@ -753,18 +771,24 @@ class UniversalTypeConverter:
         # below and be returned as a no-op passthrough — silently allowing naive
         # datetimes to flow into PyArrow and fail with a cryptic ArrowInvalid error.
         if python_type is datetime:
+            _tz_policy = self._datetime_timezone
 
             def _convert_datetime(dt: datetime) -> datetime:
+                # Pass None through so PyArrow enforces nullability at the schema
+                # level — consistent with all other primitive converters.
                 if dt is None:
-                    # Pass None through to PyArrow so it enforces nullability
-                    # the same way all other primitive converters do.
                     return None  # type: ignore[return-value]
-                if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
-                    raise ValueError(
-                        "Naive datetime (no timezone info) is not supported. "
-                        "Use a timezone-aware datetime, "
-                        f"e.g. datetime.now(timezone.utc). Got: {dt!r}"
-                    )
+                _is_naive = dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None
+                if _is_naive:
+                    if _tz_policy == "strict":
+                        raise ValueError(
+                            "Naive datetime (no timezone info) is not supported "
+                            "under the current 'strict' timezone policy. "
+                            "Use a timezone-aware datetime, "
+                            f"e.g. datetime.now(timezone.utc). Got: {dt!r}"
+                        )
+                    # coerce_utc: attach UTC so the value is treated as UTC.
+                    return dt.replace(tzinfo=timezone.utc)
                 return dt
 
             return _convert_datetime
@@ -951,15 +975,10 @@ class UniversalTypeConverter:
             )
 
         elif pa.types.is_timestamp(arrow_type):
-            if arrow_type.tz is None:
-                # PyArrow's .as_py() on a tz-less timestamp returns a naive
-                # datetime.  Attach UTC so the value can be round-tripped back
-                # through python_dicts_to_arrow_table without triggering the
-                # naive-datetime guard.
-                return lambda value: (
-                    value.replace(tzinfo=timezone.utc) if value is not None else None
-                )
-            # tz-bearing timestamps: PyArrow already returns an aware datetime.
+            # PyArrow's .as_py() already returns the right Python type:
+            # - tz-less timestamp  → naive datetime
+            # - tz-bearing timestamp → aware datetime (UTC or localised)
+            # No additional conversion is needed in either case.
             return lambda value: value
 
         else:
