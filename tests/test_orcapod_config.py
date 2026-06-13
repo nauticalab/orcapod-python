@@ -264,11 +264,12 @@ class TestLoadConfig:
         result = load_config(user_config_path=user_cfg, project_config_path=project_cfg)
         assert result.hashing.system_tag_n_char == 10
 
-    def test_project_local_can_reset_field_to_default(self, tmp_path):
-        """Project-local file can explicitly reset a field to its default value.
+    def test_project_local_wins_over_user_global_with_explicit_value(self, tmp_path):
+        """Project-local file wins over user-global file when both set an explicit value.
 
-        Verifies that a higher-precedence file setting a value equal to the
-        built-in default still wins over a lower-precedence non-default.
+        The built-in default is now ``None``, which cannot be expressed in TOML, so
+        this test verifies the simpler (and still meaningful) case: project value 12
+        beats user value 6.
         """
         from orcapod.config import load_config
 
