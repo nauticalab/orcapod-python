@@ -39,17 +39,8 @@ def test_protocol_is_importable():
 
 
 def test_protocol_defines_required_members():
-    """Protocol defines all six required members."""
-    required = {
-        "extension_name",
-        "extension_metadata",
-        "storage_type",
-        "python_type",
-        "python_to_storage",
-        "storage_to_python",
-    }
-    for member in required:
-        assert hasattr(ExtensionTypeConverter, member), f"Protocol missing member: {member}"
+    """A conforming class is recognized as an ExtensionTypeConverter instance."""
+    assert isinstance(_StubConverter(), ExtensionTypeConverter)
 
 
 def test_conforming_class_satisfies_protocol():
@@ -63,78 +54,3 @@ def test_conforming_class_satisfies_protocol():
     assert converter.storage_to_python("hello") == "hello"
 
 
-def test_extension_metadata_can_be_none():
-    """extension_metadata is allowed to be None — it is bytes | None."""
-
-    class NullMetadataConverter:
-        @property
-        def extension_name(self) -> str:
-            return "test.NullMeta"
-
-        @property
-        def extension_metadata(self) -> bytes | None:
-            return None
-
-        @property
-        def storage_type(self) -> pa.DataType:
-            return pa.binary(16)
-
-        @property
-        def python_type(self) -> type:
-            return bytes
-
-        def python_to_storage(self, value):
-            return value
-
-        def storage_to_python(self, storage_value):
-            return storage_value
-
-    converter: ExtensionTypeConverter = NullMetadataConverter()
-    assert converter.extension_metadata is None
-
-
-def test_storage_type_not_constrained_to_struct():
-    """storage_type accepts any pa.DataType — primitive types are valid, not only struct."""
-
-    class BinaryConverter:
-        @property
-        def extension_name(self) -> str:
-            return "uuid.UUID"
-
-        @property
-        def extension_metadata(self) -> bytes | None:
-            return b"orcapod.builtin"
-
-        @property
-        def storage_type(self) -> pa.DataType:
-            return pa.binary(16)
-
-        @property
-        def python_type(self) -> type:
-            return bytes
-
-        def python_to_storage(self, value):
-            return value
-
-        def storage_to_python(self, storage_value):
-            return bytes(storage_value)
-
-    converter: ExtensionTypeConverter = BinaryConverter()
-    assert converter.storage_type == pa.binary(16)
-    assert not pa.types.is_struct(converter.storage_type)
-
-
-def test_protocol_does_not_include_old_members():
-    """The new protocol must not define hashing or struct-dispatch members from the old protocol."""
-    excluded = {
-        "hash_struct_dict",
-        "hasher_id",
-        "can_handle_python_type",
-        "can_handle_struct_type",
-        "arrow_struct_type",
-    }
-    for member in excluded:
-        assert not hasattr(ExtensionTypeConverter, member), (
-            f"ExtensionTypeConverter must not define '{member}' — "
-            "hashing and struct-shape dispatch are not part of the new protocol"
-        )

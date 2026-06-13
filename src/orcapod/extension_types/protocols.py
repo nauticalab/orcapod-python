@@ -12,12 +12,13 @@ Note:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     import pyarrow as pa
 
 
+@runtime_checkable
 class ExtensionTypeConverter(Protocol):
     """Protocol for Arrow/Polars extension-type-backed converters.
 
@@ -46,12 +47,12 @@ class ExtensionTypeConverter(Protocol):
         ...
 
     @property
-    def extension_metadata(self) -> "bytes | None":
+    def extension_metadata(self) -> bytes | None:
         """Category tag; stored as ``ARROW:extension:metadata``. May be ``None``."""
         ...
 
     @property
-    def storage_type(self) -> "pa.DataType":
+    def storage_type(self) -> pa.DataType:
         """Underlying Arrow storage type. Any ``pa.DataType`` is valid."""
         ...
 
