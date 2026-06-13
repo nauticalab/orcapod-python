@@ -49,6 +49,21 @@ def test_datetime_converter_accepts_aware():
     assert result == aware
 
 
+def test_datetime_converter_accepts_non_utc_aware():
+    """Non-UTC timezone-aware datetimes pass through the converter unchanged.
+
+    PyArrow coerces the value to UTC when writing to a pa.timestamp("us", tz="UTC")
+    column; the converter itself does not normalise — it only rejects naive datetimes.
+    """
+    import zoneinfo
+
+    to_arrow, _ = universal_converter.get_conversion_functions(datetime)
+    eastern = zoneinfo.ZoneInfo("America/New_York")
+    non_utc = datetime(2024, 1, 15, 12, 30, 45, tzinfo=eastern)
+    result = to_arrow(non_utc)
+    assert result == non_utc  # converter passes through unchanged
+
+
 def test_python_type_to_arrow_type_numpy():
     assert universal_converter.python_type_to_arrow_type(np.int32) == pa.int32()
     assert universal_converter.python_type_to_arrow_type(np.float64) == pa.float64()
