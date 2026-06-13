@@ -113,7 +113,44 @@ Schema compatibility checks exist at **write** time only:
 
 Neither check understands extension types.
 
-### 1.7 Existing test suite for the old system
+### 1.7 Two parallel hashing systems for semantic types
+
+There are **two fully independent codepaths** that hash semantic type values. Both exist today and contain logically redundant file-opening/hashing logic for `Path` and `UPath`.
+
+**Path 1 — Arrow table hashing (data packet signature in FunctionNode)**
+
+Call chain: `SemanticArrowHasher.hash_table(table)` → `_process_table_columns(table)` → creates `SemanticHashingVisitor(self.semantic_registry)` per column → `visitor.visit(field.type, value)` → `visit_struct(struct_type, data)` → `registry.get_converter_for_struct_signature(struct_type)` → `converter.hash_struct_dict(data)` → returns `(pa.large_string(), hash_string)`.
+
+For `PythonPathStructConverter.hash_struct_dict({"path": "/foo"})`:
+1. Extract path string from struct dict
+2. Call `self._file_hasher.hash_file(Path("/foo"))` → `ContentHash`
+3. Return `"path:sha256:<hex>"`
+
+For `UUIDStructConverter.hash_struct_dict({"uuid": b'\x00...'})`:
+1. Extract raw bytes from struct dict
+2. Call `self._compute_content_hash(bytes(raw))` → `ContentHash`
+3. Return `"uuid:sha256:<hex>"`
+
+**Path 2 — Python-level hashing (pipeline identity / content_hash)**
+
+Call chain: `BaseSemanticHasher.hash_object(Path("/foo"))` → `self._registry.get_handler(obj)` (MRO lookup) → `PathContentHandler.handle(path, hasher)` → `self.file_hasher.hash_file(path)` → returns `ContentHash`.
+
+For `BaseSemanticHasher.hash_object(uuid.UUID(...))`:
+`UUIDHandler.handle(uuid_val, hasher)` → returns `uuid_val.bytes` (raw 16 bytes) → `BaseSemanticHasher` hashes those bytes → `ContentHash`.
+
+**The redundancy**: Both paths open the file and hash content for a `Path` value — but through completely separate implementations in `semantic_struct_converters.py` (Path 1) and `hashing/semantic_hashing/builtin_handlers.py` (Path 2). The `file_hasher` is injected separately in each (into `PathStructConverterBase.__init__` and `PathContentHandler.__init__`).
+
+**Key files involved:**
+- `hashing/visitors.py` — `SemanticHashingVisitor` (Path 1 visitor logic)
+- `hashing/arrow_hashers.py` — `SemanticArrowHasher` (Path 1 entry point)
+- `hashing/semantic_hashing/builtin_handlers.py` — `PathContentHandler`, `UPathContentHandler`, `UUIDHandler` (Path 2 handlers)
+- `hashing/semantic_hashing/semantic_hasher.py` — `BaseSemanticHasher` (Path 2 entry point)
+- `hashing/semantic_hashing/type_handler_registry.py` — `TypeHandlerRegistry`, `BuiltinTypeHandlerRegistry`
+- `semantic_types/semantic_struct_converters.py` — `PathStructConverterBase.hash_struct_dict`, `UUIDStructConverter.hash_struct_dict`
+
+**Proposed unification** (captured in the gap analyses below): The new `SemanticTypeConverter` protocol should add a `hash_python_value(value) -> ContentHash` method. When a converter is registered in `SemanticTypeRegistry`, it auto-registers a thin `TypeHandler` wrapper in the linked `TypeHandlerRegistry`. The `SemanticHashingVisitor` is updated to call `converter.hash_python_value(converter.storage_to_python(storage_value))` instead of `converter.hash_struct_dict(struct_dict)`. The standalone `PathContentHandler`, `UPathContentHandler`, and `UUIDHandler` in `builtin_handlers.py` are then redundant and removed.
+
+### 1.8 Existing test suite for the old system
 
 `tests/test_semantic_types/` contains ~2,650 lines covering the shape-based system:
 
@@ -140,9 +177,10 @@ All of these test the old shape-based system and must be removed as part of the 
 **Gaps / nuance to add to description:**
 
 1. The existing protocol is `SemanticStructConverterProtocol` in `protocols/semantic_types_protocols.py` — the issue description should name this file and the current class name so it's clear what's being replaced.
-2. The `hash_struct_dict` / `hasher_id` methods exist on the current protocol. The new protocol drops them (hashing is handled externally in the semantic hasher layer, which uses the converter via `TypeHandlerRegistry`, not directly). The issue description should explicitly say these are removed.
+2. The `hash_struct_dict` / `hasher_id` methods exist on the current protocol. The new protocol drops them — but NOT because hashing is removed. See item 5 below.
 3. `can_handle_python_type` / `can_handle_struct_type` are also removed — identity is now explicit via `extension_name`, not shape-checked.
 4. The base class `SemanticStructConverterBase` in `semantic_struct_converters.py` (providing `_compute_content_hash`, `_format_semantic_hash`) will be removed or significantly reduced.
+5. **Hashing unification**: Add `hash_python_value(value: PythonType) -> ContentHash` to the new protocol. This method is the single authoritative hash implementation for a semantic type value — it is called by BOTH the Arrow table hashing path (via `SemanticHashingVisitor`) AND the Python-level hashing path (via an auto-registered `TypeHandler`). The `file_hasher` dependency (needed for `Path`/`UPath`) is injected at converter construction time, keeping the method signature clean. This replaces the current `hash_struct_dict` (Arrow side) and `PathContentHandler`/`UUIDHandler` in `builtin_handlers.py` (Python side), which implement the same logic redundantly.
 
 **Verdict:** Accurately scoped. Add the above nuances to the description.
 
@@ -157,6 +195,7 @@ All of these test the old shape-based system and must be removed as part of the 
 3. `get_semantic_field_info(schema)` — also struct-shape-based, same fate.
 4. **Import-time registration vs. the context system**: The `SemanticTypeRegistry` is currently instantiated via the JSON context system (`contexts/registry.py` → `JSONDataContextRegistry` → `DataContext.type_converter`). The `UniversalTypeConverter` holds a `semantic_registry` reference. How does "auto-register at import time" interact with this? Recommendation: the built-in registrations (Path, UPath, UUID) happen when `orcapod` is imported by calling into a global or default registry; the context system either references the same global registry or is updated to wire it correctly. This detail should be noted in PLT-1653.
 5. The `_name_to_converter` dict (keyed by semantic type name string) should map to `extension_name` in the new design since that IS the converter's unique key.
+6. **Hashing unification**: `SemanticTypeRegistry.register(converter)` must also auto-register a thin `TypeHandler` wrapper in a linked `TypeHandlerRegistry`. The wrapper simply calls `converter.hash_python_value(value)`. This means `SemanticTypeRegistry` needs to hold a reference to a `TypeHandlerRegistry` (passed at construction or wired via `DataContext`). The auto-registration eliminates the need for standalone `PathContentHandler`, `UPathContentHandler`, and `UUIDHandler` entries in `builtin_handlers.py` — those are removed in PLT-1660.
 
 **Verdict:** Accurately scoped. Add the above nuances.
 
@@ -196,9 +235,14 @@ Replace "database base class" with the following approach:
 3. For UUID new storage (`pa.binary(16)`): `pa.binary(16)` is fine since `binary(16)` is a fixed-size binary and doesn't have the Polars string_view concern. Keep as `pa.binary(16)` (or explicitly document the choice).
 4. `PythonPathStructConverter` / `UPathStructConverter` subclass `PathStructConverterBase` which subclasses `SemanticStructConverterBase`. These inheritance chains will be removed when the protocol changes in PLT-1652.
 5. `UUIDStructConverter` similarly subclasses `SemanticStructConverterBase`. Both the base class and the UUID converter will be rewritten from scratch.
-6. The `file_hasher` dependency on `PathStructConverterBase` (for `hash_struct_dict`) disappears when `hash_struct_dict` is removed from the protocol.
+6. The `file_hasher` dependency on `PathStructConverterBase` (for `hash_struct_dict`) is retained but repurposed: the new converters inject `file_hasher` at construction for use in `hash_python_value`, not `hash_struct_dict` (which is removed).
+7. **Hashing unification**: Each new converter must implement `hash_python_value`:
+   - `PathConverter.hash_python_value(path)` → `self._file_hasher.hash_file(path)` → `ContentHash`
+   - `UPathConverter.hash_python_value(upath)` → `self._file_hasher.hash_file(upath)` → `ContentHash`
+   - `UUIDConverter.hash_python_value(uuid_val)` → `ContentHash(method="sha256", digest=sha256(uuid_val.bytes).digest())`
+8. **Update `SemanticHashingVisitor`** (`hashing/visitors.py`): The visitor currently recognises semantic types by struct shape (`visit_struct` checks `registry.get_converter_for_struct_signature`). After extension types land, semantic types arrive as `pa.ExtensionType`, not structs. Add a `visit_extension(extension_type, storage_value)` abstract method to `ArrowTypeDataVisitor`, and override in `SemanticHashingVisitor` to: look up converter by `extension_type.extension_name` → `converter.storage_to_python(storage_value)` → `converter.hash_python_value(python_value)` → return `(pa.large_string(), content_hash.to_string())`. The old `visit_struct` semantic branch in `SemanticHashingVisitor` is removed.
 
-**Verdict:** Accurately scoped. Add storage type corrections and inheritance chain notes.
+**Verdict:** Accurately scoped. Add the above nuances.
 
 ---
 
@@ -260,6 +304,11 @@ Also update `UniversalTypeConverter` references — the `has_dataclass_type_sent
 4. `SemanticStructConverterProtocol` in `protocols/semantic_types_protocols.py` — gone (replaced by the new `SemanticTypeConverter` protocol from PLT-1652).
 5. `find_semantic_fields_in_schema` / `get_semantic_field_info` on `SemanticTypeRegistry` — gone.
 6. The `UniversalTypeConverter` has_dataclass_type_sentinel checks and the struct-branch semantic registry lookup — gone (replaced by extension type dispatch, see new issue below).
+7. **Hashing unification**: Remove from `hashing/semantic_hashing/builtin_handlers.py`:
+   - `PathContentHandler` — replaced by auto-registered handler from `PathConverter.hash_python_value`
+   - `UPathContentHandler` — replaced by auto-registered handler from `UPathConverter.hash_python_value`
+   - `UUIDHandler` — replaced by auto-registered handler from `UUIDConverter.hash_python_value`
+   These three handlers are no longer registered in `register_builtin_handlers()` since the `SemanticTypeRegistry` auto-registers equivalent handlers when converters are registered. Remove from `register_builtin_handlers()` and delete the classes.
 
 **Verdict:** Accurately scoped. Add the explicit list of files/methods deleted.
 
