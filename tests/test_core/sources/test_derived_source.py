@@ -415,11 +415,11 @@ class TestDerivedSourceId:
         sid = src.source_id
         assert "/" in sid  # path separator from pipeline_path
 
-    def test_source_id_contains_content_hash_fragment(self):
+    def test_source_id_contains_full_content_hash(self):
         node = _make_node(n=3)
         src = node.as_source()
-        content_frag = node.content_hash().to_string()[:16]
-        assert content_frag in src.source_id
+        full_hash = node.content_hash().to_string()
+        assert full_hash in src.source_id
 
     def test_different_nodes_different_source_ids(self):
         node_a = _make_node(n=3)
