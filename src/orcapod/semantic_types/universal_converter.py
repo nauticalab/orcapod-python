@@ -15,8 +15,8 @@ import hashlib
 import logging
 import types
 import typing
-from datetime import datetime, timezone
 from collections.abc import Callable, Mapping
+from datetime import datetime
 
 # Handle generic types
 from typing import TYPE_CHECKING, Any, TypedDict, get_args, get_origin
