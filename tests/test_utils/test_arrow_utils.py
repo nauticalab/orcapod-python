@@ -278,12 +278,16 @@ class TestSystemTagColumnNames:
     def test_col_names_match_add_system_tag_columns_output(self):
         """Column names from system_tag_column_names() must match those
         added to a table by add_system_tag_columns()."""
+        import uuid
+
         import pyarrow as pa
         from orcapod.utils.arrow_utils import add_system_tag_columns, system_tag_column_names
 
         schema_hash = "testhash"
         table = pa.table({"id": pa.array([1]), "v": pa.array([1.0])})
-        enriched = add_system_tag_columns(table, schema_hash, ["src_a"], ["row_0"])
+        enriched = add_system_tag_columns(
+            table, schema_hash, ["src_a"], [uuid.uuid4().bytes]
+        )
         src_col, rec_col = system_tag_column_names(schema_hash)
         assert src_col in enriched.column_names
         assert rec_col in enriched.column_names

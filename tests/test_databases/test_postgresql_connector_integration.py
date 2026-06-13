@@ -195,7 +195,7 @@ class TestGetColumnInfo:
         assert infos["f"].arrow_type == pa.float64()
         assert infos["g"].arrow_type == pa.large_string()
         assert infos["h"].arrow_type == pa.large_binary()
-        assert infos["i"].arrow_type == pa.large_string()  # TODO: PLT-1162
+        assert infos["i"].arrow_type == pa.binary(16)
         assert infos["j"].arrow_type == pa.large_string()
         assert infos["k"].arrow_type == pa.date32()
         assert infos["l"].arrow_type == pa.timestamp("us")

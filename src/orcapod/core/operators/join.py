@@ -101,13 +101,13 @@ class Join(NonZeroInputOperator):
         system_tag_fields: dict[str, type] = {}
         for idx, stream in enumerate(ordered_streams):
             stream_tag_schema, _ = stream.output_schema(columns={"system_tags": True})
-            for col_name in stream_tag_schema:
+            for col_name, col_type in stream_tag_schema.items():
                 if col_name.startswith(constants.SYSTEM_TAG_PREFIX):
                     new_name = (
                         f"{col_name}{constants.BLOCK_SEPARATOR}"
                         f"{stream.pipeline_hash().to_hex(n_char)}:{idx}"
                     )
-                    system_tag_fields[new_name] = str
+                    system_tag_fields[new_name] = col_type
         return Schema(system_tag_fields)
 
     def static_process(self, *streams: StreamProtocol) -> StreamProtocol:
@@ -699,7 +699,7 @@ class Join(NonZeroInputOperator):
                 sid_val = merged_sys.get(fmap.get(sid_field, ""))
                 rid_val = merged_sys.get(fmap.get(rid_field, ""))
                 vals = {ft: merged_sys[k] for ft, k in fmap.items()}
-                entries.append(((sid_val or "", rid_val or ""), vals))
+                entries.append(((sid_val or "", rid_val or b""), vals))
 
             entries.sort(key=lambda e: e[0])
 

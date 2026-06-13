@@ -8,6 +8,7 @@ and ``CachedFunctionPod`` delegate to a ``ResultCache`` instance.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -124,7 +125,9 @@ class ResultCache:
                 [(constants.POD_TIMESTAMP, "descending")]
             ).take([0])
 
-        record_id = result_table.to_pylist()[0][RECORD_ID_COL]
+        record_id_bytes = result_table.to_pylist()[0][RECORD_ID_COL]
+        # Convert bytes back to uuid.UUID (stored as binary(16) in the DB)
+        record_uuid = uuid.UUID(bytes=bytes(record_id_bytes)) if record_id_bytes is not None else None
         # Drop lookup columns from the returned data
         drop_cols = [RECORD_ID_COL] + [
             c for c in constraints if c in result_table.column_names
@@ -133,7 +136,7 @@ class ResultCache:
 
         return Data(
             result_table,
-            record_id=record_id,
+            record_uuid=record_uuid,
             meta_info={self.RESULT_COMPUTED_FLAG: False},
         )
 
@@ -201,7 +204,7 @@ class ResultCache:
 
         self._result_database.add_record(
             self._record_path,
-            output_data.datagram_id,
+            output_data.datagram_uuid.bytes,
             data_table,
             skip_duplicates=skip_duplicates,
         )

@@ -20,6 +20,7 @@ Principles
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Collection, Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Self, cast
 
@@ -66,7 +67,7 @@ class Datagram(ContentIdentifiableBase):
         data: Mapping[str, DataValue] | pa.Table | pa.RecordBatch,
         python_schema: SchemaLike | None = None,
         meta_info: Mapping[str, DataValue] | None = None,
-        record_id: str | None = None,
+        record_uuid: uuid.UUID | None = None,
         data_context: str | contexts.DataContext | None = None,
         config: OrcapodConfig | None = None,
     ) -> None:
@@ -74,10 +75,10 @@ class Datagram(ContentIdentifiableBase):
             data = pa.Table.from_batches([data])
 
         if isinstance(data, pa.Table):
-            self._init_from_table(data, meta_info, data_context, record_id)
+            self._init_from_table(data, meta_info, data_context, record_uuid)
         else:
             self._init_from_dict(
-                data, python_schema, meta_info, data_context, record_id
+                data, python_schema, meta_info, data_context, record_uuid
             )
 
     def _init_from_dict(
@@ -86,7 +87,7 @@ class Datagram(ContentIdentifiableBase):
         python_schema: SchemaLike | None,
         meta_info: Mapping[str, DataValue] | None,
         data_context: str | contexts.DataContext | None,
-        record_id: str | None,
+        record_uuid: uuid.UUID | None,
     ) -> None:
         data_columns: dict[str, DataValue] = {}
         meta_columns: dict[str, DataValue] = {}
@@ -102,7 +103,7 @@ class Datagram(ContentIdentifiableBase):
                 data_columns[k] = v
 
         super().__init__(data_context=data_context or extracted_context)
-        self._datagram_id = record_id
+        self._datagram_uuid = record_uuid
 
         self._data_dict: dict[str, DataValue] | None = data_columns
         self._data_table: pa.Table | None = None
@@ -134,7 +135,7 @@ class Datagram(ContentIdentifiableBase):
         table: pa.Table,
         meta_info: Mapping[str, DataValue] | None,
         data_context: str | contexts.DataContext | None,
-        record_id: str | None,
+        record_uuid: uuid.UUID | None,
     ) -> None:
         if len(table) != 1:
             raise ValueError(
@@ -150,7 +151,7 @@ class Datagram(ContentIdentifiableBase):
         context_cols = [c for c in table.column_names if c == constants.CONTEXT_KEY]
 
         super().__init__(data_context=data_context)
-        self._datagram_id = record_id
+        self._datagram_uuid = record_uuid
 
         meta_col_names = [
             c for c in table.column_names if c.startswith(constants.META_PREFIX)
@@ -426,11 +427,19 @@ class Datagram(ContentIdentifiableBase):
         return self._ensure_data_table()
 
     @property
-    def datagram_id(self) -> str:
-        """Return (or lazily generate) the datagram's unique ID."""
-        if self._datagram_id is None:
-            self._datagram_id = str(uuid7())
-        return self._datagram_id
+    def datagram_uuid(self) -> uuid.UUID:
+        """Return (or lazily generate) the datagram's unique UUID."""
+        if self._datagram_uuid is None:
+            # uuid_utils is used here because it provides UUIDv7 (time-ordered,
+            # monotonic) generation, which is not available in the stdlib before
+            # Python 3.12.  However, uuid_utils.UUID and stdlib uuid.UUID are
+            # distinct types that do not compare equal even for identical bit
+            # patterns.  We therefore normalise to stdlib uuid.UUID immediately
+            # so that the public API always returns a consistent type and
+            # equality / hashing work correctly regardless of how a UUID was
+            # originally produced.
+            self._datagram_uuid = uuid.UUID(bytes=uuid7().bytes)
+        return self._datagram_uuid
 
     @property
     def converter(self) -> TypeConverterProtocol:
@@ -763,7 +772,7 @@ class Datagram(ContentIdentifiableBase):
         new_d._cached_int_hash = None
 
         # Datagram identity
-        new_d._datagram_id = self._datagram_id if preserve_id else None
+        new_d._datagram_uuid = self._datagram_uuid if preserve_id else None
 
         # Data representations — Arrow table is immutable so a ref copy is fine
         new_d._data_table = self._data_table

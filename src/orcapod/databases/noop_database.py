@@ -35,7 +35,7 @@ class NoOpArrowDatabase:
     def add_record(
         self,
         record_path: tuple[str, ...],
-        record_id: str,
+        record_id: str | bytes,
         record: "pa.Table",
         skip_duplicates: bool = False,
         flush: bool = False,
@@ -55,7 +55,7 @@ class NoOpArrowDatabase:
     def get_record_by_id(
         self,
         record_path: tuple[str, ...],
-        record_id: str,
+        record_id: str | bytes,
         record_id_column: str | None = None,
         flush: bool = False,
     ) -> "pa.Table | None":
@@ -71,7 +71,7 @@ class NoOpArrowDatabase:
     def get_records_by_ids(
         self,
         record_path: tuple[str, ...],
-        record_ids: Collection[str],
+        record_ids: Collection[str | bytes],
         record_id_column: str | None = None,
         flush: bool = False,
     ) -> "pa.Table | None":

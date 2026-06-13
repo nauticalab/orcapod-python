@@ -110,10 +110,10 @@ def test_hash_path_objects_content_based(converter, tmp_path):
 
 
 def test_hash_struct_dict_with_prefix(converter, tmp_path):
-    """Prefixed hash starts with 'path:sha256:'."""
+    """Hash always starts with 'path:sha256:'."""
     file = tmp_path / "file.txt"
     file.write_text("hello")
-    hash_str = converter.hash_struct_dict({"path": str(file)}, add_prefix=True)
+    hash_str = converter.hash_struct_dict({"path": str(file)})
     assert hash_str.startswith("path:sha256:")
 
 

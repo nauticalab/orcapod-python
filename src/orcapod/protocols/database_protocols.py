@@ -14,7 +14,7 @@ class ArrowDatabaseProtocol(Protocol):
     def add_record(
         self,
         record_path: tuple[str, ...],
-        record_id: str,
+        record_id: bytes,
         record: pa.Table,
         skip_duplicates: bool = False,
         flush: bool = False,
@@ -32,7 +32,7 @@ class ArrowDatabaseProtocol(Protocol):
     def get_record_by_id(
         self,
         record_path: tuple[str, ...],
-        record_id: str,
+        record_id: bytes,
         record_id_column: str | None = None,
         flush: bool = False,
     ) -> pa.Table | None: ...
@@ -48,7 +48,7 @@ class ArrowDatabaseProtocol(Protocol):
     def get_records_by_ids(
         self,
         record_path: tuple[str, ...],
-        record_ids: Collection[str],
+        record_ids: Collection[bytes],
         record_id_column: str | None = None,
         flush: bool = False,
     ) -> pa.Table | None: ...

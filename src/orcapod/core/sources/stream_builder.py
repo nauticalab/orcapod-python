@@ -8,6 +8,7 @@ tag columns, and wrapping the result in an ``ArrowTableStream``.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Collection
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -27,9 +28,20 @@ if TYPE_CHECKING:
 else:
     pa = LazyModule("pyarrow")
 
+# Namespace UUID for Orcapod source record IDs.
+# Derived as UUID v5 of NAMESPACE_URL + a stable Orcapod-specific URL so the
+# value is principled rather than an opaque hex literal.  This value is fixed for
+# the lifetime of the project — changing it would invalidate all existing stored
+# record IDs.
+# Computed value: uuid.UUID('877ec89b-6645-5852-ba37-a94604043f5e')
+_SOURCE_RECORD_ID_NAMESPACE = uuid.uuid5(
+    uuid.NAMESPACE_URL,
+    "https://orcapod.org/namespaces/source-record-id",
+)
 
-def _make_record_id(record_id_column: str | None, row_index: int, row: dict) -> str:
-    """Build the record-ID token for a single row.
+
+def _make_provenance_token(record_id_column: str | None, row_index: int, row: dict) -> str:
+    """Build the human-readable provenance token for a single row.
 
     When *record_id_column* is given the token is ``"{column}={value}"``,
     giving a stable, human-readable key that survives row reordering.
@@ -38,6 +50,28 @@ def _make_record_id(record_id_column: str | None, row_index: int, row: dict) -> 
     if record_id_column is not None:
         return f"{record_id_column}={row[record_id_column]}"
     return f"row_{row_index}"
+
+
+def _make_record_id(source_id: str, provenance_token: str) -> uuid.UUID:
+    """Build a stable record ID UUID from source_id and provenance token.
+
+    Uses UUID v5 (name-based, SHA-1) to produce a deterministic UUID from
+    the source identity and row provenance token. The result is stable across
+    runs for the same source_id and provenance_token.
+
+    Callers that need raw bytes for Arrow storage (``pa.binary(16)``)
+    should call ``.bytes`` on the returned UUID.
+
+    Args:
+        source_id: The canonical source identifier.
+        provenance_token: Human-readable per-row provenance key
+            (e.g. ``"row_0"`` or ``"col=value"``).
+
+    Returns:
+        A deterministic ``uuid.UUID`` identifying this (source, row) pair.
+    """
+    name = f"{source_id}::{provenance_token}"
+    return uuid.uuid5(_SOURCE_RECORD_ID_NAMESPACE, name)
 
 
 @dataclass(frozen=True)
@@ -141,12 +175,21 @@ class SourceStreamBuilder:
         if source_id is None:
             source_id = table_hash.to_hex(char_count=self._config.hashing.path_n_char)
 
-        # 7. Build per-row source-info strings.
+        # 7. Build per-row source-info strings and deterministic UUID record IDs.
         rows_as_dicts = table.to_pylist()
-        source_info = [
-            f"{source_id}{constants.BLOCK_SEPARATOR}"
-            f"{_make_record_id(record_id_column, i, row)}"
+        provenance_tokens = [
+            _make_provenance_token(record_id_column, i, row)
             for i, row in enumerate(rows_as_dicts)
+        ]
+        source_info = [
+            f"{source_id}{constants.BLOCK_SEPARATOR}{token}"
+            for token in provenance_tokens
+        ]
+        # Record IDs stored in the system tag column are stable UUID v5 bytes —
+        # deterministically derived from source_id and per-row provenance token.
+        # Same source_id + same row position/content → same record_id bytes.
+        record_id_values = [
+            _make_record_id(source_id, token).bytes for token in provenance_tokens
         ]
 
         # 8. Add source-info provenance columns.
@@ -155,10 +198,6 @@ class SourceStreamBuilder:
         )
 
         # 9. Add system tag columns.
-        record_id_values = [
-            _make_record_id(record_id_column, i, row)
-            for i, row in enumerate(rows_as_dicts)
-        ]
         table = arrow_utils.add_system_tag_columns(
             table,
             schema_hash,

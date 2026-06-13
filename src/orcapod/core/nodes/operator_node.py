@@ -795,7 +795,7 @@ class OperatorJobNode(OperatorNodeBase):
         output_table = output_table.add_column(
             0,
             self.HASH_COLUMN_NAME,
-            pa.array(record_hashes, type=pa.large_string()),
+            pa.array([h.encode() for h in record_hashes], type=pa.large_binary()),
         )
 
         # Store — record IDs are run-scoped (NODE_CONTENT_HASH_COL is included in

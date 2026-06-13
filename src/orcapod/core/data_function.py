@@ -4,6 +4,7 @@ import inspect
 import logging
 import re
 import sys
+import uuid
 from abc import abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 import typing
@@ -549,13 +550,13 @@ class PythonDataFunction(DataFunctionBase[PythonFunctionExecutorProtocol]):
             inner_parsed = [":".join(component) for component in components]
             return "::".join(inner_parsed)
 
-        record_id = str(uuid7())
-        source_info = {k: combine(self.uri, (record_id,), (k,)) for k in output_data}
+        new_record_uuid = uuid.UUID(bytes=uuid7().bytes)
+        source_info = {k: combine(self.uri, (new_record_uuid.hex,), (k,)) for k in output_data}
 
         return Data(
             output_data,
             source_info=source_info,
-            record_id=record_id,
+            record_uuid=new_record_uuid,
             python_schema=self.output_data_schema,
             data_context=self.data_context,
         )

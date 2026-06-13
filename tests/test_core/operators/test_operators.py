@@ -761,6 +761,55 @@ class TestJoinOutputSchemaSystemTags:
         assert dict(predicted_tag) == dict(actual_tag)
         assert dict(predicted_pkt) == dict(actual_pkt)
 
+    def test_output_schema_preserves_system_tag_col_types(self):
+        """_predict_system_tag_schema must carry col_type through unchanged.
+
+        The Schema stores Python types.  record_id system-tag columns are
+        stored as ``pa.binary(16)`` in Arrow, which maps to ``bytes`` in
+        the Python Schema.  source_id columns are ``pa.large_string()`` →
+        ``str``.  After a two-way join both Python types must survive — no
+        silent coercion to ``str`` for record_id.
+        """
+        from orcapod.core.sources.arrow_table_source import ArrowTableSource
+        from orcapod.system_constants import constants
+
+        src_a = ArrowTableSource(
+            pa.table(
+                {
+                    "id": pa.array([1, 2], type=pa.int64()),
+                    "alpha": pa.array([10, 20], type=pa.int64()),
+                }
+            ),
+            tag_columns=["id"],
+            infer_nullable=True,
+        )
+        src_b = ArrowTableSource(
+            pa.table(
+                {
+                    "id": pa.array([1, 2], type=pa.int64()),
+                    "beta": pa.array([100, 200], type=pa.int64()),
+                }
+            ),
+            tag_columns=["id"],
+            infer_nullable=True,
+        )
+
+        op = Join()
+        tag_schema, _ = op.output_schema(src_a, src_b, columns={"system_tags": True})
+
+        for col_name, col_type in tag_schema.items():
+            if not col_name.startswith(constants.SYSTEM_TAG_PREFIX):
+                continue
+            if col_name.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX):
+                assert col_type == bytes, (
+                    f"record_id column '{col_name}' should map to bytes, "
+                    f"got {col_type!r}"
+                )
+            else:
+                assert col_type == str, (
+                    f"source_id column '{col_name}' should map to str, got {col_type!r}"
+                )
+
 
 class TestSemiJoinBehavior:
     def test_semijoin_filters_left_by_right(self, left_stream, right_stream):
@@ -1382,7 +1431,8 @@ class TestJoinSystemTagCanonicalOrdering:
 
     def test_system_tag_values_are_per_row_source_provenance(self, three_sources):
         """System tag column values should reflect the source provenance.
-        source_id columns contain the source_id, record_id columns contain the record_id."""
+        source_id columns contain the source_id (str), record_id columns
+        contain the record_id (bytes, 16-byte binary)."""
         from orcapod.system_constants import constants
 
         src_a, src_b, src_c = three_sources
@@ -1395,8 +1445,19 @@ class TestJoinSystemTagCanonicalOrdering:
             values = result_table.column(col).to_pylist()
             assert len(values) == result_table.num_rows
             for val in values:
-                assert isinstance(val, str)
-                assert len(val) > 0
+                if col.startswith(constants.SYSTEM_TAG_RECORD_ID_PREFIX):
+                    # record_id columns store 16-byte UUID values
+                    assert isinstance(val, bytes), (
+                        f"record_id column {col!r} should contain bytes, got {type(val)}"
+                    )
+                    assert len(val) == 16, (
+                        f"record_id column {col!r} should be 16 bytes"
+                    )
+                else:
+                    # source_id and other system tag columns are large_string
+                    assert isinstance(val, str), (
+                        f"system tag column {col!r} should contain str, got {type(val)}"
+                    )
 
     def test_intermediate_operators_produce_different_stream_hash(self):
         """When sources pass through intermediate operators before Join,

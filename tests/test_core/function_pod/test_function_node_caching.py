@@ -85,14 +85,16 @@ def _make_node(stream, db=None):
 
 
 class TestComputePipelineEntryId:
-    def test_returns_non_empty_string(self):
+    def test_returns_non_empty_bytes(self):
         stream = _make_stream([{"id": 0, "x": 10}])
         node, _ = _make_node(stream)
         tag = Tag({"id": 0})
         data = Data({"x": 10})
         entry_id = node.compute_pipeline_entry_id(tag, data)
-        assert isinstance(entry_id, str)
+        assert isinstance(entry_id, bytes)
         assert len(entry_id) > 0
+        # Must be method-prefixed: b"{method}:{raw_digest}"
+        assert b":" in entry_id
 
     def test_same_inputs_produce_same_id(self):
         stream = _make_stream([{"id": 0, "x": 10}])

@@ -7,6 +7,7 @@ making semantic types visible in schemas and preserved through operations.
 
 from __future__ import annotations
 
+import uuid as _uuid_module
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -46,37 +47,33 @@ class SemanticStructConverterBase:
         """Default hasher ID based on semantic type name"""
         return self._hasher_id
 
-    def _format_hash_string(self, hash_bytes: bytes, add_prefix: bool = False) -> str:
-        """
-        Format hash bytes into the standard hash string format.
-
-        Args:
-            hash_bytes: Raw hash bytes
-            add_prefix: Whether to add semantic type and algorithm prefix
-
-        Returns:
-            Formatted hash string
-        """
-        hash_hex = hash_bytes.hex()
-        if add_prefix:
-            return f"{self.semantic_type_name}:sha256:{hash_hex}"
-        else:
-            return hash_hex
-
     def _compute_content_hash(self, content: bytes) -> ContentHash:
-        """
-        Compute SHA-256 hash of content bytes.
+        """Compute SHA-256 hash of content bytes.
 
         Args:
-            content: Content to hash
+            content: Content to hash.
 
         Returns:
-            SHA-256 hash bytes
+            ``ContentHash`` with ``method="sha256"`` and the raw digest.
         """
         import hashlib
 
         digest = hashlib.sha256(content).digest()
-        return ContentHash(method=f"{self.semantic_type_name}:sha256", digest=digest)
+        return ContentHash(method="sha256", digest=digest)
+
+    def _format_semantic_hash(self, content_hash: ContentHash) -> str:
+        """Format a ``ContentHash`` into the standard semantic hash string.
+
+        Always returns ``"{semantic_type_name}:{method}:{hex}"``,
+        e.g. ``"uuid:sha256:abc123"``.
+
+        Args:
+            content_hash: Hash to format.
+
+        Returns:
+            Formatted hash string with semantic type and algorithm prefix.
+        """
+        return f"{self.semantic_type_name}:{content_hash.to_string(prefix_method=True)}"
 
 
 class PathStructConverterBase(SemanticStructConverterBase, ABC):
@@ -148,17 +145,17 @@ class PathStructConverterBase(SemanticStructConverterBase, ABC):
             and isinstance(struct_dict[self._field_name], str)
         )
 
-    def hash_struct_dict(
-        self, struct_dict: dict[str, Any], add_prefix: bool = False
-    ) -> str:
+    def hash_struct_dict(self, struct_dict: dict[str, Any]) -> str:
         """Compute hash of a path semantic type by hashing the file content.
+
+        Returns a string of the form ``"{type}:{algorithm}:{hex}"``,
+        e.g. ``"path:sha256:abc123"``.
 
         Args:
             struct_dict: Dict with the path field containing a file path string.
-            add_prefix: If True, prefix with semantic type and algorithm info.
 
         Returns:
-            Hash string of the file content.
+            Hash string of the file content with semantic type and algorithm prefix.
 
         Raises:
             FileNotFoundError: If the path does not exist.
@@ -174,8 +171,8 @@ class PathStructConverterBase(SemanticStructConverterBase, ABC):
         if path.is_dir():
             raise IsADirectoryError(f"Path is a directory: {path}")
 
-        content_hash = self._file_hasher.hash_file(path)
-        return self._format_hash_string(content_hash.digest, add_prefix=add_prefix)
+        file_hash = self._file_hasher.hash_file(path)
+        return self._format_semantic_hash(file_hash)
 
 
 class PythonPathStructConverter(PathStructConverterBase):
@@ -218,3 +215,119 @@ class UPathStructConverter(PathStructConverterBase):
 
     def _make_path(self, path_str: str) -> UPath:
         return UPath(path_str)
+
+
+class UUIDStructConverter(SemanticStructConverterBase):
+    """Converter for ``uuid.UUID`` objects to/from Arrow semantic structs.
+
+    Stores UUIDs as fixed 16-byte binary values inside a single-field struct,
+    following the same pattern as ``PythonPathStructConverter`` and
+    ``UPathStructConverter``.
+
+    Note:
+        ``uuid_utils.UUID`` objects (e.g. from ``uuid7()``) are accepted via
+        duck typing because they expose a ``.bytes`` attribute but do not
+        inherit from ``uuid.UUID``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("uuid")
+        self._python_type = _uuid_module.UUID
+        self._arrow_struct_type = pa.struct([pa.field("uuid", pa.binary(16))])
+
+    @property
+    def python_type(self) -> type:
+        """The Python type this converter handles (``uuid.UUID``)."""
+        return self._python_type
+
+    @property
+    def arrow_struct_type(self) -> "pa.StructType":
+        """The Arrow struct type used for serialisation."""
+        return self._arrow_struct_type
+
+    def python_to_struct_dict(self, value: Any) -> dict[str, bytes]:
+        """Convert a UUID to a struct dictionary with a single ``uuid`` field.
+
+        Accepts both ``uuid.UUID`` instances and duck-typed UUID-compatible
+        objects (e.g. ``uuid_utils.UUID``) that expose a ``.bytes`` attribute
+        returning 16 raw bytes.
+
+        Args:
+            value: A ``uuid.UUID`` instance or compatible UUID-like object.
+
+        Returns:
+            A dict with a single key ``"uuid"`` whose value is 16 raw bytes.
+
+        Raises:
+            TypeError: If ``value`` is not a ``uuid.UUID`` instance or
+                compatible duck-typed UUID object.
+        """
+        if isinstance(value, _uuid_module.UUID):
+            return {"uuid": value.bytes}
+        # Accept uuid_utils.UUID and other duck-typed UUID objects
+        raw = getattr(value, "bytes", None)
+        if isinstance(raw, bytes) and len(raw) == 16:
+            return {"uuid": raw}
+        raise TypeError(
+            f"Expected uuid.UUID or compatible UUID object, got {type(value)}"
+        )
+
+    def struct_dict_to_python(self, struct_dict: dict[str, Any]) -> _uuid_module.UUID:
+        """Convert a struct dictionary back to a ``uuid.UUID`` instance.
+
+        Args:
+            struct_dict: Dict with a ``"uuid"`` key containing 16 raw bytes
+                (``bytes`` or ``bytearray``).
+
+        Returns:
+            A ``uuid.UUID`` constructed from the raw bytes.
+
+        Raises:
+            ValueError: If the ``"uuid"`` key is absent from ``struct_dict``.
+        """
+        raw = struct_dict.get("uuid")
+        if raw is None:
+            raise ValueError("Missing 'uuid' field in struct dict")
+        return _uuid_module.UUID(bytes=bytes(raw))
+
+    def can_handle_python_type(self, python_type: type) -> bool:
+        """Check if this converter can handle the given Python type.
+
+        Args:
+            python_type: The Python type to check.
+
+        Returns:
+            ``True`` if ``python_type`` is ``uuid.UUID`` or a subclass of it.
+        """
+        return issubclass(python_type, self._python_type)
+
+    def can_handle_struct_type(self, struct_type: "pa.StructType") -> bool:
+        """Check if this converter can handle the given Arrow struct type.
+
+        Args:
+            struct_type: The Arrow struct type to check.
+
+        Returns:
+            ``True`` if ``struct_type`` equals the UUID Arrow struct type.
+        """
+        return struct_type == self._arrow_struct_type
+
+    def hash_struct_dict(self, struct_dict: dict[str, Any]) -> str:
+        """Compute a SHA-256 hash of the UUID from its struct dictionary representation.
+
+        Hashes the raw 16 UUID bytes directly.
+
+        Args:
+            struct_dict: Dict with a ``"uuid"`` key containing 16 raw bytes.
+
+        Returns:
+            Hash string of the form ``"uuid:sha256:<hex>"``.
+
+        Raises:
+            ValueError: If the ``"uuid"`` key is absent from ``struct_dict``.
+        """
+        raw = struct_dict.get("uuid")
+        if raw is None:
+            raise ValueError("Missing 'uuid' field in struct dict")
+        content_hash = self._compute_content_hash(bytes(raw))
+        return self._format_semantic_hash(content_hash)

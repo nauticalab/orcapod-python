@@ -501,7 +501,11 @@ class UniversalTypeConverter:
             return str
         elif pa.types.is_boolean(arrow_type):
             return bool
-        elif pa.types.is_binary(arrow_type) or pa.types.is_large_binary(arrow_type):
+        elif (
+            pa.types.is_binary(arrow_type)
+            or pa.types.is_large_binary(arrow_type)
+            or pa.types.is_fixed_size_binary(arrow_type)
+        ):
             return bytes
 
         # Handle struct types
@@ -828,6 +832,7 @@ class UniversalTypeConverter:
             or pa.types.is_large_string(arrow_type)
             or pa.types.is_binary(arrow_type)
             or pa.types.is_large_binary(arrow_type)
+            or pa.types.is_fixed_size_binary(arrow_type)
         ):
             return lambda value: value
 

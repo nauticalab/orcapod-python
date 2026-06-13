@@ -6,7 +6,7 @@ knows how to process out of the box:
 
   - PathContentHandler    -- pathlib.Path: returns ContentHash of file content
   - UPathContentHandler   -- upath.UPath: returns ContentHash of file content (remote-aware)
-  - UUIDHandler           -- uuid.UUID: canonical string representation
+  - UUIDHandler           -- uuid.UUID: raw 16-byte binary representation
   - BytesHandler          -- bytes / bytearray: hex string representation
   - FunctionHandler       -- callable with __code__: via FunctionInfoExtractorProtocol
   - TypeObjectHandler     -- type objects (classes): stable "type:<name>" string
@@ -139,16 +139,17 @@ class UPathContentHandler:
 
 
 class UUIDHandler:
-    """
-    Handler for uuid.UUID objects.
+    """Handler for ``uuid.UUID`` objects.
 
-    Converts the UUID to its canonical hyphenated string representation
-    (e.g. ``"550e8400-e29b-41d4-a716-446655440000"``), which is stable,
-    human-readable, and unambiguous.
+    Returns the raw 16-byte binary representation of the UUID.
+    The binary form is compact, unambiguous, and independent of string
+    formatting conventions.  UUID values in data columns are stored as
+    ``pa.binary(16)`` (fixed-size) within the struct type used by
+    ``UUIDStructConverter``; database record IDs use ``pa.large_binary()``.
     """
 
     def handle(self, obj: Any, hasher: "SemanticHasherProtocol") -> Any:
-        return str(obj)
+        return obj.bytes
 
 
 class BytesHandler:

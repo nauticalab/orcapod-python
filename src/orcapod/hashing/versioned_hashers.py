@@ -126,7 +126,10 @@ def get_versioned_semantic_arrow_hasher(
     from orcapod.hashing.arrow_hashers import StarfixArrowHasher
     from orcapod.hashing.file_hashers import BasicFileHasher
     from orcapod.semantic_types.semantic_registry import SemanticTypeRegistry
-    from orcapod.semantic_types.semantic_struct_converters import PythonPathStructConverter
+    from orcapod.semantic_types.semantic_struct_converters import (
+        PythonPathStructConverter,
+        UUIDStructConverter,
+    )
 
     # Build a default semantic registry populated with the standard converters.
     # We use Any-typed locals here to side-step type-checker false positives
@@ -138,6 +141,8 @@ def get_versioned_semantic_arrow_hasher(
     # NOTE: keep this converter list in sync with the production registry in
     # src/orcapod/contexts/data/v0.1.json (semantic_registry._config.converters).
     registry.register_converter("path", path_converter)
+    uuid_converter: Any = UUIDStructConverter()
+    registry.register_converter("uuid", uuid_converter)
 
     from orcapod.pydantic_config import PydanticModelConverter
 

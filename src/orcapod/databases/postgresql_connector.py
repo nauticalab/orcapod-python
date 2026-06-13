@@ -16,6 +16,7 @@ import itertools
 import logging
 import re
 import threading
+import uuid
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
@@ -74,13 +75,13 @@ def _pg_type_to_arrow(pg_type_name: str, udt_name: str) -> pa.DataType:
         return _pa.float32()
     if t in ("float8", "double precision", "numeric", "decimal"):
         return _pa.float64()
+    if t == "uuid":
+        return _pa.binary(16)
+
     if t in ("text", "varchar", "character varying", "char", "bpchar",
-             "name", "uuid", "json", "jsonb", "time", "timetz"):
+             "name", "json", "jsonb", "time", "timetz"):
         if t in ("time", "timetz"):
             logger.warning("PostgreSQL type %r mapped to pa.large_string() (known gap)", t)
-        if t == "uuid":
-            # TODO: revisit mapping once PLT-1162 decides on a canonical UUID Arrow type
-            pass
         return _pa.large_string()
     if t == "bytea":
         return _pa.large_binary()
@@ -148,6 +149,26 @@ def _arrow_type_to_pg_sql(arrow_type: pa.DataType) -> str:
         )
     logger.warning("Unsupported Arrow type %r; mapping to TEXT", arrow_type)
     return "TEXT"
+
+
+def _coerce_pg_value(value: Any, arrow_type: "pa.DataType") -> Any:
+    """Coerce a psycopg driver value to match the target Arrow type.
+
+    Args:
+        value: Raw value from the psycopg cursor.
+        arrow_type: The Arrow type the value will be stored as.
+
+    Returns:
+        A Python value compatible with ``pa.array(..., type=arrow_type)``.
+    """
+    import pyarrow as _pa
+
+    if value is None:
+        return None
+    # psycopg returns uuid columns as uuid.UUID objects; binary(16) needs raw bytes
+    if arrow_type == _pa.binary(16) and isinstance(value, uuid.UUID):
+        return value.bytes
+    return value
 
 
 def _resolve_column_type_lookup(
@@ -360,7 +381,7 @@ class PostgreSQLConnector:
 
             while rows:
                 arrays = [
-                    _pa.array([r[i] for r in rows], type=t)
+                    _pa.array([_coerce_pg_value(r[i], t) for r in rows], type=t)
                     for i, t in enumerate(arrow_types)
                 ]
                 yield _pa.RecordBatch.from_arrays(arrays, schema=schema)

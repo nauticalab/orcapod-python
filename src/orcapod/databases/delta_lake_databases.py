@@ -6,9 +6,10 @@ from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from orcapod.databases.utils import coerce_record_id
+from orcapod.databases.storage_utils import is_cloud_uri, parse_base_path
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
-from orcapod.databases.storage_utils import is_cloud_uri, parse_base_path
 
 if TYPE_CHECKING:
     import deltalake
@@ -55,7 +56,7 @@ class DeltaTableDatabase:
         _root: "DeltaTableDatabase | None" = None,
         _scoped_path: tuple[str, ...] = (),
         _shared_pending_batches: "dict[str, pa.Table] | None" = None,
-        _shared_pending_record_ids: "defaultdict[str, set[str]] | None" = None,
+        _shared_pending_record_ids: "defaultdict[str, set[bytes]] | None" = None,
     ):
         self._root_uri, self._storage_options = parse_base_path(base_path, storage_options)
         self._is_cloud: bool = is_cloud_uri(self._root_uri)
@@ -88,7 +89,7 @@ class DeltaTableDatabase:
         if _shared_pending_record_ids is not None:
             self._pending_record_ids = _shared_pending_record_ids
         else:
-            self._pending_record_ids: dict[str, set[str]] = defaultdict(set)
+            self._pending_record_ids: dict[str, set[bytes]] = defaultdict(set)
         self._existing_ids_cache: dict[str, set[str]] = defaultdict(set)
         self._cache_dirty: dict[str, bool] = defaultdict(lambda: True)
 
@@ -211,12 +212,13 @@ class DeltaTableDatabase:
             raise
 
     def _ensure_record_id_column(
-        self, arrow_data: pa.Table, record_id: str
+        self, arrow_data: pa.Table, record_id: str | bytes
     ) -> pa.Table:
         """Ensure the table has an record id column."""
+        record_id = coerce_record_id(record_id)
         if self.RECORD_ID_COLUMN not in arrow_data.column_names:
             # Add record_id column at the beginning
-            key_array = pa.array([record_id] * len(arrow_data), type=pa.large_string())
+            key_array = pa.array([record_id] * len(arrow_data), type=pa.large_binary())
             arrow_data = arrow_data.add_column(0, self.RECORD_ID_COLUMN, key_array)
         return arrow_data
 
@@ -254,7 +256,7 @@ class DeltaTableDatabase:
                 f"Record ID column '{self.RECORD_ID_COLUMN}' not found in the table and cannot be renamed."
             )
 
-    def _create_record_id_filter(self, record_id: str) -> list:
+    def _create_record_id_filter(self, record_id: str | bytes) -> list:
         """
         Create a proper filter expression for Delta Lake.
 
@@ -264,9 +266,9 @@ class DeltaTableDatabase:
         Returns:
             List containing the filter expression for Delta Lake
         """
-        return [(self.RECORD_ID_COLUMN, "=", record_id)]
+        return [(self.RECORD_ID_COLUMN, "=", coerce_record_id(record_id))]
 
-    def _create_record_ids_filter(self, record_ids: list[str]) -> list:
+    def _create_record_ids_filter(self, record_ids: list[bytes]) -> list:
         """
         Create a proper filter expression for multiple entry IDs.
 
@@ -333,7 +335,7 @@ class DeltaTableDatabase:
     def add_record(
         self,
         record_path: tuple[str, ...],
-        record_id: str,
+        record_id: str | bytes,
         record: pa.Table,
         skip_duplicates: bool = False,
         flush: bool = False,
@@ -698,7 +700,7 @@ class DeltaTableDatabase:
     def get_record_by_id(
         self,
         record_path: tuple[str, ...],
-        record_id: str,
+        record_id: str | bytes,
         record_id_column: str | None = None,
         flush: bool = False,
     ) -> "pa.Table | None":
@@ -716,6 +718,7 @@ class DeltaTableDatabase:
         if flush:
             self.flush_batch(record_path)
 
+        record_id = coerce_record_id(record_id)
         # check if record_id is found in pending batches
         record_key = self._get_record_key(record_path)
         if record_id in self._pending_record_ids[record_key]:
@@ -756,7 +759,7 @@ class DeltaTableDatabase:
     def get_records_by_ids(
         self,
         record_path: tuple[str, ...],
-        record_ids: Collection[str] | pl.Series | pa.Array,
+        record_ids: Collection[str | bytes] | pl.Series | pa.Array,
         record_id_column: str | None = None,
         flush: bool = False,
     ) -> "pa.Table | None":
@@ -776,17 +779,17 @@ class DeltaTableDatabase:
         if flush:
             self.flush_batch(record_path)
 
-        # Convert input to list of strings for consistency
+        # Convert input to a list of bytes for consistency
 
         if isinstance(record_ids, pl.Series):
-            record_ids_list = cast(list[str], record_ids.to_list())
+            record_ids_list = [coerce_record_id(r) for r in record_ids.to_list()]
         elif isinstance(record_ids, (pa.Array, pa.ChunkedArray)):
-            record_ids_list = cast(list[str], record_ids.to_pylist())
+            record_ids_list = [coerce_record_id(r) for r in record_ids.to_pylist()]
         elif isinstance(record_ids, Collection):
-            record_ids_list = list(record_ids)
+            record_ids_list = [coerce_record_id(r) for r in record_ids]
         else:
             raise TypeError(
-                f"record_ids must be list[str], pl.Series, or pa.Array, got {type(record_ids)}"
+                f"record_ids must be Collection[str | bytes], pl.Series, or pa.Array, got {type(record_ids)}"
             )
         if len(record_ids) == 0:
             return None

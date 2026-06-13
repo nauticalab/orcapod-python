@@ -22,7 +22,7 @@ Log schema (fixed columns):
     Fixed columns are prefixed with ``_log_`` to follow system column conventions
     and avoid collision with user-defined tag column names.
 
-    - ``_log_id`` (large_utf8): UUID unique to this log entry.
+    - ``_log_id`` (binary(16)): UUID unique to this log entry.
     - ``_log_run_id`` (large_utf8): UUID of the pipeline run (from ``on_run_start``).
     - ``_log_stdout_log`` (large_utf8): Captured standard output.
     - ``_log_stderr_log`` (large_utf8): Captured standard error.
@@ -100,12 +100,12 @@ class DataLogger:
         """
         import pyarrow as pa
 
-        log_id = str(uuid7())
+        log_id = uuid7().bytes
         timestamp = datetime.now(timezone.utc).isoformat()
 
         # Context columns — prefixed with "_log_" to follow system column conventions
         columns: dict[str, pa.Array] = {
-            "_log_id":         pa.array([log_id],               type=pa.large_utf8()),
+            "_log_id":         pa.array([log_id],               type=pa.binary(16)),
             "_log_run_id":     pa.array([self._run_id],          type=pa.large_utf8()),
             "_log_timestamp":  pa.array([timestamp],             type=pa.large_utf8()),
         }
