@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
@@ -33,6 +33,20 @@ def test_arrow_type_to_python_type_timestamp_with_tz():
 
 def test_arrow_type_to_python_type_timestamp_no_tz():
     assert universal_converter.arrow_type_to_python_type(pa.timestamp("us")) is datetime
+
+
+def test_datetime_converter_rejects_naive():
+    to_arrow, _ = universal_converter.get_conversion_functions(datetime)
+    naive = datetime(2024, 1, 15, 12, 30, 45, 123456)  # no tzinfo
+    with pytest.raises(ValueError, match="Naive datetime"):
+        to_arrow(naive)
+
+
+def test_datetime_converter_accepts_aware():
+    to_arrow, _ = universal_converter.get_conversion_functions(datetime)
+    aware = datetime(2024, 1, 15, 12, 30, 45, 123456, tzinfo=timezone.utc)
+    result = to_arrow(aware)
+    assert result == aware
 
 
 def test_python_type_to_arrow_type_numpy():
