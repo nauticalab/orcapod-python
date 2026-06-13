@@ -16,7 +16,7 @@ import logging
 import types
 import typing
 from collections.abc import Callable, Mapping
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Handle generic types
 from typing import TYPE_CHECKING, Any, TypedDict, get_args, get_origin
@@ -750,6 +750,21 @@ class UniversalTypeConverter:
 
         # Create conversion function based on type
 
+        # datetime must be intercepted before the `origin is None` catch-all
+        # below, which would silently pass through naive datetimes.
+        if python_type is datetime:
+
+            def _convert_datetime(dt: datetime) -> datetime:
+                if dt.tzinfo is None:
+                    raise ValueError(
+                        f"Naive datetime (no timezone info) is not supported. "
+                        f"Use a timezone-aware datetime, "
+                        f"e.g. datetime.now(timezone.utc). Got: {dt!r}"
+                    )
+                return dt
+
+            return _convert_datetime
+
         origin = get_origin(python_type)
         args = get_args(python_type)
 
@@ -930,6 +945,11 @@ class UniversalTypeConverter:
                 if value
                 else {}
             )
+
+        elif pa.types.is_timestamp(arrow_type):
+            # PyArrow's to_pylist() already calls .as_py() on each scalar,
+            # returning a timezone-aware datetime for UTC columns.
+            return lambda value: value
 
         else:
             # Default passthrough
