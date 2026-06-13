@@ -255,6 +255,17 @@ class SpiralDBConnector:
                 batch = batch.cast(target_schema)
             yield batch
 
+    def delete_table(self, table_name: str) -> None:
+        """Drop a table from SpiralDB, if it exists.
+
+        Args:
+            table_name: Plain table name (no dataset prefix). Silently ignored
+                if the table does not exist.
+        """
+        self._require_open()
+        if table_name in self.get_table_names():
+            self._project.drop_table(self._table_id(table_name))
+
     def create_table_if_not_exists(
         self,
         table_name: str,
