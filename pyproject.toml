@@ -90,6 +90,11 @@ dev = [
 ]
 
 
+[tool.coverage.run]
+omit = [
+    "src/orcapod/extension_types/protocols.py",  # Protocol stubs — bodies are all `...`, not executable
+]
+
 [tool.coverage.report]
 # Exclude lines that are never executed at runtime and cannot be covered by tests.
 exclude_also = [
