@@ -42,6 +42,26 @@ def test_datetime_converter_rejects_naive():
         to_arrow(naive)
 
 
+def test_datetime_converter_rejects_stub_tzinfo():
+    """Rejects datetimes whose tzinfo.utcoffset() returns None (effectively naive)."""
+    import datetime as dt_mod
+
+    class StubTzInfo(dt_mod.tzinfo):
+        def utcoffset(self, d):
+            return None  # technically set but semantically naive
+
+        def tzname(self, d):
+            return "Stub"
+
+        def dst(self, d):
+            return None
+
+    to_arrow, _ = universal_converter.get_conversion_functions(datetime)
+    stub_aware = datetime(2024, 1, 15, 12, 30, 45, tzinfo=StubTzInfo())
+    with pytest.raises(ValueError, match="Naive datetime"):
+        to_arrow(stub_aware)
+
+
 def test_datetime_converter_accepts_aware():
     to_arrow, _ = universal_converter.get_conversion_functions(datetime)
     aware = datetime(2024, 1, 15, 12, 30, 45, 123456, tzinfo=timezone.utc)
