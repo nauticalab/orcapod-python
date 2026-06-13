@@ -1118,8 +1118,7 @@ class OperatorJobNode(OperatorNodeBase):
         from orcapod.core.sources.derived_source import DerivedSource
 
         path_str = "/".join(self.node_identity_path)
-        content_frag = self.content_hash().to_string()[:16]
-        source_id = f"{path_str}:{content_frag}"
+        source_id = f"{path_str}:{self.content_hash().to_string()}"
         return DerivedSource(
             origin=self,
             source_id=source_id,
