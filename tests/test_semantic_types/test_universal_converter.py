@@ -64,6 +64,41 @@ def test_datetime_converter_accepts_non_utc_aware():
     assert result == non_utc  # converter passes through unchanged
 
 
+def test_datetime_round_trip():
+    converter = get_default_context().type_converter
+    ts = datetime(2024, 3, 15, 10, 30, 45, 123456, tzinfo=timezone.utc)
+    rows_in = [{"event": "launch", "ts": ts}]
+
+    table = converter.python_dicts_to_arrow_table(rows_in)
+
+    # Arrow schema must use timestamp(us, UTC)
+    assert table.schema.field("ts").type == pa.timestamp("us", tz="UTC")
+
+    rows_out = converter.arrow_table_to_python_dicts(table)
+    assert len(rows_out) == 1
+    assert rows_out[0]["event"] == "launch"
+    assert rows_out[0]["ts"] == ts
+
+
+def test_optional_datetime_round_trip():
+    converter = get_default_context().type_converter
+    ts = datetime(2024, 6, 1, 0, 0, 0, tzinfo=timezone.utc)
+    rows_in = [
+        {"label": "a", "ts": ts},
+        {"label": "b", "ts": None},
+    ]
+    python_schema = {"label": str, "ts": datetime | None}
+
+    table = converter.python_dicts_to_arrow_table(rows_in, python_schema=python_schema)
+
+    assert table.schema.field("ts").type == pa.timestamp("us", tz="UTC")
+    assert table.schema.field("ts").nullable is True
+
+    rows_out = converter.arrow_table_to_python_dicts(table)
+    assert rows_out[0]["ts"] == ts
+    assert rows_out[1]["ts"] is None
+
+
 def test_python_type_to_arrow_type_numpy():
     assert universal_converter.python_type_to_arrow_type(np.int32) == pa.int32()
     assert universal_converter.python_type_to_arrow_type(np.float64) == pa.float64()
