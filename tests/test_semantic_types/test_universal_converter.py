@@ -69,10 +69,12 @@ def test_datetime_round_trip():
     ts = datetime(2024, 3, 15, 10, 30, 45, 123456, tzinfo=timezone.utc)
     rows_in = [{"event": "launch", "ts": ts}]
 
+    # No explicit schema — exercises schema inference from data (type(value) -> datetime)
     table = converter.python_dicts_to_arrow_table(rows_in)
 
-    # Arrow schema must use timestamp(us, UTC)
+    # Arrow schema must use timestamp(us, UTC) and be non-nullable for a plain datetime field
     assert table.schema.field("ts").type == pa.timestamp("us", tz="UTC")
+    assert table.schema.field("ts").nullable is False
 
     rows_out = converter.arrow_table_to_python_dicts(table)
     assert len(rows_out) == 1
