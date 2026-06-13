@@ -15,6 +15,7 @@ import hashlib
 import logging
 import types
 import typing
+from datetime import datetime, timezone
 from collections.abc import Callable, Mapping
 
 # Handle generic types
@@ -89,6 +90,7 @@ def _get_python_to_arrow_map() -> dict:
         "date": pa.date32(),
         "datetime": pa.timestamp("us"),
         "timestamp": pa.timestamp("us"),
+        datetime: pa.timestamp("us", tz="UTC"),
     }
 
     # Add numpy types if available
@@ -633,6 +635,9 @@ class UniversalTypeConverter:
                 return typing.Optional[non_none_type]
             else:
                 return typing.Union[tuple(child_types)]
+
+        elif pa.types.is_timestamp(arrow_type):
+            return datetime
 
         else:
             # Default case for unsupported types.

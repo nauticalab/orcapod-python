@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
@@ -15,6 +16,23 @@ def test_python_type_to_arrow_type_basic():
     assert universal_converter.python_type_to_arrow_type(str) == pa.large_string()
     assert universal_converter.python_type_to_arrow_type(bool) == pa.bool_()
     assert universal_converter.python_type_to_arrow_type(bytes) == pa.large_binary()
+
+
+def test_python_type_to_arrow_type_datetime():
+    assert universal_converter.python_type_to_arrow_type(datetime) == pa.timestamp(
+        "us", tz="UTC"
+    )
+
+
+def test_arrow_type_to_python_type_timestamp_with_tz():
+    assert (
+        universal_converter.arrow_type_to_python_type(pa.timestamp("us", tz="UTC"))
+        is datetime
+    )
+
+
+def test_arrow_type_to_python_type_timestamp_no_tz():
+    assert universal_converter.arrow_type_to_python_type(pa.timestamp("us")) is datetime
 
 
 def test_python_type_to_arrow_type_numpy():
