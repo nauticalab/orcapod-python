@@ -71,15 +71,16 @@ class DatetimeConfig(_SectionConfig):
 
 @dataclass(frozen=True)
 class HashingConfig(_SectionConfig):
-    """Hash truncation length settings.
+    """Hash length settings for system-tag column names, schema hashes, and path scoping.
 
-    Controls the number of hex characters used when truncating hashes for
-    system-tag column names, schema hashes, and database path scoping.
+    All fields default to ``None``, which means full-length hashes are used everywhere.
+    Set a field to a positive integer to truncate hashes to that many hex characters
+    (e.g. for backwards compatibility with existing stored data).
     """
 
-    system_tag_n_char: int = 12
-    schema_n_char: int = 12
-    path_n_char: int = 20
+    system_tag_n_char: int | None = None
+    schema_n_char: int | None = None
+    path_n_char: int | None = None
 
 
 @dataclass(frozen=True)
