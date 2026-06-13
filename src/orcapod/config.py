@@ -5,7 +5,7 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,28 @@ class _SectionConfig:
 
 
 @dataclass(frozen=True)
+class DatetimeConfig(_SectionConfig):
+    """Datetime handling policy settings.
+
+    Controls how ``UniversalTypeConverter`` treats Python ``datetime`` values
+    when converting to Arrow.
+
+    Attributes:
+        timezone_policy: How to handle naive (timezone-less) ``datetime`` values.
+
+            ``"strict"`` (default) — raise ``ValueError`` immediately when a naive
+            datetime is passed to the converter.  Forces callers to be explicit
+            about timezone semantics before data reaches Arrow.
+
+            ``"coerce_utc"`` — silently attach ``timezone.utc`` to naive datetimes
+            before writing to Arrow.  Convenient when the caller knows that all
+            naive datetimes in their data represent UTC.
+    """
+
+    timezone_policy: Literal["strict", "coerce_utc"] = "strict"
+
+
+@dataclass(frozen=True)
 class HashingConfig(_SectionConfig):
     """Hash length settings for system-tag column names, schema hashes, and path scoping.
 
@@ -87,6 +109,7 @@ class OrcapodConfig:
 
     hashing: HashingConfig = field(default_factory=HashingConfig)
     display: DisplayConfig = field(default_factory=DisplayConfig)
+    datetime: DatetimeConfig = field(default_factory=DatetimeConfig)
 
     def with_updates(self, **kwargs: Any) -> Self:
         """Create a new ``OrcapodConfig`` with updated section values.
@@ -121,6 +144,7 @@ class OrcapodConfig:
         return OrcapodConfig(
             hashing=self.hashing.merge(other.hashing),
             display=self.display.merge(other.display),
+            datetime=self.datetime.merge(other.datetime),
         )
 
     @classmethod
@@ -145,7 +169,7 @@ class OrcapodConfig:
             ``OrcapodConfig`` populated from ``data``; missing sections and fields
             fall back to built-in defaults.
         """
-        known_sections = {"hashing", "display"}
+        known_sections = {"hashing", "display", "datetime"}
         path_str = f" in {source_path}" if source_path is not None else ""
 
         for key in data:
@@ -186,7 +210,23 @@ class OrcapodConfig:
             **{k: v for k, v in display_dict.items() if k in known_display}
         )
 
-        return cls(hashing=hashing, display=display)
+        datetime_dict = data.get("datetime", {})
+        known_datetime = set(DatetimeConfig.__dataclass_fields__)
+        if not isinstance(datetime_dict, Mapping):
+            logger.warning(
+                "Config section [datetime]%s is not a table — ignored", path_str
+            )
+            datetime_dict = {}
+        for key in datetime_dict:
+            if key not in known_datetime:
+                logger.warning(
+                    "Unknown field %r in [datetime]%s — ignored", key, path_str
+                )
+        datetime_config = DatetimeConfig(
+            **{k: v for k, v in datetime_dict.items() if k in known_datetime}
+        )
+
+        return cls(hashing=hashing, display=display, datetime=datetime_config)
 
 
 # Module-level default config — created at import time.
@@ -234,6 +274,7 @@ def load_config(
 
     known_hashing = set(HashingConfig.__dataclass_fields__)
     known_display = set(DisplayConfig.__dataclass_fields__)
+    known_datetime = set(DatetimeConfig.__dataclass_fields__)
 
     config = DEFAULT_CONFIG
 
@@ -248,7 +289,7 @@ def load_config(
 
         # Warn on unknown top-level sections.
         for key in data:
-            if key not in {"hashing", "display"}:
+            if key not in {"hashing", "display", "datetime"}:
                 logger.warning(
                     "Unknown config section %r in %s — ignored", key, path
                 )
@@ -286,6 +327,22 @@ def load_config(
             k: v for k, v in display_data.items() if k in known_display
         }
 
+        datetime_data = data.get("datetime", {})
+        if not isinstance(datetime_data, dict):
+            logger.warning(
+                "Config section [datetime] in %s is not a table — ignored", path
+            )
+            datetime_data = {}
+        else:
+            for key in datetime_data:
+                if key not in known_datetime:
+                    logger.warning(
+                        "Unknown field %r in [datetime] in %s — ignored", key, path
+                    )
+        datetime_updates = {
+            k: v for k, v in datetime_data.items() if k in known_datetime
+        }
+
         if hashing_updates:
             config = config.with_updates(
                 hashing=replace(config.hashing, **hashing_updates)
@@ -293,6 +350,10 @@ def load_config(
         if display_updates:
             config = config.with_updates(
                 display=replace(config.display, **display_updates)
+            )
+        if datetime_updates:
+            config = config.with_updates(
+                datetime=replace(config.datetime, **datetime_updates)
             )
 
     return config
