@@ -392,9 +392,28 @@ Also update `UniversalTypeConverter` references — the `has_dataclass_type_sent
 **Sequencing:** After PLT-1653, before PLT-1656.
 **Estimate:** XS (~60 lines of targeted rewrite in `universal_converter.py`, plus corresponding test updates in `test_universal_converter.py`).
 
+### [PLT-1663](https://linear.app/enigma-metamorphic/issue/PLT-1663/final-review-and-merge-extension-type-system-main): Final review and merge `extension-type-system` → `main`
+
+**Why:** All PLT-1652 through PLT-1662 PRs target the `extension-type-system` integration branch. A dedicated final issue provides a clean gate for end-to-end review and the single merge PR into `main`.
+
+**Sequencing:** After PLT-1660 (all substantive work complete).
+**Estimate:** S (CI verification + holistic diff review + merge PR).
+
 ---
 
-## 4. Execution Order (revised)
+## 4. Branching Strategy
+
+All PRs for PLT-1652 through PLT-1660 and PLT-1662 target the **`extension-type-system`**
+integration branch rather than `main`.  This branch is merged back to `main` exactly once, as
+the final action of the dedicated merge issue (PLT-1663 below).
+
+```
+main ──────────────────────────────────────────────────────── ← final PR (PLT-1663)
+       \                                                      /
+        extension-type-system ← PLT-1652, PLT-1653, …, PLT-1660
+```
+
+## 5. Execution Order (revised)
 
 Proposed ordering after adjustments:
 
@@ -408,3 +427,4 @@ Proposed ordering after adjustments:
 8. PLT-1658 — Picklable category handler
 9. PLT-1659 — Integration tests (Path/UUID/UPath/dataclass/picklable round-trips; all three DB backends)
 10. PLT-1660 — Remove shape-based code (hard cut); rename `BaseSemanticHasher` → `SemanticAwarePythonHasher`
+11. PLT-1663 — Final review and merge `extension-type-system` → `main`
