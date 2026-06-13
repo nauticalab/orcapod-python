@@ -398,13 +398,13 @@ Also update `UniversalTypeConverter` references — the `has_dataclass_type_sent
 
 Proposed ordering after adjustments:
 
-1. PLT-1652 — Define new `SemanticTypeConverter` protocol
-2. PLT-1653 — Revamp `SemanticTypeRegistry`
+1. PLT-1652 — Define `ExtensionTypeConverter` protocol (rename from `SemanticTypeConverter`)
+2. PLT-1653 — Rename `SemanticTypeRegistry` → `ExtensionTypeRegistry`; rename `TypeHandlerRegistry` → `PythonTypeHandlerRegistry`; revamp internals
 3. PLT-1654 — Recursive Arrow schema walker
 4. **NEW** — Update `UniversalTypeConverter` to extension type dispatch
-5. PLT-1655 — Peek-schema → register → read pattern (standalone helper + both DB classes)
-6. PLT-1656 — Migrate built-in converters (Path, UPath, UUID)
-7. PLT-1657 — Dataclass category handler (replaces `dataclass_encoding.py`)
+5. PLT-1655 — Peek-schema → register → read pattern (standalone `databases/extension_utils.py` + both DB classes)
+6. PLT-1656 — Migrate built-in converters (Path, UPath, UUID) to `ExtensionTypeConverter`; update `SemanticHashingVisitor` bridge
+7. PLT-1657 — Dataclass category handler (replaces `dataclass_encoding.py` entirely)
 8. PLT-1658 — Picklable category handler
-9. PLT-1659 — Integration tests
-10. PLT-1660 — Remove shape-based type identity code (hard cut)
+9. PLT-1659 — Integration tests (Path/UUID/UPath/dataclass/picklable round-trips; all three DB backends)
+10. PLT-1660 — Remove shape-based code (hard cut); rename `BaseSemanticHasher` → `SemanticAwarePythonHasher`
