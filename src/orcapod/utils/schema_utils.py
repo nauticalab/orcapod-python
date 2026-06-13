@@ -386,7 +386,7 @@ def compute_schema_hash(
     tag_schema: Schema,
     data_schema: Schema,
     semantic_hasher: Any,
-    char_count: int,
+    char_count: int | None,
 ) -> str:
     """Compute the schema hash used for system-tag column naming.
 
@@ -400,11 +400,13 @@ def compute_schema_hash(
         data_schema: Python data schema.
         semantic_hasher: Hasher from the active ``DataContext``
             (``data_context.semantic_hasher``).
-        char_count: Number of hex characters to use in the output string
-            (``OrcapodConfig.hashing.schema_n_char``).
+        char_count: Number of hex characters to include. ``None`` (the default)
+            returns the full hex digest. Pass a positive integer to truncate
+            (e.g. for backwards compatibility with stored data).
 
     Returns:
-        Hex string of length ``char_count``.
+        Hex string — full digest length when ``char_count`` is ``None``,
+        otherwise truncated to ``char_count`` characters.
     """
     return semantic_hasher.hash_object(
         (tag_schema, data_schema)
