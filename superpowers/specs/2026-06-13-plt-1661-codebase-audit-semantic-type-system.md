@@ -379,7 +379,7 @@ Also update `UniversalTypeConverter` references — the `has_dataclass_type_sent
 
 ## 3. Missing Issues
 
-### NEW ISSUE: Update `UniversalTypeConverter` to use PyArrow extension type dispatch
+### [PLT-1662](https://linear.app/enigma-metamorphic/issue/PLT-1662/update-universaltypeconverter-to-use-pyarrow-extension-type-dispatch): Update `UniversalTypeConverter` to use PyArrow extension type dispatch
 
 **Why:** After PLT-1652 (new protocol) and PLT-1653 (registry revamp), semantic types are Arrow extension types. The `UniversalTypeConverter._convert_arrow_to_python` currently dispatches on struct shape via `self.semantic_registry.get_python_type_for_semantic_struct_signature(arrow_type)`. This needs to be rewritten to:
 
@@ -390,7 +390,7 @@ Also update `UniversalTypeConverter` references — the `has_dataclass_type_sent
 5. Update `_create_arrow_to_python_converter` similarly
 
 **Sequencing:** After PLT-1653, before PLT-1656.
-**Estimate:** S (small — ~60 lines of targeted rewrite in `universal_converter.py`, plus corresponding test updates in `test_universal_converter.py`).
+**Estimate:** XS (~60 lines of targeted rewrite in `universal_converter.py`, plus corresponding test updates in `test_universal_converter.py`).
 
 ---
 
@@ -401,7 +401,7 @@ Proposed ordering after adjustments:
 1. PLT-1652 — Define `ExtensionTypeConverter` protocol (rename from `SemanticTypeConverter`)
 2. PLT-1653 — Rename `SemanticTypeRegistry` → `ExtensionTypeRegistry`; rename `TypeHandlerRegistry` → `PythonTypeHandlerRegistry`; revamp internals
 3. PLT-1654 — Recursive Arrow schema walker
-4. **NEW** — Update `UniversalTypeConverter` to extension type dispatch
+4. PLT-1662 — Update `UniversalTypeConverter` to extension type dispatch
 5. PLT-1655 — Peek-schema → register → read pattern (standalone `databases/extension_utils.py` + both DB classes)
 6. PLT-1656 — Migrate built-in converters (Path, UPath, UUID) to `ExtensionTypeConverter`; update `SemanticHashingVisitor` bridge
 7. PLT-1657 — Dataclass category handler (replaces `dataclass_encoding.py` entirely)
