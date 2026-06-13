@@ -402,3 +402,47 @@ class TestSourceNodeColumnConfig:
         )
 
         assert job_node.output_schema(all_info=True) == src.output_schema(all_info=True)
+
+
+class TestFromStreamNonRootSource:
+    """from_stream() slot-name derivation for non-RootSource concrete streams.
+
+    Both ``SourceNode.from_stream()`` and ``SourceJobNode.from_stream()`` fall
+    through to the ``else`` branch when the stream is neither a ``SourceNode``
+    nor a ``RootSource``.  The slot name must be built as
+    ``"{stream.label}:{stream.content_hash().to_string()}"`` where
+    ``to_string()`` returns the **full** hash (no truncation).
+    """
+
+    def _make_arrow_stream(self):
+        """Return a concrete, non-RootSource ArrowTableStream."""
+        import pyarrow as pa
+
+        from orcapod.core.streams.arrow_table_stream import ArrowTableStream
+
+        table = pa.table({"id": [1, 2], "value": [1.0, 2.0]})
+        return ArrowTableStream(table, tag_columns=["id"])
+
+    def test_source_node_from_stream_slot_name_uses_full_hash(self):
+        """SourceNode.from_stream(non-RootSource) builds name as label + full content hash."""
+        from orcapod.core.nodes.source_node import SourceNode
+
+        stream = self._make_arrow_stream()
+        node = SourceNode.from_stream(stream)
+
+        expected_name = f"{stream.label}:{stream.content_hash().to_string()}"
+        assert node.name == expected_name
+        # Confirm the hash is full-length — SHA-256 produces a 64-character hex digest.
+        assert len(stream.content_hash().to_hex()) == 64
+
+    def test_source_job_node_from_stream_slot_name_uses_full_hash(self):
+        """SourceJobNode.from_stream(non-RootSource) builds name as label + full content hash."""
+        from orcapod.core.nodes.source_node import SourceJobNode
+
+        stream = self._make_arrow_stream()
+        job_node = SourceJobNode.from_stream(stream)
+
+        expected_name = f"{stream.label}:{stream.content_hash().to_string()}"
+        assert job_node.name == expected_name
+        # Confirm the hash is full-length — SHA-256 produces a 64-character hex digest.
+        assert len(stream.content_hash().to_hex()) == 64
