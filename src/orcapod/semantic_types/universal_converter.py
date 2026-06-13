@@ -757,8 +757,8 @@ class UniversalTypeConverter:
             def _convert_datetime(dt: datetime) -> datetime:
                 if dt.tzinfo is None:
                     raise ValueError(
-                        f"Naive datetime (no timezone info) is not supported. "
-                        f"Use a timezone-aware datetime, "
+                        "Naive datetime (no timezone info) is not supported. "
+                        "Use a timezone-aware datetime, "
                         f"e.g. datetime.now(timezone.utc). Got: {dt!r}"
                     )
                 return dt
@@ -947,8 +947,9 @@ class UniversalTypeConverter:
             )
 
         elif pa.types.is_timestamp(arrow_type):
-            # PyArrow's to_pylist() already calls .as_py() on each scalar,
-            # returning a timezone-aware datetime for UTC columns.
+            # PyArrow's .as_py() on a timestamp scalar already returns a Python
+            # datetime — timezone-aware when the Arrow type has tz="UTC", naive
+            # when there is no timezone. No additional conversion is needed.
             return lambda value: value
 
         else:
