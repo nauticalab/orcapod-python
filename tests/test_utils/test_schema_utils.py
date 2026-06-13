@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from orcapod.config import DEFAULT_CONFIG
 from orcapod.contexts import resolve_context
 from orcapod.types import Schema
 
