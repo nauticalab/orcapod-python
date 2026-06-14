@@ -134,14 +134,10 @@ def _collect(
         _collect(t.value_field, seen, results)
     elif pa.types.is_map(t):
         logger.debug("schema_walker: descending into map field %r", field.name)
-        # key_field / item_field are not part of PyArrow's stable public API
-        # for MapType — use getattr defensively across versions.
-        key_field = getattr(t, "key_field", None)
-        item_field = getattr(t, "item_field", None)
-        if key_field is not None:
-            _collect(key_field, seen, results)
-        if item_field is not None:
-            _collect(item_field, seen, results)
+        # key_field and item_field are stable on pa.MapType since PyArrow 14;
+        # this project requires >= 20, so direct attribute access is safe.
+        _collect(t.key_field, seen, results)
+        _collect(t.item_field, seen, results)
 
 
 def _detect_extension(field: pa.Field) -> ExtensionTypeInfo | None:
@@ -149,12 +145,15 @@ def _detect_extension(field: pa.Field) -> ExtensionTypeInfo | None:
 
     Checks two channels in order:
 
-    1. **Registered channel** — ``isinstance(field.type, pa.ExtensionType)``
-       is true. The Python type object carries the name, serialised metadata,
-       and storage type.
-    2. **Unregistered channel** — ``field.metadata`` contains
+    1. **In-memory ExtensionType channel** — ``isinstance(field.type,
+       pa.ExtensionType)`` is true. This fires whenever a ``pa.ExtensionType``
+       instance is attached to the field, regardless of whether the type is
+       registered in PyArrow's process-global registry. The type object
+       carries the name, serialised metadata, and storage type.
+    2. **Field-metadata channel** — ``field.metadata`` contains
        ``b"ARROW:extension:name"``. The type survived a Parquet/IPC
-       round-trip without being registered in this process.
+       round-trip as raw Arrow field metadata without a corresponding
+       in-memory ``pa.ExtensionType`` instance in this process.
 
     In both cases empty bytes metadata (``b""``) is normalised to ``None``.
 
