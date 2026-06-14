@@ -132,6 +132,13 @@ def test_logical_upath_get_arrow_extension_type_is_cached():
     assert lt.get_arrow_extension_type() is lt.get_arrow_extension_type()
 
 
+def test_logical_upath_get_polars_extension_type_is_cached():
+    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+
+    lt = LogicalUPath()
+    assert lt.get_polars_extension_type() is lt.get_polars_extension_type()
+
+
 def test_logical_upath_round_trip():
     """UPath -> python_to_storage -> storage_to_python -> UPath is identity."""
     from orcapod.extension_types.builtin_logical_types import LogicalUPath
