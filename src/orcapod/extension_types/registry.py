@@ -7,11 +7,17 @@ extension type in both PyArrow's and Polars' global registries.
 from __future__ import annotations
 
 import re
-
-import polars as pl
-import pyarrow as pa
+from typing import TYPE_CHECKING
 
 from orcapod.extension_types.protocols import LogicalType
+from orcapod.utils.lazy_module import LazyModule
+
+if TYPE_CHECKING:
+    import polars as pl
+    import pyarrow as pa
+else:
+    pa = LazyModule("pyarrow")
+    pl = LazyModule("polars")
 
 
 def _sanitize(name: str) -> str:
@@ -35,16 +41,25 @@ def make_arrow_extension_type(
     the option to create multiple instances or future parameterised variants from
     the same class.
 
-    This is a low-level building block. The full pattern for binding a Python
-    type to a specific Arrow/Polars representation — the extension type factory —
-    is the responsibility of each ``LogicalType`` implementation. See PLT-1656
-    for the built-in implementations (``Path``, ``UPath``, ``UUID``).
+    This is a low-level building block. Each ``LogicalType`` implementation acts
+    as a factory: it creates and owns the ``pa.ExtensionType`` instance it requires
+    and exposes it via ``get_arrow_extension_type()``. See PLT-1656 for the
+    built-in implementations (``Path``, ``UPath``, ``UUID``).
 
     Args:
         extension_name: The Arrow extension name (``ARROW:extension:name``).
         storage_type: The underlying Arrow storage type.
         metadata: Optional bytes stored as ``ARROW:extension:metadata``.
             Defaults to ``None`` (serialised as empty bytes).
+
+            ``metadata`` can optionally encode a **LogicalType category** — a
+            short identifier (e.g. ``b"Dataclass"``, ``b"Pydantic"``,
+            ``b"Pickle"``) that classifies the kind of Python type being
+            represented. A future ``LogicalTypeFactory`` will inspect this
+            category when reading schemas from IPC or Parquet files and use it
+            to auto-generate the correct ``LogicalType`` for the specific Python
+            class within that category, without requiring explicit prior
+            registration.
 
     Returns:
         A ``pa.ExtensionType`` subclass. Call it with no arguments to obtain

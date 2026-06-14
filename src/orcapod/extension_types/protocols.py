@@ -40,7 +40,7 @@ class LogicalType(Protocol):
         ...
 
     @property
-    def python_type(self) -> type[Any]:
+    def python_type(self) -> type:
         """The Python class this logical type represents."""
         ...
 
