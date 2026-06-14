@@ -1,8 +1,7 @@
 """Protocol definitions for the Arrow/Polars extension type system.
 
-This module defines ``ExtensionTypeConverter`` — the contract for all
-converters that map between Python objects and their Arrow extension type
-storage representation.
+This module defines ``LogicalType`` — the contract for all implementations
+that bind a Python class to its Arrow and Polars extension type representation.
 
 Note:
     This module is part of the parallel-build phase. The old
@@ -15,50 +14,56 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    import polars as pl
     import pyarrow as pa
 
 
 @runtime_checkable
-class ExtensionTypeConverter(Protocol):
-    """Protocol for Arrow/Polars extension-type-backed converters.
+class LogicalType(Protocol):
+    """Protocol for Arrow/Polars extension-type-backed logical types.
 
-    Declares the full contract for a converter that maps between Python
-    objects and their Arrow extension type storage representation. This
-    protocol is Arrow I/O only — hashing is not a converter responsibility.
+    A ``LogicalType`` is a three-way binding between a unique logical type name
+    (orcapod's identifier), a Python class, and Arrow/Polars extension types.
+    Each implementation *owns* its Arrow and Polars extension types by providing
+    them directly via ``get_arrow_extension_type`` and ``get_polars_extension_type``.
 
-    Attributes:
-        extension_name: Fully-qualified Python class name used as the
-            ``ARROW:extension:name`` metadata value (e.g. ``"pathlib.Path"``).
-            Must be unique across all registered converters. By convention
-            equals the FQCN, but any unique string is valid.
-        extension_metadata: Category tag encoded as ``ARROW:extension:metadata``
-            (e.g. ``b"orcapod.dataclass"``). Used by the registry to locate
-            the right category handler at read time. May be ``None``.
-        storage_type: The underlying Arrow ``pa.DataType`` used for physical
-            storage (e.g. ``pa.large_string()``, ``pa.binary(16)``,
-            ``pa.struct(...)``). Not used as an identity signal — identity
-            is determined solely by ``extension_name``.
-        python_type: The Python class this converter handles.
+    This protocol is Arrow I/O only — hashing is not a logical type responsibility.
     """
 
     @property
-    def extension_name(self) -> str:
-        """Fully-qualified Python class name; stored as ``ARROW:extension:name``."""
-        ...
+    def logical_type_name(self) -> str:
+        """Unique orcapod identifier for this logical type.
 
-    @property
-    def extension_metadata(self) -> bytes | None:
-        """Category tag; stored as ``ARROW:extension:metadata``. May be ``None``."""
-        ...
-
-    @property
-    def storage_type(self) -> pa.DataType:
-        """Underlying Arrow storage type. Any ``pa.DataType`` is valid."""
+        By convention the Python FQCN (e.g. ``"uuid.UUID"``), but any unique
+        string is valid. Does NOT need to match the Arrow extension type name.
+        """
         ...
 
     @property
     def python_type(self) -> type:
-        """The Python class this converter handles."""
+        """The Python class this logical type represents."""
+        ...
+
+    def get_arrow_extension_type(self) -> pa.ExtensionType:
+        """Return the Arrow extension type for this logical type.
+
+        ``storage_type``, ``extension_name``, and serialised metadata are
+        encapsulated inside the returned type; they are no longer top-level
+        properties on ``LogicalType``.
+
+        For custom types: create and return an instance of a new
+        ``pa.ExtensionType`` subclass (e.g. via ``make_arrow_extension_type``).
+        For pre-existing types: return the existing instance directly
+        (e.g. ``pa.uuid()``).
+        """
+        ...
+
+    def get_polars_extension_type(self) -> pl.BaseExtension:
+        """Return an instance of the Polars extension type for this logical type.
+
+        The registry calls ``type(instance)`` to obtain the class passed to
+        ``pl.register_extension_type``.
+        """
         ...
 
     def python_to_storage(self, value: Any) -> Any:
@@ -69,7 +74,7 @@ class ExtensionTypeConverter(Protocol):
 
         Returns:
             A value suitable for use as an Arrow scalar or array element
-            of type ``storage_type``.
+            matching the storage type of ``get_arrow_extension_type()``.
         """
         ...
 
@@ -77,7 +82,7 @@ class ExtensionTypeConverter(Protocol):
         """Convert an Arrow storage value back to a Python object.
 
         Args:
-            storage_value: A scalar or array element of type ``storage_type``.
+            storage_value: A scalar or array element from the Arrow storage array.
 
         Returns:
             A Python object of type ``python_type``.
