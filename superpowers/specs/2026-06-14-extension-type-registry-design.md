@@ -258,6 +258,7 @@ avoid cross-test interference (since those globals persist for the process lifet
 | `test_list_extension_names` | Returns correct list of registered names |
 | `test_list_python_types` | Returns correct list of registered types |
 | `test_arrow_polars_round_trip` | PA ext array → `pl.from_arrow` → `to_arrow()` preserves extension type and values |
+| `test_parquet_round_trip` | PA ext array written to Parquet, read back via `pq.read_table` — extension type restored, `storage_to_python` recovers original Python objects |
 | `test_extension_type_registry_module_instance` | `extension_types.extension_type_registry` is an `ExtensionTypeRegistry` instance and starts empty |
 
 ---
