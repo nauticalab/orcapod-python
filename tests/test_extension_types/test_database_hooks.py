@@ -54,11 +54,11 @@ def _make_field_metadata_schema(
     return pa.schema([field])
 
 
-def _make_stub_factory(registry: LogicalTypeRegistry):
+def _make_stub_factory():
     """Return a minimal LogicalTypeFactory stub whose calls are recorded.
 
     The factory auto-creates a fresh ``LogicalType`` stub keyed by arrow name.
-    Registering this factory in *registry* causes it to also register a Polars
+    Registering this factory in a registry causes it to also register a Polars
     extension type, which requires the Arrow ext type to be in PyArrow's global
     registry.  To avoid cross-test collisions, each test uses a unique arrow name.
     """
@@ -139,7 +139,7 @@ def test_known_type_is_registered(fresh_registry):
     from orcapod.extension_types.database_hooks import ensure_extensions_registered
 
     arrow_name = _unique_name()
-    factory = _make_stub_factory(fresh_registry)
+    factory = _make_stub_factory()
     fresh_registry.register_logical_type_factory("TestCat", factory)
 
     metadata_bytes = json.dumps({"category": "TestCat"}).encode()
@@ -156,7 +156,7 @@ def test_already_registered_is_skipped(fresh_registry):
     from orcapod.extension_types.database_hooks import ensure_extensions_registered
 
     arrow_name = _unique_name()
-    factory = _make_stub_factory(fresh_registry)
+    factory = _make_stub_factory()
     fresh_registry.register_logical_type_factory("TestCat", factory)
 
     metadata_bytes = json.dumps({"category": "TestCat"}).encode()
@@ -173,7 +173,7 @@ def test_none_metadata_already_registered_noop(fresh_registry):
     from orcapod.extension_types.database_hooks import ensure_extensions_registered
 
     arrow_name = _unique_name()
-    factory = _make_stub_factory(fresh_registry)
+    factory = _make_stub_factory()
     fresh_registry.register_logical_type_factory("TestCat", factory)
 
     # First: register via metadata so it ends up in the registry.
@@ -183,7 +183,7 @@ def test_none_metadata_already_registered_noop(fresh_registry):
 
     # Now: same arrow name but with no metadata (simulates reading the schema without
     # metadata — e.g. after an IPC round-trip where the type is now registered in-process).
-    schema_no_meta = _make_ext_schema(arrow_name, metadata=None)  # metadata=None → b"" → walker normalizes to None
+    schema_no_meta = _make_ext_schema(arrow_name, metadata=None)  # metadata=None → serialized as b"" → walker normalizes to None
     ensure_extensions_registered(schema_no_meta)  # should NOT raise
 
 
@@ -192,7 +192,7 @@ def test_none_metadata_not_registered_raises(fresh_registry):
     from orcapod.extension_types.database_hooks import ensure_extensions_registered
 
     arrow_name = _unique_name()
-    schema = _make_ext_schema(arrow_name, metadata=None)  # metadata=None → b"" → walker normalizes to None
+    schema = _make_ext_schema(arrow_name, metadata=None)  # metadata=None → serialized as b"" → walker normalizes to None
 
     with pytest.raises(ValueError, match="must be pre-registered explicitly"):
         ensure_extensions_registered(schema)
@@ -240,7 +240,7 @@ def test_nested_extension_type(fresh_registry):
     from orcapod.extension_types.database_hooks import ensure_extensions_registered
 
     arrow_name = _unique_name()
-    factory = _make_stub_factory(fresh_registry)
+    factory = _make_stub_factory()
     fresh_registry.register_logical_type_factory("TestCat", factory)
 
     metadata_bytes = json.dumps({"category": "TestCat"}).encode()
