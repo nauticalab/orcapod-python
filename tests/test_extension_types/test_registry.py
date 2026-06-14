@@ -274,9 +274,9 @@ def test_register_populates_polars_registry():
     registry.register(lt)
 
     # Verify by attempting to create a Polars series from a PA extension array.
-    ArrowExtClass = make_arrow_extension_type(arrow_name, pa.large_utf8())
-    storage_arr = pa.array(["a", "b"], type=pa.large_utf8())
-    ext_arr = storage_arr.cast(ArrowExtClass())
+    ext_type = lt.get_arrow_extension_type()
+    storage_arr = pa.array(["a", "b"], type=ext_type.storage_type)
+    ext_arr = storage_arr.cast(ext_type)
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -372,9 +372,10 @@ def _build_ext_array(
 ) -> pa.Array:
     """Build a PA extension array from Python values using the logical type.
 
-    The logical type's Arrow extension type must already be registered in
-    PyArrow's global registry (i.e. ``registry.register(lt)`` must have been
-    called) before this helper is used.
+    Global registration (via ``registry.register(lt)``) is NOT required for
+    this helper — ``cast()`` works with any ``pa.ExtensionType`` instance.
+    Registration is only needed for IPC/Parquet *deserialization*, where Arrow
+    maps the ``extension_name`` string back to the registered Python type.
     """
     storage_values = [lt.python_to_storage(v) for v in values]
     arrow_ext = lt.get_arrow_extension_type()
