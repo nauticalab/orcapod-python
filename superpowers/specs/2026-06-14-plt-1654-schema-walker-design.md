@@ -27,8 +27,10 @@ parallel-build strategy: old semantic type code is untouched until PLT-1660 (the
 - `walk_schema(schema)` returns all extension types found in a `pa.Schema` at any depth,
   deduplicated by `(extension_name, extension_metadata)`.
 - `walk_field(field)` does the same for a single `pa.Field`.
-- Both channels are handled: registered types (`pa.types.is_extension`) and unregistered
-  types (raw `ARROW:extension:name` field metadata after a Parquet/IPC round-trip).
+- Both channels are handled: in-memory `pa.ExtensionType` instances
+  (`isinstance(field.type, pa.ExtensionType)` — no global registration required) and
+  field-metadata types (raw `ARROW:extension:name` field metadata after a Parquet/IPC
+  round-trip).
 - All container nesting cases work: top-level column, list value, struct field, map
   key/value, and arbitrary combinations thereof.
 - Empty bytes `b""` from `__arrow_ext_serialize__()` is normalised to `None` so callers
@@ -114,9 +116,11 @@ columns, only the first occurrence (and its `storage_type`) is kept.
 **`_detect_extension(field) -> ExtensionTypeInfo | None`** — detects whether a field
 carries extension type information via either channel:
 
-**Channel 1 — Registered** (`pa.types.is_extension(field.type)` is True):
+**Channel 1 — In-memory ExtensionType** (`isinstance(field.type, pa.ExtensionType)` is True):
 
-The extension type is registered in this process; the type object carries everything:
+A `pa.ExtensionType` instance is attached to the field. No global registry registration
+is required — this branch fires for any `pa.ExtensionType` subclass instance, whether
+registered or not. The type object carries everything:
 
 ```python
 ext_type = field.type
@@ -167,9 +171,10 @@ __all__ = [
 
 ## Tests — `tests/test_extension_types/test_schema_walker.py`
 
-Uses the same `_make_stub` / `_unique_name` helper pattern from `test_registry.py`.
-Registered-channel tests use `ExtensionTypeRegistry` to put types into PyArrow's global
-registry. Unregistered-channel tests construct `pa.Field` objects with explicit
+Uses `_unique_name()` and `_make_reg_field()` / `_make_unreg_field()` helpers.
+In-memory-channel tests construct `pa.ExtensionType` subclass instances directly via
+`type()` and attach them to a `pa.Field` — **no global registration** is performed.
+Field-metadata-channel tests construct `pa.Field` objects with explicit
 `metadata={b"ARROW:extension:name": ..., b"ARROW:extension:metadata": ...}`.
 
 | Test | What it covers |
