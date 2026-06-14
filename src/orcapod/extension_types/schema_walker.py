@@ -10,8 +10,11 @@ This is a pure discovery utility — it never triggers any registration.
 from __future__ import annotations
 
 import dataclasses
+import logging
 
 import pyarrow as pa
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -94,12 +97,29 @@ def _collect(
     if info is not None:
         key = (info.extension_name, info.extension_metadata)
         if key not in seen:
+            logger.debug(
+                "schema_walker: found extension type %r (metadata=%r) in field %r",
+                info.extension_name,
+                info.extension_metadata,
+                field.name,
+            )
             seen.add(key)
             results.append(info)
+        else:
+            logger.debug(
+                "schema_walker: skipping duplicate extension type %r in field %r",
+                info.extension_name,
+                field.name,
+            )
         return
 
     t = field.type
     if pa.types.is_struct(t):
+        logger.debug(
+            "schema_walker: descending into struct field %r (%d sub-fields)",
+            field.name,
+            t.num_fields,
+        )
         for i in range(t.num_fields):
             _collect(t.field(i), seen, results)
     elif (
@@ -109,9 +129,11 @@ def _collect(
         or pa.types.is_list_view(t)
         or pa.types.is_large_list_view(t)
     ):
+        logger.debug("schema_walker: descending into list field %r", field.name)
         # .value_field is guaranteed by Arrow's list type contract.
         _collect(t.value_field, seen, results)
     elif pa.types.is_map(t):
+        logger.debug("schema_walker: descending into map field %r", field.name)
         # key_field / item_field are not part of PyArrow's stable public API
         # for MapType — use getattr defensively across versions.
         key_field = getattr(t, "key_field", None)
