@@ -38,11 +38,17 @@ _POLARS_REGISTRY: dict[str, tuple[pl.DataType, str | None]] = {}
 
 
 def _sanitize(name: str) -> str:
+    """Replace non-alphanumeric characters with underscores.
+
+    Used to produce a valid Python identifier for the `type()` class-name
+    argument when creating dynamic `pa.ExtensionType` / `pl.BaseExtension`
+    subclasses.
+    """
     return re.sub(r"[^A-Za-z0-9]", "_", name)
 
 
 def _register_arrow_ext_type(converter: ExtensionTypeConverter) -> None:
-    """Register a ``pa.ExtensionType`` subclass for *converter* in PyArrow's global registry."""
+    """Register a `pa.ExtensionType` subclass for *converter* in PyArrow's global registry."""
     name = converter.extension_name
     metadata = converter.extension_metadata or b""
     storage = converter.storage_type
@@ -83,7 +89,7 @@ def _register_arrow_ext_type(converter: ExtensionTypeConverter) -> None:
 
 
 def _register_polars_ext_type(converter: ExtensionTypeConverter) -> None:
-    """Register a ``pl.BaseExtension`` subclass for *converter* in Polars' global registry."""
+    """Register a `pl.BaseExtension` subclass for *converter* in Polars' global registry."""
     name = converter.extension_name
     metadata = converter.extension_metadata
     metadata_str = metadata.decode("utf-8") if metadata else None
@@ -112,25 +118,25 @@ def _register_polars_ext_type(converter: ExtensionTypeConverter) -> None:
 
     try:
         pl.register_extension_type(name, PolarsExtType)
-    except ValueError as exc:
+    except ValueError:
         raise ValueError(
             f"Extension type '{name}' is already registered in the Polars global registry "
             f"by an external source. Cannot verify equivalence; orcapod requires exclusive "
             f"ownership of extension type registrations to prevent data corruption or "
             f"misrouted conversions. See PLT-1665 for future interop support."
-        ) from exc
+        ) from None
 
     _POLARS_REGISTRY[name] = (pl_storage, metadata_str)
 
 
 class ExtensionTypeRegistry:
-    """Registry for ``ExtensionTypeConverter`` instances.
+    """Registry for `ExtensionTypeConverter` instances.
 
     Registering a converter automatically registers the corresponding
     extension type in both PyArrow's and Polars' global registries.
 
-    The primary lookup key is ``extension_name``; a secondary lookup by
-    ``python_type`` is provided for the write path.
+    The primary lookup key is `extension_name`; a secondary lookup by
+    `python_type` is provided for the write path.
 
     Example:
         >>> registry = ExtensionTypeRegistry()
@@ -146,10 +152,10 @@ class ExtensionTypeRegistry:
         """Register *converter* and its PyArrow/Polars extension types.
 
         Args:
-            converter: An ``ExtensionTypeConverter`` instance to register.
+            converter: An `ExtensionTypeConverter` instance to register.
 
         Raises:
-            ValueError: If ``converter.extension_name`` is already registered
+            ValueError: If `converter.extension_name` is already registered
                 in this registry instance.
             ValueError: If the extension name is already in the PA or Polars
                 global registry with different parameters.
@@ -168,13 +174,13 @@ class ExtensionTypeRegistry:
         _register_polars_ext_type(converter)
 
     def get_converter_for_name(self, name: str) -> ExtensionTypeConverter | None:
-        """Return the converter registered under *name*, or ``None``."""
+        """Return the converter registered under *name*, or `None`."""
         return self._by_name.get(name)
 
     def get_converter_for_python_type(self, python_type: type) -> ExtensionTypeConverter | None:
-        """Return the converter for *python_type*, or ``None``.
+        """Return the converter for *python_type*, or `None`.
 
-        Checks exact match first, then falls back to an ``issubclass`` scan.
+        Checks exact match first, then falls back to an `issubclass` scan.
         When multiple registered types are superclasses of *python_type*, the
         one registered first wins (insertion-order dict, Python 3.7+).
         """
@@ -187,11 +193,11 @@ class ExtensionTypeRegistry:
         return None
 
     def has_extension_name(self, name: str) -> bool:
-        """Return ``True`` if *name* is registered."""
+        """Return `True` if *name* is registered."""
         return name in self._by_name
 
     def has_python_type(self, python_type: type) -> bool:
-        """Return ``True`` if *python_type* (or a subclass) is registered."""
+        """Return `True` if *python_type* (or a subclass) is registered."""
         return self.get_converter_for_python_type(python_type) is not None
 
     def list_extension_names(self) -> list[str]:
