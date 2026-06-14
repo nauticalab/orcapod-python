@@ -31,7 +31,7 @@ class LogicalPath:
     """Logical type for ``pathlib.Path``.
 
     Stores paths as Arrow large strings using the custom extension type
-    ``"pathlib.Path"`` with metadata ``b"orcapod.builtin"``.
+    ``"pathlib.Path"``.
 
     Example:
         >>> lt = LogicalPath()
@@ -41,13 +41,9 @@ class LogicalPath:
         PosixPath('/tmp/foo')
     """
 
-    _arrow_ext_class = make_arrow_extension_type(
-        "pathlib.Path", pa.large_string(), b"orcapod.builtin"
-    )
+    _arrow_ext_class = make_arrow_extension_type("pathlib.Path", pa.large_string())
     _arrow_ext: pa.ExtensionType | None = None
-    _polars_ext_class = make_polars_extension_type(
-        "pathlib.Path", pa.large_string(), "orcapod.builtin"
-    )
+    _polars_ext_class = make_polars_extension_type("pathlib.Path", pa.large_string())
     _polars_ext: pl.BaseExtension | None = None
 
     logical_type_name: str = "pathlib.Path"
@@ -102,7 +98,7 @@ class LogicalUPath:
     """Logical type for ``upath.UPath``.
 
     Stores paths as Arrow large strings using the custom extension type
-    ``"upath.UPath"`` with metadata ``b"orcapod.builtin"``.
+    ``"upath.UPath"``.
 
     Example:
         >>> lt = LogicalUPath()
@@ -112,13 +108,9 @@ class LogicalUPath:
         UPath('s3://bucket/key')
     """
 
-    _arrow_ext_class = make_arrow_extension_type(
-        "upath.UPath", pa.large_string(), b"orcapod.builtin"
-    )
+    _arrow_ext_class = make_arrow_extension_type("upath.UPath", pa.large_string())
     _arrow_ext: pa.ExtensionType | None = None
-    _polars_ext_class = make_polars_extension_type(
-        "upath.UPath", pa.large_string(), "orcapod.builtin"
-    )
+    _polars_ext_class = make_polars_extension_type("upath.UPath", pa.large_string())
     _polars_ext: pl.BaseExtension | None = None
 
     logical_type_name: str = "upath.UPath"
