@@ -34,13 +34,13 @@ class LogicalType(Protocol):
     def logical_type_name(self) -> str:
         """Unique orcapod identifier for this logical type.
 
-        By convention the Python FQCN (e.g. ``"uuid.UUID"``), but any unique
+        By convention the Python fully qualified name (e.g. ``"uuid.UUID"``), but any unique
         string is valid. Does NOT need to match the Arrow extension type name.
         """
         ...
 
     @property
-    def python_type(self) -> type:
+    def python_type(self) -> type[Any]:
         """The Python class this logical type represents."""
         ...
 
