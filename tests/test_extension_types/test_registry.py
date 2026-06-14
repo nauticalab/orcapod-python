@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import pathlib
+import tempfile
 import uuid
+import warnings
 
 import polars as pl
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from orcapod.extension_types.protocols import ExtensionTypeConverter
@@ -274,3 +278,136 @@ def test_register_polars_external_registration_raises():
 
     with pytest.raises(ValueError, match="external source"):
         ExtensionTypeRegistry().register(_make_stub(name=name))
+
+
+# ---------------------------------------------------------------------------
+# End-to-end integration tests
+# ---------------------------------------------------------------------------
+
+
+class _Color:
+    """Minimal Python class used to exercise the converter contract end-to-end."""
+    def __init__(self, hex_str: str) -> None:
+        self.hex_str = hex_str
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _Color) and self.hex_str == other.hex_str
+    def __repr__(self) -> str:
+        return f"Color({self.hex_str!r})"
+
+
+def _make_color_converter() -> ExtensionTypeConverter:
+    """ExtensionTypeConverter for _Color, backed by pa.large_utf8() storage."""
+    _name = _unique_name()
+
+    class _ColorConverter:
+        @property
+        def extension_name(self) -> str:
+            return _name
+        @property
+        def extension_metadata(self) -> bytes | None:
+            return b"test.color"
+        @property
+        def storage_type(self) -> pa.DataType:
+            return pa.large_utf8()
+        @property
+        def python_type(self) -> type:
+            return _Color
+        def python_to_storage(self, value: _Color) -> str:
+            return value.hex_str
+        def storage_to_python(self, storage_value: str) -> _Color:
+            return _Color(storage_value)
+
+    return _ColorConverter()
+
+
+def _build_ext_array(
+    converter: ExtensionTypeConverter,
+    values: list,
+) -> pa.Array:
+    """Build a PA extension array from Python values using the converter."""
+    import re
+
+    storage_values = [converter.python_to_storage(v) for v in values]
+    storage_arr = pa.array(storage_values, type=converter.storage_type)
+
+    _name = converter.extension_name
+    _storage = converter.storage_type
+    _metadata = converter.extension_metadata or b""
+    _sanitized = re.sub(r"[^A-Za-z0-9]", "_", _name)
+
+    ArrowExtType = type(
+        f"_ArrowExt_{_sanitized}_probe",
+        (pa.ExtensionType,),
+        {
+            "__init__": lambda self: pa.ExtensionType.__init__(self, _storage, _name),
+            "__arrow_ext_serialize__": lambda self: _metadata,
+            "__arrow_ext_deserialize__": classmethod(lambda cls, st, se: cls()),
+        },
+    )
+    ext_type_instance = ArrowExtType()
+    return storage_arr.cast(ext_type_instance)
+
+
+def test_python_class_round_trip():
+    """Python objects -> Arrow extension array -> Python objects via converter methods."""
+    conv = _make_color_converter()
+    registry = ExtensionTypeRegistry()
+    registry.register(conv)
+
+    originals = [_Color("#ff0000"), _Color("#00ff00"), _Color("#0000ff")]
+    ext_arr = _build_ext_array(conv, originals)
+
+    # Decode back
+    storage_back = ext_arr.cast(conv.storage_type)
+    recovered = [conv.storage_to_python(v.as_py()) for v in storage_back]
+    assert recovered == originals
+
+
+def test_arrow_polars_round_trip():
+    """PA ext array -> pl.from_arrow -> to_arrow() preserves extension type and values."""
+    conv = _make_color_converter()
+    registry = ExtensionTypeRegistry()
+    registry.register(conv)
+
+    originals = [_Color("#aabbcc"), _Color("#112233")]
+    ext_arr = _build_ext_array(conv, originals)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        pl_series = pl.from_arrow(ext_arr)
+
+    assert isinstance(pl_series.dtype, pl.BaseExtension)
+    assert pl_series.dtype.ext_name() == conv.extension_name
+
+    arr_back = pl_series.to_arrow()
+    assert arr_back.type.extension_name == conv.extension_name
+
+    recovered = [conv.storage_to_python(v.as_py()) for v in arr_back.cast(conv.storage_type)]
+    assert recovered == originals
+
+
+def test_parquet_round_trip():
+    """PA ext array -> Parquet -> read back via PyArrow; extension type and values preserved."""
+    conv = _make_color_converter()
+    registry = ExtensionTypeRegistry()
+    registry.register(conv)
+
+    originals = [_Color("#deadbe"), _Color("#cafeba")]
+    ext_arr = _build_ext_array(conv, originals)
+    schema = pa.schema([pa.field("color", ext_arr.type), pa.field("id", pa.int32())])
+    table = pa.table(
+        {"color": ext_arr, "id": pa.array([1, 2], type=pa.int32())},
+        schema=schema,
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "test.parquet"
+        pq.write_table(table, path)
+        table_back = pq.read_table(path)
+
+    assert table_back.schema.field("color").type.extension_name == conv.extension_name
+    recovered = [
+        conv.storage_to_python(v.as_py())
+        for v in table_back.column("color").cast(conv.storage_type)
+    ]
+    assert recovered == originals
