@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from orcapod.databases.utils import coerce_record_id
 from orcapod.databases.storage_utils import is_cloud_uri, parse_base_path
+from orcapod.extension_types.database_hooks import ensure_extensions_registered
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -834,6 +835,8 @@ class DeltaTableDatabase:
         filter_expr = None
         # Use to_pyarrow_dataset with as_large_types for Polars compatible arrow table loading
         dataset = delta_table.to_pyarrow_dataset(as_large_types=True)
+        logger.debug("_read_delta_table: peeking schema for extension type registration")
+        ensure_extensions_registered(dataset.schema)
         if filters and expression is None:
             for filt in filters:
                 if len(filt) == 3:
