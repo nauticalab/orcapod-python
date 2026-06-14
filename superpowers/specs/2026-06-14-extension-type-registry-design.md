@@ -85,32 +85,50 @@ insertion order wins (Python 3.7+ dict ordering). Returns `None` if nothing matc
 
 All other public methods are straightforward dict lookups or list returns.
 
-### Module-level global-registry tracking
+### Private helpers
 
-Two module-level dicts shadow the process-global PA and Polars registries so that equivalence
-checks can be performed without touching private internals of either library:
+Both helpers read the actual process-global registries maintained by PyArrow and Polars
+directly, rather than maintaining shadow dicts. This means external registrations (made
+outside of `ExtensionTypeRegistry`) are visible too.
+
+The relevant internals, verified against the installed versions:
+
+- **PyArrow:** `pa.lib._python_extension_types_registry` — a `list` of live `pa.ExtensionType`
+  instances. Each exposes `.extension_name`, `.storage_type`, and `.__arrow_ext_serialize__()`
+  (the metadata bytes). Lookup is a linear scan by `extension_name`.
+- **Polars:** `polars.datatypes.extension._REGISTRY` — a `dict[str, type[BaseExtension]]`.
+  Instantiate the stored class (zero args) to read `.ext_storage()` and `.ext_metadata()`.
+
+Both are private APIs. If either changes in a future library version, `registry.py` is the
+only place to update.
+
+**`_find_in_arrow_registry(name: str) -> pa.ExtensionType | None`**
 
 ```python
-_ARROW_REGISTRY: dict[str, tuple[pa.DataType, bytes]] = {}
-# name → (storage_type, extension_metadata_bytes)
-
-_POLARS_REGISTRY: dict[str, tuple[pl.DataType, str | None]] = {}
-# name → (pl_storage_dtype, metadata_str)
+return next(
+    (t for t in pa.lib._python_extension_types_registry if t.extension_name == name),
+    None,
+)
 ```
 
-These dicts are module-level singletons and are shared across all `ExtensionTypeRegistry`
-instances in the same process. They track exactly what has been registered in the global
-PA/Polars registries by *any* `ExtensionTypeRegistry` call. They are never cleared.
+**`_find_in_polars_registry(name: str) -> tuple[pl.DataType, str | None] | None`**
 
-### Private helpers
+```python
+from polars.datatypes.extension import _REGISTRY
+cls = _REGISTRY.get(name)
+if cls is None:
+    return None
+inst = cls()
+return inst.ext_storage(), inst.ext_metadata()
+```
 
 **`_register_arrow_ext_type(converter)`**
 
 1. Compute `metadata = converter.extension_metadata or b""` and `storage = converter.storage_type`.
-2. If `converter.extension_name` is already in `_ARROW_REGISTRY`:
-   - Compare `(existing_storage, existing_metadata)` with `(storage, metadata)` using `==`.
-   - Match → return immediately (idempotent; safe for module reload and test-suite reuse).
-   - Mismatch → raise `ValueError` with both the existing and attempted parameters.
+2. Call `_find_in_arrow_registry(converter.extension_name)`.
+   - Found, same `storage_type` and `metadata` (using `==`) → return immediately (idempotent).
+   - Found, different params → raise `ValueError` showing existing vs. attempted values.
+   - Not found → proceed to step 3.
 3. Dynamically create a `pa.ExtensionType` subclass via `type()`:
 
 ```python
@@ -127,10 +145,7 @@ class _ArrowExt_<sanitized_name>(pa.ExtensionType):
         return cls()
 ```
 
-4. Call `pa.register_extension_type(instance)`. If PyArrow raises `ArrowKeyError`, the name
-   was registered externally (not through our registry) — re-raise as `ValueError` explaining
-   that the name is already taken by an external registration and equivalence cannot be verified.
-5. On success: `_ARROW_REGISTRY[name] = (storage, metadata)`.
+4. Call `pa.register_extension_type(instance)`.
 
 Name sanitization: replace all non-alphanumeric characters with `_` (e.g.
 `pathlib.Path` → `_ArrowExt_pathlib_Path`). Cosmetic only — PyArrow identifies types by
@@ -138,7 +153,7 @@ Name sanitization: replace all non-alphanumeric characters with `_` (e.g.
 
 **`_register_polars_ext_type(converter)`**
 
-1. Derive Polars storage dtype by converting an empty PA array of the storage type:
+1. Derive Polars storage dtype by converting an empty PA array:
 
 ```python
 pl_storage = pl.from_arrow(pa.array([], type=converter.storage_type)).dtype
@@ -149,10 +164,10 @@ This handles all Arrow → Polars mappings (`pa.large_utf8()` → `pl.String`,
 manually-maintained table.
 
 2. Compute `metadata_str = converter.extension_metadata.decode("utf-8") if converter.extension_metadata else None`.
-3. If `converter.extension_name` is already in `_POLARS_REGISTRY`:
-   - Compare `(existing_pl_storage, existing_metadata_str)` with `(pl_storage, metadata_str)` using `==`.
-   - Match → return immediately (idempotent).
-   - Mismatch → raise `ValueError` with both the existing and attempted parameters.
+3. Call `_find_in_polars_registry(converter.extension_name)`.
+   - Found, same `ext_storage()` and `ext_metadata()` → return immediately (idempotent).
+   - Found, different params → raise `ValueError` showing existing vs. attempted values.
+   - Not found → proceed to step 4.
 4. Dynamically create a `pl.BaseExtension` subclass via `type()`:
 
 ```python
@@ -166,10 +181,7 @@ class _PolarsExt_<sanitized_name>(pl.BaseExtension):
         return cls()
 ```
 
-5. Call `pl.register_extension_type(converter.extension_name, _PolarsExtType)`. If Polars raises
-   `ValueError` (already registered externally), re-raise as `ValueError` explaining that the
-   name is already taken and equivalence cannot be verified.
-6. On success: `_POLARS_REGISTRY[name] = (pl_storage, metadata_str)`.
+5. Call `pl.register_extension_type(converter.extension_name, _PolarsExtType)`.
 
 Note: `pl.BaseExtension` is marked unstable in Polars. The `polars>=1.36.0` constraint is a
 forward commitment; if a future Polars release changes this API, the helpers in `registry.py`
@@ -213,9 +225,8 @@ Polars 1.36.0 is the first release that exports `pl.BaseExtension` and
 | Situation | Behaviour |
 |---|---|
 | Duplicate `extension_name` in `register()` (same `ExtensionTypeRegistry` instance) | `ValueError` with the offending name |
-| PA/Polars global registry has the name, registered via our tracking dicts, same params | Idempotent — return silently (safe for module reload and test-suite reuse) |
-| PA/Polars global registry has the name, registered via our tracking dicts, different params | `ValueError` showing existing vs. attempted `storage_type` and `metadata` |
-| PA/Polars global registry has the name, registered externally (not via our dicts) | `ValueError` explaining the name is taken by an external source and equivalence cannot be verified |
+| PA/Polars global registry has the name, same params (any source) | Idempotent — return silently (safe for module reload and test-suite reuse) |
+| PA/Polars global registry has the name, different params (any source) | `ValueError` showing existing vs. attempted `storage_type` and `metadata` |
 | `get_converter_for_name` / `get_converter_for_python_type` miss | Returns `None` |
 | Non-`ExtensionTypeConverter` passed to `register()` | `beartype` raises `BeartypeCallHintParamViolation` at the call site |
 
