@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pathlib
+import re
 import tempfile
 import uuid
 import warnings
@@ -325,8 +326,6 @@ def _build_ext_array(
     values: list,
 ) -> pa.Array:
     """Build a PA extension array from Python values using the converter."""
-    import re
-
     storage_values = [converter.python_to_storage(v) for v in values]
     storage_arr = pa.array(storage_values, type=converter.storage_type)
 
