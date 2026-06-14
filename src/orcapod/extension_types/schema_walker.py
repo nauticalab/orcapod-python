@@ -127,8 +127,8 @@ def _detect_extension(field: pa.Field) -> ExtensionTypeInfo | None:
 
     Checks two channels in order:
 
-    1. **Registered channel** — ``pa.types.is_extension(field.type)`` is
-       true. The Python type object carries the name, serialised metadata,
+    1. **Registered channel** — ``isinstance(field.type, pa.ExtensionType)``
+       is true. The Python type object carries the name, serialised metadata,
        and storage type.
     2. **Unregistered channel** — ``field.metadata`` contains
        ``b"ARROW:extension:name"``. The type survived a Parquet/IPC
