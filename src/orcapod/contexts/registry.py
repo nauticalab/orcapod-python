@@ -152,6 +152,7 @@ class JSONDataContextRegistry:
             "arrow_hasher",
             "semantic_hasher",
             "type_handler_registry",
+            "logical_type_registry",
         ]
         missing_fields = [field for field in required_fields if field not in spec]
         if missing_fields:
@@ -301,6 +302,7 @@ class JSONDataContextRegistry:
                 arrow_hasher=ref_lut["arrow_hasher"],
                 semantic_hasher=ref_lut["semantic_hasher"],
                 type_handler_registry=ref_lut["type_handler_registry"],
+                logical_type_registry=ref_lut["logical_type_registry"],
             )
 
         except Exception as e:
