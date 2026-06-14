@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from .protocols import ExtensionTypeConverter
 from .registry import ExtensionTypeRegistry
+from .schema_walker import ExtensionTypeInfo, walk_field, walk_schema
 
 default_extension_type_registry = ExtensionTypeRegistry()
 
@@ -19,4 +20,8 @@ __all__ = [
     "ExtensionTypeConverter",
     "ExtensionTypeRegistry",
     "default_extension_type_registry",
+    # PLT-1654
+    "ExtensionTypeInfo",
+    "walk_schema",
+    "walk_field",
 ]
