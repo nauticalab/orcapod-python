@@ -11,7 +11,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from orcapod.extension_types.protocols import LogicalType
+from orcapod.extension_types.protocols import LogicalType, LogicalTypeFactory
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -191,6 +191,7 @@ class LogicalTypeRegistry:
         self._by_logical_name: dict[str, LogicalType] = {}
         self._by_arrow_name: dict[str, LogicalType] = {}
         self._by_python_type: dict[type, LogicalType] = {}
+        self._factories: dict[str, LogicalTypeFactory] = {}
         for lt in (logical_types or []):
             self.register(lt)
 
@@ -285,6 +286,40 @@ class LogicalTypeRegistry:
     def get_by_arrow_extension_name(self, arrow_name: str) -> LogicalType | None:
         """Return the logical type registered under *arrow_name*, or ``None``."""
         return self._by_arrow_name.get(arrow_name)
+
+    def register_logical_type_factory(
+        self,
+        category: str,
+        factory: LogicalTypeFactory,
+    ) -> None:
+        """Register a factory for the given metadata category string.
+
+        When ``prepare_extension_type`` encounters an Arrow extension type whose
+        ``extension_metadata`` JSON contains ``{"category": "<category>", ...}``,
+        it calls ``factory.create_logical_type(arrow_extension_name, storage_type,
+        metadata_dict)`` to construct the logical type and then registers it.
+
+        Args:
+            category: The ``"category"`` value from the extension metadata JSON that
+                identifies this category (e.g. ``"Dataclass"``).
+            factory: A ``LogicalTypeFactory`` instance responsible for constructing
+                logical types for this category.
+
+        Raises:
+            ValueError: If ``category`` is already registered to a different factory.
+        """
+        existing = self._factories.get(category)
+        if existing is not None and existing is not factory:
+            raise ValueError(
+                f"Cannot register factory for category {category!r}: "
+                f"a different factory is already registered for this category."
+            )
+        if existing is factory:
+            return
+        self._factories[category] = factory
+        logger.debug(
+            "registered LogicalTypeFactory for category %r: %r", category, factory
+        )
 
 
 # Module-level singleton — per-process registry used by database_hooks and
