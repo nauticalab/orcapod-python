@@ -8,6 +8,8 @@ Built-in registrations (`Path`, `UPath`, `UUID`) are added by PLT-1656.
 `DataContext` wiring is added by PLT-1660.
 """
 
+from __future__ import annotations
+
 from .protocols import ExtensionTypeConverter
 from .registry import ExtensionTypeRegistry
 
