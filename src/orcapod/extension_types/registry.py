@@ -170,12 +170,15 @@ class LogicalTypeRegistry:
         When multiple registered types are superclasses of *python_type*, the
         one registered first wins (insertion-order dict, Python 3.7+).
         """
-        lt = self._by_python_type.get(python_type)
-        if lt is not None:
-            return lt
-        for registered_type, lt in self._by_python_type.items():
-            if issubclass(python_type, registered_type):
-                return lt
+        result = self._by_python_type.get(python_type)
+        if result is not None:
+            return result
+        for registered_type, registered_lt in self._by_python_type.items():
+            try:
+                if issubclass(python_type, registered_type):
+                    return registered_lt
+            except TypeError:
+                continue
         return None
 
     def get_by_arrow_extension_name(self, arrow_name: str) -> LogicalType | None:
