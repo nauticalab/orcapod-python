@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 import tempfile
 import uuid
@@ -12,7 +13,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from orcapod.extension_types.protocols import LogicalType
+from orcapod.extension_types.protocols import LogicalType, LogicalTypeFactory
 from orcapod.extension_types.registry import LogicalTypeRegistry, make_arrow_extension_type, make_polars_extension_type
 
 
@@ -74,6 +75,28 @@ def _make_stub(
             return storage_value
 
     return _Stub()
+
+
+def _make_stub_factory(return_lt: LogicalType | None = None) -> LogicalTypeFactory:
+    """Factory for minimal LogicalTypeFactory conforming stubs.
+
+    If ``return_lt`` is given, ``create_logical_type`` returns it; otherwise
+    it creates a fresh stub using ``_make_stub`` keyed on the arrow name.
+    ``calls`` records every invocation as ``(arrow_extension_name, storage_type, metadata)``.
+    """
+    _return_lt = return_lt
+
+    class _Factory:
+        def __init__(self):
+            self.calls: list[tuple] = []
+
+        def create_logical_type(self, arrow_extension_name, storage_type, metadata):
+            self.calls.append((arrow_extension_name, storage_type, metadata))
+            if _return_lt is not None:
+                return _return_lt
+            return _make_stub(arrow_name=arrow_extension_name, storage=storage_type)
+
+    return _Factory()
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +238,7 @@ def test_get_by_arrow_extension_name_miss():
 
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
 # LogicalTypeRegistry constructor logical_types param tests
 # ---------------------------------------------------------------------------
 
@@ -246,6 +270,34 @@ def test_registry_init_with_multiple_logical_types():
     registry = LogicalTypeRegistry(logical_types=[lt1, lt2])
     assert registry.get_by_logical_name(lt1.logical_type_name) is lt1
     assert registry.get_by_logical_name(lt2.logical_type_name) is lt2
+=======
+# register_logical_type_factory tests
+# ---------------------------------------------------------------------------
+
+def test_register_logical_type_factory_no_error():
+    """register_logical_type_factory completes without raising."""
+    registry = LogicalTypeRegistry()
+    factory = _make_stub_factory()
+    registry.register_logical_type_factory("TestCat", factory)  # should not raise
+
+
+def test_register_logical_type_factory_same_instance_idempotent():
+    """Re-registering the same factory instance for the same category does not raise."""
+    registry = LogicalTypeRegistry()
+    factory = _make_stub_factory()
+    registry.register_logical_type_factory("Cat", factory)
+    registry.register_logical_type_factory("Cat", factory)  # should not raise
+
+
+def test_register_duplicate_category_raises():
+    """Registering a different factory for an already-registered category raises ValueError."""
+    registry = LogicalTypeRegistry()
+    f1 = _make_stub_factory()
+    f2 = _make_stub_factory()
+    registry.register_logical_type_factory("Cat", f1)
+    with pytest.raises(ValueError, match="Cat"):
+        registry.register_logical_type_factory("Cat", f2)
+>>>>>>> b66dd7d (feat(extension_types): add _factories dict and register_logical_type_factory to LogicalTypeRegistry)
 
 
 # ---------------------------------------------------------------------------
