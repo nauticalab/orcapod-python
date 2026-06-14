@@ -64,6 +64,9 @@ def _register_arrow_ext_type(converter: ExtensionTypeConverter) -> None:
             f"  Attempted:  storage_type={storage!r}, metadata={metadata!r}"
         )
 
+    # Rebind to local names for closure capture: the lambdas below close over
+    # these variables, not over the function parameters, to make the binding
+    # explicit and stable across any future refactoring of this function.
     _name, _storage, _metadata = name, storage, metadata
     ArrowExtType = type(
         f"_ArrowExt_{_sanitize(name)}",
@@ -71,7 +74,15 @@ def _register_arrow_ext_type(converter: ExtensionTypeConverter) -> None:
         {
             "__init__": lambda self: pa.ExtensionType.__init__(self, _storage, _name),
             "__arrow_ext_serialize__": lambda self: _metadata,
-            "__arrow_ext_deserialize__": classmethod(lambda cls, st, se: cls()),
+            # __arrow_ext_deserialize__ reconstructs the extension *type descriptor*
+            # (called once per schema read from IPC/Parquet, not per data value).
+            # `storage_type` is the Arrow storage DataType; `serialized` is the bytes
+            # returned by __arrow_ext_serialize__. Both are intentionally ignored here
+            # because the storage type and metadata are already baked into the class
+            # constructor via closure — calling cls() is sufficient.
+            "__arrow_ext_deserialize__": classmethod(
+                lambda cls, storage_type, serialized: cls()
+            ),
         },
     )
 
@@ -106,13 +117,18 @@ def _register_polars_ext_type(converter: ExtensionTypeConverter) -> None:
             f"  Attempted:  storage_dtype={pl_storage!r}, metadata={metadata_str!r}"
         )
 
+    # Rebind to local names for closure capture (see _register_arrow_ext_type for rationale).
     _name, _pl_storage, _meta_str = name, pl_storage, metadata_str
     PolarsExtType = type(
         f"_PolarsExt_{_sanitize(name)}",
         (pl.BaseExtension,),
         {
             "__init__": lambda self: pl.BaseExtension.__init__(self, _name, _pl_storage, _meta_str),
-            "ext_from_params": classmethod(lambda cls, n, s, m: cls()),
+            # ext_from_params reconstructs the extension type descriptor from its
+            # registered name, storage dtype, and metadata string. All three are
+            # already baked into the constructor via closure, so the arguments are
+            # intentionally ignored.
+            "ext_from_params": classmethod(lambda cls, ext_name, storage_dtype, metadata_str: cls()),
         },
     )
 
