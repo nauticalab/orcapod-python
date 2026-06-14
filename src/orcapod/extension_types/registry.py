@@ -11,7 +11,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from orcapod.extension_types.protocols import LogicalType, LogicalTypeFactory
+from orcapod.extension_types.protocols import LogicalType
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -59,8 +59,8 @@ def make_arrow_extension_type(
             ``metadata`` can optionally encode a **LogicalType category** — a
             short identifier (e.g. ``b"Dataclass"``, ``b"Pydantic"``,
             ``b"Pickle"``) that classifies the kind of Python type being
-            represented. A future ``LogicalTypeFactory`` will inspect this
-            category when reading schemas from IPC or Parquet files and use it
+            represented. A ``LogicalTypeFactory`` (see ``LogicalTypeFactory.create_logical_type``)
+            inspects this category when reading schemas from IPC or Parquet files and uses it
             to auto-generate the correct ``LogicalType`` for the specific Python
             class within that category, without requiring explicit prior
             registration.
