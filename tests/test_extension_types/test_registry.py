@@ -253,6 +253,15 @@ def test_register_polars_global_collision_different_storage_raises():
         ExtensionTypeRegistry().register(_make_stub(name=name, storage=pa.large_binary()))
 
 
+def test_register_polars_global_collision_different_metadata_raises():
+    """A second registry using the same name but different metadata raises."""
+    name = _unique_name()
+    ExtensionTypeRegistry().register(_make_stub(name=name, metadata=b"original"))
+
+    with pytest.raises(ValueError, match=name):
+        ExtensionTypeRegistry().register(_make_stub(name=name, metadata=b"different"))
+
+
 def test_register_polars_external_registration_raises():
     """A name registered directly with Polars (bypassing our registry) raises on register()."""
     name = _unique_name()
