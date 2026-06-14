@@ -11,7 +11,7 @@ Built-in registrations (``Path``, ``UPath``, ``UUID``) are added by PLT-1656.
 from __future__ import annotations
 
 from .protocols import LogicalType
-from .registry import LogicalTypeRegistry, make_arrow_extension_type
+from .registry import LogicalTypeRegistry, make_arrow_extension_type, make_polars_extension_type
 from .schema_walker import ExtensionTypeInfo, walk_field, walk_schema
 
 default_logical_type_registry = LogicalTypeRegistry()
@@ -20,6 +20,7 @@ __all__ = [
     "LogicalType",
     "LogicalTypeRegistry",
     "make_arrow_extension_type",
+    "make_polars_extension_type",
     "default_logical_type_registry",
     # PLT-1654
     "ExtensionTypeInfo",
