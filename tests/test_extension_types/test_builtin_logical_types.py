@@ -251,3 +251,112 @@ def test_logical_uuid_registration_does_not_raise():
     registry.register(lt)  # should NOT raise
     assert registry.get_by_logical_name("uuid.UUID") is lt
     assert registry.get_by_arrow_extension_name("arrow.uuid") is lt
+
+
+# ---------------------------------------------------------------------------
+# Default context integration tests
+# ---------------------------------------------------------------------------
+
+
+def test_default_context_has_logical_type_registry():
+    """DataContext has a logical_type_registry attribute."""
+    from orcapod.contexts import get_default_context
+
+    ctx = get_default_context()
+    assert hasattr(ctx, "logical_type_registry")
+
+
+def test_default_context_registry_has_logical_path():
+    """Default registry returns LogicalPath for 'pathlib.Path'."""
+    from orcapod.contexts import get_default_context
+    from orcapod.extension_types.builtin_logical_types import LogicalPath
+
+    registry = get_default_context().logical_type_registry
+    lt = registry.get_by_logical_name("pathlib.Path")
+    assert isinstance(lt, LogicalPath)
+
+
+def test_default_context_registry_lookup_by_python_type_path():
+    """Default registry routes pathlib.Path to LogicalPath."""
+    from orcapod.contexts import get_default_context
+    from orcapod.extension_types.builtin_logical_types import LogicalPath
+
+    registry = get_default_context().logical_type_registry
+    lt = registry.get_by_python_type(pathlib.Path)
+    assert isinstance(lt, LogicalPath)
+
+
+def test_default_context_registry_lookup_by_arrow_name_path():
+    """Default registry routes 'pathlib.Path' arrow ext name to LogicalPath."""
+    from orcapod.contexts import get_default_context
+    from orcapod.extension_types.builtin_logical_types import LogicalPath
+
+    registry = get_default_context().logical_type_registry
+    lt = registry.get_by_arrow_extension_name("pathlib.Path")
+    assert isinstance(lt, LogicalPath)
+
+
+def test_default_context_registry_has_logical_upath():
+    """Default registry returns LogicalUPath for 'upath.UPath'."""
+    from orcapod.contexts import get_default_context
+    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+
+    registry = get_default_context().logical_type_registry
+    lt = registry.get_by_logical_name("upath.UPath")
+    assert isinstance(lt, LogicalUPath)
+
+
+def test_default_context_registry_lookup_by_python_type_upath():
+    """Default registry routes UPath to LogicalUPath."""
+    from orcapod.contexts import get_default_context
+    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+
+    registry = get_default_context().logical_type_registry
+    lt = registry.get_by_python_type(UPath)
+    assert isinstance(lt, LogicalUPath)
+
+
+def test_default_context_registry_has_logical_uuid():
+    """Default registry returns LogicalUUID for 'uuid.UUID'."""
+    from orcapod.contexts import get_default_context
+    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+
+    registry = get_default_context().logical_type_registry
+    lt = registry.get_by_logical_name("uuid.UUID")
+    assert isinstance(lt, LogicalUUID)
+
+
+def test_default_context_registry_lookup_by_arrow_name_uuid():
+    """Default registry routes 'arrow.uuid' arrow ext name to LogicalUUID."""
+    from orcapod.contexts import get_default_context
+    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+
+    registry = get_default_context().logical_type_registry
+    lt = registry.get_by_arrow_extension_name("arrow.uuid")
+    assert isinstance(lt, LogicalUUID)
+
+
+def test_default_context_registry_uuid_logical_name_differs_from_arrow_name():
+    """The same LogicalUUID instance is found by both 'uuid.UUID' and 'arrow.uuid'."""
+    from orcapod.contexts import get_default_context
+
+    registry = get_default_context().logical_type_registry
+    by_logical = registry.get_by_logical_name("uuid.UUID")
+    by_arrow = registry.get_by_arrow_extension_name("arrow.uuid")
+    assert by_logical is by_arrow
+
+
+def test_get_default_logical_type_registry_returns_same_as_context():
+    """get_default_logical_type_registry() is the same object as get_default_context().logical_type_registry."""
+    from orcapod.contexts import get_default_context, get_default_logical_type_registry
+
+    assert get_default_logical_type_registry() is get_default_context().logical_type_registry
+
+
+def test_default_context_idempotent_registry():
+    """Calling get_default_context() twice returns the same LogicalTypeRegistry instance."""
+    from orcapod.contexts import get_default_context
+
+    r1 = get_default_context().logical_type_registry
+    r2 = get_default_context().logical_type_registry
+    assert r1 is r2
