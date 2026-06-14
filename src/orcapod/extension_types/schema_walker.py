@@ -46,7 +46,8 @@ def walk_schema(schema: pa.Schema) -> list[ExtensionTypeInfo]:
 
     Returns:
         Deduplicated list of ``ExtensionTypeInfo`` in depth-first,
-        first-seen order.
+        first-seen order. Extension type storage types are not descended
+        into — only the logical schema type tree is walked.
     """
     seen: set[tuple[str, bytes | None]] = set()
     results: list[ExtensionTypeInfo] = []
@@ -63,7 +64,8 @@ def walk_field(field: pa.Field) -> list[ExtensionTypeInfo]:
 
     Returns:
         Deduplicated list of ``ExtensionTypeInfo`` in depth-first,
-        first-seen order.
+        first-seen order. Extension type storage types are not descended
+        into — only the logical schema type tree is walked.
     """
     seen: set[tuple[str, bytes | None]] = set()
     results: list[ExtensionTypeInfo] = []
@@ -107,8 +109,11 @@ def _collect(
         or pa.types.is_list_view(t)
         or pa.types.is_large_list_view(t)
     ):
+        # .value_field is guaranteed by Arrow's list type contract.
         _collect(t.value_field, seen, results)
     elif pa.types.is_map(t):
+        # key_field / item_field are not part of PyArrow's stable public API
+        # for MapType — use getattr defensively across versions.
         key_field = getattr(t, "key_field", None)
         item_field = getattr(t, "item_field", None)
         if key_field is not None:

@@ -154,19 +154,9 @@ def test_deduplication():
     """Same (extension_name, extension_metadata) in two columns → one result."""
     name = _unique_name()
     meta = b"test.cat"
-    _n, _m, _s = name, meta, pa.large_utf8()
-    ExtType = type(
-        "_DupExt",
-        (pa.ExtensionType,),
-        {
-            "__init__": lambda self: pa.ExtensionType.__init__(self, _s, _n),
-            "__arrow_ext_serialize__": lambda self: _m,
-            "__arrow_ext_deserialize__": classmethod(lambda cls, st, se: cls()),
-        },
-    )
     schema = pa.schema([
-        pa.field("col_a", ExtType()),
-        pa.field("col_b", ExtType()),
+        _make_reg_field("col_a", name, metadata=meta),
+        _make_reg_field("col_b", name, metadata=meta),
     ])
     result = walk_schema(schema)
     assert len(result) == 1
