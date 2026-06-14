@@ -6,10 +6,12 @@ extension type in both PyArrow's and Polars' global registries.
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 from typing import TYPE_CHECKING
 
-from orcapod.extension_types.protocols import LogicalType
+from orcapod.extension_types.protocols import LogicalType, LogicalTypeFactory
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -18,6 +20,8 @@ if TYPE_CHECKING:
 else:
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")
+
+logger = logging.getLogger(__name__)
 
 
 def _sanitize(name: str) -> str:
