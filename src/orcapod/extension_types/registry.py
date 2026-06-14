@@ -167,16 +167,26 @@ class LogicalTypeRegistry:
     The process-global ``default_logical_type_registry`` instance provides
     effective process-wide uniqueness for normal use. Thread-safety is deferred.
 
+    An optional ``logical_types`` list can be passed at construction time to
+    pre-register one or more ``LogicalType`` instances immediately, following
+    the same pattern as ``SemanticTypeRegistry``'s ``converters`` constructor
+    argument.
+
     Example:
         >>> registry = LogicalTypeRegistry()
         >>> registry.register(my_logical_type)
         >>> lt = registry.get_by_logical_name("uuid.UUID")
+
+        >>> # Pre-register types at construction:
+        >>> registry = LogicalTypeRegistry(logical_types=[path_lt, uuid_lt])
     """
 
-    def __init__(self) -> None:
+    def __init__(self, logical_types: list[LogicalType] | None = None) -> None:
         self._by_logical_name: dict[str, LogicalType] = {}
         self._by_arrow_name: dict[str, LogicalType] = {}
         self._by_python_type: dict[type, LogicalType] = {}
+        for lt in (logical_types or []):
+            self.register(lt)
 
     def register(self, logical_type: LogicalType) -> None:
         """Register *logical_type* and its PyArrow/Polars extension types.
