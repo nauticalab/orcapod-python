@@ -88,3 +88,45 @@ class LogicalType(Protocol):
             A Python object of type ``python_type``.
         """
         ...
+
+
+@runtime_checkable
+class LogicalTypeFactory(Protocol):
+    """Protocol for factories that auto-construct ``LogicalType`` instances from Arrow schema metadata.
+
+    A ``LogicalTypeFactory`` constructs a ``LogicalType`` from the Arrow extension
+    type name, its underlying storage type, and the full parsed JSON metadata dict.
+    The dispatch key (``"category"`` value from the metadata JSON) that routes to this
+    factory is declared at registration time via
+    ``LogicalTypeRegistry.register_logical_type_factory``; the factory itself has no
+    knowledge of its dispatch key but receives the full metadata dict so it can read
+    additional hints beyond ``"category"``.
+
+    This protocol is ``@runtime_checkable``, consistent with ``LogicalType``.
+    """
+
+    def create_logical_type(
+        self,
+        arrow_extension_name: str,
+        storage_type: pa.DataType,
+        metadata: dict,
+    ) -> LogicalType:
+        """Construct a ``LogicalType`` for the given Arrow extension name and storage type.
+
+        Args:
+            arrow_extension_name: The Arrow extension type name extracted from the
+                schema (i.e. the value of ``ARROW:extension:name`` field metadata).
+            storage_type: The underlying Arrow storage type for this extension field.
+            metadata: The full parsed JSON metadata dict. Always contains at least a
+                ``"category"`` key. May contain additional keys the factory uses (e.g.
+                ``"protocol"``, ``"pydantic_version"``).
+
+        Returns:
+            A fully constructed ``LogicalType`` ready to be passed to
+            ``LogicalTypeRegistry.register()``.
+
+        Raises:
+            ValueError: If this factory cannot construct a logical type for the given
+                extension name (e.g. the Python class cannot be resolved by name).
+        """
+        ...
