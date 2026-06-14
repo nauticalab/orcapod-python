@@ -85,54 +85,80 @@ insertion order wins (Python 3.7+ dict ordering). Returns `None` if nothing matc
 
 All other public methods are straightforward dict lookups or list returns.
 
+### Module-level global-registry tracking
+
+Two module-level dicts shadow the process-global PA and Polars registries so that equivalence
+checks can be performed without touching private internals of either library:
+
+```python
+_ARROW_REGISTRY: dict[str, tuple[pa.DataType, bytes]] = {}
+# name → (storage_type, extension_metadata_bytes)
+
+_POLARS_REGISTRY: dict[str, tuple[pl.DataType, str | None]] = {}
+# name → (pl_storage_dtype, metadata_str)
+```
+
+These dicts are module-level singletons and are shared across all `ExtensionTypeRegistry`
+instances in the same process. They track exactly what has been registered in the global
+PA/Polars registries by *any* `ExtensionTypeRegistry` call. They are never cleared.
+
 ### Private helpers
 
 **`_register_arrow_ext_type(converter)`**
 
-Creates a `pa.ExtensionType` subclass dynamically using `type()` and calls
-`pa.register_extension_type(instance)`. If PyArrow raises (type already registered globally),
-the exception is silently suppressed — our registry-level duplicate check already ensures we
-never re-register the same name intentionally. Suppressing the PyArrow error makes the registry
-safe to use in test suites where the process-global PyArrow state persists across test cases.
+1. Compute `metadata = converter.extension_metadata or b""` and `storage = converter.storage_type`.
+2. If `converter.extension_name` is already in `_ARROW_REGISTRY`:
+   - Compare `(existing_storage, existing_metadata)` with `(storage, metadata)` using `==`.
+   - Match → return immediately (idempotent; safe for module reload and test-suite reuse).
+   - Mismatch → raise `ValueError` with both the existing and attempted parameters.
+3. Dynamically create a `pa.ExtensionType` subclass via `type()`:
 
 ```python
 # Pseudocode for the dynamically created class
 class _ArrowExt_<sanitized_name>(pa.ExtensionType):
     def __init__(self):
-        pa.ExtensionType.__init__(self, converter.storage_type, converter.extension_name)
+        pa.ExtensionType.__init__(self, storage, converter.extension_name)
 
     def __arrow_ext_serialize__(self) -> bytes:
-        return converter.extension_metadata or b""
+        return metadata  # captured from converter at registration time
 
     @classmethod
     def __arrow_ext_deserialize__(cls, storage_type, serialized):
         return cls()
 ```
 
+4. Call `pa.register_extension_type(instance)`. If PyArrow raises `ArrowKeyError`, the name
+   was registered externally (not through our registry) — re-raise as `ValueError` explaining
+   that the name is already taken by an external registration and equivalence cannot be verified.
+5. On success: `_ARROW_REGISTRY[name] = (storage, metadata)`.
+
 Name sanitization: replace all non-alphanumeric characters with `_` (e.g.
-`pathlib.Path` → `_ArrowExt_pathlib_Path`). This is cosmetic only (for `repr` and debugging);
-PyArrow identifies the type by `extension_name`, not the class name.
+`pathlib.Path` → `_ArrowExt_pathlib_Path`). Cosmetic only — PyArrow identifies types by
+`extension_name`, not by class name.
 
 **`_register_polars_ext_type(converter)`**
 
-Derives the Polars storage dtype by creating an empty PyArrow array of the storage type and
-converting it via `pl.from_arrow`:
+1. Derive Polars storage dtype by converting an empty PA array of the storage type:
 
 ```python
 pl_storage = pl.from_arrow(pa.array([], type=converter.storage_type)).dtype
 ```
 
-This is reliable, handles all Arrow → Polars type mappings (including `pa.large_utf8()` →
-`pl.String`, `pa.binary(16)` → `pl.Binary`, `pa.struct(...)` → `pl.Struct({...})`), and
-requires no manually-maintained mapping table.
+This handles all Arrow → Polars mappings (`pa.large_utf8()` → `pl.String`,
+`pa.binary(16)` → `pl.Binary`, `pa.struct(...)` → `pl.Struct({...})`) without a
+manually-maintained table.
 
-Then creates a `pl.BaseExtension` subclass dynamically:
+2. Compute `metadata_str = converter.extension_metadata.decode("utf-8") if converter.extension_metadata else None`.
+3. If `converter.extension_name` is already in `_POLARS_REGISTRY`:
+   - Compare `(existing_pl_storage, existing_metadata_str)` with `(pl_storage, metadata_str)` using `==`.
+   - Match → return immediately (idempotent).
+   - Mismatch → raise `ValueError` with both the existing and attempted parameters.
+4. Dynamically create a `pl.BaseExtension` subclass via `type()`:
 
 ```python
 # Pseudocode for the dynamically created class
 class _PolarsExt_<sanitized_name>(pl.BaseExtension):
     def __init__(self):
-        metadata_str = converter.extension_metadata.decode("utf-8") if converter.extension_metadata else None
         super().__init__(converter.extension_name, pl_storage, metadata_str)
 
     @classmethod
@@ -140,8 +166,10 @@ class _PolarsExt_<sanitized_name>(pl.BaseExtension):
         return cls()
 ```
 
-Calls `pl.register_extension_type(converter.extension_name, _PolarsExtType)`. If Polars raises
-(already registered), silently suppressed for the same reason as PyArrow.
+5. Call `pl.register_extension_type(converter.extension_name, _PolarsExtType)`. If Polars raises
+   `ValueError` (already registered externally), re-raise as `ValueError` explaining that the
+   name is already taken and equivalence cannot be verified.
+6. On success: `_POLARS_REGISTRY[name] = (pl_storage, metadata_str)`.
 
 Note: `pl.BaseExtension` is marked unstable in Polars. The `polars>=1.36.0` constraint is a
 forward commitment; if a future Polars release changes this API, the helpers in `registry.py`
@@ -184,9 +212,10 @@ Polars 1.36.0 is the first release that exports `pl.BaseExtension` and
 
 | Situation | Behaviour |
 |---|---|
-| Duplicate `extension_name` in `register()` | `ValueError` with the offending name |
-| PyArrow already has the type globally | Silently suppressed (safe for re-import and test isolation) |
-| Polars already has the type globally | Silently suppressed (same reason) |
+| Duplicate `extension_name` in `register()` (same `ExtensionTypeRegistry` instance) | `ValueError` with the offending name |
+| PA/Polars global registry has the name, registered via our tracking dicts, same params | Idempotent — return silently (safe for module reload and test-suite reuse) |
+| PA/Polars global registry has the name, registered via our tracking dicts, different params | `ValueError` showing existing vs. attempted `storage_type` and `metadata` |
+| PA/Polars global registry has the name, registered externally (not via our dicts) | `ValueError` explaining the name is taken by an external source and equivalence cannot be verified |
 | `get_converter_for_name` / `get_converter_for_python_type` miss | Returns `None` |
 | Non-`ExtensionTypeConverter` passed to `register()` | `beartype` raises `BeartypeCallHintParamViolation` at the call site |
 
@@ -206,7 +235,9 @@ avoid cross-test interference (since those globals persist for the process lifet
 | `test_register_stores_converter` | `get_converter_for_name` returns the converter after `register()` |
 | `test_register_populates_arrow_registry` | After `register()`, attempting to re-register the same name with PyArrow raises `pa.lib.ArrowKeyError` (proving it is registered) |
 | `test_register_populates_polars_registry` | After `register()`, `pl.from_arrow(pa.array([...], type=ext_type_instance)).dtype` is a `pl.BaseExtension` instance |
-| `test_register_duplicate_raises` | Second `register()` with same `extension_name` → `ValueError` |
+| `test_register_duplicate_raises` | Second `register()` on the same registry instance with same `extension_name` → `ValueError` |
+| `test_register_global_collision_same_params` | Fresh registry instance registers same name+params as a previous registry → idempotent (no error) |
+| `test_register_global_collision_different_params` | Fresh registry instance registers same name but different `storage_type` → `ValueError` with both old and new params shown |
 | `test_get_converter_for_name_miss` | Unknown name returns `None` |
 | `test_get_converter_for_python_type_exact` | Exact type lookup returns converter |
 | `test_get_converter_for_python_type_subclass` | Subclass of registered type returns converter |
