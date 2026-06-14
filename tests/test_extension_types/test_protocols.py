@@ -41,6 +41,35 @@ class _StubLogicalType:
         return storage_value
 
 
+class _StubFactory:
+    """Minimal conforming implementation of LogicalTypeFactory for use in tests."""
+
+    def create_logical_type(self, arrow_extension_name, storage_type, metadata):
+        return _StubLogicalType()
+
+
+def test_logical_type_factory_protocol_is_importable():
+    """LogicalTypeFactory can be imported from extension_types.protocols."""
+    from orcapod.extension_types.protocols import LogicalTypeFactory
+    assert LogicalTypeFactory is not None
+
+
+def test_logical_type_factory_conforming_class_satisfies_protocol():
+    """A conforming class is recognized as a LogicalTypeFactory instance."""
+    from orcapod.extension_types.protocols import LogicalTypeFactory
+    assert isinstance(_StubFactory(), LogicalTypeFactory)
+
+
+def test_logical_type_factory_create_returns_logical_type():
+    """A conforming factory returns a LogicalType from create_logical_type."""
+    from orcapod.extension_types.protocols import LogicalTypeFactory, LogicalType
+    factory: LogicalTypeFactory = _StubFactory()
+    result = factory.create_logical_type(
+        "test.ext", pa.large_utf8(), {"category": "Test"}
+    )
+    assert isinstance(result, LogicalType)
+
+
 def test_protocol_is_importable():
     """LogicalType can be imported from extension_types.protocols."""
     assert LogicalType is not None
