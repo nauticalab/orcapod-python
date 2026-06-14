@@ -139,3 +139,74 @@ def test_list_python_types():
     registry.register(a)
     registry.register(b)
     assert registry.list_python_types() == [bytes, float]
+
+
+# ---------------------------------------------------------------------------
+# PyArrow global registry tests
+# ---------------------------------------------------------------------------
+
+def test_register_populates_arrow_registry():
+    """After register(), PA global registry contains the extension type."""
+    conv = _make_stub()
+    registry = ExtensionTypeRegistry()
+    registry.register(conv)
+
+    # If the name is registered, attempting to re-register it raises ArrowKeyError.
+    # This is the only stable public signal PyArrow provides.
+    class _Probe(pa.ExtensionType):
+        def __init__(self):
+            pa.ExtensionType.__init__(self, pa.large_utf8(), conv.extension_name)
+        def __arrow_ext_serialize__(self):
+            return b""
+        @classmethod
+        def __arrow_ext_deserialize__(cls, st, se):
+            return cls()
+
+    with pytest.raises(pa.lib.ArrowKeyError):
+        pa.register_extension_type(_Probe())
+
+
+def test_register_arrow_global_collision_same_params_is_idempotent():
+    """A second registry instance registering the same name+params succeeds silently."""
+    name = _unique_name()
+    conv = _make_stub(name=name, storage=pa.large_utf8(), metadata=b"cat")
+
+    ExtensionTypeRegistry().register(conv)   # first — populates _ARROW_REGISTRY
+    ExtensionTypeRegistry().register(conv)   # second — should not raise
+
+
+def test_register_arrow_global_collision_different_storage_raises():
+    """A second registry using the same name but different storage_type raises."""
+    name = _unique_name()
+    ExtensionTypeRegistry().register(_make_stub(name=name, storage=pa.large_utf8()))
+
+    with pytest.raises(ValueError, match=name):
+        ExtensionTypeRegistry().register(_make_stub(name=name, storage=pa.large_binary()))
+
+
+def test_register_arrow_global_collision_different_metadata_raises():
+    """A second registry using the same name but different metadata raises."""
+    name = _unique_name()
+    ExtensionTypeRegistry().register(_make_stub(name=name, metadata=b"original"))
+
+    with pytest.raises(ValueError, match=name):
+        ExtensionTypeRegistry().register(_make_stub(name=name, metadata=b"different"))
+
+
+def test_register_arrow_external_registration_raises():
+    """A name registered directly with PyArrow (bypassing our registry) raises on register()."""
+    name = _unique_name()
+
+    class _External(pa.ExtensionType):
+        def __init__(self):
+            pa.ExtensionType.__init__(self, pa.large_utf8(), name)
+        def __arrow_ext_serialize__(self):
+            return b""
+        @classmethod
+        def __arrow_ext_deserialize__(cls, st, se):
+            return cls()
+
+    pa.register_extension_type(_External())  # bypass our registry
+
+    with pytest.raises(ValueError, match="external source"):
+        ExtensionTypeRegistry().register(_make_stub(name=name))
