@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 
+import polars as pl
 import pyarrow as pa
 import pytest
 
@@ -207,6 +208,69 @@ def test_register_arrow_external_registration_raises():
             return cls()
 
     pa.register_extension_type(_External())  # bypass our registry
+
+    with pytest.raises(ValueError, match="external source"):
+        ExtensionTypeRegistry().register(_make_stub(name=name))
+
+
+# ---------------------------------------------------------------------------
+# Polars global registry tests
+# ---------------------------------------------------------------------------
+
+def test_register_populates_polars_registry():
+    """After register(), _POLARS_REGISTRY shadow dict contains the extension type."""
+    conv = _make_stub(storage=pa.large_utf8())
+    registry = ExtensionTypeRegistry()
+    registry.register(conv)
+
+    from orcapod.extension_types.registry import _POLARS_REGISTRY
+    assert conv.extension_name in _POLARS_REGISTRY
+    stored_storage, stored_meta = _POLARS_REGISTRY[conv.extension_name]
+    assert stored_storage == pl.String
+    assert stored_meta == "test.category"
+
+
+def test_register_polars_global_collision_same_params_is_idempotent():
+    """A second registry instance registering the same name+params succeeds silently."""
+    name = _unique_name()
+    conv = _make_stub(name=name, storage=pa.large_utf8(), metadata=b"cat")
+
+    ExtensionTypeRegistry().register(conv)
+    ExtensionTypeRegistry().register(conv)   # should not raise
+
+
+def test_register_polars_global_collision_different_storage_raises():
+    """A second registry using the same name but different storage_type raises."""
+    name = _unique_name()
+    ExtensionTypeRegistry().register(_make_stub(name=name, storage=pa.large_utf8()))
+
+    with pytest.raises(ValueError, match=name):
+        ExtensionTypeRegistry().register(_make_stub(name=name, storage=pa.large_binary()))
+
+
+def test_register_polars_external_registration_raises():
+    """A name registered directly with Polars (bypassing our registry) raises on register()."""
+    name = _unique_name()
+
+    class _ExternalPL(pl.BaseExtension):
+        def __init__(self):
+            super().__init__(name, pl.String, None)
+        @classmethod
+        def ext_from_params(cls, n, s, m):
+            return cls()
+
+    # Also register in PA first so we don't hit the PA external-registration error
+    class _ExternalPA(pa.ExtensionType):
+        def __init__(self):
+            pa.ExtensionType.__init__(self, pa.large_utf8(), name)
+        def __arrow_ext_serialize__(self):
+            return b""
+        @classmethod
+        def __arrow_ext_deserialize__(cls, st, se):
+            return cls()
+
+    pa.register_extension_type(_ExternalPA())
+    pl.register_extension_type(name, _ExternalPL)
 
     with pytest.raises(ValueError, match="external source"):
         ExtensionTypeRegistry().register(_make_stub(name=name))
