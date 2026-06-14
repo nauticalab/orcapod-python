@@ -162,3 +162,97 @@ def test_deduplication():
     assert len(result) == 1
     assert result[0].extension_name == name
     assert result[0].extension_metadata == meta
+
+
+# ---------------------------------------------------------------------------
+# Task 2 tests: container recursion
+# ---------------------------------------------------------------------------
+
+
+def test_list_of_registered():
+    """Registered extension type as the value field of a list."""
+    name = _unique_name()
+    value_field = _make_reg_field("item", name, metadata=b"my.cat")
+    list_field = pa.field("col", pa.list_(value_field))
+    result = walk_schema(pa.schema([list_field]))
+    assert len(result) == 1
+    assert result[0].extension_name == name
+
+
+def test_list_of_unregistered():
+    """Unregistered extension type as the value field of a list."""
+    name = _unique_name()
+    value_field = _make_unreg_field("item", name, metadata=b"my.cat")
+    list_field = pa.field("col", pa.list_(value_field))
+    result = walk_schema(pa.schema([list_field]))
+    assert len(result) == 1
+    assert result[0].extension_name == name
+    assert result[0].extension_metadata == b"my.cat"
+
+
+def test_struct_containing_registered():
+    """Registered extension type as a field inside a struct."""
+    name = _unique_name()
+    struct_field = pa.field(
+        "col",
+        pa.struct([
+            _make_reg_field("a", name, metadata=b"my.cat"),
+            pa.field("b", pa.int64()),
+        ]),
+    )
+    result = walk_schema(pa.schema([struct_field]))
+    assert len(result) == 1
+    assert result[0].extension_name == name
+
+
+def test_struct_containing_unregistered():
+    """Unregistered extension type as a field inside a struct."""
+    name = _unique_name()
+    struct_field = pa.field(
+        "col",
+        pa.struct([
+            _make_unreg_field("a", name, metadata=b"my.cat"),
+            pa.field("b", pa.int64()),
+        ]),
+    )
+    result = walk_schema(pa.schema([struct_field]))
+    assert len(result) == 1
+    assert result[0].extension_name == name
+    assert result[0].extension_metadata == b"my.cat"
+
+
+def test_nested_list_struct():
+    """Registered extension type nested inside list<struct<...>>."""
+    name = _unique_name()
+    struct_type = pa.struct([
+        _make_reg_field("x", name, metadata=b"deep.cat"),
+        pa.field("y", pa.int32()),
+    ])
+    value_field = pa.field("item", struct_type)
+    col = pa.field("col", pa.list_(value_field))
+    result = walk_schema(pa.schema([col]))
+    assert len(result) == 1
+    assert result[0].extension_name == name
+    assert result[0].extension_metadata == b"deep.cat"
+
+
+def test_map_type():
+    """Extension type as the item type of a map (registered channel)."""
+    name = _unique_name()
+    _n, _m, _s = name, b"map.cat", pa.large_utf8()
+    # Build a pa.ExtensionType instance — it IS a pa.DataType and can be
+    # passed directly to pa.map_() as the item type.
+    ExtType = type(
+        "_MapItemExt",
+        (pa.ExtensionType,),
+        {
+            "__init__": lambda self: pa.ExtensionType.__init__(self, _s, _n),
+            "__arrow_ext_serialize__": lambda self: _m,
+            "__arrow_ext_deserialize__": classmethod(lambda cls, st, se: cls()),
+        },
+    )
+    map_field = pa.field("col", pa.map_(pa.large_utf8(), ExtType()))
+    result = walk_schema(pa.schema([map_field]))
+    # _collect uses getattr(t, "item_field") to retrieve the item pa.Field.
+    # pa.types.is_extension(item_field.type) will be True for the ExtType above.
+    assert any(r.extension_name == name for r in result)
