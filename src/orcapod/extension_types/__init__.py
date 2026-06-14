@@ -3,7 +3,7 @@
 This subpackage provides the registry and protocol for converters that map
 between Python objects and their Arrow extension type storage representation.
 
-The module-level `extension_type_registry` instance is the process default.
+The module-level `default_extension_type_registry` instance is the process default.
 Built-in registrations (`Path`, `UPath`, `UUID`) are added by PLT-1656.
 `DataContext` wiring is added by PLT-1660.
 """
@@ -13,10 +13,10 @@ from __future__ import annotations
 from .protocols import ExtensionTypeConverter
 from .registry import ExtensionTypeRegistry
 
-extension_type_registry = ExtensionTypeRegistry()
+default_extension_type_registry = ExtensionTypeRegistry()
 
 __all__ = [
     "ExtensionTypeConverter",
     "ExtensionTypeRegistry",
-    "extension_type_registry",
+    "default_extension_type_registry",
 ]

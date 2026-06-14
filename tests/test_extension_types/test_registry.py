@@ -33,10 +33,10 @@ def _make_stub(
     py_type: type = str,
 ) -> ExtensionTypeConverter:
     """Factory for minimal ExtensionTypeConverter conforming stubs."""
+    # _name and _storage are rebound to capture default-value computation once;
+    # metadata and py_type are used directly since they require no transformation.
     _name = name or _unique_name()
     _storage = storage if storage is not None else pa.large_utf8()
-    _metadata = metadata
-    _py_type = py_type
 
     class _Stub:
         @property
@@ -45,7 +45,7 @@ def _make_stub(
 
         @property
         def extension_metadata(self) -> bytes | None:
-            return _metadata
+            return metadata
 
         @property
         def storage_type(self) -> pa.DataType:
@@ -53,7 +53,7 @@ def _make_stub(
 
         @property
         def python_type(self) -> type:
-            return _py_type
+            return py_type
 
         def python_to_storage(self, value):
             return str(value)
@@ -365,9 +365,11 @@ def test_python_class_round_trip():
     originals = [_Color("#ff0000"), _Color("#00ff00"), _Color("#0000ff")]
     ext_arr = _build_ext_array(conv, originals)
 
-    # Decode back
-    storage_back = ext_arr.cast(conv.storage_type)
-    recovered = [conv.storage_to_python(v.as_py()) for v in storage_back]
+    # .storage accesses the underlying storage array directly — the idiomatic
+    # PyArrow API for extension arrays. Note: __arrow_ext_serialize__/
+    # __arrow_ext_deserialize__ are for type-descriptor (schema) serialization,
+    # not for per-value data conversion; data lives in the storage array.
+    recovered = [conv.storage_to_python(v.as_py()) for v in ext_arr.storage]
     assert recovered == originals
 
 
@@ -390,7 +392,7 @@ def test_arrow_polars_round_trip():
     arr_back = pl_series.to_arrow()
     assert arr_back.type.extension_name == conv.extension_name
 
-    recovered = [conv.storage_to_python(v.as_py()) for v in arr_back.cast(conv.storage_type)]
+    recovered = [conv.storage_to_python(v.as_py()) for v in arr_back.storage]
     assert recovered == originals
 
 
@@ -414,10 +416,10 @@ def test_parquet_round_trip():
         table_back = pq.read_table(path)
 
     assert table_back.schema.field("color").type.extension_name == conv.extension_name
-    recovered = [
-        conv.storage_to_python(v.as_py())
-        for v in table_back.column("color").cast(conv.storage_type)
-    ]
+    # ChunkedArray.combine_chunks() gives a single ExtensionArray; .storage then
+    # accesses the underlying storage array without needing an explicit cast.
+    storage_arr = table_back.column("color").combine_chunks().storage
+    recovered = [conv.storage_to_python(v.as_py()) for v in storage_arr]
     assert recovered == originals
 
 
@@ -426,8 +428,8 @@ def test_parquet_round_trip():
 # ---------------------------------------------------------------------------
 
 def test_extension_type_registry_module_instance():
-    """extension_types.extension_type_registry is an ExtensionTypeRegistry, starts empty."""
+    """extension_types.default_extension_type_registry is an ExtensionTypeRegistry, starts empty."""
     from orcapod import extension_types
-    assert isinstance(extension_types.extension_type_registry, ExtensionTypeRegistry)
+    assert isinstance(extension_types.default_extension_type_registry, ExtensionTypeRegistry)
     # PLT-1653 scope: no built-in converters registered yet (that is PLT-1656)
-    assert extension_types.extension_type_registry.list_extension_names() == []
+    assert extension_types.default_extension_type_registry.list_extension_names() == []
