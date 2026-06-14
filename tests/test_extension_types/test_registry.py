@@ -43,9 +43,11 @@ def _make_stub(
 
     ArrowExtClass = make_arrow_extension_type(_arrow_name, _storage)
 
+    _pl_storage = pl.from_arrow(pa.array([], type=_storage)).dtype
+
     class _PolarsExt(pl.BaseExtension):
         def __init__(self):
-            super().__init__(_arrow_name, pl.String, None)
+            super().__init__(_arrow_name, _pl_storage, None)
         @classmethod
         def ext_from_params(cls, ext_name, storage_dtype, metadata_str):
             return cls()
@@ -265,6 +267,7 @@ def test_register_same_instance_two_registries():
     r2 = LogicalTypeRegistry()
     r1.register(lt)
     r2.register(lt)  # should not raise (same instance, PA/Polars accept silently)
+    assert r2.get_by_logical_name(lt.logical_type_name) is lt
 
 
 # ---------------------------------------------------------------------------
@@ -375,7 +378,12 @@ def _build_ext_array(
     lt: LogicalType,
     values: list,
 ) -> pa.Array:
-    """Build a PA extension array from Python values using the logical type."""
+    """Build a PA extension array from Python values using the logical type.
+
+    The logical type's Arrow extension type must already be registered in
+    PyArrow's global registry (i.e. ``registry.register(lt)`` must have been
+    called) before this helper is used.
+    """
     storage_values = [lt.python_to_storage(v) for v in values]
     arrow_ext = lt.get_arrow_extension_type()
     storage_arr = pa.array(storage_values, type=arrow_ext.storage_type)
