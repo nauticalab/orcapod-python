@@ -2,9 +2,8 @@ name: Run Objective Tests
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, extension-type-system]
   pull_request:
-    branches: [main, dev]
   workflow_dispatch: # Allows manual triggering
 
 jobs:
