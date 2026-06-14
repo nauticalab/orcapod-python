@@ -167,3 +167,77 @@ class LogicalUPath:
             A ``upath.UPath`` instance.
         """
         return UPath(storage_value)
+
+
+class LogicalUUID:
+    """Logical type for ``uuid.UUID``.
+
+    Uses PyArrow's built-in ``pa.uuid()`` extension type (``"arrow.uuid"``)
+    which stores UUID values as 16-byte binary (``pa.binary(16)``).
+
+    Note:
+        ``logical_type_name`` (``"uuid.UUID"``) intentionally differs from
+        the Arrow extension name (``"arrow.uuid"``). The
+        ``LogicalTypeRegistry`` stores both bindings so that lookups by
+        either key resolve to this same instance.
+
+    Example:
+        >>> import uuid
+        >>> lt = LogicalUUID()
+        >>> u = uuid.uuid4()
+        >>> lt.storage_to_python(lt.python_to_storage(u)) == u
+        True
+    """
+
+    _arrow_ext: pa.ExtensionType | None = None
+    _polars_ext_class = make_polars_extension_type("arrow.uuid", pa.binary(16), None)
+    _polars_ext: pl.BaseExtension | None = None
+
+    logical_type_name: str = "uuid.UUID"
+    python_type: type = _uuid_module.UUID
+
+    def get_arrow_extension_type(self) -> pa.ExtensionType:
+        """Return PyArrow's built-in ``pa.uuid()`` extension type.
+
+        Returns:
+            A cached ``pa.uuid()`` instance (Arrow extension name ``"arrow.uuid"``,
+            storage type ``pa.binary(16)``).
+        """
+        if LogicalUUID._arrow_ext is None:
+            LogicalUUID._arrow_ext = pa.uuid()
+        return LogicalUUID._arrow_ext
+
+    def get_polars_extension_type(self) -> pl.BaseExtension:
+        """Return the Polars extension type for ``arrow.uuid``.
+
+        Returns:
+            A cached ``pl.BaseExtension`` instance registered under
+            ``"arrow.uuid"`` (matches the Arrow extension name, not the
+            logical type name).
+        """
+        if LogicalUUID._polars_ext is None:
+            LogicalUUID._polars_ext = LogicalUUID._polars_ext_class()
+        return LogicalUUID._polars_ext
+
+    def python_to_storage(self, value: Any) -> bytes:
+        """Convert a ``uuid.UUID`` to its 16-byte binary representation.
+
+        Args:
+            value: A ``uuid.UUID`` instance.
+
+        Returns:
+            A 16-byte ``bytes`` object (big-endian byte order, as per
+            ``uuid.UUID.bytes``).
+        """
+        return value.bytes
+
+    def storage_to_python(self, storage_value: Any) -> _uuid_module.UUID:
+        """Reconstruct a ``uuid.UUID`` from its 16-byte binary representation.
+
+        Args:
+            storage_value: A bytes-like object of length 16.
+
+        Returns:
+            A ``uuid.UUID`` instance.
+        """
+        return _uuid_module.UUID(bytes=bytes(storage_value))
