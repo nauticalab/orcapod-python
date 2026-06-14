@@ -238,7 +238,6 @@ def test_get_by_arrow_extension_name_miss():
 
 
 # ---------------------------------------------------------------------------
-<<<<<<< HEAD
 # LogicalTypeRegistry constructor logical_types param tests
 # ---------------------------------------------------------------------------
 
@@ -270,7 +269,9 @@ def test_registry_init_with_multiple_logical_types():
     registry = LogicalTypeRegistry(logical_types=[lt1, lt2])
     assert registry.get_by_logical_name(lt1.logical_type_name) is lt1
     assert registry.get_by_logical_name(lt2.logical_type_name) is lt2
-=======
+
+
+# ---------------------------------------------------------------------------
 # register_logical_type_factory tests
 # ---------------------------------------------------------------------------
 
@@ -297,7 +298,6 @@ def test_register_duplicate_category_raises():
     registry.register_logical_type_factory("Cat", f1)
     with pytest.raises(ValueError, match="Cat"):
         registry.register_logical_type_factory("Cat", f2)
->>>>>>> b66dd7d (feat(extension_types): add _factories dict and register_logical_type_factory to LogicalTypeRegistry)
 
 
 # ---------------------------------------------------------------------------
@@ -574,3 +574,108 @@ def test_make_polars_extension_type_with_metadata():
     inst = cls()
     assert inst.ext_name() == name
 
+
+
+# ---------------------------------------------------------------------------
+# prepare_extension_type tests
+# ---------------------------------------------------------------------------
+
+def test_register_logical_type_factory_dispatches_on_prepare():
+    """prepare_extension_type dispatches to the registered factory and registers the result."""
+    import json
+    registry = LogicalTypeRegistry()
+    factory = _make_stub_factory()
+    registry.register_logical_type_factory("TestCat", factory)
+
+    arrow_name = _unique_name()
+    metadata_bytes = json.dumps({"category": "TestCat"}).encode()
+    registry.prepare_extension_type(arrow_name, metadata_bytes, pa.large_utf8())
+
+    assert len(factory.calls) == 1
+    assert factory.calls[0][0] == arrow_name
+    assert registry.get_by_arrow_extension_name(arrow_name) is not None
+
+
+def test_factory_receives_full_metadata_dict():
+    """The factory's create_logical_type receives the full parsed JSON dict, not just category."""
+    import json
+    registry = LogicalTypeRegistry()
+    factory = _make_stub_factory()
+    registry.register_logical_type_factory("TestCat", factory)
+
+    arrow_name = _unique_name()
+    metadata_bytes = json.dumps(
+        {"category": "TestCat", "protocol": 5, "version": "1.0"}
+    ).encode()
+    registry.prepare_extension_type(arrow_name, metadata_bytes, pa.large_utf8())
+
+    assert len(factory.calls) == 1
+    _, _, received_metadata = factory.calls[0]
+    assert received_metadata == {"category": "TestCat", "protocol": 5, "version": "1.0"}
+
+
+def test_prepare_already_registered_noop():
+    """prepare_extension_type called twice does not raise and does not call the factory again."""
+    import json
+    registry = LogicalTypeRegistry()
+    factory = _make_stub_factory()
+    registry.register_logical_type_factory("TestCat", factory)
+
+    arrow_name = _unique_name()
+    metadata_bytes = json.dumps({"category": "TestCat"}).encode()
+
+    registry.prepare_extension_type(arrow_name, metadata_bytes, pa.large_utf8())
+    registry.prepare_extension_type(arrow_name, metadata_bytes, pa.large_utf8())  # second call
+
+    assert len(factory.calls) == 1  # factory called exactly once
+
+
+def test_prepare_already_registered_none_metadata_noop():
+    """Type pre-registered via register(); None metadata on prepare call is a silent no-op."""
+    registry = LogicalTypeRegistry()
+    lt = _make_stub()
+    registry.register(lt)
+
+    arrow_name = lt.get_arrow_extension_type().extension_name
+    registry.prepare_extension_type(arrow_name, None, pa.large_utf8())  # should not raise
+
+
+def test_prepare_none_metadata_not_registered_raises():
+    """None metadata for an unregistered extension type raises ValueError."""
+    registry = LogicalTypeRegistry()
+    arrow_name = _unique_name()
+
+    with pytest.raises(ValueError, match="must be pre-registered explicitly"):
+        registry.prepare_extension_type(arrow_name, None, pa.large_utf8())
+
+
+def test_prepare_invalid_json_raises():
+    """Non-UTF-8-JSON extension_metadata raises ValueError with raw bytes and parse error."""
+    registry = LogicalTypeRegistry()
+    arrow_name = _unique_name()
+    bad_metadata = b"not-json!"
+
+    with pytest.raises(ValueError, match="not valid UTF-8 JSON"):
+        registry.prepare_extension_type(arrow_name, bad_metadata, pa.large_utf8())
+
+
+def test_prepare_json_missing_category_raises():
+    """Valid JSON metadata without a 'category' key raises ValueError."""
+    import json
+    registry = LogicalTypeRegistry()
+    arrow_name = _unique_name()
+    no_category = json.dumps({"version": 1}).encode()
+
+    with pytest.raises(ValueError, match='"category"'):
+        registry.prepare_extension_type(arrow_name, no_category, pa.large_utf8())
+
+
+def test_prepare_unknown_category_raises():
+    """Valid JSON with 'category' but no matching factory raises ValueError."""
+    import json
+    registry = LogicalTypeRegistry()
+    arrow_name = _unique_name()
+    unknown = json.dumps({"category": "NoSuchFactory"}).encode()
+
+    with pytest.raises(ValueError, match="NoSuchFactory"):
+        registry.prepare_extension_type(arrow_name, unknown, pa.large_utf8())

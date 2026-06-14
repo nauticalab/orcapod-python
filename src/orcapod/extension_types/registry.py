@@ -321,6 +321,105 @@ class LogicalTypeRegistry:
             "registered LogicalTypeFactory for category %r: %r", category, factory
         )
 
+    def prepare_extension_type(
+        self,
+        arrow_extension_name: str,
+        extension_metadata: bytes | None,
+        storage_type: pa.DataType,
+    ) -> None:
+        """Ensure the Arrow extension type identified by ``arrow_extension_name``
+        is registered as a ``LogicalType``.
+
+        This is the single entry point called by ``ensure_extensions_registered``
+        in ``database_hooks``. The registry owns all dispatch logic.
+
+        Args:
+            arrow_extension_name: Arrow extension type name (``ARROW:extension:name``).
+            extension_metadata: Raw metadata bytes (``ARROW:extension:metadata``),
+                expected to be UTF-8 JSON containing at least a ``"category"`` key.
+                ``None`` if absent.
+            storage_type: Underlying Arrow storage type for this extension field.
+
+        Raises:
+            ValueError: If ``extension_metadata`` is ``None`` and the type is not
+                already registered.
+            ValueError: If ``extension_metadata`` is not valid UTF-8 JSON.
+            ValueError: If the parsed JSON has no ``"category"`` key.
+            ValueError: If no factory is registered for the ``"category"`` value.
+            ValueError: Propagated from the factory if it cannot construct a type.
+        """
+        # Step 1: per-process cache hit — no-op regardless of metadata content.
+        if self.get_by_arrow_extension_name(arrow_extension_name) is not None:
+            logger.debug(
+                "prepare_extension_type: %r already registered, skipping",
+                arrow_extension_name,
+            )
+            return
+
+        # Step 2: None metadata — cannot auto-register; must be pre-registered.
+        if extension_metadata is None:
+            raise ValueError(
+                f"Extension type {arrow_extension_name!r} has no extension metadata "
+                f"(metadata is None).\n"
+                f"Types without a metadata category tag cannot be auto-registered via "
+                f"a factory — they must be pre-registered explicitly via "
+                f"default_logical_type_registry.register(logical_type)."
+            )
+
+        # Step 3: Parse JSON.
+        try:
+            metadata_dict = json.loads(extension_metadata.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"Extension type {arrow_extension_name!r} has extension metadata that "
+                f"is not valid UTF-8 JSON: {extension_metadata!r}. "
+                f"Parse error: {exc}.\n"
+                f'Extension metadata must be a JSON object with at least a "category" '
+                f'key, e.g. {{"category": "Dataclass"}}.'
+            ) from exc
+
+        # Step 4: Require "category" key.
+        if "category" not in metadata_dict:
+            raise ValueError(
+                f"Extension type {arrow_extension_name!r} has extension metadata JSON "
+                f'with no "category" key: {metadata_dict}. Extension metadata must be '
+                f'a JSON object with at least a "category" key, e.g. '
+                f'{{"category": "Dataclass"}}.'
+            )
+
+        category = metadata_dict["category"]
+
+        # Step 5: Look up factory.
+        factory = self._factories.get(category)
+        if factory is None:
+            raise ValueError(
+                f"No LogicalTypeFactory is registered for category {category!r}.\n"
+                f"Cannot prepare extension type {arrow_extension_name!r} for "
+                f"registration.\n"
+                f"Register a factory via "
+                f"default_logical_type_registry.register_logical_type_factory(\n"
+                f"    {category!r}, factory\n"
+                f")."
+            )
+
+        # Step 6: Construct logical type via factory.
+        logger.debug(
+            "prepare_extension_type: %r not registered — dispatching to category %r factory",
+            arrow_extension_name,
+            category,
+        )
+        logical_type = factory.create_logical_type(
+            arrow_extension_name, storage_type, metadata_dict
+        )
+
+        # Step 7: Register in all three bindings + PA/Polars global registries.
+        self.register(logical_type)
+        logger.debug(
+            "prepare_extension_type: successfully registered %r via %r factory",
+            arrow_extension_name,
+            category,
+        )
+
 
 # Module-level singleton — per-process registry used by database_hooks and
 # application code. Defined here (not in __init__.py) to avoid the circular
