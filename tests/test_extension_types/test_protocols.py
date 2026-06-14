@@ -57,5 +57,6 @@ def test_conforming_class_satisfies_protocol():
     assert lt.logical_type_name == "test.module.MyType"
     assert lt.python_type is str
     assert lt.get_arrow_extension_type().extension_name == "test.module.MyType"
+    assert isinstance(lt.get_polars_extension_type(), pl.BaseExtension)
     assert lt.python_to_storage(42) == "42"
     assert lt.storage_to_python("hello") == "hello"
