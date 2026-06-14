@@ -1,6 +1,6 @@
-"""Registry for ExtensionTypeConverter instances.
+"""Registry for LogicalType instances.
 
-Registering a converter automatically registers the corresponding
+Registering a logical type automatically registers the corresponding
 extension type in both PyArrow's and Polars' global registries.
 """
 
@@ -8,218 +8,176 @@ from __future__ import annotations
 
 import re
 
-import pyarrow as pa
 import polars as pl
+import pyarrow as pa
 
-from orcapod.extension_types.protocols import ExtensionTypeConverter
-
-# ---------------------------------------------------------------------------
-# Shadow dicts — track what *we* have registered in the global registries.
-# These are module-level singletons shared across all ExtensionTypeRegistry
-# instances. We use our own dicts rather than querying library internals
-# because neither PyArrow nor Polars exposes a stable public API for looking
-# up a previously registered extension type by name.
-#
-# Limitation: types registered externally (directly via
-# pa.register_extension_type / pl.register_extension_type, bypassing this
-# module) will not appear here. A subsequent register() call for the same
-# name will detect the conflict via the library-level error and raise,
-# because without knowing what was registered externally we cannot guarantee
-# the same extension name maps to the same Python class and underlying
-# storage type — silently proceeding risks data corruption or misrouted
-# conversions at read time.
-# ---------------------------------------------------------------------------
-
-_ARROW_REGISTRY: dict[str, tuple[pa.DataType, bytes]] = {}
-# extension_name -> (storage_type, metadata_bytes)
-
-_POLARS_REGISTRY: dict[str, tuple[pl.DataType, str | None]] = {}
-# extension_name -> (pl_storage_dtype, metadata_str)
+from orcapod.extension_types.protocols import LogicalType
 
 
 def _sanitize(name: str) -> str:
     """Replace non-alphanumeric characters with underscores.
 
-    Used to produce a valid Python identifier for the `type()` class-name
-    argument when creating dynamic `pa.ExtensionType` / `pl.BaseExtension`
-    subclasses.
+    Used to produce a valid Python identifier for the dynamically created
+    ``pa.ExtensionType`` subclass name.
     """
     return re.sub(r"[^A-Za-z0-9]", "_", name)
 
 
-def _register_arrow_ext_type(converter: ExtensionTypeConverter) -> None:
-    """Register a `pa.ExtensionType` subclass for *converter* in PyArrow's global registry."""
-    name = converter.extension_name
-    metadata = converter.extension_metadata or b""
-    storage = converter.storage_type
+def make_arrow_extension_type(
+    extension_name: str,
+    storage_type: pa.DataType,
+    metadata: bytes | None = None,
+) -> type[pa.ExtensionType]:
+    """Synthesise and return a ``pa.ExtensionType`` subclass.
 
-    if name in _ARROW_REGISTRY:
-        existing_storage, existing_metadata = _ARROW_REGISTRY[name]
-        if existing_storage == storage and existing_metadata == metadata:
-            return  # idempotent — safe for module reload and test-suite reuse
-        raise ValueError(
-            f"Extension type '{name}' is already registered in the PyArrow global registry "
-            f"with different parameters.\n"
-            f"  Registered: storage_type={existing_storage!r}, metadata={existing_metadata!r}\n"
-            f"  Attempted:  storage_type={storage!r}, metadata={metadata!r}"
-        )
+    Returns the *class*, not an instance — callers instantiate it inside their
+    ``get_arrow_extension_type()`` implementation. Returning the class preserves
+    the option to create multiple instances or future parameterised variants from
+    the same class.
 
-    # Rebind to local names for closure capture: the lambdas below close over
-    # these variables, not over the function parameters, to make the binding
-    # explicit and stable across any future refactoring of this function.
-    _name, _storage, _metadata = name, storage, metadata
-    ArrowExtType = type(
-        f"_ArrowExt_{_sanitize(name)}",
+    This is a low-level building block. The full pattern for binding a Python
+    type to a specific Arrow/Polars representation — the extension type factory —
+    is the responsibility of each ``LogicalType`` implementation. See PLT-1656
+    for the built-in implementations (``Path``, ``UPath``, ``UUID``).
+
+    Args:
+        extension_name: The Arrow extension name (``ARROW:extension:name``).
+        storage_type: The underlying Arrow storage type.
+        metadata: Optional bytes stored as ``ARROW:extension:metadata``.
+            Defaults to ``None`` (serialised as empty bytes).
+
+    Returns:
+        A ``pa.ExtensionType`` subclass. Call it with no arguments to obtain
+        an instance suitable for passing to ``pa.register_extension_type`` or
+        returning from ``get_arrow_extension_type()``.
+    """
+    _name, _storage, _metadata = extension_name, storage_type, metadata or b""
+    return type(
+        f"_ArrowExt_{_sanitize(extension_name)}",
         (pa.ExtensionType,),
         {
             "__init__": lambda self: pa.ExtensionType.__init__(self, _storage, _name),
             "__arrow_ext_serialize__": lambda self: _metadata,
-            # __arrow_ext_deserialize__ reconstructs the extension *type descriptor*
-            # (called once per schema read from IPC/Parquet, not per data value).
-            # `storage_type` is the Arrow storage DataType; `serialized` is the bytes
-            # returned by __arrow_ext_serialize__. Both are intentionally ignored here
-            # because the storage type and metadata are already baked into the class
-            # constructor via closure — calling cls() is sufficient.
+            # __arrow_ext_deserialize__ reconstructs the type descriptor from schema
+            # metadata (called once per IPC/Parquet read, not per value). The storage
+            # type and metadata are baked into the constructor via closure, so
+            # arguments are intentionally ignored.
             "__arrow_ext_deserialize__": classmethod(
                 lambda cls, storage_type, serialized: cls()
             ),
         },
     )
 
-    try:
-        pa.register_extension_type(ArrowExtType())
-    except pa.lib.ArrowKeyError:
-        raise ValueError(
-            f"Extension type '{name}' is already registered in the PyArrow global registry "
-            f"by an external source. Cannot verify equivalence; orcapod requires exclusive "
-            f"ownership of extension type registrations to prevent data corruption or "
-            f"misrouted conversions. See PLT-1665 for future interop support."
-        ) from None
 
-    _ARROW_REGISTRY[name] = (storage, metadata)
+class LogicalTypeRegistry:
+    """Registry for ``LogicalType`` instances.
 
+    Maintains a three-way binding: ``(logical_type_name, arrow_extension_name,
+    python_type)`` → ``LogicalType``. Each key participates in at most one
+    binding within a registry instance.
 
-def _register_polars_ext_type(converter: ExtensionTypeConverter) -> None:
-    """Register a `pl.BaseExtension` subclass for *converter* in Polars' global registry."""
-    name = converter.extension_name
-    metadata = converter.extension_metadata
-    metadata_str = metadata.decode("utf-8") if metadata else None
-    pl_storage = pl.from_arrow(pa.array([], type=converter.storage_type)).dtype
+    Registering a logical type side-effect-registers the corresponding extension
+    type in PyArrow's and Polars' global registries. Pre-existing types (those
+    already registered externally, e.g. PyArrow's built-in ``"arrow.uuid"``) are
+    accepted silently — the binding is stored without error.
 
-    if name in _POLARS_REGISTRY:
-        existing_storage, existing_meta = _POLARS_REGISTRY[name]
-        if existing_storage == pl_storage and existing_meta == metadata_str:
-            return  # idempotent
-        raise ValueError(
-            f"Extension type '{name}' is already registered in the Polars global registry "
-            f"with different parameters.\n"
-            f"  Registered: storage_dtype={existing_storage!r}, metadata={existing_meta!r}\n"
-            f"  Attempted:  storage_dtype={pl_storage!r}, metadata={metadata_str!r}"
-        )
-
-    # Rebind to local names for closure capture (see _register_arrow_ext_type for rationale).
-    _name, _pl_storage, _meta_str = name, pl_storage, metadata_str
-    PolarsExtType = type(
-        f"_PolarsExt_{_sanitize(name)}",
-        (pl.BaseExtension,),
-        {
-            "__init__": lambda self: pl.BaseExtension.__init__(self, _name, _pl_storage, _meta_str),
-            # ext_from_params reconstructs the extension type descriptor from its
-            # registered name, storage dtype, and metadata string. All three are
-            # already baked into the constructor via closure, so the arguments are
-            # intentionally ignored.
-            "ext_from_params": classmethod(lambda cls, ext_name, storage_dtype, metadata_str: cls()),
-        },
-    )
-
-    try:
-        pl.register_extension_type(name, PolarsExtType)
-    except ValueError:
-        raise ValueError(
-            f"Extension type '{name}' is already registered in the Polars global registry "
-            f"by an external source. Cannot verify equivalence; orcapod requires exclusive "
-            f"ownership of extension type registrations to prevent data corruption or "
-            f"misrouted conversions. See PLT-1665 for future interop support."
-        ) from None
-
-    _POLARS_REGISTRY[name] = (pl_storage, metadata_str)
-
-
-class ExtensionTypeRegistry:
-    """Registry for `ExtensionTypeConverter` instances.
-
-    Registering a converter automatically registers the corresponding
-    extension type in both PyArrow's and Polars' global registries.
-
-    The primary lookup key is `extension_name`; a secondary lookup by
-    `python_type` is provided for the write path.
+    The process-global ``default_logical_type_registry`` instance provides
+    effective process-wide uniqueness for normal use. Thread-safety is deferred.
 
     Example:
-        >>> registry = ExtensionTypeRegistry()
-        >>> registry.register(my_converter)
-        >>> conv = registry.get_converter_for_name("my.Type")
+        >>> registry = LogicalTypeRegistry()
+        >>> registry.register(my_logical_type)
+        >>> lt = registry.get_by_logical_name("uuid.UUID")
     """
 
     def __init__(self) -> None:
-        self._by_name: dict[str, ExtensionTypeConverter] = {}
-        self._by_python_type: dict[type, ExtensionTypeConverter] = {}
+        self._by_logical_name: dict[str, LogicalType] = {}
+        self._by_arrow_name: dict[str, LogicalType] = {}
+        self._by_python_type: dict[type, LogicalType] = {}
 
-    def register(self, converter: ExtensionTypeConverter) -> None:
-        """Register *converter* and its PyArrow/Polars extension types.
+    def register(self, logical_type: LogicalType) -> None:
+        """Register *logical_type* and its PyArrow/Polars extension types.
 
         Args:
-            converter: An `ExtensionTypeConverter` instance to register.
+            logical_type: A ``LogicalType`` instance to register.
 
         Raises:
-            ValueError: If `converter.extension_name` is already registered
-                in this registry instance.
-            ValueError: If the extension name is already in the PA or Polars
-                global registry with different parameters.
-            ValueError: If the extension name is already in the PA or Polars
-                global registry from an external source (equivalence cannot
-                be verified).
+            ValueError: If any of the three keys (``logical_type_name``,
+                Arrow extension name, ``python_type``) is already bound to a
+                *different* ``LogicalType`` in this registry.
         """
-        name = converter.extension_name
-        if name in self._by_name:
-            raise ValueError(
-                f"Extension type '{name}' is already registered in this registry."
-            )
-        self._by_name[name] = converter
-        self._by_python_type[converter.python_type] = converter
-        _register_arrow_ext_type(converter)
-        _register_polars_ext_type(converter)
+        arrow_ext_name = logical_type.get_arrow_extension_type().extension_name
+        py_type = logical_type.python_type
+        logical_name = logical_type.logical_type_name
 
-    def get_converter_for_name(self, name: str) -> ExtensionTypeConverter | None:
-        """Return the converter registered under *name*, or `None`."""
-        return self._by_name.get(name)
+        existing_by_logical = self._by_logical_name.get(logical_name)
+        existing_by_arrow = self._by_arrow_name.get(arrow_ext_name)
+        existing_by_python = self._by_python_type.get(py_type)
 
-    def get_converter_for_python_type(self, python_type: type) -> ExtensionTypeConverter | None:
-        """Return the converter for *python_type*, or `None`.
+        # Triplet conflict check: raise if any key is bound to a different instance.
+        for existing, label, key in [
+            (existing_by_logical, "logical_type_name", logical_name),
+            (existing_by_arrow, "arrow_extension_name", arrow_ext_name),
+            (existing_by_python, "python_type", py_type.__qualname__),
+        ]:
+            if existing is not None and existing is not logical_type:
+                raise ValueError(
+                    f"Cannot register logical type '{logical_name}': "
+                    f"{label} {key!r} is already bound to "
+                    f"'{existing.logical_type_name}'."
+                )
 
-        Checks exact match first, then falls back to an `issubclass` scan.
+        # Idempotent check: all three keys already bound to this same instance.
+        if (
+            existing_by_logical is logical_type
+            and existing_by_arrow is logical_type
+            and existing_by_python is logical_type
+        ):
+            return
+
+        # Register Arrow extension type. ArrowKeyError means the name is already
+        # in PyArrow's global registry (pre-existing type or another registry
+        # instance). Accept silently — PLT-1669 adds post-error validation.
+        try:
+            pa.register_extension_type(logical_type.get_arrow_extension_type())
+        except pa.lib.ArrowKeyError:
+            pass
+
+        # Register Polars extension type. ValueError or ComputeError means already registered.
+        # Polars raises ValueError via its Python-level guard (_REGISTRY dict check), but
+        # raises polars.exceptions.ComputeError when the lower-level Rust registry detects
+        # the duplicate (e.g. when the Polars Python dict was already cleared or bypassed).
+        # Both errors mean "already registered" — accept silently.
+        polars_ext_class = type(logical_type.get_polars_extension_type())
+        try:
+            pl.register_extension_type(arrow_ext_name, polars_ext_class)
+        except (ValueError, pl.exceptions.ComputeError):
+            pass
+
+        # Store three-way binding.
+        self._by_logical_name[logical_name] = logical_type
+        self._by_arrow_name[arrow_ext_name] = logical_type
+        self._by_python_type[py_type] = logical_type
+
+    def get_by_logical_name(self, name: str) -> LogicalType | None:
+        """Return the logical type registered under *name*, or ``None``."""
+        return self._by_logical_name.get(name)
+
+    def get_by_python_type(self, python_type: type) -> LogicalType | None:
+        """Return the logical type for *python_type*, or ``None``.
+
+        Checks exact match first, then falls back to an ``issubclass`` scan.
         When multiple registered types are superclasses of *python_type*, the
         one registered first wins (insertion-order dict, Python 3.7+).
         """
-        converter = self._by_python_type.get(python_type)
-        if converter is not None:
-            return converter
-        for registered_type, conv in self._by_python_type.items():
+        lt = self._by_python_type.get(python_type)
+        if lt is not None:
+            return lt
+        for registered_type, lt in self._by_python_type.items():
             if issubclass(python_type, registered_type):
-                return conv
+                return lt
         return None
 
-    def has_extension_name(self, name: str) -> bool:
-        """Return `True` if *name* is registered."""
-        return name in self._by_name
-
-    def has_python_type(self, python_type: type) -> bool:
-        """Return `True` if *python_type* (or a subclass) is registered."""
-        return self.get_converter_for_python_type(python_type) is not None
-
-    def list_extension_names(self) -> list[str]:
-        """Return all registered extension names in insertion order."""
-        return list(self._by_name.keys())
-
-    def list_python_types(self) -> list[type]:
-        """Return all registered Python types in insertion order."""
-        return list(self._by_python_type.keys())
+    def get_by_arrow_extension_name(self, arrow_name: str) -> LogicalType | None:
+        """Return the logical type registered under *arrow_name*, or ``None``."""
+        return self._by_arrow_name.get(arrow_name)
