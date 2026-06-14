@@ -4,11 +4,8 @@ from __future__ import annotations
 
 import pathlib
 import uuid as uuid_module
-import warnings
 
-import polars as pl
 import pyarrow as pa
-import pytest
 from upath import UPath
 
 from orcapod.extension_types.protocols import LogicalType
