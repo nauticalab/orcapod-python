@@ -18,19 +18,13 @@ from __future__ import annotations
 
 import pathlib
 import uuid as _uuid_module
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+import polars as pl
+import pyarrow as pa
 from upath import UPath
 
 from orcapod.extension_types.registry import make_arrow_extension_type, make_polars_extension_type
-from orcapod.utils.lazy_module import LazyModule
-
-if TYPE_CHECKING:
-    import polars as pl
-    import pyarrow as pa
-else:
-    pa = LazyModule("pyarrow")
-    pl = LazyModule("polars")
 
 
 class LogicalPath:
