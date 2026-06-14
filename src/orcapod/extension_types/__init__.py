@@ -16,6 +16,7 @@ from __future__ import annotations
 from .protocols import LogicalType, LogicalTypeFactory
 from .registry import LogicalTypeRegistry, make_arrow_extension_type, make_polars_extension_type
 from .schema_walker import ExtensionTypeInfo, walk_field, walk_schema
+from .database_hooks import ensure_extensions_registered
 
 __all__ = [
     "LogicalType",
@@ -27,4 +28,6 @@ __all__ = [
     "ExtensionTypeInfo",
     "walk_schema",
     "walk_field",
+    # PLT-1655
+    "ensure_extensions_registered",
 ]
