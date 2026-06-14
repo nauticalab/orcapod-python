@@ -285,3 +285,9 @@ class LogicalTypeRegistry:
     def get_by_arrow_extension_name(self, arrow_name: str) -> LogicalType | None:
         """Return the logical type registered under *arrow_name*, or ``None``."""
         return self._by_arrow_name.get(arrow_name)
+
+
+# Module-level singleton — per-process registry used by database_hooks and
+# application code. Defined here (not in __init__.py) to avoid the circular
+# import that would arise if database_hooks imported from the package __init__.
+default_logical_type_registry = LogicalTypeRegistry()
