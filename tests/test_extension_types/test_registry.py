@@ -215,6 +215,40 @@ def test_get_by_arrow_extension_name_miss():
 
 
 # ---------------------------------------------------------------------------
+# LogicalTypeRegistry constructor logical_types param tests
+# ---------------------------------------------------------------------------
+
+def test_registry_init_with_logical_types_preregisters():
+    """LogicalTypeRegistry(logical_types=[lt]) makes the type immediately retrievable."""
+    lt = _make_stub()
+    registry = LogicalTypeRegistry(logical_types=[lt])
+    assert registry.get_by_logical_name(lt.logical_type_name) is lt
+    assert registry.get_by_python_type(lt.python_type) is lt
+    assert registry.get_by_arrow_extension_name(lt.get_arrow_extension_type().extension_name) is lt
+
+
+def test_registry_init_with_none_is_empty():
+    """LogicalTypeRegistry(logical_types=None) starts empty without error."""
+    registry = LogicalTypeRegistry(logical_types=None)
+    assert registry.get_by_logical_name("anything") is None
+
+
+def test_registry_init_with_empty_list_is_empty():
+    """LogicalTypeRegistry(logical_types=[]) starts empty without error."""
+    registry = LogicalTypeRegistry(logical_types=[])
+    assert registry.get_by_logical_name("anything") is None
+
+
+def test_registry_init_with_multiple_logical_types():
+    """LogicalTypeRegistry(logical_types=[lt1, lt2]) registers both."""
+    lt1 = _make_stub(py_type=int)
+    lt2 = _make_stub(py_type=float)
+    registry = LogicalTypeRegistry(logical_types=[lt1, lt2])
+    assert registry.get_by_logical_name(lt1.logical_type_name) is lt1
+    assert registry.get_by_logical_name(lt2.logical_type_name) is lt2
+
+
+# ---------------------------------------------------------------------------
 # PyArrow global registry tests
 # ---------------------------------------------------------------------------
 
