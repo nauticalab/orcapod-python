@@ -2,13 +2,7 @@
 
 **Date:** 2026-06-14
 **Linear issue:** PLT-1655
-**Status:** DRAFT — blocked on PLT-1668
-
-> ⚠️ **This spec is a work-in-progress and is expected to be revisited and updated once
-> PLT-1668 lands.** PLT-1668 redesigns `ExtensionTypeConverter` → `LogicalType` and
-> `ExtensionTypeRegistry` → `LogicalTypeRegistry`. Several naming and signature decisions
-> below will change when that redesign is complete. See the
-> [Pending PLT-1668](#pending-plt-1668) section for an explicit list of what is unsettled.
+**Status:** Approved
 
 ---
 
@@ -17,10 +11,11 @@
 Wire a single, additive call into the two existing database read methods so that any Arrow
 extension types present in a schema are automatically registered in both PyArrow's and
 Polars' global registries before data is returned. Repeated reads within the same process
-are cheap because already-registered types are detected and skipped by the registry.
+are cheap because already-registered types are detected and skipped by the registry's
+three-way binding.
 
 The peek helper itself stays deliberately dumb: it walks the schema, then delegates each
-found type to the registry. All handler dispatch logic lives in the registry.
+found type to the registry. All factory dispatch logic lives in the registry.
 
 ---
 
@@ -29,14 +24,26 @@ found type to the registry. All handler dispatch logic lives in the registry.
 * `ensure_extensions_registered(schema)` in `extension_types/database_hooks.py` is
   called before every table return in `DeltaTableDatabase._read_delta_table()` and
   `ConnectorArrowDatabase._get_committed_table()`.
-* When the schema contains no extension types the call is a no-op; existing tests continue
-  to pass unchanged.
-* When the schema contains a known extension type (one whose category handler is
-  registered) the type is registered in PyArrow and Polars before the table is returned.
-* When the schema contains an extension type whose category metadata is unknown, a clear
-  `ValueError` is raised naming the extension name and metadata bytes.
-* Repeated reads that encounter the same extension type are effectively free — the
-  registry is idempotent (already-registered types are detected and skipped).
+* When the schema contains no extension types the call is a no-op; existing tests
+  continue to pass unchanged.
+* For each extension type found in the schema, `prepare_extension_type` applies checks
+  in this order:
+  1. **Already registered** (by Arrow extension name in `default_logical_type_registry`)
+     → silent no-op. This is the common fast path for all types after first registration,
+     including built-ins like `arrow.uuid` pre-registered at import time by PLT-1656.
+     Metadata value is irrelevant — `None` metadata on an already-registered type never
+     causes an error.
+  2. **Not registered, non-`None` metadata, matching factory** → factory constructs a
+     `LogicalType` and it is registered in PyArrow, Polars, and the registry before the
+     table is returned.
+  3. **Not registered, non-`None` metadata, no matching factory** → clear `ValueError`
+     naming the extension name and metadata tag, with a pointer to
+     `register_logical_type_factory`.
+  4. **Not registered, `None` metadata** → clear `ValueError` explaining that types
+     without a category tag cannot be auto-registered via a factory and must be
+     pre-registered explicitly via `registry.register(logical_type)`.
+* Sufficient `DEBUG`-level logging throughout so that extension type discovery,
+  registration decisions, and factory dispatch are observable without code changes.
 
 ---
 
@@ -48,18 +55,18 @@ In scope:
   (`_read_delta_table`)
 * Additive modification of `src/orcapod/databases/connector_arrow_database.py`
   (`_get_committed_table`)
-* New `CategoryHandler` Protocol in `src/orcapod/extension_types/protocols.py`
-* New methods on `ExtensionTypeRegistry` (pending rename to `LogicalTypeRegistry`):
-  `register_category_handler` and `prepare_extension_type`
+* New `LogicalTypeFactory` Protocol in `src/orcapod/extension_types/protocols.py`
+* New methods on `LogicalTypeRegistry` (`registry.py`):
+  `register_logical_type_factory` and `prepare_extension_type`
 * Additive exports in `src/orcapod/extension_types/__init__.py`
 * Tests for all new code
 
 Out of scope:
-* Implementing concrete category handlers (PLT-1657 `dataclass_handler`,
-  PLT-1658 `picklable_handler`) — they will call `register_category_handler` on
+* Implementing concrete `LogicalTypeFactory` instances (PLT-1657 `dataclass_handler`,
+  PLT-1658 `picklable_handler`) — they will call `register_logical_type_factory` on
   the module-level registry instance at import time
 * Built-in logical type registrations (PLT-1656)
-* Thread safety of the global shadow dicts (deferred)
+* Thread safety of the global registry dicts (deferred)
 * Any change to `semantic_types/` (old system, untouched until PLT-1660)
 
 ---
@@ -70,8 +77,8 @@ Out of scope:
 
 | File | Change |
 |---|---|
-| `src/orcapod/extension_types/protocols.py` | Add `CategoryHandler` Protocol |
-| `src/orcapod/extension_types/registry.py` | Add `register_category_handler`, `prepare_extension_type` |
+| `src/orcapod/extension_types/protocols.py` | Add `LogicalTypeFactory` Protocol |
+| `src/orcapod/extension_types/registry.py` | Add `register_logical_type_factory`, `prepare_extension_type` |
 | `src/orcapod/extension_types/database_hooks.py` | **New** — `ensure_extensions_registered` |
 | `src/orcapod/extension_types/__init__.py` | Additive exports |
 | `src/orcapod/databases/delta_lake_databases.py` | Additive — call in `_read_delta_table` |
@@ -80,128 +87,194 @@ Out of scope:
 
 ---
 
-## `CategoryHandler` Protocol
+## `LogicalTypeFactory` Protocol
 
 **Location:** `src/orcapod/extension_types/protocols.py`
 
-`CategoryHandler` is a pure factory. Given an Arrow extension name and its storage type
-(both extracted from the schema by the walker), it constructs a fully-formed converter
-instance (currently `ExtensionTypeConverter`; renamed to `LogicalType` after PLT-1668).
-The category tag that routes to this handler is declared by the caller at registration
-time — the handler itself has no knowledge of its dispatch key.
+`LogicalTypeFactory` is a pure factory. Given an Arrow extension name, its storage type,
+and the full parsed metadata dict (both the Arrow fields extracted from the schema by the
+walker, and the metadata parsed from JSON), it constructs a fully-formed `LogicalType`
+instance ready to pass to `LogicalTypeRegistry.register()`.
+
+The `category` string that routes to this factory is declared by the caller at
+registration time — the factory itself has no knowledge of its dispatch key, but receives
+the full metadata dict so it can read additional hints (e.g. version, serialisation
+format) beyond just the category.
+
+### Metadata format
+
+`extension_metadata` bytes are expected to be **UTF-8-encoded JSON** with at least a
+`"category"` key:
+
+```json
+{"category": "Dataclass"}
+{"category": "Pickle", "protocol": 5}
+{"category": "Pydantic", "pydantic_version": 2}
+```
+
+The `category` value is the factory dispatch key. All other fields are passed through to
+the factory as-is and interpreted by the factory implementation.
+
+### Protocol definition
 
 ```python
-class CategoryHandler(Protocol):
-    def create_converter(
+class LogicalTypeFactory(Protocol):
+    def create_logical_type(
         self,
-        extension_name: str,
+        arrow_extension_name: str,
         storage_type: pa.DataType,
-    ) -> ExtensionTypeConverter:
-        """Construct a converter for the given extension name and storage type.
+        metadata: dict,
+    ) -> LogicalType:
+        """Construct a ``LogicalType`` for the given Arrow extension name and storage type.
 
         Args:
-            extension_name: The Arrow extension type name extracted from the schema
-                (i.e. the value of ``ARROW:extension:name`` field metadata).
+            arrow_extension_name: The Arrow extension type name extracted from the
+                schema (i.e. the value of ``ARROW:extension:name`` field metadata).
             storage_type: The underlying Arrow storage type for this extension field.
+            metadata: The full parsed JSON metadata dict. Always contains at least a
+                ``"category"`` key. May contain additional keys the factory uses (e.g.
+                ``"protocol"``, ``"pydantic_version"``).
 
         Returns:
-            A fully constructed ``ExtensionTypeConverter`` ready to be passed to
-            ``ExtensionTypeRegistry.register()``.
+            A fully constructed ``LogicalType`` ready to be passed to
+            ``LogicalTypeRegistry.register()``.
 
         Raises:
-            ValueError: If this handler cannot construct a converter for the given
-                extension name (e.g. the Python class cannot be resolved).
+            ValueError: If this factory cannot construct a logical type for the given
+                extension name (e.g. the Python class cannot be resolved by name).
         """
         ...
 ```
 
-> **Post-PLT-1668 note:** `create_converter` return type changes from
-> `ExtensionTypeConverter` to `LogicalType`. The `extension_name` parameter meaning may
-> shift slightly depending on how `logical_type_name` vs Arrow extension name are
-> distinguished in the new design — see [Pending PLT-1668](#pending-plt-1668).
+This protocol is `@runtime_checkable`, consistent with `LogicalType`.
 
 ---
 
-## `ExtensionTypeRegistry` additions
+## `LogicalTypeRegistry` additions
 
 **Location:** `src/orcapod/extension_types/registry.py`
 
-Two new methods are added to `ExtensionTypeRegistry` (to be renamed `LogicalTypeRegistry`
-post-PLT-1668). The existing public API is unchanged.
+Two new methods are added to `LogicalTypeRegistry`. The existing public API is unchanged.
 
-### `register_category_handler`
+### `register_logical_type_factory`
 
 ```python
-def register_category_handler(
+def register_logical_type_factory(
     self,
-    metadata_tag: bytes,
-    handler: CategoryHandler,
+    category: str,
+    factory: LogicalTypeFactory,
 ) -> None:
-    """Register a category handler for the given metadata tag.
+    """Register a factory for the given metadata category string.
 
-    When ``prepare_extension_type`` encounters an extension type whose
-    ``extension_metadata`` bytes match ``metadata_tag``, it calls
-    ``handler.create_converter(extension_name, storage_type)`` to construct
-    the converter and then registers it.
+    When ``prepare_extension_type`` encounters an Arrow extension type whose
+    ``extension_metadata`` JSON contains ``{"category": "<category>", ...}``,
+    it calls ``factory.create_logical_type(arrow_extension_name, storage_type,
+    metadata_dict)`` to construct the logical type and then registers it.
 
     Args:
-        metadata_tag: The ``extension_metadata`` bytes value that identifies
-            this category (e.g. ``b"orcapod.dataclass"``).
-        handler: A ``CategoryHandler`` instance responsible for constructing
-            converters for this category.
+        category: The ``"category"`` value from the extension metadata JSON that
+            identifies this category (e.g. ``"Dataclass"``).
+        factory: A ``LogicalTypeFactory`` instance responsible for constructing
+            logical types for this category.
 
     Raises:
-        ValueError: If ``metadata_tag`` is already registered to a different handler.
+        ValueError: If ``category`` is already registered to a different factory.
     """
 ```
 
-The registry stores handlers in a new `_category_handlers: dict[bytes, CategoryHandler]`
-instance attribute, populated at construction with an empty dict.
+Stores factories in a new `_factories: dict[str, LogicalTypeFactory]` instance
+attribute initialised to `{}` in `__init__`.
+
+Logging:
+* `DEBUG`: `"registered LogicalTypeFactory for category %r: %r"` on success.
 
 ### `prepare_extension_type`
 
 ```python
 def prepare_extension_type(
     self,
-    extension_name: str,
+    arrow_extension_name: str,
     extension_metadata: bytes | None,
     storage_type: pa.DataType,
 ) -> None:
-    """Ensure the extension type identified by ``extension_name`` is registered.
+    """Ensure the Arrow extension type identified by ``arrow_extension_name``
+    is registered as a ``LogicalType``.
 
-    This is the single call-site for ``ensure_extensions_registered`` in
-    ``database_hooks.py``. The registry owns all dispatch logic:
+    This is the single entry point called by ``ensure_extensions_registered``
+    in ``database_hooks``. The registry owns all dispatch logic:
 
-    1. If ``extension_name`` is already registered — return immediately (no-op).
-    2. Look up a ``CategoryHandler`` by ``extension_metadata`` in
-       ``_category_handlers``.
-    3. If no handler is found, raise ``ValueError`` with a clear message
-       naming both the extension name and metadata bytes.
-    4. Call ``handler.create_converter(extension_name, storage_type)`` to
-       obtain a converter.
-    5. Call ``self.register(converter)`` to register it in this registry and
-       in PyArrow's / Polars' global registries.
+    1. If ``arrow_extension_name`` is already in the three-way binding
+       (``get_by_arrow_extension_name`` returns non-``None``) — return
+       immediately (per-process cache hit). Metadata is not inspected.
+    2. If ``extension_metadata`` is ``None``, raise ``ValueError`` directing
+       the caller to pre-register the type explicitly.
+    3. Attempt to decode ``extension_metadata`` as UTF-8 JSON. If decoding
+       or parsing fails, raise ``ValueError`` with the raw bytes and the
+       parse error.
+    4. Extract the ``"category"`` key from the parsed dict. If absent, raise
+       ``ValueError`` naming the extension and the raw metadata.
+    5. Look up a ``LogicalTypeFactory`` by the ``category`` string in
+       ``_factories``. If not found, raise ``ValueError`` naming the extension,
+       the category, and the registration call needed.
+    6. Call ``factory.create_logical_type(arrow_extension_name, storage_type,
+       metadata_dict)`` to obtain a ``LogicalType``.
+    7. Call ``self.register(logical_type)`` to complete the three-way binding
+       and side-effect-register in PyArrow's and Polars' global registries.
 
     Args:
-        extension_name: Arrow extension type name (``ARROW:extension:name``).
-        extension_metadata: Category tag bytes (``ARROW:extension:metadata``),
-            or ``None`` if absent.
+        arrow_extension_name: Arrow extension type name (``ARROW:extension:name``).
+        extension_metadata: Raw metadata bytes (``ARROW:extension:metadata``),
+            expected to be UTF-8 JSON containing at least a ``"category"`` key.
+            ``None`` if absent.
         storage_type: Underlying Arrow storage type for this extension field.
 
     Raises:
-        ValueError: If no category handler is registered for ``extension_metadata``.
-        ValueError: If handler raises during converter construction.
+        ValueError: If ``extension_metadata`` is ``None``.
+        ValueError: If ``extension_metadata`` is not valid UTF-8 JSON.
+        ValueError: If the parsed JSON has no ``"category"`` key.
+        ValueError: If no factory is registered for the ``"category"`` value.
+        ValueError: Propagated from the factory if it cannot construct a type.
     """
 ```
 
-The "already registered" check in step 1 reuses `has_extension_name(extension_name)`.
-This is the per-process caching mechanism — no separate module-level `set` is needed in
-`database_hooks.py`; the registry's own `_by_name` dict is the cache.
+Logging:
+* `DEBUG`: `"prepare_extension_type: %r already registered, skipping"` on cache hit (step 1).
+* `DEBUG`: `"prepare_extension_type: %r not registered — dispatching to category %r factory"` before factory call (step 6).
+* `DEBUG`: `"prepare_extension_type: successfully registered %r via %r factory"` after `self.register` returns (step 7).
 
-> **Post-PLT-1668 note:** The "already registered" check will use
-> `get_by_arrow_extension_name(arrow_name)` from `LogicalTypeRegistry`. The parameter
-> names and exact semantics of `extension_name` here will be reconciled with the
-> `logical_type_name` / Arrow extension name distinction introduced in PLT-1668.
+Error messages:
+
+**Step 2 — `None` metadata:**
+```
+ValueError: Extension type '<name>' has no extension metadata (metadata is None).
+Types without a metadata category tag cannot be auto-registered via a factory —
+they must be pre-registered explicitly via
+default_logical_type_registry.register(logical_type).
+```
+
+**Step 3 — metadata not valid JSON:**
+```
+ValueError: Extension type '<name>' has extension metadata that is not valid UTF-8 JSON:
+b'<raw bytes>'. Parse error: <error>.
+Extension metadata must be a JSON object with at least a "category" key, e.g.
+{"category": "Dataclass"}.
+```
+
+**Step 4 — JSON missing `"category"` key:**
+```
+ValueError: Extension type '<name>' has extension metadata JSON with no "category" key:
+<parsed dict>. Extension metadata must be a JSON object with at least a "category" key,
+e.g. {"category": "Dataclass"}.
+```
+
+**Step 5 — no factory for category:**
+```
+ValueError: No LogicalTypeFactory is registered for category '<category>'.
+Cannot prepare extension type '<name>' for registration.
+Register a factory via default_logical_type_registry.register_logical_type_factory(
+    '<category>', factory
+).
+```
 
 ---
 
@@ -219,18 +292,22 @@ types.
 
 from __future__ import annotations
 
+import logging
+
 import pyarrow as pa
 
-from orcapod.extension_types import default_extension_type_registry
+from orcapod.extension_types import default_logical_type_registry
 from orcapod.extension_types.schema_walker import walk_schema
+
+logger = logging.getLogger(__name__)
 
 
 def ensure_extensions_registered(schema: pa.Schema) -> None:
     """Register any extension types found in ``schema`` that are not yet known.
 
-    Walks ``schema`` recursively using the schema walker to discover all Arrow
-    extension types at any nesting depth. For each discovered type, delegates
-    to ``default_extension_type_registry.prepare_extension_type(...)``.
+    Walks ``schema`` recursively to discover all Arrow extension types at any
+    nesting depth. For each discovered type, delegates to
+    ``default_logical_type_registry.prepare_extension_type``.
 
     Already-registered types are detected and skipped inside the registry —
     this function itself is stateless.
@@ -241,48 +318,58 @@ def ensure_extensions_registered(schema: pa.Schema) -> None:
 
     Raises:
         ValueError: Propagated from the registry if an extension type's category
-            metadata has no registered handler.
+            metadata has no registered factory.
     """
-    for info in walk_schema(schema):
-        default_extension_type_registry.prepare_extension_type(
+    found = walk_schema(schema)
+    if not found:
+        logger.debug("ensure_extensions_registered: no extension types in schema")
+        return
+    logger.debug(
+        "ensure_extensions_registered: found %d extension type(s) in schema: %s",
+        len(found),
+        [info.extension_name for info in found],
+    )
+    for info in found:
+        default_logical_type_registry.prepare_extension_type(
             info.extension_name,
             info.extension_metadata,
             info.storage_type,
         )
 ```
 
-This function is intentionally stateless and contains no dispatch logic. All complexity
-lives in the registry.
+This function is intentionally stateless and contains no dispatch logic.
 
 ---
 
 ## Database call-site hooks
 
-Both modifications are strictly additive — a single new line in each method, no existing
-logic altered.
+Both modifications are strictly additive — a single new import and a single new call in
+each method, no existing logic altered.
 
 ### `DeltaTableDatabase._read_delta_table`
 
-**Schema peek:** `DeltaTable.schema().to_arrow()` — this is a cheap metadata-only read
-that does not scan any Parquet data files.
+**Schema peek:** `DeltaTable.schema().to_arrow()` — cheap metadata-only read, no Parquet
+data scan.
 
-The call is placed **after** the schema is obtained and **before** `dataset.to_table()`
-is called. Registering extension types before materialising the Arrow table ensures
-PyArrow can deserialise extension-typed columns correctly.
+The call is placed **immediately after** `dataset = delta_table.to_pyarrow_dataset(...)`,
+before the filter-building block. Failing fast before any filter work is done if a
+category metadata has no registered factory.
 
 ```python
-# Inside _read_delta_table, after: dataset = delta_table.to_pyarrow_dataset(...)
+# Immediately after: dataset = delta_table.to_pyarrow_dataset(as_large_types=True)
 schema = delta_table.schema().to_arrow()
 ensure_extensions_registered(schema)
-# Existing table materialisation continues unchanged
+# Existing filter-building and table materialisation continue unchanged
 ```
+
+Logging (in `delta_lake_databases.py`):
+* `DEBUG`: `"_read_delta_table: peeking schema for extension type registration"` before the
+  peek call.
 
 ### `ConnectorArrowDatabase._get_committed_table`
 
-**Schema peek:** The existing `iter_batches` call already fetches data; the schema is
-available on the first batch via `batches[0].schema`. No additional query is needed.
-
-The call is placed after `batches` is populated but before the final `pa.Table.from_batches`:
+**Schema peek:** `batches[0].schema` — schema from the already-fetched first batch. No
+additional query needed; no extra round-trip.
 
 ```python
 batches = list(self._connector.iter_batches(f'SELECT * FROM "{table_name}"'))
@@ -292,41 +379,45 @@ ensure_extensions_registered(batches[0].schema)
 return pa.Table.from_batches(batches)
 ```
 
-> **Note:** A `LIMIT 0` pre-query was considered to avoid fetching data before knowing
-> whether extension type registration is needed, but was rejected: the existing code
-> already fetches all batches in a single pass, and adding a second round-trip for a
-> schema-only peek would increase latency for the common case where no extension types
-> are present. The first-batch schema approach adds zero extra queries.
+Logging (in `connector_arrow_database.py`):
+* `DEBUG`: `"_get_committed_table: peeking schema for extension type registration"` before
+  the peek call.
+
+> **Design note:** A `LIMIT 0` pre-query was considered to avoid fetching all data before
+> knowing whether extension type registration is needed, but was rejected. The existing
+> code already fetches all batches in a single pass; adding a second round-trip for a
+> schema-only peek would increase latency for the common no-extension-types case. The
+> first-batch schema approach adds zero extra queries.
 
 ---
 
 ## Per-process cache design
 
-The "per-process cache" described in the PLT-1655 issue is realised via the registry's
-own `_by_name` dict. `prepare_extension_type` checks `has_extension_name(name)` as its
-first step and returns immediately if the type is already registered. Because the
-module-level `default_extension_type_registry` instance lives for the lifetime of the
-process, this is equivalent to a module-level `set` cache — without the redundancy of
-maintaining a parallel data structure.
+The per-process cache is `LogicalTypeRegistry._by_arrow_name`. The first call to
+`prepare_extension_type` for a given `arrow_extension_name` performs factory dispatch and
+registers the `LogicalType`. Every subsequent call for the same name hits the
+`get_by_arrow_extension_name` check and returns immediately.
 
-**No separate `set` in `database_hooks.py`.** The function is stateless; the registry
-is the cache.
+Because `default_logical_type_registry` is a module-level singleton that lives for the
+process lifetime, this provides exactly the per-process caching semantics described in
+PLT-1655. No separate `set` is needed in `database_hooks.py` — the registry is the cache.
 
 ---
 
-## Error handling
+## Logging summary
 
-Unknown category metadata raises a `ValueError` from inside `prepare_extension_type`:
+| Location | Level | Message |
+|---|---|---|
+| `database_hooks.ensure_extensions_registered` | DEBUG | No extension types found in schema |
+| `database_hooks.ensure_extensions_registered` | DEBUG | N extension types found, lists names |
+| `registry.prepare_extension_type` | DEBUG | Already registered — skipping |
+| `registry.prepare_extension_type` | DEBUG | Not registered — dispatching to category factory |
+| `registry.prepare_extension_type` | DEBUG | Successfully registered via factory |
+| `registry.register_logical_type_factory` | DEBUG | Factory registered for category string |
+| `delta_lake_databases._read_delta_table` | DEBUG | Peeking schema for extension type registration |
+| `connector_arrow_database._get_committed_table` | DEBUG | Peeking schema for extension type registration |
 
-```
-ValueError: No category handler is registered for extension metadata b"orcapod.custom".
-Cannot prepare extension type 'com.example.MyType' for registration.
-Register a CategoryHandler for this metadata tag via
-default_extension_type_registry.register_category_handler(b"orcapod.custom", handler).
-```
-
-The message includes: the metadata bytes, the extension name, and a pointer to the
-registration call needed to fix the problem.
+All messages use `%r`/`%s` lazy formatting (no f-strings in log calls).
 
 ---
 
@@ -336,46 +427,34 @@ registration call needed to fix the problem.
 
 | Test | What it covers |
 |---|---|
-| `test_no_extension_types_is_noop` | Schema with only primitives — `ensure_extensions_registered` returns without touching the registry |
-| `test_known_type_is_registered` | Schema with one extension type whose category handler is registered — converter is registered in PA/Polars |
-| `test_already_registered_is_skipped` | Call `ensure_extensions_registered` twice with the same schema — second call is a no-op (no duplicate registration error) |
-| `test_unknown_metadata_raises` | Schema with extension type whose metadata has no handler — raises `ValueError` with extension name and metadata in message |
+| `test_no_extension_types_is_noop` | Schema with only primitives — returns without touching registry |
+| `test_known_type_is_registered` | Schema with one extension type whose factory is registered — logical type registered in PA/Polars |
+| `test_already_registered_is_skipped` | Call `ensure_extensions_registered` twice — second call is no-op, no duplicate error |
+| `test_unknown_metadata_raises` | Unregistered extension type with valid JSON metadata but no matching factory — raises `ValueError` with name and category in message |
+| `test_metadata_not_json_raises` | Unregistered extension type with metadata bytes that are not valid JSON — raises `ValueError` with raw bytes and parse error |
+| `test_metadata_json_missing_category_raises` | Unregistered extension type with valid JSON metadata but no `"category"` key — raises `ValueError` naming the extension and parsed dict |
+| `test_none_metadata_not_registered_raises` | Unregistered extension type with `None` metadata — raises `ValueError` telling caller to pre-register explicitly (not via factory) |
+| `test_none_metadata_already_registered_noop` | Extension type with `None` metadata that IS already in the registry — silent no-op, no error |
 | `test_nested_extension_type` | Extension type inside a struct column — walker descends and hook registers it |
-| `test_none_metadata_raises` | Extension type with `None` metadata and no `None`-keyed handler — raises `ValueError` |
 
 **`tests/test_extension_types/test_registry.py`** additions:
 
 | Test | What it covers |
 |---|---|
-| `test_register_category_handler` | Handler registered; `prepare_extension_type` dispatches to it |
-| `test_prepare_already_registered_noop` | `prepare_extension_type` called twice — second is no-op |
-| `test_prepare_unknown_metadata_raises` | Clear `ValueError` for unknown metadata |
-| `test_register_duplicate_handler_raises` | `register_category_handler` with same tag twice raises `ValueError` |
-
----
-
-## Pending PLT-1668
-
-PLT-1668 renames and redesigns the core extension type protocol and registry. The
-following items in this spec are expected to change:
-
-| Item | Current (pre-PLT-1668) | Expected change |
-|---|---|---|
-| `ExtensionTypeConverter` | Protocol with `extension_name`, `extension_metadata`, `storage_type` properties | Renamed to `LogicalType`; extension type details encapsulated in `get_arrow_extension_type()` |
-| `ExtensionTypeRegistry` | Registry keyed by `extension_name` | Renamed to `LogicalTypeRegistry`; three-way binding (`logical_type_name`, arrow ext name, python type) |
-| `CategoryHandler.create_converter` return type | `ExtensionTypeConverter` | `LogicalType` |
-| `prepare_extension_type` "already registered" check | `has_extension_name(name)` | `get_by_arrow_extension_name(arrow_ext_name)` from `LogicalTypeRegistry` |
-| `prepare_extension_type` parameter `extension_name` | Arrow `ARROW:extension:name` value | Will need to reconcile with `logical_type_name` vs Arrow extension name distinction |
-| `default_extension_type_registry` | `ExtensionTypeRegistry` instance | Renamed to `default_logical_type_registry` |
-
-**None of the `database_hooks.py` logic or the database call-site hooks are expected to
-change** — the function signature `ensure_extensions_registered(schema: pa.Schema)` and
-its stateless delegation pattern are stable regardless of the registry redesign.
+| `test_register_logical_type_factory` | Factory registered by category; `prepare_extension_type` dispatches to it and registers result |
+| `test_factory_receives_full_metadata_dict` | Factory `create_logical_type` is called with the full parsed JSON dict, not just the category |
+| `test_prepare_already_registered_noop` | `prepare_extension_type` called twice — second call is no-op |
+| `test_prepare_already_registered_none_metadata_noop` | Type pre-registered; `None` metadata on subsequent call → no-op, no error |
+| `test_prepare_none_metadata_not_registered_raises` | `None` metadata, type not in registry — `ValueError` telling caller to pre-register directly |
+| `test_prepare_invalid_json_raises` | `extension_metadata` is not valid UTF-8 JSON — `ValueError` with raw bytes and parse error |
+| `test_prepare_json_missing_category_raises` | Valid JSON but no `"category"` key — `ValueError` naming the extension and parsed dict |
+| `test_prepare_unknown_category_raises` | Valid JSON with `"category"` but no matching factory — `ValueError` with category and registration hint |
+| `test_register_duplicate_category_raises` | `register_logical_type_factory` with same category twice raises `ValueError` |
 
 ---
 
 ## Dependencies
 
-* PLT-1653 (`ExtensionTypeRegistry`) — **merged** into `extension-type-system`
-* PLT-1654 (`schema_walker`) — **merged** into `extension-type-system`
-* **PLT-1668** (`LogicalType` / `LogicalTypeRegistry` redesign) — **blocks this issue**
+* PLT-1653 (`ExtensionTypeRegistry` → `LogicalTypeRegistry`) — **merged**
+* PLT-1654 (`schema_walker`) — **merged**
+* PLT-1668 (`LogicalType` / `LogicalTypeRegistry` redesign) — **merged** (unblocked)
