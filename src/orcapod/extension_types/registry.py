@@ -97,6 +97,61 @@ def make_arrow_extension_type(
     )
 
 
+def make_polars_extension_type(
+    extension_name: str,
+    arrow_storage_type: pa.DataType,
+    metadata: str | None = None,
+) -> type[pl.BaseExtension]:
+    """Synthesise and return a ``pl.BaseExtension`` subclass.
+
+    Derives the Polars storage dtype from *arrow_storage_type* via
+    ``pl.from_arrow``. Returns the *class*; callers instantiate it inside
+    ``get_polars_extension_type()``.
+
+    The returned class uses the Arrow extension name as its registration name
+    (the same name passed to ``pl.register_extension_type``), so that Polars
+    correctly maps Arrow extension columns on read.
+
+    Args:
+        extension_name: The extension type name used for Polars registration.
+            Must match the Arrow extension name so Polars can round-trip the
+            type through Arrow IPC.
+        arrow_storage_type: The Arrow storage type. Converted once to the
+            corresponding Polars dtype via ``pl.from_arrow``.
+        metadata: Optional metadata string stored as ``metadata_str`` in the
+            Polars extension. Defaults to ``None``.
+
+    Returns:
+        A ``pl.BaseExtension`` subclass. Call it with no arguments to obtain
+        an instance suitable for passing to ``pl.register_extension_type`` or
+        returning from ``get_polars_extension_type()``.
+    """
+    _name = extension_name
+    _polars_dtype = pl.from_arrow(pa.array([], type=arrow_storage_type)).dtype
+    _metadata = metadata
+
+    def __init__(self: pl.BaseExtension) -> None:
+        pl.BaseExtension.__init__(self, _name, _polars_dtype, _metadata)
+
+    @classmethod  # type: ignore[misc]
+    def ext_from_params(
+        cls: type[pl.BaseExtension],
+        ext_name: str,
+        storage_dtype: pl.PolarsDataType,
+        metadata_str: str | None,
+    ) -> pl.BaseExtension:
+        return cls()
+
+    return type(
+        f"_PolarsExt_{_sanitize(extension_name)}",
+        (pl.BaseExtension,),
+        {
+            "__init__": __init__,
+            "ext_from_params": ext_from_params,
+        },
+    )
+
+
 class LogicalTypeRegistry:
     """Registry for ``LogicalType`` instances.
 

@@ -13,7 +13,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from orcapod.extension_types.protocols import LogicalType
-from orcapod.extension_types.registry import LogicalTypeRegistry, make_arrow_extension_type
+from orcapod.extension_types.registry import LogicalTypeRegistry, make_arrow_extension_type, make_polars_extension_type
 
 
 # ---------------------------------------------------------------------------
@@ -443,6 +443,50 @@ def test_parquet_round_trip():
     storage_arr = table_back.column("color").combine_chunks().storage
     recovered = [lt.storage_to_python(v.as_py()) for v in storage_arr]
     assert recovered == originals
+
+
+# ---------------------------------------------------------------------------
+# make_polars_extension_type tests
+# ---------------------------------------------------------------------------
+
+
+def test_make_polars_extension_type_returns_class():
+    """make_polars_extension_type returns a pl.BaseExtension subclass."""
+    cls = make_polars_extension_type("test.MakePolarsExt", pa.large_utf8())
+    assert issubclass(cls, pl.BaseExtension)
+
+
+def test_make_polars_extension_type_instance_has_correct_name():
+    """Instantiating the returned class yields the correct ext_name."""
+    name = _unique_name()
+    cls = make_polars_extension_type(name, pa.large_utf8())
+    inst = cls()
+    assert inst.ext_name() == name
+
+
+def test_make_polars_extension_type_ext_from_params_returns_instance():
+    """ext_from_params classmethod returns an instance of the class."""
+    name = _unique_name()
+    cls = make_polars_extension_type(name, pa.large_utf8())
+    inst = cls.ext_from_params(name, pl.String, None)
+    assert isinstance(inst, cls)
+
+
+def test_make_polars_extension_type_with_binary_storage():
+    """make_polars_extension_type works with pa.binary(16) storage (UUID case)."""
+    name = _unique_name()
+    cls = make_polars_extension_type(name, pa.binary(16), None)
+    inst = cls()
+    assert inst.ext_name() == name
+
+
+def test_make_polars_extension_type_with_metadata():
+    """make_polars_extension_type captures metadata in the class."""
+    name = _unique_name()
+    cls = make_polars_extension_type(name, pa.large_utf8(), "test.metadata")
+    # Instantiating should not raise; ext_name is correct.
+    inst = cls()
+    assert inst.ext_name() == name
 
 
 # ---------------------------------------------------------------------------
