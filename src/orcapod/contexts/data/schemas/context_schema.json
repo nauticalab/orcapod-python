@@ -12,7 +12,8 @@
         "type_converter",
         "arrow_hasher",
         "semantic_hasher",
-        "type_handler_registry"
+        "type_handler_registry",
+        "logical_type_registry"
     ],
     "properties": {
         "context_key": {
@@ -62,6 +63,10 @@
         "type_handler_registry": {
             "$ref": "#/$defs/objectspec",
             "description": "ObjectSpec for the TypeHandlerRegistry used by the semantic hasher"
+        },
+        "logical_type_registry": {
+            "$ref": "#/$defs/objectspec",
+            "description": "ObjectSpec for the LogicalTypeRegistry (Path, UPath, UUID built-ins)"
         },
         "file_hasher": {
             "$ref": "#/$defs/objectspec",

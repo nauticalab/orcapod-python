@@ -82,6 +82,25 @@
             }
         }
     },
+    "logical_type_registry": {
+        "_class": "orcapod.extension_types.registry.LogicalTypeRegistry",
+        "_config": {
+            "logical_types": [
+                {
+                    "_class": "orcapod.extension_types.builtin_logical_types.LogicalPath",
+                    "_config": {}
+                },
+                {
+                    "_class": "orcapod.extension_types.builtin_logical_types.LogicalUPath",
+                    "_config": {}
+                },
+                {
+                    "_class": "orcapod.extension_types.builtin_logical_types.LogicalUUID",
+                    "_config": {}
+                }
+            ]
+        }
+    },
     "metadata": {
         "created_date": "2025-08-01",
         "author": "OrcaPod Core Team",
