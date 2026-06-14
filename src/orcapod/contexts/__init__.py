@@ -27,6 +27,7 @@ Example usage:
 
 from typing import Any
 
+from orcapod.extension_types.registry import LogicalTypeRegistry
 from orcapod.protocols import hashing_protocols as hp
 from orcapod.protocols import semantic_types_protocols as sp
 
@@ -168,6 +169,15 @@ def get_default_context() -> DataContext:
     return resolve_context()
 
 
+def get_default_logical_type_registry() -> LogicalTypeRegistry:
+    """Get the default logical type registry.
+
+    Returns:
+        ``LogicalTypeRegistry`` instance from the default context.
+    """
+    return get_default_context().logical_type_registry
+
+
 def get_default_semantic_hasher() -> hp.SemanticHasherProtocol:
     """
     Get the default semantic hasher.
@@ -236,6 +246,7 @@ __all__ = [
     "get_available_contexts",
     "get_context_info",
     "get_default_context",
+    "get_default_logical_type_registry",
     # Management functions
     "set_default_context_version",
     "validate_all_contexts",
