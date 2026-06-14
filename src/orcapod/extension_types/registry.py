@@ -52,19 +52,32 @@ def make_arrow_extension_type(
         returning from ``get_arrow_extension_type()``.
     """
     _name, _storage, _metadata = extension_name, storage_type, metadata or b""
+
+    def _deserialize(cls, storage_type: pa.DataType, serialized: bytes) -> pa.ExtensionType:
+        # __arrow_ext_deserialize__ reconstructs the type descriptor from schema
+        # metadata (called once per IPC/Parquet read, not per value). Validate the
+        # incoming storage_type and serialized bytes against the expected values so
+        # that reading a file where the same extension name was written with different
+        # parameters raises immediately rather than silently producing wrong data.
+        if storage_type != _storage:
+            raise ValueError(
+                f"Arrow extension type '{_name}': expected storage_type "
+                f"{_storage!r} but got {storage_type!r}."
+            )
+        if serialized != _metadata:
+            raise ValueError(
+                f"Arrow extension type '{_name}': expected metadata "
+                f"{_metadata!r} but got {serialized!r}."
+            )
+        return cls()
+
     return type(
         f"_ArrowExt_{_sanitize(extension_name)}",
         (pa.ExtensionType,),
         {
             "__init__": lambda self: pa.ExtensionType.__init__(self, _storage, _name),
             "__arrow_ext_serialize__": lambda self: _metadata,
-            # __arrow_ext_deserialize__ reconstructs the type descriptor from schema
-            # metadata (called once per IPC/Parquet read, not per value). The storage
-            # type and metadata are baked into the constructor via closure, so
-            # arguments are intentionally ignored.
-            "__arrow_ext_deserialize__": classmethod(
-                lambda cls, storage_type, serialized: cls()
-            ),
+            "__arrow_ext_deserialize__": classmethod(_deserialize),
         },
     )
 
