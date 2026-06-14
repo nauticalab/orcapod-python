@@ -1,7 +1,9 @@
 """Protocol definitions for the Arrow/Polars extension type system.
 
-This module defines ``LogicalType`` — the contract for all implementations
-that bind a Python class to its Arrow and Polars extension type representation.
+This module defines ``LogicalType`` and ``LogicalTypeFactory`` — the contracts
+for implementations that bind a Python class to its Arrow and Polars extension
+type representation, and for factories that auto-construct such implementations
+from Arrow schema metadata.
 
 Note:
     This module is part of the parallel-build phase. The old
@@ -109,7 +111,7 @@ class LogicalTypeFactory(Protocol):
         self,
         arrow_extension_name: str,
         storage_type: pa.DataType,
-        metadata: dict,
+        metadata: dict[str, Any],
     ) -> LogicalType:
         """Construct a ``LogicalType`` for the given Arrow extension name and storage type.
 
@@ -117,7 +119,7 @@ class LogicalTypeFactory(Protocol):
             arrow_extension_name: The Arrow extension type name extracted from the
                 schema (i.e. the value of ``ARROW:extension:name`` field metadata).
             storage_type: The underlying Arrow storage type for this extension field.
-            metadata: The full parsed JSON metadata dict. Always contains at least a
+            metadata: The full parsed JSON metadata dict (``dict[str, Any]``). Always contains at least a
                 ``"category"`` key. May contain additional keys the factory uses (e.g.
                 ``"protocol"``, ``"pydantic_version"``).
 
