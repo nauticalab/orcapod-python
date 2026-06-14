@@ -177,6 +177,7 @@ def test_list_of_registered():
     result = walk_schema(pa.schema([list_field]))
     assert len(result) == 1
     assert result[0].extension_name == name
+    assert result[0].extension_metadata == b"my.cat"
 
 
 def test_list_of_unregistered():
@@ -203,6 +204,7 @@ def test_struct_containing_registered():
     result = walk_schema(pa.schema([struct_field]))
     assert len(result) == 1
     assert result[0].extension_name == name
+    assert result[0].extension_metadata == b"my.cat"
 
 
 def test_struct_containing_unregistered():
@@ -255,4 +257,5 @@ def test_map_type():
     result = walk_schema(pa.schema([map_field]))
     # _collect uses getattr(t, "item_field") to retrieve the item pa.Field.
     # pa.types.is_extension(item_field.type) will be True for the ExtType above.
-    assert any(r.extension_name == name for r in result)
+    assert len(result) == 1
+    assert result[0].extension_name == name
