@@ -5,7 +5,9 @@ from __future__ import annotations
 import pathlib
 import uuid as uuid_module
 
+import polars as pl
 import pyarrow as pa
+import warnings
 from upath import UPath
 
 from orcapod.extension_types.protocols import LogicalType
@@ -248,6 +250,132 @@ def test_logical_uuid_registration_does_not_raise():
     registry.register(lt)  # should NOT raise
     assert registry.get_by_logical_name("uuid.UUID") is lt
     assert registry.get_by_arrow_extension_name("arrow.uuid") is lt
+
+
+# ---------------------------------------------------------------------------
+# Arrow and Polars end-to-end round-trip tests
+# ---------------------------------------------------------------------------
+
+
+def test_logical_path_arrow_round_trip():
+    """Python -> Arrow extension array -> Python via LogicalPath."""
+    from orcapod.extension_types.builtin_logical_types import LogicalPath
+
+    lt = LogicalPath()
+    registry = LogicalTypeRegistry()
+    registry.register(lt)
+
+    originals = [pathlib.Path("/tmp/foo"), pathlib.Path("/home/user/bar.txt")]
+    storage_vals = [lt.python_to_storage(p) for p in originals]
+    arrow_ext = lt.get_arrow_extension_type()
+    ext_arr = pa.array(storage_vals, type=arrow_ext.storage_type).cast(arrow_ext)
+
+    recovered = [lt.storage_to_python(v.as_py()) for v in ext_arr.storage]
+    assert recovered == originals
+
+
+def test_logical_path_polars_round_trip():
+    """Python -> Arrow extension array -> Polars series -> Arrow -> Python via LogicalPath."""
+    from orcapod.extension_types.builtin_logical_types import LogicalPath
+
+    lt = LogicalPath()
+    registry = LogicalTypeRegistry()
+    registry.register(lt)
+
+    originals = [pathlib.Path("/tmp/foo"), pathlib.Path("/home/user/bar.txt")]
+    storage_vals = [lt.python_to_storage(p) for p in originals]
+    arrow_ext = lt.get_arrow_extension_type()
+    ext_arr = pa.array(storage_vals, type=arrow_ext.storage_type).cast(arrow_ext)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        pl_series = pl.from_arrow(ext_arr)
+
+    arr_back = pl_series.to_arrow()
+    recovered = [lt.storage_to_python(v.as_py()) for v in arr_back.storage]
+    assert recovered == originals
+
+
+def test_logical_upath_arrow_round_trip():
+    """Python -> Arrow extension array -> Python via LogicalUPath."""
+    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+
+    lt = LogicalUPath()
+    registry = LogicalTypeRegistry()
+    registry.register(lt)
+
+    originals = [UPath("s3://bucket/key"), UPath("gs://other/path/file.txt")]
+    storage_vals = [lt.python_to_storage(p) for p in originals]
+    arrow_ext = lt.get_arrow_extension_type()
+    ext_arr = pa.array(storage_vals, type=arrow_ext.storage_type).cast(arrow_ext)
+
+    recovered = [lt.storage_to_python(v.as_py()) for v in ext_arr.storage]
+    assert recovered == originals
+
+
+def test_logical_upath_polars_round_trip():
+    """Python -> Arrow extension array -> Polars series -> Arrow -> Python via LogicalUPath."""
+    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+
+    lt = LogicalUPath()
+    registry = LogicalTypeRegistry()
+    registry.register(lt)
+
+    originals = [UPath("s3://bucket/key"), UPath("gs://other/path/file.txt")]
+    storage_vals = [lt.python_to_storage(p) for p in originals]
+    arrow_ext = lt.get_arrow_extension_type()
+    ext_arr = pa.array(storage_vals, type=arrow_ext.storage_type).cast(arrow_ext)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        pl_series = pl.from_arrow(ext_arr)
+
+    arr_back = pl_series.to_arrow()
+    recovered = [lt.storage_to_python(v.as_py()) for v in arr_back.storage]
+    assert recovered == originals
+
+
+def test_logical_uuid_arrow_round_trip():
+    """Python -> Arrow extension array -> Python via LogicalUUID."""
+    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+
+    lt = LogicalUUID()
+    registry = LogicalTypeRegistry()
+    registry.register(lt)
+
+    originals = [uuid_module.UUID("12345678-1234-5678-1234-567812345678"), uuid_module.uuid4()]
+    storage_vals = [lt.python_to_storage(u) for u in originals]
+    arrow_ext = lt.get_arrow_extension_type()
+    ext_arr = pa.array(storage_vals, type=arrow_ext.storage_type).cast(arrow_ext)
+
+    recovered = [lt.storage_to_python(v.as_py()) for v in ext_arr.storage]
+    assert recovered == originals
+
+
+def test_logical_uuid_polars_round_trip():
+    """Python -> Arrow extension array -> Polars series -> Arrow -> Python via LogicalUUID."""
+    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+
+    lt = LogicalUUID()
+    registry = LogicalTypeRegistry()
+    registry.register(lt)
+
+    originals = [uuid_module.UUID("12345678-1234-5678-1234-567812345678"), uuid_module.uuid4()]
+    storage_vals = [lt.python_to_storage(u) for u in originals]
+    arrow_ext = lt.get_arrow_extension_type()
+    ext_arr = pa.array(storage_vals, type=arrow_ext.storage_type).cast(arrow_ext)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        pl_series = pl.from_arrow(ext_arr)
+
+    arr_back = pl_series.to_arrow()
+    # pa.uuid() is a PyArrow built-in; Polars may return the underlying binary
+    # array directly (no extension wrapper) rather than a pa.uuid() extension
+    # array. Handle both cases.
+    storage_arr = arr_back.storage if hasattr(arr_back, "storage") else arr_back
+    recovered = [lt.storage_to_python(v.as_py()) for v in storage_arr]
+    assert recovered == originals
 
 
 # ---------------------------------------------------------------------------
