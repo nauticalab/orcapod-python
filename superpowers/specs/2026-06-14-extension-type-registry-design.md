@@ -106,9 +106,12 @@ control.
 
 Limitation: equivalence can only be verified for types registered via `ExtensionTypeRegistry`.
 A type registered externally (directly via `pa.register_extension_type` or
-`pl.register_extension_type`, bypassing our code) will not appear in these dicts, so a
-subsequent `register()` call with the same name will hit the library-level duplicate error and
-raise — this is intentional and safe.
+`pl.register_extension_type`, bypassing our code) will not appear in these dicts. When a
+subsequent `register()` call hits the library-level duplicate error for such a name, we raise
+rather than silently continuing. This is intentional: without knowing what was registered
+externally we cannot guarantee that the same extension name maps to the same Python type and
+underlying storage type. Silently proceeding could cause silent data corruption or misrouted
+conversions at read time.
 
 ### Private helpers
 
@@ -223,7 +226,7 @@ Polars 1.36.0 is the first release that exports `pl.BaseExtension` and
 | Duplicate `extension_name` in `register()` (same `ExtensionTypeRegistry` instance) | `ValueError` with the offending name |
 | PA/Polars name in shadow dict, same params | Idempotent — return silently (safe for module reload and test-suite reuse) |
 | PA/Polars name in shadow dict, different params | `ValueError` showing existing vs. attempted `storage_type` and `metadata` |
-| PA/Polars name NOT in shadow dict but already in global registry (external registration) | `ValueError` — name is taken, equivalence cannot be verified |
+| PA/Polars name NOT in shadow dict but already in global registry (external registration) | `ValueError` — raised deliberately because we cannot guarantee the externally registered type maps to the same Python class and underlying storage type; silently proceeding risks data corruption or misrouted conversions at read time |
 | `get_converter_for_name` / `get_converter_for_python_type` miss | Returns `None` |
 | Non-`ExtensionTypeConverter` passed to `register()` | `beartype` raises `BeartypeCallHintParamViolation` at the call site |
 
