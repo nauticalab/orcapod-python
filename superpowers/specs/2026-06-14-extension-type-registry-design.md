@@ -268,3 +268,8 @@ avoid cross-test interference (since those globals persist for the process lifet
 - Wiring `extension_type_registry` into `DataContext` — that is PLT-1660.
 - Schema analysis helpers (finding extension-type columns in a schema) — not needed until PLT-1660.
 - Thread safety — registration is expected to happen at import time before any concurrent I/O.
+- Interop with extension types registered externally by third-party libraries (e.g., GeoPandas,
+  GeoArrow) — tracked in PLT-1665. The current design deliberately errors on external
+  registrations because we cannot guarantee the same name maps to the same Python class and
+  storage type; a future `register_external` opt-in will require the user to supply an explicit
+  converter.
