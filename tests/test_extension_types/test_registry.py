@@ -117,7 +117,10 @@ def test_make_arrow_extension_type_metadata_roundtrip():
 
 
 # ---------------------------------------------------------------------------
-# Pure-Python LogicalTypeRegistry tests (no PA/Polars global state required)
+# LogicalTypeRegistry unit tests
+# Each test uses a fresh LogicalTypeRegistry() instance (not the module-level
+# default_logical_type_registry). Registering does touch the global PA/Polars
+# registries, but unique extension names (via _unique_name()) prevent collisions.
 # ---------------------------------------------------------------------------
 
 def test_register_stores_logical_type():
@@ -221,21 +224,10 @@ def test_register_populates_arrow_registry():
     registry = LogicalTypeRegistry()
     registry.register(lt)
 
-    arrow_ext_name = lt.get_arrow_extension_type().extension_name
-
-    # If the name is registered, attempting to re-register it raises ArrowKeyError.
-    # This is the only stable public signal PyArrow provides.
-    class _Probe(pa.ExtensionType):
-        def __init__(self):
-            pa.ExtensionType.__init__(self, pa.large_utf8(), arrow_ext_name)
-        def __arrow_ext_serialize__(self):
-            return b""
-        @classmethod
-        def __arrow_ext_deserialize__(cls, st, se):
-            return cls()
-
+    # If the name is registered, attempting to re-register the same type raises
+    # ArrowKeyError. This is the only stable public signal PyArrow provides.
     with pytest.raises(pa.lib.ArrowKeyError):
-        pa.register_extension_type(_Probe())
+        pa.register_extension_type(lt.get_arrow_extension_type())
 
 
 def test_register_arrow_preexisting_external_accepted_silently():
@@ -453,10 +445,86 @@ def test_parquet_round_trip():
 
 
 # ---------------------------------------------------------------------------
-# Module-level instance test
+# default_logical_type_registry tests
 # ---------------------------------------------------------------------------
 
 def test_logical_type_registry_module_instance():
     """extension_types.default_logical_type_registry is a LogicalTypeRegistry."""
     from orcapod import extension_types
     assert isinstance(extension_types.default_logical_type_registry, LogicalTypeRegistry)
+
+
+def test_default_registry_is_same_object_across_imports():
+    """default_logical_type_registry is the same object regardless of import path."""
+    from orcapod import extension_types
+    from orcapod.extension_types import default_logical_type_registry
+    assert extension_types.default_logical_type_registry is default_logical_type_registry
+
+
+def test_default_registry_register_and_lookup():
+    """Registering into default_logical_type_registry makes the type retrievable."""
+    from orcapod.extension_types import default_logical_type_registry
+
+    class _LookupTarget:
+        pass
+
+    lt = _make_stub(py_type=_LookupTarget)
+    default_logical_type_registry.register(lt)
+
+    assert default_logical_type_registry.get_by_logical_name(lt.logical_type_name) is lt
+    assert default_logical_type_registry.get_by_python_type(lt.python_type) is lt
+    assert (
+        default_logical_type_registry.get_by_arrow_extension_name(
+            lt.get_arrow_extension_type().extension_name
+        )
+        is lt
+    )
+
+
+def test_default_registry_register_idempotent():
+    """Re-registering the same instance into default_logical_type_registry does not raise."""
+    from orcapod.extension_types import default_logical_type_registry
+
+    class _IdempotentTarget:
+        pass
+
+    lt = _make_stub(py_type=_IdempotentTarget)
+    default_logical_type_registry.register(lt)
+    default_logical_type_registry.register(lt)  # should not raise
+    assert default_logical_type_registry.get_by_logical_name(lt.logical_type_name) is lt
+
+
+def test_default_registry_populates_arrow_global():
+    """Registering into default_logical_type_registry puts the Arrow ext name in PA's global registry."""
+    from orcapod.extension_types import default_logical_type_registry
+
+    class _ArrowTarget:
+        pass
+
+    lt = _make_stub(py_type=_ArrowTarget)
+    default_logical_type_registry.register(lt)
+
+    with pytest.raises(pa.lib.ArrowKeyError):
+        pa.register_extension_type(lt.get_arrow_extension_type())
+
+
+def test_default_registry_populates_polars_global():
+    """Registering into default_logical_type_registry makes Polars recognise the extension type."""
+    from orcapod.extension_types import default_logical_type_registry
+
+    class _PolarsTarget:
+        pass
+
+    arrow_name = _unique_name()
+    lt = _make_stub(arrow_name=arrow_name, py_type=_PolarsTarget)
+    default_logical_type_registry.register(lt)
+
+    storage_arr = pa.array(["x", "y"], type=pa.large_utf8())
+    ext_arr = storage_arr.cast(lt.get_arrow_extension_type())
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        pl_series = pl.from_arrow(ext_arr)
+
+    assert isinstance(pl_series.dtype, pl.BaseExtension)
+    assert pl_series.dtype.ext_name() == arrow_name
