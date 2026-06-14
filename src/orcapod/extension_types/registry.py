@@ -106,7 +106,8 @@ class LogicalTypeRegistry:
                 Arrow extension name, ``python_type``) is already bound to a
                 *different* ``LogicalType`` in this registry.
         """
-        arrow_ext_name = logical_type.get_arrow_extension_type().extension_name
+        arrow_ext = logical_type.get_arrow_extension_type()
+        arrow_ext_name = arrow_ext.extension_name
         py_type = logical_type.python_type
         logical_name = logical_type.logical_type_name
 
@@ -139,7 +140,7 @@ class LogicalTypeRegistry:
         # in PyArrow's global registry (pre-existing type or another registry
         # instance). Accept silently — PLT-1669 adds post-error validation.
         try:
-            pa.register_extension_type(logical_type.get_arrow_extension_type())
+            pa.register_extension_type(arrow_ext)
         except pa.lib.ArrowKeyError:
             pass
 
@@ -148,7 +149,8 @@ class LogicalTypeRegistry:
         # raises polars.exceptions.ComputeError when the lower-level Rust registry detects
         # the duplicate (e.g. when the Polars Python dict was already cleared or bypassed).
         # Both errors mean "already registered" — accept silently.
-        polars_ext_class = type(logical_type.get_polars_extension_type())
+        polars_ext = logical_type.get_polars_extension_type()
+        polars_ext_class = type(polars_ext)
         try:
             pl.register_extension_type(arrow_ext_name, polars_ext_class)
         except (ValueError, pl.exceptions.ComputeError):
