@@ -410,3 +410,15 @@ def test_parquet_round_trip():
         for v in table_back.column("color").cast(conv.storage_type)
     ]
     assert recovered == originals
+
+
+# ---------------------------------------------------------------------------
+# Module-level instance test
+# ---------------------------------------------------------------------------
+
+def test_extension_type_registry_module_instance():
+    """extension_types.extension_type_registry is an ExtensionTypeRegistry, starts empty."""
+    from orcapod import extension_types
+    assert isinstance(extension_types.extension_type_registry, ExtensionTypeRegistry)
+    # PLT-1653 scope: no built-in converters registered yet (that is PLT-1656)
+    assert extension_types.extension_type_registry.list_extension_names() == []
