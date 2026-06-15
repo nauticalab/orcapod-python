@@ -19,7 +19,9 @@ mechanism to detect this and auto-register a `LogicalType` on the fly. This brea
 ergonomic goal of "declare a dataclass, use it."
 
 This spec adds a second factory dispatch axis — **Python-class-keyed** — and wires a
-write-side trigger at function pod declaration time.
+write-side trigger at function pod declaration time. It also integrates the new extension type
+system into `UniversalTypeConverter` so that complex nested types like `list[dict[A, list[B]]]`
+are handled correctly without duplicating the existing recursive machinery.
 
 ---
 
@@ -29,6 +31,7 @@ write-side trigger at function pod declaration time.
 |---|---|
 | Factory protocol extension | Add `create_for_python_type(python_type)` as a new method; rename existing `create_logical_type` → `reconstruct_from_arrow` |
 | Registration API | Extend `register_logical_type_factory` signature to accept both `category` and `python_bases` in one call |
+| Complex type handling | Extend `UniversalTypeConverter` to check `LogicalTypeRegistry` first at each leaf; use `_extract_leaf_classes` to recursively unwrap generics for the registration trigger |
 | Trigger location | `_FunctionPodBase.__init__()` — at pod declaration time |
 | Failure mode | Hard `TypeError` at declaration time if no factory matches |
 | MRO resolution | Unified MRO walk across both concrete types and factory keys; most-specific wins; concrete beats factory at same MRO level |
@@ -187,7 +190,7 @@ def ensure_logical_type_for_python_class(
 
     This is the write-side counterpart to ``ensure_extension_type`` (the read-side
     trigger). It is called at function pod declaration time for every non-native
-    type in the pod's input and output schemas.
+    leaf class extracted from the pod's input and output schemas.
 
     Resolution algorithm (unified MRO walk):
 
@@ -232,12 +235,110 @@ cache is intentionally shared with the read-side cache — they are one and the 
 
 ---
 
-## Section 3: Trigger point — `_FunctionPodBase.__init__()`
+## Section 3: Complex type handling — `_extract_leaf_classes` and `UniversalTypeConverter`
+
+Handling complex nested annotations like `list[dict[A, list[B]]]` requires two complementary
+pieces: recursive leaf extraction for the **registration phase**, and a priority check in
+`UniversalTypeConverter` for the **encoding phase**. Crucially, the existing recursive machinery
+in `UniversalTypeConverter` already handles generic nesting — we tap into it rather than
+duplicate it.
+
+### 3a: `_extract_leaf_classes` — recursive annotation unwrapper
+
+**File:** `src/orcapod/extension_types/type_utils.py` (new module)
+
+```python
+def _extract_leaf_classes(annotation: Any) -> Iterator[type]:
+    """Recursively yield all concrete leaf Python classes from a type annotation.
+
+    Unwraps generic aliases (``list[T]``, ``dict[K, V]``, ``Optional[T]``,
+    ``Union[A, B]``, etc.) using ``typing.get_origin`` / ``typing.get_args``
+    and yields every non-generic, non-None leaf class found.
+
+    Examples:
+        ``list[MyEvent]``             → ``[MyEvent]``
+        ``dict[str, MyEvent]``        → ``[str, MyEvent]``
+        ``list[dict[A, list[B]]]``    → ``[A, B]``
+        ``Optional[MyEvent]``         → ``[MyEvent]``
+        ``Union[A, B, None]``         → ``[A, B]``
+        ``int``                       → ``[int]``
+    """
+```
+
+Used by `_trigger_write_side_registration` (Section 4) to discover all leaf classes in a schema
+column's type annotation before attempting factory dispatch. The function lives in
+`extension_types/type_utils.py` so it is importable by both `function_pod.py` and future
+callers without a circular-import risk.
+
+### 3b: `UniversalTypeConverter` — priority check for `LogicalTypeRegistry`
+
+**File:** `src/orcapod/semantic_types/universal_converter.py`
+
+`UniversalTypeConverter` gains an optional `logical_type_registry` attribute, injected from
+`DataContext` at construction/wiring time:
+
+```python
+class UniversalTypeConverter:
+    def __init__(self, ..., logical_type_registry: LogicalTypeRegistry | None = None):
+        ...
+        self._logical_type_registry = logical_type_registry
+```
+
+In `_convert_python_to_arrow()`, one new check is inserted **before** the existing
+`semantic_registry` check:
+
+```python
+def _convert_python_to_arrow(self, python_type: type) -> pa.DataType:
+    # ── NEW: check LogicalTypeRegistry first (extension-type identity) ──────
+    if self._logical_type_registry is not None:
+        lt = self._logical_type_registry.get_by_python_type(python_type)
+        if lt is not None:
+            return lt.get_arrow_extension_type()
+
+    # ── EXISTING: semantic_registry (old shape-based identity) ───────────────
+    if self.semantic_registry:
+        converter = self.semantic_registry.get_converter_for_python_type(python_type)
+        if converter:
+            return converter.arrow_struct_type
+
+    # ── EXISTING: dataclass encoding, generic handling, etc. ─────────────────
+    ...
+```
+
+This is an **additive, non-breaking change**. The old `semantic_registry` and dataclass encoding
+paths remain completely intact and serve as the fallback during the parallel build phase. Once
+PLT-1660 removes the old system, those fallback paths are deleted.
+
+**Why `get_by_python_type()` and not `ensure_logical_type_for_python_class()`** at this call
+site: by the time `UniversalTypeConverter` runs (encoding phase), the registration trigger at
+pod declaration time has already called `ensure_logical_type_for_python_class` for every leaf
+class. The converter therefore only needs a read-only lookup — no synthesis, no side effects.
+If a type somehow arrives unregistered at encoding time, it falls through to the old system
+rather than raising, preserving parallel-build safety.
+
+### 3c: `DataContext` wiring
+
+**File:** `src/orcapod/contexts/` (wherever `DataContext` is constructed)
+
+When a `DataContext` is constructed, its `logical_type_registry` is passed to its
+`type_converter`:
+
+```python
+# In DataContext construction / post-init:
+self.type_converter._logical_type_registry = self.logical_type_registry
+```
+
+This is the only place where the two systems are connected. No other wiring is needed.
+
+---
+
+## Section 4: Trigger point — `_FunctionPodBase.__init__()`
 
 **File:** `src/orcapod/core/function_pod.py`
 
 A module-level helper is added and called from `_FunctionPodBase.__init__()` after the data
-function is assigned:
+function is assigned. It uses `_extract_leaf_classes` to handle complex nested annotations
+before calling `ensure_logical_type_for_python_class` for each leaf.
 
 ```python
 # Types that Arrow handles natively without a LogicalType
@@ -251,28 +352,33 @@ def _trigger_write_side_registration(
     output_schema: Schema,
     registry: LogicalTypeRegistry | None,
 ) -> None:
-    """Walk pod schemas and ensure a LogicalType is registered for every non-native type.
+    """Walk pod schemas and ensure a LogicalType is registered for every non-native leaf class.
 
-    Called once at pod declaration time. Arrow-native types (int, str, etc.) are
-    skipped. Already-registered types are skipped via a fast O(1) dict check.
-    Unregistered non-native types trigger factory synthesis. Raises TypeError if
+    Recursively unwraps generic annotations (``list[T]``, ``dict[K,V]``, etc.) to
+    extract leaf classes, then triggers factory synthesis for any not yet registered.
+    Called once at pod declaration time.
+
+    Arrow-native types (int, str, etc.) are skipped. Already-registered types are
+    skipped via a fast O(1) dict check. Unregistered non-native types trigger factory
+    synthesis via ``ensure_logical_type_for_python_class``. Raises ``TypeError`` if
     no factory is found — this is an intentional hard error at declaration time.
 
     Args:
-        input_schema: The pod's input data schema (column name → Python type).
+        input_schema: The pod's input data schema (column name → Python type annotation).
         output_schema: The pod's output data schema.
         registry: The LogicalTypeRegistry from the pod's DataContext. No-op if None.
     """
     if registry is None:
         return
     for schema in (input_schema, output_schema):
-        for python_type in schema.values():
-            if python_type in _ARROW_NATIVE_TYPES:
-                continue
-            if registry.get_by_python_type(python_type) is not None:
-                continue  # already registered — O(1) cache hit, skip MRO walk
-            registry.ensure_logical_type_for_python_class(python_type)
-            # TypeError propagates if no factory matches — intentional
+        for annotation in schema.values():
+            for leaf_class in _extract_leaf_classes(annotation):
+                if leaf_class in _ARROW_NATIVE_TYPES:
+                    continue
+                if registry.get_by_python_type(leaf_class) is not None:
+                    continue  # already registered — O(1) cache hit, skip MRO walk
+                registry.ensure_logical_type_for_python_class(leaf_class)
+                # TypeError propagates if no factory matches — intentional
 ```
 
 In `_FunctionPodBase.__init__()`:
@@ -291,7 +397,7 @@ constructed through `_FunctionPodBase.__init__()`. There is no other code path t
 
 ---
 
-## Section 4: Failure modes
+## Section 5: Failure modes
 
 **No factory found at pod declaration time:**
 
@@ -312,9 +418,15 @@ pass-through. The failure is deliberate and loud.
 without type registration (e.g. test environments that construct pods without a full
 DataContext).
 
+**Unregistered type reaching encoding:** If a type somehow bypasses pod declaration and reaches
+`UniversalTypeConverter._convert_python_to_arrow()` without being registered, `get_by_python_type()`
+returns `None` and the converter falls through to the old `semantic_registry` / dataclass
+encoding path. This is intentional parallel-build safety: the new system is higher-priority but
+not exclusive until PLT-1660.
+
 ---
 
-## Section 5: Symmetry with the read side
+## Section 6: Symmetry with the read side
 
 By protocol contract, `create_for_python_type(T)` must produce a `LogicalType` whose Arrow
 extension name and metadata JSON are identical to what `reconstruct_from_arrow` expects to
@@ -332,21 +444,25 @@ the registry itself.
 
 ---
 
-## Section 6: Built-in types (Path, UPath, UUID) — confirmed unaffected
+## Section 7: Built-in types (Path, UPath, UUID) — confirmed unaffected
 
 Built-ins are registered as concrete `LogicalType` instances against their exact Python types
-(`pathlib.Path`, `upath.UPath`, `uuid.UUID`) in the `DataContext` at startup. When a pod
-declares a `pathlib.Path`-typed column:
+(`pathlib.Path`, `upath.UPath`, `uuid.UUID`) in the `DataContext` at startup.
 
-1. `_ARROW_NATIVE_TYPES` check: fails (Path is not a primitive)
-2. `registry.get_by_python_type(pathlib.Path)` → hits exact match → skips factory
-3. No factory involved, no MRO walk, no synthesis
+At **registration time** (pod declaration): `_extract_leaf_classes` yields `pathlib.Path` from
+an annotation like `pathlib.Path`; `registry.get_by_python_type(pathlib.Path)` hits the exact-
+match dict immediately → skipped.
 
-Built-ins continue to work exactly as before. ✓
+At **encoding time** (UniversalTypeConverter): `get_by_python_type(pathlib.Path)` returns
+`LogicalPath` → `lt.get_arrow_extension_type()` returns the extension Arrow type. The old
+`semantic_registry` check for Path is never reached.
+
+Built-ins continue to work, and are now encoded via the new extension type (not the old struct
+shape). ✓
 
 ---
 
-## Section 7: What this issue does NOT implement
+## Section 8: What this issue does NOT implement
 
 The following are explicitly deferred:
 
@@ -357,29 +473,38 @@ The following are explicitly deferred:
 - **Pydantic factory:** future issue. The framework accommodates it by design.
 - **Picklable factory as fallback:** deferred. The failure-mode section deliberately makes
   no-match a hard error for now.
+- **Removal of old `semantic_registry` / dataclass encoding paths:** PLT-1660 only.
 
 ---
 
 ## Implementation scope
 
-All changes are contained to three files:
+All changes are additive. No existing code is deleted.
+
+### Source files
 
 | File | Change |
 |---|---|
-| `src/orcapod/extension_types/protocols.py` | Rename `create_logical_type` → `reconstruct_from_arrow`; add `create_for_python_type` |
-| `src/orcapod/extension_types/registry.py` | Rename `_factories` → `_category_factories`; extend `register_logical_type_factory` signature; update `ensure_extension_type` call site; add `ensure_logical_type_for_python_class` |
+| `src/orcapod/extension_types/protocols.py` | Rename `create_logical_type` → `reconstruct_from_arrow`; add `create_for_python_type` to `LogicalTypeFactoryProtocol` |
+| `src/orcapod/extension_types/registry.py` | Rename `_factories` → `_category_factories`; add `_python_class_factories`; extend `register_logical_type_factory` signature; update `ensure_extension_type` call site; add `ensure_logical_type_for_python_class` |
+| `src/orcapod/extension_types/type_utils.py` | New module: `_extract_leaf_classes(annotation)` |
+| `src/orcapod/semantic_types/universal_converter.py` | Add optional `logical_type_registry` param; insert `LogicalTypeRegistry.get_by_python_type()` check before `semantic_registry` check in `_convert_python_to_arrow` |
+| `src/orcapod/contexts/` | Wire `DataContext.logical_type_registry` into `DataContext.type_converter._logical_type_registry` at construction |
 | `src/orcapod/core/function_pod.py` | Add `_ARROW_NATIVE_TYPES`, `_trigger_write_side_registration`; call from `_FunctionPodBase.__init__()` |
 
-Tests updated / added:
+### Test files
 
 | File | Change |
 |---|---|
 | `tests/test_extension_types/test_protocols.py` | Update `_StubFactory.create_logical_type` → `reconstruct_from_arrow`; add `create_for_python_type` stub and conformance test |
 | `tests/test_extension_types/test_registry.py` | Update `register_logical_type_factory` call sites; add tests for `ensure_logical_type_for_python_class` (MRO walk, factory synthesis, caching, TypeError) |
-| `tests/test_core/function_pod/test_write_side_registration.py` | New: end-to-end tests verifying pod declaration triggers factory synthesis for unregistered types; hard error when no factory matches |
+| `tests/test_extension_types/test_type_utils.py` | New: tests for `_extract_leaf_classes` covering primitives, `list[T]`, `dict[K,V]`, `Optional[T]`, `Union`, deeply nested |
+| `tests/test_semantic_types/test_universal_converter.py` | Add tests for `logical_type_registry` priority check: registered types return extension Arrow type, unregistered fall through to old system |
+| `tests/test_core/function_pod/test_write_side_registration.py` | New: end-to-end tests for pod declaration triggering factory synthesis; nested types (`list[MyClass]`); hard error when no factory matches |
 
 ---
 
 ## PLT-1660 cleanup items (deferred)
 
-None — this issue adds new code only, consistent with the parallel-build strategy.
+- Remove `semantic_registry` fallback path from `UniversalTypeConverter._convert_python_to_arrow()` (replaced entirely by `logical_type_registry`)
+- Remove old `semantic_registry` / `dataclass_encoding` integration from `UniversalTypeConverter`
