@@ -148,6 +148,7 @@ class JSONDataContextRegistry:
         required_fields = [
             "context_key",
             "version",
+            "semantic_registry",
             "type_converter",
             "arrow_hasher",
             "semantic_hasher",
