@@ -173,37 +173,34 @@ def test_python_type_to_arrow_type_numpy():
 
 
 def test_python_type_to_arrow_type_custom():
+    """Path converts to an Arrow extension type when the default LogicalTypeRegistry is wired in."""
     arrow_type = universal_converter.python_type_to_arrow_type(Path)
-    # Should be a StructType with field 'path' of type large_string
-    assert isinstance(arrow_type, pa.StructType)
-    assert len(arrow_type) == 1
-    field = arrow_type[0]
-    assert field.name == "path"
-    assert field.type == pa.large_string()
+    # Path is registered in the default logical_type_registry — expect an extension type.
+    assert isinstance(arrow_type, pa.ExtensionType)
+    assert arrow_type.extension_name == "pathlib.Path"
+    assert pa.types.is_large_string(arrow_type.storage_type)
 
 
 def test_python_type_to_arrow_type_upath():
     from upath import UPath
 
     arrow_type = universal_converter.python_type_to_arrow_type(UPath)
-    # Should be a StructType with field 'upath' of type large_string
-    assert isinstance(arrow_type, pa.StructType)
-    assert len(arrow_type) == 1
-    field = arrow_type[0]
-    assert field.name == "upath"
-    assert field.type == pa.large_string()
+    # UPath is registered in the default logical_type_registry — expect an extension type.
+    assert isinstance(arrow_type, pa.ExtensionType)
+    assert arrow_type.extension_name == "upath.UPath"
+    assert pa.types.is_large_string(arrow_type.storage_type)
 
 
 def test_optional_upath_converter():
-    """Test that Optional[UPath] correctly converts UPath values."""
+    """Test that Optional[UPath] correctly converts UPath values via the LogicalTypeRegistry."""
     from upath import UPath
 
     to_arrow, to_python = universal_converter.get_conversion_functions(UPath | None)
 
-    # Test with UPath value
+    # UPath is registered — python_to_storage returns the string representation.
     path = UPath("/tmp/test.txt")
     result = to_arrow(path)
-    assert result == {"upath": "/tmp/test.txt"}
+    assert result == str(path)
 
     # Test with None
     assert to_arrow(None) is None
@@ -628,3 +625,90 @@ def test_pyarrow_empty_list_with_null_type():
     table = pa.Table.from_pylist([{"items": [], "meta": []}], schema=schema)
     assert table.num_rows == 1
     assert table.schema.field("items").type == pa.large_list(pa.null())
+
+
+# ── LogicalTypeRegistry priority tests ───────────────────────────────────────
+
+import uuid as _uuid_module
+
+import polars as pl
+
+from orcapod.extension_types.registry import (
+    LogicalTypeRegistry,
+    make_arrow_extension_type,
+)
+from orcapod.semantic_types.universal_converter import UniversalTypeConverter
+
+
+def _make_logical_type_stub(py_type: type, arrow_name: str):
+    """Return a minimal LogicalTypeProtocol conforming stub."""
+    _ArrowExtClass = make_arrow_extension_type(arrow_name, pa.large_string())
+
+    class _PolarsExt(pl.BaseExtension):
+        def __init__(self):
+            super().__init__(arrow_name, pl.String, None)
+        @classmethod
+        def ext_from_params(cls, ext_name, storage_dtype, metadata_str):
+            return cls()
+
+    class _Stub:
+        logical_type_name = arrow_name
+        python_type = py_type
+
+        def get_arrow_extension_type(self):
+            return _ArrowExtClass()
+
+        def get_polars_extension_type(self):
+            return _PolarsExt()
+
+        def python_to_storage(self, value):
+            return str(value)
+
+        def storage_to_python(self, storage_value):
+            return storage_value
+
+    return _Stub()
+
+
+class _MyCustomClass:
+    pass
+
+
+def test_converter_uses_logical_type_registry_for_registered_type():
+    """When a LogicalType is registered, converter returns its Arrow extension type."""
+    arrow_name = f"test.MyCustomClass.{_uuid_module.uuid4().hex[:8]}"
+    lt = _make_logical_type_stub(_MyCustomClass, arrow_name)
+
+    registry = LogicalTypeRegistry()
+    registry.register_logical_type(lt)
+
+    converter = UniversalTypeConverter()
+    converter._logical_type_registry = registry
+
+    result = converter.python_type_to_arrow_type(_MyCustomClass)
+    expected_ext = lt.get_arrow_extension_type()
+    assert result == expected_ext
+
+
+def test_converter_falls_through_for_unregistered_type():
+    """If type not in LogicalTypeRegistry, converter falls through to old system (int → int64)."""
+    registry = LogicalTypeRegistry()
+    converter = UniversalTypeConverter()
+    converter._logical_type_registry = registry
+
+    result = converter.python_type_to_arrow_type(int)
+    assert result == pa.int64()
+
+
+def test_converter_without_registry_unchanged():
+    """With no _logical_type_registry set, converter behaves exactly as before."""
+    converter = UniversalTypeConverter()
+    assert converter.python_type_to_arrow_type(str) == pa.large_string()
+
+
+def test_data_context_wires_registry_into_converter():
+    """DataContext.__post_init__ wires logical_type_registry into type_converter."""
+    from orcapod.contexts import get_default_context
+    ctx = get_default_context()
+    assert hasattr(ctx.type_converter, "_logical_type_registry")
+    assert ctx.type_converter._logical_type_registry is ctx.logical_type_registry
