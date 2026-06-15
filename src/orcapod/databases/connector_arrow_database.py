@@ -17,7 +17,6 @@ Example::
 """
 from __future__ import annotations
 
-import logging
 import re
 from collections import defaultdict
 from collections.abc import Collection, Mapping
@@ -26,8 +25,6 @@ from typing import TYPE_CHECKING, Any, cast
 from orcapod.databases.utils import coerce_record_id
 from orcapod.protocols.db_connector_protocol import ColumnInfo, DBConnectorProtocol
 from orcapod.utils.lazy_module import LazyModule
-
-logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import pyarrow as pa
