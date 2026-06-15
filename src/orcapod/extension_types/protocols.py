@@ -131,3 +131,29 @@ class LogicalTypeFactoryProtocol(Protocol):
             ValueError: If this factory cannot reconstruct a type for the given name.
         """
         ...
+
+    def create_for_python_type(
+        self,
+        python_type: type,
+    ) -> LogicalTypeProtocol:
+        """Synthesize a LogicalType for the given Python class (write path).
+
+        Called by the registry when pod declaration encounters an unregistered
+        class whose MRO intersects this factory's registered ``python_bases``.
+        The factory derives all Arrow metadata (extension name, storage type,
+        metadata dict) from the Python class itself.
+
+        The returned LogicalType must round-trip: the extension name and metadata
+        it produces must route back to this same factory's ``reconstruct_from_arrow``
+        on a subsequent read.
+
+        Args:
+            python_type: The concrete Python class to synthesize a LogicalType for.
+
+        Returns:
+            A fully constructed ``LogicalTypeProtocol`` ready for registration.
+
+        Raises:
+            ValueError: If this factory cannot construct a type for the given class.
+        """
+        ...
