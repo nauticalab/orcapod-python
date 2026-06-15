@@ -183,7 +183,7 @@ def test_python_type_to_arrow_type_custom():
     arrow_type = universal_converter.python_type_to_arrow_type(Path)
     # Path is registered in the default logical_type_registry — expect an extension type.
     assert isinstance(arrow_type, pa.ExtensionType)
-    assert arrow_type.extension_name == "pathlib.Path"
+    assert arrow_type.extension_name == "orcapod.path"
     assert pa.types.is_large_string(arrow_type.storage_type)
 
 
@@ -193,7 +193,7 @@ def test_python_type_to_arrow_type_upath():
     arrow_type = universal_converter.python_type_to_arrow_type(UPath)
     # UPath is registered in the default logical_type_registry — expect an extension type.
     assert isinstance(arrow_type, pa.ExtensionType)
-    assert arrow_type.extension_name == "upath.UPath"
+    assert arrow_type.extension_name == "orcapod.upath"
     assert pa.types.is_large_string(arrow_type.storage_type)
 
 
