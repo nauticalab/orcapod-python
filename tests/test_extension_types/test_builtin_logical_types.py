@@ -28,7 +28,7 @@ def test_logical_path_isinstance_logical_type():
 def test_logical_path_logical_type_name():
     from orcapod.extension_types.builtin_logical_types import LogicalPath
 
-    assert LogicalPath().logical_type_name == "pathlib.Path"
+    assert LogicalPath().logical_type_name == "orcapod.path"
 
 
 def test_logical_path_python_type():
@@ -41,7 +41,7 @@ def test_logical_path_arrow_ext_name():
     """get_arrow_extension_type().extension_name is 'pathlib.Path'."""
     from orcapod.extension_types.builtin_logical_types import LogicalPath
 
-    assert LogicalPath().get_arrow_extension_type().extension_name == "pathlib.Path"
+    assert LogicalPath().get_arrow_extension_type().extension_name == "orcapod.path"
 
 
 def test_logical_path_arrow_ext_storage_type():
@@ -100,7 +100,7 @@ def test_logical_upath_isinstance_logical_type():
 def test_logical_upath_logical_type_name():
     from orcapod.extension_types.builtin_logical_types import LogicalUPath
 
-    assert LogicalUPath().logical_type_name == "upath.UPath"
+    assert LogicalUPath().logical_type_name == "orcapod.upath"
 
 
 def test_logical_upath_python_type():
@@ -113,7 +113,7 @@ def test_logical_upath_arrow_ext_name():
     """get_arrow_extension_type().extension_name is 'upath.UPath'."""
     from orcapod.extension_types.builtin_logical_types import LogicalUPath
 
-    assert LogicalUPath().get_arrow_extension_type().extension_name == "upath.UPath"
+    assert LogicalUPath().get_arrow_extension_type().extension_name == "orcapod.upath"
 
 
 def test_logical_upath_arrow_ext_storage_type():
@@ -170,7 +170,7 @@ def test_logical_uuid_isinstance_logical_type():
 def test_logical_uuid_logical_type_name():
     from orcapod.extension_types.builtin_logical_types import LogicalUUID
 
-    assert LogicalUUID().logical_type_name == "uuid.UUID"
+    assert LogicalUUID().logical_type_name == "orcapod.uuid"
 
 
 def test_logical_uuid_python_type():
@@ -184,7 +184,7 @@ def test_logical_uuid_arrow_ext_name():
     from orcapod.extension_types.builtin_logical_types import LogicalUUID
 
     lt = LogicalUUID()
-    assert lt.get_arrow_extension_type().extension_name == "uuid.UUID"
+    assert lt.get_arrow_extension_type().extension_name == "orcapod.uuid"
     assert lt.get_arrow_extension_type().extension_name == lt.logical_type_name
 
 
@@ -245,8 +245,8 @@ def test_logical_uuid_registration_does_not_raise():
     registry = LogicalTypeRegistry()
     lt = LogicalUUID()
     registry.register_logical_type(lt)  # should NOT raise
-    assert registry.get_by_logical_name("uuid.UUID") is lt
-    assert registry.get_by_arrow_extension_name("uuid.UUID") is lt
+    assert registry.get_by_logical_name("orcapod.uuid") is lt
+    assert registry.get_by_arrow_extension_name("orcapod.uuid") is lt
 
 
 # ---------------------------------------------------------------------------
@@ -381,7 +381,7 @@ def test_default_context_registry_has_logical_path():
     from orcapod.extension_types.builtin_logical_types import LogicalPath
 
     registry = get_default_context().logical_type_registry
-    lt = registry.get_by_logical_name("pathlib.Path")
+    lt = registry.get_by_logical_name("orcapod.path")
     assert isinstance(lt, LogicalPath)
 
 
@@ -401,7 +401,7 @@ def test_default_context_registry_lookup_by_arrow_name_path():
     from orcapod.extension_types.builtin_logical_types import LogicalPath
 
     registry = get_default_context().logical_type_registry
-    lt = registry.get_by_arrow_extension_name("pathlib.Path")
+    lt = registry.get_by_arrow_extension_name("orcapod.path")
     assert isinstance(lt, LogicalPath)
 
 
@@ -411,7 +411,7 @@ def test_default_context_registry_has_logical_upath():
     from orcapod.extension_types.builtin_logical_types import LogicalUPath
 
     registry = get_default_context().logical_type_registry
-    lt = registry.get_by_logical_name("upath.UPath")
+    lt = registry.get_by_logical_name("orcapod.upath")
     assert isinstance(lt, LogicalUPath)
 
 
@@ -431,7 +431,7 @@ def test_default_context_registry_has_logical_uuid():
     from orcapod.extension_types.builtin_logical_types import LogicalUUID
 
     registry = get_default_context().logical_type_registry
-    lt = registry.get_by_logical_name("uuid.UUID")
+    lt = registry.get_by_logical_name("orcapod.uuid")
     assert isinstance(lt, LogicalUUID)
 
 
@@ -441,7 +441,7 @@ def test_default_context_registry_lookup_by_arrow_name_uuid():
     from orcapod.extension_types.builtin_logical_types import LogicalUUID
 
     registry = get_default_context().logical_type_registry
-    lt = registry.get_by_arrow_extension_name("uuid.UUID")
+    lt = registry.get_by_arrow_extension_name("orcapod.uuid")
     assert isinstance(lt, LogicalUUID)
 
 
