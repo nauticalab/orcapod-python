@@ -45,6 +45,16 @@ class DataContext:
     type_handler_registry: TypeHandlerRegistry
     logical_type_registry: LogicalTypeRegistry
 
+    def __post_init__(self) -> None:
+        """Wire components together after dataclass construction.
+
+        Injects ``logical_type_registry`` into ``type_converter`` so that
+        registered ``LogicalType`` instances take priority over the old
+        shape-based ``semantic_registry`` at encoding time.
+        """
+        if hasattr(self.type_converter, "_logical_type_registry"):
+            self.type_converter._logical_type_registry = self.logical_type_registry
+
 
 class ContextValidationError(Exception):
     """Raised when context validation fails."""
