@@ -161,11 +161,13 @@ class LogicalTypeRegistry:
 
     Registering a logical type side-effect-registers the corresponding extension
     type in PyArrow's and Polars' global registries. Pre-existing types (those
-    already registered externally, e.g. PyArrow's built-in ``"arrow.uuid"``) are
+    already registered externally in the global Arrow or Polars registries) are
     accepted silently — the binding is stored without error.
 
-    The process-global ``default_logical_type_registry`` instance provides
-    effective process-wide uniqueness for normal use. Thread-safety is deferred.
+    The standard access path for the default registry is
+    ``get_default_context().logical_type_registry`` or the convenience function
+    ``get_default_logical_type_registry()`` from ``orcapod.contexts``.
+    Thread-safety is deferred.
 
     An optional ``logical_types`` list can be passed at construction time to
     pre-register one or more ``LogicalType`` instances immediately, following

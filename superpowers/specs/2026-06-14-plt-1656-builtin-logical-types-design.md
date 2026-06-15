@@ -68,22 +68,28 @@ Identical structure to `LogicalPath` with:
 |---|---|
 | `logical_type_name` | `"uuid.UUID"` |
 | `python_type` | `uuid.UUID` |
-| Arrow extension name | `"arrow.uuid"` (PyArrow built-in — `pa.uuid()`) |
-| Arrow storage type | `pa.binary(16)` (encapsulated in `pa.uuid()`) |
-| Arrow extension metadata | controlled by PyArrow (not `b"orcapod.builtin"`) |
+| Arrow extension name | `"uuid.UUID"` (custom — created via `make_arrow_extension_type`) |
+| Arrow storage type | `pa.large_binary()` |
+| Arrow extension metadata | `None` (empty bytes) |
 | `python_to_storage(uuid_val)` | `uuid_val.bytes` |
 | `storage_to_python(bytes_val)` | `uuid.UUID(bytes=bytes(bytes_val))` |
 
-`get_arrow_extension_type()` returns `pa.uuid()` directly — PyArrow's pre-existing
-built-in type registered as `"arrow.uuid"`. The registry accepts this silently
-(PLT-1668 behaviour). **`logical_type_name` (`"uuid.UUID"`) intentionally differs
-from the Arrow extension name (`"arrow.uuid"`).**
+`get_arrow_extension_type()` uses
+`make_arrow_extension_type("uuid.UUID", pa.large_binary())`, following the
+same pattern as `LogicalPath` and `LogicalUPath`. `logical_type_name` and the
+Arrow extension name are both `"uuid.UUID"`.
+
+`pa.large_binary()` is used rather than `pa.binary(16)` (fixed-size) because
+Polars maps fixed-size binary to variable-length on the round-trip, which
+would conflict with the deserializer's storage-type check.
+
+PyArrow's built-in `pa.uuid()` (`"arrow.uuid"`) is intentionally **not** used:
+it is a C++ built-in type (`UuidType(BaseExtensionType)`) that Polars has
+hardcoded in its Rust layer at startup and cannot be overridden from Python,
+causing Arrow → Polars → Arrow round-trips to silently strip the extension.
 
 `get_polars_extension_type()` uses
-`make_polars_extension_type("arrow.uuid", pa.binary(16), None)`.
-Note: the Polars registration name is the Arrow extension name (`"arrow.uuid"`),
-not the logical type name (`"uuid.UUID"`), so that Polars correctly maps Arrow
-UUID columns on read.
+`make_polars_extension_type("uuid.UUID", pa.large_binary())`.
 
 ### Caching strategy
 
@@ -92,9 +98,7 @@ attributes to avoid re-creating dynamic subclasses on every `get_*` call:
 
 ```python
 class LogicalPath:
-    _arrow_ext_class = make_arrow_extension_type(
-        "pathlib.Path", pa.large_string(), b"orcapod.builtin"
-    )
+    _arrow_ext_class = make_arrow_extension_type("pathlib.Path", pa.large_string())
     _arrow_ext: pa.ExtensionType | None = None
 
     def get_arrow_extension_type(self) -> pa.ExtensionType:
