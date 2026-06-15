@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterable
 
 from orcapod.extension_types.protocols import LogicalTypeProtocol, LogicalTypeFactoryProtocol
 from orcapod.utils.lazy_module import LazyModule
@@ -193,7 +193,8 @@ class LogicalTypeRegistry:
         self._by_logical_name: dict[str, LogicalTypeProtocol] = {}
         self._by_arrow_name: dict[str, LogicalTypeProtocol] = {}
         self._by_python_type: dict[type, LogicalTypeProtocol] = {}
-        self._factories: dict[str, LogicalTypeFactoryProtocol] = {}
+        self._category_factories: dict[str, LogicalTypeFactoryProtocol] = {}
+        self._python_class_factories: dict[type, LogicalTypeFactoryProtocol] = {}
         for lt in (logical_types or []):
             self.register_logical_type(lt)
 
@@ -291,37 +292,56 @@ class LogicalTypeRegistry:
 
     def register_logical_type_factory(
         self,
-        category: str,
         factory: LogicalTypeFactoryProtocol,
+        *,
+        category: str | None = None,
+        python_bases: Iterable[type] = (),
     ) -> None:
-        """Register a factory for the given metadata category string.
-
-        When ``ensure_extension_type`` encounters an Arrow extension type whose
-        ``extension_metadata`` JSON contains ``{"category": "<category>", ...}``,
-        it calls ``factory.reconstruct_from_arrow(arrow_extension_name, storage_type,
-        metadata_dict)`` to construct the logical type and then registers it.
+        """Register a factory on one or both dispatch axes.
 
         Args:
-            category: The ``"category"`` value from the extension metadata JSON that
-                identifies this category (e.g. ``"Dataclass"``).
-            factory: A ``LogicalTypeFactory`` instance responsible for constructing
-                logical types for this category.
+            factory: The factory to register.
+            category: If given, registers factory as the read-side handler for Arrow
+                extension types whose metadata contains this category string. Raises
+                ``ValueError`` if a different factory is already registered for this
+                category.
+            python_bases: Zero or more Python base classes. Registers factory as the
+                write-side handler for each. Raises ``ValueError`` if a different
+                factory is already registered for a given base.
 
         Raises:
-            ValueError: If ``category`` is already registered to a different factory.
+            ValueError: If neither ``category`` nor ``python_bases`` is provided.
+            ValueError: If a different factory is already registered for a given key.
         """
-        existing = self._factories.get(category)
-        if existing is not None and existing is not factory:
+        python_bases_list = list(python_bases)
+        if category is None and not python_bases_list:
             raise ValueError(
-                f"Cannot register factory for category {category!r}: "
-                f"a different factory is already registered for this category."
+                "At least one of 'category' or 'python_bases' must be provided."
             )
-        if existing is factory:
-            return
-        self._factories[category] = factory
-        logger.debug(
-            "registered LogicalTypeFactory for category %r: %r", category, factory
-        )
+        if category is not None:
+            existing = self._category_factories.get(category)
+            if existing is not None and existing is not factory:
+                raise ValueError(
+                    f"Cannot register factory for category {category!r}: "
+                    f"a different factory is already registered for this category."
+                )
+            if existing is not factory:
+                self._category_factories[category] = factory
+                logger.debug(
+                    "registered LogicalTypeFactory for category %r: %r", category, factory
+                )
+        for base in python_bases_list:
+            existing = self._python_class_factories.get(base)
+            if existing is not None and existing is not factory:
+                raise ValueError(
+                    f"Cannot register factory for python base {base!r}: "
+                    f"a different factory is already registered for this base."
+                )
+            if existing is not factory:
+                self._python_class_factories[base] = factory
+                logger.debug(
+                    "registered LogicalTypeFactory for python base %r: %r", base, factory
+                )
 
     def ensure_extension_type(
         self,
@@ -409,14 +429,14 @@ class LogicalTypeRegistry:
             )
 
         # Step 5: Look up factory.
-        factory = self._factories.get(category)
+        factory = self._category_factories.get(category)
         if factory is None:
             raise ValueError(
                 f"No LogicalTypeFactory is registered for category {category!r}.\n"
                 f"Cannot prepare extension type {arrow_extension_name!r} for "
                 f"registration.\n"
                 f"Register a factory on the registry instance used for reads via "
-                f"register_logical_type_factory({category!r}, factory)."
+                f"register_logical_type_factory(factory, category={category!r})."
             )
 
         # Step 6: Construct logical type via factory.
