@@ -11,7 +11,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from orcapod.extension_types.protocols import LogicalType, LogicalTypeFactory
+from orcapod.extension_types.protocols import LogicalTypeProtocol, LogicalTypeFactoryProtocol
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -175,37 +175,37 @@ class LogicalTypeRegistry:
     Thread-safety is deferred.
 
     An optional ``logical_types`` list can be passed at construction time to
-    pre-register one or more ``LogicalType`` instances immediately, following
+    pre-register one or more ``LogicalTypeProtocol`` instances immediately, following
     the same pattern as ``SemanticTypeRegistry``'s ``converters`` constructor
     argument.
 
     Example:
         >>> registry = LogicalTypeRegistry()
-        >>> registry.register(my_logical_type)
+        >>> registry.register_logical_type(my_logical_type)
         >>> lt = registry.get_by_logical_name("uuid.UUID")
 
         >>> # Pre-register types at construction:
         >>> registry = LogicalTypeRegistry(logical_types=[path_lt, uuid_lt])
     """
 
-    def __init__(self, logical_types: list[LogicalType] | None = None) -> None:
-        self._by_logical_name: dict[str, LogicalType] = {}
-        self._by_arrow_name: dict[str, LogicalType] = {}
-        self._by_python_type: dict[type, LogicalType] = {}
-        self._factories: dict[str, LogicalTypeFactory] = {}
+    def __init__(self, logical_types: list[LogicalTypeProtocol] | None = None) -> None:
+        self._by_logical_name: dict[str, LogicalTypeProtocol] = {}
+        self._by_arrow_name: dict[str, LogicalTypeProtocol] = {}
+        self._by_python_type: dict[type, LogicalTypeProtocol] = {}
+        self._factories: dict[str, LogicalTypeFactoryProtocol] = {}
         for lt in (logical_types or []):
-            self.register(lt)
+            self.register_logical_type(lt)
 
-    def register(self, logical_type: LogicalType) -> None:
+    def register_logical_type(self, logical_type: LogicalTypeProtocol) -> None:
         """Register *logical_type* and its PyArrow/Polars extension types.
 
         Args:
-            logical_type: A ``LogicalType`` instance to register.
+            logical_type: A ``LogicalTypeProtocol`` instance to register.
 
         Raises:
             ValueError: If any of the three keys (``logical_type_name``,
                 Arrow extension name, ``python_type``) is already bound to a
-                *different* ``LogicalType`` in this registry.
+                *different* ``LogicalTypeProtocol`` in this registry.
         """
         arrow_ext = logical_type.get_arrow_extension_type()
         arrow_ext_name = arrow_ext.extension_name
@@ -262,11 +262,11 @@ class LogicalTypeRegistry:
         self._by_arrow_name[arrow_ext_name] = logical_type
         self._by_python_type[py_type] = logical_type
 
-    def get_by_logical_name(self, name: str) -> LogicalType | None:
+    def get_by_logical_name(self, name: str) -> LogicalTypeProtocol | None:
         """Return the logical type registered under *name*, or ``None``."""
         return self._by_logical_name.get(name)
 
-    def get_by_python_type(self, python_type: type) -> LogicalType | None:
+    def get_by_python_type(self, python_type: type) -> LogicalTypeProtocol | None:
         """Return the logical type for *python_type*, or ``None``.
 
         Checks exact match first, then falls back to an ``issubclass`` scan.
@@ -284,18 +284,18 @@ class LogicalTypeRegistry:
                 continue
         return None
 
-    def get_by_arrow_extension_name(self, arrow_name: str) -> LogicalType | None:
+    def get_by_arrow_extension_name(self, arrow_name: str) -> LogicalTypeProtocol | None:
         """Return the logical type registered under *arrow_name*, or ``None``."""
         return self._by_arrow_name.get(arrow_name)
 
     def register_logical_type_factory(
         self,
         category: str,
-        factory: LogicalTypeFactory,
+        factory: LogicalTypeFactoryProtocol,
     ) -> None:
         """Register a factory for the given metadata category string.
 
-        When ``prepare_extension_type`` encounters an Arrow extension type whose
+        When ``ensure_extension_type`` encounters an Arrow extension type whose
         ``extension_metadata`` JSON contains ``{"category": "<category>", ...}``,
         it calls ``factory.create_logical_type(arrow_extension_name, storage_type,
         metadata_dict)`` to construct the logical type and then registers it.
@@ -322,16 +322,16 @@ class LogicalTypeRegistry:
             "registered LogicalTypeFactory for category %r: %r", category, factory
         )
 
-    def prepare_extension_type(
+    def ensure_extension_type(
         self,
         arrow_extension_name: str,
         extension_metadata: bytes | None,
         storage_type: pa.DataType,
     ) -> None:
         """Ensure the Arrow extension type identified by ``arrow_extension_name``
-        is registered as a ``LogicalType``.
+        is registered as a ``LogicalTypeProtocol``.
 
-        This is the single entry point called by ``ensure_extensions_registered``
+        This is the single entry point called by ``register_discovered_extensions``
         in ``database_hooks``. The registry owns all dispatch logic.
 
         Args:
@@ -352,7 +352,7 @@ class LogicalTypeRegistry:
         # Step 1: per-process cache hit — no-op regardless of metadata content.
         if self.get_by_arrow_extension_name(arrow_extension_name) is not None:
             logger.debug(
-                "prepare_extension_type: %r already registered, skipping",
+                "ensure_extension_type: %r already registered, skipping",
                 arrow_extension_name,
             )
             return
@@ -364,7 +364,7 @@ class LogicalTypeRegistry:
                 f"(metadata is None).\n"
                 f"Types without a metadata category tag cannot be auto-registered via "
                 f"a factory — they must be pre-registered explicitly via "
-                f"registry.register(logical_type) on the registry instance used for reads."
+                f"registry.register_logical_type(logical_type) on the registry instance used for reads."
             )
 
         # Step 3: Parse JSON.
@@ -420,7 +420,7 @@ class LogicalTypeRegistry:
 
         # Step 6: Construct logical type via factory.
         logger.debug(
-            "prepare_extension_type: %r not registered — dispatching to category %r factory",
+            "ensure_extension_type: %r not registered — dispatching to category %r factory",
             arrow_extension_name,
             category,
         )
@@ -429,9 +429,9 @@ class LogicalTypeRegistry:
         )
 
         # Step 7: Register in all three bindings + PA/Polars global registries.
-        self.register(logical_type)
+        self.register_logical_type(logical_type)
         logger.debug(
-            "prepare_extension_type: successfully registered %r via factory for category %r",
+            "ensure_extension_type: successfully registered %r via factory for category %r",
             arrow_extension_name,
             category,
         )

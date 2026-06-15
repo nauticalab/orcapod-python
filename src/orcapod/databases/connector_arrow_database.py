@@ -24,7 +24,7 @@ from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, Any, cast
 
 from orcapod.databases.utils import coerce_record_id
-from orcapod.extension_types.database_hooks import ensure_extensions_registered
+from orcapod.extension_types.database_hooks import register_discovered_extensions
 from orcapod.extension_types.registry import LogicalTypeRegistry
 from orcapod.protocols.db_connector_protocol import ColumnInfo, DBConnectorProtocol
 from orcapod.utils.lazy_module import LazyModule
@@ -193,7 +193,7 @@ class ConnectorArrowDatabase:
         if not batches:
             return None
         logger.debug("_get_committed_table: peeking schema for extension type registration")
-        ensure_extensions_registered(self._logical_type_registry, batches[0].schema)
+        register_discovered_extensions(self._logical_type_registry, batches[0].schema)
         return pa.Table.from_batches(batches)
 
     # ── Write methods ─────────────────────────────────────────────────────────

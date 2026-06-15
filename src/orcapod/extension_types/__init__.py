@@ -13,14 +13,14 @@ paths for the default registry are:
 
 from __future__ import annotations
 
-from .protocols import LogicalType, LogicalTypeFactory
+from .protocols import LogicalTypeProtocol, LogicalTypeFactoryProtocol
 from .registry import LogicalTypeRegistry, make_arrow_extension_type, make_polars_extension_type
 from .schema_walker import ExtensionTypeInfo, walk_field, walk_schema
-from .database_hooks import ensure_extensions_registered
+from .database_hooks import register_discovered_extensions
 
 __all__ = [
-    "LogicalType",
-    "LogicalTypeFactory",
+    "LogicalTypeProtocol",
+    "LogicalTypeFactoryProtocol",
     "LogicalTypeRegistry",
     "make_arrow_extension_type",
     "make_polars_extension_type",
@@ -29,5 +29,5 @@ __all__ = [
     "walk_schema",
     "walk_field",
     # PLT-1655
-    "ensure_extensions_registered",
+    "register_discovered_extensions",
 ]
