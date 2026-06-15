@@ -22,18 +22,29 @@ from orcapod.extension_types.registry import (
     LogicalTypeRegistry,
     make_arrow_extension_type,
 )
+from orcapod.semantic_types.universal_converter import UniversalTypeConverter
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _make_test_context(registry: LogicalTypeRegistry) -> DataContext:
-    """Create a DataContext that uses the given registry."""
+    """Create a DataContext with a fresh converter so the global default is not mutated.
+
+    Re-using the default context's ``type_converter`` singleton would cause
+    ``DataContext.__post_init__`` to overwrite its ``_logical_type_registry``
+    to point to the test registry, corrupting global converter state for
+    subsequently-run tests.
+    """
     base_ctx = get_default_context()
+    # Fresh converter so we don't mutate the module-level singleton.
+    fresh_converter = UniversalTypeConverter(
+        semantic_registry=base_ctx.type_converter.semantic_registry,
+    )
     return DataContext(
         context_key="test",
         version="test",
         description="test",
-        type_converter=base_ctx.type_converter,
+        type_converter=fresh_converter,
         arrow_hasher=base_ctx.arrow_hasher,
         semantic_hasher=base_ctx.semantic_hasher,
         type_handler_registry=base_ctx.type_handler_registry,
