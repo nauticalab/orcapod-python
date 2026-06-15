@@ -2,12 +2,7 @@
 
 Call ``ensure_extensions_registered(registry, schema)`` before returning any
 Arrow table from a database read path. It is a no-op when the schema contains
-no extension types.
-
-If *registry* is ``None``, the registry is resolved from the default data
-context via ``get_default_context().logical_type_registry``. Pass an explicit
-``LogicalTypeRegistry`` instance to share one registry across multiple databases
-or to override the default context's registry.
+no extension types or when *registry* is ``None``.
 """
 
 from __future__ import annotations
@@ -39,8 +34,10 @@ def ensure_extensions_registered(
 
     Args:
         registry: The ``LogicalTypeRegistry`` to use for lookup and registration.
-            If ``None``, the registry is resolved lazily from the default data
-            context via ``get_default_context().logical_type_registry``.
+            If ``None``, this call is a no-op — no extension types will be
+            registered. Callers that want auto-registration must supply a registry
+            explicitly; the typical source is
+            ``data_context.logical_type_registry``.
         schema: The Arrow schema to inspect. May contain no extension types,
             in which case this call is a no-op.
 
@@ -49,8 +46,8 @@ def ensure_extensions_registered(
             has no registered factory or is malformed.
     """
     if registry is None:
-        from orcapod.contexts import get_default_context
-        registry = get_default_context().logical_type_registry
+        logger.debug("ensure_extensions_registered: no registry provided, skipping")
+        return
 
     found = walk_schema(schema)
     if not found:
