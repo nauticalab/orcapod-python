@@ -47,6 +47,9 @@ class _StubFactory:
     def reconstruct_from_arrow(self, arrow_extension_name, storage_type, metadata):
         return _StubLogicalType()
 
+    def create_for_python_type(self, python_type):
+        return _StubLogicalType()
+
 
 def test_logical_type_factory_protocol_is_importable():
     """LogicalTypeFactoryProtocol can be imported from extension_types.protocols."""
@@ -89,3 +92,12 @@ def test_conforming_class_satisfies_protocol():
     assert isinstance(lt.get_polars_extension_type(), pl.BaseExtension)
     assert lt.python_to_storage(42) == "42"
     assert lt.storage_to_python("hello") == "hello"
+
+
+def test_factory_create_for_python_type_conformance():
+    """A conforming factory implements create_for_python_type and returns LogicalTypeProtocol."""
+    from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol, LogicalTypeProtocol
+    factory: LogicalTypeFactoryProtocol = _StubFactory()
+    assert isinstance(factory, LogicalTypeFactoryProtocol)
+    result = factory.create_for_python_type(str)
+    assert isinstance(result, LogicalTypeProtocol)
