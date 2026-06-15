@@ -9,6 +9,8 @@ import polars as pl
 import pyarrow as pa
 from upath import UPath
 
+import orcapod
+
 from orcapod.extension_types.protocols import LogicalTypeProtocol
 from orcapod.extension_types.registry import LogicalTypeRegistry
 
@@ -470,16 +472,12 @@ def test_orcapod_path_alias_is_pathlib_path():
     """orcapod.Path is the same object as pathlib.Path."""
     import pathlib
 
-    import orcapod
-
     assert orcapod.Path is pathlib.Path
 
 
 def test_orcapod_upath_alias_is_upath_upath():
     """orcapod.UPath is the same object as upath.UPath."""
     from upath import UPath
-
-    import orcapod
 
     assert orcapod.UPath is UPath
 
@@ -488,27 +486,19 @@ def test_orcapod_uuid_alias_is_uuid_uuid():
     """orcapod.UUID is the same object as uuid.UUID."""
     import uuid
 
-    import orcapod
-
     assert orcapod.UUID is uuid.UUID
 
 
 def test_orcapod_path_alias_in_all():
     """orcapod.Path appears in orcapod.__all__."""
-    import orcapod
-
     assert "Path" in orcapod.__all__
 
 
 def test_orcapod_upath_alias_in_all():
     """orcapod.UPath appears in orcapod.__all__."""
-    import orcapod
-
     assert "UPath" in orcapod.__all__
 
 
 def test_orcapod_uuid_alias_in_all():
     """orcapod.UUID appears in orcapod.__all__."""
-    import orcapod
-
     assert "UUID" in orcapod.__all__
