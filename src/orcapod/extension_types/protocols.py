@@ -107,28 +107,27 @@ class LogicalTypeFactoryProtocol(Protocol):
     This protocol is ``@runtime_checkable``, consistent with ``LogicalTypeProtocol``.
     """
 
-    def create_logical_type(
+    def reconstruct_from_arrow(
         self,
         arrow_extension_name: str,
         storage_type: pa.DataType,
         metadata: dict[str, Any],
     ) -> LogicalTypeProtocol:
-        """Construct a ``LogicalTypeProtocol`` for the given Arrow extension name and storage type.
+        """Reconstruct a LogicalType from Arrow schema metadata (read path).
+
+        Called by the registry when a schema walk encounters an extension type
+        whose metadata ``"category"`` value matches this factory's registered
+        category. All Arrow schema information is already known.
 
         Args:
-            arrow_extension_name: The Arrow extension type name extracted from the
-                schema (i.e. the value of ``ARROW:extension:name`` field metadata).
-            storage_type: The underlying Arrow storage type for this extension field.
-            metadata: The full parsed JSON metadata dict (``dict[str, Any]``). Always contains at least a
-                ``"category"`` key. May contain additional keys the factory uses (e.g.
-                ``"protocol"``, ``"pydantic_version"``).
+            arrow_extension_name: The Arrow extension type name from the schema.
+            storage_type: The underlying Arrow storage type.
+            metadata: Full parsed metadata JSON dict. Always contains ``"category"``.
 
         Returns:
-            A fully constructed ``LogicalTypeProtocol`` ready to be passed to
-            ``LogicalTypeRegistry.register_logical_type()``.
+            A fully constructed ``LogicalTypeProtocol`` ready for registration.
 
         Raises:
-            ValueError: If this factory cannot construct a logical type for the given
-                extension name (e.g. the Python class cannot be resolved by name).
+            ValueError: If this factory cannot reconstruct a type for the given name.
         """
         ...

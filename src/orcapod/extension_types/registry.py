@@ -61,7 +61,7 @@ def make_arrow_extension_type(
             (e.g. ``b'{"category": "Dataclass"}'``,
             ``b'{"category": "Pydantic", "pydantic_version": 2}'``).
             A ``LogicalTypeFactoryProtocol`` (see
-            ``LogicalTypeFactoryProtocol.create_logical_type``) dispatches on the
+            ``LogicalTypeFactoryProtocol.reconstruct_from_arrow``) dispatches on the
             ``"category"`` value when reading schemas from IPC or Parquet files and
             uses it to auto-generate the correct ``LogicalTypeProtocol`` implementation
             for the specific Python class within that category, without requiring
@@ -298,7 +298,7 @@ class LogicalTypeRegistry:
 
         When ``ensure_extension_type`` encounters an Arrow extension type whose
         ``extension_metadata`` JSON contains ``{"category": "<category>", ...}``,
-        it calls ``factory.create_logical_type(arrow_extension_name, storage_type,
+        it calls ``factory.reconstruct_from_arrow(arrow_extension_name, storage_type,
         metadata_dict)`` to construct the logical type and then registers it.
 
         Args:
@@ -425,7 +425,7 @@ class LogicalTypeRegistry:
             arrow_extension_name,
             category,
         )
-        logical_type = factory.create_logical_type(
+        logical_type = factory.reconstruct_from_arrow(
             arrow_extension_name, storage_type, metadata_dict
         )
 
