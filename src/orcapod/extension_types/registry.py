@@ -458,3 +458,112 @@ class LogicalTypeRegistry:
             arrow_extension_name,
             category,
         )
+
+    def ensure_logical_type_for_python_class(
+        self,
+        python_type: type,
+    ) -> LogicalTypeProtocol:
+        """Ensure a LogicalType exists for ``python_type``, synthesizing via factory if needed.
+
+        Resolution algorithm:
+
+        1. Walk ``python_type.__mro__``. Track the first (most-specific) hit in
+           ``_by_python_type`` (concrete) and ``_python_class_factories`` (factory)
+           separately, recording the MRO index of each.
+        2. After the MRO walk, if no factory was found, do a fallback ``issubclass``
+           scan over ``_python_class_factories`` keys to catch ABCs with
+           ``__subclasshook__``. Assign these the least-specific index
+           (``len(python_type.__mro__)``) so they lose to any direct MRO match.
+        3. Resolution rule: if both concrete and factory are found, compare MRO indices —
+           lower index wins. Ties (same class) → concrete wins.
+        4. If factory wins (or only factory found): call
+           ``factory.create_for_python_type(python_type)``, register the result via
+           ``register_logical_type``, and return it. The registration caches it in
+           ``_by_python_type[python_type]``.
+        5. If nothing found: raise ``TypeError``.
+
+        Args:
+            python_type: The Python class to resolve.
+
+        Returns:
+            The registered or newly synthesized ``LogicalTypeProtocol``.
+
+        Raises:
+            TypeError: If no ``LogicalType`` and no factory is found for
+                ``python_type`` or any of its bases.
+        """
+        best_concrete_idx: int | None = None
+        best_concrete: LogicalTypeProtocol | None = None
+        best_factory_idx: int | None = None
+        best_factory: LogicalTypeFactoryProtocol | None = None
+
+        # Step 1: Walk MRO for direct hits.
+        for i, base in enumerate(python_type.__mro__):
+            if best_concrete is None and base in self._by_python_type:
+                best_concrete_idx = i
+                best_concrete = self._by_python_type[base]
+            if best_factory is None and base in self._python_class_factories:
+                best_factory_idx = i
+                best_factory = self._python_class_factories[base]
+            if best_concrete is not None and best_factory is not None:
+                break
+
+        # Step 2: issubclass fallback scan for ABCs with __subclasshook__.
+        if best_factory is None:
+            for base_class, factory in self._python_class_factories.items():
+                try:
+                    if issubclass(python_type, base_class):
+                        best_factory = factory
+                        # ABC match — assign lower priority than any direct MRO hit.
+                        best_factory_idx = len(python_type.__mro__)
+                        break
+                except TypeError:
+                    continue
+
+        # Step 3: Nothing found — hard error.
+        if best_concrete is None and best_factory is None:
+            raise TypeError(
+                f"No LogicalType or LogicalTypeFactory is registered for type "
+                f"{python_type!r}.\n"
+                f"To handle this type, register a factory for its base class:\n"
+                f"  registry.register_logical_type_factory(\n"
+                f"      factory, python_bases=[<base of {python_type.__name__}>]\n"
+                f"  )\n"
+                f"Or register a concrete LogicalType directly:\n"
+                f"  registry.register_logical_type(my_logical_type)"
+            )
+
+        # Only concrete found.
+        if best_factory is None:
+            assert best_concrete is not None
+            return best_concrete
+
+        # Only factory found — synthesize and cache.
+        if best_concrete is None:
+            assert best_factory is not None
+            lt = best_factory.create_for_python_type(python_type)
+            self.register_logical_type(lt)
+            logger.debug(
+                "ensure_logical_type_for_python_class: synthesized %r for %r",
+                lt.logical_type_name,
+                python_type,
+            )
+            return lt
+
+        # Both found — compare MRO specificity (lower index = more specific).
+        assert best_concrete_idx is not None
+        assert best_factory_idx is not None
+        if best_concrete_idx <= best_factory_idx:
+            # Concrete wins (same level or more specific; ties favour concrete).
+            return best_concrete
+        else:
+            # Factory is more specific — synthesize and cache.
+            lt = best_factory.create_for_python_type(python_type)
+            self.register_logical_type(lt)
+            logger.debug(
+                "ensure_logical_type_for_python_class: synthesized %r for %r "
+                "via more-specific factory",
+                lt.logical_type_name,
+                python_type,
+            )
+            return lt
