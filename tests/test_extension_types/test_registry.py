@@ -141,9 +141,9 @@ def test_make_arrow_extension_type_metadata_roundtrip():
 
 # ---------------------------------------------------------------------------
 # LogicalTypeRegistry unit tests
-# Each test uses a fresh LogicalTypeRegistry() instance (not the module-level
-# default_logical_type_registry). Registering does touch the global PA/Polars
-# registries, but unique extension names (via _unique_name()) prevent collisions.
+# Each test uses a fresh LogicalTypeRegistry() instance. Registering does
+# touch the global PA/Polars registries, but unique extension names (via
+# _unique_name()) prevent cross-test collisions.
 # ---------------------------------------------------------------------------
 
 def test_register_stores_logical_type():
