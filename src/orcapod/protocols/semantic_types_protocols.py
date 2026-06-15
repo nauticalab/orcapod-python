@@ -51,6 +51,8 @@ class TypeConverterProtocol(Protocol):
         self, arrow_type: "pa.DataType"
     ) -> "Callable[[Any], Any]": ...
 
+    def ensure_types_registered_for_schemas(self, *schemas: Schema) -> None: ...
+
 
 # Core protocols
 class SemanticStructConverterProtocol(Protocol):
