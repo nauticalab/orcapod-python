@@ -265,10 +265,11 @@ class TestNestedAndComplexTypes:
         assert arrow.field("a").nullable is False
 
     def test_path_is_non_nullable(self):
-        """Path → Arrow struct {path: large_string}, nullable=False."""
+        """Path → Arrow extension type (pathlib.Path), nullable=False."""
         arrow = _to_arrow(Schema({"p": Path}))
         assert arrow.field("p").nullable is False
-        assert pa.types.is_struct(arrow.field("p").type)
+        assert isinstance(arrow.field("p").type, pa.ExtensionType)
+        assert arrow.field("p").type.extension_name == "pathlib.Path"
 
     def test_equal_list_schemas_are_logically_equal(self):
         s1 = Schema({"items": list[int]})
