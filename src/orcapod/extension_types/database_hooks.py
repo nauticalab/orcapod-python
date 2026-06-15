@@ -1,8 +1,13 @@
 """Peek-schema hook for extension type auto-registration at database read time.
 
-Call ``ensure_extensions_registered(schema)`` before returning any Arrow table
-from a database read path. It is a no-op when the schema contains no extension
-types.
+Call ``ensure_extensions_registered(registry, schema)`` before returning any
+Arrow table from a database read path. It is a no-op when the schema contains
+no extension types.
+
+If *registry* is ``None``, the registry is resolved from the default data
+context via ``get_default_context().logical_type_registry``. Pass an explicit
+``LogicalTypeRegistry`` instance to share one registry across multiple databases
+or to override the default context's registry.
 """
 
 from __future__ import annotations
@@ -10,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from orcapod.extension_types.registry import default_logical_type_registry
+from orcapod.extension_types.registry import LogicalTypeRegistry
 from orcapod.extension_types.schema_walker import walk_schema
 
 if TYPE_CHECKING:
@@ -19,17 +24,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def ensure_extensions_registered(schema: pa.Schema) -> None:
+def ensure_extensions_registered(
+    registry: LogicalTypeRegistry | None,
+    schema: pa.Schema,
+) -> None:
     """Register any extension types found in ``schema`` that are not yet known.
 
     Walks ``schema`` recursively to discover all Arrow extension types at any
     nesting depth. For each discovered type, delegates to
-    ``default_logical_type_registry.prepare_extension_type``.
+    ``registry.prepare_extension_type``.
 
     Already-registered types are detected and skipped inside the registry —
-    this function itself is stateless.
+    this function itself is stateless beyond the registry it operates on.
 
     Args:
+        registry: The ``LogicalTypeRegistry`` to use for lookup and registration.
+            If ``None``, the registry is resolved lazily from the default data
+            context via ``get_default_context().logical_type_registry``.
         schema: The Arrow schema to inspect. May contain no extension types,
             in which case this call is a no-op.
 
@@ -37,6 +48,10 @@ def ensure_extensions_registered(schema: pa.Schema) -> None:
         ValueError: Propagated from the registry if an extension type's metadata
             has no registered factory or is malformed.
     """
+    if registry is None:
+        from orcapod.contexts import get_default_context
+        registry = get_default_context().logical_type_registry
+
     found = walk_schema(schema)
     if not found:
         logger.debug("ensure_extensions_registered: no extension types in schema")
@@ -47,7 +62,7 @@ def ensure_extensions_registered(schema: pa.Schema) -> None:
         [info.extension_name for info in found],
     )
     for info in found:
-        default_logical_type_registry.prepare_extension_type(
+        registry.prepare_extension_type(
             info.extension_name,
             info.extension_metadata,
             info.storage_type,

@@ -109,12 +109,9 @@ def _make_stub_factory():
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def fresh_registry(monkeypatch):
-    """A fresh LogicalTypeRegistry monkeypatched into database_hooks module."""
-    import orcapod.extension_types.database_hooks as hooks
-    registry = LogicalTypeRegistry()
-    monkeypatch.setattr(hooks, "default_logical_type_registry", registry)
-    return registry
+def fresh_registry():
+    """A fresh, isolated LogicalTypeRegistry for each test."""
+    return LogicalTypeRegistry()
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +126,7 @@ def test_no_extension_types_is_noop(fresh_registry):
         pa.field("id", pa.int64()),
         pa.field("name", pa.large_utf8()),
     ])
-    ensure_extensions_registered(schema)
+    ensure_extensions_registered(fresh_registry, schema)
     # fresh_registry is empty — no error means no spurious lookup was triggered
     assert fresh_registry.get_by_arrow_extension_name("anything") is None
 
@@ -145,7 +142,7 @@ def test_known_type_is_registered(fresh_registry):
     metadata_bytes = json.dumps({"category": "TestCat"}).encode()
     schema = _make_ext_schema(arrow_name, metadata=metadata_bytes)
 
-    ensure_extensions_registered(schema)
+    ensure_extensions_registered(fresh_registry, schema)
 
     assert fresh_registry.get_by_arrow_extension_name(arrow_name) is not None
     assert len(factory.calls) == 1
@@ -162,8 +159,8 @@ def test_already_registered_is_skipped(fresh_registry):
     metadata_bytes = json.dumps({"category": "TestCat"}).encode()
     schema = _make_ext_schema(arrow_name, metadata=metadata_bytes)
 
-    ensure_extensions_registered(schema)
-    ensure_extensions_registered(schema)  # second call
+    ensure_extensions_registered(fresh_registry, schema)
+    ensure_extensions_registered(fresh_registry, schema)  # second call
 
     assert len(factory.calls) == 1  # factory invoked exactly once
 
@@ -179,12 +176,12 @@ def test_none_metadata_already_registered_noop(fresh_registry):
     # First: register via metadata so it ends up in the registry.
     metadata_bytes = json.dumps({"category": "TestCat"}).encode()
     schema_with_meta = _make_ext_schema(arrow_name, metadata=metadata_bytes)
-    ensure_extensions_registered(schema_with_meta)
+    ensure_extensions_registered(fresh_registry, schema_with_meta)
 
     # Now: same arrow name but with no metadata (simulates reading the schema without
     # metadata — e.g. after an IPC round-trip where the type is now registered in-process).
     schema_no_meta = _make_ext_schema(arrow_name, metadata=None)  # metadata=None → serialized as b"" → walker normalizes to None
-    ensure_extensions_registered(schema_no_meta)  # should NOT raise
+    ensure_extensions_registered(fresh_registry, schema_no_meta)  # should NOT raise
 
 
 def test_none_metadata_not_registered_raises(fresh_registry):
@@ -195,7 +192,7 @@ def test_none_metadata_not_registered_raises(fresh_registry):
     schema = _make_ext_schema(arrow_name, metadata=None)  # metadata=None → serialized as b"" → walker normalizes to None
 
     with pytest.raises(ValueError, match="must be pre-registered explicitly"):
-        ensure_extensions_registered(schema)
+        ensure_extensions_registered(fresh_registry, schema)
 
 
 def test_metadata_not_json_raises(fresh_registry):
@@ -206,7 +203,7 @@ def test_metadata_not_json_raises(fresh_registry):
     schema = _make_field_metadata_schema(arrow_name, metadata=b"not-json!")
 
     with pytest.raises(ValueError, match="not valid UTF-8 JSON"):
-        ensure_extensions_registered(schema)
+        ensure_extensions_registered(fresh_registry, schema)
 
 
 def test_metadata_json_missing_category_raises(fresh_registry):
@@ -219,7 +216,7 @@ def test_metadata_json_missing_category_raises(fresh_registry):
     )
 
     with pytest.raises(ValueError, match='"category"'):
-        ensure_extensions_registered(schema)
+        ensure_extensions_registered(fresh_registry, schema)
 
 
 def test_unknown_metadata_raises(fresh_registry):
@@ -232,7 +229,7 @@ def test_unknown_metadata_raises(fresh_registry):
     )
 
     with pytest.raises(ValueError, match="NoSuchFactory"):
-        ensure_extensions_registered(schema)
+        ensure_extensions_registered(fresh_registry, schema)
 
 
 def test_nested_extension_type(fresh_registry):
@@ -249,7 +246,7 @@ def test_nested_extension_type(fresh_registry):
     struct_type = pa.struct([pa.field("inner", inner_ext_cls())])
     schema = pa.schema([pa.field("outer", struct_type)])
 
-    ensure_extensions_registered(schema)
+    ensure_extensions_registered(fresh_registry, schema)
 
     assert fresh_registry.get_by_arrow_extension_name(arrow_name) is not None
     assert len(factory.calls) == 1

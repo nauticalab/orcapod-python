@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from orcapod.databases.utils import coerce_record_id
 from orcapod.extension_types.database_hooks import ensure_extensions_registered
+from orcapod.extension_types.registry import LogicalTypeRegistry
 from orcapod.protocols.db_connector_protocol import ColumnInfo, DBConnectorProtocol
 from orcapod.utils.lazy_module import LazyModule
 
@@ -67,6 +68,7 @@ class ConnectorArrowDatabase:
         self,
         connector: DBConnectorProtocol,
         max_hierarchy_depth: int = 10,
+        logical_type_registry: LogicalTypeRegistry | None = None,
         _path_prefix: tuple[str, ...] = (),
         _shared_pending_batches: dict[str, pa.Table] | None = None,
         _shared_pending_record_ids: dict[str, set[bytes]] | None = None,
@@ -74,6 +76,7 @@ class ConnectorArrowDatabase:
         _root: ConnectorArrowDatabase | None = None,
         _scoped_path: tuple[str, ...] = (),
     ) -> None:
+        self._logical_type_registry = logical_type_registry
         self._connector = connector
         self.max_hierarchy_depth = max_hierarchy_depth
         self._path_prefix = _path_prefix
@@ -190,7 +193,7 @@ class ConnectorArrowDatabase:
         if not batches:
             return None
         logger.debug("_get_committed_table: peeking schema for extension type registration")
-        ensure_extensions_registered(batches[0].schema)
+        ensure_extensions_registered(self._logical_type_registry, batches[0].schema)
         return pa.Table.from_batches(batches)
 
     # ── Write methods ─────────────────────────────────────────────────────────
