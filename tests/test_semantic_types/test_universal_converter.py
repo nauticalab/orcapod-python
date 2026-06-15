@@ -1,12 +1,18 @@
+import uuid as _uuid_module
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
+import polars as pl
 import pyarrow as pa
 import pytest
 
 from orcapod.contexts import get_default_context
+from orcapod.extension_types.registry import (
+    LogicalTypeRegistry,
+    make_arrow_extension_type,
+)
 from orcapod.semantic_types import universal_converter
 from orcapod.semantic_types.universal_converter import UniversalTypeConverter
 
@@ -628,16 +634,6 @@ def test_pyarrow_empty_list_with_null_type():
 
 
 # ── LogicalTypeRegistry priority tests ───────────────────────────────────────
-
-import uuid as _uuid_module
-
-import polars as pl
-
-from orcapod.extension_types.registry import (
-    LogicalTypeRegistry,
-    make_arrow_extension_type,
-)
-from orcapod.semantic_types.universal_converter import UniversalTypeConverter
 
 
 def _make_logical_type_stub(py_type: type, arrow_name: str):
