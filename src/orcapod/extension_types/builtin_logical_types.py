@@ -5,7 +5,7 @@ Provides three built-in logical types registered into the default
 
 - ``LogicalPath``: maps ``pathlib.Path`` ↔ Arrow large_string extension "pathlib.Path"
 - ``LogicalUPath``: maps ``upath.UPath`` ↔ Arrow large_string extension "upath.UPath"
-- ``LogicalUUID``: maps ``uuid.UUID`` ↔ Arrow binary(16) extension "uuid.UUID"
+- ``LogicalUUID``: maps ``uuid.UUID`` ↔ Arrow large_binary extension "uuid.UUID"
 
 Note:
     All imports from orcapod.extension_types use direct submodule paths
