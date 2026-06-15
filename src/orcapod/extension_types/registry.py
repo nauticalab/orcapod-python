@@ -435,9 +435,3 @@ class LogicalTypeRegistry:
             arrow_extension_name,
             category,
         )
-
-
-# Module-level singleton — per-process registry used by database_hooks and
-# application code. Defined here (not in __init__.py) to avoid the circular
-# import that would arise if database_hooks imported from the package __init__.
-default_logical_type_registry = LogicalTypeRegistry()
