@@ -29,6 +29,7 @@ from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
     import pyarrow as pa
+    from orcapod.extension_types.registry import LogicalTypeRegistry
 else:
     pa = LazyModule("pyarrow")
 
@@ -150,6 +151,7 @@ class UniversalTypeConverter:
         self,
         semantic_registry: SemanticTypeRegistry | None = None,
         datetime_timezone: typing.Literal["strict", "coerce_utc"] = "strict",
+        logical_type_registry: "LogicalTypeRegistry | None" = None,
     ):
         """
         Args:
@@ -163,9 +165,13 @@ class UniversalTypeConverter:
                 ``"coerce_utc"`` — silently attach ``timezone.utc`` to naive
                 datetimes before writing to Arrow.  Use this when you know that
                 all naive datetimes in your data represent UTC.
+            logical_type_registry: Optional registry of ``LogicalType`` instances.
+                When provided, extension-type identity takes priority over the
+                shape-based ``semantic_registry`` at encoding time.
         """
         self.semantic_registry = semantic_registry
         self._datetime_timezone = datetime_timezone
+        self._logical_type_registry = logical_type_registry
 
         # Cache for created TypedDict classes
         self._struct_signature_to_typeddict: dict[pa.StructType, DataType] = {}
@@ -180,7 +186,6 @@ class UniversalTypeConverter:
         self._python_to_arrow_types: dict[DataType, pa.DataType] = {}
         self._arrow_to_python_types: dict[pa.DataType, DataType] = {}
         self._dataclass_lookup_cache: dict[str, type] = {}
-        self._logical_type_registry = None  # set by DataContext.__post_init__
 
     def python_type_to_arrow_type(self, python_type: DataType) -> pa.DataType:
         """
