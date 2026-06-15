@@ -343,7 +343,7 @@ def test_register_logical_type_factory_python_base_duplicate_different_factory_r
     f1 = _make_stub_factory()
     f2 = _make_stub_factory()
     registry.register_logical_type_factory(f1, python_bases=[str])
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="different factory"):
         registry.register_logical_type_factory(f2, python_bases=[str])
 
 

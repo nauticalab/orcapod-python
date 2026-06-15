@@ -330,6 +330,7 @@ class LogicalTypeRegistry:
                 logger.debug(
                     "registered LogicalTypeFactory for category %r: %r", category, factory
                 )
+        # Validate all bases before writing any (prevents partial mutation on error).
         for base in python_bases_list:
             existing = self._python_class_factories.get(base)
             if existing is not None and existing is not factory:
@@ -337,7 +338,8 @@ class LogicalTypeRegistry:
                     f"Cannot register factory for python base {base!r}: "
                     f"a different factory is already registered for this base."
                 )
-            if existing is not factory:
+        for base in python_bases_list:
+            if self._python_class_factories.get(base) is not factory:
                 self._python_class_factories[base] = factory
                 logger.debug(
                     "registered LogicalTypeFactory for python base %r: %r", base, factory
