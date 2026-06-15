@@ -269,7 +269,7 @@ class TestNestedAndComplexTypes:
         arrow = _to_arrow(Schema({"p": Path}))
         assert arrow.field("p").nullable is False
         assert isinstance(arrow.field("p").type, pa.ExtensionType)
-        assert arrow.field("p").type.extension_name == "pathlib.Path"
+        assert arrow.field("p").type.extension_name == "orcapod.path"
 
     def test_equal_list_schemas_are_logically_equal(self):
         s1 = Schema({"items": list[int]})
