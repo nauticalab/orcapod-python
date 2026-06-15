@@ -137,7 +137,7 @@ def test_known_type_is_registered(fresh_registry):
 
     arrow_name = _unique_name()
     factory = _make_stub_factory()
-    fresh_registry.register_logical_type_factory("TestCat", factory)
+    fresh_registry.register_logical_type_factory(factory, category="TestCat")
 
     metadata_bytes = json.dumps({"category": "TestCat"}).encode()
     schema = _make_ext_schema(arrow_name, metadata=metadata_bytes)
@@ -154,7 +154,7 @@ def test_already_registered_is_skipped(fresh_registry):
 
     arrow_name = _unique_name()
     factory = _make_stub_factory()
-    fresh_registry.register_logical_type_factory("TestCat", factory)
+    fresh_registry.register_logical_type_factory(factory, category="TestCat")
 
     metadata_bytes = json.dumps({"category": "TestCat"}).encode()
     schema = _make_ext_schema(arrow_name, metadata=metadata_bytes)
@@ -171,7 +171,7 @@ def test_none_metadata_already_registered_noop(fresh_registry):
 
     arrow_name = _unique_name()
     factory = _make_stub_factory()
-    fresh_registry.register_logical_type_factory("TestCat", factory)
+    fresh_registry.register_logical_type_factory(factory, category="TestCat")
 
     # First: register via metadata so it ends up in the registry.
     metadata_bytes = json.dumps({"category": "TestCat"}).encode()
@@ -238,7 +238,7 @@ def test_nested_extension_type(fresh_registry):
 
     arrow_name = _unique_name()
     factory = _make_stub_factory()
-    fresh_registry.register_logical_type_factory("TestCat", factory)
+    fresh_registry.register_logical_type_factory(factory, category="TestCat")
 
     metadata_bytes = json.dumps({"category": "TestCat"}).encode()
     inner_ext_cls = make_arrow_extension_type(arrow_name, pa.large_utf8(), metadata=metadata_bytes)
