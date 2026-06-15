@@ -180,6 +180,7 @@ class UniversalTypeConverter:
         self._python_to_arrow_types: dict[DataType, pa.DataType] = {}
         self._arrow_to_python_types: dict[pa.DataType, DataType] = {}
         self._dataclass_lookup_cache: dict[str, type] = {}
+        self._logical_type_registry = None  # set by DataContext.__post_init__
 
     def python_type_to_arrow_type(self, python_type: DataType) -> pa.DataType:
         """
@@ -399,12 +400,21 @@ class UniversalTypeConverter:
         This creates and caches conversion functions for optimal performance
         during data conversion operations.
         """
-        if arrow_type in self._arrow_to_python_converters:
-            return self._arrow_to_python_converters[arrow_type]
+        try:
+            if arrow_type in self._arrow_to_python_converters:
+                return self._arrow_to_python_converters[arrow_type]
+        except TypeError:
+            # Some pa.DataType subclasses (e.g. pa.ExtensionType instances) are not
+            # hashable and will raise TypeError on dict lookup. Fall through to
+            # create the converter without caching.
+            return self._create_arrow_to_python_converter(arrow_type)
 
         # Create conversion function
         converter = self._create_arrow_to_python_converter(arrow_type)
-        self._arrow_to_python_converters[arrow_type] = converter
+        try:
+            self._arrow_to_python_converters[arrow_type] = converter
+        except TypeError:
+            pass  # Unhashable type — skip caching.
 
         return converter
 
@@ -414,6 +424,12 @@ class UniversalTypeConverter:
         type_map = _get_python_to_arrow_map()
         if python_type in type_map:
             return type_map[python_type]
+
+        # Check LogicalTypeRegistry — extension-type identity takes priority over shape-based system
+        if self._logical_type_registry is not None:
+            lt = self._logical_type_registry.get_by_python_type(python_type)
+            if lt is not None:
+                return lt.get_arrow_extension_type()
 
         # Check semantic registry for registered types
         if self.semantic_registry:
@@ -510,6 +526,14 @@ class UniversalTypeConverter:
         # Handle null type — maps to Any (unknown element type, e.g. from empty containers)
         if pa.types.is_null(arrow_type):
             return Any
+
+        # Check LogicalTypeRegistry for extension types
+        if isinstance(arrow_type, pa.ExtensionType) and self._logical_type_registry is not None:
+            lt = self._logical_type_registry.get_by_arrow_extension_name(
+                arrow_type.extension_name
+            )
+            if lt is not None:
+                return lt.python_type
 
         # Handle basic types
         if pa.types.is_integer(arrow_type):
@@ -743,6 +767,12 @@ class UniversalTypeConverter:
     ) -> Callable[[Any], Any]:
         """Create a cached conversion function for Python → Arrow values."""
 
+        # Check LogicalTypeRegistry first — extension-type identity takes priority
+        if self._logical_type_registry is not None:
+            lt = self._logical_type_registry.get_by_python_type(python_type)
+            if lt is not None:
+                return lt.python_to_storage
+
         # Get the Arrow type for this Python type
         # TODO: check if this step is necessary
         _ = self.python_type_to_arrow_type(python_type)
@@ -853,6 +883,14 @@ class UniversalTypeConverter:
         self, arrow_type: pa.DataType
     ) -> Callable[[Any], Any]:
         """Create a cached conversion function for Arrow → Python values."""
+
+        # Check LogicalTypeRegistry for extension types
+        if isinstance(arrow_type, pa.ExtensionType) and self._logical_type_registry is not None:
+            lt = self._logical_type_registry.get_by_arrow_extension_name(
+                arrow_type.extension_name
+            )
+            if lt is not None:
+                return lt.storage_to_python
 
         # Get the Python type for this Arrow type
         python_type = self.arrow_type_to_python_type(arrow_type)
