@@ -61,10 +61,10 @@ def _executor_supports_concurrent(
 # Python types that Arrow handles natively — no LogicalType registration needed.
 # Built lazily from UniversalTypeConverter._get_python_to_arrow_map() so that
 # datetime.datetime, numpy types, and any future additions are captured automatically.
-_ARROW_NATIVE_TYPE_KEYS: frozenset | None = None
+_ARROW_NATIVE_TYPE_KEYS: frozenset[type] | None = None
 
 
-def _get_arrow_native_type_keys() -> frozenset:
+def _get_arrow_native_type_keys() -> frozenset[type]:
     """Return the set of Python types that UniversalTypeConverter handles natively.
 
     Derived lazily from ``_get_python_to_arrow_map()`` so that datetime, numpy,
