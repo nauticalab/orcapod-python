@@ -11,7 +11,6 @@ import uuid as _uuid_module
 from typing import Optional
 
 import pyarrow as pa
-import polars as pl
 import pytest
 
 from orcapod.contexts import get_default_context
@@ -22,6 +21,7 @@ from orcapod.extension_types.protocols import LogicalTypeProtocol
 from orcapod.extension_types.registry import (
     LogicalTypeRegistry,
     make_arrow_extension_type,
+    make_polars_extension_type,
 )
 from orcapod.semantic_types.universal_converter import UniversalTypeConverter
 
@@ -55,19 +55,13 @@ def _make_logical_type(py_type: type) -> LogicalTypeProtocol:
     """Synthesize a minimal LogicalType for py_type."""
     arrow_name = f"{py_type.__module__}.{py_type.__qualname__}.{_uuid_module.uuid4().hex[:6]}"
     ArrowExt = make_arrow_extension_type(arrow_name, pa.large_string())
-
-    class _PolarsExt(pl.BaseExtension):
-        def __init__(self):
-            super().__init__(arrow_name, pl.String, None)
-        @classmethod
-        def ext_from_params(cls, ext_name, storage_dtype, metadata_str):
-            return cls()
+    PolarsExt = make_polars_extension_type(arrow_name, pa.large_string())
 
     class _LT:
         logical_type_name = arrow_name
         python_type = py_type
         def get_arrow_extension_type(self): return ArrowExt()
-        def get_polars_extension_type(self): return _PolarsExt()
+        def get_polars_extension_type(self): return PolarsExt()
         def python_to_storage(self, v): return str(v)
         def storage_to_python(self, v): return v
 
@@ -385,3 +379,25 @@ def test_pod_declaration_already_registered_type_no_factory_call():
     )
     # Factory was NOT called — _MyChild was already registered
     assert _MyChild not in call_log
+
+
+def test_pod_declaration_with_union_none_syntax():
+    """``_MyChild | None`` (new-style union) causes factory synthesis for _MyChild.
+
+    Python 3.10+ ``X | Y`` produces a ``types.UnionType``, which is a different
+    runtime object from ``typing.Union[X, Y]``. This test confirms that
+    ``extract_leaf_classes`` correctly unwraps both union forms and that
+    ``NoneType`` is skipped in both cases.
+    """
+    registry, call_log = _make_registry_with_factory(_MyBase)
+    ctx = _make_test_context(registry)
+
+    def my_func(x: _MyChild | None) -> str:
+        return ""
+
+    FunctionPod(
+        data_function=PythonDataFunction(my_func, output_keys=["result"]),
+        data_context=ctx,
+    )
+    assert _MyChild in call_log
+    assert registry.get_by_python_type(_MyChild) is not None
