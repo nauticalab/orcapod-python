@@ -75,7 +75,7 @@ class _FunctionPodBase(TraceableBase):
         )
         self.tracker_manager = tracker_manager or DEFAULT_TRACKER_MANAGER
         self._data_function = data_function
-        self.data_context.logical_type_registry.ensure_types_registered_for_schemas(
+        self.data_context.type_converter.ensure_types_registered_for_schemas(
             data_function.input_data_schema,
             data_function.output_data_schema,
         )

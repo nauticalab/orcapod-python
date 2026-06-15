@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, TypedDict, get_args, get_origin
 
 from orcapod.contexts import DataContext, resolve_context
+from orcapod.extension_types.type_utils import extract_leaf_classes
 from orcapod.semantic_types.semantic_registry import SemanticTypeRegistry
 from orcapod.semantic_types.type_inference import infer_python_schema_from_pylist_data
 from orcapod.types import DataType, Schema, SchemaLike
@@ -212,6 +213,41 @@ class UniversalTypeConverter:
                 k for k in _get_python_to_arrow_map() if isinstance(k, type)
             ) | {type(None)}
         return _ARROW_NATIVE_TYPE_KEYS
+
+    def ensure_types_registered_for_schemas(self, *schemas: Schema) -> None:
+        """Ensure a LogicalType is registered for every non-native leaf class in schemas.
+
+        Recursively unwraps generic annotations (``list[T]``, ``dict[K, V]``,
+        ``T | None``, etc.) to find leaf Python classes. Skips Arrow-native
+        types (``int``, ``str``, ``datetime``, …) and types that are already
+        registered. Calls ``ensure_logical_type_for_python_class`` for any
+        remaining leaf class, which synthesizes via factory or raises
+        ``TypeError`` if no factory is registered.
+
+        This is the canonical write-side registration trigger, called at
+        ``FunctionPod`` declaration time so that any missing ``LogicalType``
+        is detected and synthesized eagerly rather than at data-processing time.
+        When no ``LogicalTypeRegistry`` is configured on this converter, the
+        method is a no-op.
+
+        Args:
+            *schemas: One or more ``Schema`` mappings (column name → Python type
+                annotation) to inspect.
+
+        Raises:
+            TypeError: If a leaf class has no registered ``LogicalType`` and
+                no registered factory covers it.
+        """
+        if self._logical_type_registry is None:
+            return
+        native_keys = self.get_native_python_types()
+        for schema in schemas:
+            for annotation in schema.values():
+                for leaf_class in extract_leaf_classes(annotation):
+                    if leaf_class in native_keys or self._logical_type_registry.get_by_python_type(leaf_class) is not None:
+                        continue
+                    self._logical_type_registry.ensure_logical_type_for_python_class(leaf_class)
+                    # TypeError propagates if no factory matches — intentional hard error
 
     def python_type_to_arrow_type(self, python_type: DataType) -> pa.DataType:
         """
