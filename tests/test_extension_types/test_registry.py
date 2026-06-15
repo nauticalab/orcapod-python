@@ -83,18 +83,26 @@ def _make_stub_factory(return_lt: LogicalTypeProtocol | None = None) -> LogicalT
     If ``return_lt`` is given, ``reconstruct_from_arrow`` returns it; otherwise
     it creates a fresh stub using ``_make_stub`` keyed on the arrow name.
     ``calls`` records every invocation as ``(arrow_extension_name, storage_type, metadata)``.
+    ``python_type_calls`` records every ``create_for_python_type`` invocation.
     """
     _return_lt = return_lt
 
     class _Factory:
         def __init__(self):
             self.calls: list[tuple] = []
+            self.python_type_calls: list[type] = []
 
         def reconstruct_from_arrow(self, arrow_extension_name, storage_type, metadata):
             self.calls.append((arrow_extension_name, storage_type, metadata))
             if _return_lt is not None:
                 return _return_lt
             return _make_stub(arrow_name=arrow_extension_name, storage=storage_type)
+
+        def create_for_python_type(self, python_type):
+            self.python_type_calls.append(python_type)
+            if _return_lt is not None:
+                return _return_lt
+            return _make_stub(py_type=python_type)
 
     return _Factory()
 
@@ -279,15 +287,15 @@ def test_register_logical_type_factory_no_error():
     """register_logical_type_factory completes without raising."""
     registry = LogicalTypeRegistry()
     factory = _make_stub_factory()
-    registry.register_logical_type_factory("TestCat", factory)  # should not raise
+    registry.register_logical_type_factory(factory, category="TestCat")  # should not raise
 
 
 def test_register_logical_type_factory_same_instance_idempotent():
     """Re-registering the same factory instance for the same category does not raise."""
     registry = LogicalTypeRegistry()
     factory = _make_stub_factory()
-    registry.register_logical_type_factory("Cat", factory)
-    registry.register_logical_type_factory("Cat", factory)  # should not raise
+    registry.register_logical_type_factory(factory, category="Cat")
+    registry.register_logical_type_factory(factory, category="Cat")  # should not raise
 
 
 def test_register_duplicate_category_raises():
@@ -295,9 +303,56 @@ def test_register_duplicate_category_raises():
     registry = LogicalTypeRegistry()
     f1 = _make_stub_factory()
     f2 = _make_stub_factory()
-    registry.register_logical_type_factory("Cat", f1)
+    registry.register_logical_type_factory(f1, category="Cat")
     with pytest.raises(ValueError, match="Cat"):
-        registry.register_logical_type_factory("Cat", f2)
+        registry.register_logical_type_factory(f2, category="Cat")
+
+
+def test_register_logical_type_factory_keyword_category():
+    """register_logical_type_factory accepts factory as first arg, category as keyword."""
+    registry = LogicalTypeRegistry()
+    factory = _make_stub_factory()
+    registry.register_logical_type_factory(factory, category="TestCat")  # no error
+
+
+def test_register_logical_type_factory_keyword_python_bases():
+    """register_logical_type_factory accepts python_bases as keyword."""
+    registry = LogicalTypeRegistry()
+    factory = _make_stub_factory()
+    registry.register_logical_type_factory(factory, python_bases=[str])  # no error
+
+
+def test_register_logical_type_factory_both_axes():
+    """register_logical_type_factory accepts both category and python_bases."""
+    registry = LogicalTypeRegistry()
+    factory = _make_stub_factory()
+    registry.register_logical_type_factory(factory, category="Cat", python_bases=[str, int])
+
+
+def test_register_logical_type_factory_no_axes_raises():
+    """register_logical_type_factory raises ValueError when called with no axes."""
+    registry = LogicalTypeRegistry()
+    factory = _make_stub_factory()
+    with pytest.raises(ValueError, match="At least one of"):
+        registry.register_logical_type_factory(factory)
+
+
+def test_register_logical_type_factory_python_base_duplicate_different_factory_raises():
+    """Registering a different factory for the same python_base raises ValueError."""
+    registry = LogicalTypeRegistry()
+    f1 = _make_stub_factory()
+    f2 = _make_stub_factory()
+    registry.register_logical_type_factory(f1, python_bases=[str])
+    with pytest.raises(ValueError):
+        registry.register_logical_type_factory(f2, python_bases=[str])
+
+
+def test_register_logical_type_factory_python_base_same_factory_idempotent():
+    """Registering the same factory twice for the same python_base is a no-op."""
+    registry = LogicalTypeRegistry()
+    factory = _make_stub_factory()
+    registry.register_logical_type_factory(factory, python_bases=[str])
+    registry.register_logical_type_factory(factory, python_bases=[str])  # no error
 
 
 # ---------------------------------------------------------------------------
@@ -584,7 +639,7 @@ def test_register_logical_type_factory_dispatches_on_prepare():
     """ensure_extension_type dispatches to the registered factory and registers the result."""
     registry = LogicalTypeRegistry()
     factory = _make_stub_factory()
-    registry.register_logical_type_factory("TestCat", factory)
+    registry.register_logical_type_factory(factory, category="TestCat")
 
     arrow_name = _unique_name()
     metadata_bytes = json.dumps({"category": "TestCat"}).encode()
@@ -599,7 +654,7 @@ def test_factory_receives_full_metadata_dict():
     """The factory's reconstruct_from_arrow receives the full parsed JSON dict, not just category."""
     registry = LogicalTypeRegistry()
     factory = _make_stub_factory()
-    registry.register_logical_type_factory("TestCat", factory)
+    registry.register_logical_type_factory(factory, category="TestCat")
 
     arrow_name = _unique_name()
     metadata_bytes = json.dumps(
@@ -616,7 +671,7 @@ def test_prepare_already_registered_noop():
     """ensure_extension_type called twice does not raise and does not call the factory again."""
     registry = LogicalTypeRegistry()
     factory = _make_stub_factory()
-    registry.register_logical_type_factory("TestCat", factory)
+    registry.register_logical_type_factory(factory, category="TestCat")
 
     arrow_name = _unique_name()
     metadata_bytes = json.dumps({"category": "TestCat"}).encode()
