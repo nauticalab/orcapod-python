@@ -226,3 +226,75 @@ def test_mixed_columns_only_ext_columns_changed():
     assert result.schema.field("ext_col").type == ext_type
     assert result.schema.field("plain_col").type == pa.int32()
     assert result.column("plain_col").to_pylist() == [1]
+
+
+def test_schema_level_metadata_preserved():
+    """Schema-level metadata (e.g. pandas metadata) is preserved when rebuilding schema."""
+    from orcapod.extension_types.database_hooks import apply_extension_types
+
+    name = _unique_name()
+    registry, ext_type = _make_registry_with_type(name, pa.large_utf8())
+
+    ext_field = pa.field("col", pa.large_utf8()).with_metadata({
+        b"ARROW:extension:name": name.encode(),
+        b"ARROW:extension:metadata": b"",
+    })
+    schema_meta = {b"pandas": b'{"some": "pandas_metadata"}', b"custom": b"value"}
+    schema = pa.schema([ext_field], metadata=schema_meta)
+    table = pa.table({"col": pa.array(["x"], type=pa.large_utf8())}, schema=schema)
+
+    result = apply_extension_types(table, registry)
+
+    assert result.schema.field("col").type == ext_type
+    assert result.schema.metadata == schema_meta
+
+
+def test_plain_struct_not_rebuilt():
+    """A struct column with no extension children is returned as-is without rebuilding."""
+    from orcapod.extension_types.database_hooks import apply_extension_types
+
+    registry = LogicalTypeRegistry()  # empty — nothing registered
+    inner_field = pa.field("x", pa.int32())
+    struct_type = pa.struct([inner_field])
+    struct_col = pa.StructArray.from_arrays(
+        [pa.array([1, 2], type=pa.int32())], fields=[inner_field]
+    )
+    schema = pa.schema([pa.field("s", struct_type)])
+    table = pa.table({"s": struct_col}, schema=schema)
+
+    result = apply_extension_types(table, registry)
+
+    # Nothing changed — same object returned
+    assert result is table
+
+
+def test_struct_null_bitmap_preserved():
+    """Null struct rows retain their null status after extension type wrapping."""
+    from orcapod.extension_types.database_hooks import apply_extension_types
+
+    name = _unique_name()
+    registry, ext_type = _make_registry_with_type(name, pa.large_utf8())
+
+    inner_field = pa.field("inner", pa.large_utf8()).with_metadata({
+        b"ARROW:extension:name": name.encode(),
+        b"ARROW:extension:metadata": b"",
+    })
+    struct_type = pa.struct([inner_field])
+    inner_data = pa.array(["a", "b", "c"], type=pa.large_utf8())
+    # Build struct with a null at position 1
+    struct_col = pa.StructArray.from_arrays(
+        [inner_data],
+        fields=[inner_field],
+        mask=pa.array([False, True, False]),  # True = null
+    )
+    schema = pa.schema([pa.field("s", struct_type)])
+    table = pa.table({"s": struct_col}, schema=schema)
+
+    result = apply_extension_types(table, registry)
+
+    result_col = result.column("s")
+    assert result_col.null_count == 1
+    rows = result_col.to_pylist()
+    assert rows[0] is not None
+    assert rows[1] is None
+    assert rows[2] is not None
