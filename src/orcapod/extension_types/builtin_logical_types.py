@@ -5,7 +5,7 @@ Provides three built-in logical types registered into the default
 
 - ``LogicalPath``: maps ``pathlib.Path`` ↔ Arrow large_string extension "pathlib.Path"
 - ``LogicalUPath``: maps ``upath.UPath`` ↔ Arrow large_string extension "upath.UPath"
-- ``LogicalUUID``: maps ``uuid.UUID`` ↔ PyArrow built-in ``pa.uuid()`` ("arrow.uuid")
+- ``LogicalUUID``: maps ``uuid.UUID`` ↔ Arrow binary(16) extension "uuid.UUID"
 
 Note:
     All imports from orcapod.extension_types use direct submodule paths
@@ -164,14 +164,15 @@ class LogicalUPath:
 class LogicalUUID:
     """Logical type for ``uuid.UUID``.
 
-    Uses PyArrow's built-in ``pa.uuid()`` extension type (``"arrow.uuid"``)
-    which stores UUID values as 16-byte binary (``pa.binary(16)``).
+    Stores UUIDs as Arrow binary (16 bytes) using the custom extension type
+    ``"uuid.UUID"``. Both the Arrow extension name and ``logical_type_name``
+    are ``"uuid.UUID"``, consistent with ``LogicalPath`` and ``LogicalUPath``.
 
-    Note:
-        ``logical_type_name`` (``"uuid.UUID"``) intentionally differs from
-        the Arrow extension name (``"arrow.uuid"``). The
-        ``LogicalTypeRegistry`` stores both bindings so that lookups by
-        either key resolve to this same instance.
+    The storage type is ``pa.large_binary()`` (variable-length binary), using
+    big-endian byte order as returned by ``uuid.UUID.bytes``. ``large_binary``
+    is used rather than ``pa.binary(16)`` (fixed-size) because Polars maps
+    fixed-size binary to variable-length on the round-trip, which would
+    conflict with the deserializer's storage type check.
 
     Example:
         >>> import uuid
@@ -181,31 +182,31 @@ class LogicalUUID:
         True
     """
 
+    _arrow_ext_class = make_arrow_extension_type("uuid.UUID", pa.large_binary())
     _arrow_ext: pa.ExtensionType | None = None
-    _polars_ext_class = make_polars_extension_type("arrow.uuid", pa.binary(16), None)
+    _polars_ext_class = make_polars_extension_type("uuid.UUID", pa.large_binary())
     _polars_ext: pl.BaseExtension | None = None
 
     logical_type_name: str = "uuid.UUID"
     python_type: type = _uuid_module.UUID
 
     def get_arrow_extension_type(self) -> pa.ExtensionType:
-        """Return PyArrow's built-in ``pa.uuid()`` extension type.
+        """Return the Arrow extension type for ``uuid.UUID``.
 
         Returns:
-            A cached ``pa.uuid()`` instance (Arrow extension name ``"arrow.uuid"``,
-            storage type ``pa.binary(16)``).
+            A cached ``pa.ExtensionType`` instance with extension name
+            ``"uuid.UUID"`` and storage type ``pa.large_binary()``.
         """
         if LogicalUUID._arrow_ext is None:
-            LogicalUUID._arrow_ext = pa.uuid()
+            LogicalUUID._arrow_ext = LogicalUUID._arrow_ext_class()
         return LogicalUUID._arrow_ext
 
     def get_polars_extension_type(self) -> pl.BaseExtension:
-        """Return the Polars extension type for ``arrow.uuid``.
+        """Return the Polars extension type for ``uuid.UUID``.
 
         Returns:
             A cached ``pl.BaseExtension`` instance registered under
-            ``"arrow.uuid"`` (matches the Arrow extension name, not the
-            logical type name).
+            ``"uuid.UUID"``.
         """
         if LogicalUUID._polars_ext is None:
             LogicalUUID._polars_ext = LogicalUUID._polars_ext_class()
