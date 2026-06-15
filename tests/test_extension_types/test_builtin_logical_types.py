@@ -7,7 +7,6 @@ import uuid as uuid_module
 
 import polars as pl
 import pyarrow as pa
-import warnings
 from upath import UPath
 
 from orcapod.extension_types.protocols import LogicalType
@@ -169,7 +168,6 @@ def test_logical_uuid_isinstance_logical_type():
 
 
 def test_logical_uuid_logical_type_name():
-    """logical_type_name is 'uuid.UUID', not the Arrow extension name."""
     from orcapod.extension_types.builtin_logical_types import LogicalUUID
 
     assert LogicalUUID().logical_type_name == "uuid.UUID"
@@ -181,21 +179,20 @@ def test_logical_uuid_python_type():
     assert LogicalUUID().python_type is uuid_module.UUID
 
 
-def test_logical_uuid_arrow_ext_name_is_arrow_uuid():
-    """Arrow extension name is 'arrow.uuid', intentionally different from logical_type_name."""
+def test_logical_uuid_arrow_ext_name():
+    """Arrow extension name is 'uuid.UUID', matching logical_type_name."""
     from orcapod.extension_types.builtin_logical_types import LogicalUUID
 
     lt = LogicalUUID()
-    assert lt.get_arrow_extension_type().extension_name == "arrow.uuid"
-    assert lt.logical_type_name != lt.get_arrow_extension_type().extension_name
+    assert lt.get_arrow_extension_type().extension_name == "uuid.UUID"
+    assert lt.get_arrow_extension_type().extension_name == lt.logical_type_name
 
 
-def test_logical_uuid_get_arrow_extension_type_returns_pa_uuid():
-    """get_arrow_extension_type() returns PyArrow's built-in pa.uuid() type."""
+def test_logical_uuid_arrow_ext_storage_type():
+    """Arrow extension storage type is pa.large_binary()."""
     from orcapod.extension_types.builtin_logical_types import LogicalUUID
 
-    lt = LogicalUUID()
-    assert lt.get_arrow_extension_type() == pa.uuid()
+    assert LogicalUUID().get_arrow_extension_type().storage_type == pa.large_binary()
 
 
 def test_logical_uuid_get_arrow_extension_type_is_cached():
@@ -242,14 +239,14 @@ def test_logical_uuid_storage_to_python_accepts_bytes():
 
 
 def test_logical_uuid_registration_does_not_raise():
-    """Registering LogicalUUID succeeds even though pa.uuid() is already in PyArrow's registry."""
+    """Registering LogicalUUID succeeds and is reachable by both logical and arrow names."""
     from orcapod.extension_types.builtin_logical_types import LogicalUUID
 
     registry = LogicalTypeRegistry()
     lt = LogicalUUID()
     registry.register(lt)  # should NOT raise
     assert registry.get_by_logical_name("uuid.UUID") is lt
-    assert registry.get_by_arrow_extension_name("arrow.uuid") is lt
+    assert registry.get_by_arrow_extension_name("uuid.UUID") is lt
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +265,7 @@ def test_logical_path_arrow_round_trip():
     originals = [pathlib.Path("/tmp/foo"), pathlib.Path("/home/user/bar.txt")]
     storage_vals = [lt.python_to_storage(p) for p in originals]
     arrow_ext = lt.get_arrow_extension_type()
-    ext_arr = pa.array(storage_vals, type=arrow_ext.storage_type).cast(arrow_ext)
+    ext_arr = pa.ExtensionArray.from_storage(arrow_ext, pa.array(storage_vals, type=arrow_ext.storage_type))
 
     recovered = [lt.storage_to_python(v.as_py()) for v in ext_arr.storage]
     assert recovered == originals
@@ -285,12 +282,9 @@ def test_logical_path_polars_round_trip():
     originals = [pathlib.Path("/tmp/foo"), pathlib.Path("/home/user/bar.txt")]
     storage_vals = [lt.python_to_storage(p) for p in originals]
     arrow_ext = lt.get_arrow_extension_type()
-    ext_arr = pa.array(storage_vals, type=arrow_ext.storage_type).cast(arrow_ext)
+    ext_arr = pa.ExtensionArray.from_storage(arrow_ext, pa.array(storage_vals, type=arrow_ext.storage_type))
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        pl_series = pl.from_arrow(ext_arr)
-
+    pl_series = pl.from_arrow(ext_arr)
     arr_back = pl_series.to_arrow()
     recovered = [lt.storage_to_python(v.as_py()) for v in arr_back.storage]
     assert recovered == originals
@@ -307,7 +301,7 @@ def test_logical_upath_arrow_round_trip():
     originals = [UPath("s3://bucket/key"), UPath("gs://other/path/file.txt")]
     storage_vals = [lt.python_to_storage(p) for p in originals]
     arrow_ext = lt.get_arrow_extension_type()
-    ext_arr = pa.array(storage_vals, type=arrow_ext.storage_type).cast(arrow_ext)
+    ext_arr = pa.ExtensionArray.from_storage(arrow_ext, pa.array(storage_vals, type=arrow_ext.storage_type))
 
     recovered = [lt.storage_to_python(v.as_py()) for v in ext_arr.storage]
     assert recovered == originals
@@ -324,12 +318,9 @@ def test_logical_upath_polars_round_trip():
     originals = [UPath("s3://bucket/key"), UPath("gs://other/path/file.txt")]
     storage_vals = [lt.python_to_storage(p) for p in originals]
     arrow_ext = lt.get_arrow_extension_type()
-    ext_arr = pa.array(storage_vals, type=arrow_ext.storage_type).cast(arrow_ext)
+    ext_arr = pa.ExtensionArray.from_storage(arrow_ext, pa.array(storage_vals, type=arrow_ext.storage_type))
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        pl_series = pl.from_arrow(ext_arr)
-
+    pl_series = pl.from_arrow(ext_arr)
     arr_back = pl_series.to_arrow()
     recovered = [lt.storage_to_python(v.as_py()) for v in arr_back.storage]
     assert recovered == originals
@@ -346,7 +337,7 @@ def test_logical_uuid_arrow_round_trip():
     originals = [uuid_module.UUID("12345678-1234-5678-1234-567812345678"), uuid_module.uuid4()]
     storage_vals = [lt.python_to_storage(u) for u in originals]
     arrow_ext = lt.get_arrow_extension_type()
-    ext_arr = pa.array(storage_vals, type=arrow_ext.storage_type).cast(arrow_ext)
+    ext_arr = pa.ExtensionArray.from_storage(arrow_ext, pa.array(storage_vals, type=arrow_ext.storage_type))
 
     recovered = [lt.storage_to_python(v.as_py()) for v in ext_arr.storage]
     assert recovered == originals
@@ -363,18 +354,11 @@ def test_logical_uuid_polars_round_trip():
     originals = [uuid_module.UUID("12345678-1234-5678-1234-567812345678"), uuid_module.uuid4()]
     storage_vals = [lt.python_to_storage(u) for u in originals]
     arrow_ext = lt.get_arrow_extension_type()
-    ext_arr = pa.array(storage_vals, type=arrow_ext.storage_type).cast(arrow_ext)
+    ext_arr = pa.ExtensionArray.from_storage(arrow_ext, pa.array(storage_vals, type=arrow_ext.storage_type))
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        pl_series = pl.from_arrow(ext_arr)
-
+    pl_series = pl.from_arrow(ext_arr)
     arr_back = pl_series.to_arrow()
-    # pa.uuid() is a PyArrow built-in; Polars may return the underlying binary
-    # array directly (no extension wrapper) rather than a pa.uuid() extension
-    # array. Handle both cases.
-    storage_arr = arr_back.storage if hasattr(arr_back, "storage") else arr_back
-    recovered = [lt.storage_to_python(v.as_py()) for v in storage_arr]
+    recovered = [lt.storage_to_python(v.as_py()) for v in arr_back.storage]
     assert recovered == originals
 
 
@@ -452,23 +436,13 @@ def test_default_context_registry_has_logical_uuid():
 
 
 def test_default_context_registry_lookup_by_arrow_name_uuid():
-    """Default registry routes 'arrow.uuid' arrow ext name to LogicalUUID."""
+    """Default registry routes 'uuid.UUID' arrow ext name to LogicalUUID."""
     from orcapod.contexts import get_default_context
     from orcapod.extension_types.builtin_logical_types import LogicalUUID
 
     registry = get_default_context().logical_type_registry
-    lt = registry.get_by_arrow_extension_name("arrow.uuid")
+    lt = registry.get_by_arrow_extension_name("uuid.UUID")
     assert isinstance(lt, LogicalUUID)
-
-
-def test_default_context_registry_uuid_logical_name_differs_from_arrow_name():
-    """The same LogicalUUID instance is found by both 'uuid.UUID' and 'arrow.uuid'."""
-    from orcapod.contexts import get_default_context
-
-    registry = get_default_context().logical_type_registry
-    by_logical = registry.get_by_logical_name("uuid.UUID")
-    by_arrow = registry.get_by_arrow_extension_name("arrow.uuid")
-    assert by_logical is by_arrow
 
 
 def test_get_default_logical_type_registry_returns_same_as_context():
