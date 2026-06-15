@@ -431,8 +431,10 @@ class UniversalTypeConverter:
         if python_type in type_map:
             return type_map[python_type]
 
-        # Check LogicalTypeRegistry — extension-type identity takes priority over shape-based system
-        if self._logical_type_registry is not None:
+        # Check LogicalTypeRegistry — extension-type identity takes priority over shape-based system.
+        # Guard with isinstance(…, type) because get_by_python_type is keyed on concrete classes;
+        # generic aliases (list[T], Optional[T], etc.) will never be registered there.
+        if self._logical_type_registry is not None and isinstance(python_type, type):
             lt = self._logical_type_registry.get_by_python_type(python_type)
             if lt is not None:
                 return lt.get_arrow_extension_type()
@@ -773,8 +775,10 @@ class UniversalTypeConverter:
     ) -> Callable[[Any], Any]:
         """Create a cached conversion function for Python → Arrow values."""
 
-        # Check LogicalTypeRegistry first — extension-type identity takes priority
-        if self._logical_type_registry is not None:
+        # Check LogicalTypeRegistry first — extension-type identity takes priority.
+        # Guard with isinstance(…, type) because get_by_python_type is keyed on concrete classes;
+        # generic aliases (list[T], Optional[T], etc.) will never be registered there.
+        if self._logical_type_registry is not None and isinstance(python_type, type):
             lt = self._logical_type_registry.get_by_python_type(python_type)
             if lt is not None:
                 return lt.python_to_storage
