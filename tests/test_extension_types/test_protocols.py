@@ -44,7 +44,7 @@ class _StubLogicalType:
 class _StubFactory:
     """Minimal conforming implementation of LogicalTypeFactoryProtocol for use in tests."""
 
-    def create_logical_type(self, arrow_extension_name, storage_type, metadata):
+    def reconstruct_from_arrow(self, arrow_extension_name, storage_type, metadata):
         return _StubLogicalType()
 
 
@@ -61,10 +61,10 @@ def test_logical_type_factory_conforming_class_satisfies_protocol():
 
 
 def test_logical_type_factory_create_returns_logical_type():
-    """A conforming factory returns a LogicalTypeProtocol from create_logical_type."""
+    """A conforming factory returns a LogicalTypeProtocol from reconstruct_from_arrow."""
     from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol, LogicalTypeProtocol
     factory: LogicalTypeFactoryProtocol = _StubFactory()
-    result = factory.create_logical_type(
+    result = factory.reconstruct_from_arrow(
         "test.ext", pa.large_utf8(), {"category": "Test"}
     )
     assert isinstance(result, LogicalTypeProtocol)
