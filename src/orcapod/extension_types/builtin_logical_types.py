@@ -3,9 +3,14 @@
 Provides three built-in logical types registered into the default
 ``DataContext.logical_type_registry`` via ``contexts/data/v0.1.json``:
 
-- ``LogicalPath``: maps ``pathlib.Path`` ↔ Arrow large_string extension "pathlib.Path"
-- ``LogicalUPath``: maps ``upath.UPath`` ↔ Arrow large_string extension "upath.UPath"
-- ``LogicalUUID``: maps ``uuid.UUID`` ↔ Arrow large_binary extension "uuid.UUID"
+- ``LogicalPath``: maps ``pathlib.Path`` ↔ Arrow large_string extension ``"orcapod.path"``
+- ``LogicalUPath``: maps ``upath.UPath`` ↔ Arrow large_string extension ``"orcapod.upath"``
+- ``LogicalUUID``: maps ``uuid.UUID`` ↔ Arrow large_binary extension ``"orcapod.uuid"``
+
+All three types use the ``orcapod.*`` extension name namespace rather than the upstream
+module-qualified names (``"pathlib.Path"``, etc.). This gives Orcapod stable ownership of
+the on-disk extension identity: even if the upstream library is renamed or restructured,
+data written with these extension names continues to be readable without modification.
 
 Note:
     All imports from orcapod.extension_types use direct submodule paths
@@ -31,7 +36,11 @@ class LogicalPath:
     """Logical type for ``pathlib.Path``.
 
     Stores paths as Arrow large strings using the custom extension type
-    ``"pathlib.Path"``.
+    ``"orcapod.path"``.
+
+    The extension name ``"orcapod.path"`` is Orcapod-owned and stable; it does not
+    depend on the upstream ``pathlib`` module path. Use ``orcapod.Path`` (a top-level
+    alias for ``pathlib.Path``) as the preferred way to reference this type in user code.
 
     Example:
         >>> lt = LogicalPath()
@@ -41,12 +50,12 @@ class LogicalPath:
         PosixPath('/tmp/foo')
     """
 
-    _arrow_ext_class = make_arrow_extension_type("pathlib.Path", pa.large_string())
+    _arrow_ext_class = make_arrow_extension_type("orcapod.path", pa.large_string())
     _arrow_ext: pa.ExtensionType | None = None
-    _polars_ext_class = make_polars_extension_type("pathlib.Path", pa.large_string())
+    _polars_ext_class = make_polars_extension_type("orcapod.path", pa.large_string())
     _polars_ext: pl.BaseExtension | None = None
 
-    logical_type_name: str = "pathlib.Path"
+    logical_type_name: str = "orcapod.path"
     python_type: type = pathlib.Path
 
     def get_arrow_extension_type(self) -> pa.ExtensionType:
@@ -54,7 +63,7 @@ class LogicalPath:
 
         Returns:
             A cached ``pa.ExtensionType`` instance with extension name
-            ``"pathlib.Path"`` and storage type ``pa.large_string()``.
+            ``"orcapod.path"`` and storage type ``pa.large_string()``.
         """
         if LogicalPath._arrow_ext is None:
             LogicalPath._arrow_ext = LogicalPath._arrow_ext_class()
@@ -65,7 +74,7 @@ class LogicalPath:
 
         Returns:
             A cached ``pl.BaseExtension`` instance registered under
-            ``"pathlib.Path"``.
+            ``"orcapod.path"``.
         """
         if LogicalPath._polars_ext is None:
             LogicalPath._polars_ext = LogicalPath._polars_ext_class()
@@ -98,7 +107,11 @@ class LogicalUPath:
     """Logical type for ``upath.UPath``.
 
     Stores paths as Arrow large strings using the custom extension type
-    ``"upath.UPath"``.
+    ``"orcapod.upath"``.
+
+    The extension name ``"orcapod.upath"`` is Orcapod-owned and stable; it does not
+    depend on the upstream ``upath`` module path. Use ``orcapod.UPath`` (a top-level
+    alias for ``upath.UPath``) as the preferred way to reference this type in user code.
 
     Example:
         >>> lt = LogicalUPath()
@@ -108,12 +121,12 @@ class LogicalUPath:
         UPath('s3://bucket/key')
     """
 
-    _arrow_ext_class = make_arrow_extension_type("upath.UPath", pa.large_string())
+    _arrow_ext_class = make_arrow_extension_type("orcapod.upath", pa.large_string())
     _arrow_ext: pa.ExtensionType | None = None
-    _polars_ext_class = make_polars_extension_type("upath.UPath", pa.large_string())
+    _polars_ext_class = make_polars_extension_type("orcapod.upath", pa.large_string())
     _polars_ext: pl.BaseExtension | None = None
 
-    logical_type_name: str = "upath.UPath"
+    logical_type_name: str = "orcapod.upath"
     python_type: type = UPath
 
     def get_arrow_extension_type(self) -> pa.ExtensionType:
@@ -121,7 +134,7 @@ class LogicalUPath:
 
         Returns:
             A cached ``pa.ExtensionType`` instance with extension name
-            ``"upath.UPath"`` and storage type ``pa.large_string()``.
+            ``"orcapod.upath"`` and storage type ``pa.large_string()``.
         """
         if LogicalUPath._arrow_ext is None:
             LogicalUPath._arrow_ext = LogicalUPath._arrow_ext_class()
@@ -132,7 +145,7 @@ class LogicalUPath:
 
         Returns:
             A cached ``pl.BaseExtension`` instance registered under
-            ``"upath.UPath"``.
+            ``"orcapod.upath"``.
         """
         if LogicalUPath._polars_ext is None:
             LogicalUPath._polars_ext = LogicalUPath._polars_ext_class()
@@ -165,8 +178,13 @@ class LogicalUUID:
     """Logical type for ``uuid.UUID``.
 
     Stores UUIDs as Arrow binary (16 bytes) using the custom extension type
-    ``"uuid.UUID"``. Both the Arrow extension name and ``logical_type_name``
-    are ``"uuid.UUID"``, consistent with ``LogicalPath`` and ``LogicalUPath``.
+    ``"orcapod.uuid"``. Both the Arrow extension name and ``logical_type_name``
+    are ``"orcapod.uuid"``, consistent with ``LogicalPath`` and ``LogicalUPath``.
+
+    The extension name ``"orcapod.uuid"`` is Orcapod-owned and stable, replacing
+    the previous ``"uuid.UUID"`` name that mirrored PyArrow's ``"arrow.uuid"``
+    territory. Use ``orcapod.UUID`` (a top-level alias for ``uuid.UUID``) as the
+    preferred way to reference this type in user code.
 
     The storage type is ``pa.large_binary()`` (variable-length binary), using
     big-endian byte order as returned by ``uuid.UUID.bytes``. ``large_binary``
@@ -182,12 +200,12 @@ class LogicalUUID:
         True
     """
 
-    _arrow_ext_class = make_arrow_extension_type("uuid.UUID", pa.large_binary())
+    _arrow_ext_class = make_arrow_extension_type("orcapod.uuid", pa.large_binary())
     _arrow_ext: pa.ExtensionType | None = None
-    _polars_ext_class = make_polars_extension_type("uuid.UUID", pa.large_binary())
+    _polars_ext_class = make_polars_extension_type("orcapod.uuid", pa.large_binary())
     _polars_ext: pl.BaseExtension | None = None
 
-    logical_type_name: str = "uuid.UUID"
+    logical_type_name: str = "orcapod.uuid"
     python_type: type = _uuid_module.UUID
 
     def get_arrow_extension_type(self) -> pa.ExtensionType:
@@ -195,7 +213,7 @@ class LogicalUUID:
 
         Returns:
             A cached ``pa.ExtensionType`` instance with extension name
-            ``"uuid.UUID"`` and storage type ``pa.large_binary()``.
+            ``"orcapod.uuid"`` and storage type ``pa.large_binary()``.
         """
         if LogicalUUID._arrow_ext is None:
             LogicalUUID._arrow_ext = LogicalUUID._arrow_ext_class()
@@ -206,7 +224,7 @@ class LogicalUUID:
 
         Returns:
             A cached ``pl.BaseExtension`` instance registered under
-            ``"uuid.UUID"``.
+            ``"orcapod.uuid"``.
         """
         if LogicalUUID._polars_ext is None:
             LogicalUUID._polars_ext = LogicalUUID._polars_ext_class()
