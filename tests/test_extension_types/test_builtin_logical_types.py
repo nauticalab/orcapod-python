@@ -38,7 +38,7 @@ def test_logical_path_python_type():
 
 
 def test_logical_path_arrow_ext_name():
-    """get_arrow_extension_type().extension_name is 'pathlib.Path'."""
+    """get_arrow_extension_type().extension_name is 'orcapod.path'."""
     from orcapod.extension_types.builtin_logical_types import LogicalPath
 
     assert LogicalPath().get_arrow_extension_type().extension_name == "orcapod.path"
@@ -110,7 +110,7 @@ def test_logical_upath_python_type():
 
 
 def test_logical_upath_arrow_ext_name():
-    """get_arrow_extension_type().extension_name is 'upath.UPath'."""
+    """get_arrow_extension_type().extension_name is 'orcapod.upath'."""
     from orcapod.extension_types.builtin_logical_types import LogicalUPath
 
     assert LogicalUPath().get_arrow_extension_type().extension_name == "orcapod.upath"
@@ -180,7 +180,7 @@ def test_logical_uuid_python_type():
 
 
 def test_logical_uuid_arrow_ext_name():
-    """Arrow extension name is 'uuid.UUID', matching logical_type_name."""
+    """Arrow extension name is 'orcapod.uuid', matching logical_type_name."""
     from orcapod.extension_types.builtin_logical_types import LogicalUUID
 
     lt = LogicalUUID()
