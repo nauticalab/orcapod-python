@@ -80,7 +80,7 @@ def _make_stub(
 def _make_stub_factory(return_lt: LogicalTypeProtocol | None = None) -> LogicalTypeFactoryProtocol:
     """Factory for minimal LogicalTypeFactoryProtocol conforming stubs.
 
-    If ``return_lt`` is given, ``create_logical_type`` returns it; otherwise
+    If ``return_lt`` is given, ``reconstruct_from_arrow`` returns it; otherwise
     it creates a fresh stub using ``_make_stub`` keyed on the arrow name.
     ``calls`` records every invocation as ``(arrow_extension_name, storage_type, metadata)``.
     """
@@ -90,7 +90,7 @@ def _make_stub_factory(return_lt: LogicalTypeProtocol | None = None) -> LogicalT
         def __init__(self):
             self.calls: list[tuple] = []
 
-        def create_logical_type(self, arrow_extension_name, storage_type, metadata):
+        def reconstruct_from_arrow(self, arrow_extension_name, storage_type, metadata):
             self.calls.append((arrow_extension_name, storage_type, metadata))
             if _return_lt is not None:
                 return _return_lt
@@ -596,7 +596,7 @@ def test_register_logical_type_factory_dispatches_on_prepare():
 
 
 def test_factory_receives_full_metadata_dict():
-    """The factory's create_logical_type receives the full parsed JSON dict, not just category."""
+    """The factory's reconstruct_from_arrow receives the full parsed JSON dict, not just category."""
     registry = LogicalTypeRegistry()
     factory = _make_stub_factory()
     registry.register_logical_type_factory("TestCat", factory)
