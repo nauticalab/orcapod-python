@@ -355,6 +355,117 @@ def test_register_logical_type_factory_python_base_same_factory_idempotent():
     registry.register_logical_type_factory(factory, python_bases=[str])  # no error
 
 
+# ── ensure_logical_type_for_python_class tests ───────────────────────────────
+
+class _A:
+    pass
+
+
+class _B(_A):
+    pass
+
+
+class _C(_B):
+    pass
+
+
+def test_ensure_for_python_class_concrete_exact_match():
+    """Returns the concrete LogicalType when exact Python type is registered."""
+    registry = LogicalTypeRegistry()
+    lt = _make_stub(py_type=_A)
+    registry.register_logical_type(lt)
+    result = registry.ensure_logical_type_for_python_class(_A)
+    assert result is lt
+
+
+def test_ensure_for_python_class_concrete_mro_match():
+    """Returns concrete LogicalType registered for a parent class via MRO walk."""
+    registry = LogicalTypeRegistry()
+    lt = _make_stub(py_type=_A)
+    registry.register_logical_type(lt)
+    result = registry.ensure_logical_type_for_python_class(_C)
+    assert result is lt
+
+
+def test_ensure_for_python_class_factory_synthesis():
+    """Calls factory.create_for_python_type and registers the result."""
+    registry = LogicalTypeRegistry()
+    factory = _make_stub_factory()
+    registry.register_logical_type_factory(factory, python_bases=[_A])
+    result = registry.ensure_logical_type_for_python_class(_C)
+    assert len(factory.python_type_calls) == 1
+    assert factory.python_type_calls[0] is _C
+    # Synthesized type is now registered — second call hits cache
+    cached = registry.ensure_logical_type_for_python_class(_C)
+    assert cached is result
+    assert len(factory.python_type_calls) == 1  # factory NOT called again
+
+
+def test_ensure_for_python_class_concrete_beats_factory_same_mro_level():
+    """When concrete type and factory are registered for the same class, concrete wins."""
+    registry = LogicalTypeRegistry()
+    lt = _make_stub(py_type=_A)
+    registry.register_logical_type(lt)
+    factory = _make_stub_factory()
+    registry.register_logical_type_factory(factory, python_bases=[_A])
+    result = registry.ensure_logical_type_for_python_class(_A)
+    assert result is lt
+    assert len(factory.python_type_calls) == 0  # factory never called
+
+
+def test_ensure_for_python_class_factory_more_specific_than_concrete():
+    """Factory registered for a subclass beats concrete registered for a parent."""
+    registry = LogicalTypeRegistry()
+    lt_a = _make_stub(py_type=_A)
+    registry.register_logical_type(lt_a)  # concrete for _A
+    factory = _make_stub_factory()
+    registry.register_logical_type_factory(factory, python_bases=[_B])  # factory for _B
+    # Query _C: factory at _B (MRO index 1) beats concrete at _A (MRO index 2)
+    registry.ensure_logical_type_for_python_class(_C)
+    assert len(factory.python_type_calls) == 1
+    assert factory.python_type_calls[0] is _C
+
+
+def test_ensure_for_python_class_concrete_more_specific_than_factory():
+    """Concrete registered for a subclass beats factory registered for a parent."""
+    registry = LogicalTypeRegistry()
+    factory = _make_stub_factory()
+    registry.register_logical_type_factory(factory, python_bases=[_A])  # factory for _A
+    lt_b = _make_stub(py_type=_B)
+    registry.register_logical_type(lt_b)  # concrete for _B
+    # Query _C: concrete at _B (MRO index 1) beats factory at _A (MRO index 2)
+    result = registry.ensure_logical_type_for_python_class(_C)
+    assert result is lt_b
+    assert len(factory.python_type_calls) == 0
+
+
+def test_ensure_for_python_class_abc_subclasshook():
+    """issubclass fallback scan catches ABCs with __subclasshook__."""
+    from abc import ABCMeta
+
+    class _StructuralABC(metaclass=ABCMeta):
+        @classmethod
+        def __subclasshook__(cls, C):
+            return hasattr(C, "_MARKER")
+
+    class _MarkedClass:
+        _MARKER = True
+
+    registry = LogicalTypeRegistry()
+    factory = _make_stub_factory()
+    registry.register_logical_type_factory(factory, python_bases=[_StructuralABC])
+    result = registry.ensure_logical_type_for_python_class(_MarkedClass)
+    assert len(factory.python_type_calls) == 1
+    assert factory.python_type_calls[0] is _MarkedClass
+
+
+def test_ensure_for_python_class_no_match_raises_type_error():
+    """TypeError raised when no LogicalType and no factory match the type."""
+    registry = LogicalTypeRegistry()
+    with pytest.raises(TypeError, match="No LogicalType or LogicalTypeFactory"):
+        registry.ensure_logical_type_for_python_class(_C)
+
+
 # ---------------------------------------------------------------------------
 # PyArrow global registry tests
 # ---------------------------------------------------------------------------
