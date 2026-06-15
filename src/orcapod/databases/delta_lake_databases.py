@@ -8,8 +8,6 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from orcapod.databases.utils import coerce_record_id
 from orcapod.databases.storage_utils import is_cloud_uri, parse_base_path
-from orcapod.extension_types.database_hooks import register_discovered_extensions
-from orcapod.extension_types.registry import LogicalTypeRegistry
 from orcapod.utils import arrow_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -54,14 +52,12 @@ class DeltaTableDatabase:
         batch_size: int = 1000,
         max_hierarchy_depth: int = 10,
         allow_schema_evolution: bool = True,
-        logical_type_registry: LogicalTypeRegistry | None = None,
         _path_prefix: tuple[str, ...] = (),
         _root: "DeltaTableDatabase | None" = None,
         _scoped_path: tuple[str, ...] = (),
         _shared_pending_batches: "dict[str, pa.Table] | None" = None,
         _shared_pending_record_ids: "defaultdict[str, set[bytes]] | None" = None,
     ):
-        self._logical_type_registry = logical_type_registry
         self._root_uri, self._storage_options = parse_base_path(base_path, storage_options)
         self._is_cloud: bool = is_cloud_uri(self._root_uri)
         self._path_prefix = _path_prefix
@@ -838,8 +834,6 @@ class DeltaTableDatabase:
         filter_expr = None
         # Use to_pyarrow_dataset with as_large_types for Polars compatible arrow table loading
         dataset = delta_table.to_pyarrow_dataset(as_large_types=True)
-        logger.debug("_read_delta_table: peeking schema for extension type registration")
-        register_discovered_extensions(self._logical_type_registry, dataset.schema)
         if filters and expression is None:
             for filt in filters:
                 if len(filt) == 3:
