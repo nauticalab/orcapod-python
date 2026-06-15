@@ -13,7 +13,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from orcapod.extension_types.protocols import LogicalType, LogicalTypeFactory
+from orcapod.extension_types.protocols import LogicalTypeProtocol, LogicalTypeFactoryProtocol
 from orcapod.extension_types.registry import LogicalTypeRegistry, make_arrow_extension_type, make_polars_extension_type
 
 
@@ -31,8 +31,8 @@ def _make_stub(
     logical_name: str | None = None,
     storage: pa.DataType | None = None,
     py_type: type = str,
-) -> LogicalType:
-    """Factory for minimal LogicalType conforming stubs.
+) -> LogicalTypeProtocol:
+    """Factory for minimal LogicalTypeProtocol conforming stubs.
 
     ``arrow_name`` defaults to ``logical_name`` (or a unique name if both are
     omitted) so that callers can pass a single name and get consistent arrow
@@ -77,8 +77,8 @@ def _make_stub(
     return _Stub()
 
 
-def _make_stub_factory(return_lt: LogicalType | None = None) -> LogicalTypeFactory:
-    """Factory for minimal LogicalTypeFactory conforming stubs.
+def _make_stub_factory(return_lt: LogicalTypeProtocol | None = None) -> LogicalTypeFactoryProtocol:
+    """Factory for minimal LogicalTypeFactoryProtocol conforming stubs.
 
     If ``return_lt`` is given, ``create_logical_type`` returns it; otherwise
     it creates a fresh stub using ``_make_stub`` keyed on the arrow name.
@@ -149,7 +149,7 @@ def test_make_arrow_extension_type_metadata_roundtrip():
 def test_register_stores_logical_type():
     registry = LogicalTypeRegistry()
     lt = _make_stub()
-    registry.register(lt)
+    registry.register_logical_type(lt)
     assert registry.get_by_logical_name(lt.logical_type_name) is lt
 
 
@@ -157,8 +157,8 @@ def test_register_same_instance_twice_is_idempotent():
     """Re-registering the exact same instance does not raise."""
     registry = LogicalTypeRegistry()
     lt = _make_stub()
-    registry.register(lt)
-    registry.register(lt)  # should not raise
+    registry.register_logical_type(lt)
+    registry.register_logical_type(lt)  # should not raise
     assert registry.get_by_logical_name(lt.logical_type_name) is lt
 
 
@@ -168,9 +168,9 @@ def test_register_conflict_on_logical_name_raises():
     name = _unique_name()
     lt1 = _make_stub(logical_name=name, py_type=str)
     lt2 = _make_stub(logical_name=name, py_type=bytes)
-    registry.register(lt1)
+    registry.register_logical_type(lt1)
     with pytest.raises(ValueError, match="logical_type_name"):
-        registry.register(lt2)
+        registry.register_logical_type(lt2)
 
 
 def test_register_conflict_on_arrow_name_raises():
@@ -179,9 +179,9 @@ def test_register_conflict_on_arrow_name_raises():
     arrow_name = _unique_name()
     lt1 = _make_stub(arrow_name=arrow_name, logical_name=_unique_name(), py_type=str)
     lt2 = _make_stub(arrow_name=arrow_name, logical_name=_unique_name(), py_type=bytes)
-    registry.register(lt1)
+    registry.register_logical_type(lt1)
     with pytest.raises(ValueError, match="arrow_extension_name"):
-        registry.register(lt2)
+        registry.register_logical_type(lt2)
 
 
 def test_register_conflict_on_python_type_raises():
@@ -189,9 +189,9 @@ def test_register_conflict_on_python_type_raises():
     registry = LogicalTypeRegistry()
     lt1 = _make_stub(py_type=float)
     lt2 = _make_stub(py_type=float)
-    registry.register(lt1)
+    registry.register_logical_type(lt1)
     with pytest.raises(ValueError, match="python_type"):
-        registry.register(lt2)
+        registry.register_logical_type(lt2)
 
 
 def test_get_by_logical_name_miss():
@@ -202,7 +202,7 @@ def test_get_by_logical_name_miss():
 def test_get_by_python_type_exact():
     registry = LogicalTypeRegistry()
     lt = _make_stub(py_type=bytes)
-    registry.register(lt)
+    registry.register_logical_type(lt)
     assert registry.get_by_python_type(bytes) is lt
 
 
@@ -215,7 +215,7 @@ def test_get_by_python_type_subclass():
 
     registry = LogicalTypeRegistry()
     lt = _make_stub(py_type=_Base)
-    registry.register(lt)
+    registry.register_logical_type(lt)
     assert registry.get_by_python_type(_Child) is lt
 
 
@@ -228,7 +228,7 @@ def test_get_by_arrow_extension_name():
     registry = LogicalTypeRegistry()
     arrow_name = _unique_name()
     lt = _make_stub(arrow_name=arrow_name)
-    registry.register(lt)
+    registry.register_logical_type(lt)
     assert registry.get_by_arrow_extension_name(arrow_name) is lt
 
 
@@ -308,7 +308,7 @@ def test_register_populates_arrow_registry():
     """After register(), PA global registry contains the extension type."""
     lt = _make_stub()
     registry = LogicalTypeRegistry()
-    registry.register(lt)
+    registry.register_logical_type(lt)
 
     # If the name is registered, attempting to re-register the same type raises
     # ArrowKeyError. This is the only stable public signal PyArrow provides.
@@ -334,17 +334,17 @@ def test_register_arrow_preexisting_external_accepted_silently():
     # New semantics: pre-existing registrations are accepted silently.
     lt = _make_stub(arrow_name=name)
     registry = LogicalTypeRegistry()
-    registry.register(lt)  # should NOT raise
+    registry.register_logical_type(lt)  # should NOT raise
     assert registry.get_by_logical_name(lt.logical_type_name) is lt
 
 
 def test_register_same_instance_two_registries():
-    """The same LogicalType instance can be registered in two different registry instances."""
+    """The same LogicalTypeProtocol instance can be registered in two different registry instances."""
     lt = _make_stub()
     r1 = LogicalTypeRegistry()
     r2 = LogicalTypeRegistry()
-    r1.register(lt)
-    r2.register(lt)  # should not raise (same instance, PA/Polars accept silently)
+    r1.register_logical_type(lt)
+    r2.register_logical_type(lt)  # should not raise (same instance, PA/Polars accept silently)
     assert r2.get_by_logical_name(lt.logical_type_name) is lt
 
 
@@ -357,7 +357,7 @@ def test_register_populates_polars_registry():
     arrow_name = _unique_name()
     lt = _make_stub(arrow_name=arrow_name)
     registry = LogicalTypeRegistry()
-    registry.register(lt)
+    registry.register_logical_type(lt)
 
     # Verify by attempting to create a Polars series from a PA extension array.
     ext_type = lt.get_arrow_extension_type()
@@ -397,7 +397,7 @@ def test_register_polars_preexisting_external_accepted_silently():
 
     lt = _make_stub(arrow_name=name)
     registry = LogicalTypeRegistry()
-    registry.register(lt)  # should NOT raise
+    registry.register_logical_type(lt)  # should NOT raise
     assert registry.get_by_logical_name(lt.logical_type_name) is lt
 
 
@@ -407,7 +407,7 @@ def test_register_polars_preexisting_external_accepted_silently():
 
 
 class _Color:
-    """Minimal Python class used to exercise the LogicalType contract end-to-end."""
+    """Minimal Python class used to exercise the LogicalTypeProtocol contract end-to-end."""
     def __init__(self, hex_str: str) -> None:
         self.hex_str = hex_str
     def __eq__(self, other: object) -> bool:
@@ -416,8 +416,8 @@ class _Color:
         return f"Color({self.hex_str!r})"
 
 
-def _make_color_logical_type() -> LogicalType:
-    """LogicalType for _Color, backed by pa.large_utf8() storage."""
+def _make_color_logical_type() -> LogicalTypeProtocol:
+    """LogicalTypeProtocol for _Color, backed by pa.large_utf8() storage."""
     _name = _unique_name()
     _ArrowExtClass = make_arrow_extension_type(_name, pa.large_utf8(), metadata=b"test.color")
 
@@ -453,12 +453,12 @@ def _make_color_logical_type() -> LogicalType:
 
 
 def _build_ext_array(
-    lt: LogicalType,
+    lt: LogicalTypeProtocol,
     values: list,
 ) -> pa.Array:
     """Build a PA extension array from Python values using the logical type.
 
-    Global registration (via ``registry.register(lt)``) is NOT required for
+    Global registration (via ``registry.register_logical_type(lt)``) is NOT required for
     this helper — ``cast()`` works with any ``pa.ExtensionType`` instance.
     Registration is only needed for IPC/Parquet *deserialization*, where Arrow
     maps the ``extension_name`` string back to the registered Python type.
@@ -473,7 +473,7 @@ def test_python_class_round_trip():
     """Python objects -> Arrow extension array -> Python objects via logical type methods."""
     lt = _make_color_logical_type()
     registry = LogicalTypeRegistry()
-    registry.register(lt)
+    registry.register_logical_type(lt)
 
     originals = [_Color("#ff0000"), _Color("#00ff00"), _Color("#0000ff")]
     ext_arr = _build_ext_array(lt, originals)
@@ -486,7 +486,7 @@ def test_arrow_polars_round_trip():
     """PA ext array -> pl.from_arrow -> to_arrow() preserves extension type and values."""
     lt = _make_color_logical_type()
     registry = LogicalTypeRegistry()
-    registry.register(lt)
+    registry.register_logical_type(lt)
 
     originals = [_Color("#aabbcc"), _Color("#112233")]
     ext_arr = _build_ext_array(lt, originals)
@@ -509,7 +509,7 @@ def test_parquet_round_trip():
     """PA ext array -> Parquet -> read back via PyArrow; extension type and values preserved."""
     lt = _make_color_logical_type()
     registry = LogicalTypeRegistry()
-    registry.register(lt)
+    registry.register_logical_type(lt)
 
     originals = [_Color("#deadbe"), _Color("#cafeba")]
     ext_arr = _build_ext_array(lt, originals)
@@ -577,18 +577,18 @@ def test_make_polars_extension_type_with_metadata():
 
 
 # ---------------------------------------------------------------------------
-# prepare_extension_type tests
+# ensure_extension_type tests
 # ---------------------------------------------------------------------------
 
 def test_register_logical_type_factory_dispatches_on_prepare():
-    """prepare_extension_type dispatches to the registered factory and registers the result."""
+    """ensure_extension_type dispatches to the registered factory and registers the result."""
     registry = LogicalTypeRegistry()
     factory = _make_stub_factory()
     registry.register_logical_type_factory("TestCat", factory)
 
     arrow_name = _unique_name()
     metadata_bytes = json.dumps({"category": "TestCat"}).encode()
-    registry.prepare_extension_type(arrow_name, metadata_bytes, pa.large_utf8())
+    registry.ensure_extension_type(arrow_name, metadata_bytes, pa.large_utf8())
 
     assert len(factory.calls) == 1
     assert factory.calls[0][0] == arrow_name
@@ -605,7 +605,7 @@ def test_factory_receives_full_metadata_dict():
     metadata_bytes = json.dumps(
         {"category": "TestCat", "protocol": 5, "version": "1.0"}
     ).encode()
-    registry.prepare_extension_type(arrow_name, metadata_bytes, pa.large_utf8())
+    registry.ensure_extension_type(arrow_name, metadata_bytes, pa.large_utf8())
 
     assert len(factory.calls) == 1
     _, _, received_metadata = factory.calls[0]
@@ -613,7 +613,7 @@ def test_factory_receives_full_metadata_dict():
 
 
 def test_prepare_already_registered_noop():
-    """prepare_extension_type called twice does not raise and does not call the factory again."""
+    """ensure_extension_type called twice does not raise and does not call the factory again."""
     registry = LogicalTypeRegistry()
     factory = _make_stub_factory()
     registry.register_logical_type_factory("TestCat", factory)
@@ -621,8 +621,8 @@ def test_prepare_already_registered_noop():
     arrow_name = _unique_name()
     metadata_bytes = json.dumps({"category": "TestCat"}).encode()
 
-    registry.prepare_extension_type(arrow_name, metadata_bytes, pa.large_utf8())
-    registry.prepare_extension_type(arrow_name, metadata_bytes, pa.large_utf8())  # second call
+    registry.ensure_extension_type(arrow_name, metadata_bytes, pa.large_utf8())
+    registry.ensure_extension_type(arrow_name, metadata_bytes, pa.large_utf8())  # second call
 
     assert len(factory.calls) == 1  # factory called exactly once
 
@@ -631,10 +631,10 @@ def test_prepare_already_registered_none_metadata_noop():
     """Type pre-registered via register(); None metadata on prepare call is a silent no-op."""
     registry = LogicalTypeRegistry()
     lt = _make_stub()
-    registry.register(lt)
+    registry.register_logical_type(lt)
 
     arrow_name = lt.get_arrow_extension_type().extension_name
-    registry.prepare_extension_type(arrow_name, None, pa.large_utf8())  # should not raise
+    registry.ensure_extension_type(arrow_name, None, pa.large_utf8())  # should not raise
 
 
 def test_prepare_none_metadata_not_registered_raises():
@@ -643,7 +643,7 @@ def test_prepare_none_metadata_not_registered_raises():
     arrow_name = _unique_name()
 
     with pytest.raises(ValueError, match="must be pre-registered explicitly"):
-        registry.prepare_extension_type(arrow_name, None, pa.large_utf8())
+        registry.ensure_extension_type(arrow_name, None, pa.large_utf8())
 
 
 def test_prepare_invalid_json_raises():
@@ -653,7 +653,7 @@ def test_prepare_invalid_json_raises():
     bad_metadata = b"not-json!"
 
     with pytest.raises(ValueError, match="not valid UTF-8 JSON"):
-        registry.prepare_extension_type(arrow_name, bad_metadata, pa.large_utf8())
+        registry.ensure_extension_type(arrow_name, bad_metadata, pa.large_utf8())
 
 
 def test_prepare_json_missing_category_raises():
@@ -663,7 +663,7 @@ def test_prepare_json_missing_category_raises():
     no_category = json.dumps({"version": 1}).encode()
 
     with pytest.raises(ValueError, match='"category"'):
-        registry.prepare_extension_type(arrow_name, no_category, pa.large_utf8())
+        registry.ensure_extension_type(arrow_name, no_category, pa.large_utf8())
 
 
 def test_prepare_unknown_category_raises():
@@ -673,4 +673,4 @@ def test_prepare_unknown_category_raises():
     unknown = json.dumps({"category": "NoSuchFactory"}).encode()
 
     with pytest.raises(ValueError, match="NoSuchFactory"):
-        registry.prepare_extension_type(arrow_name, unknown, pa.large_utf8())
+        registry.ensure_extension_type(arrow_name, unknown, pa.large_utf8())
