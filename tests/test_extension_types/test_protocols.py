@@ -1,16 +1,16 @@
-"""Tests for LogicalType protocol."""
+"""Tests for LogicalTypeProtocol and LogicalTypeFactoryProtocol."""
 
 from __future__ import annotations
 
 import pyarrow as pa
 import polars as pl
 
-from orcapod.extension_types.protocols import LogicalType
+from orcapod.extension_types.protocols import LogicalTypeProtocol
 from orcapod.extension_types.registry import make_arrow_extension_type
 
 
 class _StubLogicalType:
-    """Minimal conforming implementation of LogicalType for use in tests."""
+    """Minimal conforming implementation of LogicalTypeProtocol for use in tests."""
 
     _ArrowExtClass = make_arrow_extension_type("test.module.MyType", pa.large_string())
 
@@ -42,47 +42,47 @@ class _StubLogicalType:
 
 
 class _StubFactory:
-    """Minimal conforming implementation of LogicalTypeFactory for use in tests."""
+    """Minimal conforming implementation of LogicalTypeFactoryProtocol for use in tests."""
 
     def create_logical_type(self, arrow_extension_name, storage_type, metadata):
         return _StubLogicalType()
 
 
 def test_logical_type_factory_protocol_is_importable():
-    """LogicalTypeFactory can be imported from extension_types.protocols."""
-    from orcapod.extension_types.protocols import LogicalTypeFactory
-    assert LogicalTypeFactory is not None
+    """LogicalTypeFactoryProtocol can be imported from extension_types.protocols."""
+    from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol
+    assert LogicalTypeFactoryProtocol is not None
 
 
 def test_logical_type_factory_conforming_class_satisfies_protocol():
-    """A conforming class is recognized as a LogicalTypeFactory instance."""
-    from orcapod.extension_types.protocols import LogicalTypeFactory
-    assert isinstance(_StubFactory(), LogicalTypeFactory)
+    """A conforming class is recognized as a LogicalTypeFactoryProtocol instance."""
+    from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol
+    assert isinstance(_StubFactory(), LogicalTypeFactoryProtocol)
 
 
 def test_logical_type_factory_create_returns_logical_type():
-    """A conforming factory returns a LogicalType from create_logical_type."""
-    from orcapod.extension_types.protocols import LogicalTypeFactory, LogicalType
-    factory: LogicalTypeFactory = _StubFactory()
+    """A conforming factory returns a LogicalTypeProtocol from create_logical_type."""
+    from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol, LogicalTypeProtocol
+    factory: LogicalTypeFactoryProtocol = _StubFactory()
     result = factory.create_logical_type(
         "test.ext", pa.large_utf8(), {"category": "Test"}
     )
-    assert isinstance(result, LogicalType)
+    assert isinstance(result, LogicalTypeProtocol)
 
 
 def test_protocol_is_importable():
-    """LogicalType can be imported from extension_types.protocols."""
-    assert LogicalType is not None
+    """LogicalTypeProtocol can be imported from extension_types.protocols."""
+    assert LogicalTypeProtocol is not None
 
 
 def test_protocol_defines_required_members():
-    """A conforming class is recognized as a LogicalType instance."""
-    assert isinstance(_StubLogicalType(), LogicalType)
+    """A conforming class is recognized as a LogicalTypeProtocol instance."""
+    assert isinstance(_StubLogicalType(), LogicalTypeProtocol)
 
 
 def test_conforming_class_satisfies_protocol():
     """A class implementing all required members works correctly via the protocol interface."""
-    lt: LogicalType = _StubLogicalType()
+    lt: LogicalTypeProtocol = _StubLogicalType()
     assert lt.logical_type_name == "test.module.MyType"
     assert lt.python_type is str
     assert lt.get_arrow_extension_type().extension_name == "test.module.MyType"

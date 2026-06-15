@@ -1,8 +1,8 @@
-"""Peek-schema hook for extension type auto-registration at database read time.
+"""Schema-walking hook for extension type auto-registration.
 
-Call ``ensure_extensions_registered(registry, schema)`` before returning any
-Arrow table from a database read path. It is a no-op when the schema contains
-no extension types or when *registry* is ``None``.
+Call ``register_discovered_extensions(registry, schema)`` on any Arrow schema
+that may contain extension types. It is a no-op when the schema contains no
+extension types or when *registry* is ``None``.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def ensure_extensions_registered(
+def register_discovered_extensions(
     registry: LogicalTypeRegistry | None,
     schema: pa.Schema,
 ) -> None:
@@ -27,7 +27,7 @@ def ensure_extensions_registered(
 
     Walks ``schema`` recursively to discover all Arrow extension types at any
     nesting depth. For each discovered type, delegates to
-    ``registry.prepare_extension_type``.
+    ``registry.ensure_extension_type``.
 
     Already-registered types are detected and skipped inside the registry —
     this function itself is stateless beyond the registry it operates on.
@@ -46,20 +46,20 @@ def ensure_extensions_registered(
             has no registered factory or is malformed.
     """
     if registry is None:
-        logger.debug("ensure_extensions_registered: no registry provided, skipping")
+        logger.debug("register_discovered_extensions: no registry provided, skipping")
         return
 
     found = walk_schema(schema)
     if not found:
-        logger.debug("ensure_extensions_registered: no extension types in schema")
+        logger.debug("register_discovered_extensions: no extension types in schema")
         return
     logger.debug(
-        "ensure_extensions_registered: found %d extension type(s) in schema: %s",
+        "register_discovered_extensions: found %d extension type(s) in schema: %s",
         len(found),
         [info.extension_name for info in found],
     )
     for info in found:
-        registry.prepare_extension_type(
+        registry.ensure_extension_type(
             info.extension_name,
             info.extension_metadata,
             info.storage_type,
