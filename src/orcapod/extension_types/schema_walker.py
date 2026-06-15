@@ -23,7 +23,7 @@ class ExtensionTypeInfo:
 
     Attributes:
         extension_name: The extension type's unique name stored as
-            ``ARROW:extension:name`` (e.g. ``"pathlib.Path"``).
+            ``ARROW:extension:name`` (e.g. ``"orcapod.path"``).
         extension_metadata: The category tag stored as
             ``ARROW:extension:metadata`` (e.g. ``b"orcapod.dataclass"``).
             ``None`` when absent or serialised as empty bytes.
