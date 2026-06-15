@@ -12,8 +12,6 @@ import re
 from typing import TYPE_CHECKING, Iterable
 
 from orcapod.extension_types.protocols import LogicalTypeProtocol, LogicalTypeFactoryProtocol
-from orcapod.extension_types.type_utils import extract_leaf_classes
-from orcapod.types import Schema
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -577,37 +575,3 @@ class LogicalTypeRegistry:
             )
             return lt
 
-    def ensure_types_registered_for_schemas(self, *schemas: Schema) -> None:
-        """Ensure a LogicalType is registered for every non-native leaf class in schemas.
-
-        Recursively unwraps generic annotations (``list[T]``, ``dict[K, V]``,
-        ``T | None``, etc.) to find leaf Python classes. Skips Arrow-native
-        types (``int``, ``str``, ``datetime``, …) and types that are already
-        registered. Calls ``ensure_logical_type_for_python_class`` for any
-        remaining leaf class, which synthesizes via factory or raises
-        ``TypeError`` if no factory is registered.
-
-        This is the canonical write-side registration trigger, called at
-        ``FunctionPod`` declaration time so that any missing ``LogicalType``
-        is detected and synthesized eagerly rather than at data-processing time.
-
-        Args:
-            *schemas: One or more ``Schema`` mappings (column name → Python type
-                annotation) to inspect.
-
-        Raises:
-            TypeError: If a leaf class has no registered ``LogicalType`` and
-                no registered factory covers it.
-        """
-        # Local import to avoid a circular dependency:
-        # registry → universal_converter → contexts.core → registry
-        from orcapod.semantic_types.universal_converter import UniversalTypeConverter  # noqa: PLC0415
-
-        native_keys = UniversalTypeConverter.get_native_python_types()
-        for schema in schemas:
-            for annotation in schema.values():
-                for leaf_class in extract_leaf_classes(annotation):
-                    if leaf_class in native_keys or self.get_by_python_type(leaf_class) is not None:
-                        continue
-                    self.ensure_logical_type_for_python_class(leaf_class)
-                    # TypeError propagates if no factory matches — intentional hard error
