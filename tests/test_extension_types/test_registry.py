@@ -582,7 +582,6 @@ def test_make_polars_extension_type_with_metadata():
 
 def test_register_logical_type_factory_dispatches_on_prepare():
     """prepare_extension_type dispatches to the registered factory and registers the result."""
-    import json
     registry = LogicalTypeRegistry()
     factory = _make_stub_factory()
     registry.register_logical_type_factory("TestCat", factory)
@@ -598,7 +597,6 @@ def test_register_logical_type_factory_dispatches_on_prepare():
 
 def test_factory_receives_full_metadata_dict():
     """The factory's create_logical_type receives the full parsed JSON dict, not just category."""
-    import json
     registry = LogicalTypeRegistry()
     factory = _make_stub_factory()
     registry.register_logical_type_factory("TestCat", factory)
@@ -616,7 +614,6 @@ def test_factory_receives_full_metadata_dict():
 
 def test_prepare_already_registered_noop():
     """prepare_extension_type called twice does not raise and does not call the factory again."""
-    import json
     registry = LogicalTypeRegistry()
     factory = _make_stub_factory()
     registry.register_logical_type_factory("TestCat", factory)
@@ -661,7 +658,6 @@ def test_prepare_invalid_json_raises():
 
 def test_prepare_json_missing_category_raises():
     """Valid JSON metadata without a 'category' key raises ValueError."""
-    import json
     registry = LogicalTypeRegistry()
     arrow_name = _unique_name()
     no_category = json.dumps({"version": 1}).encode()
@@ -672,7 +668,6 @@ def test_prepare_json_missing_category_raises():
 
 def test_prepare_unknown_category_raises():
     """Valid JSON with 'category' but no matching factory raises ValueError."""
-    import json
     registry = LogicalTypeRegistry()
     arrow_name = _unique_name()
     unknown = json.dumps({"category": "NoSuchFactory"}).encode()
