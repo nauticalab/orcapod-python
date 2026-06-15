@@ -9,7 +9,7 @@ import polars as pl
 import pyarrow as pa
 from upath import UPath
 
-from orcapod.extension_types.protocols import LogicalType
+from orcapod.extension_types.protocols import LogicalTypeProtocol
 from orcapod.extension_types.registry import LogicalTypeRegistry
 
 
@@ -22,7 +22,7 @@ def test_logical_path_isinstance_logical_type():
     """LogicalPath() satisfies the LogicalType runtime-checkable protocol."""
     from orcapod.extension_types.builtin_logical_types import LogicalPath
 
-    assert isinstance(LogicalPath(), LogicalType)
+    assert isinstance(LogicalPath(), LogicalTypeProtocol)
 
 
 def test_logical_path_logical_type_name():
@@ -94,7 +94,7 @@ def test_logical_upath_isinstance_logical_type():
     """LogicalUPath() satisfies the LogicalType runtime-checkable protocol."""
     from orcapod.extension_types.builtin_logical_types import LogicalUPath
 
-    assert isinstance(LogicalUPath(), LogicalType)
+    assert isinstance(LogicalUPath(), LogicalTypeProtocol)
 
 
 def test_logical_upath_logical_type_name():
@@ -164,7 +164,7 @@ def test_logical_uuid_isinstance_logical_type():
     """LogicalUUID() satisfies the LogicalType runtime-checkable protocol."""
     from orcapod.extension_types.builtin_logical_types import LogicalUUID
 
-    assert isinstance(LogicalUUID(), LogicalType)
+    assert isinstance(LogicalUUID(), LogicalTypeProtocol)
 
 
 def test_logical_uuid_logical_type_name():
@@ -244,7 +244,7 @@ def test_logical_uuid_registration_does_not_raise():
 
     registry = LogicalTypeRegistry()
     lt = LogicalUUID()
-    registry.register(lt)  # should NOT raise
+    registry.register_logical_type(lt)  # should NOT raise
     assert registry.get_by_logical_name("uuid.UUID") is lt
     assert registry.get_by_arrow_extension_name("uuid.UUID") is lt
 
@@ -260,7 +260,7 @@ def test_logical_path_arrow_round_trip():
 
     lt = LogicalPath()
     registry = LogicalTypeRegistry()
-    registry.register(lt)
+    registry.register_logical_type(lt)
 
     originals = [pathlib.Path("/tmp/foo"), pathlib.Path("/home/user/bar.txt")]
     storage_vals = [lt.python_to_storage(p) for p in originals]
@@ -277,7 +277,7 @@ def test_logical_path_polars_round_trip():
 
     lt = LogicalPath()
     registry = LogicalTypeRegistry()
-    registry.register(lt)
+    registry.register_logical_type(lt)
 
     originals = [pathlib.Path("/tmp/foo"), pathlib.Path("/home/user/bar.txt")]
     storage_vals = [lt.python_to_storage(p) for p in originals]
@@ -296,7 +296,7 @@ def test_logical_upath_arrow_round_trip():
 
     lt = LogicalUPath()
     registry = LogicalTypeRegistry()
-    registry.register(lt)
+    registry.register_logical_type(lt)
 
     originals = [UPath("s3://bucket/key"), UPath("gs://other/path/file.txt")]
     storage_vals = [lt.python_to_storage(p) for p in originals]
@@ -313,7 +313,7 @@ def test_logical_upath_polars_round_trip():
 
     lt = LogicalUPath()
     registry = LogicalTypeRegistry()
-    registry.register(lt)
+    registry.register_logical_type(lt)
 
     originals = [UPath("s3://bucket/key"), UPath("gs://other/path/file.txt")]
     storage_vals = [lt.python_to_storage(p) for p in originals]
@@ -332,7 +332,7 @@ def test_logical_uuid_arrow_round_trip():
 
     lt = LogicalUUID()
     registry = LogicalTypeRegistry()
-    registry.register(lt)
+    registry.register_logical_type(lt)
 
     originals = [uuid_module.UUID("12345678-1234-5678-1234-567812345678"), uuid_module.uuid4()]
     storage_vals = [lt.python_to_storage(u) for u in originals]
@@ -349,7 +349,7 @@ def test_logical_uuid_polars_round_trip():
 
     lt = LogicalUUID()
     registry = LogicalTypeRegistry()
-    registry.register(lt)
+    registry.register_logical_type(lt)
 
     originals = [uuid_module.UUID("12345678-1234-5678-1234-567812345678"), uuid_module.uuid4()]
     storage_vals = [lt.python_to_storage(u) for u in originals]

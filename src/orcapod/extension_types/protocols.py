@@ -1,9 +1,9 @@
 """Protocol definitions for the Arrow/Polars extension type system.
 
-This module defines ``LogicalType`` and ``LogicalTypeFactory`` — the contracts
-for implementations that bind a Python class to its Arrow and Polars extension
-type representation, and for factories that auto-construct such implementations
-from Arrow schema metadata.
+This module defines ``LogicalTypeProtocol`` and ``LogicalTypeFactoryProtocol`` —
+the contracts for implementations that bind a Python class to its Arrow and Polars
+extension type representation, and for factories that auto-construct such
+implementations from Arrow schema metadata.
 
 Note:
     This module is part of the parallel-build phase. The old
@@ -21,10 +21,10 @@ if TYPE_CHECKING:
 
 
 @runtime_checkable
-class LogicalType(Protocol):
+class LogicalTypeProtocol(Protocol):
     """Protocol for Arrow/Polars extension-type-backed logical types.
 
-    A ``LogicalType`` is a three-way binding between a unique logical type name
+    A ``LogicalTypeProtocol`` is a three-way binding between a unique logical type name
     (orcapod's identifier), a Python class, and Arrow/Polars extension types.
     Each implementation *owns* its Arrow and Polars extension types by providing
     them directly via ``get_arrow_extension_type`` and ``get_polars_extension_type``.
@@ -93,18 +93,18 @@ class LogicalType(Protocol):
 
 
 @runtime_checkable
-class LogicalTypeFactory(Protocol):
-    """Protocol for factories that auto-construct ``LogicalType`` instances from Arrow schema metadata.
+class LogicalTypeFactoryProtocol(Protocol):
+    """Protocol for factories that auto-construct ``LogicalTypeProtocol`` instances from Arrow schema metadata.
 
-    A ``LogicalTypeFactory`` constructs a ``LogicalType`` from the Arrow extension
-    type name, its underlying storage type, and the full parsed JSON metadata dict.
-    The dispatch key (``"category"`` value from the metadata JSON) that routes to this
-    factory is declared at registration time via
+    A ``LogicalTypeFactoryProtocol`` constructs a ``LogicalTypeProtocol`` from the
+    Arrow extension type name, its underlying storage type, and the full parsed JSON
+    metadata dict. The dispatch key (``"category"`` value from the metadata JSON) that
+    routes to this factory is declared at registration time via
     ``LogicalTypeRegistry.register_logical_type_factory``; the factory itself has no
     knowledge of its dispatch key but receives the full metadata dict so it can read
     additional hints beyond ``"category"``.
 
-    This protocol is ``@runtime_checkable``, consistent with ``LogicalType``.
+    This protocol is ``@runtime_checkable``, consistent with ``LogicalTypeProtocol``.
     """
 
     def create_logical_type(
@@ -112,8 +112,8 @@ class LogicalTypeFactory(Protocol):
         arrow_extension_name: str,
         storage_type: pa.DataType,
         metadata: dict[str, Any],
-    ) -> LogicalType:
-        """Construct a ``LogicalType`` for the given Arrow extension name and storage type.
+    ) -> LogicalTypeProtocol:
+        """Construct a ``LogicalTypeProtocol`` for the given Arrow extension name and storage type.
 
         Args:
             arrow_extension_name: The Arrow extension type name extracted from the
@@ -124,8 +124,8 @@ class LogicalTypeFactory(Protocol):
                 ``"protocol"``, ``"pydantic_version"``).
 
         Returns:
-            A fully constructed ``LogicalType`` ready to be passed to
-            ``LogicalTypeRegistry.register()``.
+            A fully constructed ``LogicalTypeProtocol`` ready to be passed to
+            ``LogicalTypeRegistry.register_logical_type()``.
 
         Raises:
             ValueError: If this factory cannot construct a logical type for the given
