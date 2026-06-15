@@ -118,6 +118,12 @@ def _get_python_to_arrow_map() -> dict:
     return _PYTHON_TO_ARROW_MAP
 
 
+# Cache for the set of Python types that UniversalTypeConverter handles natively.
+# Built lazily by get_native_python_types() from _get_python_to_arrow_map() so
+# that datetime, numpy types, and any future additions are captured automatically.
+_ARROW_NATIVE_TYPE_KEYS: frozenset[type] | None = None
+
+
 def _is_optional_type(python_type: DataType) -> bool:
     """Return True if python_type is T | None (Optional[T]).
 
@@ -151,7 +157,7 @@ class UniversalTypeConverter:
         self,
         semantic_registry: SemanticTypeRegistry | None = None,
         datetime_timezone: typing.Literal["strict", "coerce_utc"] = "strict",
-        logical_type_registry: "LogicalTypeRegistry | None" = None,
+        logical_type_registry: LogicalTypeRegistry | None = None,
     ):
         """
         Args:
@@ -186,6 +192,26 @@ class UniversalTypeConverter:
         self._python_to_arrow_types: dict[DataType, pa.DataType] = {}
         self._arrow_to_python_types: dict[pa.DataType, DataType] = {}
         self._dataclass_lookup_cache: dict[str, type] = {}
+
+    @classmethod
+    def get_native_python_types(cls) -> frozenset[type]:
+        """Return the set of Python types that this converter handles natively.
+
+        Derived lazily from ``_get_python_to_arrow_map()`` so that
+        ``datetime.datetime``, numpy scalar types, and any future additions
+        are captured without hard-coding them here. ``type(None)`` is always
+        included because ``NoneType`` is produced by ``Optional[T]`` /
+        ``T | None`` unwrapping but may not appear as a key in the map.
+
+        Returns:
+            Frozen set of Python ``type`` objects with built-in Arrow mappings.
+        """
+        global _ARROW_NATIVE_TYPE_KEYS
+        if _ARROW_NATIVE_TYPE_KEYS is None:
+            _ARROW_NATIVE_TYPE_KEYS = frozenset(
+                k for k in _get_python_to_arrow_map() if isinstance(k, type)
+            ) | {type(None)}
+        return _ARROW_NATIVE_TYPE_KEYS
 
     def python_type_to_arrow_type(self, python_type: DataType) -> pa.DataType:
         """

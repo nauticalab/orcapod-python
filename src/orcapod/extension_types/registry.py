@@ -12,6 +12,8 @@ import re
 from typing import TYPE_CHECKING, Iterable
 
 from orcapod.extension_types.protocols import LogicalTypeProtocol, LogicalTypeFactoryProtocol
+from orcapod.extension_types.type_utils import extract_leaf_classes
+from orcapod.types import Schema
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -299,6 +301,9 @@ class LogicalTypeRegistry:
     ) -> None:
         """Register a factory on one or both dispatch axes.
 
+        A single factory instance can be registered for multiple ``python_bases``
+        at once — pass a list with all the base classes it should handle.
+
         Args:
             factory: The factory to register.
             category: If given, registers factory as the read-side handler for Arrow
@@ -306,8 +311,9 @@ class LogicalTypeRegistry:
                 ``ValueError`` if a different factory is already registered for this
                 category.
             python_bases: Zero or more Python base classes. Registers factory as the
-                write-side handler for each. Raises ``ValueError`` if a different
-                factory is already registered for a given base.
+                write-side handler for each base. A single factory may cover any
+                number of bases. Raises ``ValueError`` if a *different* factory is
+                already registered for a given base.
 
         Raises:
             ValueError: If neither ``category`` nor ``python_bases`` is provided.
@@ -325,6 +331,7 @@ class LogicalTypeRegistry:
                     f"Cannot register factory for category {category!r}: "
                     f"a different factory is already registered for this category."
                 )
+            # Skip registration if this exact factory object is already bound to the category.
             if existing is not factory:
                 self._category_factories[category] = factory
                 logger.debug(
@@ -339,6 +346,8 @@ class LogicalTypeRegistry:
                     f"a different factory is already registered for this base."
                 )
         for base in python_bases_list:
+            # Skip if this exact factory object is already bound to the base class
+            # (idempotent re-registration of the same factory is always a no-op).
             if self._python_class_factories.get(base) is not factory:
                 self._python_class_factories[base] = factory
                 logger.debug(
@@ -567,3 +576,38 @@ class LogicalTypeRegistry:
                 python_type,
             )
             return lt
+
+    def ensure_types_registered_for_schemas(self, *schemas: Schema) -> None:
+        """Ensure a LogicalType is registered for every non-native leaf class in schemas.
+
+        Recursively unwraps generic annotations (``list[T]``, ``dict[K, V]``,
+        ``T | None``, etc.) to find leaf Python classes. Skips Arrow-native
+        types (``int``, ``str``, ``datetime``, …) and types that are already
+        registered. Calls ``ensure_logical_type_for_python_class`` for any
+        remaining leaf class, which synthesizes via factory or raises
+        ``TypeError`` if no factory is registered.
+
+        This is the canonical write-side registration trigger, called at
+        ``FunctionPod`` declaration time so that any missing ``LogicalType``
+        is detected and synthesized eagerly rather than at data-processing time.
+
+        Args:
+            *schemas: One or more ``Schema`` mappings (column name → Python type
+                annotation) to inspect.
+
+        Raises:
+            TypeError: If a leaf class has no registered ``LogicalType`` and
+                no registered factory covers it.
+        """
+        # Local import to avoid a circular dependency:
+        # registry → universal_converter → contexts.core → registry
+        from orcapod.semantic_types.universal_converter import UniversalTypeConverter  # noqa: PLC0415
+
+        native_keys = UniversalTypeConverter.get_native_python_types()
+        for schema in schemas:
+            for annotation in schema.values():
+                for leaf_class in extract_leaf_classes(annotation):
+                    if leaf_class in native_keys or self.get_by_python_type(leaf_class) is not None:
+                        continue
+                    self.ensure_logical_type_for_python_class(leaf_class)
+                    # TypeError propagates if no factory matches — intentional hard error
