@@ -35,6 +35,7 @@ from orcapod.types import (
     Schema,
     resolve_concurrency,
 )
+from orcapod.extension_types.type_utils import _extract_leaf_classes
 from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -56,6 +57,43 @@ def _executor_supports_concurrent(
     return executor is not None and executor.supports_concurrent_execution
 
 
+# Python types that Arrow handles natively — no LogicalType registration needed.
+_ARROW_NATIVE_TYPES: frozenset[type] = frozenset({
+    int, float, str, bytes, bool, type(None),
+})
+
+
+def _trigger_write_side_registration(
+    input_schema: Schema,
+    output_schema: Schema,
+    registry: object | None,
+) -> None:
+    """Ensure a LogicalType is registered for every non-native leaf class in the schemas.
+
+    Called once at pod declaration time. Recursively unwraps generic annotations
+    (``list[T]``, ``dict[K, V]``, etc.) to find leaf classes. Skips Arrow-native
+    types and already-registered types. Raises ``TypeError`` at declaration time
+    if no factory is registered for a leaf class.
+
+    Args:
+        input_schema: The pod's input data schema (column name to Python type annotation).
+        output_schema: The pod's output data schema.
+        registry: The ``LogicalTypeRegistry`` from the pod's ``DataContext``.
+            If ``None``, this function is a no-op.
+    """
+    if registry is None:
+        return
+    for schema in (input_schema, output_schema):
+        for annotation in schema.values():
+            for leaf_class in _extract_leaf_classes(annotation):
+                if leaf_class in _ARROW_NATIVE_TYPES:
+                    continue
+                if registry.get_by_python_type(leaf_class) is not None:
+                    continue  # already registered — O(1) cache hit
+                registry.ensure_logical_type_for_python_class(leaf_class)
+                # TypeError propagates if no factory matches — intentional hard error
+
+
 class _FunctionPodBase(TraceableBase):
     """Base pod that applies a data function to each input data."""
 
@@ -74,6 +112,11 @@ class _FunctionPodBase(TraceableBase):
         )
         self.tracker_manager = tracker_manager or DEFAULT_TRACKER_MANAGER
         self._data_function = data_function
+        _trigger_write_side_registration(
+            data_function.input_data_schema,
+            data_function.output_data_schema,
+            self.data_context.logical_type_registry,
+        )
 
     def computed_label(self) -> str | None:
         """Use the data function's canonical name as the default label."""
