@@ -56,13 +56,14 @@ def make_arrow_extension_type(
         metadata: Optional bytes stored as ``ARROW:extension:metadata``.
             Defaults to ``None`` (serialised as empty bytes).
 
-            ``metadata`` can optionally encode a **LogicalType category** as a
+            ``metadata`` can optionally encode a **LogicalTypeProtocol category** as a
             UTF-8 JSON object with at least a ``"category"`` key
             (e.g. ``b'{"category": "Dataclass"}'``,
             ``b'{"category": "Pydantic", "pydantic_version": 2}'``).
-            A ``LogicalTypeFactory`` (see ``LogicalTypeFactory.create_logical_type``)
-            dispatches on the ``"category"`` value when reading schemas from IPC or
-            Parquet files and uses it to auto-generate the correct ``LogicalType``
+            A ``LogicalTypeFactoryProtocol`` (see
+            ``LogicalTypeFactoryProtocol.create_logical_type``) dispatches on the
+            ``"category"`` value when reading schemas from IPC or Parquet files and
+            uses it to auto-generate the correct ``LogicalTypeProtocol`` implementation
             for the specific Python class within that category, without requiring
             explicit prior registration.
 

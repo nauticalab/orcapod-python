@@ -21,7 +21,6 @@ Example::
 """
 from __future__ import annotations
 
-import logging
 from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, Any
 
@@ -34,8 +33,6 @@ from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 
 if TYPE_CHECKING:
     import pyarrow as pa
-
-logger = logging.getLogger(__name__)
 
 
 class ExtensionAwareDatabase:
