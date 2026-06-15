@@ -35,7 +35,6 @@ from orcapod.types import (
     Schema,
     resolve_concurrency,
 )
-from orcapod.extension_types.type_utils import _extract_leaf_classes
 from orcapod.utils import arrow_utils, schema_utils
 from orcapod.utils.lazy_module import LazyModule
 
@@ -44,7 +43,6 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     import polars as pl
     import pyarrow as pa
-    from orcapod.extension_types.registry import LogicalTypeRegistry
 else:
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")
@@ -57,58 +55,6 @@ def _executor_supports_concurrent(
     executor = data_function.executor
     return executor is not None and executor.supports_concurrent_execution
 
-
-# Python types that Arrow handles natively — no LogicalType registration needed.
-# Built lazily from UniversalTypeConverter._get_python_to_arrow_map() so that
-# datetime.datetime, numpy types, and any future additions are captured automatically.
-_ARROW_NATIVE_TYPE_KEYS: frozenset[type] | None = None
-
-
-def _get_arrow_native_type_keys() -> frozenset[type]:
-    """Return the set of Python types that UniversalTypeConverter handles natively.
-
-    Derived lazily from ``_get_python_to_arrow_map()`` so that datetime, numpy,
-    and other built-in mappings are captured without hard-coding them here.
-    ``type(None)`` is always included because ``NoneType`` is produced by
-    ``Optional[T]`` unwrapping but may not appear as a key in the map.
-    """
-    global _ARROW_NATIVE_TYPE_KEYS
-    if _ARROW_NATIVE_TYPE_KEYS is None:
-        from orcapod.semantic_types.universal_converter import _get_python_to_arrow_map  # noqa: PLC0415
-        _ARROW_NATIVE_TYPE_KEYS = frozenset(
-            k for k in _get_python_to_arrow_map() if isinstance(k, type)
-        ) | {type(None)}
-    return _ARROW_NATIVE_TYPE_KEYS
-
-
-def _ensure_types_registered_for_schemas(
-    *schemas: Schema,
-    registry: LogicalTypeRegistry | None,
-) -> None:
-    """Ensure a LogicalType is registered for every non-native leaf class in the schemas.
-
-    Generic utility that can be called with any number of ``Schema`` objects.
-    Recursively unwraps generic annotations (``list[T]``, ``dict[K, V]``, etc.)
-    to find leaf classes. Skips Arrow-native types and already-registered types.
-    Raises ``TypeError`` at the call site if no factory is registered for a leaf
-    class.
-
-    Args:
-        *schemas: One or more ``Schema`` mappings (column name → Python type
-            annotation) to inspect.
-        registry: The ``LogicalTypeRegistry`` used for lookup and synthesis.
-            If ``None``, this function is a no-op.
-    """
-    if registry is None:
-        return
-    native_keys = _get_arrow_native_type_keys()
-    for schema in schemas:
-        for annotation in schema.values():
-            for leaf_class in _extract_leaf_classes(annotation):
-                if leaf_class in native_keys or registry.get_by_python_type(leaf_class) is not None:
-                    continue
-                registry.ensure_logical_type_for_python_class(leaf_class)
-                # TypeError propagates if no factory matches — intentional hard error
 
 
 class _FunctionPodBase(TraceableBase):
@@ -129,10 +75,9 @@ class _FunctionPodBase(TraceableBase):
         )
         self.tracker_manager = tracker_manager or DEFAULT_TRACKER_MANAGER
         self._data_function = data_function
-        _ensure_types_registered_for_schemas(
+        self.data_context.logical_type_registry.ensure_types_registered_for_schemas(
             data_function.input_data_schema,
             data_function.output_data_schema,
-            registry=self.data_context.logical_type_registry,
         )
 
     def computed_label(self) -> str | None:
