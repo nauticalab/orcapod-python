@@ -6,6 +6,7 @@ from abc import abstractmethod
 from collections.abc import Callable, Collection, Iterator, Sequence
 from functools import wraps
 from typing import TYPE_CHECKING, Any, Protocol, cast
+import typing as _typing
 
 from orcapod import contexts
 from orcapod.channels import ReadableChannel, WritableChannel
@@ -44,6 +45,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     import polars as pl
     import pyarrow as pa
+    from orcapod.extension_types.registry import LogicalTypeRegistry
 else:
     pa = LazyModule("pyarrow")
     pl = LazyModule("polars")
@@ -58,15 +60,17 @@ def _executor_supports_concurrent(
 
 
 # Python types that Arrow handles natively — no LogicalType registration needed.
-_ARROW_NATIVE_TYPES: frozenset[type] = frozenset({
-    int, float, str, bytes, bool, type(None),
+# typing.Any is included because it is a valid "unknown element type" annotation
+# (e.g. list[Any]) that maps directly to pa.null() without extension type dispatch.
+_ARROW_NATIVE_TYPES: frozenset = frozenset({
+    int, float, str, bytes, bool, type(None), _typing.Any,
 })
 
 
 def _trigger_write_side_registration(
     input_schema: Schema,
     output_schema: Schema,
-    registry: object | None,
+    registry: LogicalTypeRegistry | None,
 ) -> None:
     """Ensure a LogicalType is registered for every non-native leaf class in the schemas.
 
