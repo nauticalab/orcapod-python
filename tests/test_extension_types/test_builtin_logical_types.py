@@ -502,3 +502,131 @@ def test_orcapod_upath_alias_in_all():
 def test_orcapod_uuid_alias_in_all():
     """orcapod.UUID appears in orcapod.__all__."""
     assert "UUID" in orcapod.__all__
+
+
+# ---------------------------------------------------------------------------
+# Alias round-trip tests: using the stdlib types directly still works
+# ---------------------------------------------------------------------------
+# These tests verify that orcapod.Path / orcapod.UPath / orcapod.UUID are true
+# aliases, not wrappers.  Because e.g. orcapod.UUID is uuid.UUID, using
+# uuid.UUID directly produces the same orcapod.uuid Arrow extension type, and
+# the value recovered from Arrow is a uuid.UUID (i.e. also an orcapod.UUID).
+# Each test asserts the identity precondition first so the contract is clear.
+# ---------------------------------------------------------------------------
+
+
+def test_pathlib_path_works_via_orcapod_path_alias_arrow_round_trip():
+    """pathlib.Path values round-trip through Arrow with the orcapod.path extension type.
+
+    This test is only valid because orcapod.Path is pathlib.Path — they are the same
+    object.  Using pathlib.Path directly (rather than orcapod.Path) produces the same
+    Arrow extension type (``"orcapod.path"``), and the recovered value is a
+    pathlib.Path (i.e. orcapod.Path).
+    """
+    from orcapod.extension_types.builtin_logical_types import LogicalPath
+
+    # Precondition: test is only meaningful if orcapod.Path is pathlib.Path
+    assert orcapod.Path is pathlib.Path
+
+    lt = LogicalPath()
+    registry = LogicalTypeRegistry()
+    registry.register_logical_type(lt)
+
+    # Create value using stdlib pathlib directly (not orcapod.Path)
+    p = pathlib.Path("/tmp/alias_test/foo.txt")
+
+    # Registry can find LogicalPath via pathlib.Path since orcapod.Path is pathlib.Path
+    found = registry.get_by_python_type(pathlib.Path)
+    assert found is lt
+
+    # Saving to Arrow produces "orcapod.path" extension type
+    storage_val = lt.python_to_storage(p)
+    arrow_ext = lt.get_arrow_extension_type()
+    assert arrow_ext.extension_name == "orcapod.path"
+    ext_arr = pa.ExtensionArray.from_storage(
+        arrow_ext, pa.array([storage_val], type=arrow_ext.storage_type)
+    )
+
+    # Recovered value is a pathlib.Path (which is orcapod.Path)
+    recovered = lt.storage_to_python(ext_arr.storage[0].as_py())
+    assert recovered == p
+    assert isinstance(recovered, orcapod.Path)  # valid because orcapod.Path is pathlib.Path
+    assert isinstance(recovered, pathlib.Path)
+
+
+def test_upath_upath_works_via_orcapod_upath_alias_arrow_round_trip():
+    """upath.UPath values round-trip through Arrow with the orcapod.upath extension type.
+
+    This test is only valid because orcapod.UPath is upath.UPath — they are the same
+    object.  Using upath.UPath directly (rather than orcapod.UPath) produces the same
+    Arrow extension type (``"orcapod.upath"``), and the recovered value is a
+    upath.UPath (i.e. orcapod.UPath).
+    """
+    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+
+    # Precondition: test is only meaningful if orcapod.UPath is upath.UPath
+    assert orcapod.UPath is UPath
+
+    lt = LogicalUPath()
+    registry = LogicalTypeRegistry()
+    registry.register_logical_type(lt)
+
+    # Create value using upath directly (not orcapod.UPath)
+    up = UPath("s3://bucket/alias_test/key.txt")
+
+    # Registry can find LogicalUPath via UPath since orcapod.UPath is upath.UPath
+    found = registry.get_by_python_type(UPath)
+    assert found is lt
+
+    # Saving to Arrow produces "orcapod.upath" extension type
+    storage_val = lt.python_to_storage(up)
+    arrow_ext = lt.get_arrow_extension_type()
+    assert arrow_ext.extension_name == "orcapod.upath"
+    ext_arr = pa.ExtensionArray.from_storage(
+        arrow_ext, pa.array([storage_val], type=arrow_ext.storage_type)
+    )
+
+    # Recovered value is a upath.UPath (which is orcapod.UPath)
+    recovered = lt.storage_to_python(ext_arr.storage[0].as_py())
+    assert recovered == up
+    assert isinstance(recovered, orcapod.UPath)  # valid because orcapod.UPath is upath.UPath
+    assert isinstance(recovered, UPath)
+
+
+def test_uuid_uuid_works_via_orcapod_uuid_alias_arrow_round_trip():
+    """uuid.UUID values round-trip through Arrow with the orcapod.uuid extension type.
+
+    This test is only valid because orcapod.UUID is uuid.UUID — they are the same
+    object.  Using uuid.UUID directly (rather than orcapod.UUID) produces the same
+    Arrow extension type (``"orcapod.uuid"``), and the recovered value is a
+    uuid.UUID (i.e. orcapod.UUID).
+    """
+    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+
+    # Precondition: test is only meaningful if orcapod.UUID is uuid.UUID
+    assert orcapod.UUID is uuid_module.UUID
+
+    lt = LogicalUUID()
+    registry = LogicalTypeRegistry()
+    registry.register_logical_type(lt)
+
+    # Create value using stdlib uuid directly (not orcapod.UUID)
+    u = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
+
+    # Registry can find LogicalUUID via uuid.UUID since orcapod.UUID is uuid.UUID
+    found = registry.get_by_python_type(uuid_module.UUID)
+    assert found is lt
+
+    # Saving to Arrow produces "orcapod.uuid" extension type
+    storage_val = lt.python_to_storage(u)
+    arrow_ext = lt.get_arrow_extension_type()
+    assert arrow_ext.extension_name == "orcapod.uuid"
+    ext_arr = pa.ExtensionArray.from_storage(
+        arrow_ext, pa.array([storage_val], type=arrow_ext.storage_type)
+    )
+
+    # Recovered value is a uuid.UUID (which is orcapod.UUID)
+    recovered = lt.storage_to_python(ext_arr.storage[0].as_py())
+    assert recovered == u
+    assert isinstance(recovered, orcapod.UUID)  # valid because orcapod.UUID is uuid.UUID
+    assert isinstance(recovered, uuid_module.UUID)
