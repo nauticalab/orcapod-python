@@ -56,14 +56,15 @@ def make_arrow_extension_type(
         metadata: Optional bytes stored as ``ARROW:extension:metadata``.
             Defaults to ``None`` (serialised as empty bytes).
 
-            ``metadata`` can optionally encode a **LogicalType category** — a
-            short identifier (e.g. ``b"Dataclass"``, ``b"Pydantic"``,
-            ``b"Pickle"``) that classifies the kind of Python type being
-            represented. A ``LogicalTypeFactory`` (see ``LogicalTypeFactory.create_logical_type``)
-            inspects this category when reading schemas from IPC or Parquet files and uses it
-            to auto-generate the correct ``LogicalType`` for the specific Python
-            class within that category, without requiring explicit prior
-            registration.
+            ``metadata`` can optionally encode a **LogicalType category** as a
+            UTF-8 JSON object with at least a ``"category"`` key
+            (e.g. ``b'{"category": "Dataclass"}'``,
+            ``b'{"category": "Pydantic", "pydantic_version": 2}'``).
+            A ``LogicalTypeFactory`` (see ``LogicalTypeFactory.create_logical_type``)
+            dispatches on the ``"category"`` value when reading schemas from IPC or
+            Parquet files and uses it to auto-generate the correct ``LogicalType``
+            for the specific Python class within that category, without requiring
+            explicit prior registration.
 
     Returns:
         A ``pa.ExtensionType`` subclass. Call it with no arguments to obtain
@@ -363,7 +364,7 @@ class LogicalTypeRegistry:
                 f"(metadata is None).\n"
                 f"Types without a metadata category tag cannot be auto-registered via "
                 f"a factory — they must be pre-registered explicitly via "
-                f"default_logical_type_registry.register(logical_type)."
+                f"registry.register(logical_type) on the registry instance used for reads."
             )
 
         # Step 3: Parse JSON.
@@ -378,6 +379,15 @@ class LogicalTypeRegistry:
                 f'key, e.g. {{"category": "Dataclass"}}.'
             ) from exc
 
+        # Guard: JSON must decode to a dict (object), not a list, scalar, etc.
+        if not isinstance(metadata_dict, dict):
+            raise ValueError(
+                f"Extension type {arrow_extension_name!r} has extension metadata that "
+                f"decoded to a non-object JSON value: {metadata_dict!r}. "
+                f'Extension metadata must be a JSON object with at least a "category" '
+                f'key, e.g. {{"category": "Dataclass"}}.'
+            )
+
         # Step 4: Require "category" key.
         if "category" not in metadata_dict:
             raise ValueError(
@@ -389,6 +399,14 @@ class LogicalTypeRegistry:
 
         category = metadata_dict["category"]
 
+        # Guard: "category" value must be a string (used as dict key for factory lookup).
+        if not isinstance(category, str):
+            raise ValueError(
+                f"Extension type {arrow_extension_name!r} has extension metadata JSON "
+                f'where "category" is not a string: {category!r}. '
+                f'The "category" value must be a plain string, e.g. "Dataclass".'
+            )
+
         # Step 5: Look up factory.
         factory = self._factories.get(category)
         if factory is None:
@@ -396,10 +414,8 @@ class LogicalTypeRegistry:
                 f"No LogicalTypeFactory is registered for category {category!r}.\n"
                 f"Cannot prepare extension type {arrow_extension_name!r} for "
                 f"registration.\n"
-                f"Register a factory via "
-                f"default_logical_type_registry.register_logical_type_factory(\n"
-                f"    {category!r}, factory\n"
-                f")."
+                f"Register a factory on the registry instance used for reads via "
+                f"register_logical_type_factory({category!r}, factory)."
             )
 
         # Step 6: Construct logical type via factory.
@@ -415,7 +431,7 @@ class LogicalTypeRegistry:
         # Step 7: Register in all three bindings + PA/Polars global registries.
         self.register(logical_type)
         logger.debug(
-            "prepare_extension_type: successfully registered %r via %r factory",
+            "prepare_extension_type: successfully registered %r via factory for category %r",
             arrow_extension_name,
             category,
         )
