@@ -6,7 +6,6 @@ from abc import abstractmethod
 from collections.abc import Callable, Collection, Iterator, Sequence
 from functools import wraps
 from typing import TYPE_CHECKING, Any, Protocol, cast
-import typing as _typing
 
 from orcapod import contexts
 from orcapod.channels import ReadableChannel, WritableChannel
@@ -60,11 +59,26 @@ def _executor_supports_concurrent(
 
 
 # Python types that Arrow handles natively — no LogicalType registration needed.
-# typing.Any is included because it is a valid "unknown element type" annotation
-# (e.g. list[Any]) that maps directly to pa.null() without extension type dispatch.
-_ARROW_NATIVE_TYPES: frozenset = frozenset({
-    int, float, str, bytes, bool, type(None), _typing.Any,
-})
+# Built lazily from UniversalTypeConverter._get_python_to_arrow_map() so that
+# datetime.datetime, numpy types, and any future additions are captured automatically.
+_ARROW_NATIVE_TYPE_KEYS: frozenset | None = None
+
+
+def _get_arrow_native_type_keys() -> frozenset:
+    """Return the set of Python types that UniversalTypeConverter handles natively.
+
+    Derived lazily from ``_get_python_to_arrow_map()`` so that datetime, numpy,
+    and other built-in mappings are captured without hard-coding them here.
+    ``type(None)`` is always included because ``NoneType`` is produced by
+    ``Optional[T]`` unwrapping but may not appear as a key in the map.
+    """
+    global _ARROW_NATIVE_TYPE_KEYS
+    if _ARROW_NATIVE_TYPE_KEYS is None:
+        from orcapod.semantic_types.universal_converter import _get_python_to_arrow_map  # noqa: PLC0415
+        _ARROW_NATIVE_TYPE_KEYS = frozenset(
+            k for k in _get_python_to_arrow_map() if isinstance(k, type)
+        ) | {type(None)}
+    return _ARROW_NATIVE_TYPE_KEYS
 
 
 def _trigger_write_side_registration(
@@ -90,7 +104,7 @@ def _trigger_write_side_registration(
     for schema in (input_schema, output_schema):
         for annotation in schema.values():
             for leaf_class in _extract_leaf_classes(annotation):
-                if leaf_class in _ARROW_NATIVE_TYPES:
+                if leaf_class in _get_arrow_native_type_keys():
                     continue
                 if registry.get_by_python_type(leaf_class) is not None:
                     continue  # already registered — O(1) cache hit
