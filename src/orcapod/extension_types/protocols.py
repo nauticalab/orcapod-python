@@ -94,7 +94,12 @@ class LogicalTypeProtocol(Protocol):
 
 @runtime_checkable
 class LogicalTypeFactoryProtocol(Protocol):
-    """Protocol for factories that auto-construct ``LogicalTypeProtocol`` instances from Arrow schema metadata.
+    """Protocol for factories that synthesize or reconstruct ``LogicalTypeProtocol`` instances.
+
+    Bridges two directions: the write path (``create_for_python_type`` — synthesizes a
+    ``LogicalTypeProtocol`` from a Python class) and the read path
+    (``reconstruct_from_arrow`` — reconstructs a ``LogicalTypeProtocol`` from Arrow schema
+    metadata).
 
     A ``LogicalTypeFactoryProtocol`` constructs a ``LogicalTypeProtocol`` from the
     Arrow extension type name, its underlying storage type, and the full parsed JSON
@@ -139,13 +144,14 @@ class LogicalTypeFactoryProtocol(Protocol):
         """Synthesize a LogicalType for the given Python class (write path).
 
         Called by the registry when pod declaration encounters an unregistered
-        class whose MRO intersects this factory's registered ``python_bases``.
+        class whose MRO intersects a base registered for this factory
+        (via ``LogicalTypeRegistry.register_logical_type_factory``).
         The factory derives all Arrow metadata (extension name, storage type,
         metadata dict) from the Python class itself.
 
-        The returned LogicalType must round-trip: the extension name and metadata
-        it produces must route back to this same factory's ``reconstruct_from_arrow``
-        on a subsequent read.
+        The returned LogicalType must round-trip: the Arrow metadata it embeds
+        must include the ``"category"`` key used to register this factory so
+        that ``reconstruct_from_arrow`` is correctly selected on a subsequent read.
 
         Args:
             python_type: The concrete Python class to synthesize a LogicalType for.
