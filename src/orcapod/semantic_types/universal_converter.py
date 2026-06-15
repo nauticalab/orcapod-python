@@ -221,14 +221,18 @@ class UniversalTypeConverter:
         This is the main entry point for Arrow → Python type conversion.
         Results are cached for performance.
         """
-        # Check cache first
-        if arrow_type in self._arrow_to_python_types:
-            return self._arrow_to_python_types[arrow_type]
+        try:
+            if arrow_type in self._arrow_to_python_types:
+                return self._arrow_to_python_types[arrow_type]
+        except TypeError:
+            # ExtensionType instances are not always hashable — skip the cache.
+            return self._convert_arrow_to_python(arrow_type)
 
-        # Convert and cache result
         python_type = self._convert_arrow_to_python(arrow_type)
-        self._arrow_to_python_types[arrow_type] = python_type
-
+        try:
+            self._arrow_to_python_types[arrow_type] = python_type
+        except TypeError:
+            pass  # Unhashable type — skip caching.
         return python_type
 
     def arrow_schema_to_python_schema(self, arrow_schema: pa.Schema) -> Schema:
@@ -411,10 +415,7 @@ class UniversalTypeConverter:
 
         # Create conversion function
         converter = self._create_arrow_to_python_converter(arrow_type)
-        try:
-            self._arrow_to_python_converters[arrow_type] = converter
-        except TypeError:
-            pass  # Unhashable type — skip caching.
+        self._arrow_to_python_converters[arrow_type] = converter
 
         return converter
 
