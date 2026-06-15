@@ -130,7 +130,8 @@ def apply_extension_types(
     if not changed:
         return table
 
-    new_schema = pa.schema(new_fields)
+    # Preserve any schema-level metadata (e.g. pandas metadata) from the original.
+    new_schema = pa.schema(new_fields, metadata=table.schema.metadata)
     return pa.table(dict(zip(new_schema.names, new_columns)), schema=new_schema)
 
 
@@ -170,12 +171,30 @@ def _apply_field(
             logger.debug("apply_extension_types: wrapped column %r as %r", field.name, ext_name)
             return new_col, new_field
 
-    # ── Case 3: struct — recurse into children ────────────────────────────────
+    # ── Case 3: struct — recurse only if children carry extension metadata ──────
     if pa.types.is_struct(field.type):
-        new_col, new_field = _apply_struct_field(col, field, registry)
-        return new_col, new_field
+        if _has_nested_extension_fields(field.type):
+            return _apply_struct_field(col, field, registry)
 
     return col, field
+
+
+def _has_nested_extension_fields(arrow_type: pa.DataType) -> bool:
+    """Return True if any child field at any nesting depth carries extension metadata.
+
+    Used to guard struct recursion: structs whose children carry no
+    ``ARROW:extension:name`` metadata are returned as-is without rebuilding.
+    """
+    import pyarrow as pa
+
+    for i in range(arrow_type.num_fields):
+        child = arrow_type.field(i)
+        meta = child.metadata or {}
+        if b"ARROW:extension:name" in meta:
+            return True
+        if pa.types.is_struct(child.type) and _has_nested_extension_fields(child.type):
+            return True
+    return False
 
 
 def _apply_struct_field(
@@ -187,7 +206,6 @@ def _apply_struct_field(
     import pyarrow as pa
 
     struct_type = field.type
-    child_names = [struct_type.field(i).name for i in range(struct_type.num_fields)]
     child_fields = [struct_type.field(i) for i in range(struct_type.num_fields)]
 
     # Process each chunk: rebuild StructArray with re-wrapped children.
@@ -209,7 +227,12 @@ def _apply_struct_field(
             new_child_arrays.append(new_child_chunked.combine_chunks())
             resolved_fields.append(new_child_field)
 
-        new_struct = pa.StructArray.from_arrays(new_child_arrays, fields=resolved_fields)
+        # Preserve the original null bitmap so struct-level nulls survive wrapping.
+        # StructArray.from_arrays() defaults to all-valid without an explicit mask.
+        null_mask = chunk.is_null() if chunk.null_count > 0 else None
+        new_struct = pa.StructArray.from_arrays(
+            new_child_arrays, fields=resolved_fields, mask=null_mask
+        )
         new_chunks.append(new_struct)
         if new_child_fields is None:
             new_child_fields = resolved_fields
