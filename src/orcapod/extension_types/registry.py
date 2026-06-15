@@ -183,7 +183,7 @@ class LogicalTypeRegistry:
     Example:
         >>> registry = LogicalTypeRegistry()
         >>> registry.register_logical_type(my_logical_type)
-        >>> lt = registry.get_by_logical_name("uuid.UUID")
+        >>> lt = registry.get_by_logical_name("orcapod.uuid")
 
         >>> # Pre-register types at construction:
         >>> registry = LogicalTypeRegistry(logical_types=[path_lt, uuid_lt])

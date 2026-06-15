@@ -36,7 +36,7 @@ class LogicalTypeProtocol(Protocol):
     def logical_type_name(self) -> str:
         """Unique orcapod identifier for this logical type.
 
-        By convention the Python fully qualified name (e.g. ``"uuid.UUID"``), but any unique
+        For built-in types, use an ``orcapod.*`` prefix (e.g. ``"orcapod.uuid"``). Any unique
         string is valid. Does NOT need to match the Arrow extension type name.
         """
         ...
