@@ -678,8 +678,7 @@ def test_converter_uses_logical_type_registry_for_registered_type():
     registry = LogicalTypeRegistry()
     registry.register_logical_type(lt)
 
-    converter = UniversalTypeConverter()
-    converter._logical_type_registry = registry
+    converter = UniversalTypeConverter(logical_type_registry=registry)
 
     result = converter.python_type_to_arrow_type(_MyCustomClass)
     expected_ext = lt.get_arrow_extension_type()
@@ -689,21 +688,20 @@ def test_converter_uses_logical_type_registry_for_registered_type():
 def test_converter_falls_through_for_unregistered_type():
     """If type not in LogicalTypeRegistry, converter falls through to old system (int → int64)."""
     registry = LogicalTypeRegistry()
-    converter = UniversalTypeConverter()
-    converter._logical_type_registry = registry
+    converter = UniversalTypeConverter(logical_type_registry=registry)
 
     result = converter.python_type_to_arrow_type(int)
     assert result == pa.int64()
 
 
 def test_converter_without_registry_unchanged():
-    """With no _logical_type_registry set, converter behaves exactly as before."""
+    """With no logical_type_registry, converter behaves exactly as before."""
     converter = UniversalTypeConverter()
     assert converter.python_type_to_arrow_type(str) == pa.large_string()
 
 
-def test_data_context_wires_registry_into_converter():
-    """DataContext.__post_init__ wires logical_type_registry into type_converter."""
+def test_data_context_type_converter_holds_logical_type_registry():
+    """DataContext's type_converter is constructed with the same logical_type_registry."""
     from orcapod.contexts import get_default_context
     ctx = get_default_context()
     assert hasattr(ctx.type_converter, "_logical_type_registry")

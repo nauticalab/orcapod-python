@@ -81,33 +81,32 @@ def _get_arrow_native_type_keys() -> frozenset:
     return _ARROW_NATIVE_TYPE_KEYS
 
 
-def _trigger_write_side_registration(
-    input_schema: Schema,
-    output_schema: Schema,
+def _ensure_types_registered_for_schemas(
+    *schemas: Schema,
     registry: LogicalTypeRegistry | None,
 ) -> None:
     """Ensure a LogicalType is registered for every non-native leaf class in the schemas.
 
-    Called once at pod declaration time. Recursively unwraps generic annotations
-    (``list[T]``, ``dict[K, V]``, etc.) to find leaf classes. Skips Arrow-native
-    types and already-registered types. Raises ``TypeError`` at declaration time
-    if no factory is registered for a leaf class.
+    Generic utility that can be called with any number of ``Schema`` objects.
+    Recursively unwraps generic annotations (``list[T]``, ``dict[K, V]``, etc.)
+    to find leaf classes. Skips Arrow-native types and already-registered types.
+    Raises ``TypeError`` at the call site if no factory is registered for a leaf
+    class.
 
     Args:
-        input_schema: The pod's input data schema (column name to Python type annotation).
-        output_schema: The pod's output data schema.
-        registry: The ``LogicalTypeRegistry`` from the pod's ``DataContext``.
+        *schemas: One or more ``Schema`` mappings (column name → Python type
+            annotation) to inspect.
+        registry: The ``LogicalTypeRegistry`` used for lookup and synthesis.
             If ``None``, this function is a no-op.
     """
     if registry is None:
         return
-    for schema in (input_schema, output_schema):
+    native_keys = _get_arrow_native_type_keys()
+    for schema in schemas:
         for annotation in schema.values():
             for leaf_class in _extract_leaf_classes(annotation):
-                if leaf_class in _get_arrow_native_type_keys():
+                if leaf_class in native_keys or registry.get_by_python_type(leaf_class) is not None:
                     continue
-                if registry.get_by_python_type(leaf_class) is not None:
-                    continue  # already registered — O(1) cache hit
                 registry.ensure_logical_type_for_python_class(leaf_class)
                 # TypeError propagates if no factory matches — intentional hard error
 
@@ -130,10 +129,10 @@ class _FunctionPodBase(TraceableBase):
         )
         self.tracker_manager = tracker_manager or DEFAULT_TRACKER_MANAGER
         self._data_function = data_function
-        _trigger_write_side_registration(
+        _ensure_types_registered_for_schemas(
             data_function.input_data_schema,
             data_function.output_data_schema,
-            self.data_context.logical_type_registry,
+            registry=self.data_context.logical_type_registry,
         )
 
     def computed_label(self) -> str | None:
