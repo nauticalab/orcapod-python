@@ -112,7 +112,7 @@ def test_resolution_context_is_importable_and_frozen():
     assert dataclasses.is_dataclass(ctx)
     # Verify it is frozen (mutation raises FrozenInstanceError)
     import pytest
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         ctx.visited_types = frozenset()  # type: ignore[misc]
 
 
