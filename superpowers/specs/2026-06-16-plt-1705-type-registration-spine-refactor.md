@@ -347,7 +347,16 @@ callers may use it).
 
 ## Out of scope
 
-- Registered logical types (e.g. `pathlib.Path`) as dataclass field types — follow-up issue
 - Wiring `DataclassHandlerFactory` into the default context — PLT-1701
 - Nested extension types inside struct sub-fields (self-describing nesting) — PLT-1700 (v0.2)
 - `dict[K, V]` as `list[struct{key, value}]` — **in scope** (owned by converter, zero factory logic)
+
+## Note: registered logical types as dataclass field types work naturally
+
+Because `DataclassHandlerFactory` delegates all per-field type resolution to
+`converter.register_python_class`, dataclass fields typed as registered logical types
+(e.g. `pathlib.Path`, `uuid.UUID`, `upath.UPath`) work without any special handling.
+`register_python_class` hits the registry immediately for pre-registered types and returns
+their Arrow extension type. Value conversion dispatches through the logical type's
+`python_to_storage` / `storage_to_python` methods. This was listed as a follow-up gap in
+PLT-1657, but is resolved by the new architecture at no extra cost.
