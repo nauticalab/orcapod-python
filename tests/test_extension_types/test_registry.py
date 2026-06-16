@@ -350,7 +350,6 @@ def test_register_logical_type_factory_python_base_same_factory_idempotent():
 
 def test_register_logical_type_factory_python_base_multiple_factories_allowed():
     """Multiple different factories can be registered for the same python_base."""
-    from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol
     registry = LogicalTypeRegistry()
     f1 = _make_stub_factory()
     f2 = _make_stub_factory()

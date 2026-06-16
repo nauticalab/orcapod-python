@@ -66,6 +66,12 @@ def _make_stub_factory():
         def __init__(self):
             self.calls: list[tuple] = []
 
+        def supports_class(self, python_type: type) -> bool:
+            return False  # database_hooks stub never handles write-side dispatch
+
+        def create_for_python_type(self, python_type, **kwargs):
+            raise NotImplementedError("database_hooks stub does not handle write-side dispatch")
+
         def reconstruct_from_arrow(self, arrow_extension_name, storage_type, metadata, **kwargs):
             import polars as pl
             from orcapod.extension_types.registry import make_arrow_extension_type

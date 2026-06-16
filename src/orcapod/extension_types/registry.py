@@ -473,8 +473,11 @@ class LogicalTypeRegistry:
 
         1. Exact-match shortcut: if ``python_type`` is already in ``_by_python_type``,
            return immediately.
-        2. Factory cache shortcut: if a winning factory for this type was previously
-           cached in ``_python_class_cache``, call it directly without re-probing.
+        2. Factory cache shortcut (defensive): if a winning factory for this type was
+           previously cached in ``_python_class_cache`` but the type is not yet in
+           ``_by_python_type``, call it directly without re-probing. Unreachable in
+           normal operation when synthesis succeeds — ``register_logical_type`` populates
+           ``_by_python_type`` so Step 1 fires on the next call.
         3. Walk ``python_type.__mro__``. Track the first (most-specific) hit in
            ``_by_python_type`` (concrete) and ``_python_class_factories`` (factory)
            separately, recording the MRO index of each. For factory hits, iterate
@@ -508,7 +511,9 @@ class LogicalTypeRegistry:
         if exact is not None:
             return exact
 
-        # Step 2: factory cache shortcut (skips supports_class re-probing).
+        # Step 2: factory cache shortcut (defensive; unreachable when synthesis succeeds,
+        # because register_logical_type puts the type into _by_python_type, making
+        # Step 1 fire on any subsequent call).
         cached_factory = self._python_class_cache.get(python_type)
         if cached_factory is not None:
             lt = cached_factory.create_for_python_type(python_type, registry=self, context=context)
@@ -526,7 +531,9 @@ class LogicalTypeRegistry:
         best_factory: LogicalTypeFactoryProtocol | None = None
 
         # Step 3: Walk MRO for direct hits.
+        mro_bases_visited: set[type] = set()
         for i, base in enumerate(python_type.__mro__):
+            mro_bases_visited.add(base)
             if best_concrete is None and base in self._by_python_type:
                 best_concrete_idx = i
                 best_concrete = self._by_python_type[base]
@@ -540,8 +547,11 @@ class LogicalTypeRegistry:
                 break
 
         # Step 4: issubclass fallback scan for ABCs with __subclasshook__.
+        # Skip bases already visited in the MRO walk (Step 3) to avoid re-probing.
         if best_factory is None:
             for base_class, factory_list in self._python_class_factories.items():
+                if base_class in mro_bases_visited:
+                    continue  # already probed in Step 3
                 try:
                     if issubclass(python_type, base_class):
                         for factory in factory_list:
@@ -573,9 +583,9 @@ class LogicalTypeRegistry:
             return best_concrete
 
         def _synthesize(factory: LogicalTypeFactoryProtocol) -> LogicalTypeProtocol:
-            self._python_class_cache[python_type] = factory
             lt = factory.create_for_python_type(python_type, registry=self, context=context)
             self.register_logical_type(lt)
+            self._python_class_cache[python_type] = factory
             logger.debug(
                 "ensure_logical_type_for_python_class: synthesized %r for %r",
                 lt.logical_type_name,
