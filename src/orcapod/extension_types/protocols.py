@@ -1,14 +1,10 @@
 """Protocol definitions for the Arrow/Polars extension type system.
 
-This module defines ``LogicalTypeProtocol`` and ``LogicalTypeFactoryProtocol`` —
-the contracts for implementations that bind a Python class to its Arrow and Polars
-extension type representation, and for factories that auto-construct such
-implementations from Arrow schema metadata.
-
-Note:
-    This module is part of the parallel-build phase. The old
-    ``SemanticStructConverterProtocol`` in ``protocols/semantic_types_protocols.py``
-    is untouched; it is removed in PLT-1660.
+This module defines ``TypeConverterProtocol``, ``LogicalTypeProtocol``, and
+``LogicalTypeFactoryProtocol`` — the contracts for the converter, for logical
+type implementations that bind a Python class to its Arrow and Polars extension
+type representation, and for factories that auto-construct such implementations
+from Arrow schema metadata.
 """
 
 from __future__ import annotations
@@ -18,6 +14,31 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 if TYPE_CHECKING:
     import polars as pl
     import pyarrow as pa
+
+
+@runtime_checkable
+class TypeConverterProtocol(Protocol):
+    """Minimal protocol exposing what factories and logical types need from the converter.
+
+    Placed in ``extension_types/protocols.py`` to avoid circular imports.
+    ``UniversalTypeConverter`` is the canonical implementation.
+    """
+
+    def register_python_class(self, annotation: Any) -> "pa.DataType":
+        """Traverse a Python annotation and return its Arrow type, registering as needed."""
+        ...
+
+    def register_storage_type(self, arrow_type: "pa.DataType") -> "pa.DataType":
+        """Traverse an Arrow type bottom-up, registering extension types, and return resolved type."""
+        ...
+
+    def python_to_storage(self, value: Any, annotation: Any) -> Any:
+        """Convert a Python value to its Arrow storage representation."""
+        ...
+
+    def storage_to_python(self, storage_value: Any, annotation: Any) -> Any:
+        """Convert an Arrow storage value back to a Python object."""
+        ...
 
 
 @runtime_checkable
@@ -34,11 +55,7 @@ class LogicalTypeProtocol(Protocol):
 
     @property
     def logical_type_name(self) -> str:
-        """Unique orcapod identifier for this logical type.
-
-        For built-in types, use an ``orcapod.*`` prefix (e.g. ``"orcapod.uuid"``). Any unique
-        string is valid. Does NOT need to match the Arrow extension type name.
-        """
+        """Unique orcapod identifier for this logical type (e.g. ``"orcapod.uuid"``)."""
         ...
 
     @property
@@ -46,45 +63,32 @@ class LogicalTypeProtocol(Protocol):
         """The Python class this logical type represents."""
         ...
 
-    def get_arrow_extension_type(self) -> pa.ExtensionType:
-        """Return the Arrow extension type for this logical type.
-
-        ``storage_type``, ``extension_name``, and serialised metadata are
-        encapsulated inside the returned type; they are no longer top-level
-        properties on ``LogicalType``.
-
-        For custom types: create and return an instance of a new
-        ``pa.ExtensionType`` subclass (e.g. via ``make_arrow_extension_type``).
-        For pre-existing types: return the existing instance directly
-        (e.g. ``pa.uuid()``).
-        """
+    def get_arrow_extension_type(self) -> "pa.ExtensionType":
+        """Return the Arrow extension type for this logical type."""
         ...
 
-    def get_polars_extension_type(self) -> pl.BaseExtension:
-        """Return an instance of the Polars extension type for this logical type.
-
-        The registry calls ``type(instance)`` to obtain the class passed to
-        ``pl.register_extension_type``.
-        """
+    def get_polars_extension_type(self) -> "pl.BaseExtension":
+        """Return an instance of the Polars extension type for this logical type."""
         ...
 
-    def python_to_storage(self, value: Any) -> Any:
+    def python_to_storage(self, value: Any, converter: "TypeConverterProtocol | None") -> Any:
         """Convert a Python value to its Arrow storage representation.
 
         Args:
             value: A Python object of type ``python_type``.
+            converter: The active ``TypeConverterProtocol`` for recursive delegation.
 
         Returns:
-            A value suitable for use as an Arrow scalar or array element
-            matching the storage type of ``get_arrow_extension_type()``.
+            A value suitable for Arrow storage.
         """
         ...
 
-    def storage_to_python(self, storage_value: Any) -> Any:
+    def storage_to_python(self, storage_value: Any, converter: "TypeConverterProtocol | None") -> Any:
         """Convert an Arrow storage value back to a Python object.
 
         Args:
             storage_value: A scalar or array element from the Arrow storage array.
+            converter: The active ``TypeConverterProtocol`` for recursive delegation.
 
         Returns:
             A Python object of type ``python_type``.
@@ -96,70 +100,62 @@ class LogicalTypeProtocol(Protocol):
 class LogicalTypeFactoryProtocol(Protocol):
     """Protocol for factories that synthesize or reconstruct ``LogicalTypeProtocol`` instances.
 
-    Bridges two directions: the write path (``create_for_python_type`` — synthesizes a
-    ``LogicalTypeProtocol`` from a Python class) and the read path
-    (``reconstruct_from_arrow`` — reconstructs a ``LogicalTypeProtocol`` from Arrow schema
-    metadata).
-
-    A ``LogicalTypeFactoryProtocol`` constructs a ``LogicalTypeProtocol`` from the
-    Arrow extension type name, its underlying storage type, and the full parsed JSON
-    metadata dict. The dispatch key (``"category"`` value from the metadata JSON) that
-    routes to this factory is declared at registration time via
-    ``LogicalTypeRegistry.register_logical_type_factory``; the factory itself has no
-    knowledge of its dispatch key but receives the full metadata dict so it can read
-    additional hints beyond ``"category"``.
-
-    This protocol is ``@runtime_checkable``, consistent with ``LogicalTypeProtocol``.
+    Bridges two directions: the write path (``create_for_python_type``) and the read
+    path (``reconstruct_from_arrow``). Both methods receive ``converter`` instead of
+    ``registry`` so all traversal flows through the converter.
     """
 
-    def reconstruct_from_arrow(
-        self,
-        arrow_extension_name: str,
-        storage_type: pa.DataType,
-        metadata: dict[str, Any],
-    ) -> LogicalTypeProtocol:
-        """Reconstruct a LogicalType from Arrow schema metadata (read path).
+    def supports_class(self, python_type: type) -> bool:
+        """Return True if this factory can synthesize a LogicalType for ``python_type``.
 
-        Called by the registry when a schema walk encounters an extension type
-        whose metadata ``"category"`` value matches this factory's registered
-        category. All Arrow schema information is already known.
+        Used as a probe during write-side MRO dispatch in ``register_python_class``.
 
         Args:
-            arrow_extension_name: The Arrow extension type name from the schema.
-            storage_type: The underlying Arrow storage type.
-            metadata: Full parsed metadata JSON dict. Always contains ``"category"``.
+            python_type: The Python class to probe.
 
         Returns:
-            A fully constructed ``LogicalTypeProtocol`` ready for registration.
-
-        Raises:
-            ValueError: If this factory cannot reconstruct a type for the given name.
+            True if this factory handles ``python_type``.
         """
         ...
 
     def create_for_python_type(
         self,
         python_type: type,
+        converter: "TypeConverterProtocol",
     ) -> LogicalTypeProtocol:
         """Synthesize a LogicalType for the given Python class (write path).
 
-        Called by the registry when pod declaration encounters an unregistered
-        class whose MRO intersects a base registered for this factory
-        (via ``LogicalTypeRegistry.register_logical_type_factory``).
-        The factory derives all Arrow metadata (extension name, storage type,
-        metadata dict) from the Python class itself.
-
-        The returned LogicalType must round-trip: the Arrow metadata it embeds
-        must include the ``"category"`` key used to register this factory so
-        that ``reconstruct_from_arrow`` is correctly selected on a subsequent read.
-
         Args:
             python_type: The concrete Python class to synthesize a LogicalType for.
+            converter: The active converter for recursive field-type resolution.
 
         Returns:
             A fully constructed ``LogicalTypeProtocol`` ready for registration.
 
         Raises:
             ValueError: If this factory cannot construct a type for the given class.
+        """
+        ...
+
+    def reconstruct_from_arrow(
+        self,
+        arrow_extension_name: str,
+        storage_type: "pa.DataType",
+        metadata: dict[str, Any],
+        converter: "TypeConverterProtocol",
+    ) -> LogicalTypeProtocol:
+        """Reconstruct a LogicalType from Arrow schema metadata (read path).
+
+        Args:
+            arrow_extension_name: The Arrow extension type name from the schema.
+            storage_type: The underlying Arrow storage type (already resolved bottom-up).
+            metadata: Full parsed metadata JSON dict. Always contains ``"category"``.
+            converter: The active converter for recursive field-type resolution.
+
+        Returns:
+            A fully constructed ``LogicalTypeProtocol`` ready for registration.
+
+        Raises:
+            ValueError: If this factory cannot reconstruct a type for the given name.
         """
         ...
