@@ -345,3 +345,93 @@ def test_unsupported_field_type_error_mentions_annotation():
     with pytest.raises(TypeError) as exc_info:
         factory.create_for_python_type(_Bad)
     assert "UUID" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# Read path — reconstruct_from_arrow
+# ---------------------------------------------------------------------------
+
+def test_reconstruct_from_arrow_returns_dataclass_logical_type():
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory, DataclassLogicalType
+    factory = DataclassHandlerFactory()
+    fqcn = f"{Flat.__module__}.{Flat.__qualname__}"
+    storage = pa.struct([pa.field("x", pa.int64()), pa.field("y", pa.large_string())])
+    lt = factory.reconstruct_from_arrow(fqcn, storage, {"category": "orcapod.dataclass"})
+    assert isinstance(lt, DataclassLogicalType)
+    assert lt.python_type is Flat
+    assert lt.logical_type_name == fqcn
+
+
+def test_reconstruct_from_arrow_converters_work():
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    fqcn = f"{Flat.__module__}.{Flat.__qualname__}"
+    storage = pa.struct([pa.field("x", pa.int64()), pa.field("y", pa.large_string())])
+    lt = factory.reconstruct_from_arrow(fqcn, storage, {"category": "orcapod.dataclass"})
+    original = Flat(x=5, y="test")
+    assert lt.storage_to_python(lt.python_to_storage(original)) == original
+
+
+def test_reconstruct_from_arrow_uses_schema_storage_type():
+    """reconstruct_from_arrow uses the storage_type from the schema, not re-derived."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    fqcn = f"{Flat.__module__}.{Flat.__qualname__}"
+    # Intentionally use storage_type from the schema
+    storage = pa.struct([pa.field("x", pa.int64()), pa.field("y", pa.large_string())])
+    lt = factory.reconstruct_from_arrow(fqcn, storage, {"category": "orcapod.dataclass"})
+    assert lt.get_arrow_extension_type().storage_type == storage
+
+
+def test_reconstruct_from_arrow_bad_module_raises_value_error():
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    storage = pa.struct([pa.field("x", pa.int64())])
+    with pytest.raises(ValueError, match="[Cc]annot import"):
+        factory.reconstruct_from_arrow(
+            "no.such.module.Foo", storage, {"category": "orcapod.dataclass"}
+        )
+
+
+def test_reconstruct_from_arrow_bad_class_name_raises_value_error():
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    # Use a valid module but nonexistent class
+    factory = DataclassHandlerFactory()
+    storage = pa.struct([pa.field("x", pa.int64())])
+    with pytest.raises(ValueError, match="[Cc]annot find"):
+        factory.reconstruct_from_arrow(
+            "builtins.NoSuchClass", storage, {"category": "orcapod.dataclass"}
+        )
+
+
+def test_reconstruct_from_arrow_non_dataclass_raises_value_error():
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    # str is a builtin — definitely not a dataclass
+    storage = pa.struct([pa.field("x", pa.int64())])
+    with pytest.raises(ValueError, match="not a.*dataclass"):
+        factory.reconstruct_from_arrow(
+            "builtins.str", storage, {"category": "orcapod.dataclass"}
+        )
+
+
+def test_reconstruct_from_arrow_no_dot_in_fqcn_raises_value_error():
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    storage = pa.struct([])
+    with pytest.raises(ValueError, match="no module separator"):
+        factory.reconstruct_from_arrow(
+            "NoDotInName", storage, {"category": "orcapod.dataclass"}
+        )
+
+
+def test_reconstruct_from_arrow_cycle_detection():
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    fqcn = f"{Flat.__module__}.{Flat.__qualname__}"
+    storage = pa.struct([pa.field("x", pa.int64()), pa.field("y", pa.large_string())])
+    ctx = ResolutionContext(visited_arrow_names=frozenset({fqcn}))
+    with pytest.raises(ValueError, match="[Cc]ircular"):
+        factory.reconstruct_from_arrow(
+            fqcn, storage, {"category": "orcapod.dataclass"}, context=ctx
+        )
