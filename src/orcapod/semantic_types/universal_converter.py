@@ -22,7 +22,6 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, TypedDict, get_args, get_origin
 
 from orcapod.contexts import DataContext, resolve_context
-from orcapod.extension_types.type_utils import _extract_leaf_classes
 from orcapod.semantic_types.type_inference import infer_python_schema_from_pylist_data
 from orcapod.types import DataType, Schema, SchemaLike
 from orcapod.utils.lazy_module import LazyModule
@@ -392,27 +391,63 @@ class UniversalTypeConverter:
             resolved_storage = self.register_storage_type(arrow_type.storage_type)
             return self._ensure_extension_type_info(ext_name, ext_meta, resolved_storage)
 
-        # Struct type — recurse into each field
+        # Struct type — recurse into each field, preserving field-level metadata
         if pa.types.is_struct(arrow_type):
             resolved_fields = []
             for i in range(arrow_type.num_fields):
                 field = arrow_type.field(i)
                 resolved_type = self.register_storage_type(field.type)
-                resolved_fields.append(pa.field(field.name, resolved_type, nullable=field.nullable))
+                resolved_fields.append(
+                    pa.field(field.name, resolved_type, nullable=field.nullable, metadata=field.metadata)
+                )
             return pa.struct(resolved_fields)
 
-        # Large list type
+        # Large list type — preserve value field metadata (used by ARROW:extension:* channel)
         if pa.types.is_large_list(arrow_type):
-            resolved_value = self.register_storage_type(arrow_type.value_type)
-            return pa.large_list(resolved_value)
+            vf = arrow_type.value_field
+            resolved_value = self.register_storage_type(vf.type)
+            return pa.large_list(
+                pa.field(vf.name, resolved_value, nullable=vf.nullable, metadata=vf.metadata)
+            )
 
         # List type
         if pa.types.is_list(arrow_type):
-            resolved_value = self.register_storage_type(arrow_type.value_type)
-            return pa.list_(resolved_value)
+            vf = arrow_type.value_field
+            resolved_value = self.register_storage_type(vf.type)
+            return pa.list_(
+                pa.field(vf.name, resolved_value, nullable=vf.nullable, metadata=vf.metadata)
+            )
 
         # All other types (primitives, timestamps, binary, etc.) — return as-is
         return arrow_type
+
+    def apply_extension_types(self, table: "pa.Table") -> "pa.Table":
+        """Re-wrap *table* columns into their registered Arrow extension types.
+
+        A convenience wrapper around the module-level ``apply_extension_types``
+        function that uses this converter's own logical type registry. No-op
+        when the registry is absent or when the table contains no columns with
+        ``ARROW:extension:name`` field metadata.
+
+        Call ``register_discovered_extensions(self, table.schema)`` first to
+        ensure all extension types in the schema are registered before calling
+        this method.
+
+        Args:
+            table: Arrow table whose columns may contain ``ARROW:extension:*``
+                field metadata from a Parquet/IPC read, but were loaded as plain
+                storage types.
+
+        Returns:
+            A new ``pa.Table`` with extension-typed columns re-wrapped, or the
+            original *table* unchanged if no re-wrapping is needed.
+        """
+        if self._logical_type_registry is None:
+            return table
+        from orcapod.extension_types.database_hooks import (
+            apply_extension_types as _apply_ext,
+        )
+        return _apply_ext(table, self._logical_type_registry)
 
     def _ensure_extension_type_info(
         self,

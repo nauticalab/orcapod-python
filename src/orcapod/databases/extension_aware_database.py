@@ -6,7 +6,7 @@ register → cast pattern on every read result:
 1. Call ``register_discovered_extensions(converter, table.schema)`` to ensure
    all Arrow extension types found in the returned table's field metadata are
    registered with the converter.
-2. Call ``apply_extension_types(table, registry)`` to re-wrap columns that
+2. Call ``converter.apply_extension_types(table)`` to re-wrap columns that
    were loaded as plain storage types into their correct extension types.
    This operation is zero-copy (``pa.ExtensionArray.from_storage`` per chunk).
 
@@ -24,10 +24,7 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, Any
 
-from orcapod.extension_types.database_hooks import (
-    apply_extension_types,
-    register_discovered_extensions,
-)
+from orcapod.extension_types.database_hooks import register_discovered_extensions
 from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 
 if TYPE_CHECKING:
@@ -45,7 +42,8 @@ class ExtensionAwareDatabase:
     2. Register any newly discovered types with *converter* via
        ``register_discovered_extensions``.
     3. Re-wrap columns that were loaded as plain storage types into their
-       correct Arrow extension types via ``apply_extension_types`` (zero-copy).
+       correct Arrow extension types via ``converter.apply_extension_types``
+       (zero-copy).
 
     Write methods and ``flush`` delegate directly without modification.
 
@@ -58,22 +56,19 @@ class ExtensionAwareDatabase:
     def __init__(
         self,
         db: ArrowDatabaseProtocol,
-        converter: "UniversalTypeConverter",
+        converter: UniversalTypeConverter,
     ) -> None:
         self._db = db
         self._converter = converter
 
     # ── Internal helper ───────────────────────────────────────────────────────
 
-    def _process(self, table: "pa.Table | None") -> "pa.Table | None":
+    def _process(self, table: pa.Table | None) -> pa.Table | None:
         """Register extension types and re-wrap columns, or return None unchanged."""
         if table is None:
             return None
         register_discovered_extensions(self._converter, table.schema)
-        registry = self._converter._logical_type_registry
-        if registry is not None:
-            return apply_extension_types(table, registry)
-        return table
+        return self._converter.apply_extension_types(table)
 
     # ── Read methods ──────────────────────────────────────────────────────────
 
@@ -83,7 +78,7 @@ class ExtensionAwareDatabase:
         record_id: bytes,
         record_id_column: str | None = None,
         flush: bool = False,
-    ) -> "pa.Table | None":
+    ) -> pa.Table | None:
         return self._process(
             self._db.get_record_by_id(
                 record_path,
@@ -97,7 +92,7 @@ class ExtensionAwareDatabase:
         self,
         record_path: tuple[str, ...],
         record_id_column: str | None = None,
-    ) -> "pa.Table | None":
+    ) -> pa.Table | None:
         return self._process(
             self._db.get_all_records(record_path, record_id_column=record_id_column)
         )
@@ -108,7 +103,7 @@ class ExtensionAwareDatabase:
         record_ids: Collection[bytes],
         record_id_column: str | None = None,
         flush: bool = False,
-    ) -> "pa.Table | None":
+    ) -> pa.Table | None:
         return self._process(
             self._db.get_records_by_ids(
                 record_path,
@@ -124,7 +119,7 @@ class ExtensionAwareDatabase:
         column_values: Collection[tuple[str, Any]] | Mapping[str, Any],
         record_id_column: str | None = None,
         flush: bool = False,
-    ) -> "pa.Table | None":
+    ) -> pa.Table | None:
         return self._process(
             self._db.get_records_with_column_value(
                 record_path,
@@ -140,7 +135,7 @@ class ExtensionAwareDatabase:
         self,
         record_path: tuple[str, ...],
         record_id: bytes,
-        record: "pa.Table",
+        record: pa.Table,
         skip_duplicates: bool = False,
         flush: bool = False,
     ) -> None:
@@ -155,7 +150,7 @@ class ExtensionAwareDatabase:
     def add_records(
         self,
         record_path: tuple[str, ...],
-        records: "pa.Table",
+        records: pa.Table,
         record_id_column: str | None = None,
         skip_duplicates: bool = False,
         flush: bool = False,
@@ -177,7 +172,7 @@ class ExtensionAwareDatabase:
     def base_path(self) -> tuple[str, ...]:
         return self._db.base_path
 
-    def at(self, *path_components: str) -> "ExtensionAwareDatabase":
+    def at(self, *path_components: str) -> ExtensionAwareDatabase:
         """Return a scoped view, preserving the extension-aware wrapper."""
         return ExtensionAwareDatabase(
             self._db.at(*path_components),

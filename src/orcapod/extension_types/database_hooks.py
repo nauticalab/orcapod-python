@@ -13,10 +13,10 @@ Two entry points:
     copied — each chunk is wrapped with ``pa.ExtensionArray.from_storage()``.
     Nested struct fields are reconstructed recursively.
 
-These two functions are typically called in sequence:
+These two functions are typically called in sequence via ``UniversalTypeConverter``:
 
     register_discovered_extensions(converter, table.schema)
-    table = apply_extension_types(table, converter._logical_type_registry)
+    table = converter.apply_extension_types(table)
 """
 
 from __future__ import annotations

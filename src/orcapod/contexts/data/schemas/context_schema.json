@@ -10,8 +10,7 @@
         "version",
         "type_converter",
         "arrow_hasher",
-        "semantic_hasher",
-        "type_handler_registry"
+        "semantic_hasher"
     ],
     "properties": {
         "context_key": {
