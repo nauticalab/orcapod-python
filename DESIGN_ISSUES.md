@@ -999,6 +999,38 @@ Open questions:
 
 ---
 
+## `src/orcapod/extension_types/`
+
+### ET1 — `make_polars_extension_type` cannot accept a storage type containing nested extension types
+**Status:** open
+**Severity:** medium
+
+`make_polars_extension_type` computes the Polars storage dtype by calling:
+```python
+pl.from_arrow(pa.array([], type=arrow_storage_type)).dtype
+```
+This fails with `ArrowNotImplementedError: extension` when `arrow_storage_type` is a struct
+(or list) whose fields include any `pa.ExtensionType` node — for example, a dataclass whose
+fields include `uuid.UUID` (stored as `orcapod.uuid` extension over `pa.large_binary()`).
+
+Polars's Arrow IPC bridge handles top-level extension types via `pl.BaseExtension`, but has no
+path for extension types *nested inside* a struct at dtype-inference time.
+
+**Workaround:** `dataclass_handler._strip_ext_to_storage()` recursively replaces all
+`pa.ExtensionType` nodes with their plain storage types before calling
+`make_polars_extension_type`. The Arrow side still receives the full extension-typed struct;
+only the Polars dtype computation sees the stripped version. The consequence is that the Polars
+extension type for a dataclass reports downgraded inner field types (e.g. `large_binary`
+instead of `orcapod.uuid`). This is invisible through the normal conversion path (all value
+conversion flows through `converter.storage_to_python`), but would mislead any code that
+directly introspects the Polars schema of a dataclass extension column's storage type.
+
+**Fix needed:** Once Polars adds support for nested extension types in its Arrow IPC bridge,
+`_strip_ext_to_storage` can be removed and `make_polars_extension_type` can accept extension-
+typed storage directly. Track upstream Polars issue.
+
+---
+
 ## `src/orcapod/semantic_types/universal_converter.py`
 
 ### UC1 — `python_type_to_arrow_type` raised on `typing.Any` from empty-container inference
