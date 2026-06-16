@@ -1032,6 +1032,11 @@ or Polars schema of a dataclass extension column's storage fields.
 whose fields are `pa.ExtensionType` nodes, for the same underlying reason. The stripping
 in `create_for_python_type` fixes both issues simultaneously.
 
+**Polars round-trip fidelity:** once the storage struct contains only plain types (no
+nested extension types), the full Arrow → Polars → Arrow round-trip for the *outermost*
+extension type is faithful: extension name, metadata bytes, and storage struct are all
+preserved. Only the inner field schema (already stripped) is absent.
+
 **Fix needed:** Once PyArrow (and Polars) support nested extension types natively in struct
 construction and Arrow↔Polars conversion, `_strip_ext_to_storage` can be removed from
 `create_for_python_type` and `make_polars_extension_type` can accept extension-typed
