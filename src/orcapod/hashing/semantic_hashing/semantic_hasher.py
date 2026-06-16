@@ -124,6 +124,11 @@ class BaseSemanticHasher:
     def strict(self) -> bool:
         return self._strict
 
+    @property
+    def type_handler_registry(self) -> TypeHandlerRegistry:
+        """Return the ``TypeHandlerRegistry`` used by this hasher."""
+        return self._registry
+
     def hash_object(
         self,
         obj: Any,

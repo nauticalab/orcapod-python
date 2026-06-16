@@ -16,14 +16,24 @@ from orcapod.protocols import hashing_protocols as hp
 
 def get_default_type_handler_registry() -> TypeHandlerRegistry:
     """
-    Return the TypeHandlerRegistry from the default data context.
+    Return the TypeHandlerRegistry from the default data context's semantic hasher.
+
+    The registry is owned by the active ``BaseSemanticHasher``, which is itself
+    versioned inside the active ``DataContext``.
 
     Returns:
         TypeHandlerRegistry: The type handler registry from the default data context.
     """
     from orcapod.contexts import get_default_context
+    from orcapod.hashing.semantic_hashing.semantic_hasher import BaseSemanticHasher
 
-    return get_default_context().type_handler_registry
+    hasher = get_default_context().semantic_hasher
+    if isinstance(hasher, BaseSemanticHasher):
+        return hasher.type_handler_registry
+    raise RuntimeError(
+        f"get_default_type_handler_registry: expected BaseSemanticHasher, "
+        f"got {type(hasher).__qualname__}"
+    )
 
 
 def get_default_semantic_hasher() -> hp.SemanticHasherProtocol:
