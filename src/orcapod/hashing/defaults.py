@@ -25,15 +25,7 @@ def get_default_type_handler_registry() -> TypeHandlerRegistry:
         TypeHandlerRegistry: The type handler registry from the default data context.
     """
     from orcapod.contexts import get_default_context
-    from orcapod.hashing.semantic_hashing.semantic_hasher import BaseSemanticHasher
-
-    hasher = get_default_context().semantic_hasher
-    if isinstance(hasher, BaseSemanticHasher):
-        return hasher.type_handler_registry
-    raise RuntimeError(
-        f"get_default_type_handler_registry: expected BaseSemanticHasher, "
-        f"got {type(hasher).__qualname__}"
-    )
+    return get_default_context().semantic_hasher.type_handler_registry
 
 
 def get_default_semantic_hasher() -> hp.SemanticHasherProtocol:

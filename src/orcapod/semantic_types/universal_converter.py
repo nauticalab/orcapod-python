@@ -11,6 +11,7 @@ This provides a comprehensive, self-contained system that:
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import logging
 import types
@@ -41,6 +42,14 @@ logger = logging.getLogger(__name__)
 # pyarrow (or numpy) import.  Call _get_python_to_arrow_map() instead of
 # referencing _PYTHON_TO_ARROW_MAP directly.
 _PYTHON_TO_ARROW_MAP: "dict | None" = None
+
+# Context variable for cycle detection in register_python_class.
+# Using a ContextVar (rather than an instance attribute) keeps it thread-safe,
+# coroutine-safe, and explicitly scoped to the active call chain without
+# polluting the converter instance with temporary state.
+_register_in_progress: contextvars.ContextVar[set[type] | None] = contextvars.ContextVar(
+    "_register_in_progress", default=None
+)
 
 
 def _get_python_to_arrow_map() -> dict:
@@ -178,8 +187,6 @@ class UniversalTypeConverter:
         self._python_to_arrow_types: dict[DataType, pa.DataType] = {}
         self._arrow_to_python_types: dict[pa.DataType, DataType] = {}
 
-        # Cycle detection for register_python_class
-        self._in_progress: set[type] = set()
 
     @classmethod
     def get_native_python_types(cls) -> frozenset[type]:
@@ -228,6 +235,11 @@ class UniversalTypeConverter:
         either returns from the primitive map or registry (cache hit), or
         synthesises via factory and registers the result.
 
+        Cycle detection uses a ``ContextVar`` (``_register_in_progress``) rather
+        than instance state, so it is thread-safe, coroutine-safe, and correctly
+        detects cycles that cross factory call-backs (e.g. a dataclass with a
+        field of its own type).
+
         Args:
             annotation: A Python type or generic alias (e.g. ``list[str]``,
                 ``Optional[uuid.UUID]``, a dataclass type).
@@ -239,6 +251,27 @@ class UniversalTypeConverter:
             TypeError: If a concrete class has no registered ``LogicalType`` and
                 no factory covers it, or if a circular dependency is detected.
             ValueError: If a complex (non-Optional) union is encountered.
+        """
+        in_progress = _register_in_progress.get()
+        if in_progress is None:
+            # Top-level call: initialize a fresh in-progress set and register it
+            # in the context so recursive calls (including factory call-backs) reuse it.
+            fresh: set[type] = set()
+            token = _register_in_progress.set(fresh)
+            try:
+                return self._register_python_class_impl(annotation, fresh)
+            finally:
+                _register_in_progress.reset(token)
+        # Nested call (direct recursion or factory call-back): reuse the existing set.
+        return self._register_python_class_impl(annotation, in_progress)
+
+    def _register_python_class_impl(self, annotation: Any, in_progress: set[type]) -> "pa.DataType":
+        """Internal recursive implementation of ``register_python_class``.
+
+        Args:
+            annotation: The annotation to resolve.
+            in_progress: The mutable cycle-detection set for the current call chain.
+                Shared across factory call-backs via ``_register_in_progress`` ContextVar.
         """
         import types as _types_mod
 
@@ -291,8 +324,8 @@ class UniversalTypeConverter:
             if lt is not None:
                 return lt.get_arrow_extension_type()
 
-            # Cycle detection
-            if annotation in self._in_progress:
+            # Cycle detection (via the shared ContextVar-backed in_progress set)
+            if annotation in in_progress:
                 raise TypeError(
                     f"Circular type dependency detected while synthesising "
                     f"LogicalType for {annotation!r}."
@@ -307,12 +340,12 @@ class UniversalTypeConverter:
                     f"python_bases=[<base of {annotation.__name__}>])"
                 )
 
-            self._in_progress.add(annotation)
+            in_progress.add(annotation)
             try:
                 lt = factory.create_for_python_type(annotation, converter=self)
                 self._logical_type_registry.register_logical_type(lt)
             finally:
-                self._in_progress.discard(annotation)
+                in_progress.discard(annotation)
 
             return lt.get_arrow_extension_type()
 
@@ -389,7 +422,7 @@ class UniversalTypeConverter:
             raw_meta = arrow_type.__arrow_ext_serialize__()
             ext_meta = raw_meta if raw_meta else None
             resolved_storage = self.register_storage_type(arrow_type.storage_type)
-            return self._ensure_extension_type_info(ext_name, ext_meta, resolved_storage)
+            return self.register_arrow_extension(ext_name, ext_meta, resolved_storage)
 
         # Struct type — recurse into each field, preserving field-level metadata
         if pa.types.is_struct(arrow_type):
@@ -449,7 +482,7 @@ class UniversalTypeConverter:
         )
         return _apply_ext(table, self._logical_type_registry)
 
-    def _ensure_extension_type_info(
+    def register_arrow_extension(
         self,
         arrow_extension_name: str,
         extension_metadata: bytes | None,
