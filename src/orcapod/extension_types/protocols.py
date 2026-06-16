@@ -13,11 +13,33 @@ Note:
 
 from __future__ import annotations
 
+import dataclasses
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     import polars as pl
     import pyarrow as pa
+
+
+@dataclass(frozen=True)
+class ResolutionContext:
+    """Immutable context for cycle detection during ``LogicalType`` resolution.
+
+    Passed through the factory call chain so that circular references are
+    detected across factory boundaries (e.g. a dataclass ``A`` containing a
+    field of type ``B`` which itself contains a field of type ``A``).
+
+    Updates always produce new instances via ``dataclasses.replace(...)``.
+
+    Attributes:
+        visited_types: Python types currently being resolved on the call stack.
+        visited_arrow_names: Arrow extension names currently being resolved
+            on the call stack.
+    """
+
+    visited_types: frozenset[type] = frozenset()
+    visited_arrow_names: frozenset[str] = frozenset()
 
 
 @runtime_checkable

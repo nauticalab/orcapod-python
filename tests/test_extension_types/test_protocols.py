@@ -101,3 +101,25 @@ def test_factory_create_for_python_type_conformance():
     assert isinstance(factory, LogicalTypeFactoryProtocol)
     result = factory.create_for_python_type(str)
     assert isinstance(result, LogicalTypeProtocol)
+
+
+def test_resolution_context_is_importable_and_frozen():
+    from orcapod.extension_types.protocols import ResolutionContext
+    import dataclasses
+    ctx = ResolutionContext()
+    assert ctx.visited_types == frozenset()
+    assert ctx.visited_arrow_names == frozenset()
+    assert dataclasses.is_dataclass(ctx)
+    # Verify it is frozen (mutation raises FrozenInstanceError)
+    import pytest
+    with pytest.raises(Exception):
+        ctx.visited_types = frozenset()  # type: ignore[misc]
+
+
+def test_resolution_context_update_produces_new_instance():
+    from orcapod.extension_types.protocols import ResolutionContext
+    import dataclasses
+    ctx = ResolutionContext()
+    ctx2 = dataclasses.replace(ctx, visited_types=frozenset({int}))
+    assert int in ctx2.visited_types
+    assert ctx.visited_types == frozenset()  # original unchanged
