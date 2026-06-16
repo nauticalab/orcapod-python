@@ -1017,17 +1017,25 @@ Polars's Arrow IPC bridge handles top-level extension types via `pl.BaseExtensio
 path for extension types *nested inside* a struct at dtype-inference time.
 
 **Workaround:** `dataclass_handler._strip_ext_to_storage()` recursively replaces all
-`pa.ExtensionType` nodes with their plain storage types before calling
-`make_polars_extension_type`. The Arrow side still receives the full extension-typed struct;
-only the Polars dtype computation sees the stripped version. The consequence is that the Polars
-extension type for a dataclass reports downgraded inner field types (e.g. `large_binary`
-instead of `orcapod.uuid`). This is invisible through the normal conversion path (all value
-conversion flows through `converter.storage_to_python`), but would mislead any code that
-directly introspects the Polars schema of a dataclass extension column's storage type.
+`pa.ExtensionType` nodes with their plain storage types. This stripping is applied in
+`DataclassHandlerFactory.create_for_python_type` when building the struct's field types —
+so the stored Arrow schema (and thus the struct passed to `make_polars_extension_type` and
+`pa.Table.from_pylist`) never contains nested extension types. The consequence is that the
+schema for a dataclass extension column reports downgraded inner field types (e.g.
+`large_binary` instead of `orcapod.uuid`). This is invisible through the normal conversion
+path (all value conversion flows through `converter.storage_to_python`, which is
+annotation-driven), but would mislead any code that directly introspects the raw Arrow
+or Polars schema of a dataclass extension column's storage fields.
 
-**Fix needed:** Once Polars adds support for nested extension types in its Arrow IPC bridge,
-`_strip_ext_to_storage` can be removed and `make_polars_extension_type` can accept extension-
-typed storage directly. Track upstream Polars issue.
+**Also affects `pa.Table.from_pylist`:** the same restriction applies to PyArrow's
+`pa.Table.from_pylist` (and `pa.array`) — neither can build an array from a struct type
+whose fields are `pa.ExtensionType` nodes, for the same underlying reason. The stripping
+in `create_for_python_type` fixes both issues simultaneously.
+
+**Fix needed:** Once PyArrow (and Polars) support nested extension types natively in struct
+construction and Arrow↔Polars conversion, `_strip_ext_to_storage` can be removed from
+`create_for_python_type` and `make_polars_extension_type` can accept extension-typed
+storage directly. Track upstream PyArrow / Polars issues.
 
 ---
 

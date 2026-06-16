@@ -196,7 +196,14 @@ def test_factory_create_flat_dataclass():
 
 
 def test_factory_create_dataclass_with_uuid_field():
-    """UUID field → orcapod.uuid extension type in storage struct."""
+    """UUID field → plain storage type (large_binary) in the struct, not extension type.
+
+    ``pa.Table.from_pylist`` (and Polars dtype inference) cannot handle a struct
+    whose fields are ``pa.ExtensionType`` nodes.  ``DataclassHandlerFactory`` strips
+    extension types from struct field types so that Arrow array construction works.
+    The UUID's extension type (``orcapod.uuid``) is still registered and used for
+    value conversion; only the struct field schema uses the stripped storage type.
+    """
     from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
 
     factory = DataclassHandlerFactory()
@@ -205,8 +212,9 @@ def test_factory_create_dataclass_with_uuid_field():
 
     storage = lt.get_arrow_extension_type().storage_type
     id_field_type = storage.field("id").type
-    assert isinstance(id_field_type, pa.ExtensionType)
-    assert id_field_type.extension_name == "orcapod.uuid"
+    # Stripped to plain storage type — NOT an extension type in the struct.
+    assert id_field_type == pa.large_binary()
+    assert not isinstance(id_field_type, pa.ExtensionType)
 
 
 def test_factory_create_dataclass_with_list_field():
