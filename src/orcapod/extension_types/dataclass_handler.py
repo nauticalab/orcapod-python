@@ -237,6 +237,38 @@ class DataclassHandlerFactory:
 
             return arrow_type, to_storage_list, from_storage_list
 
+        # dict[K, V] — stored as pa.list_(pa.struct([pa.field("key", K), pa.field("value", V)]))
+        # This matches the existing codebase convention for map-like fields.
+        if origin is dict:
+            args = typing.get_args(annotation)
+            if len(args) != 2:
+                raise TypeError(
+                    f"Unsupported field annotation: 'dict' requires exactly two type "
+                    f"arguments (e.g. dict[str, int]). Got: {annotation!r}."
+                )
+            key_ann, val_ann = args
+            key_arrow, key_to, key_from = self._resolve_field(key_ann, registry, context)
+            val_arrow, val_to, val_from = self._resolve_field(val_ann, registry, context)
+            pair_struct = pa.struct([pa.field("key", key_arrow), pa.field("value", val_arrow)])
+            arrow_type = pa.list_(pair_struct)
+
+            def to_storage_dict(
+                d: Any,
+                _kt: Callable[[Any], Any] = key_to,
+                _vt: Callable[[Any], Any] = val_to,
+            ) -> list[dict[str, Any]]:
+                return [{"key": _kt(k), "value": _vt(v)} for k, v in d.items()]
+
+            def from_storage_dict(
+                pairs: Any,
+                _kf: Callable[[Any], Any] = key_from,
+                _vf: Callable[[Any], Any] = val_from,
+            ) -> dict[Any, Any]:
+                # pairs is a list of {"key": ..., "value": ...} dicts (from pa.StructScalar.as_py())
+                return {_kf(p["key"]): _vf(p["value"]) for p in pairs}
+
+            return arrow_type, to_storage_dict, from_storage_dict
+
         # Nested dataclass
         if isinstance(annotation, type) and dataclasses.is_dataclass(annotation):
             nested_lt = self.create_for_python_type(annotation, registry, context)
@@ -249,9 +281,9 @@ class DataclassHandlerFactory:
 
         raise TypeError(
             f"Unsupported field type annotation: {annotation!r}. "
-            f"Supported types: int, float, str, bool, bytes, list[T], and nested "
-            f"dataclasses. Registered logical types (e.g. pathlib.Path, uuid.UUID) "
-            f"as field types are not yet supported — see follow-up issue."
+            f"Supported types: int, float, str, bool, bytes, list[T], dict[K, V], "
+            f"and nested dataclasses. Registered logical types (e.g. pathlib.Path, "
+            f"uuid.UUID) as field types are not yet supported — see follow-up issue."
         )
 
     def create_for_python_type(

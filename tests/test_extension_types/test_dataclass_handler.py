@@ -72,6 +72,35 @@ class Complex:
     tags: list[str]
 
 
+@dataclasses.dataclass
+class WithDictStrInt:
+    """Dataclass with a dict[str, int] field."""
+    counts: dict[str, int]
+
+
+@dataclasses.dataclass
+class WithDictStrListInt:
+    """Dataclass with a dict[str, list[int]] field — the user's target complexity."""
+    f1: dict[str, list[int]]
+
+
+@dataclasses.dataclass
+class WithDictStrNested:
+    """Dataclass with a dict[str, Inner] field."""
+    lookup: dict[str, Inner]
+
+
+@dataclasses.dataclass
+class DeepComplex:
+    """Combines all supported field types including dicts, lists, and nested dataclasses."""
+    name: str
+    counts: dict[str, int]
+    data: dict[str, list[int]]
+    children: list[Inner]
+    lookup: dict[str, Inner]
+    tags: list[str]
+
+
 # Cyclic fixtures — must be module-level so get_type_hints resolves the string
 # annotations ('_SelfRef', '_IndirectB', '_IndirectA') in module globals.
 
@@ -643,6 +672,164 @@ def test_complex_dataclass_arrow_array_round_trip():
             child=Inner(a=20),
             children=[],
             tags=["y", "z"],
+        ),
+    ]
+    storage_dicts = [lt.python_to_storage(inst) for inst in instances]
+    struct_arr = pa.array(storage_dicts, type=lt.get_arrow_extension_type().storage_type)
+    results = [lt.storage_to_python(struct_arr[i].as_py()) for i in range(len(struct_arr))]
+    assert results == instances
+
+
+# ---------------------------------------------------------------------------
+# dict[K, V] fields — stored as list[struct{key, value}]
+# ---------------------------------------------------------------------------
+
+def test_dict_str_int_arrow_type():
+    """dict[str, int] maps to pa.list_(pa.struct([pa.field('key', large_string), pa.field('value', int64)]))."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(WithDictStrInt)
+    struct_type = lt.get_arrow_extension_type().storage_type
+    pair_struct = pa.struct([pa.field("key", pa.large_string()), pa.field("value", pa.int64())])
+    assert struct_type.field("counts").type == pa.list_(pair_struct)
+
+
+def test_dict_str_int_round_trip():
+    """dict[str, int] field round-trips correctly."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(WithDictStrInt)
+    original = WithDictStrInt(counts={"a": 1, "b": 2, "c": 3})
+    storage = lt.python_to_storage(original)
+    assert storage == {"counts": [{"key": "a", "value": 1}, {"key": "b", "value": 2}, {"key": "c", "value": 3}]}
+    reconstructed = lt.storage_to_python(storage)
+    assert reconstructed == original
+
+
+def test_dict_str_int_empty():
+    """Empty dict[str, int] round-trips correctly."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(WithDictStrInt)
+    original = WithDictStrInt(counts={})
+    assert lt.storage_to_python(lt.python_to_storage(original)) == original
+
+
+def test_dict_str_list_int_arrow_type():
+    """dict[str, list[int]] maps to pa.list_(pa.struct([key: large_string, value: list(int64)]))."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(WithDictStrListInt)
+    struct_type = lt.get_arrow_extension_type().storage_type
+    pair_struct = pa.struct([
+        pa.field("key", pa.large_string()),
+        pa.field("value", pa.list_(pa.int64())),
+    ])
+    assert struct_type.field("f1").type == pa.list_(pair_struct)
+
+
+def test_dict_str_list_int_round_trip():
+    """dict[str, list[int]] field round-trips correctly — the target complexity."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(WithDictStrListInt)
+    original = WithDictStrListInt(f1={"evens": [2, 4, 6], "odds": [1, 3, 5], "empty": []})
+    storage = lt.python_to_storage(original)
+    assert storage == {
+        "f1": [
+            {"key": "evens", "value": [2, 4, 6]},
+            {"key": "odds", "value": [1, 3, 5]},
+            {"key": "empty", "value": []},
+        ]
+    }
+    reconstructed = lt.storage_to_python(storage)
+    assert reconstructed == original
+
+
+def test_dict_str_nested_arrow_type():
+    """dict[str, Inner] maps to pa.list_(pa.struct([key: large_string, value: struct(Inner)]))."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(WithDictStrNested)
+    struct_type = lt.get_arrow_extension_type().storage_type
+    inner_struct = pa.struct([pa.field("a", pa.int64())])
+    pair_struct = pa.struct([pa.field("key", pa.large_string()), pa.field("value", inner_struct)])
+    assert struct_type.field("lookup").type == pa.list_(pair_struct)
+
+
+def test_dict_str_nested_round_trip():
+    """dict[str, Inner] field round-trips correctly."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(WithDictStrNested)
+    original = WithDictStrNested(lookup={"x": Inner(a=10), "y": Inner(a=20)})
+    storage = lt.python_to_storage(original)
+    assert storage == {
+        "lookup": [{"key": "x", "value": {"a": 10}}, {"key": "y", "value": {"a": 20}}]
+    }
+    reconstructed = lt.storage_to_python(storage)
+    assert reconstructed == original
+
+
+def test_deep_complex_arrow_layout():
+    """DeepComplex dataclass with all field types produces the correct Arrow struct layout."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(DeepComplex)
+    struct_type = lt.get_arrow_extension_type().storage_type
+    inner_struct = pa.struct([pa.field("a", pa.int64())])
+    str_int_pair = pa.struct([pa.field("key", pa.large_string()), pa.field("value", pa.int64())])
+    str_list_int_pair = pa.struct([
+        pa.field("key", pa.large_string()),
+        pa.field("value", pa.list_(pa.int64())),
+    ])
+    str_inner_pair = pa.struct([pa.field("key", pa.large_string()), pa.field("value", inner_struct)])
+    assert struct_type.field("name").type == pa.large_string()
+    assert struct_type.field("counts").type == pa.list_(str_int_pair)
+    assert struct_type.field("data").type == pa.list_(str_list_int_pair)
+    assert struct_type.field("children").type == pa.list_(inner_struct)
+    assert struct_type.field("lookup").type == pa.list_(str_inner_pair)
+    assert struct_type.field("tags").type == pa.list_(pa.large_string())
+
+
+def test_deep_complex_round_trip():
+    """DeepComplex round-trips all field types including dicts, lists, and nested dataclasses."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(DeepComplex)
+    original = DeepComplex(
+        name="test",
+        counts={"a": 1, "b": 2},
+        data={"evens": [2, 4], "odds": [1, 3]},
+        children=[Inner(a=5), Inner(a=6)],
+        lookup={"x": Inner(a=10), "y": Inner(a=20)},
+        tags=["alpha", "beta"],
+    )
+    reconstructed = lt.storage_to_python(lt.python_to_storage(original))
+    assert reconstructed == original
+
+
+def test_deep_complex_arrow_array_round_trip():
+    """DeepComplex round-trips through an actual pa.array struct array."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(DeepComplex)
+    instances = [
+        DeepComplex(
+            name="first",
+            counts={"x": 1},
+            data={"nums": [10, 20]},
+            children=[Inner(a=1)],
+            lookup={"k": Inner(a=99)},
+            tags=["t1"],
+        ),
+        DeepComplex(
+            name="second",
+            counts={},
+            data={},
+            children=[],
+            lookup={},
+            tags=[],
         ),
     ]
     storage_dicts = [lt.python_to_storage(inst) for inst in instances]
