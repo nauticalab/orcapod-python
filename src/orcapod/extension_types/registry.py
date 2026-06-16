@@ -85,7 +85,11 @@ def make_arrow_extension_type(
                 f"Arrow extension type '{_name}': expected storage_type "
                 f"{_storage!r} but got {storage_type!r}."
             )
-        if serialized != _metadata:
+        # Accept empty metadata: Polars does not preserve extension metadata
+        # when converting back to Arrow (it sends b''), so we treat b'' as a
+        # valid stand-in for the expected metadata.  A non-empty mismatched
+        # value is still rejected.
+        if serialized and serialized != _metadata:
             raise ValueError(
                 f"Arrow extension type '{_name}': expected metadata "
                 f"{_metadata!r} but got {serialized!r}."
