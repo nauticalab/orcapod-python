@@ -59,6 +59,63 @@ def _primitive_arrow_map() -> dict[type, Any]:
     }
 
 
+def _import_class_from_fqcn(fqcn: str) -> type:
+    """Import a class from its fully-qualified class name.
+
+    Tries progressively shorter module prefixes (longest first) until one is
+    importable, then resolves the remaining segments via attribute traversal.
+    This correctly handles both top-level classes (``pkg.mod.MyClass``) and
+    inner/nested classes (``pkg.mod.Outer.Inner``) where ``__qualname__``
+    contributes extra dot-separated segments.
+
+    Args:
+        fqcn: A fully-qualified name such as ``"pkg.mod.MyClass"`` or
+            ``"pkg.mod.Outer.Inner"``.
+
+    Returns:
+        The resolved class object.
+
+    Raises:
+        ValueError: If no importable module prefix can be found or any
+            attribute segment is missing.
+    """
+    parts = fqcn.split(".")
+    if len(parts) < 2:
+        raise ValueError(
+            f"Cannot import class from FQCN {fqcn!r}: expected at least one dot "
+            f"separating a module from a class name "
+            f"(e.g. 'my.module.MyClass')."
+        )
+
+    last_import_error: ImportError | None = None
+    # Try prefixes from longest to shortest (requires at least one attr segment).
+    for i in range(len(parts) - 1, 0, -1):
+        module_path = ".".join(parts[:i])
+        attr_chain = parts[i:]
+        try:
+            obj: Any = importlib.import_module(module_path)
+        except ImportError as exc:
+            last_import_error = exc
+            continue
+
+        # Walk the attribute chain.
+        try:
+            for attr in attr_chain:
+                obj = getattr(obj, attr)
+            return obj  # type: ignore[return-value]
+        except AttributeError as exc:
+            raise ValueError(
+                f"Cannot find class from FQCN {fqcn!r}: imported {module_path!r} "
+                f"but attribute traversal failed at {attr!r}: {exc}"
+            ) from exc
+
+    # No importable prefix found.
+    raise ValueError(
+        f"Cannot import class from FQCN {fqcn!r}: no importable module prefix "
+        f"found. Last ImportError: {last_import_error}"
+    )
+
+
 class DataclassLogicalType:
     """Concrete ``LogicalTypeProtocol`` for a specific Python dataclass.
 
@@ -321,6 +378,15 @@ class DataclassHandlerFactory:
                 f"DataclassHandlerFactory only handles @dataclass-decorated classes."
             )
 
+        if "<locals>" in python_type.__qualname__:
+            raise ValueError(
+                f"Cannot create a logical type for {python_type!r}: the class is defined "
+                f"in a local scope (__qualname__ = {python_type.__qualname__!r}). "
+                f"Locally-defined dataclasses cannot be reconstructed on the read path "
+                f"because they are not importable by FQCN. Define the dataclass at module "
+                f"level instead."
+            )
+
         if python_type in context.visited_types:
             raise TypeError(
                 f"Circular reference detected: {python_type!r} is already being "
@@ -391,32 +457,12 @@ class DataclassHandlerFactory:
             visited_arrow_names=context.visited_arrow_names | {arrow_extension_name},
         )
 
-        # Import the class by FQCN (split on last dot).
-        last_dot = arrow_extension_name.rfind(".")
-        if last_dot == -1:
-            raise ValueError(
-                f"Cannot import class from FQCN {arrow_extension_name!r}: "
-                f"no module separator (dot) found. "
-                f"Expected a fully qualified name such as 'my.module.MyClass'."
-            )
-        module_path = arrow_extension_name[:last_dot]
-        class_name = arrow_extension_name[last_dot + 1:]
-
-        try:
-            module = importlib.import_module(module_path)
-        except ImportError as exc:
-            raise ValueError(
-                f"Cannot import module {module_path!r} to reconstruct "
-                f"{arrow_extension_name!r}: {exc}"
-            ) from exc
-
-        try:
-            imported_class = getattr(module, class_name)
-        except AttributeError as exc:
-            raise ValueError(
-                f"Cannot find class {class_name!r} in module {module_path!r} "
-                f"to reconstruct {arrow_extension_name!r}: {exc}"
-            ) from exc
+        # Import the class by FQCN using a longest-prefix walk.
+        # We try progressively shorter module prefixes until one is importable,
+        # then resolve remaining segments via attribute access.  This correctly
+        # handles inner/nested classes (e.g. ``pkg.mod.Outer.Inner``) where the
+        # last dot does not separate a module from a top-level name.
+        imported_class = _import_class_from_fqcn(arrow_extension_name)
 
         if not dataclasses.is_dataclass(imported_class):
             raise ValueError(

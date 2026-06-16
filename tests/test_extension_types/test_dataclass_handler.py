@@ -91,6 +91,17 @@ class WithDictStrNested:
 
 
 @dataclasses.dataclass
+class _OuterForNestedClassTest:
+    """Outer class containing a nested (inner) dataclass — used to test robust FQCN import."""
+    n: int
+
+    @dataclasses.dataclass
+    class _InnerDataclass:
+        """Inner dataclass whose __qualname__ contains a dot (Outer._Inner)."""
+        a: int
+
+
+@dataclasses.dataclass
 class DeepComplex:
     """Combines all supported field types including dicts, lists, and nested dataclasses."""
     name: str
@@ -99,6 +110,22 @@ class DeepComplex:
     children: list[Inner]
     lookup: dict[str, Inner]
     tags: list[str]
+
+
+# Dataclass with an unsupported field type — used by unsupported-type tests.
+# Must be module-level to pass the local-scope guard introduced in the PR review fix.
+# uuid is already imported at module level, so get_type_hints resolves uuid.UUID correctly.
+
+@dataclasses.dataclass
+class _UnsupportedFieldDataclass:
+    u: uuid.UUID
+
+
+# Dataclass for ResolutionContext cross-factory propagation test.
+
+@dataclasses.dataclass
+class _XForContextTest:
+    n: int
 
 
 # Cyclic fixtures — must be module-level so get_type_hints resolves the string
@@ -376,27 +403,17 @@ def test_indirect_cycle_raises_type_error():
 def test_unsupported_field_type_raises_type_error():
     """A field annotated with an unsupported type (uuid.UUID) raises TypeError."""
     from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
-
-    @dataclasses.dataclass
-    class _Bad:
-        u: uuid.UUID
-
     factory = DataclassHandlerFactory()
     with pytest.raises(TypeError, match="[Uu]nsupported"):
-        factory.create_for_python_type(_Bad)
+        factory.create_for_python_type(_UnsupportedFieldDataclass)
 
 
 def test_unsupported_field_type_error_mentions_annotation():
     """TypeError message names the unsupported annotation."""
     from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
-
-    @dataclasses.dataclass
-    class _Bad:
-        u: uuid.UUID
-
     factory = DataclassHandlerFactory()
     with pytest.raises(TypeError) as exc_info:
-        factory.create_for_python_type(_Bad)
+        factory.create_for_python_type(_UnsupportedFieldDataclass)
     assert "UUID" in str(exc_info.value)
 
 
@@ -472,7 +489,7 @@ def test_reconstruct_from_arrow_no_dot_in_fqcn_raises_value_error():
     from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
     factory = DataclassHandlerFactory()
     storage = pa.struct([])
-    with pytest.raises(ValueError, match="no module separator"):
+    with pytest.raises(ValueError, match="at least one dot"):
         factory.reconstruct_from_arrow(
             "NoDotInName", storage, {"category": "orcapod.dataclass"}
         )
@@ -542,16 +559,11 @@ def test_resolution_context_cycle_across_factories():
     """Demonstrates that a context with visited_types from another factory scope
     propagates correctly into DataclassHandlerFactory.create_for_python_type."""
     from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
-
-    @dataclasses.dataclass
-    class _X:
-        n: int
-
     factory = DataclassHandlerFactory()
-    # Pre-populate context as if another factory already put _X in visited_types
-    ctx = ResolutionContext(visited_types=frozenset({_X}))
+    # Pre-populate context as if another factory already put _XForContextTest in visited_types
+    ctx = ResolutionContext(visited_types=frozenset({_XForContextTest}))
     with pytest.raises(TypeError, match="[Cc]ircular"):
-        factory.create_for_python_type(_X, context=ctx)
+        factory.create_for_python_type(_XForContextTest, context=ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -836,3 +848,79 @@ def test_deep_complex_arrow_array_round_trip():
     struct_arr = pa.array(storage_dicts, type=lt.get_arrow_extension_type().storage_type)
     results = [lt.storage_to_python(struct_arr[i].as_py()) for i in range(len(struct_arr))]
     assert results == instances
+
+
+# ---------------------------------------------------------------------------
+# Locally-defined (non-importable) dataclasses — write-path guard
+# ---------------------------------------------------------------------------
+
+def test_create_for_python_type_local_class_raises_value_error():
+    """create_for_python_type rejects dataclasses defined in local scope with a clear error."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+
+    def _make_local_class() -> type:
+        @dataclasses.dataclass
+        class _Local:
+            x: int
+        return _Local
+
+    factory = DataclassHandlerFactory()
+    local_cls = _make_local_class()
+    assert "<locals>" in local_cls.__qualname__
+    with pytest.raises(ValueError, match="local scope"):
+        factory.create_for_python_type(local_cls)
+
+
+def test_create_for_python_type_local_class_error_mentions_qualname():
+    """The ValueError for a locally-defined dataclass mentions __qualname__ for clarity."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+
+    def _make_local_class() -> type:
+        @dataclasses.dataclass
+        class _LocalForMsg:
+            y: str
+        return _LocalForMsg
+
+    factory = DataclassHandlerFactory()
+    local_cls = _make_local_class()
+    with pytest.raises(ValueError, match="_LocalForMsg"):
+        factory.create_for_python_type(local_cls)
+
+
+# ---------------------------------------------------------------------------
+# Nested/inner class FQCN — read-path robustness
+# ---------------------------------------------------------------------------
+
+def test_reconstruct_from_arrow_inner_class_via_attribute_traversal():
+    """reconstruct_from_arrow correctly resolves inner-class FQCNs (e.g. Outer.Inner)
+    via attribute traversal rather than naive last-dot module split."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory, DataclassLogicalType
+
+    inner_cls = _OuterForNestedClassTest._InnerDataclass
+    # __qualname__ is "_OuterForNestedClassTest._InnerDataclass", so FQCN has two class
+    # segments after the module — the old "split on last dot" approach would try to import
+    # "...test_dataclass_handler._OuterForNestedClassTest" as a module, which fails.
+    fqcn = f"{inner_cls.__module__}.{inner_cls.__qualname__}"
+    assert "._OuterForNestedClassTest._InnerDataclass" in fqcn
+
+    factory = DataclassHandlerFactory()
+    storage = pa.struct([pa.field("a", pa.int64())])
+    lt = factory.reconstruct_from_arrow(fqcn, storage, {"category": "orcapod.dataclass"})
+
+    assert isinstance(lt, DataclassLogicalType)
+    assert lt.python_type is inner_cls
+    assert lt.logical_type_name == fqcn
+
+
+def test_reconstruct_from_arrow_inner_class_round_trip():
+    """Inner class reconstructed from Arrow schema round-trips python_to_storage / storage_to_python."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+
+    inner_cls = _OuterForNestedClassTest._InnerDataclass
+    fqcn = f"{inner_cls.__module__}.{inner_cls.__qualname__}"
+    factory = DataclassHandlerFactory()
+    storage = pa.struct([pa.field("a", pa.int64())])
+    lt = factory.reconstruct_from_arrow(fqcn, storage, {"category": "orcapod.dataclass"})
+
+    original = inner_cls(a=42)
+    assert lt.storage_to_python(lt.python_to_storage(original)) == original
