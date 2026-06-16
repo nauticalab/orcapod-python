@@ -288,3 +288,60 @@ def test_nested_dataclass_registers_inner_in_registry():
     inner_lt = registry.get_by_python_type(Inner)
     assert inner_lt is not None
     assert inner_lt.python_type is Inner
+
+
+# ---------------------------------------------------------------------------
+# Cycle detection (write path)
+# ---------------------------------------------------------------------------
+
+def test_self_referential_dataclass_raises_type_error():
+    """A dataclass with a self-referential field raises TypeError."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    with pytest.raises(TypeError, match="[Cc]ircular"):
+        factory.create_for_python_type(_SelfRef)
+
+
+def test_indirect_cycle_raises_type_error():
+    """An A → B → A cycle raises TypeError."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    with pytest.raises(TypeError, match="[Cc]ircular"):
+        factory.create_for_python_type(_IndirectA)
+
+
+# ---------------------------------------------------------------------------
+# Unsupported field types
+# ---------------------------------------------------------------------------
+
+# NOTE: We use uuid.UUID here because `uuid` is imported at module level.
+# With `from __future__ import annotations`, `u: uuid.UUID` becomes the string
+# `'uuid.UUID'`, which get_type_hints resolves via the module's globals where
+# `uuid` IS present. Using pathlib.Path would fail unless pathlib is also
+# imported at module level.
+
+def test_unsupported_field_type_raises_type_error():
+    """A field annotated with an unsupported type (uuid.UUID) raises TypeError."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+
+    @dataclasses.dataclass
+    class _Bad:
+        u: uuid.UUID
+
+    factory = DataclassHandlerFactory()
+    with pytest.raises(TypeError, match="[Uu]nsupported"):
+        factory.create_for_python_type(_Bad)
+
+
+def test_unsupported_field_type_error_mentions_annotation():
+    """TypeError message names the unsupported annotation."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+
+    @dataclasses.dataclass
+    class _Bad:
+        u: uuid.UUID
+
+    factory = DataclassHandlerFactory()
+    with pytest.raises(TypeError) as exc_info:
+        factory.create_for_python_type(_Bad)
+    assert "UUID" in str(exc_info.value)
