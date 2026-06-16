@@ -22,8 +22,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, TypedDict, get_args, get_origin
 
 from orcapod.contexts import DataContext, resolve_context
-from orcapod.extension_types.type_utils import extract_leaf_classes
-from orcapod.semantic_types.semantic_registry import SemanticTypeRegistry
+from orcapod.extension_types.type_utils import _extract_leaf_classes
 from orcapod.semantic_types.type_inference import infer_python_schema_from_pylist_data
 from orcapod.types import DataType, Schema, SchemaLike
 from orcapod.utils.lazy_module import LazyModule
@@ -34,17 +33,6 @@ if TYPE_CHECKING:
     from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol, LogicalTypeProtocol
 else:
     pa = LazyModule("pyarrow")
-
-import dataclasses
-
-from orcapod.semantic_types.dataclass_encoding import (
-    DATACLASS_TYPE_FIELD,
-    _get_type_hints_safe,
-    dataclass_to_arrow_struct_type,
-    dataclass_to_struct_dict,
-    has_dataclass_type_sentinel,
-    struct_dict_to_dataclass,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -157,13 +145,11 @@ class UniversalTypeConverter:
 
     def __init__(
         self,
-        semantic_registry: SemanticTypeRegistry | None = None,
         datetime_timezone: typing.Literal["strict", "coerce_utc"] = "strict",
         logical_type_registry: LogicalTypeRegistry | None = None,
     ):
         """
         Args:
-            semantic_registry: Optional registry of semantic type converters.
             datetime_timezone: How to handle naive (timezone-less) ``datetime``
                 values when converting Python → Arrow.
 
@@ -175,9 +161,8 @@ class UniversalTypeConverter:
                 all naive datetimes in your data represent UTC.
             logical_type_registry: Optional registry of ``LogicalType`` instances.
                 When provided, extension-type identity takes priority over the
-                shape-based ``semantic_registry`` at encoding time.
+                shape-based logical type system at encoding time.
         """
-        self.semantic_registry = semantic_registry
         self._datetime_timezone = datetime_timezone
         self._logical_type_registry = logical_type_registry
 
@@ -193,7 +178,6 @@ class UniversalTypeConverter:
         # Cache for type mappings
         self._python_to_arrow_types: dict[DataType, pa.DataType] = {}
         self._arrow_to_python_types: dict[pa.DataType, DataType] = {}
-        self._dataclass_lookup_cache: dict[str, type] = {}
 
         # Cycle detection for register_python_class
         self._in_progress: set[type] = set()
@@ -838,21 +822,9 @@ class UniversalTypeConverter:
             if lt is not None:
                 return lt.get_arrow_extension_type()
 
-        # Check semantic registry for registered types
-        if self.semantic_registry:
-            converter = self.semantic_registry.get_converter_for_python_type(
-                python_type
-            )
-            if converter:
-                return converter.arrow_struct_type
-
         # Handle typeddict look up
         if python_type in self._typeddict_to_struct_signature:
             return self._typeddict_to_struct_signature[python_type]
-
-        # Dataclass types → struct with __type sentinel
-        if dataclasses.is_dataclass(python_type) and isinstance(python_type, type):
-            return dataclass_to_arrow_struct_type(python_type, self)
 
         # Check generic types
         origin = get_origin(python_type)
@@ -960,48 +932,6 @@ class UniversalTypeConverter:
 
         # Handle struct types
         elif pa.types.is_struct(arrow_type):
-            # Check if it's a registered semantic type first
-            if self.semantic_registry:
-                python_type = self.semantic_registry.get_python_type_for_semantic_struct_signature(
-                    arrow_type
-                )
-                if python_type:
-                    return python_type
-
-            # Dataclass structs: synthesize a concrete dataclass from the struct's
-            # field definitions. The sentinel field is excluded; each remaining
-            # field's Arrow type is recursively converted to a Python type.
-            # The result is cached automatically by arrow_type_to_python_type()'s
-            # _arrow_to_python_types dict so the same class is reused for the
-            # same struct schema.
-            if has_dataclass_type_sentinel(arrow_type):
-                # Respect per-field nullability: nullable Arrow fields become
-                # Optional[T] annotations so that the synthesized dataclass
-                # correctly conveys that those fields can hold None, and so
-                # that round-trips through python_schema_to_arrow_schema
-                # preserve the nullable flag.
-                fields = [
-                    (
-                        field.name,
-                        self.arrow_type_to_python_type(field.type) | None
-                        if field.nullable
-                        else self.arrow_type_to_python_type(field.type),
-                    )
-                    for field in arrow_type
-                    if field.name != DATACLASS_TYPE_FIELD
-                ]
-                # Include nullability in the hash so that two structs with
-                # identical field names and Arrow types but different per-field
-                # nullability produce distinct class names in the lookup cache.
-                field_parts = [
-                    f"{f.name}:{'?' if f.nullable else ''}{f.type}"
-                    for f in arrow_type
-                    if f.name != DATACLASS_TYPE_FIELD
-                ]
-                name_hash = hashlib.md5("|".join(field_parts).encode()).hexdigest()[:8]
-                class_name = f"_SynthesizedDataclass_{name_hash}"
-                return dataclasses.make_dataclass(class_name, fields)
-
             # Check if it is heterogeneous tuple
             if len(arrow_type) > 0 and all(
                 field.name.startswith("f") and field.name[1:].isdigit()
@@ -1188,24 +1118,6 @@ class UniversalTypeConverter:
         # TODO: check if this step is necessary
         _ = self.python_type_to_arrow_type(python_type)
 
-        # Check for semantic type first
-        if self.semantic_registry:
-            converter = self.semantic_registry.get_converter_for_python_type(
-                python_type
-            )
-            if converter:
-                return converter.python_to_struct_dict
-
-        # Dataclass instances → struct dict with __type sentinel
-        if dataclasses.is_dataclass(python_type) and isinstance(python_type, type):
-            hints = _get_type_hints_safe(python_type)
-            field_converters = {
-                f.name: self.get_python_to_arrow_converter(hints[f.name])
-                for f in dataclasses.fields(python_type)
-                if f.init  # skip init=False fields: not part of the serialized repr
-            }
-            return lambda obj: dataclass_to_struct_dict(obj, field_converters)
-
         # Create conversion function based on type
 
         # Without this guard, datetime would reach the `origin is None` catch-all
@@ -1308,20 +1220,6 @@ class UniversalTypeConverter:
         # Get the Python type for this Arrow type
         python_type = self.arrow_type_to_python_type(arrow_type)
 
-        # Check for semantic type first
-        if self.semantic_registry and pa.types.is_struct(arrow_type):
-            registered_python_type = (
-                self.semantic_registry.get_python_type_for_semantic_struct_signature(
-                    arrow_type
-                )
-            )
-            if registered_python_type:
-                converter = self.semantic_registry.get_converter_for_python_type(
-                    registered_python_type
-                )
-                if converter:
-                    return converter.struct_dict_to_python
-
         # Handle basic types - no conversion needed
         if (
             pa.types.is_integer(arrow_type)
@@ -1386,16 +1284,6 @@ class UniversalTypeConverter:
 
         # Handle struct types - heterogeneous tuple or dynamic TypedDict
         elif pa.types.is_struct(arrow_type):
-            # Dataclass structs: per-row dispatch via __type value
-            if has_dataclass_type_sentinel(arrow_type):
-                field_converters = {
-                    field.name: self.get_arrow_to_python_converter(field.type)
-                    for field in arrow_type
-                    if field.name != DATACLASS_TYPE_FIELD
-                }
-                cache = self._dataclass_lookup_cache
-                return lambda d: struct_dict_to_dataclass(d, field_converters, cache)
-
             # if python_type
             if python_type is tuple or get_origin(python_type) is tuple:
                 n = len(get_args(python_type))
@@ -1455,7 +1343,6 @@ class UniversalTypeConverter:
         self._arrow_to_python_converters.clear()
         self._python_to_arrow_types.clear()
         self._arrow_to_python_types.clear()
-        self._dataclass_lookup_cache.clear()
 
     def get_cache_stats(self) -> dict[str, int]:
         """Get statistics about cache usage (useful for debugging/optimization)."""
