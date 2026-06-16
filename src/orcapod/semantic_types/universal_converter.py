@@ -15,7 +15,7 @@ import hashlib
 import logging
 import types
 import typing
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime, timezone
 
 # Handle generic types
@@ -31,6 +31,7 @@ from orcapod.utils.lazy_module import LazyModule
 if TYPE_CHECKING:
     import pyarrow as pa
     from orcapod.extension_types.registry import LogicalTypeRegistry
+    from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol, LogicalTypeProtocol
 else:
     pa = LazyModule("pyarrow")
 
@@ -194,6 +195,9 @@ class UniversalTypeConverter:
         self._arrow_to_python_types: dict[pa.DataType, DataType] = {}
         self._dataclass_lookup_cache: dict[str, type] = {}
 
+        # Cycle detection for register_python_class
+        self._in_progress: set[type] = set()
+
     @classmethod
     def get_native_python_types(cls) -> frozenset[type]:
         """Return the set of Python types that this converter handles natively.
@@ -215,24 +219,14 @@ class UniversalTypeConverter:
         return _ARROW_NATIVE_TYPE_KEYS
 
     def ensure_types_registered_for_schemas(self, *schemas: Schema) -> None:
-        """Ensure a LogicalType is registered for every non-native leaf class in schemas.
+        """Ensure a LogicalType is registered for every annotation in schemas.
 
-        Recursively unwraps generic annotations (``list[T]``, ``dict[K, V]``,
-        ``T | None``, etc.) to find leaf Python classes. Skips Arrow-native
-        types (``int``, ``str``, ``datetime``, …) and types that are already
-        registered. Calls ``ensure_logical_type_for_python_class`` for any
-        remaining leaf class, which synthesizes via factory or raises
-        ``TypeError`` if no factory is registered.
-
-        This is the canonical write-side registration trigger, called at
-        ``FunctionPod`` declaration time so that any missing ``LogicalType``
-        is detected and synthesized eagerly rather than at data-processing time.
-        When no ``LogicalTypeRegistry`` is configured on this converter, the
-        method is a no-op.
+        Calls ``register_python_class`` for each annotation, which recursively
+        resolves nested types and synthesises via factory if needed.
+        When no ``LogicalTypeRegistry`` is configured, this is a no-op.
 
         Args:
-            *schemas: One or more ``Schema`` mappings (column name → Python type
-                annotation) to inspect.
+            *schemas: One or more ``Schema`` mappings (column name → Python type).
 
         Raises:
             TypeError: If a leaf class has no registered ``LogicalType`` and
@@ -240,14 +234,357 @@ class UniversalTypeConverter:
         """
         if self._logical_type_registry is None:
             return
-        native_keys = self.get_native_python_types()
         for schema in schemas:
             for annotation in schema.values():
-                for leaf_class in extract_leaf_classes(annotation):
-                    if leaf_class in native_keys or self._logical_type_registry.get_by_python_type(leaf_class) is not None:
-                        continue
-                    self._logical_type_registry.ensure_logical_type_for_python_class(leaf_class)
-                    # TypeError propagates if no factory matches — intentional hard error
+                self.register_python_class(annotation)
+
+    def register_python_class(self, annotation: Any) -> "pa.DataType":
+        """Register a Python type annotation and return its Arrow type.
+
+        Traverses generic annotations recursively. For each concrete class found,
+        either returns from the primitive map or registry (cache hit), or
+        synthesises via factory and registers the result.
+
+        Args:
+            annotation: A Python type or generic alias (e.g. ``list[str]``,
+                ``Optional[uuid.UUID]``, a dataclass type).
+
+        Returns:
+            The Arrow ``pa.DataType`` corresponding to ``annotation``.
+
+        Raises:
+            TypeError: If a concrete class has no registered ``LogicalType`` and
+                no factory covers it, or if a circular dependency is detected.
+            ValueError: If a complex (non-Optional) union is encountered.
+        """
+        import types as _types_mod
+
+        type_map = _get_python_to_arrow_map()
+
+        # Primitive map hit
+        if annotation in type_map:
+            return type_map[annotation]
+
+        origin = get_origin(annotation)
+        args = get_args(annotation)
+
+        # Optional[T] / T | None → strip None arm
+        if origin is typing.Union or origin is _types_mod.UnionType:
+            non_none = [a for a in args if a is not type(None)]
+            if len(non_none) == 1:
+                return self.register_python_class(non_none[0])
+            raise ValueError(
+                f"Complex unions with multiple non-None types are not supported: "
+                f"{annotation!r}. Only Optional[T] (T | None) is allowed."
+            )
+
+        # list[T] → pa.large_list(T)
+        if origin is list:
+            return pa.large_list(self.register_python_class(args[0]))
+
+        # set[T] → pa.large_list(T)
+        if origin is set:
+            return pa.large_list(self.register_python_class(args[0]))
+
+        # dict[K, V] → pa.large_list(struct{key: K, value: V})
+        if origin is dict:
+            key_arrow = self.register_python_class(args[0])
+            val_arrow = self.register_python_class(args[1])
+            return pa.large_list(
+                pa.struct([pa.field("key", key_arrow), pa.field("value", val_arrow)])
+            )
+
+        # Concrete class — registry or factory dispatch
+        if isinstance(annotation, type):
+            if self._logical_type_registry is None:
+                # No registry — return primitive Arrow type if available, else raise
+                raise TypeError(
+                    f"No LogicalTypeRegistry configured — cannot register {annotation!r}. "
+                    f"Provide logical_type_registry at converter construction time."
+                )
+
+            # Registry hit (already synthesised)
+            lt = self._logical_type_registry.get_by_python_type(annotation)
+            if lt is not None:
+                return lt.get_arrow_extension_type()
+
+            # Cycle detection
+            if annotation in self._in_progress:
+                raise TypeError(
+                    f"Circular type dependency detected while synthesising "
+                    f"LogicalType for {annotation!r}."
+                )
+
+            # Factory dispatch via MRO walk
+            factory = self._find_factory_for_class(annotation)
+            if factory is None:
+                raise TypeError(
+                    f"No LogicalType or LogicalTypeFactory registered for {annotation!r}. "
+                    f"Register a factory: converter.register_logical_type_factory(factory, "
+                    f"python_bases=[<base of {annotation.__name__}>])"
+                )
+
+            self._in_progress.add(annotation)
+            try:
+                lt = factory.create_for_python_type(annotation, converter=self)
+                self._logical_type_registry.register_logical_type(lt)
+            finally:
+                self._in_progress.discard(annotation)
+
+            return lt.get_arrow_extension_type()
+
+        raise ValueError(f"Unsupported annotation: {annotation!r}")
+
+    def _find_factory_for_class(
+        self,
+        python_type: type,
+    ) -> "LogicalTypeFactoryProtocol | None":
+        """Find the most-specific registered factory for ``python_type``.
+
+        Walks ``python_type.__mro__`` and returns the first factory in
+        ``_python_class_factories`` whose ``supports_class(python_type)`` returns True.
+        Falls back to an ``issubclass`` scan for ABC-registered factories.
+
+        Args:
+            python_type: Concrete Python class to find a factory for.
+
+        Returns:
+            The matching ``LogicalTypeFactoryProtocol``, or ``None`` if none found.
+        """
+        factories = self._logical_type_registry._python_class_factories
+
+        # MRO walk — most-specific base first
+        for base in python_type.__mro__:
+            factory = factories.get(base)
+            if factory is not None:
+                if hasattr(factory, "supports_class") and factory.supports_class(python_type):
+                    return factory
+                elif not hasattr(factory, "supports_class"):
+                    # Factories without supports_class are treated as unconditional matches
+                    return factory
+
+        # issubclass fallback for ABC-registered factories
+        for base, factory in factories.items():
+            try:
+                if issubclass(python_type, base):
+                    if hasattr(factory, "supports_class"):
+                        if factory.supports_class(python_type):
+                            return factory
+                    else:
+                        return factory
+            except TypeError:
+                continue
+
+        return None
+
+    def register_storage_type(self, arrow_type: "pa.DataType") -> "pa.DataType":
+        """Register extension types found in ``arrow_type`` and return the resolved type.
+
+        Traverses Arrow types recursively in a bottom-up manner:
+
+        - Primitives are returned unchanged.
+        - ``pa.ExtensionType`` instances that are already registered are returned as-is.
+        - Unregistered extension types: the storage type is resolved first (bottom-up),
+          then the factory dispatches on the ``"category"`` metadata key.
+        - Structs: each field's type is resolved; a new struct with resolved fields is returned.
+        - Lists: the value type is resolved; a new list type with the resolved value is returned.
+
+        Args:
+            arrow_type: An Arrow type to traverse and register.
+
+        Returns:
+            The resolved Arrow type with extension types embedded.
+        """
+        # Extension type
+        if isinstance(arrow_type, pa.ExtensionType):
+            ext_name = arrow_type.extension_name
+            if self._logical_type_registry is not None:
+                lt = self._logical_type_registry.get_by_arrow_extension_name(ext_name)
+                if lt is not None:
+                    return lt.get_arrow_extension_type()
+            # Registry miss — extract info and register
+            raw_meta = arrow_type.__arrow_ext_serialize__()
+            ext_meta = raw_meta if raw_meta else None
+            resolved_storage = self.register_storage_type(arrow_type.storage_type)
+            return self._ensure_extension_type_info(ext_name, ext_meta, resolved_storage)
+
+        # Struct type — recurse into each field
+        if pa.types.is_struct(arrow_type):
+            resolved_fields = []
+            for i in range(arrow_type.num_fields):
+                field = arrow_type.field(i)
+                resolved_type = self.register_storage_type(field.type)
+                resolved_fields.append(pa.field(field.name, resolved_type, nullable=field.nullable))
+            return pa.struct(resolved_fields)
+
+        # Large list type
+        if pa.types.is_large_list(arrow_type):
+            resolved_value = self.register_storage_type(arrow_type.value_type)
+            return pa.large_list(resolved_value)
+
+        # List type
+        if pa.types.is_list(arrow_type):
+            resolved_value = self.register_storage_type(arrow_type.value_type)
+            return pa.list_(resolved_value)
+
+        # All other types (primitives, timestamps, binary, etc.) — return as-is
+        return arrow_type
+
+    def _ensure_extension_type_info(
+        self,
+        arrow_extension_name: str,
+        extension_metadata: bytes | None,
+        storage_type: "pa.DataType",
+    ) -> "pa.DataType":
+        """Register an extension type from (name, metadata, storage_type) info.
+
+        Called by ``register_storage_type`` for in-memory ``pa.ExtensionType`` objects,
+        and by ``register_discovered_extensions`` for the field-metadata (Parquet) channel.
+        The ``storage_type`` must already be resolved (nested extension types registered).
+
+        Args:
+            arrow_extension_name: Arrow extension name (``ARROW:extension:name``).
+            extension_metadata: Raw metadata bytes, expected to be UTF-8 JSON with
+                at least a ``"category"`` key. ``None`` or empty bytes if absent.
+            storage_type: Underlying Arrow storage type (already bottom-up resolved).
+
+        Returns:
+            The Arrow extension type after registration.
+
+        Raises:
+            ValueError: If metadata is missing, malformed, lacks ``"category"``, or
+                no factory is registered for the category.
+        """
+        import json as _json
+
+        if self._logical_type_registry is None:
+            raise ValueError(
+                f"No LogicalTypeRegistry configured — cannot register extension type "
+                f"{arrow_extension_name!r}."
+            )
+
+        # Registry hit — already registered
+        lt = self._logical_type_registry.get_by_arrow_extension_name(arrow_extension_name)
+        if lt is not None:
+            return lt.get_arrow_extension_type()
+
+        # Missing metadata — cannot auto-register
+        if not extension_metadata:
+            raise ValueError(
+                f"Extension type {arrow_extension_name!r} has no extension metadata. "
+                f"Types without a metadata category tag cannot be auto-registered via a factory. "
+                f"Pre-register them explicitly via converter.register_logical_type(lt)."
+            )
+
+        # Parse JSON metadata
+        try:
+            metadata_dict = _json.loads(extension_metadata.decode("utf-8"))
+        except (UnicodeDecodeError, _json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"Extension type {arrow_extension_name!r} has metadata that is not valid "
+                f"UTF-8 JSON: {extension_metadata!r}. Parse error: {exc}."
+            ) from exc
+
+        if not isinstance(metadata_dict, dict):
+            raise ValueError(
+                f"Extension type {arrow_extension_name!r} metadata decoded to a non-object "
+                f"JSON value: {metadata_dict!r}."
+            )
+
+        if "category" not in metadata_dict:
+            raise ValueError(
+                f"Extension type {arrow_extension_name!r} metadata has no \"category\" key: "
+                f"{metadata_dict}."
+            )
+
+        category = metadata_dict["category"]
+        if not isinstance(category, str):
+            raise ValueError(
+                f"Extension type {arrow_extension_name!r} metadata \"category\" is not a "
+                f"string: {category!r}."
+            )
+
+        # Look up factory by category
+        factory = self._logical_type_registry._category_factories.get(category)
+        if factory is None:
+            raise ValueError(
+                f"No LogicalTypeFactory registered for category {category!r}. "
+                f"Cannot register extension type {arrow_extension_name!r}."
+            )
+
+        # Reconstruct and register
+        logical_type = factory.reconstruct_from_arrow(
+            arrow_extension_name, storage_type, metadata_dict, converter=self
+        )
+        self._logical_type_registry.register_logical_type(logical_type)
+        return logical_type.get_arrow_extension_type()
+
+    def python_to_storage(self, value: Any, annotation: Any) -> Any:
+        """Convert a Python value to its Arrow storage representation.
+
+        Thin wrapper over ``get_python_to_arrow_converter`` for use by
+        ``DataclassLogicalType`` and other logical types that delegate per-field
+        conversion back to the converter.
+
+        Args:
+            value: A Python object.
+            annotation: The Python type annotation for ``value``.
+
+        Returns:
+            A value in Arrow storage format.
+        """
+        converter_fn = self.get_python_to_arrow_converter(annotation)
+        return converter_fn(value)
+
+    def storage_to_python(self, storage_value: Any, annotation: Any) -> Any:
+        """Convert an Arrow storage value back to a Python object.
+
+        Args:
+            storage_value: A scalar or element from an Arrow storage array.
+            annotation: The Python type annotation to convert back to.
+
+        Returns:
+            A Python object of the type described by ``annotation``.
+        """
+        arrow_type = self.python_type_to_arrow_type(annotation)
+        converter_fn = self.get_arrow_to_python_converter(arrow_type)
+        return converter_fn(storage_value)
+
+    def register_logical_type(self, lt: "LogicalTypeProtocol") -> None:
+        """Register a ``LogicalTypeProtocol`` instance.
+
+        Pass-through to the internal ``LogicalTypeRegistry``.
+
+        Args:
+            lt: The logical type to register.
+        """
+        if self._logical_type_registry is None:
+            raise ValueError("No LogicalTypeRegistry configured on this converter.")
+        self._logical_type_registry.register_logical_type(lt)
+
+    def register_logical_type_factory(
+        self,
+        factory: "LogicalTypeFactoryProtocol",
+        *,
+        category: str | None = None,
+        python_bases: Iterable[type] = (),
+    ) -> None:
+        """Register a ``LogicalTypeFactoryProtocol`` instance.
+
+        Pass-through to the internal ``LogicalTypeRegistry``.
+
+        Args:
+            factory: The factory to register.
+            category: If given, registers factory as the read-side handler for
+                Arrow extension types with this ``"category"`` metadata value.
+            python_bases: Zero or more Python base classes to register as write-side
+                dispatch keys for this factory.
+        """
+        if self._logical_type_registry is None:
+            raise ValueError("No LogicalTypeRegistry configured on this converter.")
+        self._logical_type_registry.register_logical_type_factory(
+            factory, category=category, python_bases=python_bases
+        )
 
     def python_type_to_arrow_type(self, python_type: DataType) -> pa.DataType:
         """
@@ -843,7 +1180,9 @@ class UniversalTypeConverter:
         if self._logical_type_registry is not None and isinstance(python_type, type):
             lt = self._logical_type_registry.get_by_python_type(python_type)
             if lt is not None:
-                return lt.python_to_storage
+                _lt = lt
+                _self = self
+                return lambda value: _lt.python_to_storage(value, _self)
 
         # Get the Arrow type for this Python type
         # TODO: check if this step is necessary
@@ -962,7 +1301,9 @@ class UniversalTypeConverter:
                 arrow_type.extension_name
             )
             if lt is not None:
-                return lt.storage_to_python
+                _lt = lt
+                _self = self
+                return lambda storage_value: _lt.storage_to_python(storage_value, _self)
 
         # Get the Python type for this Arrow type
         python_type = self.arrow_type_to_python_type(arrow_type)
