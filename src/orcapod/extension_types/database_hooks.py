@@ -29,26 +29,26 @@ from orcapod.extension_types.schema_walker import walk_schema
 
 if TYPE_CHECKING:
     import pyarrow as pa
-    from orcapod.semantic_types.universal_converter import UniversalTypeConverter
+    from orcapod.extension_types.protocols import TypeConverterProtocol
 
 logger = logging.getLogger(__name__)
 
 
 def register_discovered_extensions(
-    converter: "UniversalTypeConverter | None",
+    converter: "TypeConverterProtocol | None",
     schema: "pa.Schema",
 ) -> None:
     """Register any extension types found in ``schema`` that are not yet known.
 
     Walks ``schema`` recursively via ``walk_schema`` to discover all Arrow extension
     types at any nesting depth (both in-memory and field-metadata channels).
-    For each discovered type, delegates to ``converter._ensure_extension_type_info``.
+    For each discovered type, delegates to ``converter.register_arrow_extension``.
 
     Already-registered types are detected and skipped inside the converter —
     this function itself is stateless beyond the converter it operates on.
 
     Args:
-        converter: The ``UniversalTypeConverter`` to use for registration.
+        converter: The ``TypeConverterProtocol`` to use for registration.
             If ``None``, this call is a no-op.
         schema: The Arrow schema to inspect. May contain no extension types,
             in which case this call is a no-op.
@@ -73,7 +73,7 @@ def register_discovered_extensions(
     for info in found:
         # Bottom-up resolve the storage type first, then register the extension
         resolved_storage = converter.register_storage_type(info.storage_type)
-        converter._ensure_extension_type_info(
+        converter.register_arrow_extension(
             info.extension_name,
             info.extension_metadata,
             resolved_storage,

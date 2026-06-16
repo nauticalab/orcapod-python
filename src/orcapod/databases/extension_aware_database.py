@@ -15,7 +15,7 @@ Write operations pass through to the underlying database unchanged.
 Example::
 
     db = DeltaTableDatabase("/path/to/store")
-    ext_db = ExtensionAwareDatabase(db, converter=data_context.type_converter)
+    ext_db = ExtensionAwareDatabase(db, converter=type_converter)
     table = ext_db.get_all_records(("results", "my_fn"))
     # table columns have proper extension types applied
 """
@@ -29,7 +29,7 @@ from orcapod.protocols.database_protocols import ArrowDatabaseProtocol
 
 if TYPE_CHECKING:
     import pyarrow as pa
-    from orcapod.semantic_types.universal_converter import UniversalTypeConverter
+    from orcapod.extension_types.protocols import TypeConverterProtocol
 
 
 class ExtensionAwareDatabase:
@@ -49,14 +49,14 @@ class ExtensionAwareDatabase:
 
     Args:
         db: Any ``ArrowDatabaseProtocol`` backend.
-        converter: The ``UniversalTypeConverter`` to use for registration and
-            lookup. Callers typically supply ``data_context.type_converter``.
+        converter: The ``TypeConverterProtocol`` to use for registration and
+            lookup.
     """
 
     def __init__(
         self,
         db: ArrowDatabaseProtocol,
-        converter: UniversalTypeConverter,
+        converter: TypeConverterProtocol,
     ) -> None:
         self._db = db
         self._converter = converter

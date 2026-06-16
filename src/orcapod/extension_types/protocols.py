@@ -40,6 +40,19 @@ class TypeConverterProtocol(Protocol):
         """Convert an Arrow storage value back to a Python object."""
         ...
 
+    def apply_extension_types(self, table: "pa.Table") -> "pa.Table":
+        """Re-wrap table columns into their registered Arrow extension types."""
+        ...
+
+    def register_arrow_extension(
+        self,
+        arrow_extension_name: str,
+        extension_metadata: "bytes | None",
+        storage_type: "pa.DataType",
+    ) -> "pa.DataType":
+        """Register an extension type from (name, metadata, storage_type) and return the Arrow type."""
+        ...
+
 
 @runtime_checkable
 class LogicalTypeProtocol(Protocol):
