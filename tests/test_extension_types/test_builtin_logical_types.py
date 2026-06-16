@@ -630,3 +630,54 @@ def test_uuid_uuid_works_via_orcapod_uuid_alias_arrow_round_trip():
     assert recovered == u
     assert isinstance(recovered, orcapod.UUID)  # valid because orcapod.UUID is uuid.UUID
     assert isinstance(recovered, uuid_module.UUID)
+
+
+# ---------------------------------------------------------------------------
+# Converter param acceptance tests (Task 2 — PLT-1705)
+# ---------------------------------------------------------------------------
+
+
+def test_logical_path_python_to_storage_accepts_converter():
+    """python_to_storage now accepts a converter param (ignored)."""
+    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    lt = LogicalPath()
+    result = lt.python_to_storage(pathlib.Path("/tmp/foo"), converter=None)
+    assert result == "/tmp/foo"
+
+
+def test_logical_path_storage_to_python_accepts_converter():
+    """storage_to_python now accepts a converter param (ignored)."""
+    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    lt = LogicalPath()
+    result = lt.storage_to_python("/tmp/foo", converter=None)
+    assert result == pathlib.Path("/tmp/foo")
+
+
+def test_logical_uuid_python_to_storage_accepts_converter():
+    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    lt = LogicalUUID()
+    u = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
+    result = lt.python_to_storage(u, converter=None)
+    assert result == u.bytes
+
+
+def test_logical_uuid_storage_to_python_accepts_converter():
+    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    lt = LogicalUUID()
+    u = uuid_module.UUID("12345678-1234-5678-1234-567812345678")
+    result = lt.storage_to_python(u.bytes, converter=None)
+    assert result == u
+
+
+def test_logical_upath_python_to_storage_accepts_converter():
+    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+    lt = LogicalUPath()
+    result = lt.python_to_storage(UPath("s3://bucket/key"), converter=None)
+    assert result == "s3://bucket/key"
+
+
+def test_logical_upath_storage_to_python_accepts_converter():
+    from orcapod.extension_types.builtin_logical_types import LogicalUPath
+    lt = LogicalUPath()
+    result = lt.storage_to_python("s3://bucket/key", converter=None)
+    assert isinstance(result, UPath)
