@@ -26,15 +26,27 @@ the context):
 ```python
 @dataclass(frozen=True)
 class ResolutionContext:
-    visited_types: frozenset[type] = field(default_factory=frozenset)
-    visited_arrow_names: frozenset[str] = field(default_factory=frozenset)
+    visited_types: frozenset[type] = frozenset()
+    visited_arrow_names: frozenset[str] = frozenset()
 ```
 
 Immutable — updates produce new instances via `dataclasses.replace(...)`.
 
 ### Updated `LogicalTypeFactoryProtocol`
 
-Both methods gain two optional trailing parameters:
+Three additions:
+
+**`supports_class`** — write-side probe used by the registry to confirm whether
+a factory actually handles a given Python type before committing to it:
+
+```python
+def supports_class(self, python_type: type) -> bool: ...
+```
+
+Read-side dispatch (via category metadata) bypasses `supports_class` entirely —
+the category string is fully definitive and `supports_class` is not consulted.
+
+**`registry` and `context`** — both methods gain two optional trailing parameters:
 
 ```python
 def create_for_python_type(
@@ -54,35 +66,58 @@ def reconstruct_from_arrow(
 ) -> LogicalTypeProtocol: ...
 ```
 
-Both parameters default to "no registry, empty context" so simple factories
-require no changes. `LogicalTypeRegistry` is imported under `TYPE_CHECKING` to
-avoid a circular import.
+All three additions default gracefully — simple factories that don't need
+registry/context can ignore them, and a factory registered for a specific base
+class can implement `supports_class` as a trivial `return True`.
+`LogicalTypeRegistry` is imported under `TYPE_CHECKING` to avoid a circular
+import.
 
-### Registry call sites (registry.py)
+### Registry write-side dispatch changes (`registry.py`)
 
-`ensure_logical_type_for_python_class` and `ensure_extension_type` each:
+`_python_class_factories` changes from `dict[type, LogicalTypeFactoryProtocol]`
+to `dict[type, list[LogicalTypeFactoryProtocol]]` — multiple factories may be
+registered against the same base class (e.g. both the dataclass and picklable
+factories register against `object`).
+
+During `ensure_logical_type_for_python_class`, the MRO walk is updated:
+for each base class hit in the dict, iterate through its factory list in
+registration order and call `factory.supports_class(python_type)`. The first
+factory that returns `True` wins. Its result is cached in a
+`_python_class_cache: dict[type, LogicalTypeFactoryProtocol]` for fast future
+lookups. When multiple factories could match (same base, both support the class),
+registration order is the tiebreaker — first registered wins.
+
+`ensure_logical_type_for_python_class` and `ensure_extension_type` also each:
 - Accept an optional `context: ResolutionContext = ResolutionContext()`
 - Forward it (updated) when invoking a factory
 
-Three-line change per call site; no structural change to either method.
-
 ---
 
-## Part 2: `DataclassBase` sentinel ABC
+## Part 2: Write-side dispatch — `supports_class` replaces `DataclassBase`
 
-Registered as `python_bases=[DataclassBase]` for write-side dispatch. Because
-Python dataclasses share no common base class, a sentinel ABC detects them
-structurally:
+The sentinel `DataclassBase` ABC is **not needed**. Instead, `DataclassHandlerFactory`
+registers against `object` (the universal base, always last in every MRO) and
+implements `supports_class` as the actual gate:
 
 ```python
-class DataclassBase(ABC):
-    @classmethod
-    def __subclasshook__(cls, C: type) -> bool:
-        return bool(dataclasses.is_dataclass(C))
+def supports_class(self, python_type: type) -> bool:
+    return dataclasses.is_dataclass(python_type)
 ```
 
-The registry's `issubclass` fallback scan (`ensure_logical_type_for_python_class`)
-will match any dataclass automatically.
+Registration call:
+
+```python
+registry.register_logical_type_factory(
+    factory,
+    category="orcapod.dataclass",
+    python_bases=[object],
+)
+```
+
+Because `object` is at the tail of every MRO, this factory is the least specific
+match. Any factory registered against a more specific base class (e.g. a concrete
+dataclass subclass) will win first. `supports_class` is only consulted after the
+MRO walk reaches `object`, where it confirms the class is actually a dataclass.
 
 ---
 
@@ -93,7 +128,7 @@ converter construction in a single recursive pass:
 
 ```
 DataclassHandlerFactory._resolve_field(
-    annotation, registry, context
+    annotation, registry, context: ResolutionContext
 ) -> tuple[pa.DataType, Callable, Callable]
 ```
 
@@ -107,15 +142,14 @@ Handles all supported annotation shapes:
 | `str` | `pa.large_string()` | identity | identity |
 | `bool` | `pa.bool_()` | identity | identity |
 | `bytes` | `pa.large_binary()` | identity | identity |
-| `list[T]` | `pa.list_(_resolve_field(T)[0])` | elementwise `to_storage` for T | elementwise `from_storage` for T |
+| `list[T]` | `pa.list_(_resolve_field(T, ...)[0])` | elementwise `to_storage` for T | elementwise `from_storage` for T |
 | nested dataclass | `pa.struct([...])` via `create_for_python_type` | `nested_lt.python_to_storage` | `nested_lt.storage_to_python` |
 | anything else | — | `TypeError` with a clear message naming the annotation |
 
 For a nested dataclass annotation, `_resolve_field` calls
-`self.create_for_python_type(annotation, registry, context)` to obtain the
-`DataclassLogicalType`. Cycle detection happens inside `create_for_python_type`
-(not here), so cycles in `list[nested]` or multi-level nesting are all caught
-at the same point.
+`self.create_for_python_type(annotation, registry, context)` directly — `context`
+is already the updated instance (with the outer class added to `visited_types`)
+so cycle detection works naturally at any nesting depth or inside `list[nested]`.
 
 Registered logical types (e.g. `pathlib.Path`, `uuid.UUID`) as dataclass field
 types are **not supported** in this PR and raise `TypeError`. A follow-up issue
@@ -195,6 +229,16 @@ For `list[T]` fields: `from_fn` maps the element converter over the list.
 
 Implements `LogicalTypeFactoryProtocol`. Stateless — no stored registry reference.
 
+### `supports_class`
+
+```python
+def supports_class(self, python_type: type) -> bool:
+    return dataclasses.is_dataclass(python_type)
+```
+
+Called by the registry during the MRO walk after hitting `object` in
+`_python_class_factories`. Not called on the read path.
+
 ### Write path: `create_for_python_type`
 
 ```python
@@ -212,7 +256,7 @@ def create_for_python_type(
 4. Resolve `get_type_hints(python_type)` for field annotations.
 5. For each `dataclasses.fields(python_type)` entry (where `field.init=True`):
    a. Call `self._resolve_field(annotation, registry, context)` → `(arrow_type, to_storage, from_storage)`.
-   b. For nested dataclass annotations, `_resolve_field` internally calls `self.create_for_python_type(nested_cls, registry, context)` to produce the nested `DataclassLogicalType`. After the call returns, register the nested type: `registry.register_logical_type(nested_lt)` (only if `registry is not None`) so it is cached for future lookups.
+   b. For nested dataclass annotations, `_resolve_field` internally calls `self.create_for_python_type(nested_cls, registry, context)`. After the call returns, register the nested type: `registry.register_logical_type(nested_lt)` (only if `registry is not None`) so it is cached for future lookups.
 6. Construct `DataclassLogicalType` with `(fqcn, python_type, struct_type, field_converters)`.
 7. Return it (caller — the registry — registers it).
 
@@ -261,7 +305,7 @@ factory = DataclassHandlerFactory()
 registry.register_logical_type_factory(
     factory,
     category="orcapod.dataclass",
-    python_bases=[DataclassBase],
+    python_bases=[object],
 )
 ```
 
@@ -278,6 +322,7 @@ Tests live in `tests/test_extension_types/test_dataclass_handler.py`.
 ### Protocol conformance
 - `DataclassHandlerFactory()` satisfies `LogicalTypeFactoryProtocol` (isinstance check).
 - A `DataclassLogicalType` instance satisfies `LogicalTypeProtocol`.
+- `supports_class` returns `True` for a `@dataclass` class and `False` for a plain class.
 
 ### Write path — flat dataclass
 - `create_for_python_type` with `@dataclass class Flat: x: int; y: str` produces correct `logical_type_name`, `python_type`, Arrow struct layout.
