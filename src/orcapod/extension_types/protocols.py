@@ -140,9 +140,9 @@ class LogicalTypeFactoryProtocol(Protocol):
     def supports_class(self, python_type: type) -> bool:
         """Return ``True`` if this factory handles *python_type* (write-side gate).
 
-        Called by the registry during the MRO walk after a base class registered
-        for this factory is found in the target type's MRO. The first factory
-        (in registration order) that returns ``True`` wins.
+        Intended to be called by the registry during the MRO walk after a base
+        class registered for this factory is found in the target type's MRO.
+        The first factory (in registration order) that returns ``True`` wins.
 
         Read-side dispatch via ``"category"`` metadata does NOT call this method.
 
