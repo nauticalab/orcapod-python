@@ -18,7 +18,7 @@ from .protocols import LogicalTypeProtocol, LogicalTypeFactoryProtocol
 from .registry import LogicalTypeRegistry, make_arrow_extension_type, make_polars_extension_type
 from .schema_walker import ExtensionTypeInfo, walk_field, walk_schema
 from .database_hooks import apply_extension_types, register_discovered_extensions
-from .dataclass_handler import DATACLASS_CATEGORY, DataclassLogicalType, DataclassLogicalTypeFactory
+from .dataclass_logical_type_factory import DATACLASS_CATEGORY, DataclassLogicalType, DataclassLogicalTypeFactory
 
 __all__ = [
     "LogicalTypeProtocol",
