@@ -11,7 +11,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, Iterable
 
-from orcapod.extension_types.protocols import LogicalTypeProtocol, LogicalTypeFactoryProtocol
+from orcapod.extension_types.protocols import LogicalTypeProtocol, LogicalTypeFactoryProtocol, ResolutionContext
 from orcapod.utils.lazy_module import LazyModule
 
 if TYPE_CHECKING:
@@ -194,7 +194,8 @@ class LogicalTypeRegistry:
         self._by_arrow_name: dict[str, LogicalTypeProtocol] = {}
         self._by_python_type: dict[type, LogicalTypeProtocol] = {}
         self._category_factories: dict[str, LogicalTypeFactoryProtocol] = {}
-        self._python_class_factories: dict[type, LogicalTypeFactoryProtocol] = {}
+        self._python_class_factories: dict[type, list[LogicalTypeFactoryProtocol]] = {}
+        self._python_class_cache: dict[type, LogicalTypeFactoryProtocol] = {}
         for lt in (logical_types or []):
             self.register_logical_type(lt)
 
@@ -308,14 +309,15 @@ class LogicalTypeRegistry:
                 extension types whose metadata contains this category string. Raises
                 ``ValueError`` if a different factory is already registered for this
                 category.
-            python_bases: Zero or more Python base classes. Registers factory as the
-                write-side handler for each base. A single factory may cover any
-                number of bases. Raises ``ValueError`` if a *different* factory is
-                already registered for a given base.
+            python_bases: Zero or more Python base classes. Multiple different factories
+                can be registered for the same base — they are appended in registration
+                order. During the MRO walk, ``supports_class`` is called on each factory
+                in registration order; the first that returns ``True`` wins. Re-registering
+                the exact same factory instance for a base is a no-op (idempotent).
 
         Raises:
             ValueError: If neither ``category`` nor ``python_bases`` is provided.
-            ValueError: If a different factory is already registered for a given key.
+            ValueError: If a different factory is already registered for ``category``.
         """
         python_bases_list = list(python_bases)
         if category is None and not python_bases_list:
@@ -335,19 +337,11 @@ class LogicalTypeRegistry:
                 logger.debug(
                     "registered LogicalTypeFactory for category %r: %r", category, factory
                 )
-        # Validate all bases before writing any (prevents partial mutation on error).
+        # Multiple factories per base are allowed; append if not already present.
         for base in python_bases_list:
-            existing = self._python_class_factories.get(base)
-            if existing is not None and existing is not factory:
-                raise ValueError(
-                    f"Cannot register factory for python base {base!r}: "
-                    f"a different factory is already registered for this base."
-                )
-        for base in python_bases_list:
-            # Skip if this exact factory object is already bound to the base class
-            # (idempotent re-registration of the same factory is always a no-op).
-            if self._python_class_factories.get(base) is not factory:
-                self._python_class_factories[base] = factory
+            lst = self._python_class_factories.setdefault(base, [])
+            if factory not in lst:
+                lst.append(factory)
                 logger.debug(
                     "registered LogicalTypeFactory for python base %r: %r", base, factory
                 )
@@ -455,7 +449,9 @@ class LogicalTypeRegistry:
             category,
         )
         logical_type = factory.reconstruct_from_arrow(
-            arrow_extension_name, storage_type, metadata_dict
+            arrow_extension_name, storage_type, metadata_dict,
+            registry=self,
+            context=ResolutionContext(),
         )
 
         # Step 7: Register in all three bindings + PA/Polars global registries.
@@ -469,28 +465,36 @@ class LogicalTypeRegistry:
     def ensure_logical_type_for_python_class(
         self,
         python_type: type,
+        context: ResolutionContext = ResolutionContext(),
     ) -> LogicalTypeProtocol:
         """Ensure a LogicalType exists for ``python_type``, synthesizing via factory if needed.
 
         Resolution algorithm:
 
-        1. Walk ``python_type.__mro__``. Track the first (most-specific) hit in
+        1. Exact-match shortcut: if ``python_type`` is already in ``_by_python_type``,
+           return immediately.
+        2. Factory cache shortcut: if a winning factory for this type was previously
+           cached in ``_python_class_cache``, call it directly without re-probing.
+        3. Walk ``python_type.__mro__``. Track the first (most-specific) hit in
            ``_by_python_type`` (concrete) and ``_python_class_factories`` (factory)
-           separately, recording the MRO index of each.
-        2. After the MRO walk, if no factory was found, do a fallback ``issubclass``
+           separately, recording the MRO index of each. For factory hits, iterate
+           through the factory list in registration order and call
+           ``factory.supports_class(python_type)``; the first True wins.
+        4. After the MRO walk, if no factory was found, do a fallback ``issubclass``
            scan over ``_python_class_factories`` keys to catch ABCs with
            ``__subclasshook__``. Assign these the least-specific index
            (``len(python_type.__mro__)``) so they lose to any direct MRO match.
-        3. Resolution rule: if both concrete and factory are found, compare MRO indices —
+        5. Resolution rule: if both concrete and factory are found, compare MRO indices —
            lower index wins. Ties (same class) → concrete wins.
-        4. If factory wins (or only factory found): call
-           ``factory.create_for_python_type(python_type)``, register the result via
-           ``register_logical_type``, and return it. The registration caches it in
-           ``_by_python_type[python_type]``.
-        5. If nothing found: raise ``TypeError``.
+        6. If factory wins (or only factory found): cache the factory in
+           ``_python_class_cache[python_type]``, call
+           ``factory.create_for_python_type(python_type, registry=self, context=context)``,
+           register the result via ``register_logical_type``, and return it.
+        7. If nothing found: raise ``TypeError``.
 
         Args:
             python_type: The Python class to resolve.
+            context: Immutable cycle-detection context forwarded to the factory.
 
         Returns:
             The registered or newly synthesized ``LogicalTypeProtocol``.
@@ -499,35 +503,58 @@ class LogicalTypeRegistry:
             TypeError: If no ``LogicalType`` and no factory is found for
                 ``python_type`` or any of its bases.
         """
+        # Step 1: exact-match shortcut.
+        exact = self._by_python_type.get(python_type)
+        if exact is not None:
+            return exact
+
+        # Step 2: factory cache shortcut (skips supports_class re-probing).
+        cached_factory = self._python_class_cache.get(python_type)
+        if cached_factory is not None:
+            lt = cached_factory.create_for_python_type(python_type, registry=self, context=context)
+            self.register_logical_type(lt)
+            logger.debug(
+                "ensure_logical_type_for_python_class: synthesized %r for %r (factory cache hit)",
+                lt.logical_type_name,
+                python_type,
+            )
+            return lt
+
         best_concrete_idx: int | None = None
         best_concrete: LogicalTypeProtocol | None = None
         best_factory_idx: int | None = None
         best_factory: LogicalTypeFactoryProtocol | None = None
 
-        # Step 1: Walk MRO for direct hits.
+        # Step 3: Walk MRO for direct hits.
         for i, base in enumerate(python_type.__mro__):
             if best_concrete is None and base in self._by_python_type:
                 best_concrete_idx = i
                 best_concrete = self._by_python_type[base]
             if best_factory is None and base in self._python_class_factories:
-                best_factory_idx = i
-                best_factory = self._python_class_factories[base]
+                for factory in self._python_class_factories[base]:
+                    if factory.supports_class(python_type):
+                        best_factory_idx = i
+                        best_factory = factory
+                        break
             if best_concrete is not None and best_factory is not None:
                 break
 
-        # Step 2: issubclass fallback scan for ABCs with __subclasshook__.
+        # Step 4: issubclass fallback scan for ABCs with __subclasshook__.
         if best_factory is None:
-            for base_class, factory in self._python_class_factories.items():
+            for base_class, factory_list in self._python_class_factories.items():
                 try:
                     if issubclass(python_type, base_class):
-                        best_factory = factory
-                        # ABC match — assign lower priority than any direct MRO hit.
-                        best_factory_idx = len(python_type.__mro__)
-                        break
+                        for factory in factory_list:
+                            if factory.supports_class(python_type):
+                                best_factory = factory
+                                best_factory_idx = len(python_type.__mro__)
+                                break
+                        if best_factory is not None:
+                            break
                 except TypeError:
                     continue
 
-        # Step 3: Nothing found — hard error.
+        # Step 5: Nothing found — hard error.
         if best_concrete is None and best_factory is None:
             raise TypeError(
                 f"No LogicalType or LogicalTypeFactory is registered for type "
@@ -545,10 +572,9 @@ class LogicalTypeRegistry:
             assert best_concrete is not None
             return best_concrete
 
-        # Only factory found — synthesize and cache.
-        if best_concrete is None:
-            assert best_factory is not None
-            lt = best_factory.create_for_python_type(python_type)
+        def _synthesize(factory: LogicalTypeFactoryProtocol) -> LogicalTypeProtocol:
+            self._python_class_cache[python_type] = factory
+            lt = factory.create_for_python_type(python_type, registry=self, context=context)
             self.register_logical_type(lt)
             logger.debug(
                 "ensure_logical_type_for_python_class: synthesized %r for %r",
@@ -557,21 +583,17 @@ class LogicalTypeRegistry:
             )
             return lt
 
+        # Only factory found — synthesize and cache.
+        if best_concrete is None:
+            assert best_factory is not None
+            return _synthesize(best_factory)
+
         # Both found — compare MRO specificity (lower index = more specific).
         assert best_concrete_idx is not None
         assert best_factory_idx is not None
         if best_concrete_idx <= best_factory_idx:
-            # Concrete wins (same level or more specific; ties favour concrete).
             return best_concrete
         else:
-            # Factory is more specific — synthesize and cache.
-            lt = best_factory.create_for_python_type(python_type)
-            self.register_logical_type(lt)
-            logger.debug(
-                "ensure_logical_type_for_python_class: synthesized %r for %r "
-                "via more-specific factory",
-                lt.logical_type_name,
-                python_type,
-            )
-            return lt
+            assert best_factory is not None
+            return _synthesize(best_factory)
 

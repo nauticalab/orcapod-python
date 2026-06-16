@@ -66,7 +66,7 @@ def _make_stub_factory():
         def __init__(self):
             self.calls: list[tuple] = []
 
-        def reconstruct_from_arrow(self, arrow_extension_name, storage_type, metadata):
+        def reconstruct_from_arrow(self, arrow_extension_name, storage_type, metadata, **kwargs):
             import polars as pl
             from orcapod.extension_types.registry import make_arrow_extension_type
 

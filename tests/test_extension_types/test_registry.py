@@ -348,6 +348,92 @@ def test_register_logical_type_factory_python_base_same_factory_idempotent():
     registry.register_logical_type_factory(factory, python_bases=[str])  # no error
 
 
+def test_register_logical_type_factory_python_base_multiple_factories_allowed():
+    """Multiple different factories can be registered for the same python_base."""
+    from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol
+    registry = LogicalTypeRegistry()
+    f1 = _make_stub_factory()
+    f2 = _make_stub_factory()
+    # Both registrations should succeed without raising
+    registry.register_logical_type_factory(f1, python_bases=[object])
+    registry.register_logical_type_factory(f2, python_bases=[object])  # must not raise
+
+
+def test_register_logical_type_factory_supports_class_selects_first_match():
+    """When multiple factories are registered for the same base, the first whose
+    supports_class returns True wins (registration order)."""
+    import dataclasses as _dc
+
+    @_dc.dataclass
+    class _DC:
+        x: int
+
+    class _PickyFactory:
+        """Only handles dataclasses."""
+        def supports_class(self, python_type: type) -> bool:
+            return _dc.is_dataclass(python_type)
+        def create_for_python_type(self, python_type, **kwargs):
+            return _make_stub(py_type=python_type)
+        def reconstruct_from_arrow(self, *args, **kwargs):
+            return _make_stub()
+
+    class _FallbackFactory:
+        """Handles everything."""
+        def __init__(self):
+            self.called = False
+        def supports_class(self, python_type: type) -> bool:
+            return True
+        def create_for_python_type(self, python_type, **kwargs):
+            self.called = True
+            return _make_stub(py_type=python_type)
+        def reconstruct_from_arrow(self, *args, **kwargs):
+            return _make_stub()
+
+    registry = LogicalTypeRegistry()
+    picky = _PickyFactory()
+    fallback = _FallbackFactory()
+    registry.register_logical_type_factory(picky, python_bases=[object])
+    registry.register_logical_type_factory(fallback, python_bases=[object])
+
+    registry.ensure_logical_type_for_python_class(_DC)
+    # Picky factory wins — fallback should NOT have been called
+    assert not fallback.called
+
+
+def test_register_logical_type_factory_supports_class_falls_through_to_next():
+    """When the first factory's supports_class returns False, the next factory is tried."""
+    class _PlainClass:
+        pass
+
+    class _RejectingFactory:
+        def supports_class(self, python_type: type) -> bool:
+            return False  # never accepts
+        def create_for_python_type(self, python_type, **kwargs):
+            raise AssertionError("should not be called")
+        def reconstruct_from_arrow(self, *args, **kwargs):
+            return _make_stub()
+
+    class _AcceptingFactory:
+        def __init__(self):
+            self.called_with: list[type] = []
+        def supports_class(self, python_type: type) -> bool:
+            return True
+        def create_for_python_type(self, python_type, **kwargs):
+            self.called_with.append(python_type)
+            return _make_stub(py_type=python_type)
+        def reconstruct_from_arrow(self, *args, **kwargs):
+            return _make_stub()
+
+    registry = LogicalTypeRegistry()
+    rejecting = _RejectingFactory()
+    accepting = _AcceptingFactory()
+    registry.register_logical_type_factory(rejecting, python_bases=[object])
+    registry.register_logical_type_factory(accepting, python_bases=[object])
+
+    registry.ensure_logical_type_for_python_class(_PlainClass)
+    assert _PlainClass in accepting.called_with
+
+
 # ── ensure_logical_type_for_python_class tests ───────────────────────────────
 
 class _A:
