@@ -2,9 +2,9 @@
 
 Two entry points:
 
-``register_discovered_extensions(registry, schema)``
+``register_discovered_extensions(converter, schema)``
     Walk an Arrow schema and register any extension types not yet known to
-    *registry*.  No-op when *registry* is ``None`` or the schema has no
+    *converter*.  No-op when *converter* is ``None`` or the schema has no
     extension types.
 
 ``apply_extension_types(table, registry)``
@@ -15,8 +15,8 @@ Two entry points:
 
 These two functions are typically called in sequence:
 
-    register_discovered_extensions(registry, table.schema)
-    table = apply_extension_types(table, registry)
+    register_discovered_extensions(converter, table.schema)
+    table = apply_extension_types(table, converter._logical_type_registry)
 """
 
 from __future__ import annotations
@@ -29,38 +29,36 @@ from orcapod.extension_types.schema_walker import walk_schema
 
 if TYPE_CHECKING:
     import pyarrow as pa
+    from orcapod.semantic_types.universal_converter import UniversalTypeConverter
 
 logger = logging.getLogger(__name__)
 
 
 def register_discovered_extensions(
-    registry: LogicalTypeRegistry | None,
-    schema: pa.Schema,
+    converter: "UniversalTypeConverter | None",
+    schema: "pa.Schema",
 ) -> None:
     """Register any extension types found in ``schema`` that are not yet known.
 
-    Walks ``schema`` recursively to discover all Arrow extension types at any
-    nesting depth. For each discovered type, delegates to
-    ``registry.ensure_extension_type``.
+    Walks ``schema`` recursively via ``walk_schema`` to discover all Arrow extension
+    types at any nesting depth (both in-memory and field-metadata channels).
+    For each discovered type, delegates to ``converter._ensure_extension_type_info``.
 
-    Already-registered types are detected and skipped inside the registry —
-    this function itself is stateless beyond the registry it operates on.
+    Already-registered types are detected and skipped inside the converter —
+    this function itself is stateless beyond the converter it operates on.
 
     Args:
-        registry: The ``LogicalTypeRegistry`` to use for lookup and registration.
-            If ``None``, this call is a no-op — no extension types will be
-            registered. Callers that want auto-registration must supply a registry
-            explicitly; the typical source is
-            ``data_context.logical_type_registry``.
+        converter: The ``UniversalTypeConverter`` to use for registration.
+            If ``None``, this call is a no-op.
         schema: The Arrow schema to inspect. May contain no extension types,
             in which case this call is a no-op.
 
     Raises:
-        ValueError: Propagated from the registry if an extension type's metadata
+        ValueError: Propagated from the converter if an extension type's metadata
             has no registered factory or is malformed.
     """
-    if registry is None:
-        logger.debug("register_discovered_extensions: no registry provided, skipping")
+    if converter is None:
+        logger.debug("register_discovered_extensions: no converter provided, skipping")
         return
 
     found = walk_schema(schema)
@@ -73,10 +71,12 @@ def register_discovered_extensions(
         [info.extension_name for info in found],
     )
     for info in found:
-        registry.ensure_extension_type(
+        # Bottom-up resolve the storage type first, then register the extension
+        resolved_storage = converter.register_storage_type(info.storage_type)
+        converter._ensure_extension_type_info(
             info.extension_name,
             info.extension_metadata,
-            info.storage_type,
+            resolved_storage,
         )
 
 
