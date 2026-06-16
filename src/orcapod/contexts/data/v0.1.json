@@ -36,25 +36,6 @@
             }
         }
     },
-    "logical_type_registry": {
-        "_class": "orcapod.extension_types.registry.LogicalTypeRegistry",
-        "_config": {
-            "logical_types": [
-                {
-                    "_class": "orcapod.extension_types.builtin_logical_types.LogicalPath",
-                    "_config": {}
-                },
-                {
-                    "_class": "orcapod.extension_types.builtin_logical_types.LogicalUPath",
-                    "_config": {}
-                },
-                {
-                    "_class": "orcapod.extension_types.builtin_logical_types.LogicalUUID",
-                    "_config": {}
-                }
-            ]
-        }
-    },
     "type_converter": {
         "_class": "orcapod.semantic_types.universal_converter.UniversalTypeConverter",
         "_config": {
@@ -62,7 +43,23 @@
                 "_ref": "semantic_registry"
             },
             "logical_type_registry": {
-                "_ref": "logical_type_registry"
+                "_class": "orcapod.extension_types.registry.LogicalTypeRegistry",
+                "_config": {
+                    "logical_types": [
+                        {
+                            "_class": "orcapod.extension_types.builtin_logical_types.LogicalPath",
+                            "_config": {}
+                        },
+                        {
+                            "_class": "orcapod.extension_types.builtin_logical_types.LogicalUPath",
+                            "_config": {}
+                        },
+                        {
+                            "_class": "orcapod.extension_types.builtin_logical_types.LogicalUUID",
+                            "_config": {}
+                        }
+                    ]
+                }
             }
         }
     },
