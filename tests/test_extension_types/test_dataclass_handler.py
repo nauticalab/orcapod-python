@@ -1,4 +1,4 @@
-"""Tests for DataclassLogicalType and DataclassHandlerFactory."""
+"""Tests for DataclassLogicalType and DataclassLogicalTypeFactory."""
 
 from __future__ import annotations
 
@@ -122,38 +122,38 @@ def test_dataclass_logical_type_python_type():
     assert lt.python_type is _Bar
 
 
-# ── DataclassHandlerFactory helpers ──────────────────────────────────────────
+# ── DataclassLogicalTypeFactory helpers ──────────────────────────────────────────
 
 def _make_full_converter():
-    """Make a UniversalTypeConverter with builtin types + DataclassHandlerFactory."""
+    """Make a UniversalTypeConverter with builtin types + DataclassLogicalTypeFactory."""
     from orcapod.extension_types.builtin_logical_types import LogicalPath, LogicalUUID, LogicalUPath
     from orcapod.extension_types.registry import LogicalTypeRegistry
-    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory, DATACLASS_CATEGORY
+    from orcapod.extension_types.dataclass_handler import DataclassLogicalTypeFactory, DATACLASS_CATEGORY
     from orcapod.semantic_types.universal_converter import UniversalTypeConverter
 
     registry = LogicalTypeRegistry(logical_types=[LogicalPath(), LogicalUUID(), LogicalUPath()])
-    factory = DataclassHandlerFactory()
+    factory = DataclassLogicalTypeFactory()
     registry.register_logical_type_factory(factory, category=DATACLASS_CATEGORY, python_bases=[object])
     return UniversalTypeConverter(logical_type_registry=registry)
 
 
-# ── DataclassHandlerFactory write-path tests ─────────────────────────────────
+# ── DataclassLogicalTypeFactory write-path tests ─────────────────────────────────
 
 def test_factory_supports_class_dataclass():
-    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    from orcapod.extension_types.dataclass_handler import DataclassLogicalTypeFactory
 
     @dataclasses.dataclass
     class _Dummy:
         x: int
 
-    factory = DataclassHandlerFactory()
+    factory = DataclassLogicalTypeFactory()
     assert factory.supports_class(_Dummy) is True
 
 
 def test_factory_supports_class_non_dataclass():
-    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    from orcapod.extension_types.dataclass_handler import DataclassLogicalTypeFactory
 
-    factory = DataclassHandlerFactory()
+    factory = DataclassLogicalTypeFactory()
     assert factory.supports_class(str) is False
     assert factory.supports_class(int) is False
 
@@ -182,9 +182,9 @@ class _WithDict:
 
 
 def test_factory_create_flat_dataclass():
-    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory, DataclassLogicalType
+    from orcapod.extension_types.dataclass_handler import DataclassLogicalTypeFactory, DataclassLogicalType
 
-    factory = DataclassHandlerFactory()
+    factory = DataclassLogicalTypeFactory()
     converter = _make_full_converter()
     lt = factory.create_for_python_type(_Flat, converter=converter)
 
@@ -199,14 +199,14 @@ def test_factory_create_dataclass_with_uuid_field():
     """UUID field → plain storage type (large_binary) in the struct, not extension type.
 
     ``pa.Table.from_pylist`` (and Polars dtype inference) cannot handle a struct
-    whose fields are ``pa.ExtensionType`` nodes.  ``DataclassHandlerFactory`` strips
+    whose fields are ``pa.ExtensionType`` nodes.  ``DataclassLogicalTypeFactory`` strips
     extension types from struct field types so that Arrow array construction works.
     The UUID's extension type (``orcapod.uuid``) is still registered and used for
     value conversion; only the struct field schema uses the stripped storage type.
     """
-    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    from orcapod.extension_types.dataclass_handler import DataclassLogicalTypeFactory
 
-    factory = DataclassHandlerFactory()
+    factory = DataclassLogicalTypeFactory()
     converter = _make_full_converter()
     lt = factory.create_for_python_type(_WithUUID, converter=converter)
 
@@ -218,9 +218,9 @@ def test_factory_create_dataclass_with_uuid_field():
 
 
 def test_factory_create_dataclass_with_list_field():
-    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    from orcapod.extension_types.dataclass_handler import DataclassLogicalTypeFactory
 
-    factory = DataclassHandlerFactory()
+    factory = DataclassLogicalTypeFactory()
     converter = _make_full_converter()
     lt = factory.create_for_python_type(_WithList, converter=converter)
 
@@ -230,9 +230,9 @@ def test_factory_create_dataclass_with_list_field():
 
 
 def test_factory_create_dataclass_with_dict_field():
-    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    from orcapod.extension_types.dataclass_handler import DataclassLogicalTypeFactory
 
-    factory = DataclassHandlerFactory()
+    factory = DataclassLogicalTypeFactory()
     converter = _make_full_converter()
     lt = factory.create_for_python_type(_WithDict, converter=converter)
 
@@ -245,7 +245,7 @@ def test_factory_create_dataclass_with_dict_field():
 
 
 def test_factory_rejects_local_class():
-    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    from orcapod.extension_types.dataclass_handler import DataclassLogicalTypeFactory
 
     def _make_local():
         @dataclasses.dataclass
@@ -254,14 +254,14 @@ def test_factory_rejects_local_class():
         return _Local
 
     LocalClass = _make_local()
-    factory = DataclassHandlerFactory()
+    factory = DataclassLogicalTypeFactory()
     converter = _make_full_converter()
     with pytest.raises(ValueError, match="local"):
         factory.create_for_python_type(LocalClass, converter=converter)
 
 
 def test_register_python_class_dispatches_to_dataclass_factory():
-    """register_python_class on a dataclass triggers DataclassHandlerFactory."""
+    """register_python_class on a dataclass triggers DataclassLogicalTypeFactory."""
     converter = _make_full_converter()
 
     # For this test, use UUID as a proxy (already registered as built-in).
@@ -290,13 +290,13 @@ class _RoundTripRecord:
 
 def test_factory_reconstruct_from_arrow():
     """reconstruct_from_arrow rebuilds the logical type from the Arrow struct."""
-    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory, DataclassLogicalType
+    from orcapod.extension_types.dataclass_handler import DataclassLogicalTypeFactory, DataclassLogicalType
 
     storage = pa.struct([pa.field("x", pa.int64()), pa.field("y", pa.int64())])
     metadata = {"category": "orcapod.dataclass"}
     fqcn = f"{_RoundTripPoint.__module__}.{_RoundTripPoint.__qualname__}"
 
-    factory = DataclassHandlerFactory()
+    factory = DataclassLogicalTypeFactory()
     converter = _make_full_converter()
     lt = factory.reconstruct_from_arrow(fqcn, storage, metadata, converter=converter)
 
@@ -307,10 +307,10 @@ def test_factory_reconstruct_from_arrow():
 
 def test_factory_reconstruct_from_arrow_invalid_fqcn():
     """ImportError if the FQCN cannot be resolved."""
-    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    from orcapod.extension_types.dataclass_handler import DataclassLogicalTypeFactory
 
     storage = pa.struct([pa.field("x", pa.int64())])
-    factory = DataclassHandlerFactory()
+    factory = DataclassLogicalTypeFactory()
     converter = _make_full_converter()
 
     with pytest.raises(ImportError):
@@ -323,8 +323,8 @@ def test_dataclass_python_to_storage_round_trip():
     """python_to_storage → storage_to_python returns an equivalent dataclass."""
     converter = _make_full_converter()
 
-    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
-    factory = DataclassHandlerFactory()
+    from orcapod.extension_types.dataclass_handler import DataclassLogicalTypeFactory
+    factory = DataclassLogicalTypeFactory()
     lt = factory.create_for_python_type(_RoundTripPoint, converter=converter)
     converter.register_logical_type(lt)
 
@@ -340,10 +340,10 @@ def test_dataclass_python_to_storage_round_trip():
 
 def test_dataclass_with_uuid_round_trip():
     """Round-trip a dataclass with a UUID field through python_to_storage / storage_to_python."""
-    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    from orcapod.extension_types.dataclass_handler import DataclassLogicalTypeFactory
 
     converter = _make_full_converter()
-    factory = DataclassHandlerFactory()
+    factory = DataclassLogicalTypeFactory()
     lt = factory.create_for_python_type(_RoundTripRecord, converter=converter)
     converter.register_logical_type(lt)
 
@@ -359,3 +359,58 @@ def test_dataclass_with_uuid_round_trip():
     assert isinstance(reconstructed, _RoundTripRecord)
     assert reconstructed.record_id == u
     assert reconstructed.label == "hello"
+
+
+# ── _import_from_fqcn nested class tests ─────────────────────────────────────
+
+@dataclasses.dataclass
+class _OuterForNestedTest:
+    """Module-level outer class for testing nested-class FQCN import."""
+
+    @dataclasses.dataclass
+    class Inner:
+        x: int
+        y: str
+
+
+def test_import_from_fqcn_nested_class():
+    """_import_from_fqcn resolves module-level nested dataclasses via attribute walk."""
+    from orcapod.extension_types.dataclass_handler import _import_from_fqcn
+
+    # _OuterForNestedTest.Inner lives in this test module; its FQCN uses '.' for nesting
+    module = _OuterForNestedTest.__module__
+    outer_qualname = _OuterForNestedTest.__qualname__
+    inner_qualname = _OuterForNestedTest.Inner.__qualname__  # e.g. "_OuterForNestedTest.Inner"
+
+    fqcn = f"{module}.{inner_qualname}"
+    cls = _import_from_fqcn(fqcn)
+    assert cls is _OuterForNestedTest.Inner
+    assert dataclasses.is_dataclass(cls)
+
+
+def test_python_to_storage_raises_when_converter_none():
+    """DataclassLogicalType.python_to_storage raises ValueError when converter is None."""
+    from orcapod.extension_types.dataclass_handler import DataclassLogicalType
+
+    @dataclasses.dataclass
+    class _DC:
+        x: int
+
+    storage = pa.struct([pa.field("x", pa.int64())])
+    lt = DataclassLogicalType("mymod._DC", _DC, storage, [("x", int)])
+    with pytest.raises(ValueError, match="converter"):
+        lt.python_to_storage(_DC(x=1), None)
+
+
+def test_storage_to_python_raises_when_converter_none():
+    """DataclassLogicalType.storage_to_python raises ValueError when converter is None."""
+    from orcapod.extension_types.dataclass_handler import DataclassLogicalType
+
+    @dataclasses.dataclass
+    class _DC:
+        x: int
+
+    storage = pa.struct([pa.field("x", pa.int64())])
+    lt = DataclassLogicalType("mymod._DC2", _DC, storage, [("x", int)])
+    with pytest.raises(ValueError, match="converter"):
+        lt.storage_to_python({"x": 1}, None)

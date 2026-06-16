@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 
-from orcapod.hashing.semantic_hashing.type_handler_registry import TypeHandlerRegistry
 from orcapod.protocols.hashing_protocols import (
     ArrowHasherProtocol,
     SemanticHasherProtocol,
@@ -21,8 +20,9 @@ class DataContext:
         type_converter: Type converter for Python ↔ Arrow conversion and
             registration. This is the single public API for all type operations.
         arrow_hasher: Arrow table hasher for this context
-        semantic_hasher: General semantic hasher for this context
-        type_handler_registry: Registry of TypeHandlerProtocol instances
+        semantic_hasher: General semantic hasher for this context. The
+            ``TypeHandlerRegistry`` used for hashing is accessible via
+            ``semantic_hasher.type_handler_registry``.
     """
 
     context_key: str
@@ -31,7 +31,6 @@ class DataContext:
     type_converter: TypeConverterProtocol
     arrow_hasher: ArrowHasherProtocol
     semantic_hasher: SemanticHasherProtocol
-    type_handler_registry: TypeHandlerRegistry
 
 class ContextValidationError(Exception):
     """Raised when context validation fails."""

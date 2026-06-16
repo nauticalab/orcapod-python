@@ -83,7 +83,7 @@ class LogicalPath:
             LogicalPath._polars_ext = LogicalPath._polars_ext_class()
         return LogicalPath._polars_ext
 
-    def python_to_storage(self, value: Any, converter: "TypeConverterProtocol | None" = None) -> str:
+    def python_to_storage(self, value: Any, converter: TypeConverterProtocol | None = None) -> str:
         """Convert a ``pathlib.Path`` to its string representation.
 
         Args:
@@ -95,7 +95,7 @@ class LogicalPath:
         """
         return str(value)
 
-    def storage_to_python(self, storage_value: Any, converter: "TypeConverterProtocol | None" = None) -> pathlib.Path:
+    def storage_to_python(self, storage_value: Any, converter: TypeConverterProtocol | None = None) -> pathlib.Path:
         """Reconstruct a ``pathlib.Path`` from its string representation.
 
         Args:
@@ -156,7 +156,7 @@ class LogicalUPath:
             LogicalUPath._polars_ext = LogicalUPath._polars_ext_class()
         return LogicalUPath._polars_ext
 
-    def python_to_storage(self, value: Any, converter: "TypeConverterProtocol | None" = None) -> str:
+    def python_to_storage(self, value: Any, converter: TypeConverterProtocol | None = None) -> str:
         """Convert a ``upath.UPath`` to its string representation.
 
         Args:
@@ -168,7 +168,7 @@ class LogicalUPath:
         """
         return str(value)
 
-    def storage_to_python(self, storage_value: Any, converter: "TypeConverterProtocol | None" = None) -> UPath:
+    def storage_to_python(self, storage_value: Any, converter: TypeConverterProtocol | None = None) -> UPath:
         """Reconstruct a ``upath.UPath`` from its string representation.
 
         Args:
@@ -237,7 +237,7 @@ class LogicalUUID:
             LogicalUUID._polars_ext = LogicalUUID._polars_ext_class()
         return LogicalUUID._polars_ext
 
-    def python_to_storage(self, value: Any, converter: "TypeConverterProtocol | None" = None) -> bytes:
+    def python_to_storage(self, value: Any, converter: TypeConverterProtocol | None = None) -> bytes:
         """Convert a ``uuid.UUID`` to its 16-byte binary representation.
 
         Args:
@@ -250,7 +250,7 @@ class LogicalUUID:
         """
         return value.bytes
 
-    def storage_to_python(self, storage_value: Any, converter: "TypeConverterProtocol | None" = None) -> _uuid_module.UUID:
+    def storage_to_python(self, storage_value: Any, converter: TypeConverterProtocol | None = None) -> _uuid_module.UUID:
         """Reconstruct a ``uuid.UUID`` from its 16-byte binary representation.
 
         Args:
