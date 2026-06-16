@@ -43,12 +43,19 @@ DATACLASS_CATEGORY = "orcapod.dataclass"
 
 
 def _strip_ext_to_storage(arrow_type: "pa.DataType") -> "pa.DataType":
-    """Recursively strip ``pa.ExtensionType`` down to its storage type.
+    """Recursively strip ``pa.ExtensionType`` nodes down to plain storage types.
 
-    ``make_polars_extension_type`` computes the Polars dtype via
-    ``pl.from_arrow(pa.array([], type=storage_type))``, which fails when the
-    storage type is a struct that contains extension-typed fields.  This
-    helper strips those extension types before the Polars conversion.
+    Both ``pa.Table.from_pylist`` and ``make_polars_extension_type`` fail when
+    a struct (or list element) contains ``pa.ExtensionType`` fields — Arrow
+    raises ``ArrowNotImplementedError: extension`` in both cases (see ET1 in
+    ``DESIGN_ISSUES.md``).  This helper strips those extension types before
+    any such operation so that only plain scalar/binary/string types remain
+    inside struct fields.
+
+    Applied at struct construction time in
+    ``DataclassHandlerFactory.create_for_python_type`` so that the resulting
+    ``storage_type`` never contains nested extension types.  Value conversion
+    is annotation-driven (not Arrow-type-driven), so stripping is safe.
 
     Args:
         arrow_type: An Arrow data type, possibly containing nested extension types.
@@ -117,11 +124,11 @@ class DataclassLogicalType:
             logical_name, storage_type, metadata=_metadata
         )
         self._arrow_ext: "pa.ExtensionType | None" = None
-        # Strip nested extension types before deriving the Polars storage dtype.
-        # pl.from_arrow cannot build an empty array from a struct that contains
-        # Arrow extension-typed fields (e.g. orcapod.uuid inside a struct).
-        _polars_storage = _strip_ext_to_storage(storage_type)
-        self._polars_ext_class = make_polars_extension_type(logical_name, _polars_storage)
+        # ``storage_type`` is already stripped of nested extension types by
+        # ``DataclassHandlerFactory.create_for_python_type`` (see ET1 in
+        # DESIGN_ISSUES.md).  ``make_polars_extension_type`` and
+        # ``pa.Table.from_pylist`` both require plain storage types inside structs.
+        self._polars_ext_class = make_polars_extension_type(logical_name, storage_type)
         self._polars_ext: "pl.BaseExtension | None" = None
 
     @property
@@ -275,7 +282,11 @@ class DataclassHandlerFactory:
                 continue
             annotation = hints.get(field.name, Any)
             arrow_type = converter.register_python_class(annotation)
-            arrow_fields.append(pa.field(field.name, arrow_type))
+            # Strip extension types from struct field types: pa.Table.from_pylist (and
+            # pa.array) cannot build a struct array when a field type is a pa.ExtensionType.
+            # Value conversion is annotation-driven so the stripped type here is fine.
+            stripped_type = _strip_ext_to_storage(arrow_type)
+            arrow_fields.append(pa.field(field.name, stripped_type))
             field_annotations.append((field.name, annotation))
 
         storage_type = pa.struct(arrow_fields)
