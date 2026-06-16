@@ -10,7 +10,7 @@ import typing
 from typing import Any, Iterator
 
 
-def extract_leaf_classes(annotation: Any) -> Iterator[type]:
+def _extract_leaf_classes(annotation: Any) -> Iterator[type]:
     """Recursively yield all concrete leaf Python classes from a type annotation.
 
     Unwraps generic aliases (``list[T]``, ``dict[K, V]``, ``Optional[T]``,
@@ -31,9 +31,9 @@ def extract_leaf_classes(annotation: Any) -> Iterator[type]:
         Concrete Python ``type`` objects found at leaf positions.
 
     Examples:
-        >>> list(extract_leaf_classes(list[int]))
+        >>> list(_extract_leaf_classes(list[int]))
         [<class 'int'>]
-        >>> set(extract_leaf_classes(dict[str, list[MyClass]]))
+        >>> set(_extract_leaf_classes(dict[str, list[MyClass]]))
         {<class 'str'>, <class 'MyClass'>}
     """
     origin = typing.get_origin(annotation)
@@ -48,4 +48,4 @@ def extract_leaf_classes(annotation: Any) -> Iterator[type]:
     for arg in typing.get_args(annotation):
         if arg is type(None):
             continue
-        yield from extract_leaf_classes(arg)
+        yield from _extract_leaf_classes(arg)

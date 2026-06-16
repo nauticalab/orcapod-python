@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional, Union
 
-from orcapod.extension_types.type_utils import extract_leaf_classes
+from orcapod.extension_types.type_utils import _extract_leaf_classes as extract_leaf_classes
 
 
 class _A:

@@ -39,9 +39,6 @@
     "type_converter": {
         "_class": "orcapod.semantic_types.universal_converter.UniversalTypeConverter",
         "_config": {
-            "semantic_registry": {
-                "_ref": "semantic_registry"
-            },
             "logical_type_registry": {
                 "_class": "orcapod.extension_types.registry.LogicalTypeRegistry",
                 "_config": {
