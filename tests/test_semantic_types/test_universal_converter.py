@@ -706,3 +706,305 @@ def test_data_context_type_converter_holds_logical_type_registry():
     ctx = get_default_context()
     assert hasattr(ctx.type_converter, "_logical_type_registry")
     assert ctx.type_converter._logical_type_registry is ctx.logical_type_registry
+
+
+# ── Helpers for new tests ────────────────────────────────────────────────────
+
+import dataclasses
+import pathlib
+from typing import Optional
+
+from orcapod.extension_types.registry import make_polars_extension_type
+
+
+def _make_registry_with_builtins() -> LogicalTypeRegistry:
+    """Registry with LogicalPath, LogicalUUID, LogicalUPath pre-registered."""
+    from orcapod.extension_types.builtin_logical_types import LogicalPath, LogicalUUID, LogicalUPath
+    return LogicalTypeRegistry(logical_types=[LogicalPath(), LogicalUUID(), LogicalUPath()])
+
+
+def _make_converter(registry: LogicalTypeRegistry | None = None) -> UniversalTypeConverter:
+    if registry is None:
+        registry = _make_registry_with_builtins()
+    return UniversalTypeConverter(logical_type_registry=registry)
+
+
+# ── register_python_class tests ──────────────────────────────────────────────
+
+def test_register_python_class_primitive_int():
+    converter = _make_converter()
+    assert converter.register_python_class(int) == pa.int64()
+
+
+def test_register_python_class_primitive_str():
+    converter = _make_converter()
+    assert converter.register_python_class(str) == pa.large_string()
+
+
+def test_register_python_class_list_of_int():
+    converter = _make_converter()
+    result = converter.register_python_class(list[int])
+    assert result == pa.large_list(pa.int64())
+
+
+def test_register_python_class_optional_str():
+    converter = _make_converter()
+    result = converter.register_python_class(Optional[str])
+    assert result == pa.large_string()
+
+
+def test_register_python_class_dict_str_int():
+    converter = _make_converter()
+    result = converter.register_python_class(dict[str, int])
+    expected = pa.large_list(pa.struct([pa.field("key", pa.large_string()), pa.field("value", pa.int64())]))
+    assert result == expected
+
+
+def test_register_python_class_set_of_str():
+    converter = _make_converter()
+    result = converter.register_python_class(set[str])
+    assert result == pa.large_list(pa.large_string())
+
+
+def test_register_python_class_registry_hit_path():
+    """pathlib.Path is pre-registered → returns the orcapod.path extension type."""
+    converter = _make_converter()
+    result = converter.register_python_class(pathlib.Path)
+    assert isinstance(result, pa.ExtensionType)
+    assert result.extension_name == "orcapod.path"
+
+
+def test_register_python_class_uuid_registry_hit():
+    converter = _make_converter()
+    result = converter.register_python_class(_uuid_module.UUID)
+    assert isinstance(result, pa.ExtensionType)
+    assert result.extension_name == "orcapod.uuid"
+
+
+def test_register_python_class_factory_dispatch():
+    """A custom class triggers factory synthesis and caches the result."""
+    import uuid as _u
+
+    class _Base:
+        pass
+
+    class _Child(_Base):
+        pass
+
+    ext_name = f"test.custom.{_u.uuid4().hex[:8]}"
+    ArrowExt = make_arrow_extension_type(ext_name, pa.large_string())
+    PolarsExt = make_polars_extension_type(ext_name, pa.large_string())
+    synthesized_calls = []
+
+    class _Factory:
+        def supports_class(self, python_type):
+            return issubclass(python_type, _Base)
+        def create_for_python_type(self, python_type, converter):
+            synthesized_calls.append(python_type)
+            class _LT:
+                logical_type_name = ext_name
+                python_type_ = _Child
+                python_type = _Child
+                def get_arrow_extension_type(self): return ArrowExt()
+                def get_polars_extension_type(self): return PolarsExt()
+                def python_to_storage(self, v, c=None): return str(v)
+                def storage_to_python(self, v, c=None): return v
+            return _LT()
+        def reconstruct_from_arrow(self, name, storage, meta, converter): pass
+
+    registry = _make_registry_with_builtins()
+    registry.register_logical_type_factory(_Factory(), python_bases=[_Base])
+    converter = _make_converter(registry)
+
+    result = converter.register_python_class(_Child)
+    assert isinstance(result, pa.ExtensionType)
+    assert result.extension_name == ext_name
+    assert _Child in synthesized_calls
+
+    # Second call is a registry hit — factory NOT called again
+    result2 = converter.register_python_class(_Child)
+    assert result2 == result
+    assert len(synthesized_calls) == 1
+
+
+def test_register_python_class_cycle_detection():
+    """Cyclic type synthesis raises TypeError."""
+
+    class _CycleClass:
+        pass
+
+    class _CycleFactory:
+        def supports_class(self, python_type):
+            return python_type is _CycleClass
+        def create_for_python_type(self, python_type, converter):
+            # Intentionally trigger a cycle
+            converter.register_python_class(_CycleClass)
+        def reconstruct_from_arrow(self, name, storage, meta, converter): pass
+
+    registry = _make_registry_with_builtins()
+    registry.register_logical_type_factory(_CycleFactory(), python_bases=[_CycleClass])
+    converter = _make_converter(registry)
+
+    with pytest.raises(TypeError, match="[Cc]ircular"):
+        converter.register_python_class(_CycleClass)
+
+
+# ── register_storage_type tests ──────────────────────────────────────────────
+
+def test_register_storage_type_primitive_int():
+    converter = _make_converter()
+    assert converter.register_storage_type(pa.int64()) == pa.int64()
+
+
+def test_register_storage_type_primitive_large_string():
+    converter = _make_converter()
+    assert converter.register_storage_type(pa.large_string()) == pa.large_string()
+
+
+def test_register_storage_type_extension_type_registry_hit():
+    """An already-registered extension type is returned unchanged (no-op)."""
+    converter = _make_converter()
+    from orcapod.extension_types.builtin_logical_types import LogicalUUID
+    uuid_ext = LogicalUUID().get_arrow_extension_type()
+    result = converter.register_storage_type(uuid_ext)
+    assert isinstance(result, pa.ExtensionType)
+    assert result.extension_name == "orcapod.uuid"
+
+
+def test_register_storage_type_struct_recurses():
+    """Structs are traversed field by field; resolved field types are returned."""
+    converter = _make_converter()
+    struct_type = pa.struct([pa.field("name", pa.large_string()), pa.field("count", pa.int64())])
+    result = converter.register_storage_type(struct_type)
+    assert pa.types.is_struct(result)
+    assert result.field("name").type == pa.large_string()
+    assert result.field("count").type == pa.int64()
+
+
+def test_register_storage_type_large_list_recurses():
+    converter = _make_converter()
+    list_type = pa.large_list(pa.int32())
+    result = converter.register_storage_type(list_type)
+    assert pa.types.is_large_list(result)
+    assert result.value_type == pa.int32()
+
+
+def test_register_storage_type_extension_miss_dispatches_to_factory():
+    """An unregistered extension type triggers factory.reconstruct_from_arrow."""
+    import json
+    import uuid as _u
+
+    ext_name = f"test.reconstruct.{_u.uuid4().hex[:8]}"
+    category = "test.reconstruct"
+    metadata = json.dumps({"category": category}).encode()
+    ArrowExt = make_arrow_extension_type(ext_name, pa.large_string(), metadata=metadata)
+    PolarsExt = make_polars_extension_type(ext_name, pa.large_string())
+
+    class _LT:
+        logical_type_name = ext_name
+        python_type = str
+        def get_arrow_extension_type(self): return ArrowExt()
+        def get_polars_extension_type(self): return PolarsExt()
+        def python_to_storage(self, v, c=None): return str(v)
+        def storage_to_python(self, v, c=None): return v
+
+    class _Factory:
+        def supports_class(self, t): return False
+        def create_for_python_type(self, t, converter): pass
+        def reconstruct_from_arrow(self, name, storage_type, meta, converter):
+            return _LT()
+
+    registry = _make_registry_with_builtins()
+    registry.register_logical_type_factory(_Factory(), category=category)
+    converter = _make_converter(registry)
+
+    ext_instance = ArrowExt()
+    result = converter.register_storage_type(ext_instance)
+    assert isinstance(result, pa.ExtensionType)
+    assert result.extension_name == ext_name
+
+    # Second call: registry hit → same result, factory NOT called again
+    result2 = converter.register_storage_type(ext_instance)
+    assert result2.extension_name == ext_name
+
+
+def test_register_storage_type_nested_struct_with_extension():
+    """Extension type nested inside a struct field is resolved bottom-up."""
+    import json
+    import uuid as _u
+
+    ext_name = f"test.nested.{_u.uuid4().hex[:8]}"
+    category = "test.nested"
+    metadata = json.dumps({"category": category}).encode()
+    ArrowExt = make_arrow_extension_type(ext_name, pa.large_string(), metadata=metadata)
+    PolarsExt = make_polars_extension_type(ext_name, pa.large_string())
+
+    class _LT:
+        logical_type_name = ext_name
+        python_type = str
+        def get_arrow_extension_type(self): return ArrowExt()
+        def get_polars_extension_type(self): return PolarsExt()
+        def python_to_storage(self, v, c=None): return str(v)
+        def storage_to_python(self, v, c=None): return v
+
+    class _Factory:
+        def supports_class(self, t): return False
+        def create_for_python_type(self, t, converter): pass
+        def reconstruct_from_arrow(self, name, storage_type, meta, converter):
+            return _LT()
+
+    registry = _make_registry_with_builtins()
+    registry.register_logical_type_factory(_Factory(), category=category)
+    converter = _make_converter(registry)
+
+    ext_instance = ArrowExt()
+    struct_with_ext = pa.struct([pa.field("id", pa.int64()), pa.field("tag", ext_instance)])
+    result = converter.register_storage_type(struct_with_ext)
+
+    assert pa.types.is_struct(result)
+    assert result.field("id").type == pa.int64()
+    assert isinstance(result.field("tag").type, pa.ExtensionType)
+    assert result.field("tag").type.extension_name == ext_name
+
+
+# ── python_to_storage / storage_to_python / pass-through tests ───────────────
+
+def test_python_to_storage_for_registered_type():
+    """python_to_storage uses the logical type's converter for registered types."""
+    converter = _make_converter()
+    result = converter.python_to_storage(pathlib.Path("/tmp/bar"), pathlib.Path)
+    assert result == "/tmp/bar"
+
+
+def test_storage_to_python_for_registered_type():
+    converter = _make_converter()
+    result = converter.storage_to_python("/tmp/bar", pathlib.Path)
+    assert isinstance(result, pathlib.Path)
+    assert result == pathlib.Path("/tmp/bar")
+
+
+def test_python_to_storage_for_int():
+    converter = _make_converter()
+    assert converter.python_to_storage(42, int) == 42
+
+
+def test_register_logical_type_passthrough():
+    from orcapod.extension_types.builtin_logical_types import LogicalPath
+    registry = LogicalTypeRegistry()
+    converter = UniversalTypeConverter(logical_type_registry=registry)
+    lt = LogicalPath()
+    converter.register_logical_type(lt)
+    assert registry.get_by_python_type(pathlib.Path) is lt
+
+
+def test_register_logical_type_factory_passthrough():
+    class _Factory:
+        def supports_class(self, t): return False
+        def create_for_python_type(self, t, converter): pass
+        def reconstruct_from_arrow(self, name, storage, meta, converter): pass
+
+    registry = LogicalTypeRegistry()
+    converter = UniversalTypeConverter(logical_type_registry=registry)
+    factory = _Factory()
+    converter.register_logical_type_factory(factory, category="test.cat")
+    assert registry._category_factories.get("test.cat") is factory
