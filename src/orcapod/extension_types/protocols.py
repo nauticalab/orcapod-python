@@ -124,14 +124,14 @@ class LogicalTypeFactoryProtocol(Protocol):
     (``reconstruct_from_arrow`` — reconstructs a ``LogicalTypeProtocol`` from Arrow schema
     metadata).
 
-    ``supports_class`` is the write-side gate: the registry calls it during the MRO walk
-    to confirm whether this factory should handle a given Python type before committing.
+    ``supports_class`` is the intended write-side gate for the registry's MRO walk — the
+    registry consults it to confirm a factory handles a given Python type before committing.
     Read-side dispatch (via ``"category"`` metadata) bypasses ``supports_class`` entirely —
     the category string is fully definitive.
 
     ``registry`` and ``context`` are optional on both factory methods so that simple
     factories that don't recurse can ignore them. Factories that handle recursive types
-    (e.g. nested dataclasses) use ``registry`` to register sub-types as a side effect and
+    (e.g. nested dataclasses) can use ``registry`` to register sub-types as a side effect and
     ``context`` to propagate cycle detection across factory boundaries.
 
     This protocol is ``@runtime_checkable``, consistent with ``LogicalTypeProtocol``.
