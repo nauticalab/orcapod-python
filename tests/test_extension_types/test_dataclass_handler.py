@@ -435,3 +435,67 @@ def test_reconstruct_from_arrow_cycle_detection():
         factory.reconstruct_from_arrow(
             fqcn, storage, {"category": "orcapod.dataclass"}, context=ctx
         )
+
+
+# ---------------------------------------------------------------------------
+# Arrow array round-trip
+# ---------------------------------------------------------------------------
+
+def test_arrow_struct_array_round_trip_flat():
+    """Build a PyArrow struct array from storage dicts; verify round-trip via storage_to_python."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(Flat)
+
+    instances = [Flat(x=1, y="a"), Flat(x=2, y="b"), Flat(x=3, y="c")]
+    storage_dicts = [lt.python_to_storage(inst) for inst in instances]
+
+    struct_arr = pa.array(storage_dicts, type=lt.get_arrow_extension_type().storage_type)
+    results = [lt.storage_to_python(struct_arr[i].as_py()) for i in range(len(struct_arr))]
+    assert results == instances
+
+
+def test_arrow_struct_array_round_trip_nested():
+    """Nested dataclass round-trips through Arrow struct array correctly."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(Outer)
+
+    instances = [Outer(inner=Inner(a=10), z="x"), Outer(inner=Inner(a=20), z="y")]
+    storage_dicts = [lt.python_to_storage(inst) for inst in instances]
+    struct_arr = pa.array(storage_dicts, type=lt.get_arrow_extension_type().storage_type)
+    results = [lt.storage_to_python(struct_arr[i].as_py()) for i in range(len(struct_arr))]
+    assert results == instances
+
+
+def test_arrow_struct_array_round_trip_with_list():
+    """list[T] field round-trips through Arrow list array correctly."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(WithList)
+
+    instances = [WithList(items=[1, 2]), WithList(items=[]), WithList(items=[9])]
+    storage_dicts = [lt.python_to_storage(inst) for inst in instances]
+    struct_arr = pa.array(storage_dicts, type=lt.get_arrow_extension_type().storage_type)
+    results = [lt.storage_to_python(struct_arr[i].as_py()) for i in range(len(struct_arr))]
+    assert results == instances
+
+
+# ---------------------------------------------------------------------------
+# ResolutionContext propagation across factory boundary
+# ---------------------------------------------------------------------------
+
+def test_resolution_context_cycle_across_factories():
+    """Demonstrates that a context with visited_types from another factory scope
+    propagates correctly into DataclassHandlerFactory.create_for_python_type."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+
+    @dataclasses.dataclass
+    class _X:
+        n: int
+
+    factory = DataclassHandlerFactory()
+    # Pre-populate context as if another factory already put _X in visited_types
+    ctx = ResolutionContext(visited_types=frozenset({_X}))
+    with pytest.raises(TypeError, match="[Cc]ircular"):
+        factory.create_for_python_type(_X, context=ctx)
