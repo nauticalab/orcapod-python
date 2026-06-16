@@ -1,4 +1,4 @@
-"""Tests for LogicalTypeProtocol and LogicalTypeFactoryProtocol."""
+"""Tests for LogicalTypeProtocol, LogicalTypeFactoryProtocol, and TypeConverterProtocol."""
 
 from __future__ import annotations
 
@@ -34,21 +34,74 @@ class _StubLogicalType:
                 return cls()
         return _PolarsExt()
 
-    def python_to_storage(self, value):
+    def python_to_storage(self, value, converter):  # converter param added
         return str(value)
 
-    def storage_to_python(self, storage_value):
+    def storage_to_python(self, storage_value, converter):  # converter param added
         return storage_value
 
 
 class _StubFactory:
     """Minimal conforming implementation of LogicalTypeFactoryProtocol for use in tests."""
 
-    def reconstruct_from_arrow(self, arrow_extension_name, storage_type, metadata):
+    def supports_class(self, python_type):  # new method
+        return True
+
+    def reconstruct_from_arrow(self, arrow_extension_name, storage_type, metadata, converter):
         return _StubLogicalType()
 
-    def create_for_python_type(self, python_type):
+    def create_for_python_type(self, python_type, converter):
         return _StubLogicalType()
+
+
+def test_type_converter_protocol_is_importable():
+    from orcapod.extension_types.protocols import TypeConverterProtocol
+    assert TypeConverterProtocol is not None
+
+
+def test_factory_supports_class_method_required():
+    """LogicalTypeFactoryProtocol requires supports_class."""
+    from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol
+
+    class _BadFactory:
+        def reconstruct_from_arrow(self, name, storage_type, metadata, converter):
+            pass
+        def create_for_python_type(self, python_type, converter):
+            pass
+        # Missing supports_class
+
+    assert not isinstance(_BadFactory(), LogicalTypeFactoryProtocol)
+
+
+def test_factory_with_supports_class_satisfies_protocol():
+    from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol
+
+    class _GoodFactory:
+        def supports_class(self, python_type):
+            return True
+        def reconstruct_from_arrow(self, name, storage_type, metadata, converter):
+            pass
+        def create_for_python_type(self, python_type, converter):
+            pass
+
+    assert isinstance(_GoodFactory(), LogicalTypeFactoryProtocol)
+
+
+def test_logical_type_python_to_storage_accepts_converter():
+    """LogicalTypeProtocol.python_to_storage now requires converter param."""
+    from orcapod.extension_types.protocols import LogicalTypeProtocol
+
+    class _GoodLT:
+        @property
+        def logical_type_name(self): return "test.lt"
+        @property
+        def python_type(self): return str
+        def get_arrow_extension_type(self): pass
+        def get_polars_extension_type(self): pass
+        def python_to_storage(self, value, converter): return value
+        def storage_to_python(self, storage_value, converter): return storage_value
+
+    assert isinstance(_GoodLT(), LogicalTypeProtocol)
 
 
 def test_logical_type_factory_protocol_is_importable():
@@ -68,7 +121,7 @@ def test_logical_type_factory_create_returns_logical_type():
     from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol, LogicalTypeProtocol
     factory: LogicalTypeFactoryProtocol = _StubFactory()
     result = factory.reconstruct_from_arrow(
-        "test.ext", pa.large_utf8(), {"category": "Test"}
+        "test.ext", pa.large_utf8(), {"category": "Test"}, converter=None
     )
     assert isinstance(result, LogicalTypeProtocol)
 
@@ -90,8 +143,8 @@ def test_conforming_class_satisfies_protocol():
     assert lt.python_type is str
     assert lt.get_arrow_extension_type().extension_name == "test.module.MyType"
     assert isinstance(lt.get_polars_extension_type(), pl.BaseExtension)
-    assert lt.python_to_storage(42) == "42"
-    assert lt.storage_to_python("hello") == "hello"
+    assert lt.python_to_storage(42, None) == "42"   # pass converter=None
+    assert lt.storage_to_python("hello", None) == "hello"  # pass converter=None
 
 
 def test_factory_create_for_python_type_conformance():
@@ -99,5 +152,5 @@ def test_factory_create_for_python_type_conformance():
     from orcapod.extension_types.protocols import LogicalTypeFactoryProtocol, LogicalTypeProtocol
     factory: LogicalTypeFactoryProtocol = _StubFactory()
     assert isinstance(factory, LogicalTypeFactoryProtocol)
-    result = factory.create_for_python_type(str)
+    result = factory.create_for_python_type(str, converter=None)
     assert isinstance(result, LogicalTypeProtocol)
