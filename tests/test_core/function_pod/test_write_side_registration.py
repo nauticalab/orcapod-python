@@ -45,7 +45,6 @@ def _make_test_context(registry: LogicalTypeRegistry) -> DataContext:
         type_converter=fresh_converter,
         arrow_hasher=base_ctx.arrow_hasher,
         semantic_hasher=base_ctx.semantic_hasher,
-        type_handler_registry=base_ctx.type_handler_registry,
     )
 
 

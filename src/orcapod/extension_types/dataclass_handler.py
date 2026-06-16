@@ -1,7 +1,7 @@
-"""DataclassLogicalType and DataclassHandlerFactory.
+"""DataclassLogicalType and DataclassLogicalTypeFactory.
 
 Provides the ``DataclassLogicalType`` logical type implementation and the
-``DataclassHandlerFactory`` that synthesises and reconstructs ``DataclassLogicalType``
+``DataclassLogicalTypeFactory`` that synthesises and reconstructs ``DataclassLogicalType``
 instances for Python dataclasses.
 
 Write path (``create_for_python_type``):
@@ -42,18 +42,18 @@ logger = logging.getLogger(__name__)
 DATACLASS_CATEGORY = "orcapod.dataclass"
 
 
-def _strip_ext_to_storage(arrow_type: "pa.DataType") -> "pa.DataType":
+def _strip_ext_to_storage(arrow_type: pa.DataType) -> pa.DataType:
     """Recursively strip ``pa.ExtensionType`` nodes down to plain storage types.
 
-    Both ``pa.Table.from_pylist`` and ``make_polars_extension_type`` fail when
-    a struct (or list element) contains ``pa.ExtensionType`` fields — Arrow
+    Both ``pa.array`` (used to build struct arrays) and ``make_polars_extension_type``
+    fail when a struct (or list element) contains ``pa.ExtensionType`` fields — Arrow
     raises ``ArrowNotImplementedError: extension`` in both cases (see ET1 in
     ``DESIGN_ISSUES.md``).  This helper strips those extension types before
     any such operation so that only plain scalar/binary/string types remain
     inside struct fields.
 
     Applied at struct construction time in
-    ``DataclassHandlerFactory.create_for_python_type`` so that the resulting
+    ``DataclassLogicalTypeFactory.create_for_python_type`` so that the resulting
     ``storage_type`` never contains nested extension types.  Value conversion
     is annotation-driven (not Arrow-type-driven), so stripping is safe.
 
@@ -111,7 +111,7 @@ class DataclassLogicalType:
         self,
         logical_name: str,
         python_type: type,
-        storage_type: "pa.StructType",
+        storage_type: pa.StructType,
         field_annotations: list[tuple[str, Any]],
     ) -> None:
         self._logical_name = logical_name
@@ -123,13 +123,13 @@ class DataclassLogicalType:
         self._arrow_ext_class = make_arrow_extension_type(
             logical_name, storage_type, metadata=_metadata
         )
-        self._arrow_ext: "pa.ExtensionType | None" = None
+        self._arrow_ext: pa.ExtensionType | None = None
         # ``storage_type`` is already stripped of nested extension types by
-        # ``DataclassHandlerFactory.create_for_python_type`` (see ET1 in
+        # ``DataclassLogicalTypeFactory.create_for_python_type`` (see ET1 in
         # DESIGN_ISSUES.md).  ``make_polars_extension_type`` and
-        # ``pa.Table.from_pylist`` both require plain storage types inside structs.
+        # ``pa.array`` both require plain storage types inside structs.
         self._polars_ext_class = make_polars_extension_type(logical_name, storage_type)
-        self._polars_ext: "pl.BaseExtension | None" = None
+        self._polars_ext: pl.BaseExtension | None = None
 
     @property
     def logical_type_name(self) -> str:
@@ -141,7 +141,7 @@ class DataclassLogicalType:
         """The Python dataclass type this logical type represents."""
         return self._python_type
 
-    def get_arrow_extension_type(self) -> "pa.ExtensionType":
+    def get_arrow_extension_type(self) -> pa.ExtensionType:
         """Return the Arrow extension type for this dataclass.
 
         Returns:
@@ -153,7 +153,7 @@ class DataclassLogicalType:
             self._arrow_ext = self._arrow_ext_class()
         return self._arrow_ext
 
-    def get_polars_extension_type(self) -> "pl.BaseExtension":
+    def get_polars_extension_type(self) -> pl.BaseExtension:
         """Return the Polars extension type for this dataclass.
 
         Returns:
@@ -163,7 +163,7 @@ class DataclassLogicalType:
             self._polars_ext = self._polars_ext_class()
         return self._polars_ext
 
-    def python_to_storage(self, value: Any, converter: "TypeConverterProtocol") -> dict[str, Any]:
+    def python_to_storage(self, value: Any, converter: TypeConverterProtocol | None) -> dict[str, Any]:
         """Convert a dataclass instance to an Arrow-compatible struct dict.
 
         Iterates ``_field_annotations`` and delegates each field's conversion to
@@ -171,26 +171,42 @@ class DataclassLogicalType:
 
         Args:
             value: A dataclass instance of type ``python_type``.
-            converter: The active converter for per-field delegation.
+            converter: The active converter for per-field delegation. Must not be ``None``.
 
         Returns:
             A dict mapping field names to their Arrow storage values.
+
+        Raises:
+            ValueError: If ``converter`` is ``None``.
         """
+        if converter is None:
+            raise ValueError(
+                "DataclassLogicalType.python_to_storage requires a converter — "
+                "pass a TypeConverterProtocol instance for field-level conversion."
+            )
         return {
             name: converter.python_to_storage(getattr(value, name), annotation)
             for name, annotation in self._field_annotations
         }
 
-    def storage_to_python(self, storage_value: Any, converter: "TypeConverterProtocol") -> Any:
+    def storage_to_python(self, storage_value: Any, converter: TypeConverterProtocol | None) -> Any:
         """Reconstruct a dataclass instance from an Arrow struct dict.
 
         Args:
             storage_value: A dict mapping field names to Arrow storage values.
-            converter: The active converter for per-field delegation.
+            converter: The active converter for per-field delegation. Must not be ``None``.
 
         Returns:
             A dataclass instance of type ``python_type``.
+
+        Raises:
+            ValueError: If ``converter`` is ``None``.
         """
+        if converter is None:
+            raise ValueError(
+                "DataclassLogicalType.storage_to_python requires a converter — "
+                "pass a TypeConverterProtocol instance for field-level conversion."
+            )
         kwargs = {
             name: converter.storage_to_python(storage_value[name], annotation)
             for name, annotation in self._field_annotations
@@ -198,7 +214,7 @@ class DataclassLogicalType:
         return self._python_type(**kwargs)
 
 
-class DataclassHandlerFactory:
+class DataclassLogicalTypeFactory:
     """Stateless factory that synthesises and reconstructs ``DataclassLogicalType`` instances.
 
     **Write path** (``create_for_python_type``): derives Arrow struct type from the
@@ -213,13 +229,13 @@ class DataclassHandlerFactory:
     Register with::
 
         converter.register_logical_type_factory(
-            DataclassHandlerFactory(),
+            DataclassLogicalTypeFactory(),
             category="orcapod.dataclass",
             python_bases=[object],
         )
 
     Example:
-        >>> factory = DataclassHandlerFactory()
+        >>> factory = DataclassLogicalTypeFactory()
         >>> factory.supports_class(MyDataclass)
         True
         >>> factory.supports_class(str)
@@ -240,7 +256,7 @@ class DataclassHandlerFactory:
     def create_for_python_type(
         self,
         python_type: type,
-        converter: "TypeConverterProtocol",
+        converter: TypeConverterProtocol,
     ) -> DataclassLogicalType:
         """Synthesise a ``DataclassLogicalType`` for a Python dataclass (write path).
 
@@ -282,23 +298,23 @@ class DataclassHandlerFactory:
                 continue
             annotation = hints.get(field.name, Any)
             arrow_type = converter.register_python_class(annotation)
-            # Strip extension types from struct field types: pa.Table.from_pylist (and
-            # pa.array) cannot build a struct array when a field type is a pa.ExtensionType.
-            # Value conversion is annotation-driven so the stripped type here is fine.
+            # Strip extension types from struct field types: pa.array cannot build a
+            # struct array when a field type is a pa.ExtensionType (see ET1 in
+            # DESIGN_ISSUES.md). Value conversion is annotation-driven so stripping is safe.
             stripped_type = _strip_ext_to_storage(arrow_type)
             arrow_fields.append(pa.field(field.name, stripped_type))
             field_annotations.append((field.name, annotation))
 
         storage_type = pa.struct(arrow_fields)
-        logger.debug("DataclassHandlerFactory: synthesised %r for %r", fqcn, python_type)
+        logger.debug("DataclassLogicalTypeFactory: synthesised %r for %r", fqcn, python_type)
         return DataclassLogicalType(fqcn, python_type, storage_type, field_annotations)
 
     def reconstruct_from_arrow(
         self,
         arrow_extension_name: str,
-        storage_type: "pa.DataType",
+        storage_type: pa.DataType,
         metadata: dict[str, Any],
-        converter: "TypeConverterProtocol",
+        converter: TypeConverterProtocol,
     ) -> DataclassLogicalType:
         """Reconstruct a ``DataclassLogicalType`` from Arrow schema metadata (read path).
 
@@ -324,7 +340,7 @@ class DataclassHandlerFactory:
 
         if not pa.types.is_struct(storage_type):
             raise ValueError(
-                f"DataclassHandlerFactory.reconstruct_from_arrow: expected a struct "
+                f"DataclassLogicalTypeFactory.reconstruct_from_arrow: expected a struct "
                 f"storage type for {arrow_extension_name!r}, got {storage_type!r}."
             )
 
@@ -346,7 +362,7 @@ class DataclassHandlerFactory:
             field_annotations.append((field.name, annotation))
 
         logger.debug(
-            "DataclassHandlerFactory: reconstructed %r from Arrow", arrow_extension_name
+            "DataclassLogicalTypeFactory: reconstructed %r from Arrow", arrow_extension_name
         )
         return DataclassLogicalType(
             arrow_extension_name, cls, storage_type, field_annotations
@@ -356,33 +372,49 @@ class DataclassHandlerFactory:
 def _import_from_fqcn(fqcn: str) -> type:
     """Import a class from its fully-qualified class name.
 
-    Tries module prefixes from longest to shortest. For example, for
-    ``"mypackage.sub.MyClass"``, tries ``importlib.import_module("mypackage.sub")``
-    then ``getattr(module, "MyClass")``.
+    Tries module prefixes from longest to shortest, then walks the remaining
+    parts as attribute access. For example:
+
+    - ``"mypackage.sub.MyClass"`` → import ``mypackage.sub``, then
+      ``getattr(module, "MyClass")``.
+    - ``"mypackage.sub.Outer.Inner"`` → import ``mypackage.sub``, then
+      ``getattr(module, "Outer")``, then ``getattr(Outer, "Inner")``.
 
     Args:
         fqcn: Fully-qualified class name, e.g. ``"mypackage.sub.MyClass"``.
 
     Returns:
-        The imported class.
+        The imported dataclass type.
 
     Raises:
-        ImportError: If no valid module+attribute split can be found.
+        ImportError: If no valid module+attribute split can be found, or if the
+            resolved object is not a dataclass type.
     """
-    parts = fqcn.rsplit(".", 1)
-    if len(parts) != 2:
+    parts = fqcn.split(".")
+    if len(parts) < 2:
         raise ImportError(f"Cannot import from FQCN {fqcn!r}: no module separator found.")
 
-    module_path, class_name = parts
-    try:
-        module = importlib.import_module(module_path)
-        cls = getattr(module, class_name)
-        if not dataclasses.is_dataclass(cls) or not isinstance(cls, type):
+    # Try module paths from longest to shortest prefix
+    for i in range(len(parts) - 1, 0, -1):
+        module_path = ".".join(parts[:i])
+        attr_parts = parts[i:]
+        try:
+            module = importlib.import_module(module_path)
+        except (ImportError, ModuleNotFoundError):
+            continue
+        # Walk the remaining attribute chain (handles nested classes)
+        obj: Any = module
+        try:
+            for attr in attr_parts:
+                obj = getattr(obj, attr)
+        except AttributeError:
+            continue
+        if not dataclasses.is_dataclass(obj) or not isinstance(obj, type):
             raise ImportError(
-                f"{class_name!r} in {module_path!r} is not a dataclass type."
+                f"{'.'.join(attr_parts)!r} in {module_path!r} is not a dataclass type."
             )
-        return cls
-    except (ImportError, AttributeError, ModuleNotFoundError) as exc:
-        raise ImportError(
-            f"Cannot import dataclass from FQCN {fqcn!r}: {exc}"
-        ) from exc
+        return obj
+
+    raise ImportError(
+        f"Cannot import dataclass from FQCN {fqcn!r}: no valid module+attribute path found."
+    )
