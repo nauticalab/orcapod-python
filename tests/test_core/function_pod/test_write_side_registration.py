@@ -73,10 +73,13 @@ def _make_registry_with_factory(*target_bases: type) -> tuple[LogicalTypeRegistr
     call_log: list[type] = []
 
     class _Factory:
-        def reconstruct_from_arrow(self, name, storage, meta):
+        def supports_class(self, python_type: type) -> bool:
+            return True
+
+        def reconstruct_from_arrow(self, name, storage, meta, **kwargs):
             return _make_logical_type(object)
 
-        def create_for_python_type(self, python_type):
+        def create_for_python_type(self, python_type, **kwargs):
             call_log.append(python_type)
             return _make_logical_type(python_type)
 

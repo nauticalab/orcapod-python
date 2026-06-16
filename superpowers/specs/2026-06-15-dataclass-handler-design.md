@@ -155,6 +155,18 @@ Registered logical types (e.g. `pathlib.Path`, `uuid.UUID`) as dataclass field
 types are **not supported** in this PR and raise `TypeError`. A follow-up issue
 will add the registry-lookup bridge.
 
+**Nested dataclass fields use plain sub-structs, not extension types.** For a
+field `inner: Inner`, `_resolve_field` uses
+`inner_lt.get_arrow_extension_type().storage_type` (the raw `pa.struct(...)`)
+as the Arrow field type — not the extension type itself. This means the nested
+`Inner` sub-field carries no FQCN or category metadata in the schema; only the
+outermost column is self-describing. The factory converters (precomputed from
+annotations) handle reconstruction of all nested fields.
+
+This is a deliberate simplification. Supporting nested extension types inside
+structs (so that every nesting level is self-describing) is tracked in a
+dedicated v0.2 issue and deferred from this PR.
+
 ---
 
 ## Part 4: `DataclassLogicalType`
@@ -363,4 +375,5 @@ Tests live in `tests/test_extension_types/test_dataclass_handler.py`.
 - Registered logical type field support (e.g. `pathlib.Path` fields) — follow-up issue.
 - Default context wiring — follow-up issue.
 - `dict[K, V]` field support — follow-up issue.
+- Nested extension types inside struct sub-fields (self-describing nesting) — v0.2 issue.
 - Deletion of `semantic_types/dataclass_encoding.py` — PLT-1660.
