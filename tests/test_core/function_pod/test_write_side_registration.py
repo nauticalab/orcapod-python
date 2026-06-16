@@ -62,8 +62,8 @@ def _make_logical_type(py_type: type) -> LogicalTypeProtocol:
         python_type = py_type
         def get_arrow_extension_type(self): return ArrowExt()
         def get_polars_extension_type(self): return PolarsExt()
-        def python_to_storage(self, v): return str(v)
-        def storage_to_python(self, v): return v
+        def python_to_storage(self, v, converter=None): return str(v)
+        def storage_to_python(self, v, converter=None): return v
 
     return _LT()
 
@@ -73,10 +73,13 @@ def _make_registry_with_factory(*target_bases: type) -> tuple[LogicalTypeRegistr
     call_log: list[type] = []
 
     class _Factory:
-        def reconstruct_from_arrow(self, name, storage, meta):
+        def supports_class(self, python_type):
+            return any(issubclass(python_type, base) for base in target_bases)
+
+        def reconstruct_from_arrow(self, name, storage, meta, converter):
             return _make_logical_type(object)
 
-        def create_for_python_type(self, python_type):
+        def create_for_python_type(self, python_type, converter):
             call_log.append(python_type)
             return _make_logical_type(python_type)
 
@@ -315,8 +318,10 @@ def test_pod_declaration_native_types_no_factory_call():
     """Pods using only native types (int, str, etc.) never trigger factory lookup."""
 
     class _NeverCalledFactory:
-        def reconstruct_from_arrow(self, *a): ...
-        def create_for_python_type(self, pt):
+        def supports_class(self, python_type):
+            return True
+        def reconstruct_from_arrow(self, name, storage, meta, converter): ...
+        def create_for_python_type(self, pt, converter):
             raise AssertionError(f"factory called for {pt!r}")
 
     registry = LogicalTypeRegistry()
