@@ -44,10 +44,13 @@ class _StubLogicalType:
 class _StubFactory:
     """Minimal conforming implementation of LogicalTypeFactoryProtocol for use in tests."""
 
-    def reconstruct_from_arrow(self, arrow_extension_name, storage_type, metadata):
+    def supports_class(self, python_type: type) -> bool:
+        return True
+
+    def reconstruct_from_arrow(self, arrow_extension_name, storage_type, metadata, **kwargs):
         return _StubLogicalType()
 
-    def create_for_python_type(self, python_type):
+    def create_for_python_type(self, python_type, **kwargs):
         return _StubLogicalType()
 
 

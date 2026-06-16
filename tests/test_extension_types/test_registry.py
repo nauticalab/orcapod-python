@@ -92,13 +92,16 @@ def _make_stub_factory(return_lt: LogicalTypeProtocol | None = None) -> LogicalT
             self.calls: list[tuple] = []
             self.python_type_calls: list[type] = []
 
-        def reconstruct_from_arrow(self, arrow_extension_name, storage_type, metadata):
+        def supports_class(self, python_type: type) -> bool:
+            return True
+
+        def reconstruct_from_arrow(self, arrow_extension_name, storage_type, metadata, **kwargs):
             self.calls.append((arrow_extension_name, storage_type, metadata))
             if _return_lt is not None:
                 return _return_lt
             return _make_stub(arrow_name=arrow_extension_name, storage=storage_type)
 
-        def create_for_python_type(self, python_type):
+        def create_for_python_type(self, python_type, **kwargs):
             self.python_type_calls.append(python_type)
             if _return_lt is not None:
                 return _return_lt
@@ -335,16 +338,6 @@ def test_register_logical_type_factory_no_axes_raises():
     factory = _make_stub_factory()
     with pytest.raises(ValueError, match="At least one of"):
         registry.register_logical_type_factory(factory)
-
-
-def test_register_logical_type_factory_python_base_duplicate_different_factory_raises():
-    """Registering a different factory for the same python_base raises ValueError."""
-    registry = LogicalTypeRegistry()
-    f1 = _make_stub_factory()
-    f2 = _make_stub_factory()
-    registry.register_logical_type_factory(f1, python_bases=[str])
-    with pytest.raises(ValueError, match="different factory"):
-        registry.register_logical_type_factory(f2, python_bases=[str])
 
 
 def test_register_logical_type_factory_python_base_same_factory_idempotent():

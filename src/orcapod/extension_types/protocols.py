@@ -20,6 +20,8 @@ if TYPE_CHECKING:
     import polars as pl
     import pyarrow as pa
 
+    from orcapod.extension_types.registry import LogicalTypeRegistry
+
 
 @dataclass(frozen=True)
 class ResolutionContext:
@@ -122,22 +124,44 @@ class LogicalTypeFactoryProtocol(Protocol):
     (``reconstruct_from_arrow`` — reconstructs a ``LogicalTypeProtocol`` from Arrow schema
     metadata).
 
-    A ``LogicalTypeFactoryProtocol`` constructs a ``LogicalTypeProtocol`` from the
-    Arrow extension type name, its underlying storage type, and the full parsed JSON
-    metadata dict. The dispatch key (``"category"`` value from the metadata JSON) that
-    routes to this factory is declared at registration time via
-    ``LogicalTypeRegistry.register_logical_type_factory``; the factory itself has no
-    knowledge of its dispatch key but receives the full metadata dict so it can read
-    additional hints beyond ``"category"``.
+    ``supports_class`` is the write-side gate: the registry calls it during the MRO walk
+    to confirm whether this factory should handle a given Python type before committing.
+    Read-side dispatch (via ``"category"`` metadata) bypasses ``supports_class`` entirely —
+    the category string is fully definitive.
+
+    ``registry`` and ``context`` are optional on both factory methods so that simple
+    factories that don't recurse can ignore them. Factories that handle recursive types
+    (e.g. nested dataclasses) use ``registry`` to register sub-types as a side effect and
+    ``context`` to propagate cycle detection across factory boundaries.
 
     This protocol is ``@runtime_checkable``, consistent with ``LogicalTypeProtocol``.
     """
+
+    def supports_class(self, python_type: type) -> bool:
+        """Return ``True`` if this factory handles *python_type* (write-side gate).
+
+        Called by the registry during the MRO walk after a base class registered
+        for this factory is found in the target type's MRO. The first factory
+        (in registration order) that returns ``True`` wins.
+
+        Read-side dispatch via ``"category"`` metadata does NOT call this method.
+
+        Args:
+            python_type: The concrete Python class being resolved.
+
+        Returns:
+            ``True`` if this factory can synthesize a ``LogicalTypeProtocol``
+            for *python_type*; ``False`` otherwise.
+        """
+        ...
 
     def reconstruct_from_arrow(
         self,
         arrow_extension_name: str,
         storage_type: pa.DataType,
         metadata: dict[str, Any],
+        registry: LogicalTypeRegistry | None = None,
+        context: ResolutionContext = ResolutionContext(),
     ) -> LogicalTypeProtocol:
         """Reconstruct a LogicalType from Arrow schema metadata (read path).
 
@@ -149,6 +173,10 @@ class LogicalTypeFactoryProtocol(Protocol):
             arrow_extension_name: The Arrow extension type name from the schema.
             storage_type: The underlying Arrow storage type.
             metadata: Full parsed metadata JSON dict. Always contains ``"category"``.
+            registry: The ``LogicalTypeRegistry`` to register sub-types into as a
+                side effect. ``None`` if the caller has no registry.
+            context: Immutable cycle-detection context. Updated with the current
+                Arrow extension name before recursing.
 
         Returns:
             A fully constructed ``LogicalTypeProtocol`` ready for registration.
@@ -161,21 +189,23 @@ class LogicalTypeFactoryProtocol(Protocol):
     def create_for_python_type(
         self,
         python_type: type,
+        registry: LogicalTypeRegistry | None = None,
+        context: ResolutionContext = ResolutionContext(),
     ) -> LogicalTypeProtocol:
         """Synthesize a LogicalType for the given Python class (write path).
 
         Called by the registry when pod declaration encounters an unregistered
-        class whose MRO intersects a base registered for this factory
-        (via ``LogicalTypeRegistry.register_logical_type_factory``).
-        The factory derives all Arrow metadata (extension name, storage type,
-        metadata dict) from the Python class itself.
-
-        The returned LogicalType must round-trip: the Arrow metadata it embeds
-        must include the ``"category"`` key used to register this factory so
-        that ``reconstruct_from_arrow`` is correctly selected on a subsequent read.
+        class whose MRO intersects a base registered for this factory and
+        ``supports_class`` returned ``True``. The factory derives all Arrow
+        metadata (extension name, storage type, metadata dict) from the
+        Python class itself.
 
         Args:
             python_type: The concrete Python class to synthesize a LogicalType for.
+            registry: The ``LogicalTypeRegistry`` to register sub-types into as a
+                side effect. ``None`` if the caller has no registry.
+            context: Immutable cycle-detection context. Updated with *python_type*
+                before recursing into field resolution.
 
         Returns:
             A fully constructed ``LogicalTypeProtocol`` ready for registration.
