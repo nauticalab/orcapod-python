@@ -397,9 +397,13 @@ class DataclassHandlerFactory:
         field_converters: list[tuple[str, Callable[[Any], Any], Callable[[Any], Any]]] = []
 
         # Build converters from annotations; use storage_type from schema as-is.
-        # Pass the write-path context (visited_types) via a fresh ResolutionContext
-        # so that nested type resolution also participates in cycle detection.
-        write_context = ResolutionContext(visited_types=frozenset({imported_class}))
+        # Derive the write-path context from the inbound context (preserving
+        # visited_arrow_names from any upstream factory) and add this class to
+        # visited_types so nested write-path resolution participates in cycle detection.
+        write_context = dataclasses.replace(
+            context,
+            visited_types=context.visited_types | {imported_class},
+        )
 
         for field in dataclasses.fields(imported_class):
             if not field.init:
