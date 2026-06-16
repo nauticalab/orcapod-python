@@ -118,12 +118,24 @@ def make_polars_extension_type(
     (the same name passed to ``pl.register_extension_type``), so that Polars
     correctly maps Arrow extension columns on read.
 
+    **Limitation — nested extension types not supported:** ``arrow_storage_type``
+    must not contain any ``pa.ExtensionType`` nodes (e.g. as struct fields or
+    list element types). Polars's Arrow IPC bridge can handle a top-level
+    extension type via ``pl.BaseExtension``, but raises
+    ``ArrowNotImplementedError: extension`` when it encounters an extension type
+    nested inside a struct or list during dtype inference. Callers that need to
+    build a Polars extension type whose storage contains nested extension types
+    must first strip those nodes to their plain storage types (see
+    ``dataclass_handler._strip_ext_to_storage``). This is tracked as design
+    issue ET1 in ``DESIGN_ISSUES.md``.
+
     Args:
         extension_name: The extension type name used for Polars registration.
             Must match the Arrow extension name so Polars can round-trip the
             type through Arrow IPC.
-        arrow_storage_type: The Arrow storage type. Converted once to the
-            corresponding Polars dtype via ``pl.from_arrow``.
+        arrow_storage_type: The Arrow storage type. Must not contain nested
+            ``pa.ExtensionType`` nodes; see limitation note above. Converted
+            once to the corresponding Polars dtype via ``pl.from_arrow``.
         metadata: Optional metadata string stored as ``metadata_str`` in the
             Polars extension. Defaults to ``None``.
 
