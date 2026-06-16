@@ -36,7 +36,6 @@ def _make_test_context(registry: LogicalTypeRegistry) -> DataContext:
     """
     base_ctx = get_default_context()
     fresh_converter = UniversalTypeConverter(
-        semantic_registry=base_ctx.type_converter.semantic_registry,
         logical_type_registry=registry,
     )
     return DataContext(
@@ -47,7 +46,6 @@ def _make_test_context(registry: LogicalTypeRegistry) -> DataContext:
         arrow_hasher=base_ctx.arrow_hasher,
         semantic_hasher=base_ctx.semantic_hasher,
         type_handler_registry=base_ctx.type_handler_registry,
-        logical_type_registry=registry,
     )
 
 

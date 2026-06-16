@@ -370,11 +370,12 @@ def test_logical_uuid_polars_round_trip():
 
 
 def test_default_context_has_logical_type_registry():
-    """DataContext has a logical_type_registry attribute."""
+    """DataContext's type_converter has a _logical_type_registry attribute."""
     from orcapod.contexts import get_default_context
 
     ctx = get_default_context()
-    assert hasattr(ctx, "logical_type_registry")
+    assert hasattr(ctx.type_converter, "_logical_type_registry")
+    assert ctx.type_converter._logical_type_registry is not None
 
 
 def test_default_context_registry_has_logical_path():
@@ -382,7 +383,7 @@ def test_default_context_registry_has_logical_path():
     from orcapod.contexts import get_default_context
     from orcapod.extension_types.builtin_logical_types import LogicalPath
 
-    registry = get_default_context().logical_type_registry
+    registry = get_default_context().type_converter._logical_type_registry
     lt = registry.get_by_logical_name("orcapod.path")
     assert isinstance(lt, LogicalPath)
 
@@ -392,7 +393,7 @@ def test_default_context_registry_lookup_by_python_type_path():
     from orcapod.contexts import get_default_context
     from orcapod.extension_types.builtin_logical_types import LogicalPath
 
-    registry = get_default_context().logical_type_registry
+    registry = get_default_context().type_converter._logical_type_registry
     lt = registry.get_by_python_type(pathlib.Path)
     assert isinstance(lt, LogicalPath)
 
@@ -402,7 +403,7 @@ def test_default_context_registry_lookup_by_arrow_name_path():
     from orcapod.contexts import get_default_context
     from orcapod.extension_types.builtin_logical_types import LogicalPath
 
-    registry = get_default_context().logical_type_registry
+    registry = get_default_context().type_converter._logical_type_registry
     lt = registry.get_by_arrow_extension_name("orcapod.path")
     assert isinstance(lt, LogicalPath)
 
@@ -412,7 +413,7 @@ def test_default_context_registry_has_logical_upath():
     from orcapod.contexts import get_default_context
     from orcapod.extension_types.builtin_logical_types import LogicalUPath
 
-    registry = get_default_context().logical_type_registry
+    registry = get_default_context().type_converter._logical_type_registry
     lt = registry.get_by_logical_name("orcapod.upath")
     assert isinstance(lt, LogicalUPath)
 
@@ -422,7 +423,7 @@ def test_default_context_registry_lookup_by_python_type_upath():
     from orcapod.contexts import get_default_context
     from orcapod.extension_types.builtin_logical_types import LogicalUPath
 
-    registry = get_default_context().logical_type_registry
+    registry = get_default_context().type_converter._logical_type_registry
     lt = registry.get_by_python_type(UPath)
     assert isinstance(lt, LogicalUPath)
 
@@ -432,7 +433,7 @@ def test_default_context_registry_has_logical_uuid():
     from orcapod.contexts import get_default_context
     from orcapod.extension_types.builtin_logical_types import LogicalUUID
 
-    registry = get_default_context().logical_type_registry
+    registry = get_default_context().type_converter._logical_type_registry
     lt = registry.get_by_logical_name("orcapod.uuid")
     assert isinstance(lt, LogicalUUID)
 
@@ -442,24 +443,25 @@ def test_default_context_registry_lookup_by_arrow_name_uuid():
     from orcapod.contexts import get_default_context
     from orcapod.extension_types.builtin_logical_types import LogicalUUID
 
-    registry = get_default_context().logical_type_registry
+    registry = get_default_context().type_converter._logical_type_registry
     lt = registry.get_by_arrow_extension_name("orcapod.uuid")
     assert isinstance(lt, LogicalUUID)
 
 
-def test_get_default_logical_type_registry_returns_same_as_context():
-    """get_default_logical_type_registry() is the same object as get_default_context().logical_type_registry."""
-    from orcapod.contexts import get_default_context, get_default_logical_type_registry
+def test_default_type_converter_logical_registry_is_not_none():
+    """The default context's type_converter has a non-None _logical_type_registry."""
+    from orcapod.contexts import get_default_context
 
-    assert get_default_logical_type_registry() is get_default_context().logical_type_registry
+    ctx = get_default_context()
+    assert ctx.type_converter._logical_type_registry is not None
 
 
 def test_default_context_idempotent_registry():
     """Calling get_default_context() twice returns the same LogicalTypeRegistry instance."""
     from orcapod.contexts import get_default_context
 
-    r1 = get_default_context().logical_type_registry
-    r2 = get_default_context().logical_type_registry
+    r1 = get_default_context().type_converter._logical_type_registry
+    r2 = get_default_context().type_converter._logical_type_registry
     assert r1 is r2
 
 
