@@ -126,7 +126,7 @@ def make_polars_extension_type(
     nested inside a struct or list during dtype inference. Callers that need to
     build a Polars extension type whose storage contains nested extension types
     must first strip those nodes to their plain storage types (see
-    ``dataclass_handler._strip_ext_to_storage``). This is tracked as design
+    ``dataclass_logical_type_factory._strip_ext_to_storage``). This is tracked as design
     issue ET1 in ``DESIGN_ISSUES.md``.
 
     Args:

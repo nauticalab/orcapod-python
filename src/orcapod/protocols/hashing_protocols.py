@@ -9,6 +9,7 @@ from orcapod.types import ContentHash, PathLike, Schema
 
 if TYPE_CHECKING:
     import pyarrow as pa
+    from orcapod.hashing.semantic_hashing.type_handler_registry import TypeHandlerRegistry
 
 
 @runtime_checkable
@@ -214,6 +215,11 @@ class SemanticHasherProtocol(Protocol):
         hasher, allowing hashes from different versions or configurations
         to be distinguished.
         """
+        ...
+
+    @property
+    def type_handler_registry(self) -> "TypeHandlerRegistry":
+        """Return the TypeHandlerRegistry used by this hasher."""
         ...
 
 
