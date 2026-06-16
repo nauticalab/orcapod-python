@@ -48,6 +48,30 @@ class Outer:
     z: str
 
 
+@dataclasses.dataclass
+class ListOfNested:
+    """Dataclass with a list[Inner] field — tests list-of-dataclass resolution."""
+    items: list[Inner]
+
+
+@dataclasses.dataclass
+class NestedMatrix:
+    """Dataclass with a list[list[int]] field — tests nested list resolution."""
+    matrix: list[list[int]]
+
+
+@dataclasses.dataclass
+class Complex:
+    """Dataclass combining multiple field types: primitives, list[T], nested dataclass,
+    list[dataclass], and list[list[T]]."""
+    name: str
+    count: int
+    scores: list[float]
+    child: Inner
+    children: list[Inner]
+    tags: list[str]
+
+
 # Cyclic fixtures — must be module-level so get_type_hints resolves the string
 # annotations ('_SelfRef', '_IndirectB', '_IndirectA') in module globals.
 
@@ -499,3 +523,129 @@ def test_resolution_context_cycle_across_factories():
     ctx = ResolutionContext(visited_types=frozenset({_X}))
     with pytest.raises(TypeError, match="[Cc]ircular"):
         factory.create_for_python_type(_X, context=ctx)
+
+
+# ---------------------------------------------------------------------------
+# Complex field type combinations
+# ---------------------------------------------------------------------------
+
+def test_list_of_nested_dataclass_arrow_type():
+    """list[Inner] field maps to pa.list_(pa.struct([...]))."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(ListOfNested)
+    struct_type = lt.get_arrow_extension_type().storage_type
+    inner_struct = pa.struct([pa.field("a", pa.int64())])
+    assert struct_type.field("items").type == pa.list_(inner_struct)
+
+
+def test_list_of_nested_dataclass_round_trip():
+    """list[Inner] field round-trips correctly through python_to_storage/storage_to_python."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(ListOfNested)
+    original = ListOfNested(items=[Inner(a=1), Inner(a=2), Inner(a=3)])
+    storage = lt.python_to_storage(original)
+    assert storage == {"items": [{"a": 1}, {"a": 2}, {"a": 3}]}
+    reconstructed = lt.storage_to_python(storage)
+    assert reconstructed == original
+
+
+def test_list_of_nested_dataclass_empty_list():
+    """Empty list[Inner] round-trips correctly."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(ListOfNested)
+    original = ListOfNested(items=[])
+    assert lt.storage_to_python(lt.python_to_storage(original)) == original
+
+
+def test_nested_list_arrow_type():
+    """list[list[int]] field maps to pa.list_(pa.list_(pa.int64()))."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(NestedMatrix)
+    struct_type = lt.get_arrow_extension_type().storage_type
+    assert struct_type.field("matrix").type == pa.list_(pa.list_(pa.int64()))
+
+
+def test_nested_list_round_trip():
+    """list[list[int]] field round-trips correctly."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(NestedMatrix)
+    original = NestedMatrix(matrix=[[1, 2], [3, 4, 5], []])
+    storage = lt.python_to_storage(original)
+    assert storage == {"matrix": [[1, 2], [3, 4, 5], []]}
+    reconstructed = lt.storage_to_python(storage)
+    assert reconstructed == original
+
+
+def test_complex_dataclass_arrow_layout():
+    """Complex dataclass with all field types produces the correct Arrow struct layout."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(Complex)
+    struct_type = lt.get_arrow_extension_type().storage_type
+    inner_struct = pa.struct([pa.field("a", pa.int64())])
+    assert struct_type.field("name").type == pa.large_string()
+    assert struct_type.field("count").type == pa.int64()
+    assert struct_type.field("scores").type == pa.list_(pa.float64())
+    assert struct_type.field("child").type == inner_struct
+    assert struct_type.field("children").type == pa.list_(inner_struct)
+    assert struct_type.field("tags").type == pa.list_(pa.large_string())
+
+
+def test_complex_dataclass_round_trip():
+    """Complex dataclass round-trips all field types correctly."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(Complex)
+    original = Complex(
+        name="example",
+        count=42,
+        scores=[1.5, 2.5, 3.5],
+        child=Inner(a=10),
+        children=[Inner(a=1), Inner(a=2)],
+        tags=["alpha", "beta"],
+    )
+    storage = lt.python_to_storage(original)
+    assert storage == {
+        "name": "example",
+        "count": 42,
+        "scores": [1.5, 2.5, 3.5],
+        "child": {"a": 10},
+        "children": [{"a": 1}, {"a": 2}],
+        "tags": ["alpha", "beta"],
+    }
+    reconstructed = lt.storage_to_python(storage)
+    assert reconstructed == original
+
+
+def test_complex_dataclass_arrow_array_round_trip():
+    """Complex dataclass round-trips through an actual pa.array struct array."""
+    from orcapod.extension_types.dataclass_handler import DataclassHandlerFactory
+    factory = DataclassHandlerFactory()
+    lt = factory.create_for_python_type(Complex)
+    instances = [
+        Complex(
+            name="first",
+            count=1,
+            scores=[0.1],
+            child=Inner(a=10),
+            children=[Inner(a=11), Inner(a=12)],
+            tags=["x"],
+        ),
+        Complex(
+            name="second",
+            count=2,
+            scores=[],
+            child=Inner(a=20),
+            children=[],
+            tags=["y", "z"],
+        ),
+    ]
+    storage_dicts = [lt.python_to_storage(inst) for inst in instances]
+    struct_arr = pa.array(storage_dicts, type=lt.get_arrow_extension_type().storage_type)
+    results = [lt.storage_to_python(struct_arr[i].as_py()) for i in range(len(struct_arr))]
+    assert results == instances
