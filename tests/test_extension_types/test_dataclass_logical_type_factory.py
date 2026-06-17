@@ -181,6 +181,19 @@ class _WithDict:
     meta: dict[str, int]
 
 
+@dataclasses.dataclass
+class _InnerForRegistrationTest:
+    """Module-level inner dataclass for registration completeness test."""
+    value: int
+
+
+@dataclasses.dataclass
+class _OuterForRegistrationTest:
+    """Module-level outer dataclass for registration completeness test."""
+    inner: _InnerForRegistrationTest
+    label: str
+
+
 def test_factory_create_flat_dataclass():
     from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory, DataclassLogicalType
 
@@ -317,6 +330,33 @@ def test_factory_reconstruct_from_arrow_invalid_fqcn():
         factory.reconstruct_from_arrow(
             "nonexistent.module.NoSuchClass", storage, {"category": "orcapod.dataclass"}, converter
         )
+
+
+def test_reconstruct_from_arrow_registers_nested_types():
+    """reconstruct_from_arrow for Outer must register Inner as a side effect."""
+    from orcapod.extension_types.dataclass_logical_type_factory import DataclassLogicalTypeFactory
+
+    # Build the storage type for _OuterForRegistrationTest manually (as it would come
+    # from Parquet): outer struct with an inner struct field (Inner is stored as a struct,
+    # NOT as an extension type inside the struct field — that's the ET1 constraint).
+    inner_storage = pa.struct([pa.field("value", pa.int64())])
+    outer_storage = pa.struct([
+        pa.field("inner", inner_storage),
+        pa.field("label", pa.large_string()),
+    ])
+    outer_fqcn = f"{_OuterForRegistrationTest.__module__}.{_OuterForRegistrationTest.__qualname__}"
+
+    factory = DataclassLogicalTypeFactory()
+    converter = _make_full_converter()
+
+    # Inner is NOT pre-registered
+    assert converter._logical_type_registry.get_by_python_type(_InnerForRegistrationTest) is None
+
+    # reconstruct_from_arrow for Outer should trigger registration of Inner as a side effect
+    lt = factory.reconstruct_from_arrow(outer_fqcn, outer_storage, {"category": "orcapod.dataclass"}, converter)
+
+    # Inner must now be registered
+    assert converter._logical_type_registry.get_by_python_type(_InnerForRegistrationTest) is not None
 
 
 def test_dataclass_python_to_storage_round_trip():
