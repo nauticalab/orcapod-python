@@ -72,3 +72,47 @@ def test_none_type_plain():
     """type(None) itself yields type(None) as a leaf (not filtered at this level)."""
     result = list(extract_leaf_classes(type(None)))
     assert result == [type(None)]
+
+
+# ── _walk_fqcn tests ─────────────────────────────────────────────────────────
+
+import dataclasses
+import pytest
+
+
+def test_walk_fqcn_resolves_module_level_class():
+    """_walk_fqcn resolves a top-level class from its FQCN."""
+    from orcapod.extension_types.type_utils import _walk_fqcn
+    import pathlib
+    obj = _walk_fqcn("pathlib.Path")
+    assert obj is pathlib.Path
+
+
+def test_walk_fqcn_resolves_nested_attribute():
+    """_walk_fqcn walks nested attribute chains (e.g. module.Outer.Inner)."""
+    from orcapod.extension_types.type_utils import _walk_fqcn
+    import os.path
+    # os.path.join is a function reachable via attribute walk
+    obj = _walk_fqcn("os.path.join")
+    assert obj is os.path.join
+
+
+def test_walk_fqcn_raises_import_error_on_bad_module():
+    """_walk_fqcn raises ImportError when no module prefix can be imported."""
+    from orcapod.extension_types.type_utils import _walk_fqcn
+    with pytest.raises(ImportError):
+        _walk_fqcn("nonexistent.module.NoSuchClass")
+
+
+def test_walk_fqcn_raises_import_error_on_missing_attr():
+    """_walk_fqcn raises ImportError when module exists but attribute does not."""
+    from orcapod.extension_types.type_utils import _walk_fqcn
+    with pytest.raises(ImportError):
+        _walk_fqcn("pathlib.NoSuchClass")
+
+
+def test_walk_fqcn_raises_import_error_on_single_part():
+    """_walk_fqcn raises ImportError when FQCN has no module separator."""
+    from orcapod.extension_types.type_utils import _walk_fqcn
+    with pytest.raises(ImportError):
+        _walk_fqcn("justname")
