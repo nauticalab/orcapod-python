@@ -439,29 +439,38 @@ class UniversalTypeConverter:
             resolved_storage = self.register_storage_type(arrow_type.storage_type)
             return self.register_arrow_extension(ext_name, ext_meta, resolved_storage)
 
-        # Struct type — recurse into each field, preserving field-level metadata
+        # Struct type — recurse into each field, preserving field-level metadata.
+        # Strip any extension type from field types before embedding (ET1: Arrow/Polars
+        # cannot construct arrays whose struct fields are pa.ExtensionType nodes).
         if pa.types.is_struct(arrow_type):
             resolved_fields = []
             for i in range(arrow_type.num_fields):
                 field = arrow_type.field(i)
                 resolved_type = self.register_storage_type(field.type)
+                if isinstance(resolved_type, pa.ExtensionType):
+                    resolved_type = resolved_type.storage_type  # strip: ET1
                 resolved_fields.append(
                     pa.field(field.name, resolved_type, nullable=field.nullable, metadata=field.metadata)
                 )
             return pa.struct(resolved_fields)
 
-        # Large list type — preserve value field metadata (used by ARROW:extension:* channel)
+        # Large list type — preserve value field metadata (used by ARROW:extension:* channel).
+        # Strip any extension type from the value type before embedding (ET1).
         if pa.types.is_large_list(arrow_type):
             vf = arrow_type.value_field
             resolved_value = self.register_storage_type(vf.type)
+            if isinstance(resolved_value, pa.ExtensionType):
+                resolved_value = resolved_value.storage_type  # strip: ET1
             return pa.large_list(
                 pa.field(vf.name, resolved_value, nullable=vf.nullable, metadata=vf.metadata)
             )
 
-        # List type
+        # List type — strip any extension type from the value type (ET1).
         if pa.types.is_list(arrow_type):
             vf = arrow_type.value_field
             resolved_value = self.register_storage_type(vf.type)
+            if isinstance(resolved_value, pa.ExtensionType):
+                resolved_value = resolved_value.storage_type  # strip: ET1
             return pa.list_(
                 pa.field(vf.name, resolved_value, nullable=vf.nullable, metadata=vf.metadata)
             )
